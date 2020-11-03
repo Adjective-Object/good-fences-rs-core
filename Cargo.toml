@@ -1,0 +1,17 @@
+[package]
+name = "good-fences-rs-core"
+version = "0.1.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+jwalk = "0.5"
+regex = "1.4.2"
+lazy_static = "1.4.0"
+find-ts-imports = { git = "https://github.com/Adjective-Object/find-ts-imports.git", rev = "179adc2", features = ["serde"] }
+neon-serde = "0.4.0"
+serde_derive = "1.0.117"
+serde_bytes = "0.11.5"
+serde = { version = "1.0.117", features = ["rc"]}
+serde_json = "1.0.59"
+void = "1.0.2"
