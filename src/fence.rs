@@ -10,22 +10,22 @@ use void::Void;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Fence {
-  fence_path: Box<String>,
-  fence: ParsedFence,
+  pub fence_path: String,
+  pub fence: ParsedFence,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedFence {
-  tags: Option<Vec<String>>,
-  exports: Option<Vec<ExportRule>>,
-  dependencies: Option<Vec<DependencyRule>>,
-  imports: Option<Vec<String>>,
+  pub tags: Option<Vec<String>>,
+  pub exports: Option<Vec<ExportRule>>,
+  pub dependencies: Option<Vec<DependencyRule>>,
+  pub imports: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct RawDependencyRule {
+struct RawDependencyRule {
   dependency: String,
   #[serde(deserialize_with = "expand_to_string_vec")]
   accessible_to: Vec<String>,
@@ -33,8 +33,8 @@ pub struct RawDependencyRule {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DependencyRule {
-  dependency: String,
-  accessible_to: Vec<String>,
+  pub dependency: String,
+  pub accessible_to: Vec<String>,
 }
 
 impl Into<DependencyRule> for RawDependencyRule {
@@ -71,7 +71,7 @@ impl<'de> Deserialize<'de> for DependencyRule {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct RawExportRule {
+struct RawExportRule {
   modules: String,
   #[serde(deserialize_with = "expand_to_string_vec")]
   accessible_to: Vec<String>,
@@ -79,8 +79,8 @@ pub struct RawExportRule {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExportRule {
-  accessible_to: Vec<String>,
-  modules: String,
+  pub accessible_to: Vec<String>,
+  pub modules: String,
 }
 
 impl Into<ExportRule> for RawExportRule {
@@ -208,13 +208,13 @@ pub fn parse_fence_str(fence_str: &str, fence_path: &Path) -> Result<Fence, Stri
   }
 
   return Ok(Fence {
-    fence_path: Box::new(String::from(match fence_path.to_str() {
+    fence_path: String::from(match fence_path.to_str() {
       Some(x) => x,
       None => panic!(format!(
         "failed to unwrap a path into a string! {:?}",
         fence_path
       )),
-    })),
+    }),
     fence: fence_result.unwrap(),
   });
 }
@@ -246,7 +246,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
@@ -270,7 +270,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::Some(vec!("a".to_owned(), "b".to_owned(), "c".to_owned())),
           exports: Option::None,
@@ -299,7 +299,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::Some(vec!(ExportRule {
@@ -331,7 +331,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::Some(vec!(ExportRule {
@@ -363,7 +363,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::Some(vec!(ExportRule {
@@ -395,7 +395,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
@@ -427,7 +427,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
@@ -459,7 +459,7 @@ mod test {
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: Box::new(String::from("/test/path/to/fence.json")),
+        fence_path: String::from("/test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,

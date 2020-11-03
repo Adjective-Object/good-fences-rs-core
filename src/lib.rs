@@ -1,3 +1,2 @@
-mod fence;
-mod string_or_struct;
-mod walk_dirs;
+pub mod fence;
+pub mod walk_dirs;
