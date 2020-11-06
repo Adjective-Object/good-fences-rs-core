@@ -13,10 +13,10 @@ fn should_retain_file(s: &str) -> bool {
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct SourceFile {
-  source_file_path: String,
+  pub source_file_path: String,
   // ref to the strings of tags that apply to this file
-  tags: HashSet<String>,
-  imports: SourceFileImportData,
+  pub tags: HashSet<String>,
+  pub imports: SourceFileImportData,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]

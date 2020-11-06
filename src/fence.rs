@@ -28,10 +28,10 @@ pub struct ParsedFence {
 struct RawDependencyRule {
   dependency: String,
   #[serde(deserialize_with = "expand_to_string_vec")]
-  accessible_to: Vec<String>,
+  accessible_to: Option<Vec<String>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DependencyRule {
   pub dependency: String,
   pub accessible_to: Vec<String>,
@@ -41,7 +41,10 @@ impl Into<DependencyRule> for RawDependencyRule {
   fn into(self) -> DependencyRule {
     DependencyRule {
       dependency: self.dependency,
-      accessible_to: self.accessible_to,
+      accessible_to: match self.accessible_to {
+        Some(a) => a,
+        None => vec!["*".to_owned()],
+      },
     }
   }
 }
@@ -74,10 +77,10 @@ impl<'de> Deserialize<'de> for DependencyRule {
 struct RawExportRule {
   modules: String,
   #[serde(deserialize_with = "expand_to_string_vec")]
-  accessible_to: Vec<String>,
+  accessible_to: Option<Vec<String>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ExportRule {
   pub accessible_to: Vec<String>,
   pub modules: String,
@@ -87,7 +90,10 @@ impl Into<ExportRule> for RawExportRule {
   fn into(self) -> ExportRule {
     ExportRule {
       modules: self.modules,
-      accessible_to: self.accessible_to,
+      accessible_to: match self.accessible_to {
+        Some(a) => a,
+        None => vec!["*".to_owned()],
+      },
     }
   }
 }
@@ -146,11 +152,14 @@ impl<'de> Visitor<'de> for StringOrStringArrayVisitor {
   }
 }
 
-fn expand_to_string_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+fn expand_to_string_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
   D: Deserializer<'de>,
 {
-  return deserializer.deserialize_any(StringOrStringArrayVisitor {});
+  return match deserializer.deserialize_any(StringOrStringArrayVisitor {}) {
+    Ok(x) => Ok(Some(x)),
+    Err(e) => Err(e),
+  };
 }
 
 // This is a Visitor that forwards string types to T's `FromStr` impl and
