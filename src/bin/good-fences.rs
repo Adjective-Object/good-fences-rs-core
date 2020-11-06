@@ -10,7 +10,20 @@ use std::env::set_current_dir;
 use std::fs::File;
 use std::io::BufReader;
 use std::iter::FromIterator;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn no_ext<'a>(s: &'a str) -> &'a str {
+    let p = PathBuf::from(s);
+    let ext_opt = p.extension();
+    match ext_opt {
+        Some(ext) => {
+            return &s[0..s.len() - ext.len() - 1];
+        }
+        None => {
+            return s;
+        }
+    }
+}
 
 fn main() {
     // set working dir
@@ -27,15 +40,15 @@ fn main() {
     let tsconfig_paths_json: TsconfigPathsJson = serde_json::from_reader(buf_reader).unwrap();
 
     // find files
-    println!("File Walking './packages'");
-    let package_files = discover_fences_and_files("./packages");
-    println!("File Walking './shared'");
-    let shared_files = discover_fences_and_files("./shared");
+    println!("File Walking 'packages'");
+    let package_files = discover_fences_and_files("packages");
+    println!("File Walking 'shared'");
+    let shared_files = discover_fences_and_files("shared");
     let fences: Vec<&Fence> = package_files
         .iter()
         .chain(shared_files.iter())
         .filter(|file| match file {
-            WalkFileData::Fence(fence) => true,
+            WalkFileData::Fence(_fence) => true,
             _ => false,
         })
         .map(|file| match file {
@@ -60,13 +73,14 @@ fn main() {
     let source_file_map: HashMap<&str, &SourceFile> = HashMap::from_iter(
         sources
             .iter()
-            .map(|source_file| (source_file.source_file_path.as_ref(), *source_file)),
+            .map(|source_file| (no_ext(&source_file.source_file_path).as_ref(), *source_file)),
     );
+    println!("source file map: {:#?}", source_file_map);
     // build fences map
     let fences_map: HashMap<&str, &Fence> = HashMap::from_iter(
         fences
             .iter()
-            .map(|fence_file| (fence_file.fence_path.as_ref(), *fence_file)),
+            .map(|fence_file| (no_ext(&fence_file.fence_path).as_ref(), *fence_file)),
     );
     let fence_collection: FenceCollection = FenceCollection {
         fences_map: fences_map,

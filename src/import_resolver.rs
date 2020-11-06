@@ -28,17 +28,36 @@ pub enum ResolvedImport {
 pub fn resolve_ts_import<'a>(
     tsconfig_paths: &'a TsconfigPathsJson,
     initial_path: &RelativePath,
-    import_specifier: &'a str,
+    raw_import_specifier: &'a str,
 ) -> Result<ResolvedImport, String> {
+    // println!("resole import! {:?}, {:?}", initial_path, import_specifier);
+
+    // this is a directory import, so we want to add index.ts to the end of the file
+    let import_specifier: String =
+        if raw_import_specifier.ends_with('/') || raw_import_specifier.ends_with('.') {
+            let mut x = RelativePathBuf::from(raw_import_specifier);
+            x.push("index");
+            x.normalize();
+            x.to_string()
+        } else {
+            raw_import_specifier.to_owned()
+        };
+
     if import_specifier.starts_with(".") {
         // relative import -- bypass tsconfig
-        let joined_path: RelativePathBuf = initial_path.join(RelativePath::new(import_specifier));
+        let parent_path = initial_path.parent();
+        if !parent_path.is_some() {
+            return Err(format!("source path {:} had no parent?", initial_path));
+        }
+        let joined_path: RelativePathBuf = parent_path
+            .unwrap()
+            .join(RelativePath::new(&import_specifier));
         return Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
             joined_path.normalize().as_str(),
         )));
     } else {
         // tsconfig.paths.json imports
-        let import_specifier_path = Path::new(import_specifier);
+        let import_specifier_path = Path::new(&import_specifier);
         for segment in import_specifier_path.ancestors() {
             // match on starless stub
             let stub_to_check_option = segment.to_str();
@@ -82,7 +101,7 @@ pub fn resolve_ts_import<'a>(
                     &switch_specifier_prefix(
                         &star_stub_to_check,
                         &star_stub_entry[0],
-                        import_specifier,
+                        &import_specifier,
                     ),
                 )));
             }
@@ -170,7 +189,7 @@ mod test {
         let result = resolve_ts_import(
             &TEST_TSCONFIG_JSON,
             &RelativePathBuf::from("packages/my/importing/module"),
-            "../../imported/module",
+            "../imported/module",
         );
         assert_eq!(
             result,
@@ -223,7 +242,99 @@ mod test {
                 },
             },
             &RelativePathBuf::from("packages/my/importing/module"),
-            "../../imported/module",
+            "../imported/module",
+        );
+        assert_eq!(
+            result,
+            Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
+                "packages/my/imported/module"
+            )))
+        )
+    }
+
+    #[test]
+    fn test_import_resolvers_relative_with_base_url_as_tsconfig_file() {
+        let result = resolve_ts_import(
+            &TsconfigPathsJson {
+                compiler_options: TsconfigPathsCompilerOptions {
+                    base_url: Some("./base/url".to_owned()),
+                    paths: map!(
+                        "glob-specifier/lib/*" => vec!["packages/glob-specifier/src/*".to_owned()],
+                        "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
+                    ),
+                },
+            },
+            &RelativePathBuf::from("packages/my/importing/module.ts"),
+            "../imported/module",
+        );
+        assert_eq!(
+            result,
+            Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
+                "packages/my/imported/module"
+            )))
+        )
+    }
+
+    #[test]
+    fn test_import_resolvers_relative_index() {
+        let result = resolve_ts_import(
+            &TsconfigPathsJson {
+                compiler_options: TsconfigPathsCompilerOptions {
+                    base_url: None,
+                    paths: map!(
+                        "glob-specifier/lib/*" => vec!["packages/glob-specifier/src/*".to_owned()],
+                        "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
+                    ),
+                },
+            },
+            &RelativePathBuf::from("packages/my/importing/module.ts"),
+            ".",
+        );
+        assert_eq!(
+            result,
+            Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
+                "packages/my/importing/index"
+            )))
+        )
+    }
+
+    #[test]
+    fn test_import_resolvers_relative_parent_index() {
+        let result = resolve_ts_import(
+            &TsconfigPathsJson {
+                compiler_options: TsconfigPathsCompilerOptions {
+                    base_url: None,
+                    paths: map!(
+                        "glob-specifier/lib/*" => vec!["packages/glob-specifier/src/*".to_owned()],
+                        "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
+                    ),
+                },
+            },
+            &RelativePathBuf::from("packages/my/importing/module.ts"),
+            "..",
+        );
+        assert_eq!(
+            result,
+            Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
+                "packages/my/index"
+            )))
+        )
+    }
+
+    #[test]
+    fn test_import_resolvers_relative_parent_specifier() {
+        let result = resolve_ts_import(
+            &TsconfigPathsJson {
+                compiler_options: TsconfigPathsCompilerOptions {
+                    base_url: None,
+                    paths: map!(
+                        "glob-specifier/lib/*" => vec!["packages/glob-specifier/src/*".to_owned()],
+                        "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
+                    ),
+                },
+            },
+            &RelativePathBuf::from("packages/my/importing/module.ts"),
+            "../imported/module",
         );
         assert_eq!(
             result,

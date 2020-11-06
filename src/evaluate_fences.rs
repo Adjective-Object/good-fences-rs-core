@@ -24,6 +24,18 @@ pub struct ImportRuleViolation<'fencelifetime, 'importlifetime> {
     violating_imported_name: Option<&'importlifetime str>,
 }
 
+fn is_node_dependency_permitted(
+    permitted_node_dependency_pattern: &str,
+    node_dependency: &str,
+) -> bool {
+    let export_rule_glob = Pattern::new(permitted_node_dependency_pattern);
+
+    match export_rule_glob {
+        Ok(glob) => glob.matches(node_dependency),
+        Err(e) => false,
+    }
+}
+
 fn export_rule_applies_to_import_path(
     fence_path: &str,
     export_rule: &ExportRule,
@@ -72,8 +84,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                     let imported_source_file_opt = source_files.get(project_local_path_str);
                     if imported_source_file_opt.is_none() {
                         return Err(format!(
-                            "could not find project local path {}",
-                            project_local_path_str
+                            "could not find project local path {} imported by {} with specifier {}",
+                            project_local_path_str, source_file.source_file_path, import_specifier
                         ));
                     }
 
@@ -156,7 +168,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                     }
                 }
                 // node imports: check the tags against the source fence allow list
-                ResolvedImport::NodeModulesImport(node_module_name) => {
+                ResolvedImport::NodeModulesImport(node_module_filter) => {
                     for source_fence in source_fences.iter() {
                         // only filter on dependencies if there is a dependency list
                         if source_fence.fence.dependencies.is_some() {
@@ -167,7 +179,12 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                 allowed_dependencies
                                     .iter()
                                     // TODO handle glob dependency matches
-                                    .filter(|dependency| dependency.dependency == node_module_name)
+                                    .filter(|dependency| {
+                                        is_node_dependency_permitted(
+                                            &node_module_filter,
+                                            &dependency.dependency,
+                                        )
+                                    })
                                     .collect();
                             if dependency_clauses.len() == 0 {
                                 // violation: dependency not on allowlist

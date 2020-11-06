@@ -3,9 +3,12 @@ extern crate serde;
 use crate::fence::{parse_fence_file, Fence};
 use find_ts_imports::{parse_source_file_imports, SourceFileImportData};
 use jwalk::WalkDirGeneric;
+use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use std::path::{Path, PathBuf};
+extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
   s == "fence.json" || s.ends_with(".ts") || s.ends_with(".tsx")
@@ -34,6 +37,12 @@ impl Default for WalkFileData {
 
 type TagList = HashSet<String>;
 
+use lazy_static::lazy_static;
+use std::env::current_dir;
+lazy_static! {
+  static ref WORKING_DIR_PATH: PathBuf = current_dir().unwrap();
+}
+
 pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
   let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
     |read_dir_state, children| {
@@ -59,7 +68,10 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
             match f {
               Some(file_name) => {
                 if file_name.ends_with("fence.json") {
-                  let fence_result = parse_fence_file(&dir_entry.parent_path.join(file_name));
+                  let working_dir_path: &Path = &WORKING_DIR_PATH;
+                  let fence_result = parse_fence_file(
+                    RelativePath::from_path(&dir_entry.parent_path.join(file_name)).unwrap(),
+                  );
                   match fence_result {
                     Ok(fence) => {
                       // update fences
@@ -69,6 +81,8 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                           read_dir_state.insert(tag);
                         }
                       }
+
+                      // fence.path_relative_to(&WORKING_DIR_PATH);
 
                       // update client state from the walk
                       dir_entry.client_state = WalkFileData::Fence(fence);
@@ -94,8 +108,11 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
               Some(file_name) => {
                 if file_name.ends_with(".ts") || file_name.ends_with(".tsx") {
                   let file_path = dir_entry.parent_path.join(file_name);
+                  let working_dir_path: &Path = &WORKING_DIR_PATH;
+                  let source_file_path = RelativePath::from_path(&file_path);
+
                   dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
-                    source_file_path: file_path.to_str().unwrap().to_owned(),
+                    source_file_path: source_file_path.unwrap().to_string(),
                     imports: parse_source_file_imports(&file_path),
                     tags: HashSet::from_iter(read_dir_state.iter().map(|x| x.to_owned())),
                   });
@@ -124,15 +141,10 @@ mod test {
   use crate::fence::{Fence, ParsedFence};
   use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
   use find_ts_imports::SourceFileImportData;
+  use relative_path::RelativePathBuf;
   use std::collections::HashSet;
   use std::env::current_dir;
   use std::iter::{FromIterator, Iterator};
-  use std::path::PathBuf;
-
-  fn force_to_abs_path_str(p: &str) -> String {
-    let x = PathBuf::from(p);
-    return x.canonicalize().unwrap().to_str().unwrap().to_owned();
-  }
 
   macro_rules! map(
     { $($key:expr => $value:expr),+ } => {
@@ -160,15 +172,10 @@ mod test {
 
   #[test]
   fn test_simple_contains_root_fence() {
-    let mut test_path_buf = current_dir().unwrap();
-    test_path_buf.push("walk_dir_tests");
-    test_path_buf.push("simple");
-    let current_dir_str = current_dir().unwrap();
-
-    let discovered: Vec<WalkFileData> = discover_fences_and_files(test_path_buf.to_str().unwrap());
+    let discovered: Vec<WalkFileData> = discover_fences_and_files("walk_dir_tests/simple");
 
     let expected_root_fence = Fence {
-      fence_path: force_to_abs_path_str("walk_dir_tests/simple/fence.json"),
+      fence_path: "walk_dir_tests/simple/fence.json".to_owned(),
       fence: ParsedFence {
         tags: Some(vec![
           "root-fence-tag-1".to_owned(),
@@ -193,15 +200,10 @@ mod test {
 
   #[test]
   fn test_simple_contains_subsubdir_fence() {
-    let mut test_path_buf = current_dir().unwrap();
-    test_path_buf.push("walk_dir_tests");
-    test_path_buf.push("simple");
-    let current_dir_str = current_dir().unwrap();
-
-    let discovered: Vec<WalkFileData> = discover_fences_and_files(test_path_buf.to_str().unwrap());
+    let discovered: Vec<WalkFileData> = discover_fences_and_files("walk_dir_tests/simple");
 
     let expected_subsubdir_fence = Fence {
-      fence_path: force_to_abs_path_str("walk_dir_tests/simple/subdir/subsubdir/fence.json"),
+      fence_path: "walk_dir_tests/simple/subdir/subsubdir/fence.json".to_owned(),
       fence: ParsedFence {
         tags: Some(vec!["subsubdir-fence-tag".to_owned()]),
         exports: Option::None,
@@ -223,15 +225,10 @@ mod test {
 
   #[test]
   fn test_simple_contains_root_file_imports() {
-    let mut test_path_buf = current_dir().unwrap();
-    test_path_buf.push("walk_dir_tests");
-    test_path_buf.push("simple");
-    let current_dir_str = current_dir().unwrap();
-
-    let discovered: Vec<WalkFileData> = discover_fences_and_files(test_path_buf.to_str().unwrap());
+    let discovered: Vec<WalkFileData> = discover_fences_and_files("walk_dir_tests/simple");
 
     let expected_root_ts_file = SourceFile {
-      source_file_path: force_to_abs_path_str("walk_dir_tests/simple/rootFile.ts"),
+      source_file_path: "walk_dir_tests/simple/rootFile.ts".to_owned(),
       tags: set!("root-fence-tag-1".to_owned(), "root-fence-tag-2".to_owned()),
       imports: SourceFileImportData {
         imports: map!(
@@ -253,15 +250,10 @@ mod test {
 
   #[test]
   fn test_simple_contains_sub_dir_file_imports() {
-    let mut test_path_buf = current_dir().unwrap();
-    test_path_buf.push("walk_dir_tests");
-    test_path_buf.push("simple");
-    let current_dir_str = current_dir().unwrap();
-
-    let discovered: Vec<WalkFileData> = discover_fences_and_files(test_path_buf.to_str().unwrap());
+    let discovered: Vec<WalkFileData> = discover_fences_and_files("walk_dir_tests/simple");
 
     let expected_subdir_ts_file = SourceFile {
-      source_file_path: force_to_abs_path_str("walk_dir_tests/simple/subdir/subDirFile.ts"),
+      source_file_path: "walk_dir_tests/simple/subdir/subDirFile.ts".to_owned(),
       tags: set!("root-fence-tag-1".to_owned(), "root-fence-tag-2".to_owned()),
       imports: SourceFileImportData {
         imports: map!(
@@ -284,17 +276,10 @@ mod test {
 
   #[test]
   fn test_simple_contains_sub_sub_dir_file_imports() {
-    let mut test_path_buf = current_dir().unwrap();
-    test_path_buf.push("walk_dir_tests");
-    test_path_buf.push("simple");
-    let current_dir_str = current_dir().unwrap();
-
-    let discovered: Vec<WalkFileData> = discover_fences_and_files(test_path_buf.to_str().unwrap());
+    let discovered: Vec<WalkFileData> = discover_fences_and_files("walk_dir_tests/simple");
 
     let expected_subdir_ts_file = SourceFile {
-      source_file_path: force_to_abs_path_str(
-        "walk_dir_tests/simple/subdir/subsubdir/subSubDirFile.ts",
-      ),
+      source_file_path: "walk_dir_tests/simple/subdir/subsubdir/subSubDirFile.ts".to_owned(),
       tags: set!(
         "root-fence-tag-1".to_owned(),
         "root-fence-tag-2".to_owned(),

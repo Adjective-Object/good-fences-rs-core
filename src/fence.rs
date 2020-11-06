@@ -1,6 +1,7 @@
 extern crate serde;
 extern crate serde_json;
 
+use relative_path::{RelativePath, RelativePathBuf};
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 use std::marker::PhantomData;
@@ -206,30 +207,23 @@ where
   }
 }
 
-pub fn parse_fence_str(fence_str: &str, fence_path: &Path) -> Result<Fence, String> {
+pub fn parse_fence_str(fence_str: &str, fence_path: &RelativePath) -> Result<Fence, String> {
   let fence_result = serde_json::from_str(&fence_str);
   if !fence_result.is_ok() {
     return Err(format!(
       "failed to parse fence from '{:?}' err {:?}",
-      fence_path.to_str().unwrap_or(fence_str),
-      fence_result
+      fence_path, fence_result
     ));
   }
 
   return Ok(Fence {
-    fence_path: String::from(match fence_path.to_str() {
-      Some(x) => x,
-      None => panic!(format!(
-        "failed to unwrap a path into a string! {:?}",
-        fence_path
-      )),
-    }),
+    fence_path: fence_path.to_string(),
     fence: fence_result.unwrap(),
   });
 }
 
-pub fn parse_fence_file(fence_path: &Path) -> Result<Fence, String> {
-  let fence_text_result = std::fs::read_to_string(fence_path);
+pub fn parse_fence_file(fence_path: &RelativePath) -> Result<Fence, String> {
+  let fence_text_result = std::fs::read_to_string(fence_path.to_path(Path::new(".")));
   if !fence_text_result.is_ok() {
     return Err(format!("error reading fence file \"{:?}\"", fence_path));
   }
@@ -238,9 +232,21 @@ pub fn parse_fence_file(fence_path: &Path) -> Result<Fence, String> {
   parse_fence_str(&fence_text, fence_path)
 }
 
+impl Fence {
+  pub fn path_relative_to(self: &mut Fence, base_path: &Path) -> () {
+    println!("relative! {:?}, {:?}", self.fence_path, base_path);
+    self.fence_path = pathdiff::diff_paths(self.fence_path.clone(), base_path)
+      .unwrap()
+      .to_str()
+      .unwrap()
+      .to_owned();
+  }
+}
+
 #[cfg(test)]
 mod test {
   use crate::fence::{parse_fence_str, DependencyRule, ExportRule, Fence, ParsedFence};
+  use relative_path::RelativePath;
   use std::option::Option;
   use std::path::Path;
 
@@ -250,12 +256,12 @@ mod test {
       r#"
       {}
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
@@ -274,12 +280,12 @@ mod test {
         "tags": ["a", "b", "c"]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::Some(vec!("a".to_owned(), "b".to_owned(), "c".to_owned())),
           exports: Option::None,
@@ -303,12 +309,12 @@ mod test {
         ]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::Some(vec!(ExportRule {
@@ -335,12 +341,12 @@ mod test {
         ]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::Some(vec!(ExportRule {
@@ -367,12 +373,12 @@ mod test {
         ]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::Some(vec!(ExportRule {
@@ -399,12 +405,12 @@ mod test {
         ]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
@@ -431,12 +437,12 @@ mod test {
         ]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
@@ -463,12 +469,12 @@ mod test {
         ]
       }
       "#,
-      Path::new("/test/path/to/fence.json"),
+      RelativePath::new("test/path/to/fence.json"),
     );
     assert_eq!(
       result,
       Result::Ok(Fence {
-        fence_path: String::from("/test/path/to/fence.json"),
+        fence_path: String::from("test/path/to/fence.json"),
         fence: ParsedFence {
           tags: Option::None,
           exports: Option::None,
