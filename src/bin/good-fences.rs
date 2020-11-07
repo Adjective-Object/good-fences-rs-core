@@ -48,7 +48,7 @@ fn main() {
         .iter()
         .chain(shared_files.iter())
         .filter(|file| match file {
-            WalkFileData::SourceFile(source_file) => true,
+            WalkFileData::SourceFile(_source_file) => true,
             _ => false,
         })
         .map(|file| match file {

@@ -3,7 +3,7 @@ extern crate serde;
 use crate::fence::{parse_fence_file, Fence};
 use find_ts_imports::{parse_source_file_imports, SourceFileImportData};
 use jwalk::WalkDirGeneric;
-use relative_path::{RelativePath, RelativePathBuf};
+use relative_path::{RelativePath};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -72,7 +72,7 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
             match f {
               Some(file_name) => {
                 if file_name.ends_with("fence.json") {
-                  let working_dir_path: &Path = &WORKING_DIR_PATH;
+                  let _working_dir_path: &Path = &WORKING_DIR_PATH;
                   let fence_result = parse_fence_file(
                     RelativePath::from_path(&dir_entry.parent_path.join(file_name)).unwrap(),
                   );
@@ -116,7 +116,7 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                   || file_name.ends_with(".js")
                 {
                   let file_path = dir_entry.parent_path.join(file_name);
-                  let working_dir_path: &Path = &WORKING_DIR_PATH;
+                  let _working_dir_path: &Path = &WORKING_DIR_PATH;
                   let source_file_path = RelativePath::from_path(&file_path);
 
                   dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
@@ -149,9 +149,9 @@ mod test {
   use crate::fence::{Fence, ParsedFence};
   use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
   use find_ts_imports::SourceFileImportData;
-  use relative_path::RelativePathBuf;
+  
   use std::collections::HashSet;
-  use std::env::current_dir;
+  
   use std::iter::{FromIterator, Iterator};
 
   macro_rules! map(

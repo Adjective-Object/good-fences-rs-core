@@ -4,7 +4,7 @@ use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJso
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
 use relative_path::RelativePath;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
@@ -32,7 +32,7 @@ fn is_node_dependency_permitted(
 
     match export_rule_glob {
         Ok(glob) => glob.matches(node_dependency),
-        Err(e) => false,
+        Err(_e) => false,
     }
 }
 
@@ -68,7 +68,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
         fence_collection.get_fences_for_path(&PathBuf::from(source_file.source_file_path.clone()));
 
-    for (import_specifier, imported_names) in source_file.imports.imports.iter() {
+    for (import_specifier, _imported_names) in source_file.imports.imports.iter() {
         let resolved_import = resolve_ts_import(
             tsconfig_paths_json,
             &RelativePath::new(&source_file.source_file_path),

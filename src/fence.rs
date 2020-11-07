@@ -1,7 +1,7 @@
 extern crate serde;
 extern crate serde_json;
 
-use relative_path::{RelativePath, RelativePathBuf};
+use relative_path::{RelativePath};
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 use std::marker::PhantomData;
@@ -248,7 +248,7 @@ mod test {
   use crate::fence::{parse_fence_str, DependencyRule, ExportRule, Fence, ParsedFence};
   use relative_path::RelativePath;
   use std::option::Option;
-  use std::path::Path;
+  
 
   #[test]
   fn loads_empty_fence() {
