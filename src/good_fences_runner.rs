@@ -77,11 +77,11 @@ impl GoodFencesRunner {
             }));
         // println!("source file map: {:#?}", source_file_map);
         // build fences map
-        let fences_map: HashMap<String, Fence> = HashMap::from_iter(
-            fences
-                .into_iter()
-                .map(|fence_file| (no_ext(&fence_file.fence_path).to_owned(), fence_file)),
-        );
+        let fences_map: HashMap<String, Fence> =
+            HashMap::from_iter(fences.into_iter().map(|fence_file| {
+                let k = fence_file.fence_path.clone();
+                (k, fence_file)
+            }));
         return GoodFencesRunner {
             source_files: source_file_map,
             fence_collection: FenceCollection {
@@ -244,7 +244,7 @@ mod test {
                 },
                 fence_collection: FenceCollection {
                     fences_map: map!(
-                        "tests/good_fences_integration/src/componentA/fence" => Fence {
+                        "tests/good_fences_integration/src/componentA/fence.json" => Fence {
                             fence_path: "tests/good_fences_integration/src/componentA/fence.json".to_owned(),
                             fence: ParsedFence {
                                 tags: Some(
@@ -274,7 +274,7 @@ mod test {
                                 ),
                             },
                         },
-                        "tests/good_fences_integration/src/componentB/fence" => Fence {
+                        "tests/good_fences_integration/src/componentB/fence.json" => Fence {
                             fence_path: "tests/good_fences_integration/src/componentB/fence.json".to_owned(),
                             fence: ParsedFence {
                                 tags: Some(
