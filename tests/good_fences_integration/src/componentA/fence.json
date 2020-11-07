@@ -1,0 +1,13 @@
+{
+    "tags": [
+        "tagA"
+    ],
+    "exports": [
+        "componentA",
+        {
+            "modules": "helperA1",
+            "accessibleTo": "unknownTag"
+        }
+    ],
+    "imports": []
+}

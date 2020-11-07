@@ -2,6 +2,7 @@ use crate::fence::Fence;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, PartialEq)]
 pub struct FenceCollection {
     pub fences_map: HashMap<String, Fence>,
 }

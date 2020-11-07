@@ -18,7 +18,7 @@ fn main() {
         GoodFencesRunner::new("tsconfig.paths.json", &vec!["packages", "shared"]);
 
     println!("beginning fence evaluations");
-    let violations = good_fences_runner.evaluate_fences();
+    let violations = good_fences_runner.find_import_violations();
 
     // print some junk
     println!("Violations: {:#?}", violations)
