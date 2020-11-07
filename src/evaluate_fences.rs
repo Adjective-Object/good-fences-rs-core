@@ -82,14 +82,28 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
                     let project_local_path_str = project_local_path.to_str().unwrap();
                     let imported_source_file_opt = source_files.get(project_local_path_str);
-                    if imported_source_file_opt.is_none() {
-                        return Err(format!(
-                            "could not find project local path {} imported by {} with specifier {}",
-                            project_local_path_str, source_file.source_file_path, import_specifier
-                        ));
-                    }
+                    let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
+                        let mut clone_path_with_idx = project_local_path.clone();
+                        clone_path_with_idx.push("index");
+                        let clone_path_with_idx_str = clone_path_with_idx.to_str().unwrap();
 
-                    let imported_source_file = imported_source_file_opt.unwrap();
+                        source_files.get(clone_path_with_idx_str)
+                    } else {
+                        None
+                    };
+
+                    let imported_source_file = match imported_source_file_opt {
+                        None => match imported_source_file_with_idx_opt {
+                            Some(x) => x,
+                            None => {
+                                return Err(format!(
+                                    "could not find project local path {} imported by {} with specifier {}",
+                                    project_local_path_str, source_file.source_file_path, import_specifier
+                                ));
+                            }
+                        },
+                        Some(x) => x,
+                    };
 
                     // check allowed imports against tags of the imported source file
                     for source_fence in source_fences.iter() {
@@ -219,6 +233,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                         }
                     }
                 }
+                // do nothing for resource file imports
+                ResolvedImport::ResourceFileImport => {}
             },
             Err(e) => {
                 return Err(e);

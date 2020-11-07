@@ -3,6 +3,7 @@ extern crate serde_json;
 use good_fences_rs_core::evaluate_fences::{evaluate_fences, ImportRuleViolation};
 use good_fences_rs_core::fence::Fence;
 use good_fences_rs_core::fence_collection::FenceCollection;
+use good_fences_rs_core::file_extension::no_ext;
 use good_fences_rs_core::import_resolver::TsconfigPathsJson;
 use good_fences_rs_core::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
 use std::collections::HashMap;
@@ -10,20 +11,7 @@ use std::env::set_current_dir;
 use std::fs::File;
 use std::io::BufReader;
 use std::iter::FromIterator;
-use std::path::{Path, PathBuf};
-
-fn no_ext<'a>(s: &'a str) -> &'a str {
-    let p = PathBuf::from(s);
-    let ext_opt = p.extension();
-    match ext_opt {
-        Some(ext) => {
-            return &s[0..s.len() - ext.len() - 1];
-        }
-        None => {
-            return s;
-        }
-    }
-}
+use std::path::Path;
 
 fn main() {
     // set working dir

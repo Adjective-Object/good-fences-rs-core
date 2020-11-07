@@ -11,7 +11,11 @@ use std::path::{Path, PathBuf};
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
-  s == "fence.json" || s.ends_with(".ts") || s.ends_with(".tsx")
+  s == "fence.json"
+    || s.ends_with(".ts")
+    || s.ends_with(".tsx")
+    || s.ends_with(".js")
+    || s.ends_with(".jsx")
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -106,7 +110,11 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
             let f = dir_entry.file_name.to_str();
             match f {
               Some(file_name) => {
-                if file_name.ends_with(".ts") || file_name.ends_with(".tsx") {
+                if file_name.ends_with(".ts")
+                  || file_name.ends_with(".tsx")
+                  || file_name.ends_with(".jsx")
+                  || file_name.ends_with(".js")
+                {
                   let file_path = dir_entry.parent_path.join(file_name);
                   let working_dir_path: &Path = &WORKING_DIR_PATH;
                   let source_file_path = RelativePath::from_path(&file_path);

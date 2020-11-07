@@ -8,7 +8,7 @@ edition = "2018"
 jwalk = "0.5"
 regex = "1.4.2"
 lazy_static = "1.4.0"
-find-ts-imports = { git = "https://github.com/Adjective-Object/find-ts-imports.git", rev = "bb65b53173b8d37a27eae649d4203ae063384c4d", features = ["serde"] }
+find-ts-imports = { git = "https://github.com/Adjective-Object/find-ts-imports.git", rev = "87619adf857443b531ac3af777423cece5c8cdbd", features = ["serde"] }
 neon-serde = "0.4.0"
 serde_derive = "1.0.117"
 serde_bytes = "0.11.5"

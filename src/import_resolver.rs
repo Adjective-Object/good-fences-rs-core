@@ -23,6 +23,7 @@ pub struct TsconfigPathsCompilerOptions {
 pub enum ResolvedImport {
     NodeModulesImport(String),
     ProjectLocalImport(PathBuf),
+    ResourceFileImport,
 }
 
 pub fn resolve_ts_import<'a>(
@@ -42,6 +43,18 @@ pub fn resolve_ts_import<'a>(
         } else {
             raw_import_specifier.to_owned()
         };
+
+    // short circuit when importing non-ts resource files.
+    let buf = PathBuf::from(import_specifier.clone());
+    let ext = buf.extension();
+    match ext {
+        Some(ext) => {
+            if ext != "tsx" && ext != "ts" {
+                return Ok(ResolvedImport::ResourceFileImport);
+            }
+        }
+        None => {}
+    }
 
     if import_specifier.starts_with(".") {
         // relative import -- bypass tsconfig
