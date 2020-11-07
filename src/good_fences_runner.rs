@@ -192,8 +192,8 @@ impl GoodFencesRunner {
 
 #[cfg(test)]
 mod test {
-    use crate::evaluate_fences::{ImportRuleViolation, ViolatedFenceClause};
-    use crate::fence::{DependencyRule, ExportRule, Fence, ParsedFence};
+    
+    use crate::fence::{ExportRule, Fence, ParsedFence};
     use crate::fence_collection::FenceCollection;
     use crate::good_fences_runner::{GoodFencesRunner, UndefinedTagReference};
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
@@ -411,7 +411,7 @@ mod test {
 
     #[test]
     fn good_fences_integration_test_violations() {
-        let good_fences_runner = GoodFencesRunner::new(
+        let _good_fences_runner = GoodFencesRunner::new(
             "tests/good_fences_integration/tsconfig.json",
             &vec!["tests/good_fences_integration/src"],
         );
