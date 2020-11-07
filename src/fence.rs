@@ -1,7 +1,7 @@
 extern crate serde;
 extern crate serde_json;
 
-use relative_path::{RelativePath};
+use relative_path::RelativePath;
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 use std::marker::PhantomData;
@@ -28,7 +28,7 @@ pub struct ParsedFence {
 #[serde(rename_all = "camelCase")]
 struct RawDependencyRule {
   dependency: String,
-  #[serde(deserialize_with = "expand_to_string_vec")]
+  #[serde(default, deserialize_with = "expand_to_string_vec")]
   accessible_to: Option<Vec<String>>,
 }
 
@@ -77,7 +77,7 @@ impl<'de> Deserialize<'de> for DependencyRule {
 #[serde(rename_all = "camelCase")]
 struct RawExportRule {
   modules: String,
-  #[serde(deserialize_with = "expand_to_string_vec")]
+  #[serde(default, deserialize_with = "expand_to_string_vec")]
   accessible_to: Option<Vec<String>>,
 }
 
@@ -248,7 +248,6 @@ mod test {
   use crate::fence::{parse_fence_str, DependencyRule, ExportRule, Fence, ParsedFence};
   use relative_path::RelativePath;
   use std::option::Option;
-  
 
   #[test]
   fn loads_empty_fence() {
@@ -329,6 +328,37 @@ mod test {
   }
 
   #[test]
+  fn loads_single_export_rule_missing_accessible_to() {
+    let result = parse_fence_str(
+      r#"
+      {
+        "exports": [
+          {
+            "modules": "some_module"
+          }
+        ]
+      }
+      "#,
+      RelativePath::new("test/path/to/fence.json"),
+    );
+    assert_eq!(
+      result,
+      Result::Ok(Fence {
+        fence_path: String::from("test/path/to/fence.json"),
+        fence: ParsedFence {
+          tags: Option::None,
+          exports: Option::Some(vec!(ExportRule {
+            modules: "some_module".to_owned(),
+            accessible_to: vec!("*".to_owned())
+          })),
+          dependencies: Option::None,
+          imports: Option::None,
+        }
+      })
+    )
+  }
+
+  #[test]
   fn loads_single_export_rule_accessible_to_str_arr() {
     let result = parse_fence_str(
       r#"
@@ -386,6 +416,37 @@ mod test {
             accessible_to: vec!("*".to_owned())
           })),
           dependencies: Option::None,
+          imports: Option::None,
+        }
+      })
+    )
+  }
+
+  #[test]
+  fn loads_single_dependency_rule_missing_accessible_to() {
+    let result = parse_fence_str(
+      r#"
+      {
+        "dependencies": [
+          {
+            "dependency": "some_dependency"
+          }
+        ]
+      }
+      "#,
+      RelativePath::new("test/path/to/fence.json"),
+    );
+    assert_eq!(
+      result,
+      Result::Ok(Fence {
+        fence_path: String::from("test/path/to/fence.json"),
+        fence: ParsedFence {
+          tags: Option::None,
+          exports: Option::None,
+          dependencies: Option::Some(vec!(DependencyRule {
+            dependency: "some_dependency".to_owned(),
+            accessible_to: vec!("*".to_owned())
+          })),
           imports: Option::None,
         }
       })

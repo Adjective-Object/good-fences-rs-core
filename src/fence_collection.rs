@@ -2,11 +2,11 @@ use crate::fence::Fence;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-pub struct FenceCollection<'a> {
-    pub fences_map: HashMap<&'a str, &'a Fence>,
+pub struct FenceCollection {
+    pub fences_map: HashMap<String, Fence>,
 }
 
-impl<'a> FenceCollection<'a> {
+impl FenceCollection {
     // TODO rewrite this as a generator?
     pub fn get_fences_for_path<'b>(&'b self, path: &Path) -> Vec<&'b Fence> {
         let mut fences: Vec<&'b Fence> = Vec::with_capacity(5);

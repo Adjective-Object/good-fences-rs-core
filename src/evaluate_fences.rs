@@ -4,7 +4,7 @@ use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJso
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
 use relative_path::RelativePath;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
@@ -59,7 +59,7 @@ fn is_importer_allowed(accessible_to: &Vec<String>, source_file: &SourceFile) ->
 
 pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     fence_collection: &'fencecollectionlifetime FenceCollection,
-    source_files: &HashMap<&str, &SourceFile>,
+    source_files: &HashMap<String, SourceFile>,
     tsconfig_paths_json: &TsconfigPathsJson,
     source_file: &'sourcefilelifetime SourceFile,
 ) -> Result<Option<Vec<ImportRuleViolation<'fencecollectionlifetime, 'sourcefilelifetime>>>, String>
