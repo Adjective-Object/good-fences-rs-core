@@ -21,8 +21,8 @@ pub struct GoodFencesRunner {
 
 #[derive(Debug, PartialEq)]
 pub struct UndefinedTagReference<'a> {
-    tag: &'a str,
-    referencing_fence_path: &'a str,
+    pub tag: &'a str,
+    pub referencing_fence_path: &'a str,
 }
 
 impl GoodFencesRunner {
