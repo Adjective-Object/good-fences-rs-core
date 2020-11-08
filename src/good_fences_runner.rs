@@ -5,6 +5,7 @@ use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
 use crate::import_resolver::TsconfigPathsJson;
 use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
@@ -94,15 +95,21 @@ impl GoodFencesRunner {
     pub fn find_import_violations<'a>(
         &'a self,
     ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
-        let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
-        for (_, source) in self.source_files.iter() {
-            let violations_wrapped = evaluate_fences(
-                &self.fence_collection,
-                &self.source_files,
-                &self.tsconfig_paths_json,
-                &source,
-            );
+        let fence_outputs: Vec<_> = self
+            .source_files
+            .par_iter()
+            .map(|(_, source_file)| {
+                evaluate_fences(
+                    &self.fence_collection,
+                    &self.source_files,
+                    &self.tsconfig_paths_json,
+                    &source_file,
+                )
+            })
+            .collect();
 
+        let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
+        for violations_wrapped in fence_outputs {
             match violations_wrapped {
                 Err(e) => all_violations.push(Err(e)),
                 Ok(None) => {}

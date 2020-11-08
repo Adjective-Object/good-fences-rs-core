@@ -32,8 +32,6 @@ fn is_node_dependency_matching(
 ) -> bool {
     let export_rule_glob = Pattern::new(permitted_node_dependency_pattern);
 
-    println!("#### {:?} globs to {:?}", export_rule_glob, node_dependency);
-
     match export_rule_glob {
         Ok(glob) => glob.matches(node_dependency),
         Err(_e) => false,
