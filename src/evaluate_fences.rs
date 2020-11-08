@@ -18,11 +18,11 @@ pub enum ViolatedFenceClause<'a> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ImportRuleViolation<'fencelifetime, 'importlifetime> {
-    violating_file_path: &'importlifetime str,
-    violating_fence: &'fencelifetime Fence,
-    violating_fence_clause: ViolatedFenceClause<'fencelifetime>,
-    violating_import_path: &'importlifetime str,
-    violating_imported_name: Option<&'importlifetime str>,
+    pub violating_file_path: &'importlifetime str,
+    pub violating_fence: &'fencelifetime Fence,
+    pub violating_fence_clause: ViolatedFenceClause<'fencelifetime>,
+    pub violating_import_path: &'importlifetime str,
+    pub violating_imported_name: Option<&'importlifetime str>,
 }
 
 fn is_node_dependency_matching(
