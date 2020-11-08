@@ -95,7 +95,8 @@ impl GoodFencesRunner {
     pub fn find_import_violations<'a>(
         &'a self,
     ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
-        let fence_outputs: Vec<_> = self
+        let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
+        let violation_results = self
             .source_files
             .par_iter()
             .map(|(_, source_file)| {
@@ -106,10 +107,8 @@ impl GoodFencesRunner {
                     &source_file,
                 )
             })
-            .collect();
-
-        let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
-        for violations_wrapped in fence_outputs {
+            .collect::<Vec<_>>();
+        for violations_wrapped in violation_results {
             match violations_wrapped {
                 Err(e) => all_violations.push(Err(e)),
                 Ok(None) => {}
@@ -429,7 +428,10 @@ mod test {
                         .fence_path
                         .cmp(&b.violating_fence.fence_path),
                 )
-                .then(a.violating_import_path.cmp(&b.violating_import_path)),
+                .then(
+                    a.violating_import_specifier
+                        .cmp(&b.violating_import_specifier),
+                ),
             (Ok(_a), Err(_b)) => std::cmp::Ordering::Less,
             (Err(_a), Ok(_b)) => std::cmp::Ordering::Greater,
             (Err(a), Err(b)) => a.cmp(&b),
@@ -459,7 +461,7 @@ mod test {
                     .get("tests/good_fences_integration/src/componentB/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "../componentB/helperB1",
+                violating_import_specifier: "../componentB/helperB1",
                 violating_imported_name: None,
             }),
             Ok(ImportRuleViolation {
@@ -470,7 +472,7 @@ mod test {
                     .get("tests/good_fences_integration/src/componentA/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "../componentB/helperB1",
+                violating_import_specifier: "../componentB/helperB1",
                 violating_imported_name: None,
             }),
             Ok(ImportRuleViolation {
@@ -481,7 +483,7 @@ mod test {
                     .get("tests/good_fences_integration/src/componentA/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "../componentB/componentB",
+                violating_import_specifier: "../componentB/componentB",
                 violating_imported_name: None,
             }),
             Ok(ImportRuleViolation {
@@ -492,7 +494,7 @@ mod test {
                     .get("tests/good_fences_integration/src/componentB/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule)),
-                violating_import_path: "./componentB/componentB",
+                violating_import_specifier: "./componentB/componentB",
                 violating_imported_name: None,
             }),
         ];

@@ -22,7 +22,7 @@ pub struct ImportRuleViolation<'fencelifetime, 'importlifetime> {
     pub violating_file_path: &'importlifetime str,
     pub violating_fence: &'fencelifetime Fence,
     pub violating_fence_clause: ViolatedFenceClause<'fencelifetime>,
-    pub violating_import_path: &'importlifetime str,
+    pub violating_import_specifier: &'importlifetime str,
     pub violating_imported_name: Option<&'importlifetime str>,
 }
 
@@ -137,7 +137,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                             && (imported_source_file
                                 .tags
                                 .iter()
-                                .any(|imported_source_file_tag| {
+                                .all(|imported_source_file_tag| {
                                     !source_fence
                                         .fence
                                         .imports
@@ -151,7 +151,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                 violating_file_path: &source_file.source_file_path,
                                 violating_fence: source_fence,
                                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                                violating_import_path: &import_specifier,
+                                violating_import_specifier: &import_specifier,
                                 violating_imported_name: None,
                             })
                         }
@@ -180,16 +180,18 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                     violating_file_path: &source_file.source_file_path,
                                     violating_fence: destination_fence,
                                     violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                                    violating_import_path: &import_specifier,
+                                    violating_import_specifier: &import_specifier,
                                     violating_imported_name: None,
                                 })
                             }
-                            for destination_export_rule in destination_export_rules {
+                            let any_destination_export_rule_allows_import =
+                                destination_export_rules.iter().any(|clause| {
+                                    is_importer_allowed(&clause.accessible_to, source_file)
+                                });
+
+                            if !any_destination_export_rule_allows_import {
                                 // check that the rule allows exports to the tag of the file
-                                if !is_importer_allowed(
-                                    &destination_export_rule.accessible_to,
-                                    source_file,
-                                ) {
+                                for destination_export_rule in destination_export_rules {
                                     // rule violation this importer is on the allow list but
                                     // not to this tag
                                     violations.push(ImportRuleViolation {
@@ -198,7 +200,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                         violating_fence_clause: ViolatedFenceClause::ExportRule(
                                             Some(&destination_export_rule),
                                         ),
-                                        violating_import_path: &import_specifier,
+                                        violating_import_specifier: &import_specifier,
                                         violating_imported_name: None,
                                     })
                                 }
@@ -214,19 +216,19 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                             let allowed_dependencies: &'fencecollectionlifetime Vec<
                                 DependencyRule,
                             > = source_fence.fence.dependencies.as_ref().unwrap();
-                            let dependency_clauses: Vec<&'fencecollectionlifetime DependencyRule> =
-                                allowed_dependencies
-                                    .iter()
-                                    // TODO handle glob dependency matches
-                                    .filter(|dependency| {
-                                        is_node_dependency_matching(
-                                            &dependency.dependency,
-                                            &node_module_filter,
-                                        )
-                                    })
-                                    .collect();
-                            println!("matched dependency_clauses {:#?}", dependency_clauses);
-                            if dependency_clauses.len() == 0 {
+                            let matching_dependency_clauses: Vec<
+                                &'fencecollectionlifetime DependencyRule,
+                            > = allowed_dependencies
+                                .iter()
+                                // TODO handle glob dependency matches
+                                .filter(|dependency| {
+                                    is_node_dependency_matching(
+                                        &dependency.dependency,
+                                        &node_module_filter,
+                                    )
+                                })
+                                .collect();
+                            if matching_dependency_clauses.len() == 0 {
                                 // violation: dependency not on allowlist
                                 violations.push(ImportRuleViolation {
                                     violating_file_path: &source_file.source_file_path,
@@ -234,27 +236,32 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                     violating_fence_clause: ViolatedFenceClause::DependencyRule(
                                         None,
                                     ),
-                                    violating_import_path: &import_specifier,
+                                    violating_import_specifier: &import_specifier,
                                     violating_imported_name: None,
                                 })
                             } else {
-                                for dependency_clause in dependency_clauses {
-                                    if !is_importer_allowed(
-                                        &dependency_clause.accessible_to,
-                                        source_file,
-                                    ) {
-                                        // violation: dependency on allowlist, but not exposed
-                                        // to tags for this file
-                                        violations.push(ImportRuleViolation {
-                                            violating_file_path: &source_file.source_file_path,
-                                            violating_fence: source_fence,
-                                            violating_fence_clause:
-                                                ViolatedFenceClause::DependencyRule(Some(
-                                                    &dependency_clause,
-                                                )),
-                                            violating_import_path: &import_specifier,
-                                            violating_imported_name: None,
-                                        })
+                                // if any of the applicable clauses allow the import, allow it.
+                                let any_matching_dependency_clauses_allows_import =
+                                    matching_dependency_clauses.iter().any(|clause| {
+                                        is_importer_allowed(&clause.accessible_to, source_file)
+                                    });
+                                if !any_matching_dependency_clauses_allows_import {
+                                    // none of the applicable clauses allow this import
+                                    for dependency_clause in matching_dependency_clauses {
+                                        {
+                                            // violation: dependency on allowlist, but not exposed
+                                            // to tags for this file
+                                            violations.push(ImportRuleViolation {
+                                                violating_file_path: &source_file.source_file_path,
+                                                violating_fence: source_fence,
+                                                violating_fence_clause:
+                                                    ViolatedFenceClause::DependencyRule(Some(
+                                                        &dependency_clause,
+                                                    )),
+                                                violating_import_specifier: &import_specifier,
+                                                violating_imported_name: None,
+                                            })
+                                        }
                                     }
                                 }
                             }
@@ -390,7 +397,7 @@ mod test {
                     .get("path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "../protected/internal",
+                violating_import_specifier: "../protected/internal",
                 violating_imported_name: Option::None
             }]))
         );
@@ -427,7 +434,7 @@ mod test {
                     .get("path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "../protected/internal",
+                violating_import_specifier: "../protected/internal",
                 violating_imported_name: Option::None
             }]))
         );
@@ -464,7 +471,7 @@ mod test {
                     .get("path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Option::None),
-                violating_import_path: "../protected/internal",
+                violating_import_specifier: "../protected/internal",
                 violating_imported_name: Option::None
             }]))
         );
@@ -501,10 +508,41 @@ mod test {
                     .get("path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Option::None),
-                violating_import_path: "../protected/internal",
+                violating_import_specifier: "../protected/internal",
                 violating_imported_name: Option::None
             }]))
         );
+    }
+
+    #[test]
+    pub fn test_imports_exports_list_conflicting_match_allowed() {
+        let fence_collection = FenceCollection {
+            fences_map: map!(
+                "path/to/source/fence.json" => parse_fence_str(
+                    r#"{}"#,
+                    &RelativePathBuf::from("path/to/source/fence.json")
+                ).unwrap(),
+                "path/to/source/friend/fence.json" => parse_fence_str(
+                    r#"{
+                        "tags": ["friend"]
+                    }"#,
+                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                ).unwrap(),
+                "path/to/protected/fence.json" => parse_fence_str(
+                    r#"{"tags": ["protected"], "exports": [{"modules": "*", "accessibleTo": "test"}, {"modules": "*", "accessibleTo": "friend"}]}"#,
+                    &RelativePathBuf::from("path/to/protected/fence.json")
+                ).unwrap()
+            ),
+        };
+
+        let violations = evaluate_fences(
+            &fence_collection,
+            &SOURCE_FILES,
+            &TSCONFIG_PATHS_JSON,
+            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+        );
+
+        assert_eq!(violations, Ok(None));
     }
 
     #[test]
@@ -548,7 +586,7 @@ mod test {
                     .get("path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&d)),
-                violating_import_path: "../protected/internal",
+                violating_import_specifier: "../protected/internal",
                 violating_imported_name: Option::None
             }]))
         );
@@ -595,7 +633,7 @@ mod test {
                     .get("path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&d)),
-                violating_import_path: "../protected/internal",
+                violating_import_specifier: "../protected/internal",
                 violating_imported_name: Option::None
             }]))
         );
@@ -664,7 +702,7 @@ mod test {
                     .get("path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::DependencyRule(None),
-                violating_import_path: "node-import",
+                violating_import_specifier: "node-import",
                 violating_imported_name: Option::None
             }]))
         );
@@ -728,7 +766,7 @@ mod test {
                     .get("path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::DependencyRule(Some(&d)),
-                violating_import_path: "node-import",
+                violating_import_specifier: "node-import",
                 violating_imported_name: Option::None
             }]))
         );
@@ -744,6 +782,95 @@ mod test {
                             {
                                 "dependency": "node-import",
                                 "accessibleTo": "friend"
+                            }
+                        ]
+                    }"#,
+                    &RelativePathBuf::from("path/to/source/fence.json")
+                ).unwrap(),
+                "path/to/source/friend/fence.json" => parse_fence_str(
+                    r#"{
+                        "tags": ["friend"]
+                    }"#,
+                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                ).unwrap()
+            ),
+        };
+
+        let violations = evaluate_fences(
+            &fence_collection,
+            &SOURCE_FILES,
+            &TSCONFIG_PATHS_JSON,
+            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+        );
+
+        assert_eq!(violations, Ok(None));
+    }
+
+    #[test]
+    pub fn test_dependencies_not_allowed_when_on_dependency_not_on_allow_list() {
+        let fence_collection = FenceCollection {
+            fences_map: map!(
+                "path/to/source/fence.json" => parse_fence_str(
+                    r#"{
+                        "dependencies": [
+                            {
+                                "dependency": "node-import",
+                                "accessibleTo": "friendzzz"
+                            }
+                        ]
+                    }"#,
+                    &RelativePathBuf::from("path/to/source/fence.json")
+                ).unwrap(),
+                "path/to/source/friend/fence.json" => parse_fence_str(
+                    r#"{
+                        "tags": ["friend"]
+                    }"#,
+                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                ).unwrap()
+            ),
+        };
+
+        let violations = evaluate_fences(
+            &fence_collection,
+            &SOURCE_FILES,
+            &TSCONFIG_PATHS_JSON,
+            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+        );
+
+        let r = DependencyRule {
+            dependency: "node-import".to_owned(),
+            accessible_to: vec!["friendzzz".to_owned()],
+        };
+
+        assert_eq!(
+            violations,
+            Ok(Some(vec![ImportRuleViolation {
+                violating_file_path: "path/to/source/friend/index.ts",
+                violating_fence: fence_collection
+                    .fences_map
+                    .get("path/to/source/fence.json")
+                    .unwrap(),
+                violating_fence_clause: ViolatedFenceClause::DependencyRule(Some(&r)),
+                violating_import_specifier: "node-import",
+                violating_imported_name: None
+            }]))
+        );
+    }
+
+    #[test]
+    pub fn test_dependencies_allowed_when_on_dependency_allow_list_with_accessible_to_conflict() {
+        let fence_collection = FenceCollection {
+            fences_map: map!(
+                "path/to/source/fence.json" => parse_fence_str(
+                    r#"{
+                        "dependencies": [
+                            {
+                                "dependency": "node-import",
+                                "accessibleTo": "friend"
+                            },
+                            {
+                                "dependency": "node-import",
+                                "accessibleTo": "friendzzz"
                             }
                         ]
                     }"#,

@@ -16,6 +16,7 @@ fn main() {
     println!("beginning file walks");
     let good_fences_runner =
         GoodFencesRunner::new("tsconfig.paths.json", &vec!["packages", "shared"]);
+    // println!("{:#?}", good_fences_runner);
 
     println!("beginning fence evaluations");
     let violations = good_fences_runner.find_import_violations();
