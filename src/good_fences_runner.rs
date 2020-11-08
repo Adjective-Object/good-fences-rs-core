@@ -439,60 +439,20 @@ mod test {
         let mut violations = good_fences_runner.find_import_violations();
         violations.sort_by(compare_violations);
 
+        let rule = ExportRule {
+            accessible_to: vec!["tagA".to_owned()],
+            modules: "componentB".to_owned(),
+        };
         let mut expected_violations = vec![
             Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentA/componentA.ts",
+                violating_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts",
                 violating_fence: good_fences_runner
                     .fence_collection
                     .fences_map
-                    .get("tests/good_fences_integration/src/componentA/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "../componentB/componentB",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentA/componentA.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentA/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "./helperA1",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentA/componentA.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentA/fence.json")
+                    .get("tests/good_fences_integration/src/componentB/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "./helperA1",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentA/componentA.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentA/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                violating_import_path: "./helperA2",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentA/componentA.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentA/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "./helperA2",
+                violating_import_path: "../componentB/helperB1",
                 violating_imported_name: None,
             }),
             Ok(ImportRuleViolation {
@@ -511,64 +471,20 @@ mod test {
                 violating_fence: good_fences_runner
                     .fence_collection
                     .fences_map
-                    .get("tests/good_fences_integration/src/componentB/fence.json")
+                    .get("tests/good_fences_integration/src/componentA/fence.json")
                     .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
+                violating_fence_clause: ViolatedFenceClause::ImportAllowList,
                 violating_import_path: "../componentB/componentB",
                 violating_imported_name: None,
             }),
             Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentB/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "../componentB/helperB1",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentB/componentB.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentB/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "./helperB1",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/componentB/componentB.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentB/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "./helperB2",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
-                violating_file_path: "tests/good_fences_integration/src/index.ts",
-                violating_fence: good_fences_runner
-                    .fence_collection
-                    .fences_map
-                    .get("tests/good_fences_integration/src/componentA/fence.json")
-                    .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                violating_import_path: "./componentA/componentA",
-                violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
                 violating_file_path: "tests/good_fences_integration/src/index.ts",
                 violating_fence: good_fences_runner
                     .fence_collection
                     .fences_map
                     .get("tests/good_fences_integration/src/componentB/fence.json")
                     .unwrap(),
-                violating_fence_clause: ViolatedFenceClause::ExportRule(None),
+                violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule)),
                 violating_import_path: "./componentB/componentB",
                 violating_imported_name: None,
             }),

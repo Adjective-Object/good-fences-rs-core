@@ -1,11 +1,12 @@
 use crate::fence::{DependencyRule, ExportRule, Fence};
 use crate::fence_collection::FenceCollection;
+use crate::file_extension::no_ext;
 use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
 use relative_path::RelativePath;
-use std::collections::HashMap;
-use std::iter::Iterator;
+use std::collections::{HashMap, HashSet};
+use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
 
@@ -50,7 +51,8 @@ fn export_rule_applies_to_import_path(
     let export_rule_glob = Pattern::new(buf.to_str().unwrap());
 
     match export_rule_glob {
-        Ok(glob) => Ok(glob.matches(imported_file_path.to_str().unwrap())),
+        Ok(glob) => Ok(glob.matches(imported_file_path.to_str().unwrap())
+            || glob.matches(no_ext(imported_file_path.to_str().unwrap()))),
         Err(e) => Err(e),
     }
 }
@@ -71,6 +73,12 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     let mut violations = Vec::<ImportRuleViolation>::new();
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
         fence_collection.get_fences_for_path(&PathBuf::from(source_file.source_file_path.clone()));
+
+    // fences only apply to files between their boundaries, so
+    // fences will not filter imports within their bounds at all.
+    //
+    // the same goes for exported files
+    let source_fences_set: HashSet<&Fence> = HashSet::from_iter(source_fences);
 
     for (import_specifier, _imported_names) in source_file.imports.imports.iter() {
         let resolved_import = resolve_ts_import(
@@ -109,8 +117,24 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                         Some(x) => x,
                     };
 
+                    let imported_file_path =
+                        &PathBuf::from(imported_source_file.source_file_path.clone());
+                    let imported_source_file_fences: Vec<&Fence> =
+                        fence_collection.get_fences_for_path(imported_file_path);
+                    let imported_source_file_fences_set: HashSet<&Fence> =
+                        HashSet::from_iter(imported_source_file_fences);
+
+                    let exclusive_source_fences: HashSet<&Fence> = source_fences_set
+                        .difference(&imported_source_file_fences_set)
+                        .map(|x| *x)
+                        .collect();
+                    let exclusive_target_fences: HashSet<&Fence> = imported_source_file_fences_set
+                        .difference(&source_fences_set)
+                        .map(|x| *x)
+                        .collect();
+
                     // check allowed imports against tags of the imported source file
-                    for source_fence in source_fences.iter() {
+                    for source_fence in exclusive_source_fences.iter() {
                         if source_fence.fence.imports.is_some()
                             && (imported_source_file
                                 .tags
@@ -135,12 +159,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                         }
                     }
 
-                    let imported_file_path =
-                        &PathBuf::from(imported_source_file.source_file_path.clone());
-                    let imported_source_file_fences =
-                        fence_collection.get_fences_for_path(imported_file_path);
                     // check imports against exports of each fence
-                    for destination_fence in imported_source_file_fences.iter() {
+                    for destination_fence in exclusive_target_fences.iter() {
                         if destination_fence.fence.exports.is_some() {
                             let export_rules_unfiltered =
                                 destination_fence.fence.exports.as_ref().unwrap();
@@ -190,7 +210,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 }
                 // node imports: check the tags against the source fence allow list
                 ResolvedImport::NodeModulesImport(node_module_filter) => {
-                    for source_fence in source_fences.iter() {
+                    for source_fence in source_fences_set.iter() {
                         // only filter on dependencies if there is a dependency list
                         if source_fence.fence.dependencies.is_some() {
                             let allowed_dependencies: &'fencecollectionlifetime Vec<

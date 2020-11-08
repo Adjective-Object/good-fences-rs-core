@@ -9,13 +9,13 @@ use std::path::Path;
 use std::str::FromStr;
 use void::Void;
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash)]
 pub struct Fence {
   pub fence_path: String,
   pub fence: ParsedFence,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedFence {
   pub tags: Option<Vec<String>>,
@@ -32,7 +32,7 @@ struct RawDependencyRule {
   accessible_to: Option<Vec<String>>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct DependencyRule {
   pub dependency: String,
   pub accessible_to: Vec<String>,
@@ -81,7 +81,7 @@ struct RawExportRule {
   accessible_to: Option<Vec<String>>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct ExportRule {
   pub accessible_to: Vec<String>,
   pub modules: String,
