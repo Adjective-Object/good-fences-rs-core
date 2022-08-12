@@ -1,8 +1,3 @@
-extern crate find_ts_imports;
-extern crate serde;
-extern crate swc_common;
-extern crate swc_ecma_parser;
-extern crate swc_ecma_ast;
 use crate::fence::{parse_fence_file, Fence};
 use find_ts_imports::{parse_source_file_imports, SourceFileImportData};
 use jwalk::{WalkDirGeneric, Error};
@@ -11,15 +6,15 @@ use serde::Deserialize;
 use swc_common::sync::Lrc;
 use swc_common::{
     errors::{ColorConfig, Handler},
-    FileName, FilePathMapping, SourceMap,
+    FileName, FilePathMapping, SourceMap
 };
+use swc_ecma_ast::Str;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
@@ -35,7 +30,7 @@ pub struct SourceFile {
   pub source_file_path: String,
   // ref to the strings of tags that apply to this file
   pub tags: HashSet<String>,
-  pub imports: SourceFileImportData,
+  pub imports: HashMap<String, Option<HashSet<String>>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -131,10 +126,12 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                   let _working_dir_path: &Path = &WORKING_DIR_PATH;
                   let source_file_path = RelativePath::from_path(&file_path);
 
+                  let imports = get_imports_from_file(&file_path);
+                  let imports_map = get_imports_map(&imports);
                  
                   dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
                     source_file_path: source_file_path.unwrap().to_string(),
-                    imports: parse_source_file_imports(&file_path),
+                    imports: imports_map,
                     tags: HashSet::from_iter(read_dir_state.iter().map(|x| x.to_owned())),
                   });
                 }
@@ -157,6 +154,32 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
     .collect();
 }
 
+fn get_imports_map(imports: &Vec<&swc_ecma_ast::ModuleDecl>) -> HashMap<String, Option<HashSet<String>>> {
+    let mut imports_map : HashMap<String, Option<HashSet<String>>> = HashMap::new();
+    imports.iter().for_each(|i| {
+    if let Some(import) = i.as_import() {
+      let set: HashSet<String> = import.specifiers.iter().filter_map(|spec| -> Option<String> {
+        if let Some(default) = spec.as_default() {
+          return Some(default.local.to_string());
+        }
+        // if let Some(named) = spec.as_named() {
+
+        //   if let Some(imported) = named.imported.clone() {
+        
+        //   }
+        // }
+        None
+      }).collect();
+      if set.is_empty() {
+        imports_map.insert(import.src.value.to_string(), None);
+      } else {
+        imports_map.insert(import.src.value.to_string(), Some(set));
+      }
+    }
+                      });
+    imports_map
+}
+
 pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
     let lexer = Lexer::new(
       Syntax::Typescript(Default::default()),
@@ -167,7 +190,7 @@ pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput
     lexer
 }
 
-pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<swc_ecma_ast::ModuleItem>{
+pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<&swc_ecma_ast::ModuleDecl>{
   let cm = Arc::<swc_common::SourceMap>::default();
   let fm = cm.load_file(Path::new(file_path.to_str().unwrap())).expect("Could not load file");
   let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
@@ -188,7 +211,16 @@ pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<swc_ecma_ast::Mo
     .map_err(|e| e.into_diagnostic(&handler).emit())
     .expect("Failed to parse module.");
 
-  let imports: Vec<_> = ts_module.body.iter().map(|node| node.clone()).collect();
+  let imports: Vec<_> = ts_module.body.iter().filter_map(|node| -> Option<&swc_ecma_ast::ModuleDecl> {
+    if node.is_module_decl() {
+      if let Some(module_decl) = node.as_module_decl() {
+        if module_decl.is_import() {
+          node.as_module_decl().clone();
+        }
+      }
+    }
+    None
+  }).collect();
 
   return imports;
 }
@@ -291,11 +323,10 @@ use super::get_imports_from_file;
     let expected_root_ts_file = SourceFile {
       source_file_path: "tests/walk_dir_simple/rootFile.ts".to_owned(),
       tags: set!("root-fence-tag-1".to_owned(), "root-fence-tag-2".to_owned()),
-      imports: SourceFileImportData {
-        imports: map!(
+      imports: map!(
           "root-ts-file-import-1" => Option::Some(set!("importFromRootFile"))
         ),
-      },
+      
     };
 
     assert!(
@@ -316,12 +347,11 @@ use super::get_imports_from_file;
     let expected_subdir_ts_file = SourceFile {
       source_file_path: "tests/walk_dir_simple/subdir/subDirFile.ts".to_owned(),
       tags: set!("root-fence-tag-1".to_owned(), "root-fence-tag-2".to_owned()),
-      imports: SourceFileImportData {
-        imports: map!(
+      imports: map!(
           "subdir-file-default-import" => Option::Some(set!("default")),
           "subdir-file-named-import" => Option::Some(set!("namedImport"))
         ),
-      },
+      
     };
 
     assert!(
@@ -346,11 +376,10 @@ use super::get_imports_from_file;
         "root-fence-tag-2".to_owned(),
         "subsubdir-fence-tag".to_owned()
       ),
-      imports: SourceFileImportData {
-        imports: map!(
+      imports: map!(
           "sub-sub-dir-file-abc-named-imports" => Option::Some(set!("a","b","c"))
         ),
-      },
+      
     };
 
     assert!(
