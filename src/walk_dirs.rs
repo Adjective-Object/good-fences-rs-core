@@ -2,6 +2,7 @@ extern crate find_ts_imports;
 extern crate serde;
 extern crate swc_common;
 extern crate swc_ecma_parser;
+extern crate swc_ecma_ast;
 use crate::fence::{parse_fence_file, Fence};
 use find_ts_imports::{parse_source_file_imports, SourceFileImportData};
 use jwalk::{WalkDirGeneric, Error};
@@ -166,10 +167,11 @@ pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput
     lexer
 }
 
-pub fn print_imports_from_swc<'a>(file_path: &'a PathBuf) {
-  let cm = Arc::<SourceMap>::default();
-  let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
+pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<swc_ecma_ast::ModuleItem>{
+  let cm = Arc::<swc_common::SourceMap>::default();
   let fm = cm.load_file(Path::new(file_path.to_str().unwrap())).expect("Could not load file");
+  let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
+  
   let lexer = create_lexer(&fm);
 
   let capturing = Capturing::new(lexer);
@@ -180,34 +182,15 @@ pub fn print_imports_from_swc<'a>(file_path: &'a PathBuf) {
     e.into_diagnostic(&handler).emit();
   }
 
+
+
   let ts_module = parser.parse_typescript_module()
     .map_err(|e| e.into_diagnostic(&handler).emit())
     .expect("Failed to parse module.");
 
-  for node in ts_module.body {
-    let module_decl = node.as_module_decl();
-    if let Some(m) = module_decl {
-      if m.is_import() {
-        let import = m.as_import().unwrap();
-        println!("Hello from {}", import.src.value);
-      }
-    }
-  }
+  let imports: Vec<_> = ts_module.body.iter().map(|node| node.clone()).collect();
 
-
-
-  let c = swc::Compiler::new(cm.clone());
-
-  let file_text: String = std::fs::read_to_string(&file_path).expect(&format!(
-      "error opening source file \"{:?}\"",
-      file_path
-  ));
-
-  let fm = cm.new_source_file(
-    FileName::Custom(file_path.to_str().unwrap().into()), 
-    file_text
-  );
-
+  return imports;
 }
 
 
@@ -220,7 +203,7 @@ mod test {
   use std::iter::{FromIterator, Iterator};
 use std::path::PathBuf;
 
-use super::print_imports_from_swc;
+use super::get_imports_from_file;
 
 
 
@@ -382,8 +365,8 @@ use super::print_imports_from_swc;
   }
 
   #[test]
-  fn test_print_imports_from_swc() {
+  fn tesT_get_imports_from_file() {
     let filename = "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts";
-    print_imports_from_swc(&PathBuf::from(filename.to_owned()));
+    get_imports_from_file(&PathBuf::from(filename.to_owned()));
   }
 }
