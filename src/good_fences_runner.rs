@@ -203,7 +203,6 @@ mod test {
     use crate::good_fences_runner::{GoodFencesRunner, UndefinedTagReference};
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::SourceFile;
-    use find_ts_imports::SourceFileImportData;
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
     use text_diff::print_diff;

@@ -291,7 +291,6 @@ mod test {
     use crate::fence_collection::FenceCollection;
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::SourceFile;
-    use find_ts_imports::SourceFileImportData;
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::collections::{HashMap, HashSet};

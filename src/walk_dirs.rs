@@ -1,5 +1,4 @@
 use crate::fence::{parse_fence_file, Fence};
-use find_ts_imports::{parse_source_file_imports, SourceFileImportData};
 use jwalk::{WalkDirGeneric, Error};
 use relative_path::RelativePath;
 use serde::Deserialize;
@@ -154,14 +153,18 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
     .collect();
 }
 
-fn get_imports_map(imports: &Vec<&swc_ecma_ast::ModuleDecl>) -> HashMap<String, Option<HashSet<String>>> {
+fn get_imports_map(imports: &Vec<SourceSpecifiers>) -> HashMap<String, Option<HashSet<String>>> {
     let mut imports_map : HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    imports.iter().for_each(|i| {
-    if let Some(import) = i.as_import() {
+    // imports.iter().for_each(|import| {
+    //   import.specifiers
+    // });
+    imports.iter().for_each(|import| {
+    
       let set: HashSet<String> = import.specifiers.iter().filter_map(|spec| -> Option<String> {
         if let Some(default) = spec.as_default() {
           return Some(default.local.to_string());
         }
+        // TODO find way to convert swc Str to std::String
         // if let Some(named) = spec.as_named() {
 
         //   if let Some(imported) = named.imported.clone() {
@@ -171,12 +174,12 @@ fn get_imports_map(imports: &Vec<&swc_ecma_ast::ModuleDecl>) -> HashMap<String, 
         None
       }).collect();
       if set.is_empty() {
-        imports_map.insert(import.src.value.to_string(), None);
+        imports_map.insert(import.source.value.to_string(), None);
       } else {
-        imports_map.insert(import.src.value.to_string(), Some(set));
+        imports_map.insert(import.source.value.to_string(), Some(set));
       }
-    }
-                      });
+    
+    });
     imports_map
 }
 
@@ -190,7 +193,12 @@ pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput
     lexer
 }
 
-pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<&swc_ecma_ast::ModuleDecl>{
+pub struct SourceSpecifiers {
+  specifiers: Vec<swc_ecma_ast::ImportSpecifier>,
+  source: Str
+}
+
+pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers>{
   let cm = Arc::<swc_common::SourceMap>::default();
   let fm = cm.load_file(Path::new(file_path.to_str().unwrap())).expect("Could not load file");
   let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
@@ -211,11 +219,15 @@ pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<&swc_ecma_ast::M
     .map_err(|e| e.into_diagnostic(&handler).emit())
     .expect("Failed to parse module.");
 
-  let imports: Vec<_> = ts_module.body.iter().filter_map(|node| -> Option<&swc_ecma_ast::ModuleDecl> {
+  let imports: Vec<_> = ts_module.body.iter().filter_map(|node| -> Option<SourceSpecifiers> {
     if node.is_module_decl() {
       if let Some(module_decl) = node.as_module_decl() {
         if module_decl.is_import() {
-          node.as_module_decl().clone();
+          let i = node.as_module_decl().unwrap().as_import().unwrap();
+          return Some(SourceSpecifiers {
+            specifiers: i.specifiers.clone().to_vec(),
+            source: i.src.clone()
+          });
         }
       }
     }
@@ -230,7 +242,6 @@ pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<&swc_ecma_ast::M
 mod test {
   use crate::fence::{Fence, ParsedFence};
   use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
-  use find_ts_imports::SourceFileImportData;
   use std::collections::HashSet;
   use std::iter::{FromIterator, Iterator};
 use std::path::PathBuf;
