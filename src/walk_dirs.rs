@@ -2,6 +2,7 @@ use crate::fence::{parse_fence_file, Fence};
 use jwalk::{WalkDirGeneric, Error};
 use relative_path::RelativePath;
 use serde::Deserialize;
+use swc_common::source_map::Pos;
 use swc_common::sync::Lrc;
 use swc_common::{
     errors::{ColorConfig, Handler},
@@ -11,6 +12,7 @@ use swc_ecma_ast::Str;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use std::collections::{HashSet, HashMap};
+use std::convert::TryInto;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -126,7 +128,7 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                   let source_file_path = RelativePath::from_path(&file_path);
 
                   let imports = get_imports_from_file(&file_path);
-                  let imports_map = get_imports_map(&imports);
+                  let imports_map = get_imports_map(&imports, &file_path);
                  
                   dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
                     source_file_path: source_file_path.unwrap().to_string(),
@@ -153,30 +155,48 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
     .collect();
 }
 
-fn get_imports_map(imports: &Vec<SourceSpecifiers>) -> HashMap<String, Option<HashSet<String>>> {
+
+fn get_imports_map(imports: &Vec<SourceSpecifiers>, file_path: &PathBuf) -> HashMap<String, Option<HashSet<String>>> {
     let mut imports_map : HashMap<String, Option<HashSet<String>>> = HashMap::new();
     // imports.iter().for_each(|import| {
     //   import.specifiers
     // });
     imports.iter().for_each(|import| {
     
-      let set: HashSet<String> = import.specifiers.iter().filter_map(|spec| -> Option<String> {
+      let mut set: HashSet<String> = import.specifiers.iter().filter_map(|spec| -> Option<String> {
+        let file_text = std::fs::read(file_path).expect(&format!(
+          "error opening source file \"{:?}\"",
+          file_path
+        ));
         if let Some(default) = spec.as_default() {
-          return Some(default.local.to_string());
+          let text =  &file_text[default.span.lo().to_usize()-1..default.span.hi().to_usize()-1];
+          return Some(String::from_utf8_lossy(text).to_string());
         }
-        // TODO find way to convert swc Str to std::String
-        // if let Some(named) = spec.as_named() {
-
-        //   if let Some(imported) = named.imported.clone() {
-        
-        //   }
-        // }
+        if let Some(named) = spec.as_named() {
+          
+          let text =  &file_text[named.span.lo().to_usize()-1..named.span.hi().to_usize()-1];
+          println!("{}", String::from_utf8_lossy(text));
+          return Some(String::from_utf8_lossy(text).to_string());
+        }
         None
       }).collect();
-      if set.is_empty() {
-        imports_map.insert(import.source.value.to_string(), None);
+
+      if let Some(current_set) = imports_map.get(&import.source.value.to_string()) {
+        if let  Some(current_set) = current_set {
+          let mut new_set: HashSet<String> = HashSet::from_iter(current_set.iter().map(|v| v).cloned());
+          for val in set {
+            new_set.insert(val);
+          }
+          imports_map.insert(import.source.value.to_string(), Some(new_set.to_owned()));
+        } else {
+
+        }
       } else {
-        imports_map.insert(import.source.value.to_string(), Some(set));
+        if set.is_empty() {
+          imports_map.insert(import.source.value.to_string(), None);
+        } else {
+          imports_map.insert(import.source.value.to_string(), Some(set));
+        }
       }
     
     });
@@ -246,7 +266,7 @@ mod test {
   use std::iter::{FromIterator, Iterator};
 use std::path::PathBuf;
 
-use super::get_imports_from_file;
+use super::{get_imports_from_file, get_imports_map};
 
 
 
@@ -408,5 +428,26 @@ use super::get_imports_from_file;
   fn tesT_get_imports_from_file() {
     let filename = "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts";
     get_imports_from_file(&PathBuf::from(filename.to_owned()));
+  }
+
+  #[test]
+  fn test_get_imports_map() {
+    // TODO consider multiple imports from same file in ts files
+    let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
+    // let mut expected_imports = map!["./helperA1" => Some(set!(""))];
+    let source_specs = get_imports_from_file(&PathBuf::from(filename.to_owned()));
+    let import_map = get_imports_map(&source_specs, &PathBuf::from(filename.to_owned()));
+    import_map.iter().for_each(|f| {
+      let (key, value) = f;
+      if let Some(value) = value {
+        println!("Key {}", key);
+        print!("Values ");
+        value.iter().for_each(|v| {
+          print!(" {} ", v);
+        });
+        println!("");
+
+      }
+    });
   }
 }
