@@ -81,22 +81,22 @@ pub fn get_imports_map(imports: &Vec<SourceSpecifiers>, importer_file_path: &Pat
         None
       }).collect();
 
-      if let Some(current_set) = imports_map.get(&import.source.value.to_string()) {
-        if let Some(current_set) = current_set {
-          let mut new_set: HashSet<String> = HashSet::from_iter(current_set.iter().map(|v| v).cloned());
-          for val in set {
-            new_set.insert(val);
-          }
-          imports_map.insert(import.source.value.to_string(), Some(new_set.to_owned()));
-        } else {
-
+      match imports_map.get(&import.source.value.to_string()) {
+        Some(Some(current_set)) => {
+            let mut new_set: HashSet<String> = HashSet::from_iter(current_set.iter().map(|v| v).cloned());
+            for val in set {
+              new_set.insert(val);
+            }
+            imports_map.insert(import.source.value.to_string(), Some(new_set.to_owned()));
+        },
+        Some(None) => {
+            if set.is_empty() {
+                imports_map.insert(import.source.value.to_string(), None);
+            } else {
+                imports_map.insert(import.source.value.to_string(), Some(set));
+            }
         }
-      } else {
-        if set.is_empty() {
-          imports_map.insert(import.source.value.to_string(), None);
-        } else {
-          imports_map.insert(import.source.value.to_string(), Some(set));
-        }
+        None => {},
       }
     
     });
