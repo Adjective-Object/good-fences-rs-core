@@ -1,22 +1,11 @@
 use crate::fence::{parse_fence_file, Fence};
 use crate::file_import_retriever;
-use jwalk::{WalkDirGeneric, Error};
+use jwalk::WalkDirGeneric;
 use relative_path::RelativePath;
 use serde::Deserialize;
-use swc_common::source_map::Pos;
-use swc_common::sync::Lrc;
-use swc_common::{
-    errors::{ColorConfig, Handler},
-    FileName, FilePathMapping, SourceMap
-};
-use swc_ecma_ast::Str;
-use swc_ecma_parser::Capturing;
-use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use std::collections::{HashSet, HashMap};
-use std::convert::TryInto;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use file_import_retriever::{get_imports_from_file, get_imports_map};
 extern crate pathdiff;
 

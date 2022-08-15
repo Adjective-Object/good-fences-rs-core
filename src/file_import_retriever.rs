@@ -1,8 +1,6 @@
 use swc_common::source_map::Pos;
-use swc_common::sync::Lrc;
 use swc_common::{
     errors::{ColorConfig, Handler},
-    FileName, FilePathMapping, SourceMap
 };
 use swc_ecma_ast::Str;
 use swc_ecma_parser::Capturing;
