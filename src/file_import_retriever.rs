@@ -52,8 +52,16 @@ pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers
 
     return imports;
 }
+
+pub fn get_string_of_span<'a>(file_path: &'a PathBuf, span: &'a swc_common::Span) -> String {
+    let file_text = std::fs::read(file_path).expect(&format!(
+        "error opening source file \"{:?}\"",
+        file_path
+      ));
+    String::from_utf8_lossy(&file_text[span.lo().to_usize()-1..span.hi().to_usize()-1]).to_string()
+}
   
-pub fn get_imports_map(imports: &Vec<SourceSpecifiers>, file_path: &PathBuf) -> HashMap<String, Option<HashSet<String>>> {
+pub fn get_imports_map(imports: &Vec<SourceSpecifiers>, importer_file_path: &PathBuf) -> HashMap<String, Option<HashSet<String>>> {
     let mut imports_map : HashMap<String, Option<HashSet<String>>> = HashMap::new();
     // imports.iter().for_each(|import| {
     //   import.specifiers
@@ -61,25 +69,20 @@ pub fn get_imports_map(imports: &Vec<SourceSpecifiers>, file_path: &PathBuf) -> 
     imports.iter().for_each(|import| {
     
       let set: HashSet<String> = import.specifiers.iter().filter_map(|spec| -> Option<String> {
-        let file_text = std::fs::read(file_path).expect(&format!(
-          "error opening source file \"{:?}\"",
-          file_path
-        ));
         if let Some(default) = spec.as_default() {
-          let text =  &file_text[default.span.lo().to_usize()-1..default.span.hi().to_usize()-1];
-          return Some(String::from_utf8_lossy(text).to_string());
+          let text = get_string_of_span(importer_file_path, &default.span);
+          return Some(text);
         }
         if let Some(named) = spec.as_named() {
           
-          let text =  &file_text[named.span.lo().to_usize()-1..named.span.hi().to_usize()-1];
-          println!("{}", String::from_utf8_lossy(text));
-          return Some(String::from_utf8_lossy(text).to_string());
+          let text =  get_string_of_span(importer_file_path, &named.span);
+          return Some(text);
         }
         None
       }).collect();
 
       if let Some(current_set) = imports_map.get(&import.source.value.to_string()) {
-        if let  Some(current_set) = current_set {
+        if let Some(current_set) = current_set {
           let mut new_set: HashSet<String> = HashSet::from_iter(current_set.iter().map(|v| v).cloned());
           for val in set {
             new_set.insert(val);
@@ -112,7 +115,9 @@ pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput
 
 #[cfg(test)]
 mod test {
-    use crate::file_import_retriever::{*};
+    use crate::file_import_retriever::{get_imports_from_file, get_imports_map};
+    use std::path::PathBuf;
+
     #[test]
     fn test_get_imports_from_file() {
         let filename = "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts";
