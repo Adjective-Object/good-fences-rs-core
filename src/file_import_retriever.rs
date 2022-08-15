@@ -56,9 +56,7 @@ pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers
     return imports;
 }
 
-pub fn get_string_of_span<'a>(file_path: &'a PathBuf, span: &'a swc_common::Span) -> String {
-    let file_text =
-        std::fs::read(file_path).expect(&format!("error opening source file \"{:?}\"", file_path));
+pub fn get_string_of_span<'a>(file_text: &'a Vec<u8>, span: &'a swc_common::Span) -> String {
     String::from_utf8_lossy(&file_text[span.lo().to_usize() - 1..span.hi().to_usize() - 1])
         .to_string()
 }
@@ -74,12 +72,13 @@ pub fn get_imports_map(
 					.specifiers
 					.iter()
 					.filter_map(|spec| -> Option<String> {
+						let file_text =std::fs::read(importer_file_path).expect(&format!("error opening source file \"{:?}\"", importer_file_path));
 						if let Some(default) = spec.as_default() {
-							let text = get_string_of_span(importer_file_path, &default.span);
+							let text = get_string_of_span(&file_text, &default.span);
 							return Some(text);
 						}
 						if let Some(named) = spec.as_named() {
-							let text = get_string_of_span(importer_file_path, &named.span);
+							let text = get_string_of_span(&file_text, &named.span);
 							return Some(text);
 						}
 						None
