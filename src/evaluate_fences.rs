@@ -329,7 +329,7 @@ mod test {
                         "../protected/internal" => Option::None,
                         "node-import" => Option::None
                     ),
-                
+
             },
             "path/to/source/friend/index" => SourceFile {
                 tags: set!(
@@ -340,7 +340,7 @@ mod test {
                         "../../protected/internal" => Option::None,
                         "node-import" => Option::None
                     ),
-                
+
             },
             "path/to/protected/internal" => SourceFile {
                 tags: set!(

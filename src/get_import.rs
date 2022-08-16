@@ -12,7 +12,9 @@ pub struct SourceSpecifiers {
     source: Str,
 }
 
-pub fn get_imports_map_from_file<'a>(file_path: &'a PathBuf) -> HashMap<String, Option<HashSet<String>>> {
+pub fn get_imports_map_from_file<'a>(
+    file_path: &'a PathBuf,
+) -> HashMap<String, Option<HashSet<String>>> {
     let imports = get_imports_from_file(&file_path);
     get_imports_map(&imports, &file_path)
 }
@@ -77,7 +79,10 @@ fn get_imports_map(
             .specifiers
             .iter()
             .filter_map(|spec| -> Option<String> {
-                let file_text =std::fs::read(importer_file_path).expect(&format!("error opening source file \"{:?}\"", importer_file_path));
+                let file_text = std::fs::read(importer_file_path).expect(&format!(
+                    "error opening source file \"{:?}\"",
+                    importer_file_path
+                ));
                 if let Some(default) = spec.as_default() {
                     let text = get_string_of_span(&file_text, &default.span);
                     return Some(text);
