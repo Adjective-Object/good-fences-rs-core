@@ -145,8 +145,6 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
     .collect();
 }
 
-
-
 #[cfg(test)]
 mod test {
   use crate::fence::{Fence, ParsedFence};
