@@ -7,23 +7,34 @@ use swc_common::source_map::Pos;
 use swc_ecma_ast::Str;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
-pub struct SourceSpecifiers {
+
+use crate::error::GetImportError;
+struct SourceSpecifiers {
     specifiers: Vec<swc_ecma_ast::ImportSpecifier>,
     source: Str,
 }
 
 pub fn get_imports_map_from_file<'a>(
     file_path: &'a PathBuf,
-) -> HashMap<String, Option<HashSet<String>>> {
-    let imports = get_imports_from_file(&file_path);
+) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
+    let imports = match get_imports_from_file(&file_path) {
+        Ok(i) => i,
+        Err(e) => return Err(e),
+    };
     get_imports_map(&imports, &file_path)
+        
 }
 
-fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers> {
+fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Result<Vec<SourceSpecifiers>, GetImportError> {
+    let path_string = match file_path.to_str() {
+        Some(path) => path,
+        None => return Err(GetImportError::ReadTsFileError(None)),
+    };
     let cm = Arc::<swc_common::SourceMap>::default();
-    let fm = cm
-        .load_file(Path::new(file_path.to_str().unwrap()))
-        .expect("Could not load file");
+    let fm = match cm.load_file(Path::new(path_string)) {
+        Ok(f) => f,
+        Err(_) => return Err(GetImportError::ReadTsFileError(Some(path_string.to_string()))),
+    };
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
 
     let lexer = create_lexer(&fm);
@@ -36,10 +47,13 @@ fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers> {
         e.into_diagnostic(&handler).emit();
     }
 
-    let ts_module = parser
+    let ts_module = match parser
         .parse_typescript_module()
         .map_err(|e| e.into_diagnostic(&handler).emit())
-        .expect("Failed to parse module.");
+        {
+            Ok(module) => module,
+            Err(_) => return Err(GetImportError::ParseTsFileError(path_string.to_string())),
+        };
 
     let imports: Vec<_> = ts_module
         .body
@@ -48,7 +62,7 @@ fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers> {
             if node.is_module_decl() {
                 if let Some(module_decl) = node.as_module_decl() {
                     if module_decl.is_import() {
-                        let i = node.as_module_decl().unwrap().as_import().unwrap();
+                        let i = module_decl.as_import().unwrap();
                         return Some(SourceSpecifiers {
                             specifiers: i.specifiers.clone().to_vec(),
                             source: i.src.clone(),
@@ -60,7 +74,7 @@ fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers> {
         })
         .collect();
 
-    return imports;
+    return Ok(imports);
 }
 
 fn get_string_of_span<'a>(file_text: &'a Vec<u8>, span: &'a swc_common::Span) -> String {
@@ -71,25 +85,27 @@ fn get_string_of_span<'a>(file_text: &'a Vec<u8>, span: &'a swc_common::Span) ->
 fn get_imports_map(
     imports: &Vec<SourceSpecifiers>,
     importer_file_path: &PathBuf,
-) -> HashMap<String, Option<HashSet<String>>> {
+) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
     let mut imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
 
     imports.iter().for_each(|import| {
         let set: HashSet<String> = import
             .specifiers
             .iter()
+            .filter(|spec| spec.is_default() || spec.is_named())
             .filter_map(|spec| -> Option<String> {
-                let file_text = std::fs::read(importer_file_path).expect(&format!(
-                    "error opening source file \"{:?}\"",
-                    importer_file_path
-                ));
+                let file_text = match std::fs::read(importer_file_path) {
+                    Ok(text) => text,
+                    Err(e) => { 
+                        // eprintln!(GetImportError::ReadTsFileError(None));
+                        return None;
+                    }
+                };
                 if let Some(default) = spec.as_default() {
-                    let text = get_string_of_span(&file_text, &default.span);
-                    return Some(text);
+                    return Some(get_string_of_span(&file_text, &default.span));
                 }
                 if let Some(named) = spec.as_named() {
-                    let text = get_string_of_span(&file_text, &named.span);
-                    return Some(text);
+                    return Some(get_string_of_span(&file_text, &named.span));
                 }
                 None
             })
@@ -113,7 +129,7 @@ fn get_imports_map(
             }
         }
     });
-    imports_map
+    Ok(imports_map)
 }
 
 fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
@@ -128,7 +144,7 @@ fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>
 
 #[cfg(test)]
 mod test {
-    use crate::get_import::{get_imports_from_file, get_imports_map};
+    use crate::get_imports::{get_imports_from_file, get_imports_map};
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,
@@ -137,7 +153,7 @@ mod test {
     #[test]
     fn test_get_imports_from_file() {
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
-        let imports = get_imports_from_file(&PathBuf::from(filename.to_owned()));
+        let imports = get_imports_from_file(&PathBuf::from(filename.to_owned())).unwrap();
         assert_eq!(4, imports.len());
     }
 
@@ -146,8 +162,8 @@ mod test {
         // TODO consider multiple imports from same file in ts files
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
         // let mut expected_imports = map!["./helperA1" => Some(set!(""))];
-        let source_specs = get_imports_from_file(&PathBuf::from(filename.to_owned()));
-        let import_map = get_imports_map(&source_specs, &PathBuf::from(filename.to_owned()));
+        let source_specs = get_imports_from_file(&PathBuf::from(filename.to_owned())).unwrap();
+        let import_map = get_imports_map(&source_specs, &PathBuf::from(filename.to_owned())).unwrap();
         let expected_map: HashMap<String, Option<HashSet<String>>> = HashMap::from([
             (
                 String::from("../componentB/componentB"),
@@ -168,5 +184,13 @@ mod test {
             ),
         ]);
         assert_eq!(import_map, expected_map);
+    }
+
+    #[test]
+    fn test_get_imports_from_non_existent_path() {
+        // TODO consider multiple imports from same file in ts files
+        let filename = "path/to/nowhere/nothing.ts";
+        let source_specs = get_imports_from_file(&PathBuf::from(filename.to_owned()));
+        assert!(source_specs.is_err());
     }
 }
