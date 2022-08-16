@@ -203,7 +203,6 @@ mod test {
     use crate::good_fences_runner::{GoodFencesRunner, UndefinedTagReference};
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::SourceFile;
-    use find_ts_imports::SourceFileImportData;
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
     use text_diff::print_diff;
@@ -310,59 +309,50 @@ mod test {
                         tags: set!(
                             "tagA".to_owned()
                         ),
-                        imports: SourceFileImportData {
-                            imports: map!(
-                                "../componentB/helperB1" => Some(
-                                    set!(
-                                        "default".to_owned()
-                                    ),
-                                )
-                            ),
-                        },
+                        imports: map!(
+                            "../componentB/helperB1" => Some(
+                                set!(
+                                    "default".to_owned()
+                                ),
+                            )
+                        ),
                     },
                     "tests/good_fences_integration/src/componentB/componentB" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/componentB.ts".to_owned(),
                         tags: set!(
                             "tagB".to_owned()
                         ),
-                        imports: SourceFileImportData {
-                            imports: map!(
-                                "./helperB2" => Some(
-                                    set!(
-                                        "default".to_owned()
-                                    ),
+                        imports: map!(
+                            "./helperB2" => Some(
+                                set!(
+                                    "default".to_owned()
                                 ),
-                                "./helperB1" => Some(
-                                    set!(
-                                        "default".to_owned()
-                                    ),
-                                )
                             ),
-                        },
+                            "./helperB1" => Some(
+                                set!(
+                                    "default".to_owned()
+                                ),
+                            )
+                        ),
                     },
                     "tests/good_fences_integration/src/componentB/helperB2" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/helperB2.ts".to_owned(),
                         tags: set!(
                             "tagB".to_owned()
                         ),
-                        imports: SourceFileImportData {
-                            imports: HashMap::new()
-                        },
+                        imports: HashMap::new(),
                     },
                     "tests/good_fences_integration/src/componentA/helperA2" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentA/helperA2.ts".to_owned(),
                         tags: set!(
                             "tagA".to_owned()
                         ),
-                        imports: SourceFileImportData {
-                            imports: HashMap::new()
-                        },
+                        imports: HashMap::new(),
                     },
                     "tests/good_fences_integration/src/index" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/index.ts".to_owned(),
                         tags: HashSet::new(),
-                        imports: SourceFileImportData {
-                            imports: map!(
+                        imports: map!(
                                 "./componentA/componentA" => Some(
                                     set!(
                                         "default as componentA".to_owned()
@@ -374,24 +364,20 @@ mod test {
                                     ),
                                 )
                             ),
-                        },
                     },
                     "tests/good_fences_integration/src/componentB/helperB1" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/helperB1.ts".to_owned(),
                         tags: set!(
                             "tagB".to_owned()
                         ),
-                        imports: SourceFileImportData {
-                            imports: HashMap::new()
-                        },
+                        imports: HashMap::new()
                     },
                     "tests/good_fences_integration/src/componentA/componentA" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentA/componentA.ts".to_owned(),
                         tags: set!(
                             "tagA".to_owned()
                         ),
-                        imports: SourceFileImportData {
-                            imports: map!(
+                        imports: map!(
                                 "./helperA2" => Some(
                                     set!(
                                         "default".to_owned()
@@ -408,7 +394,6 @@ mod test {
                                     ),
                                 )
                             ),
-                        },
                     }
                 )
             }

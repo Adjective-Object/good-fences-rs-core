@@ -1,13 +1,12 @@
-extern crate find_ts_imports;
-extern crate serde;
 use crate::fence::{parse_fence_file, Fence};
-use find_ts_imports::{parse_source_file_imports, SourceFileImportData};
+use crate::get_import;
 use jwalk::WalkDirGeneric;
 use relative_path::RelativePath;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
+use get_import::{get_imports_map_from_file};
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
@@ -23,7 +22,7 @@ pub struct SourceFile {
   pub source_file_path: String,
   // ref to the strings of tags that apply to this file
   pub tags: HashSet<String>,
-  pub imports: SourceFileImportData,
+  pub imports: HashMap<String, Option<HashSet<String>>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -74,7 +73,7 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                 if file_name.ends_with("fence.json") {
                   let _working_dir_path: &Path = &WORKING_DIR_PATH;
                   let fence_result = parse_fence_file(
-                    RelativePath::from_path(&dir_entry.parent_path.join(file_name)).unwrap(),
+                    RelativePath::from_path(&dir_entry.parent_path.join(file_name)).unwrap()
                   );
                   match fence_result {
                     Ok(fence) => {
@@ -119,9 +118,11 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                   let _working_dir_path: &Path = &WORKING_DIR_PATH;
                   let source_file_path = RelativePath::from_path(&file_path);
 
+                  let imports = get_imports_map_from_file(&file_path);
+                 
                   dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
                     source_file_path: source_file_path.unwrap().to_string(),
-                    imports: parse_source_file_imports(&file_path),
+                    imports: imports,
                     tags: HashSet::from_iter(read_dir_state.iter().map(|x| x.to_owned())),
                   });
                 }
@@ -148,7 +149,6 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
 mod test {
   use crate::fence::{Fence, ParsedFence};
   use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
-  use find_ts_imports::SourceFileImportData;
   use std::collections::HashSet;
   use std::iter::{FromIterator, Iterator};
 
@@ -236,11 +236,10 @@ mod test {
     let expected_root_ts_file = SourceFile {
       source_file_path: "tests/walk_dir_simple/rootFile.ts".to_owned(),
       tags: set!("root-fence-tag-1".to_owned(), "root-fence-tag-2".to_owned()),
-      imports: SourceFileImportData {
-        imports: map!(
+      imports: map!(
           "root-ts-file-import-1" => Option::Some(set!("importFromRootFile"))
         ),
-      },
+      
     };
 
     assert!(
@@ -261,12 +260,11 @@ mod test {
     let expected_subdir_ts_file = SourceFile {
       source_file_path: "tests/walk_dir_simple/subdir/subDirFile.ts".to_owned(),
       tags: set!("root-fence-tag-1".to_owned(), "root-fence-tag-2".to_owned()),
-      imports: SourceFileImportData {
-        imports: map!(
+      imports: map!(
           "subdir-file-default-import" => Option::Some(set!("default")),
           "subdir-file-named-import" => Option::Some(set!("namedImport"))
         ),
-      },
+      
     };
 
     assert!(
@@ -291,11 +289,10 @@ mod test {
         "root-fence-tag-2".to_owned(),
         "subsubdir-fence-tag".to_owned()
       ),
-      imports: SourceFileImportData {
-        imports: map!(
+      imports: map!(
           "sub-sub-dir-file-abc-named-imports" => Option::Some(set!("a","b","c"))
         ),
-      },
+      
     };
 
     assert!(
@@ -308,4 +305,5 @@ mod test {
       discovered
     );
   }
+  
 }

@@ -8,7 +8,6 @@ edition = "2018"
 jwalk = "0.5"
 regex = "1.4.2"
 lazy_static = "1.4.0"
-find-ts-imports = { git = "https://github.com/Adjective-Object/find-ts-imports.git", rev = "87619adf857443b531ac3af777423cece5c8cdbd", features = ["serde"] }
 serde_derive = "1.0.117"
 serde_bytes = "0.11.5"
 serde = { version = "1.0.117", features = ["rc"]}
@@ -20,3 +19,8 @@ pathdiff = "0.2.0"
 text-diff = "0.4.0"
 rayon = "1.5.0"
 hyperfine = "1.11.0"
+swc_ecma_parser = {version = "0.117.0", features = ["typescript"]}
+swc_common = {version = "0.27.0", features = ["tty-emitter"]}
+swc = "0.213.1"
+swc_ecma_ast = "0.90.3"
+swc_atoms = "0.4.3"

@@ -78,7 +78,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     // the same goes for exported files
     let source_fences_set: HashSet<&Fence> = HashSet::from_iter(source_fences);
 
-    for (import_specifier, _imported_names) in source_file.imports.imports.iter() {
+    for (import_specifier, _imported_names) in source_file.imports.iter() {
         let resolved_import = resolve_ts_import(
             tsconfig_paths_json,
             &RelativePath::new(&source_file.source_file_path),
@@ -291,7 +291,6 @@ mod test {
     use crate::fence_collection::FenceCollection;
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::SourceFile;
-    use find_ts_imports::SourceFileImportData;
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::collections::{HashMap, HashSet};
@@ -326,33 +325,29 @@ mod test {
             "path/to/source/index" => SourceFile {
                 tags: HashSet::new(),
                 source_file_path: "path/to/source/index.ts".to_owned(),
-                imports: SourceFileImportData {
-                    imports: map!(
+                imports: map!(
                         "../protected/internal" => Option::None,
                         "node-import" => Option::None
                     ),
-                }
+                
             },
             "path/to/source/friend/index" => SourceFile {
                 tags: set!(
                     "friend"
                 ),
                 source_file_path: "path/to/source/friend/index.ts".to_owned(),
-                imports: SourceFileImportData {
-                    imports: map!(
+                imports: map!(
                         "../../protected/internal" => Option::None,
                         "node-import" => Option::None
                     ),
-                }
+                
             },
             "path/to/protected/internal" => SourceFile {
                 tags: set!(
                     "protected"
                 ),
                 source_file_path: "path/to/protected/internal.ts".to_owned(),
-                imports: SourceFileImportData {
-                    imports: HashMap::new(),
-                }
+                imports: HashMap::new(),
             }
         );
     }
