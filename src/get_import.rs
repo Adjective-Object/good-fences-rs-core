@@ -12,7 +12,12 @@ pub struct SourceSpecifiers {
     source: Str,
 }
 
-pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers> {
+pub fn get_imports_map_from_file<'a>(file_path: &'a PathBuf) -> HashMap<String, Option<HashSet<String>>> {
+    let imports = get_imports_from_file(&file_path);
+    get_imports_map(&imports, &file_path)
+}
+
+fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers> {
     let cm = Arc::<swc_common::SourceMap>::default();
     let fm = cm
         .load_file(Path::new(file_path.to_str().unwrap()))
@@ -56,12 +61,12 @@ pub fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Vec<SourceSpecifiers
     return imports;
 }
 
-pub fn get_string_of_span<'a>(file_text: &'a Vec<u8>, span: &'a swc_common::Span) -> String {
+fn get_string_of_span<'a>(file_text: &'a Vec<u8>, span: &'a swc_common::Span) -> String {
     String::from_utf8_lossy(&file_text[span.lo().to_usize() - 1..span.hi().to_usize() - 1])
         .to_string()
 }
 
-pub fn get_imports_map(
+fn get_imports_map(
     imports: &Vec<SourceSpecifiers>,
     importer_file_path: &PathBuf,
 ) -> HashMap<String, Option<HashSet<String>>> {
@@ -69,44 +74,44 @@ pub fn get_imports_map(
 
     imports.iter().for_each(|import| {
         let set: HashSet<String> = import
-					.specifiers
-					.iter()
-					.filter_map(|spec| -> Option<String> {
-						let file_text =std::fs::read(importer_file_path).expect(&format!("error opening source file \"{:?}\"", importer_file_path));
-						if let Some(default) = spec.as_default() {
-							let text = get_string_of_span(&file_text, &default.span);
-							return Some(text);
-						}
-						if let Some(named) = spec.as_named() {
-							let text = get_string_of_span(&file_text, &named.span);
-							return Some(text);
-						}
-						None
-					})
-					.collect();
+            .specifiers
+            .iter()
+            .filter_map(|spec| -> Option<String> {
+                let file_text =std::fs::read(importer_file_path).expect(&format!("error opening source file \"{:?}\"", importer_file_path));
+                if let Some(default) = spec.as_default() {
+                    let text = get_string_of_span(&file_text, &default.span);
+                    return Some(text);
+                }
+                if let Some(named) = spec.as_named() {
+                    let text = get_string_of_span(&file_text, &named.span);
+                    return Some(text);
+                }
+                None
+            })
+            .collect();
         match imports_map.get(&import.source.value.to_string()) {
-					Some(Some(current_set)) => {
-						// TODO find a way to append data to current set instead of copying it into an new one
-						let mut new_set: HashSet<String> =
-							HashSet::from_iter(current_set.iter().map(|v| v).cloned());
-						for val in set {
-							new_set.insert(val);
-						}
-						imports_map.insert(import.source.value.to_string(), Some(new_set));
-					}
-					_ => {
-						if set.is_empty() {
-							imports_map.insert(import.source.value.to_string(), None);
-						} else {
-							imports_map.insert(import.source.value.to_string(), Some(set));
-						}
-					}
+            Some(Some(current_set)) => {
+                // TODO find a way to append data to current set instead of copying it into an new one
+                let mut new_set: HashSet<String> =
+                    HashSet::from_iter(current_set.iter().map(|v| v).cloned());
+                for val in set {
+                    new_set.insert(val);
+                }
+                imports_map.insert(import.source.value.to_string(), Some(new_set));
+            }
+            _ => {
+                if set.is_empty() {
+                    imports_map.insert(import.source.value.to_string(), None);
+                } else {
+                    imports_map.insert(import.source.value.to_string(), Some(set));
+                }
+            }
         }
     });
     imports_map
 }
 
-pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
+fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
     let lexer = Lexer::new(
         Syntax::Typescript(Default::default()),
         Default::default(),
@@ -118,7 +123,7 @@ pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput
 
 #[cfg(test)]
 mod test {
-    use crate::file_import_retriever::{get_imports_from_file, get_imports_map};
+    use crate::get_import::{get_imports_from_file, get_imports_map};
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,

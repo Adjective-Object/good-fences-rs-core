@@ -1,12 +1,12 @@
 use crate::fence::{parse_fence_file, Fence};
-use crate::file_import_retriever;
+use crate::get_import;
 use jwalk::WalkDirGeneric;
 use relative_path::RelativePath;
 use serde::Deserialize;
 use std::collections::{HashSet, HashMap};
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
-use file_import_retriever::{get_imports_from_file, get_imports_map};
+use get_import::{get_imports_map_from_file};
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
@@ -118,12 +118,11 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                   let _working_dir_path: &Path = &WORKING_DIR_PATH;
                   let source_file_path = RelativePath::from_path(&file_path);
 
-                  let imports = get_imports_from_file(&file_path);
-                  let imports_map = get_imports_map(&imports, &file_path);
+                  let imports = get_imports_map_from_file(&file_path);
                  
                   dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
                     source_file_path: source_file_path.unwrap().to_string(),
-                    imports: imports_map,
+                    imports: imports,
                     tags: HashSet::from_iter(read_dir_state.iter().map(|x| x.to_owned())),
                   });
                 }
