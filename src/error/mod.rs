@@ -1,43 +1,59 @@
 use std::{error::Error, fmt::Display};
 
 #[derive(Debug)]
-pub enum GetImportError {
-    /**
-     * - String: file_path
-     */
-    ParseTsFileError(String),
-    FileDoesNotExist(String),
-    /**
-     * 0 -> file_path
-     * 1 -> import_path
-     */
-    ReadImportError(String, String),
-    /**
-     * Option<String> in case filepath is a valid string it will receive it as option
-     */
-    ReadTsFileError(Option<String>),
+pub enum GetImportErrorKind {
+    ParseTsFileError,
+    FileDoesNotExist,
+    ReadImportError,
+    ReadTsFileError,
+}
+
+#[derive(Debug)]
+pub struct GetImportError {
+    pub kind: GetImportErrorKind,
+    pub swc_parser_errrors: Option<Vec<swc_ecma_parser::error::Error>>,
+    pub io_errors: Option<Vec<std::io::Error>>,
+    pub file_path: Option<String>,
+}
+
+impl GetImportError {
+    pub fn new(
+        kind: GetImportErrorKind,
+        file_path: Option<String>,
+        swc_parser_errrors: Option<Vec<swc_ecma_parser::error::Error>>,
+        io_errors: Option<Vec<std::io::Error>>,
+    ) -> GetImportError {
+        Self {
+            swc_parser_errrors,
+            kind,
+            file_path,
+            io_errors,
+        }
+    }
 }
 
 impl Error for GetImportError {}
 
 impl Display for GetImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GetImportError::ParseTsFileError(file_path) => {
-                write!(f, "Error parsing file: {}", file_path)
-            }
-            GetImportError::ReadImportError(file_path, import) => write!(
-                f,
-                "Error reading import names of {} inside file {}",
-                import, file_path
-            ),
-            GetImportError::FileDoesNotExist(file_path) => {
-                write!(f, "File {} does not exist", &file_path)
-            }
-            GetImportError::ReadTsFileError(path_opt) => match path_opt {
-                Some(file_path) => write!(f, "Could not read TS file {}", &file_path),
-                None => write!(f, "Invalid path, could not read TS file"),
+        match self.kind {
+            GetImportErrorKind::ParseTsFileError => {
+
+            },
+            GetImportErrorKind::FileDoesNotExist => {
+
+            },
+            GetImportErrorKind::ReadImportError => {
+
+            },
+            GetImportErrorKind::ReadTsFileError => {
+                if let Some(io_errors) = &self.io_errors {
+                    for io_error in io_errors {
+                        write!(f, "IO Error {}", io_error.to_string()).unwrap();
+                    }
+                }
             },
         }
+        Ok(())
     }
 }

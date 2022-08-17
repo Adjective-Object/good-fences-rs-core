@@ -124,8 +124,8 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
 
                                     let imports = match get_imports_map_from_file(&file_path) {
                                         Ok(imps) => imps,
-                                        Err(_e) => {
-                                            eprint!("Error");
+                                        Err(e) => {
+                                            eprint!("Error {}", e);
                                             continue;
                                         }
                                     };

@@ -8,17 +8,12 @@ use swc_common::SourceFile;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
-use crate::error::GetImportError;
+use crate::error::{GetImportError, GetImportErrorKind};
 
 pub fn get_imports_map_from_file<'a>(
     file_path: &'a PathBuf,
 ) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
-    if file_path.exists() {
-        return get_imports_from_file(&file_path);
-    }
-    Err(GetImportError::FileDoesNotExist(
-        file_path.to_str().unwrap().to_string(),
-    ))
+    get_imports_from_file(&file_path)
 }
 
 fn get_imports_from_file<'a>(
@@ -26,17 +21,28 @@ fn get_imports_from_file<'a>(
 ) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
     let path_string = match file_path.to_str() {
         Some(path) => path,
-        None => return Err(GetImportError::ReadTsFileError(None)),
+        None => {
+            return Err(GetImportError::new(
+                GetImportErrorKind::ReadImportError,
+                None,
+                None,
+                None,
+            ))
+        }
     };
     let cm = Arc::<swc_common::SourceMap>::default();
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
-        Err(_) => {
-            return Err(GetImportError::ReadTsFileError(Some(
-                path_string.to_string(),
-            )))
+        Err(e) => {
+            return Err(GetImportError::new(
+                GetImportErrorKind::ReadTsFileError,
+                Some(path_string.to_string()),
+                None,
+                Some(vec![e]),
+            ));
         }
     };
+
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
 
     let lexer = create_lexer(&fm);
@@ -45,17 +51,29 @@ fn get_imports_from_file<'a>(
 
     let mut parser = Parser::new_from(capturing);
 
-    for e in parser.take_errors() {
-        e.into_diagnostic(&handler).emit();
+    let errors = parser.take_errors();
+
+    if !errors.is_empty() {
+        return Err(GetImportError::new(
+            GetImportErrorKind::ParseTsFileError,
+            Some(path_string.to_string()),
+            Some(errors),
+            None,
+        ));
     }
 
-    let ts_module = match parser
-        .parse_typescript_module()
-        .map_err(|e| e.into_diagnostic(&handler).emit())
-    {
+    let ts_module = match parser.parse_typescript_module() {
         Ok(module) => module,
-        Err(_) => return Err(GetImportError::ParseTsFileError(path_string.to_string())),
+        Err(e) => {
+            return Err(GetImportError::new(
+                GetImportErrorKind::ParseTsFileError,
+                Some(path_string.to_string()),
+                Some(vec![e]),
+                None,
+            ));
+        }
     };
+
     let imports_map = capture_imports_map(ts_module, fm);
 
     return Ok(imports_map);
@@ -185,12 +203,5 @@ mod test {
         let source_specs =
             get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
         assert!(source_specs.is_err());
-        match source_specs.unwrap_err() {
-            crate::error::GetImportError::ParseTsFileError(_) => assert!(false),
-            crate::error::GetImportError::ReadImportError(_, _) => assert!(false),
-            crate::error::GetImportError::ReadTsFileError(_) => assert!(false),
-            crate::error::GetImportError::FileDoesNotExist(_) => assert!(true),
-        }
-        // assert!(source_specs.is_err());
     }
 }
