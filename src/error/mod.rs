@@ -1,4 +1,3 @@
-#[doc("inline")]
 use std::{fmt::Display, error::Error};
 
 #[derive(Debug)]
@@ -12,6 +11,9 @@ pub enum GetImportError {
      * 1 -> import_path
      */
     ReadingImportError(String, String),
+    /**
+     * Option<String> in case filepath is a valid string it will receive it as option
+     */
     ReadTsFileError(Option<String>),
 }
 

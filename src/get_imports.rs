@@ -22,7 +22,6 @@ pub fn get_imports_map_from_file<'a>(
         Err(e) => return Err(e),
     };
     get_imports_map(&imports, &file_path)
-        
 }
 
 fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Result<Vec<SourceSpecifiers>, GetImportError> {
@@ -62,9 +61,9 @@ fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Result<Vec<SourceSpecifi
             if node.is_module_decl() {
                 if let Some(module_decl) = node.as_module_decl() {
                     if module_decl.is_import() {
-                        let i = module_decl.as_import().unwrap();
+                        let i = module_decl.as_import().unwrap(); // Safe to unwrap due to previous is_import assertion
                         return Some(SourceSpecifiers {
-                            specifiers: i.specifiers.clone().to_vec(),
+                            specifiers: i.specifiers.to_vec(),
                             source: i.src.clone(),
                         });
                     }
@@ -88,6 +87,8 @@ fn get_imports_map(
 ) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
     let mut imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
 
+    let mut errors: Vec<GetImportError> = vec![];
+
     imports.iter().for_each(|import| {
         let set: HashSet<String> = import
             .specifiers
@@ -96,8 +97,8 @@ fn get_imports_map(
             .filter_map(|spec| -> Option<String> {
                 let file_text = match std::fs::read(importer_file_path) {
                     Ok(text) => text,
-                    Err(e) => { 
-                        // eprintln!(GetImportError::ReadTsFileError(None));
+                    _ => {
+                        errors.push(GetImportError::ReadTsFileError(Some(importer_file_path.to_str().unwrap().to_string())));
                         return None;
                     }
                 };
@@ -144,7 +145,7 @@ fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>
 
 #[cfg(test)]
 mod test {
-    use crate::get_imports::{get_imports_from_file, get_imports_map};
+    use crate::{get_imports::{get_imports_from_file, get_imports_map, get_imports_map_from_file}};
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,
@@ -190,7 +191,13 @@ mod test {
     fn test_get_imports_from_non_existent_path() {
         // TODO consider multiple imports from same file in ts files
         let filename = "path/to/nowhere/nothing.ts";
-        let source_specs = get_imports_from_file(&PathBuf::from(filename.to_owned()));
+        let source_specs = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
         assert!(source_specs.is_err());
+        match source_specs.unwrap_err() {
+            crate::error::GetImportError::ParseTsFileError(_) => assert!(false),
+            crate::error::GetImportError::ReadingImportError(_, _) => assert!(false),
+            crate::error::GetImportError::ReadTsFileError(_) => assert!(true),
+        }
+        // assert!(source_specs.is_err());
     }
 }
