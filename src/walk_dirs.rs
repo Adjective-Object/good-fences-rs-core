@@ -127,7 +127,7 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                         Err(_e) => {
                                             eprint!("Error");
                                             continue;
-                                        },
+                                        }
                                     };
 
                                     dir_entry.client_state = WalkFileData::SourceFile(SourceFile {

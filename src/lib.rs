@@ -1,3 +1,4 @@
+pub mod error;
 pub mod evaluate_fences;
 pub mod fence;
 pub mod fence_collection;
@@ -6,4 +7,3 @@ pub mod get_imports;
 pub mod good_fences_runner;
 pub mod import_resolver;
 pub mod walk_dirs;
-pub mod error;
