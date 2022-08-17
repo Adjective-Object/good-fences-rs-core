@@ -17,11 +17,14 @@ struct SourceSpecifiers {
 pub fn get_imports_map_from_file<'a>(
     file_path: &'a PathBuf,
 ) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
-    let imports = match get_imports_from_file(&file_path) {
-        Ok(i) => i,
-        Err(e) => return Err(e),
-    };
-    get_imports_map(&imports, &file_path)
+    if file_path.exists() {
+        let imports = match get_imports_from_file(&file_path) {
+            Ok(i) => i,
+            Err(e) => return Err(e),
+        };
+        return get_imports_map(&imports, &file_path);
+    }
+    Err(GetImportError::FileDoesNotExist(file_path.to_str().unwrap().to_string()))
 }
 
 fn get_imports_from_file<'a>(file_path: &'a PathBuf) -> Result<Vec<SourceSpecifiers>, GetImportError> {
@@ -87,8 +90,6 @@ fn get_imports_map(
 ) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
     let mut imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
 
-    let mut errors: Vec<GetImportError> = vec![];
-
     imports.iter().for_each(|import| {
         let set: HashSet<String> = import
             .specifiers
@@ -98,7 +99,6 @@ fn get_imports_map(
                 let file_text = match std::fs::read(importer_file_path) {
                     Ok(text) => text,
                     _ => {
-                        errors.push(GetImportError::ReadTsFileError(Some(importer_file_path.to_str().unwrap().to_string())));
                         return None;
                     }
                 };
@@ -196,7 +196,8 @@ mod test {
         match source_specs.unwrap_err() {
             crate::error::GetImportError::ParseTsFileError(_) => assert!(false),
             crate::error::GetImportError::ReadingImportError(_, _) => assert!(false),
-            crate::error::GetImportError::ReadTsFileError(_) => assert!(true),
+            crate::error::GetImportError::ReadTsFileError(_) => assert!(false),
+            crate::error::GetImportError::FileDoesNotExist(_) => assert!(true),
         }
         // assert!(source_specs.is_err());
     }
