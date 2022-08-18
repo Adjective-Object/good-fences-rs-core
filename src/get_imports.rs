@@ -1,6 +1,9 @@
+use lazy_static::__Deref;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
+use std::panic;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use swc_common::errors::{ColorConfig, Handler};
 use swc_common::source_map::Pos;
@@ -43,7 +46,15 @@ fn get_imports_from_file<'a>(
         }
     };
 
-    let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
+    let mut parser_errors: Vec<String> = Vec::new();
+
+    let dest_vector: Vec<u8> = Vec::new();
+
+    let dst = Box::new(dest_vector);
+
+    let handler = Handler::with_emitter_writer(dst, Some(cm.clone()));
+
+    // let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, alse, Some(cm.clone()));
 
     let lexer = create_lexer(&fm);
 
@@ -53,22 +64,32 @@ fn get_imports_from_file<'a>(
 
     let errors = parser.take_errors();
 
+    // panic::set_hook(Box::new(|_| {}));
+
     if !errors.is_empty() {
+        for error in errors {
+            let mut diagnostic = error.into_diagnostic(&handler);
+            parser_errors.push(diagnostic.message());
+            diagnostic.cancel();
+        }
         return Err(GetImportError::new(
             GetImportErrorKind::ParseTsFileError,
             Some(path_string.to_string()),
-            Some(errors),
+            Some(parser_errors),
             None,
         ));
     }
 
     let ts_module = match parser.parse_typescript_module() {
         Ok(module) => module,
-        Err(e) => {
+        Err(error) => {
+            let mut diagnostic = error.into_diagnostic(&handler);
+            parser_errors.push(diagnostic.message());
+            diagnostic.cancel();
             return Err(GetImportError::new(
                 GetImportErrorKind::ParseTsFileError,
                 Some(path_string.to_string()),
-                Some(vec![e]),
+                Some(parser_errors),
                 None,
             ));
         }
@@ -155,7 +176,10 @@ fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>
 
 #[cfg(test)]
 mod test {
-    use crate::get_imports::{get_imports_from_file, get_imports_map_from_file};
+    use crate::{
+        error::{GetImportError, GetImportErrorKind},
+        get_imports::{get_imports_from_file, get_imports_map_from_file},
+    };
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,
@@ -200,8 +224,21 @@ mod test {
     fn test_get_imports_from_non_existent_path() {
         // TODO consider multiple imports from same file in ts files
         let filename = "path/to/nowhere/nothing.ts";
-        let source_specs =
-            get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
-        assert!(source_specs.is_err());
+        let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
+        assert!(imports.is_err());
+    }
+
+    #[test]
+    fn test_parser_error() {
+        let filename = "tests/good_fences_integration/src/parseError/parseError.ts";
+        let imports = get_imports_from_file(&PathBuf::from(filename.to_owned()));
+        // assert_eq!(HashMap::new(), imports.unwrap());
+        assert!(imports.is_err());
+        let error = imports.unwrap_err();
+        // assert_eq!(GetImportErrorKind::ParseTsFileError, error.kind);
+        assert_eq!(
+            vec!["Expected ';', '}' or <eof>".to_string()],
+            error.parser_errors.unwrap()
+        );
     }
 }
