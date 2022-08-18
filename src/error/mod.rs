@@ -7,9 +7,7 @@ pub enum GetImportError {
         parser_errors: Vec<String>,
     },
     FileDoesNotExist {
-        filepath: PathBuf,
-    },
-    ReadImportError {
+        filepath: String,
         io_errors: Vec<std::io::Error>,
     },
     PathError {
@@ -28,10 +26,14 @@ impl Display for GetImportError {
             } => {
                 write!(f, "Error parsing {} :\n {:?}", filepath, parser_errors)
             }
-            GetImportError::FileDoesNotExist { filepath } => {
-                write!(f, "Could not read file {:?}", filepath)
-            }
-            GetImportError::ReadImportError { io_errors } => write!(f, "{:?}", io_errors),
+            GetImportError::FileDoesNotExist {
+                filepath,
+                io_errors,
+            } => write!(
+                f,
+                "IO Errors found while trying to parse {} : {:?}",
+                filepath, io_errors
+            ),
             GetImportError::PathError { filepath } => {
                 write!(f, "Error reading {:?} path", filepath)
             }

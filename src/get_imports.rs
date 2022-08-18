@@ -31,7 +31,10 @@ fn get_imports_from_file<'a>(
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
         Err(e) => {
-            return Err(GetImportError::ReadImportError { io_errors: vec![e] });
+            return Err(GetImportError::FileDoesNotExist {
+                filepath: path_string.to_string(),
+                io_errors: vec![e],
+            });
         }
     };
 
@@ -44,8 +47,6 @@ fn get_imports_from_file<'a>(
     let mut parser = Parser::new_from(capturing);
 
     let errors = parser.take_errors();
-
-    // panic::set_hook(Box::new(|_| {}));
 
     if !errors.is_empty() {
         for error in errors {
@@ -168,9 +169,7 @@ mod test {
 
     #[test]
     fn test_get_imports_map() {
-        // TODO consider multiple imports from same file in ts files
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
-        // let mut expected_imports = map!["./helperA1" => Some(set!(""))];
         let import_map = get_imports_from_file(&PathBuf::from(filename.to_owned())).unwrap();
         let expected_map: HashMap<String, Option<HashSet<String>>> = HashMap::from([
             (
@@ -196,20 +195,18 @@ mod test {
 
     #[test]
     fn test_get_imports_from_non_existent_path() {
-        // TODO consider multiple imports from same file in ts files
         let filename = "path/to/nowhere/nothing.ts";
         let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
         assert!(imports.is_err());
+        assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"The system cannot find the path specified.\" }]".to_string(), imports.unwrap_err().to_string());
     }
 
     #[test]
     fn test_parser_error() {
         let filename = "tests/good_fences_integration/src/parseError/parseError.ts";
         let imports = get_imports_from_file(&PathBuf::from(filename.to_owned()));
-        // assert_eq!(HashMap::new(), imports.unwrap());
         assert!(imports.is_err());
         let error = imports.unwrap_err();
-        // assert_eq!(GetImportErrorKind::ParseTsFileError, error.kind);
         assert_eq!(
             "Error parsing tests/good_fences_integration/src/parseError/parseError.ts :\n [\"Expected ';', '}' or <eof>\"]".to_string(),
             error.to_string()
