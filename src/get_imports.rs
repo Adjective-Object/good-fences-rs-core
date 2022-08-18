@@ -1,17 +1,14 @@
-use lazy_static::__Deref;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
-use std::panic;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::Arc;
-use swc_common::errors::{ColorConfig, Handler};
+use swc_common::errors::Handler;
 use swc_common::source_map::Pos;
 use swc_common::SourceFile;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
-use crate::error::{GetImportError, GetImportErrorKind};
+use crate::error::GetImportError;
 
 pub fn get_imports_map_from_file<'a>(
     file_path: &'a PathBuf,
@@ -25,41 +22,25 @@ fn get_imports_from_file<'a>(
     let path_string = match file_path.to_str() {
         Some(path) => path,
         None => {
-            return Err(GetImportError::new(
-                GetImportErrorKind::ReadImportError,
-                None,
-                None,
-                None,
-            ))
+            return Err(GetImportError::PathError {
+                filepath: file_path.clone(),
+            })
         }
     };
     let cm = Arc::<swc_common::SourceMap>::default();
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
         Err(e) => {
-            return Err(GetImportError::new(
-                GetImportErrorKind::ReadTsFileError,
-                Some(path_string.to_string()),
-                None,
-                Some(vec![e]),
-            ));
+            return Err(GetImportError::ReadImportError { io_errors: vec![e] });
         }
     };
 
     let mut parser_errors: Vec<String> = Vec::new();
-
     let dest_vector: Vec<u8> = Vec::new();
-
     let dst = Box::new(dest_vector);
-
     let handler = Handler::with_emitter_writer(dst, Some(cm.clone()));
-
-    // let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, alse, Some(cm.clone()));
-
     let lexer = create_lexer(&fm);
-
     let capturing = Capturing::new(lexer);
-
     let mut parser = Parser::new_from(capturing);
 
     let errors = parser.take_errors();
@@ -72,12 +53,10 @@ fn get_imports_from_file<'a>(
             parser_errors.push(diagnostic.message());
             diagnostic.cancel();
         }
-        return Err(GetImportError::new(
-            GetImportErrorKind::ParseTsFileError,
-            Some(path_string.to_string()),
-            Some(parser_errors),
-            None,
-        ));
+        return Err(GetImportError::ParseTsFileError {
+            filepath: path_string.to_string(),
+            parser_errors,
+        });
     }
 
     let ts_module = match parser.parse_typescript_module() {
@@ -86,12 +65,10 @@ fn get_imports_from_file<'a>(
             let mut diagnostic = error.into_diagnostic(&handler);
             parser_errors.push(diagnostic.message());
             diagnostic.cancel();
-            return Err(GetImportError::new(
-                GetImportErrorKind::ParseTsFileError,
-                Some(path_string.to_string()),
-                Some(parser_errors),
-                None,
-            ));
+            return Err(GetImportError::ParseTsFileError {
+                filepath: path_string.to_string(),
+                parser_errors,
+            });
         }
     };
 
@@ -176,10 +153,7 @@ fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        error::{GetImportError, GetImportErrorKind},
-        get_imports::{get_imports_from_file, get_imports_map_from_file},
-    };
+    use crate::get_imports::{get_imports_from_file, get_imports_map_from_file};
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,
@@ -237,8 +211,8 @@ mod test {
         let error = imports.unwrap_err();
         // assert_eq!(GetImportErrorKind::ParseTsFileError, error.kind);
         assert_eq!(
-            vec!["Expected ';', '}' or <eof>".to_string()],
-            error.parser_errors.unwrap()
+            "Error parsing tests/good_fences_integration/src/parseError/parseError.ts :\n [\"Expected ';', '}' or <eof>\"]".to_string(),
+            error.to_string()
         );
     }
 }
