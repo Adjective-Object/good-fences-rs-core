@@ -1,0 +1,1 @@
+imprt { componentA } from '../index.ts'

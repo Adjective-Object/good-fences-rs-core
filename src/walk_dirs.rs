@@ -1,6 +1,5 @@
 use crate::fence::{parse_fence_file, Fence};
-use crate::get_import;
-use get_import::get_imports_map_from_file;
+use crate::get_imports::get_imports_map_from_file;
 use jwalk::WalkDirGeneric;
 use relative_path::RelativePath;
 use serde::Deserialize;
@@ -123,11 +122,17 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                     let _working_dir_path: &Path = &WORKING_DIR_PATH;
                                     let source_file_path = RelativePath::from_path(&file_path);
 
-                                    let imports = get_imports_map_from_file(&file_path);
+                                    let imports = match get_imports_map_from_file(&file_path) {
+                                        Ok(imps) => imps,
+                                        Err(e) => {
+                                            eprint!("Error {}", e);
+                                            continue;
+                                        }
+                                    };
 
                                     dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
                                         source_file_path: source_file_path.unwrap().to_string(),
-                                        imports: imports,
+                                        imports,
                                         tags: HashSet::from_iter(
                                             read_dir_state.iter().map(|x| x.to_owned()),
                                         ),
