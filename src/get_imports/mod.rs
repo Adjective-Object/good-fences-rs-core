@@ -3,10 +3,15 @@ use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use swc_common::errors::Handler;
-use swc_common::source_map::Pos;
 use swc_common::SourceFile;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
+
+mod require_import_visitor;
+mod utils;
+
+pub use require_import_visitor::*;
+use utils::{get_specifier_name};
 
 use crate::error::GetImportError;
 
@@ -122,24 +127,6 @@ fn capture_imports_map(
         }
     });
     imports_map
-}
-
-fn get_specifier_name(fm: &SourceFile, spec: &swc_ecma_ast::ImportSpecifier) -> Option<String> {
-    if let Some(default) = spec.as_default() {
-        return Some(get_string_of_span(
-            &fm.src.as_bytes().to_vec(),
-            &default.span,
-        ));
-    }
-    if let Some(named) = spec.as_named() {
-        return Some(get_string_of_span(&fm.src.as_bytes().to_vec(), &named.span));
-    }
-    None
-}
-
-fn get_string_of_span<'a>(file_text: &'a Vec<u8>, span: &'a swc_common::Span) -> String {
-    String::from_utf8_lossy(&file_text[span.lo().to_usize() - 1..span.hi().to_usize() - 1])
-        .to_string()
 }
 
 fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
