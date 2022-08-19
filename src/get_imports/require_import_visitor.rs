@@ -1,6 +1,6 @@
 use std::collections::{HashSet, HashMap};
 
-use swc_ecma_ast::{CallExpr, Callee, Ident, Lit, Import, ImportDecl};
+use swc_ecma_ast::{CallExpr, Callee, Ident, Lit, Import, ImportDecl, ModuleExportName};
 use swc_ecmascript::visit::{as_folder, Folder, VisitMut, VisitMutWith};
 #[derive(Debug)]
 pub struct RequireImportVisitor {
@@ -48,7 +48,26 @@ impl VisitMut for RequireImportVisitor {
 
     fn visit_mut_import_decl(&mut self, node: &mut ImportDecl) {
         node.visit_mut_children_with(self);
-        node.src.value.to_string();
+        let source_path = node.src.value.to_string();
+        if let Some(imported_names) = self.imports_map.get_mut(&source_path) {
+            for spec in &node.specifiers {
+                if let Some(named) = spec.as_named() {
+                    match &named.imported {
+                        Some(imported) => {
+                            match imported {
+                                ModuleExportName::Ident(identifier) => {
+                                    imported_names.insert(identifier.sym.to_string().clone());
+                                },
+                                ModuleExportName::Str(str_value) => {
+                                    imported_names.insert(str_value.value.to_string());
+                                },
+                            }
+                        },
+                        None => todo!(),
+                    }
+                }
+            }
+        }
     }
 }
 
