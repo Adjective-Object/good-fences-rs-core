@@ -208,7 +208,7 @@ mod test {
         assert!(imports.is_err());
         let error = imports.unwrap_err();
         assert_eq!(
-            "Error parsing tests/good_fences_integration/src/parseError/parseError.ts :\n [\"Expected ';', '}' or <eof>\"]".to_string(),
+            "Error parsing tests/good_fences_integration/src/parseError/parseError.ts :\n Expected ';', '}' or <eof>".to_string(),
             error.to_string()
         );
     }
