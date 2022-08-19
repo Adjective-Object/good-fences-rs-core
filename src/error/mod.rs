@@ -24,7 +24,7 @@ impl Display for GetImportError {
                 filepath,
                 parser_errors,
             } => {
-                write!(f, "Error parsing {} :\n {:?}", filepath, parser_errors)
+                write!(f, "Error parsing {} :\n {}", filepath, parser_errors.join("\n"))
             }
             GetImportError::FileDoesNotExist {
                 filepath,
