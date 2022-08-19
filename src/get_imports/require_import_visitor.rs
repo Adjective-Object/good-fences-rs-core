@@ -1,19 +1,21 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
-use swc_ecma_ast::{CallExpr, Callee, Ident, Lit};
+use swc_ecma_ast::{CallExpr, Callee, Ident, Lit, Import, ImportDecl};
 use swc_ecmascript::visit::{as_folder, Folder, VisitMut, VisitMutWith};
 #[derive(Debug)]
 pub struct RequireImportVisitor {
     require_paths: HashSet<String>,
     import_paths: HashSet<String>,
+    imports_map: HashMap<String, HashSet<String>>,
 }
 
 impl RequireImportVisitor {}
 
 pub fn node_visitor() -> Folder<RequireImportVisitor> {
-    let mut visitor = RequireImportVisitor {
+    let mut visitor: RequireImportVisitor = RequireImportVisitor {
         require_paths: HashSet::new(),
         import_paths: HashSet::new(),
+        imports_map: HashMap::new()
     };
     as_folder(visitor)
 }
@@ -42,6 +44,11 @@ impl VisitMut for RequireImportVisitor {
                 }
             }
         }
+    }
+
+    fn visit_mut_import_decl(&mut self, node: &mut ImportDecl) {
+        node.visit_mut_children_with(self);
+        node.src.value.to_string();
     }
 }
 

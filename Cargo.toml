@@ -27,3 +27,4 @@ swc_atoms = "0.4.3"
 swc_ecma_visit = "0.76.6"
 swc_ecmascript = {version = "0.190.0", features = ["transforms", "visit"]}
 swc_plugin = "0.89.1"
+swc_core = { version = "0.7.*", features = ["plugin_transform"] }
