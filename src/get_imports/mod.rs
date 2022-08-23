@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use swc_common::errors::Handler;
 use swc_common::SourceFile;
+use swc_core::visit::visit_module;
 use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
-
 mod require_import_visitor;
 mod utils;
 
 pub use require_import_visitor::*;
-use utils::{get_specifier_name};
+use utils::get_import_specifier_name;
 
 use crate::error::GetImportError;
 
@@ -78,6 +78,12 @@ fn get_imports_from_file<'a>(
         }
     };
 
+    let mut visitor = ImportPathCheckerVisitor::new();
+
+    visit_module(&mut visitor, &ts_module);
+
+    let mut import_paths = HashMap::from(visitor.imports_map);
+
     let imports_map = capture_imports_map(ts_module, fm);
 
     return Ok(imports_map);
@@ -98,7 +104,7 @@ fn capture_imports_map(
                         .specifiers
                         .iter()
                         .filter_map(|spec| -> Option<String> {
-                            return get_specifier_name(&fm, spec);
+                            return get_import_specifier_name(&fm, spec);
                         })
                         .collect();
                     let import_source = i.src.value.to_string();

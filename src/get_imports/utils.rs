@@ -1,6 +1,9 @@
 use swc_common::{source_map::Pos, SourceFile};
 
-pub fn get_specifier_name(fm: &SourceFile, spec: &swc_ecma_ast::ImportSpecifier) -> Option<String> {
+pub fn get_import_specifier_name(
+    fm: &SourceFile,
+    spec: &swc_ecma_ast::ImportSpecifier,
+) -> Option<String> {
     if let Some(default) = spec.as_default() {
         return Some(get_string_of_span(
             &fm.src.as_bytes().to_vec(),
