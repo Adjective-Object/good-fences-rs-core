@@ -2,32 +2,29 @@ use std::collections::{HashMap, HashSet};
 
 use swc_core::visit::swc_ecma_ast;
 use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, Id, Ident, ImportDecl, Lit, ModuleExportName,
-    TsImportEqualsDecl, VarDecl,
+    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, TsImportEqualsDecl,
 };
 use swc_ecmascript::visit::{Visit, VisitWith};
 #[derive(Debug)]
-pub struct ImportPathCheckerVisitor {
+pub struct ImportPathVisitor {
     pub require_paths: HashSet<String>,
     pub import_paths: HashSet<String>,
     pub imports_map: HashMap<String, HashSet<String>>,
-    pub require_identifiers: HashSet<Id>,
-    require_calls: Vec<(Ident, String)>,
+    require_identifiers: HashSet<Id>,
 }
 
-impl ImportPathCheckerVisitor {
+impl ImportPathVisitor {
     pub fn new() -> Self {
         Self {
             require_paths: HashSet::new(),
             import_paths: HashSet::new(),
             imports_map: HashMap::new(),
             require_identifiers: HashSet::new(),
-            require_calls: Vec::new(),
         }
     }
 }
 
-impl Visit for ImportPathCheckerVisitor {
+impl Visit for ImportPathVisitor {
     fn visit_binding_ident(&mut self, binding: &BindingIdent) {
         binding.visit_children_with(self);
         if binding.sym.to_string() == "require".to_string() {
@@ -44,7 +41,7 @@ impl Visit for ImportPathCheckerVisitor {
 
     fn visit_call_expr(&mut self, expr: &CallExpr) {
         expr.visit_children_with(self);
-        if let Callee::Import(import) = &expr.callee {
+        if let Callee::Import(_) = &expr.callee {
             match extract_argument_value(expr) {
                 Some(import_path) => {
                     self.import_paths.insert(import_path);
@@ -134,11 +131,10 @@ mod test {
     use swc_common::{FileName, Globals, Mark, SourceMap, GLOBALS};
     use swc_ecma_parser::{Capturing, Parser};
     use swc_ecma_visit::{fold_module, visit_module};
-    use swc_ecmascript::transforms::pass::noop;
 
     use crate::get_imports::create_lexer;
 
-    use super::ImportPathCheckerVisitor;
+    use super::ImportPathVisitor;
 
     #[test]
     fn test_require_imports() {
@@ -150,7 +146,7 @@ mod test {
 
         let mut parser = create_test_parser(&fm);
 
-        let mut visitor = ImportPathCheckerVisitor::new();
+        let mut visitor = ImportPathVisitor::new();
         let module = parser.parse_typescript_module().unwrap();
 
         visit_module(&mut visitor, &module);
@@ -170,7 +166,7 @@ mod test {
         );
         let mut parser = create_test_parser(&fm);
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ImportPathCheckerVisitor::new();
+        let mut visitor = ImportPathVisitor::new();
 
         visit_module(&mut visitor, &module);
         let expected_import_paths = HashSet::from(["foo".to_string()]);
@@ -196,7 +192,7 @@ mod test {
             );
             let mut parser = create_test_parser(&fm);
             let module = parser.parse_typescript_module().unwrap();
-            let mut visitor = ImportPathCheckerVisitor::new();
+            let mut visitor = ImportPathVisitor::new();
 
             let mut resolver = swc_core::transforms::resolver(
                 Mark::fresh(Mark::root()),
@@ -223,7 +219,7 @@ mod test {
 
         let mut parser = create_test_parser(&fm);
 
-        let mut visitor = ImportPathCheckerVisitor::new();
+        let mut visitor = ImportPathVisitor::new();
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
 
@@ -246,7 +242,7 @@ mod test {
 
         let mut parser = create_test_parser(&fm);
 
-        let mut visitor = ImportPathCheckerVisitor::new();
+        let mut visitor = ImportPathVisitor::new();
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
 
@@ -260,7 +256,7 @@ mod test {
 
     #[test]
     fn test_require_redefinition() {
-        let mut visitor = ImportPathCheckerVisitor::new();
+        let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
             let cm = Lrc::<SourceMap>::default();

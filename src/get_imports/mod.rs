@@ -1,27 +1,18 @@
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use swc_common::errors::Handler;
-use swc_common::SourceFile;
 use swc_core::visit::visit_module;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
-mod require_import_visitor;
+mod import_path_visitor;
 mod utils;
 
-pub use require_import_visitor::*;
-use utils::get_import_specifier_name;
+pub use import_path_visitor::*;
 
 use crate::error::GetImportError;
 
 pub fn get_imports_map_from_file<'a>(
-    file_path: &'a PathBuf,
-) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
-    get_imports_from_file(&file_path)
-}
-
-fn get_imports_from_file<'a>(
     file_path: &'a PathBuf,
 ) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
     let path_string = match file_path.to_str() {
@@ -78,61 +69,46 @@ fn get_imports_from_file<'a>(
         }
     };
 
-    let mut visitor = ImportPathCheckerVisitor::new();
-
+    let mut visitor = ImportPathVisitor::new();
     visit_module(&mut visitor, &ts_module);
 
-    let mut import_paths = HashMap::from(visitor.imports_map);
+    let final_imports_map = get_import_paths_from_visitor(visitor);
 
-    let imports_map = capture_imports_map(ts_module, fm);
+    // let imports_map = capture_imports_map(ts_module, fm);
 
-    return Ok(imports_map);
+    return Ok(final_imports_map);
 }
 
-fn capture_imports_map(
-    ts_module: swc_ecma_ast::Module,
-    fm: Arc<SourceFile>,
+fn get_import_paths_from_visitor(
+    visitor: ImportPathVisitor,
 ) -> HashMap<String, Option<HashSet<String>>> {
-    let mut imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    ts_module.body.iter().for_each(|node| {
-        if node.is_module_decl() {
-            if let Some(module_decl) = node.as_module_decl() {
-                if module_decl.is_import() {
-                    // let source_text = &fm.src.as_bytes().to_vec();
-                    let i = module_decl.as_import().unwrap(); // Safe to unwrap due to previous is_import assertion
-                    let specs_name: Vec<String> = i
-                        .specifiers
-                        .iter()
-                        .filter_map(|spec| -> Option<String> {
-                            return get_import_specifier_name(&fm, spec);
-                        })
-                        .collect();
-                    let import_source = i.src.value.to_string();
-                    match imports_map.get(&import_source) {
-                        Some(Some(current_set)) => {
-                            // TODO find a way to append data to current set instead of copying it into an new one
-                            let mut new_set: HashSet<String> =
-                                HashSet::from_iter(current_set.iter().map(|v| v).cloned());
-                            for val in specs_name {
-                                new_set.insert(val);
-                            }
-                            imports_map.insert(import_source, Some(new_set));
-                        }
-                        _ => {
-                            if specs_name.is_empty() {
-                                imports_map.insert(import_source, None);
-                            } else {
-                                let new_set: HashSet<String> =
-                                    HashSet::from_iter(specs_name.iter().cloned());
-                                imports_map.insert(import_source, Some(new_set));
-                            }
-                        }
-                    }
+    let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
+    visitor
+        .imports_map
+        .iter()
+        .for_each(|(k, v)| match final_imports_map.get_mut(k) {
+            Some(Some(specifiers)) => {
+                for spec in v {
+                    specifiers.insert(spec.clone());
                 }
             }
+            Some(None) | None => {
+                if !v.is_empty() {
+                    final_imports_map.insert(k.clone(), Some(v.clone()));
+                }
+            }
+        });
+    visitor.import_paths.iter().for_each(|path| {
+        if !final_imports_map.contains_key(path) {
+            final_imports_map.insert(path.clone(), None);
         }
     });
-    imports_map
+    visitor.require_paths.iter().for_each(|path| {
+        if !final_imports_map.contains_key(path) {
+            final_imports_map.insert(path.clone(), None);
+        }
+    });
+    final_imports_map
 }
 
 fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
@@ -150,7 +126,7 @@ fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>
 
 #[cfg(test)]
 mod test {
-    use crate::get_imports::{get_imports_from_file, get_imports_map_from_file};
+    use crate::get_imports::get_imports_map_from_file;
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,
@@ -159,14 +135,14 @@ mod test {
     #[test]
     fn test_get_imports_from_file() {
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
-        let imports = get_imports_from_file(&PathBuf::from(filename.to_owned())).unwrap();
+        let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).unwrap();
         assert_eq!(3, imports.len());
     }
 
     #[test]
     fn test_get_imports_map() {
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
-        let import_map = get_imports_from_file(&PathBuf::from(filename.to_owned())).unwrap();
+        let import_map = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).unwrap();
         let expected_map: HashMap<String, Option<HashSet<String>>> = HashMap::from([
             (
                 String::from("../componentB/componentB"),
@@ -200,7 +176,7 @@ mod test {
     #[test]
     fn test_parser_error() {
         let filename = "tests/good_fences_integration/src/parseError/parseError.ts";
-        let imports = get_imports_from_file(&PathBuf::from(filename.to_owned()));
+        let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned()));
         assert!(imports.is_err());
         let error = imports.unwrap_err();
         assert_eq!(
