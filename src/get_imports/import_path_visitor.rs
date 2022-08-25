@@ -174,6 +174,25 @@ mod test {
     }
 
     #[test]
+    fn test_nested_import_call() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+                import(import('import_subrequire').default + '/parent')
+                "#
+            .to_string(),
+        );
+        let mut parser = create_test_parser(&fm);
+        let module = parser.parse_typescript_module().unwrap();
+        let mut visitor = ImportPathVisitor::new();
+
+        visit_module(&mut visitor, &module);
+        let expected_import_paths = HashSet::from(["import_subrequire".to_string()]);
+        assert_eq!(expected_import_paths, visitor.import_paths);
+    }
+
+    #[test]
     fn test_require_shadowing() {
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
