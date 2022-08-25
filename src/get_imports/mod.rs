@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use swc_common::{Globals, GLOBALS, Mark};
 use swc_common::errors::Handler;
-use swc_core::visit::visit_module;
+use swc_core::visit::{visit_module, fold_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
 mod import_path_visitor;
@@ -70,16 +71,23 @@ pub fn get_imports_map_from_file<'a>(
     };
 
     let mut visitor = ImportPathVisitor::new();
-    visit_module(&mut visitor, &ts_module);
 
-    let final_imports_map = get_import_paths_from_visitor(visitor);
+    let globals = Globals::new();
+    GLOBALS.set(&globals, || {
+        let mut resolver = swc_core::transforms::resolver(
+            Mark::fresh(Mark::root()),
+            Mark::fresh(Mark::root()),
+            true,
+        );
+        let resolved = fold_module(&mut resolver, ts_module.clone());
+        visit_module(&mut visitor, &resolved);
+    });
+    let imports_map = get_imports_map_from_visitor(visitor);
 
-    // let imports_map = capture_imports_map(ts_module, fm);
-
-    return Ok(final_imports_map);
+    return Ok(imports_map);
 }
 
-fn get_import_paths_from_visitor(
+fn get_imports_map_from_visitor(
     visitor: ImportPathVisitor,
 ) -> HashMap<String, Option<HashSet<String>>> {
     let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
