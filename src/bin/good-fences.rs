@@ -6,7 +6,7 @@ use std::path::Path;
 
 fn main() {
     // set working dir
-    let root = Path::new("/home/adjective/Projects/client-web");
+    let root = Path::new("C:/Users/Usuario/client-web");
     assert!(set_current_dir(&root).is_ok());
     println!(
         "Successfully changed working directory to {}!",

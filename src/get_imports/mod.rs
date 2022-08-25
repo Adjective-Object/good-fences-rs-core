@@ -5,8 +5,8 @@ use std::sync::Arc;
 use swc_common::errors::Handler;
 use swc_common::SourceFile;
 use swc_core::visit::visit_module;
-use swc_ecma_parser::Capturing;
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
+use swc_ecma_parser::{Capturing, TsConfig};
 mod require_import_visitor;
 mod utils;
 
@@ -137,7 +137,10 @@ fn capture_imports_map(
 
 fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
     let lexer = Lexer::new(
-        Syntax::Typescript(Default::default()),
+        Syntax::Typescript(TsConfig {
+            tsx: true,
+            ..Default::default()
+        }),
         Default::default(),
         StringInput::from(fm),
         None,

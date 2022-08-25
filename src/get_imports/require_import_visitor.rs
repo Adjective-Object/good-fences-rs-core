@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use swc_core::visit::swc_ecma_ast;
 use swc_ecma_ast::{
-    AssignExpr, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName,
+    BindingIdent, CallExpr, Callee, Id, Ident, ImportDecl, Lit, ModuleExportName,
     TsImportEqualsDecl, VarDecl,
 };
 use swc_ecmascript::visit::{Visit, VisitWith};
@@ -12,6 +12,7 @@ pub struct ImportPathCheckerVisitor {
     pub import_paths: HashSet<String>,
     pub imports_map: HashMap<String, HashSet<String>>,
     pub require_identifiers: HashSet<Id>,
+    require_calls: Vec<(Ident, String)>,
 }
 
 impl ImportPathCheckerVisitor {
@@ -21,40 +22,16 @@ impl ImportPathCheckerVisitor {
             import_paths: HashSet::new(),
             imports_map: HashMap::new(),
             require_identifiers: HashSet::new(),
+            require_calls: Vec::new(),
         }
     }
 }
 
 impl Visit for ImportPathCheckerVisitor {
-    fn visit_var_decl(&mut self, decl: &VarDecl) {
-        decl.visit_children_with(self);
-        decl.decls.iter().for_each(|decl| match &decl.name {
-            swc_ecma_ast::Pat::Ident(ident) => {
-                if ident.sym.to_string() == "require".to_string() {
-                    self.require_identifiers.insert(ident.to_id());
-                }
-            }
-            _ => {}
-        })
-    }
-
-    fn visit_assign_expr(&mut self, expr: &AssignExpr) {
-        expr.visit_children_with(self);
-        if let Some(ident) = expr.right.as_ident() {
-            dbg!(ident.sym.to_string());
-            if ident.sym.to_string() == "require".to_string() {
-                if let Some(req_ident) = expr.left.as_ident() {
-                    let a = req_ident.to_id();
-                    dbg!(&a);
-                    self.require_identifiers.insert(a);
-                }
-            }
-        }
-
-        if let Some(ident) = expr.left.as_ident() {
-            if ident.sym.to_string() == "require" {
-
-            }
+    fn visit_binding_ident(&mut self, binding: &BindingIdent) {
+        binding.visit_children_with(self);
+        if binding.sym.to_string() == "require".to_string() {
+            self.require_identifiers.insert(binding.id.to_id());
         }
     }
 
@@ -64,18 +41,19 @@ impl Visit for ImportPathCheckerVisitor {
             self.import_paths.insert(module_ref.expr.value.to_string());
         }
     }
+
     fn visit_call_expr(&mut self, expr: &CallExpr) {
         expr.visit_children_with(self);
+        if let Callee::Import(import) = &expr.callee {
+            match extract_argument_value(expr) {
+                Some(import_path) => {
+                    self.import_paths.insert(import_path);
+                }
+                None => return,
+            }
+        }
         if let Callee::Expr(callee) = &expr.callee {
             if let Some(ident) = callee.as_ident() {
-                if ident.sym.to_string() == "import" {
-                    match extract_argument_value(expr) {
-                        Some(import_path) => {
-                            self.import_paths.insert(import_path);
-                        }
-                        None => return,
-                    }
-                }
                 if ident.sym.to_string() == "require" {
                     if !self.require_identifiers.contains(&ident.to_id()) {
                         match extract_argument_value(expr) {
@@ -141,7 +119,6 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
             match path_lit {
                 Lit::Str(value) => {
                     return Some(value.value.to_string());
-                    // self.require_paths.insert(value.value.to_string());
                 }
                 _ => return None,
             }
@@ -153,11 +130,11 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
 #[cfg(test)]
 mod test {
     use std::collections::{HashMap, HashSet};
-
     use swc_common::sync::Lrc;
-    use swc_common::{FileName, SourceMap};
+    use swc_common::{FileName, Globals, Mark, SourceMap, GLOBALS};
     use swc_ecma_parser::{Capturing, Parser};
-    use swc_ecma_visit::visit_module;
+    use swc_ecma_visit::{fold_module, visit_module};
+    use swc_ecmascript::transforms::pass::noop;
 
     use crate::get_imports::create_lexer;
 
@@ -180,29 +157,57 @@ mod test {
         let expected_require_set = HashSet::from(["hello-world".to_string()]);
         assert_eq!(expected_require_set, visitor.require_paths);
     }
+
     #[test]
-    fn test_require_shadowing() {
+    fn test_import_call() {
         let cm = Lrc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
-            r#"require("foo")
-            (function() {
-              const require = console.log
-              require("bar")
-            })()
-            require("original")
-            "#
+            r#"
+                import('foo')
+                "#
             .to_string(),
         );
-
         let mut parser = create_test_parser(&fm);
-
-        let mut visitor = ImportPathCheckerVisitor::new();
         let module = parser.parse_typescript_module().unwrap();
+        let mut visitor = ImportPathCheckerVisitor::new();
 
         visit_module(&mut visitor, &module);
-        let expected_require_set = HashSet::from(["foo".to_string(), "original".to_string()]);
-        assert_eq!(expected_require_set, visitor.require_paths);
+        let expected_import_paths = HashSet::from(["foo".to_string()]);
+        assert_eq!(expected_import_paths, visitor.import_paths);
+    }
+
+    #[test]
+    fn test_require_shadowing() {
+        let globals = Globals::new();
+        GLOBALS.set(&globals, || {
+            let cm = Lrc::<SourceMap>::default();
+            let fm = cm.new_source_file(
+                FileName::Custom("test.ts".into()),
+                r#"
+                require("foo");
+                (function() {
+                  const require = console.log;
+                  require("bar");
+                })();
+                require("original")
+                "#
+                .to_string(),
+            );
+            let mut parser = create_test_parser(&fm);
+            let module = parser.parse_typescript_module().unwrap();
+            let mut visitor = ImportPathCheckerVisitor::new();
+
+            let mut resolver = swc_core::transforms::resolver(
+                Mark::fresh(Mark::root()),
+                Mark::fresh(Mark::root()),
+                true,
+            );
+            let resolved = fold_module(&mut resolver, module.clone());
+            visit_module(&mut visitor, &resolved);
+            let expected_require_set = HashSet::from(["foo".to_string(), "original".to_string()]);
+            assert_eq!(expected_require_set, visitor.require_paths);
+        });
     }
 
     #[test]
@@ -255,25 +260,33 @@ mod test {
 
     #[test]
     fn test_require_redefinition() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            require('before_definition')
-            var require = function(){}
-            require('after_definition')
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-
         let mut visitor = ImportPathCheckerVisitor::new();
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
+        let globals = Globals::new();
+        GLOBALS.set(&globals, || {
+            let cm = Lrc::<SourceMap>::default();
+            let fm = cm.new_source_file(
+                FileName::Custom("test.ts".into()),
+                r#"
+                require('before_definition')
+                var require = function(){}
+                require('after_definition')
+                "#
+                .to_string(),
+            );
 
+            let lexer = create_lexer(&fm);
+            let capturing = Capturing::new(lexer);
+            let mut parser = Parser::new_from(capturing);
+            let module = parser.parse_typescript_module().unwrap();
+            let mut resolver = swc_core::transforms::resolver(
+                Mark::fresh(Mark::root()),
+                Mark::fresh(Mark::root()),
+                true,
+            );
+            let resolved = fold_module(&mut resolver, module.clone());
+            visit_module(&mut visitor, &resolved);
+        });
         let expected_require_set = HashSet::from(["before_definition".to_string()]);
-
         assert_eq!(expected_require_set, visitor.require_paths);
     }
 
