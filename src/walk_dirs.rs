@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 extern crate pathdiff;
+use path_slash::PathBufExt as _;
 
 fn should_retain_file(s: &str) -> bool {
     s == "fence.json"
@@ -71,11 +72,15 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                             Some(file_name) => {
                                 if file_name.ends_with("fence.json") {
                                     let _working_dir_path: &Path = &WORKING_DIR_PATH;
+                                    let mut joined =  dir_entry.parent_path.join(file_name);
+                                    #[cfg(target_os = "windows")] {
+                                        joined = PathBuf::from(joined.to_slash().unwrap().to_string());
+                                    }
                                     let fence_result = parse_fence_file(
                                         RelativePath::from_path(
-                                            &dir_entry.parent_path.join(file_name),
+                                            &joined
                                         )
-                                        .unwrap(),
+                                        .unwrap()
                                     );
                                     match fence_result {
                                         Ok(fence) => {
@@ -118,8 +123,12 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                     || file_name.ends_with(".jsx")
                                     || file_name.ends_with(".js")
                                 {
-                                    let file_path = dir_entry.parent_path.join(file_name);
+                                    let mut file_path = dir_entry.parent_path.join(file_name);
+                                    #[cfg(target_os = "windows")] {
+                                        file_path = PathBuf::from(file_path.to_slash().unwrap().to_string());
+                                    }
                                     let _working_dir_path: &Path = &WORKING_DIR_PATH;
+
                                     let source_file_path = RelativePath::from_path(&file_path);
 
                                     let imports = match get_imports_map_from_file(&file_path) {

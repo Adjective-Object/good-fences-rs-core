@@ -82,54 +82,56 @@ pub fn get_imports_map_from_file<'a>(
         let resolved = fold_module(&mut resolver, ts_module.clone());
         visit_module(&mut visitor, &resolved);
     });
-    let imports_map = get_imports_map_from_visitor(visitor);
+    let imports_map = get_imports_map_from_visitor(&mut visitor);
 
     return Ok(imports_map);
 }
 
 fn get_imports_map_from_visitor(
-    visitor: ImportPathVisitor,
+    visitor: &mut ImportPathVisitor,
 ) -> HashMap<String, Option<HashSet<String>>> {
     let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    visitor
-        .imports_map
-        .iter()
-        .for_each(|(k, v)| match final_imports_map.get_mut(k) {
+    let ImportPathVisitor { require_paths, import_paths, imports_map, .. } = visitor;
+    imports_map
+        .drain()
+        .for_each(|(k, v)| match final_imports_map.get_mut(&k) {
             Some(Some(specifiers)) => {
                 for spec in v {
-                    specifiers.insert(spec.clone());
+                    specifiers.insert(spec);
                 }
             }
             Some(None) | None => {
                 if !v.is_empty() {
-                    final_imports_map.insert(k.clone(), Some(v.clone()));
+                    final_imports_map.insert(k, Some(v));
                 }
             }
         });
-    visitor.import_paths.iter().for_each(|path| {
-        if !final_imports_map.contains_key(path) {
-            final_imports_map.insert(path.clone(), None);
+    import_paths.drain().for_each(|path| {
+        if !final_imports_map.contains_key(&path) {
+            final_imports_map.insert(path, None);
         }
     });
-    visitor.require_paths.iter().for_each(|path| {
-        if !final_imports_map.contains_key(path) {
-            final_imports_map.insert(path.clone(), None);
+    require_paths.drain().for_each(|path| {
+        if !final_imports_map.contains_key(&path) {
+            final_imports_map.insert(path, None);
         }
     });
     final_imports_map
 }
 
 fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
+    let filename = fm.name.to_string();
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig {
-            tsx: true,
+            tsx: filename.ends_with(".tsx") || filename.ends_with(".jsx"),
+            decorators: true,
             ..Default::default()
         }),
         Default::default(),
         StringInput::from(fm),
         None,
     );
-    lexer
+    return lexer
 }
 
 #[cfg(test)]
@@ -171,6 +173,11 @@ mod test {
             ),
         ]);
         assert_eq!(import_map, expected_map);
+    }
+
+    #[test]
+    fn test_import_and_require_same_package() {
+        
     }
 
     #[test]
