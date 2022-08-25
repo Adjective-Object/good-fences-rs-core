@@ -286,6 +286,67 @@ mod test {
         assert_eq!(expected_require_set, visitor.require_paths);
     }
 
+    #[test]
+    fn test_require_inside_call_expr() {
+        let mut visitor = ImportPathVisitor::new();
+        let globals = Globals::new();
+        GLOBALS.set(&globals, || {
+            let cm = Lrc::<SourceMap>::default();
+            let fm = cm.new_source_file(
+                FileName::Custom("test.ts".into()),
+                r#"
+                (function otherFunction() {})(require('arg_subrequire'))
+                (require('callee_subrequire'))("foo")
+                "#
+                .to_string(),
+            );
+
+            let lexer = create_lexer(&fm);
+            let capturing = Capturing::new(lexer);
+            let mut parser = Parser::new_from(capturing);
+            let module = parser.parse_typescript_module().unwrap();
+            let mut resolver = swc_core::transforms::resolver(
+                Mark::fresh(Mark::root()),
+                Mark::fresh(Mark::root()),
+                true,
+            );
+            let resolved = fold_module(&mut resolver, module.clone());
+            visit_module(&mut visitor, &resolved);
+        });
+        let expected_require_set = HashSet::from(["arg_subrequire".to_string(), "callee_subrequire".to_string()]);
+        assert_eq!(expected_require_set, visitor.require_paths);
+    }
+
+    #[test]
+    fn test_require_inside_require() {
+        let mut visitor = ImportPathVisitor::new();
+        let globals = Globals::new();
+        GLOBALS.set(&globals, || {
+            let cm = Lrc::<SourceMap>::default();
+            let fm = cm.new_source_file(
+                FileName::Custom("test.ts".into()),
+                r#"
+                require(require('require_subrequire').default + '/parent')
+                "#
+                .to_string(),
+            );
+
+            let lexer = create_lexer(&fm);
+            let capturing = Capturing::new(lexer);
+            let mut parser = Parser::new_from(capturing);
+            let module = parser.parse_typescript_module().unwrap();
+            let mut resolver = swc_core::transforms::resolver(
+                Mark::fresh(Mark::root()),
+                Mark::fresh(Mark::root()),
+                true,
+            );
+            let resolved = fold_module(&mut resolver, module.clone());
+            visit_module(&mut visitor, &resolved);
+        });
+        let expected_require_set = HashSet::from(["require_subrequire".to_string()]);
+        assert_eq!(expected_require_set, visitor.require_paths);
+    }
+
     fn create_test_parser<'a>(
         fm: &'a Lrc<swc_common::SourceFile>,
     ) -> Parser<Capturing<swc_ecma_parser::lexer::Lexer<'a, swc_ecma_parser::StringInput<'a>>>>
