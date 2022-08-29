@@ -101,8 +101,8 @@ fn append_imported_names(
             }
         }
     }
-    if let Some(default) = spec.as_default() {
-        imported_names.insert(default.local.sym.to_string());
+    if spec.is_default() {
+        imported_names.insert("default".to_string());
     }
 }
 
@@ -243,7 +243,7 @@ mod test {
         visit_module(&mut visitor, &module);
 
         let expected_import_map =
-            HashMap::from([("./bar".to_string(), HashSet::from(["foo".to_string()]))]);
+            HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
 
         assert_eq!(expected_import_map, visitor.imports_map);
     }

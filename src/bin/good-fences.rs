@@ -23,7 +23,7 @@ fn main() {
     let violations = good_fences_runner.find_import_violations();
     let elapsed = start.elapsed();
     
-    // // print some junk
+    // Print results and statistics
     println!("Violations: {:#?}", violations);
     println!("Elapsed time since start: {:?}", elapsed);
 }
