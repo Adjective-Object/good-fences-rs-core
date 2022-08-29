@@ -82,16 +82,25 @@ pub fn get_imports_map_from_file<'a>(
         let resolved = fold_module(&mut resolver, ts_module.clone());
         visit_module(&mut visitor, &resolved);
     });
-    let imports_map = get_imports_map_from_visitor(&mut visitor);
+    let imports_map = get_imports_map_from_visitor(visitor);
 
     return Ok(imports_map);
 }
 
 fn get_imports_map_from_visitor(
-    visitor: &mut ImportPathVisitor,
+    visitor: ImportPathVisitor,
 ) -> HashMap<String, Option<HashSet<String>>> {
     let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    let ImportPathVisitor { require_paths, import_paths, imports_map, .. } = visitor;
+    let ImportPathVisitor { mut require_paths, mut import_paths, mut imports_map, .. } = visitor;
+
+    require_paths.drain().for_each(|path| {
+        final_imports_map.insert(path, None);
+    });
+
+    import_paths.drain().for_each(|path| {
+        final_imports_map.insert(path, None);
+    });
+
     imports_map
         .drain()
         .for_each(|(k, v)| match final_imports_map.get_mut(&k) {
@@ -106,16 +115,7 @@ fn get_imports_map_from_visitor(
                 }
             }
         });
-    import_paths.drain().for_each(|path| {
-        if !final_imports_map.contains_key(&path) {
-            final_imports_map.insert(path, None);
-        }
-    });
-    require_paths.drain().for_each(|path| {
-        if !final_imports_map.contains_key(&path) {
-            final_imports_map.insert(path, None);
-        }
-    });
+
     final_imports_map
 }
 
@@ -156,12 +156,12 @@ mod test {
         let expected_map: HashMap<String, Option<HashSet<String>>> = HashMap::from([
             (
                 String::from("../componentB/componentB"),
-                Some(HashSet::from(["componentB".to_string()])),
+                Some(HashSet::from(["default".to_string()])),
             ),
             (
                 String::from("./helperA1"),
                 Some(HashSet::from([
-                    "helperA1".to_string(),
+                    "default".to_string(),
                     "some".to_string(),
                     "other".to_string(),
                     "stuff".to_string(),
@@ -169,7 +169,7 @@ mod test {
             ),
             (
                 String::from("./helperA2"),
-                Some(HashSet::from(["helperA2".to_string()])),
+                Some(HashSet::from(["default".to_string()])),
             ),
         ]);
         assert_eq!(import_map, expected_map);
