@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use path_slash::PathExt as _;
-use relative_path::RelativePath;
+use relative_path::RelativePathBuf;
 
 use crate::error::WalkDirsError;
 
@@ -23,14 +23,12 @@ pub fn get_slashed_path_buf<'a>(p: &'a Path) -> Result<PathBuf, WalkDirsError> {
 
 pub fn slashed_as_relative_path<'a>(
     slashed: &'a PathBuf,
-) -> Result<&'a RelativePath, WalkDirsError> {
-    match RelativePath::from_path(slashed.as_path()) {
-        Ok(rel_path) => return Ok(rel_path),
-        Err(e) => {
-            return Err(WalkDirsError::RelativePathError {
-                path: slashed.to_path_buf(),
-                err: e,
-            })
-        }
+) -> Result<RelativePathBuf, WalkDirsError> {
+    match RelativePathBuf::from_path(slashed) {
+        Ok(rel_path) => Ok(rel_path),
+        Err(e) => Err(WalkDirsError::RelativePathError {
+            path: slashed.to_path_buf(),
+            err: e,
+        }),
     }
 }

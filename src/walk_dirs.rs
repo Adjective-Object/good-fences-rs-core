@@ -80,8 +80,15 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                             continue;
                                         }
                                     };
-                                    let fence_path = slashed_as_relative_path(&slashed);
-                                    let fence_result = parse_fence_file(fence_path.unwrap());
+                                    let fence_path = match slashed_as_relative_path(&slashed) {
+                                        Ok(fence_path) => fence_path,
+                                        Err(e) => {
+                                            eprintln!("{}", e.to_string());
+                                            continue;
+                                        }
+                                    };
+                                    let fence_result =
+                                        parse_fence_file(fence_path.as_relative_path());
                                     match fence_result {
                                         Ok(fence) => {
                                             // update fences
