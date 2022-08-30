@@ -332,7 +332,10 @@ mod test {
             let resolved = fold_module(&mut resolver, module.clone());
             visit_module(&mut visitor, &resolved);
         });
-        let expected_require_set = HashSet::from(["arg_subrequire".to_string(), "callee_subrequire".to_string()]);
+        let expected_require_set = HashSet::from([
+            "arg_subrequire".to_string(),
+            "callee_subrequire".to_string(),
+        ]);
         assert_eq!(expected_require_set, visitor.require_paths);
     }
 

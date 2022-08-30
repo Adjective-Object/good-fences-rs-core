@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use swc_common::{Globals, GLOBALS, Mark};
 use swc_common::errors::Handler;
-use swc_core::visit::{visit_module, fold_module};
+use swc_common::{Globals, Mark, GLOBALS};
+use swc_core::visit::{fold_module, visit_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
 mod import_path_visitor;
@@ -91,7 +91,12 @@ fn get_imports_map_from_visitor(
     visitor: ImportPathVisitor,
 ) -> HashMap<String, Option<HashSet<String>>> {
     let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    let ImportPathVisitor { mut require_paths, mut import_paths, mut imports_map, .. } = visitor;
+    let ImportPathVisitor {
+        mut require_paths,
+        mut import_paths,
+        mut imports_map,
+        ..
+    } = visitor;
 
     require_paths.drain().for_each(|path| {
         final_imports_map.insert(path, None);
@@ -131,7 +136,7 @@ fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>
         StringInput::from(fm),
         None,
     );
-    return lexer
+    return lexer;
 }
 
 #[cfg(test)]
@@ -173,11 +178,6 @@ mod test {
             ),
         ]);
         assert_eq!(import_map, expected_map);
-    }
-
-    #[test]
-    fn test_import_and_require_same_package() {
-        
     }
 
     #[test]
