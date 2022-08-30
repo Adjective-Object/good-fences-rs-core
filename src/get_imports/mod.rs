@@ -7,7 +7,6 @@ use swc_core::visit::{fold_module, visit_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
 mod import_path_visitor;
-mod utils;
 
 pub use import_path_visitor::*;
 
