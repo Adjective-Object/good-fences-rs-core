@@ -385,7 +385,10 @@ mod test {
                                 ),
                                 "./helperA1" => Some(
                                     set!(
-                                        "default".to_owned()
+                                        "default".to_owned(),
+                                        "some".to_owned(),
+                                        "other".to_owned(),
+                                        "stuff".to_owned()
                                     ),
                                 ),
                                 "../componentB/componentB" => Some(

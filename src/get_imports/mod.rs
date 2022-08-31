@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use swc_common::{Globals, GLOBALS, Mark};
 use swc_common::errors::Handler;
-use swc_core::visit::{visit_module, fold_module};
+use swc_common::{Globals, Mark, GLOBALS};
+use swc_core::visit::{fold_module, visit_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
 mod import_path_visitor;
-mod utils;
 
 pub use import_path_visitor::*;
 
@@ -91,45 +90,52 @@ fn get_imports_map_from_visitor(
     visitor: ImportPathVisitor,
 ) -> HashMap<String, Option<HashSet<String>>> {
     let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    visitor
-        .imports_map
-        .iter()
-        .for_each(|(k, v)| match final_imports_map.get_mut(k) {
+    let ImportPathVisitor {
+        mut require_paths,
+        mut import_paths,
+        mut imports_map,
+        ..
+    } = visitor;
+
+    require_paths.drain().for_each(|path| {
+        final_imports_map.insert(path, None);
+    });
+
+    import_paths.drain().for_each(|path| {
+        final_imports_map.insert(path, None);
+    });
+
+    imports_map
+        .drain()
+        .for_each(|(k, v)| match final_imports_map.get_mut(&k) {
             Some(Some(specifiers)) => {
                 for spec in v {
-                    specifiers.insert(spec.clone());
+                    specifiers.insert(spec);
                 }
             }
             Some(None) | None => {
                 if !v.is_empty() {
-                    final_imports_map.insert(k.clone(), Some(v.clone()));
+                    final_imports_map.insert(k, Some(v));
                 }
             }
         });
-    visitor.import_paths.iter().for_each(|path| {
-        if !final_imports_map.contains_key(path) {
-            final_imports_map.insert(path.clone(), None);
-        }
-    });
-    visitor.require_paths.iter().for_each(|path| {
-        if !final_imports_map.contains_key(path) {
-            final_imports_map.insert(path.clone(), None);
-        }
-    });
+
     final_imports_map
 }
 
 fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
+    let filename = fm.name.to_string();
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig {
-            tsx: true,
+            tsx: filename.ends_with(".tsx") || filename.ends_with(".jsx"),
+            decorators: true,
             ..Default::default()
         }),
         Default::default(),
         StringInput::from(fm),
         None,
     );
-    lexer
+    return lexer;
 }
 
 #[cfg(test)]
@@ -154,12 +160,12 @@ mod test {
         let expected_map: HashMap<String, Option<HashSet<String>>> = HashMap::from([
             (
                 String::from("../componentB/componentB"),
-                Some(HashSet::from(["componentB".to_string()])),
+                Some(HashSet::from(["default".to_string()])),
             ),
             (
                 String::from("./helperA1"),
                 Some(HashSet::from([
-                    "helperA1".to_string(),
+                    "default".to_string(),
                     "some".to_string(),
                     "other".to_string(),
                     "stuff".to_string(),
@@ -167,7 +173,7 @@ mod test {
             ),
             (
                 String::from("./helperA2"),
-                Some(HashSet::from(["helperA2".to_string()])),
+                Some(HashSet::from(["default".to_string()])),
             ),
         ]);
         assert_eq!(import_map, expected_map);

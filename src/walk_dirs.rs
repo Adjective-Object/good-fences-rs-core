@@ -1,5 +1,6 @@
 use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
+use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
 use relative_path::RelativePath;
 use serde::Deserialize;
@@ -71,12 +72,23 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                             Some(file_name) => {
                                 if file_name.ends_with("fence.json") {
                                     let _working_dir_path: &Path = &WORKING_DIR_PATH;
-                                    let fence_result = parse_fence_file(
-                                        RelativePath::from_path(
-                                            &dir_entry.parent_path.join(file_name),
-                                        )
-                                        .unwrap(),
-                                    );
+                                    let joined = &dir_entry.parent_path.join(file_name);
+                                    let slashed = match get_slashed_path_buf(joined) {
+                                        Ok(slashed) => slashed,
+                                        Err(e) => {
+                                            eprintln!("{}", e.to_string());
+                                            continue;
+                                        }
+                                    };
+                                    let fence_path = match slashed_as_relative_path(&slashed) {
+                                        Ok(fence_path) => fence_path,
+                                        Err(e) => {
+                                            eprintln!("{}", e.to_string());
+                                            continue;
+                                        }
+                                    };
+                                    let fence_result =
+                                        parse_fence_file(fence_path.as_relative_path());
                                     match fence_result {
                                         Ok(fence) => {
                                             // update fences
@@ -88,7 +100,6 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                             }
 
                                             // fence.path_relative_to(&WORKING_DIR_PATH);
-
                                             // update client state from the walk
                                             dir_entry.client_state = WalkFileData::Fence(fence);
                                         }
@@ -119,7 +130,15 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                     || file_name.ends_with(".js")
                                 {
                                     let file_path = dir_entry.parent_path.join(file_name);
+                                    let file_path = match get_slashed_path_buf(&file_path) {
+                                        Ok(slashed) => slashed,
+                                        Err(e) => {
+                                            eprintln!("{}", e.to_string());
+                                            continue;
+                                        }
+                                    };
                                     let _working_dir_path: &Path = &WORKING_DIR_PATH;
+
                                     let source_file_path = RelativePath::from_path(&file_path);
 
                                     let imports = match get_imports_map_from_file(&file_path) {
@@ -156,6 +175,20 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
         .map(|ok| ok.unwrap().client_state)
         .collect();
 }
+
+// fn as_relative_path<'a>(file_path: &'a Path) -> Result<RelativePath, fmt::Error> {
+//     let slashed: PathBuf;
+//     #[cfg(target_os = "windows")] {
+//       slashed = match file_path.to_slash() {
+//         Some(slash_path) => PathBuf::from(slash_path.to_string()),
+//         None => {return Err() },
+//       }
+//     }
+//     #[cfg(not(target_os = "windows"))] {
+//       slashed = PathBuf::from(p)
+//     }
+//     return Ok(RelativePath::from_path(&slashed))
+//   }
 
 #[cfg(test)]
 mod test {
