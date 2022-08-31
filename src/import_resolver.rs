@@ -2,10 +2,17 @@ extern crate relative_path;
 extern crate serde;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
+use swc_common::FileName;
+use swc_ecma_ast::Bool;
+use swc_ecma_loader::resolve::Resolve;
+use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
+use path_slash::PathBufExt as _;
+
+use crate::path_utils::slashed_as_relative_path;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +31,42 @@ pub enum ResolvedImport {
     NodeModulesImport(String),
     ProjectLocalImport(PathBuf),
     ResourceFileImport,
+}
+
+pub fn resolve_import<'a>(
+    tsconfig_paths: &'a TsconfigPathsJson,
+    initial_path: &RelativePath,
+    raw_import_specifier: &'a str,
+) -> Result<ResolvedImport, String> {
+    let resolver = NodeModulesResolver::default();
+    let base = FileName::Real(
+        PathBuf::from(initial_path.as_str())
+    );
+    match resolver.resolve(&base, raw_import_specifier) {
+        Ok(resolved) => {
+            if let FileName::Real(file_path) = resolved {
+                if is_resource_file(&file_path) {
+                    return Ok(ResolvedImport::ResourceFileImport);
+                }
+                if raw_import_specifier.starts_with(".") {
+                    return Ok(ResolvedImport::ProjectLocalImport(file_path))
+                }
+            }
+        },
+        Err(e) => {
+            println!("Error resolving import: {:?}", e);
+        },
+    };
+    return Err(String::from(""));
+}
+
+fn is_resource_file(file: &PathBuf) -> bool {
+    if let Some(ext) = file.extension() {
+        if ext != ".tsx" && ext != ".ts" {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn resolve_ts_import<'a>(
@@ -167,12 +210,14 @@ fn path_buf_from_tsconfig(
 mod test {
     extern crate lazy_static;
     extern crate relative_path;
-    use crate::import_resolver::{
+    use crate::{import_resolver::{
         resolve_ts_import, ResolvedImport, TsconfigPathsCompilerOptions, TsconfigPathsJson,
-    };
+    }, path_utils::as_slashed_pathbuf};
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::path::PathBuf;
+
+    use super::resolve_import;
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {
             {
@@ -203,6 +248,11 @@ mod test {
             &TEST_TSCONFIG_JSON,
             &RelativePathBuf::from("packages/my/importing/module"),
             "../imported/module",
+        );
+        resolve_import(
+            &TEST_TSCONFIG_JSON,
+            &RelativePathBuf::from_path(as_slashed_pathbuf("tests/good_fences_integration/src/index.ts").unwrap()).unwrap(),
+            "./componentA/componentA",
         );
         assert_eq!(
             result,
