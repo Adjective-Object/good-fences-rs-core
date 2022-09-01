@@ -1,16 +1,16 @@
 extern crate relative_path;
 extern crate serde;
+use path_slash::PathBufExt as _;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
-use swc_common::FileName;
-use swc_ecma_ast::Bool;
-use swc_ecma_loader::resolve::Resolve;
-use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
-use path_slash::PathBufExt as _;
+use swc_common::FileName;
+use swc_ecma_ast::Bool;
+use swc_ecma_loader::resolve::Resolve;
+use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 
 use crate::path_utils::slashed_as_relative_path;
 
@@ -36,28 +36,77 @@ pub enum ResolvedImport {
 pub fn resolve_import<'a>(
     tsconfig_paths: &'a TsconfigPathsJson,
     initial_path: &RelativePath,
-    raw_import_specifier: &'a str,
+    raw_import_path: &'a str,
 ) -> Result<ResolvedImport, String> {
     let resolver = NodeModulesResolver::default();
-    let base = FileName::Real(
-        PathBuf::from(initial_path.as_str())
-    );
-    match resolver.resolve(&base, raw_import_specifier) {
-        Ok(resolved) => {
-            if let FileName::Real(file_path) = resolved {
-                if is_resource_file(&file_path) {
-                    return Ok(ResolvedImport::ResourceFileImport);
-                }
-                if raw_import_specifier.starts_with(".") {
-                    return Ok(ResolvedImport::ProjectLocalImport(file_path))
-                }
+    let base = FileName::Real(PathBuf::from(initial_path.as_str()));
+
+    let resolved = resolver.resolve(&base, raw_import_path);
+
+    let file_path = match resolved {
+        Ok(filename) => {
+            if let FileName::Real(f) = filename {
+                f
+            } else {
+                return Err("".to_string());
             }
-        },
-        Err(e) => {
-            println!("Error resolving import: {:?}", e);
-        },
+        }
+        Err(e) => return Err(e.to_string()),
     };
-    return Err(String::from(""));
+
+    if is_resource_file(&file_path) {
+        return Ok(ResolvedImport::ResourceFileImport);
+    }
+    if raw_import_path.starts_with(".") {
+        return Ok(ResolvedImport::ProjectLocalImport(file_path));
+    }
+
+    for segment in file_path.ancestors() {
+        let stub_to_check_option = segment.to_str();
+
+        if !stub_to_check_option.is_some() {
+            return Err("accumulated specifier was empty.".to_owned());
+        }
+        let stub_to_check = stub_to_check_option.unwrap();
+        if let Some(no_star_stub_entry) = tsconfig_paths.compiler_options.paths.get(stub_to_check) {
+            if no_star_stub_entry.len() != 1 {
+                return Err(format!(
+                    "Expected all members of paths: to have a single entry, but got {:?}",
+                    no_star_stub_entry
+                ));
+            }
+            return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
+                tsconfig_paths,
+                &no_star_stub_entry[0],
+            )));
+        }
+        let mut star_stub_to_check = stub_to_check.to_owned();
+        star_stub_to_check.push_str("/*");
+        if let Some(star_stub_entry) = tsconfig_paths
+            .compiler_options
+            .paths
+            .get(&star_stub_to_check)
+        {
+            if star_stub_entry.len() != 1 {
+                return Err(format!(
+                    "Expected all members of paths: to have a single entry, but got {:?}",
+                    star_stub_entry,
+                ));
+            }
+            return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
+                tsconfig_paths,
+                &switch_specifier_prefix(
+                    &star_stub_to_check,
+                    &star_stub_entry[0],
+                    &file_path.to_str().unwrap(),
+                ),
+            )));
+        }
+    }
+
+    return Ok(ResolvedImport::NodeModulesImport(
+        raw_import_path.to_string(),
+    ));
 }
 
 fn is_resource_file(file: &PathBuf) -> bool {
@@ -210,9 +259,12 @@ fn path_buf_from_tsconfig(
 mod test {
     extern crate lazy_static;
     extern crate relative_path;
-    use crate::{import_resolver::{
-        resolve_ts_import, ResolvedImport, TsconfigPathsCompilerOptions, TsconfigPathsJson,
-    }, path_utils::as_slashed_pathbuf};
+    use crate::{
+        import_resolver::{
+            resolve_ts_import, ResolvedImport, TsconfigPathsCompilerOptions, TsconfigPathsJson,
+        },
+        path_utils::as_slashed_pathbuf,
+    };
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::path::PathBuf;
@@ -251,7 +303,10 @@ mod test {
         );
         resolve_import(
             &TEST_TSCONFIG_JSON,
-            &RelativePathBuf::from_path(as_slashed_pathbuf("tests/good_fences_integration/src/index.ts").unwrap()).unwrap(),
+            &RelativePathBuf::from_path(as_slashed_pathbuf(
+                "tests/good_fences_integration/src/index.ts",
+            ))
+            .unwrap(),
             "./componentA/componentA",
         );
         assert_eq!(
