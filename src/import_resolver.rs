@@ -1,6 +1,7 @@
 extern crate relative_path;
 extern crate serde;
 use path_slash::PathBufExt as _;
+use path_clean::{PathClean};
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use swc_ecma_ast::Bool;
 use swc_ecma_loader::resolve::Resolve;
 use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 
-use crate::path_utils::slashed_as_relative_path;
+use crate::path_utils::{slashed_as_relative_path, as_slashed_pathbuf};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -224,6 +225,14 @@ fn switch_specifier_prefix(
     replace_star_path: &str,
     import_specifier: &str,
 ) -> String {
+    //
+    // { "paths": 
+    //      "foo": [ "./packages/foo" ]
+    //      "foo/lib/*": [ "./packages/foo/src/*" ]
+    // }
+    //
+    // import "foo/lib/bar" -> "packages/foo/src/bar"
+
     if !replace_star_path.ends_with("/*") {
         return replace_star_path.to_owned();
     }
@@ -235,11 +244,13 @@ fn switch_specifier_prefix(
     resulting_string
 }
 
+// Prefixes the specifier with the baseurl in the tsconfig, if any is defined
 fn path_buf_from_tsconfig(
     tsconfig_paths_json: &TsconfigPathsJson,
     specifier_from_tsconfig_paths: &str,
 ) -> PathBuf {
     if tsconfig_paths_json.compiler_options.base_url.is_some() {
+        // Join the base url onto the path, if present in the config
         let mut builder: RelativePathBuf = RelativePathBuf::new();
         builder.push(
             tsconfig_paths_json
@@ -249,9 +260,15 @@ fn path_buf_from_tsconfig(
                 .unwrap(),
         );
         builder.push(specifier_from_tsconfig_paths);
-        return PathBuf::from(builder.normalize().as_str());
+        let rel_path = slashed_as_relative_path(&as_slashed_pathbuf(builder.into_string().as_str())).unwrap();
+        return PathBuf::from(rel_path.as_str()).clean();
     } else {
-        return PathBuf::from(specifier_from_tsconfig_paths);
+        return PathBuf::from(
+            RelativePathBuf::from(
+                specifier_from_tsconfig_paths
+            )
+                .as_str()
+            ).clean();
     }
 }
 
@@ -301,14 +318,6 @@ mod test {
             &RelativePathBuf::from("packages/my/importing/module"),
             "../imported/module",
         );
-        resolve_import(
-            &TEST_TSCONFIG_JSON,
-            &RelativePathBuf::from_path(as_slashed_pathbuf(
-                "tests/good_fences_integration/src/index.ts",
-            ))
-            .unwrap(),
-            "./componentA/componentA",
-        );
         assert_eq!(
             result,
             Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
@@ -337,7 +346,7 @@ mod test {
         let result = resolve_ts_import(
             &TEST_TSCONFIG_JSON,
             &RelativePathBuf::from("packages/my/importing/module"),
-            "glob-specifier/lib/relative/after/glob/specifier/../../the/specifier",
+            "glob-specifier/lib/relative/after/glob/specifier/../../the/./specifier",
         );
         assert_eq!(
             result,
