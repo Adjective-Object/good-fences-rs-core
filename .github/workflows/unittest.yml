@@ -1,0 +1,25 @@
+name: run unit tests
+on:
+  # uncomment this block to enable
+  # running on PRs & tracking builds on 'main'
+  # push:
+  #   branches:
+  #     - 'main'
+  # pull_request:
+  #   branches: [main]
+  workflow_dispatch:
+jobs:
+  tests-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: cargo test
+        run: cargo test
+  tests-win:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: cargo test
+        run: cargo test
