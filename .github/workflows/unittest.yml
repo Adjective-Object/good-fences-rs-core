@@ -1,8 +1,12 @@
 name: run unit tests
 on:
+  # uncomment this block to enable
+  # running on PRs & tracking builds on 'main'
   # push:
   #   branches:
   #     - 'main'
+  # pull_request:
+  #   branches: [main]
   workflow_dispatch:
 jobs:
   tests-linux:
