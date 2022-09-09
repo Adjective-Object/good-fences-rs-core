@@ -304,6 +304,14 @@ mod test {
                     ),
                 },
                 source_files: map!(
+                    "tests/good_fences_integration/src/requireImportTest" => SourceFile {
+                        source_file_path:"tests/good_fences_integration/src/requireImportTest.ts".to_owned(),
+                        tags: HashSet::new(),
+                        imports: map!(
+                            "something" => None,
+                            "fs" => None
+                        )
+                    },
                     "tests/good_fences_integration/src/componentA/helperA1" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts".to_owned(),
                         tags: set!(
@@ -355,12 +363,12 @@ mod test {
                         imports: map!(
                                 "./componentA/componentA" => Some(
                                     set!(
-                                        "default as componentA".to_owned()
+                                        "default".to_owned()
                                     ),
                                 ),
                                 "./componentB/componentB" => Some(
                                     set!(
-                                        "default as componentB".to_owned()
+                                        "default".to_owned()
                                     ),
                                 )
                             ),
