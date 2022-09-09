@@ -1,0 +1,21 @@
+name: run unit tests
+on:
+  # push:
+  #   branches:
+  #     - 'main'
+  workflow_dispatch:
+jobs:
+  tests-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: cargo test
+        run: cargo test
+  tests-win:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: cargo test
+        run: cargo test
