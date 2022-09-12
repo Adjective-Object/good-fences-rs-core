@@ -188,7 +188,7 @@ mod test {
         assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"The system cannot find the path specified.\" }]".to_string(), imports.unwrap_err().to_string());
 
         #[cfg(not(target_os="windows"))]
-        assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"No such file or directory\" }]".to_string(), imports.unwrap_err().to_string());
+        assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 2, kind: NotFound, message: \"No such file or directory\" }]".to_string(), imports.unwrap_err().to_string());
     }
 
     #[test]
