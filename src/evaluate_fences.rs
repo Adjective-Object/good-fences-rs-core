@@ -4,6 +4,7 @@ use crate::file_extension::no_ext;
 use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
+use path_slash::PathBufExt;
 use relative_path::RelativePath;
 use std::collections::{HashMap, HashSet};
 use std::iter::{FromIterator, Iterator};
@@ -91,13 +92,14 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 // fences of the file we are importing.
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
                     let project_local_path_str = project_local_path.to_str().unwrap();
-                    let imported_source_file_opt = source_files.get(project_local_path_str);
+                    let imported_source_file_opt = source_files.get(no_ext(project_local_path_str));
                     let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
                         let mut clone_path_with_idx = project_local_path.clone();
                         clone_path_with_idx.push("index");
-                        let clone_path_with_idx_str = clone_path_with_idx.to_str().unwrap();
+                        let clone_path_with_idx_str =
+                            clone_path_with_idx.to_slash().unwrap().to_string();
 
-                        source_files.get(clone_path_with_idx_str)
+                        source_files.get(clone_path_with_idx_str.as_str())
                     } else {
                         None
                     };

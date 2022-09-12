@@ -1,8 +1,12 @@
-use std::{collections::{HashMap, HashSet}, iter::FromIterator};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::FromIterator,
+};
 
 use swc_core::visit::swc_ecma_ast;
 use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, TsImportEqualsDecl, ExportNamedSpecifier, ExportDecl, NamedExport,
+    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, NamedExport,
+    TsImportEqualsDecl,
 };
 use swc_ecmascript::visit::{Visit, VisitWith};
 #[derive(Debug)]
@@ -25,30 +29,34 @@ impl ImportPathVisitor {
 }
 
 impl Visit for ImportPathVisitor {
-
     fn visit_named_export(&mut self, export: &NamedExport) {
         export.visit_children_with(self);
 
         if let Some(source) = &export.src {
             let source = source.value.to_string();
-            let mut specifiers: HashSet<String> = export.specifiers.iter().filter_map(|x| -> Option<String> {
-                if let Some(named) = x.as_named() {
-                    if let ModuleExportName::Ident(ident) = &named.orig {
-                        return Some(ident.sym.to_string())
+            let mut specifiers: HashSet<String> = export
+                .specifiers
+                .iter()
+                .filter_map(|x| -> Option<String> {
+                    if let Some(named) = x.as_named() {
+                        if let ModuleExportName::Ident(ident) = &named.orig {
+                            return Some(ident.sym.to_string());
+                        }
                     }
-                }
-                if x.is_default() {
-                    return Some("default".to_string())
-                }
-                None
-            }).collect();
-            
+                    if x.is_default() {
+                        return Some("default".to_string());
+                    }
+                    None
+                })
+                .collect();
+
             if let Some(imports) = self.imports_map.get_mut(&source) {
                 specifiers.drain().for_each(|x| {
                     imports.insert(x);
                 });
             } else {
-                self.imports_map.insert(source, HashSet::from_iter(specifiers));
+                self.imports_map
+                    .insert(source, HashSet::from_iter(specifiers));
             }
         }
     }
@@ -178,9 +186,10 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
 
         visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<String>> = HashMap::from([
-            ("./foo".to_owned(), HashSet::from(["default".to_owned(), "foo".to_owned()]))
-        ]);
+        let expected_map: HashMap<String, HashSet<String>> = HashMap::from([(
+            "./foo".to_owned(),
+            HashSet::from(["default".to_owned(), "foo".to_owned()]),
+        )]);
         assert_eq!(expected_map, visitor.imports_map);
     }
 

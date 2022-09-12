@@ -46,7 +46,6 @@ lazy_static! {
 }
 
 pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
-
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         |read_dir_state, children| {
             // Custom filter -- retain only directories and fence.json files
@@ -56,9 +55,7 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                     .map(|dir_entry| {
                         dir_entry.file_type.is_dir()
                             || match dir_entry.file_name.to_str() {
-                                Some(file_name_str) => {
-                                    should_retain_file(file_name_str)
-                                },
+                                Some(file_name_str) => should_retain_file(file_name_str),
                                 None => false,
                             }
                     })
@@ -253,13 +250,16 @@ mod test {
 
     #[test]
     fn test_index_file() {
-        let discovered: Vec<WalkFileData> = discover_fences_and_files("./tests/comments_panel_test");
+        let discovered: Vec<WalkFileData> =
+            discover_fences_and_files("./tests/comments_panel_test");
 
         let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
         assert!(
             discovered.iter().any(|file: &WalkFileData| {
                 match file {
-                    WalkFileData::SourceFile(source_file) => source_file.source_file_path == expected,
+                    WalkFileData::SourceFile(source_file) => {
+                        source_file.source_file_path == expected
+                    }
                     _ => false,
                 }
             }),

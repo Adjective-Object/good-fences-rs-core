@@ -1,7 +1,6 @@
 extern crate relative_path;
 extern crate serde;
-use path_slash::PathBufExt as _;
-use path_clean::{PathClean};
+use path_clean::PathClean as _;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -9,11 +8,10 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
 use swc_common::FileName;
-use swc_ecma_ast::Bool;
 use swc_ecma_loader::resolve::Resolve;
 use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 
-use crate::path_utils::{slashed_as_relative_path, as_slashed_pathbuf};
+use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -226,7 +224,7 @@ fn switch_specifier_prefix(
     import_specifier: &str,
 ) -> String {
     //
-    // { "paths": 
+    // { "paths":
     //      "foo": [ "./packages/foo" ]
     //      "foo/lib/*": [ "./packages/foo/src/*" ]
     // }
@@ -260,15 +258,12 @@ fn path_buf_from_tsconfig(
                 .unwrap(),
         );
         builder.push(specifier_from_tsconfig_paths);
-        let rel_path = slashed_as_relative_path(&as_slashed_pathbuf(builder.into_string().as_str())).unwrap();
+        let rel_path =
+            slashed_as_relative_path(&as_slashed_pathbuf(builder.into_string().as_str())).unwrap();
         return PathBuf::from(rel_path.as_str()).clean();
     } else {
-        return PathBuf::from(
-            RelativePathBuf::from(
-                specifier_from_tsconfig_paths
-            )
-                .as_str()
-            ).clean();
+        return PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
+            .clean();
     }
 }
 
@@ -276,17 +271,13 @@ fn path_buf_from_tsconfig(
 mod test {
     extern crate lazy_static;
     extern crate relative_path;
-    use crate::{
-        import_resolver::{
-            resolve_ts_import, ResolvedImport, TsconfigPathsCompilerOptions, TsconfigPathsJson,
-        },
-        path_utils::as_slashed_pathbuf,
+    use crate::import_resolver::{
+        resolve_ts_import, ResolvedImport, TsconfigPathsCompilerOptions, TsconfigPathsJson,
     };
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::path::PathBuf;
 
-    use super::resolve_import;
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {
             {
