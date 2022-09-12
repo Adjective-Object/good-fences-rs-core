@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, iter::FromIterator};
 
 use swc_core::visit::swc_ecma_ast;
 use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, TsImportEqualsDecl,
+    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, TsImportEqualsDecl, ExportNamedSpecifier, ExportDecl, NamedExport,
 };
 use swc_ecmascript::visit::{Visit, VisitWith};
 #[derive(Debug)]
@@ -25,6 +25,34 @@ impl ImportPathVisitor {
 }
 
 impl Visit for ImportPathVisitor {
+
+    fn visit_named_export(&mut self, export: &NamedExport) {
+        export.visit_children_with(self);
+
+        if let Some(source) = &export.src {
+            let source = source.value.to_string();
+            let mut specifiers: HashSet<String> = export.specifiers.iter().filter_map(|x| -> Option<String> {
+                if let Some(named) = x.as_named() {
+                    if let ModuleExportName::Ident(ident) = &named.orig {
+                        return Some(ident.sym.to_string())
+                    }
+                }
+                if x.is_default() {
+                    return Some("default".to_string())
+                }
+                None
+            }).collect();
+            
+            if let Some(imports) = self.imports_map.get_mut(&source) {
+                specifiers.drain().for_each(|x| {
+                    imports.insert(x);
+                });
+            } else {
+                self.imports_map.insert(source, HashSet::from_iter(specifiers));
+            }
+        }
+    }
+
     fn visit_binding_ident(&mut self, binding: &BindingIdent) {
         binding.visit_children_with(self);
         if binding.sym.to_string() == "require".to_string() {
@@ -135,6 +163,26 @@ mod test {
     use crate::get_imports::create_lexer;
 
     use super::ImportPathVisitor;
+
+    #[test]
+    fn text_export_from() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"export { default as a, foo as bar } from './foo'"#.to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+
+        let mut visitor = ImportPathVisitor::new();
+        let module = parser.parse_typescript_module().unwrap();
+
+        visit_module(&mut visitor, &module);
+        let expected_map: HashMap<String, HashSet<String>> = HashMap::from([
+            ("./foo".to_owned(), HashSet::from(["default".to_owned(), "foo".to_owned()]))
+        ]);
+        assert_eq!(expected_map, visitor.imports_map);
+    }
 
     #[test]
     fn test_require_imports() {

@@ -2,7 +2,6 @@ use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
 use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
-use relative_path::RelativePath;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
@@ -47,6 +46,7 @@ lazy_static! {
 }
 
 pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
+
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         |read_dir_state, children| {
             // Custom filter -- retain only directories and fence.json files
@@ -56,7 +56,9 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                     .map(|dir_entry| {
                         dir_entry.file_type.is_dir()
                             || match dir_entry.file_name.to_str() {
-                                Some(file_name_str) => should_retain_file(file_name_str),
+                                Some(file_name_str) => {
+                                    should_retain_file(file_name_str)
+                                },
                                 None => false,
                             }
                     })
@@ -139,12 +141,12 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                                     };
                                     let _working_dir_path: &Path = &WORKING_DIR_PATH;
 
-                                    let source_file_path = RelativePath::from_path(&file_path);
+                                    let source_file_path = slashed_as_relative_path(&file_path);
 
                                     let imports = match get_imports_map_from_file(&file_path) {
                                         Ok(imps) => imps,
                                         Err(e) => {
-                                            eprint!("Error {}", e);
+                                            eprintln!("Error {}", e);
                                             continue;
                                         }
                                     };
@@ -198,28 +200,28 @@ mod test {
     use std::iter::{FromIterator, Iterator};
 
     macro_rules! map(
-    { $($key:expr => $value:expr),+ } => {
-        {
-            let mut m = ::std::collections::HashMap::new();
-            $(
-                m.insert(String::from($key), $value);
-            )+
-            m
-        }
-     };
-  );
+        { $($key:expr => $value:expr),+ } => {
+            {
+                let mut m = ::std::collections::HashMap::new();
+                $(
+                    m.insert(String::from($key), $value);
+                )+
+                m
+            }
+        };
+    );
 
     macro_rules! set(
-      { $($member:expr),+ } => {
-          {
-              HashSet::from_iter(vec!(
-                  $(
-                      String::from($member),
-                  )+
-              ))
-          }
-      };
-  );
+        { $($member:expr),+ } => {
+            {
+                HashSet::from_iter(vec!(
+                    $(
+                        String::from($member),
+                    )+
+                ))
+            }
+        };
+    );
 
     #[test]
     fn test_simple_contains_root_fence() {
@@ -246,6 +248,24 @@ mod test {
             "expected discovered files to contain {:?}, but it did not. Actual: {:?}",
             expected_root_fence,
             discovered
+        );
+    }
+
+    #[test]
+    fn test_index_file() {
+        let discovered: Vec<WalkFileData> = discover_fences_and_files("./tests/comments_panel_test");
+
+        let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
+        assert!(
+            discovered.iter().any(|file: &WalkFileData| {
+                match file {
+                    WalkFileData::SourceFile(source_file) => source_file.source_file_path == expected,
+                    _ => false,
+                }
+            }),
+            "expected discovered files to contain {:?}, but it did not. Actual: {:?}",
+            expected,
+            discovered,
         );
     }
 
