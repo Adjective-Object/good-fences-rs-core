@@ -1,7 +1,7 @@
 extern crate relative_path;
 extern crate serde;
+use path_clean::PathClean;
 use path_slash::PathBufExt as _;
-use path_clean::{PathClean};
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ use swc_ecma_ast::Bool;
 use swc_ecma_loader::resolve::Resolve;
 use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 
-use crate::path_utils::{slashed_as_relative_path, as_slashed_pathbuf};
+use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -226,7 +226,7 @@ fn switch_specifier_prefix(
     import_specifier: &str,
 ) -> String {
     //
-    // { "paths": 
+    // { "paths":
     //      "foo": [ "./packages/foo" ]
     //      "foo/lib/*": [ "./packages/foo/src/*" ]
     // }
@@ -260,15 +260,12 @@ fn path_buf_from_tsconfig(
                 .unwrap(),
         );
         builder.push(specifier_from_tsconfig_paths);
-        let rel_path = slashed_as_relative_path(&as_slashed_pathbuf(builder.into_string().as_str())).unwrap();
+        let rel_path =
+            slashed_as_relative_path(&as_slashed_pathbuf(builder.into_string().as_str())).unwrap();
         return PathBuf::from(rel_path.as_str()).clean();
     } else {
-        return PathBuf::from(
-            RelativePathBuf::from(
-                specifier_from_tsconfig_paths
-            )
-                .as_str()
-            ).clean();
+        return PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
+            .clean();
     }
 }
 

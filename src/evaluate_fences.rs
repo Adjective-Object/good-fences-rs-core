@@ -96,7 +96,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                     let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
                         let mut clone_path_with_idx = project_local_path.clone();
                         clone_path_with_idx.push("index");
-                        let clone_path_with_idx_str = clone_path_with_idx.to_slash().unwrap().to_string();
+                        let clone_path_with_idx_str =
+                            clone_path_with_idx.to_slash().unwrap().to_string();
 
                         source_files.get(clone_path_with_idx_str.as_str())
                     } else {
