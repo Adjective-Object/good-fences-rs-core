@@ -51,7 +51,6 @@ impl Visit for ImportPathVisitor {
                 self.imports_map.insert(source, HashSet::from_iter(specifiers));
             }
         }
-        // export.
     }
 
     fn visit_binding_ident(&mut self, binding: &BindingIdent) {
@@ -177,7 +176,6 @@ mod test {
 
         let mut visitor = ImportPathVisitor::new();
         let module = parser.parse_typescript_module().unwrap();
-        // println!("{:?}", module.body);
 
         visit_module(&mut visitor, &module);
         let expected_map: HashMap<String, HashSet<String>> = HashMap::from([

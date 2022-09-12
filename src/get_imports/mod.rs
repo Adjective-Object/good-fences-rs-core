@@ -184,7 +184,11 @@ mod test {
         let filename = "path/to/nowhere/nothing.ts";
         let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
         assert!(imports.is_err());
+        #[cfg(target_os="windows")]
         assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"The system cannot find the path specified.\" }]".to_string(), imports.unwrap_err().to_string());
+
+        #[cfg(not(target_os="windows"))]
+        assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"No such file or directory\" }]".to_string(), imports.unwrap_err().to_string());
     }
 
     #[test]

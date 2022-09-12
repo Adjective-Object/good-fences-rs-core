@@ -66,7 +66,7 @@ mod test {
                     &RelativePathBuf::from("path/to/protected/fence.json")
                 ).unwrap(),
                 "some/fence.json" =>  parse_fence_str(r#"{"tags": ["root"]}"#, &RelativePathBuf::from("path/to/protected/fence.json")).unwrap(),
-                "some/fucking/fence.json" =>  parse_fence_str(r#"{"tags": ["fucking"]}"#, &RelativePathBuf::from("path/to/protected/fence.json")).unwrap()
+                "some/other/fence.json" =>  parse_fence_str(r#"{"tags": ["other"]}"#, &RelativePathBuf::from("path/to/protected/fence.json")).unwrap()
             )
         };
 
@@ -78,9 +78,9 @@ mod test {
         );
 
         assert_eq!(
-            fence_collection.get_fences_for_path(&Path::new("some/fucking/file.ts")),
+            fence_collection.get_fences_for_path(&Path::new("some/other/file.ts")),
             vec![
-                fence_collection.fences_map.get("some/fucking/fence.json").unwrap(),
+                fence_collection.fences_map.get("some/other/fence.json").unwrap(),
                 fence_collection.fences_map.get("some/fence.json").unwrap(),
             ],
             "should return multiple fences for file with multiple fences",
