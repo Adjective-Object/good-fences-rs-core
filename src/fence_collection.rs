@@ -1,5 +1,4 @@
 use crate::fence::Fence;
-use crate::path_utils::as_slashed_pathbuf;
 use lazy_static::__Deref;
 use path_slash::PathBufExt;
 use std::collections::HashMap;

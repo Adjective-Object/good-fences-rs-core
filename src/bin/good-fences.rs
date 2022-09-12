@@ -2,8 +2,6 @@ extern crate good_fences_rs_core; // Optional in Rust 2018
 extern crate serde_json;
 use good_fences_rs_core::good_fences_runner::GoodFencesRunner;
 use std::env::set_current_dir;
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 

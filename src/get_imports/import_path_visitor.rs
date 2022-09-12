@@ -5,8 +5,8 @@ use std::{
 
 use swc_core::visit::swc_ecma_ast;
 use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, ExportDecl, ExportNamedSpecifier, Id, ImportDecl, Lit,
-    ModuleExportName, NamedExport, TsImportEqualsDecl,
+    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, NamedExport,
+    TsImportEqualsDecl,
 };
 use swc_ecmascript::visit::{Visit, VisitWith};
 #[derive(Debug)]
