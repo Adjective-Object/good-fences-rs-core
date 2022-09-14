@@ -4,24 +4,44 @@ use clap::{self, Parser};
 use good_fences_rs_core::evaluate_fences::ImportRuleViolation;
 use good_fences_rs_core::good_fences_runner::GoodFencesRunner;
 use serde::Serialize;
-use std::env::set_current_dir;
+use std::env::{self, set_current_dir};
 use std::path::Path;
 use std::time::Instant;
 
+/**
+ * Example usage: \n
+ * ```
+  good-fences packages --root ./my-user/my-project --project custom.tsconfig.json --output my-error-file.json
+ * ```
+ */
 #[derive(Debug, Parser)]
 struct Cli {
-    // Directories
+    /**
+     * Dirs to look for fence and source files
+     */
     paths: Vec<String>,
 
+    /**
+     * The tsconfig file used relative to '--root' argument
+     */
     #[clap(short, long, default_value = "tsconfig.json")]
     project: String,
 
+    /**
+     *  Overrides `compilerOptions.baseUrl` property read from '--project' argument
+     */
     #[clap(short, long)]
     base_url: Option<String>,
 
+    /**
+     * Argument to change the cwd of execution
+     */
     #[clap(short, long, default_value = ".")]
     root: String,
 
+    /**
+     * Output file for violations, relative to '--root' argument
+     */
     #[clap(short, long, default_value = "good-fences-violations.json")]
     output: String,
 }
@@ -69,7 +89,11 @@ fn write_erros_as_json(
                 serde_json::to_string_pretty(&JsonErrorFile { violations: v }).unwrap(),
             ) {
                 Ok(_) => {
-                    println!("See results in {:?}", error_file_output);
+                    let cwd = env::current_dir().unwrap().to_string_lossy().to_string();
+                    println!(
+                        "See results in {:?}",
+                        format!("{} at {}", cwd, error_file_output)
+                    );
                 }
                 Err(_) => {
                     println!("Unable to write error at {:?}", error_file_output);
