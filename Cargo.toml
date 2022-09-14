@@ -2,7 +2,7 @@
 name = "good-fences-rs-core"
 version = "0.2.0"
 authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 jwalk = "0.5"
@@ -31,3 +31,4 @@ swc_plugin = "0.89.1"
 swc_core = { version = "0.7.*", features = ["plugin_transform", "transforms"] }
 swc_ecma_loader = "0.39.*"
 path-clean = "0.1.0"
+clap = { version = "3.2.21", features = ["derive"] }

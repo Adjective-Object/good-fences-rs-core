@@ -3,19 +3,19 @@ extern crate serde_json;
 
 use relative_path::RelativePath;
 use serde::de::{Deserializer, Visitor};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::str::FromStr;
 use void::Void;
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Fence {
     pub fence_path: String,
     pub fence: ParsedFence,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedFence {
     pub tags: Option<Vec<String>>,
@@ -32,7 +32,7 @@ struct RawDependencyRule {
     accessible_to: Option<Vec<String>>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
 pub struct DependencyRule {
     pub dependency: String,
     pub accessible_to: Vec<String>,
@@ -81,7 +81,7 @@ struct RawExportRule {
     accessible_to: Option<Vec<String>>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
 pub struct ExportRule {
     pub accessible_to: Vec<String>,
     pub modules: String,
