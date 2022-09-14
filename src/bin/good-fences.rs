@@ -22,7 +22,7 @@ struct Cli {
     #[clap(short, long, default_value = ".")]
     root: String,
 
-    #[clap(short, long, default_value = "good-fences-errors.log")]
+    #[clap(short, long, default_value = "good-fences-violations.json")]
     output: String,
 }
 
@@ -41,7 +41,6 @@ fn main() {
     println!("beginning file walks");
     let tsconfig_path = args.project;
     let dirs_to_walk = &args.paths.iter().map(|x| x.as_str()).collect();
-    println!("{:?}", &dirs_to_walk);
     let good_fences_runner = GoodFencesRunner::new(&tsconfig_path, dirs_to_walk);
 
     println!("beginning fence evaluations");
