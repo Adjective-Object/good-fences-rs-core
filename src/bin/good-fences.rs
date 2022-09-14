@@ -8,12 +8,6 @@ use std::env::{self, set_current_dir};
 use std::path::Path;
 use std::time::Instant;
 
-/**
- * Example usage: \n
- * ```
-  good-fences packages --root ./my-user/my-project --project custom.tsconfig.json --output my-error-file.json
- * ```
- */
 #[derive(Debug, Parser)]
 struct Cli {
     /**
