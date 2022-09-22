@@ -61,7 +61,7 @@ fn write_erros_as_json(
                 Ok(_) => {
                     let cwd = env::current_dir().unwrap().to_string_lossy().to_string();
                     println!(
-                        "See results in {}",
+                        "Violations written to {}",
                         format!("{} at {}", err_file_output_path, cwd)
                     );
                 }
