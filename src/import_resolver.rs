@@ -4,6 +4,8 @@ use path_clean::PathClean as _;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
@@ -18,6 +20,16 @@ use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
 pub struct TsconfigPathsJson {
     pub compiler_options: TsconfigPathsCompilerOptions,
 }
+
+impl TsconfigPathsJson {
+    pub fn from_path(tsconfig_path: String) -> Self {
+        let file = File::open(tsconfig_path).unwrap();
+        let buf_reader = BufReader::new(file);
+        let tsconfig_paths_json: TsconfigPathsJson = serde_json::from_reader(buf_reader).unwrap();
+        tsconfig_paths_json
+    }
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TsconfigPathsCompilerOptions {
