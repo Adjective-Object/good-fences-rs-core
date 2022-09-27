@@ -2,6 +2,7 @@
 pub struct Cli {
     /**
      * Dirs to look for fence and source files
+     * Evaluated relative to the `--project` file
      */
     pub paths: Vec<String>,
 
