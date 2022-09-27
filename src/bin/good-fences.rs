@@ -45,7 +45,6 @@ fn main() {
     // Write results to file
     write_errors_as_json(violations, args.output);
     println!("Elapsed time since start: {:?}", elapsed);
-    return Ok(());
 }
 
 fn write_errors_as_json(
