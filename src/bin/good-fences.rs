@@ -7,7 +7,6 @@ use good_fences_rs_core::good_fences_runner::GoodFencesRunner;
 use good_fences_rs_core::import_resolver::TsconfigPathsJson;
 use serde::Serialize;
 use std::env;
-use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
