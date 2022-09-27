@@ -3,7 +3,6 @@ use std::{
     iter::FromIterator,
 };
 
-use swc_core::visit::swc_ecma_ast;
 use swc_ecma_ast::{
     BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, NamedExport,
     TsImportEqualsDecl,
@@ -167,6 +166,7 @@ mod test {
     use swc_common::{FileName, Globals, Mark, SourceMap, GLOBALS};
     use swc_ecma_parser::{Capturing, Parser};
     use swc_ecma_visit::{fold_module, visit_module};
+    use swc_ecmascript::transforms::resolver;
 
     use crate::get_imports::create_lexer;
 
@@ -270,11 +270,7 @@ mod test {
             let module = parser.parse_typescript_module().unwrap();
             let mut visitor = ImportPathVisitor::new();
 
-            let mut resolver = swc_core::transforms::resolver(
-                Mark::fresh(Mark::root()),
-                Mark::fresh(Mark::root()),
-                true,
-            );
+            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
             let resolved = fold_module(&mut resolver, module.clone());
             visit_module(&mut visitor, &resolved);
             let expected_require_set = HashSet::from(["foo".to_string(), "original".to_string()]);
@@ -350,11 +346,7 @@ mod test {
             let capturing = Capturing::new(lexer);
             let mut parser = Parser::new_from(capturing);
             let module = parser.parse_typescript_module().unwrap();
-            let mut resolver = swc_core::transforms::resolver(
-                Mark::fresh(Mark::root()),
-                Mark::fresh(Mark::root()),
-                true,
-            );
+            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
             let resolved = fold_module(&mut resolver, module.clone());
             visit_module(&mut visitor, &resolved);
         });
@@ -381,11 +373,7 @@ mod test {
             let capturing = Capturing::new(lexer);
             let mut parser = Parser::new_from(capturing);
             let module = parser.parse_typescript_module().unwrap();
-            let mut resolver = swc_core::transforms::resolver(
-                Mark::fresh(Mark::root()),
-                Mark::fresh(Mark::root()),
-                true,
-            );
+            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
             let resolved = fold_module(&mut resolver, module.clone());
             visit_module(&mut visitor, &resolved);
         });
@@ -414,11 +402,7 @@ mod test {
             let capturing = Capturing::new(lexer);
             let mut parser = Parser::new_from(capturing);
             let module = parser.parse_typescript_module().unwrap();
-            let mut resolver = swc_core::transforms::resolver(
-                Mark::fresh(Mark::root()),
-                Mark::fresh(Mark::root()),
-                true,
-            );
+            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
             let resolved = fold_module(&mut resolver, module.clone());
             visit_module(&mut visitor, &resolved);
         });

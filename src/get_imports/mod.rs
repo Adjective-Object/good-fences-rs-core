@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use swc_common::errors::Handler;
 use swc_common::{Globals, Mark, GLOBALS};
-use swc_core::visit::{fold_module, visit_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
 mod import_path_visitor;
 
 pub use import_path_visitor::*;
+use swc_ecmascript::transforms::resolver;
+use swc_ecmascript::visit::{fold_module, visit_module};
 
 use crate::error::GetImportError;
 
@@ -73,11 +74,7 @@ pub fn get_imports_map_from_file<'a>(
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {
-        let mut resolver = swc_core::transforms::resolver(
-            Mark::fresh(Mark::root()),
-            Mark::fresh(Mark::root()),
-            true,
-        );
+        let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
         let resolved = fold_module(&mut resolver, ts_module.clone());
         visit_module(&mut visitor, &resolved);
     });
