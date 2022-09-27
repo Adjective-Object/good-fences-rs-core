@@ -7,6 +7,7 @@ use good_fences_rs_core::good_fences_runner::GoodFencesRunner;
 use good_fences_rs_core::import_resolver::TsconfigPathsJson;
 use serde::Serialize;
 use std::env;
+use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 
@@ -16,7 +17,7 @@ fn main() {
     let args = Cli::parse();
     let root = Path::new(args.root.as_str());
     let tsconfig_path = args.project;
-    let mut tsconfig = TsconfigPathsJson::from_path(tsconfig_path);
+    let mut tsconfig = TsconfigPathsJson::from_path(tsconfig_path).unwrap();
 
     if args.base_url.is_some() {
         tsconfig.compiler_options.base_url = args.base_url;
@@ -42,11 +43,12 @@ fn main() {
     println!("Total violations: {}", violations.len());
 
     // Write results to file
-    write_erros_as_json(violations, args.output);
+    write_errors_as_json(violations, args.output);
     println!("Elapsed time since start: {:?}", elapsed);
+    return Ok(());
 }
 
-fn write_erros_as_json(
+fn write_errors_as_json(
     violations: Vec<Result<ImportRuleViolation, String>>,
     err_file_output_path: String,
 ) {

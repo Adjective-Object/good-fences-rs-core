@@ -13,6 +13,7 @@ use swc_common::FileName;
 use swc_ecma_loader::resolve::Resolve;
 use swc_ecma_loader::resolvers::node::NodeModulesResolver;
 
+use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -22,11 +23,18 @@ pub struct TsconfigPathsJson {
 }
 
 impl TsconfigPathsJson {
-    pub fn from_path(tsconfig_path: String) -> Self {
-        let file = File::open(tsconfig_path).unwrap();
+    // Reads and parsed the tsconfig.json at the provided path
+    pub fn from_path(tsconfig_path: String) -> Result<Self, OpenTsConfigError> {
+        let file = match File::open(tsconfig_path) {
+            Ok(f) => f,
+            Err(err) => return Err(OpenTsConfigError::IOError(err)),
+        };
         let buf_reader = BufReader::new(file);
-        let tsconfig_paths_json: TsconfigPathsJson = serde_json::from_reader(buf_reader).unwrap();
-        tsconfig_paths_json
+        let tsconfig_paths_json: TsconfigPathsJson = match serde_json::from_reader(buf_reader) {
+            Ok(tsconfig) => tsconfig,
+            Err(e) => return Err(OpenTsConfigError::SerdeError(e)),
+        };
+        Ok(tsconfig_paths_json)
     }
 }
 

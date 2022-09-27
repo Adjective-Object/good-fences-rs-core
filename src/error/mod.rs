@@ -70,3 +70,24 @@ impl Display for WalkDirsError {
         }
     }
 }
+
+#[derive(Debug)]
+pub enum OpenTsConfigError {
+    SerdeError(serde_json::Error),
+    IOError(std::io::Error),
+}
+
+impl Error for OpenTsConfigError {}
+
+impl Display for OpenTsConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpenTsConfigError::SerdeError(err) => {
+                write!(f, "Error parsing specified tsconfig file {}", err)
+            }
+            OpenTsConfigError::IOError(err) => {
+                write!(f, "Error opening specified tsconfig file {}", err)
+            }
+        }
+    }
+}
