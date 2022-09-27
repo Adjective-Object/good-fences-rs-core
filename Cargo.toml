@@ -2,7 +2,7 @@
 name = "good-fences-rs-core"
 version = "0.2.0"
 authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
-edition = "2021"
+edition = "2018"
 
 [dependencies]
 jwalk = "0.5"
@@ -23,7 +23,7 @@ hyperfine = "1.11.0"
 swc_ecma_parser = {version = "0.117.0", features = ["typescript"]}
 swc_common = {version = "0.27.0", features = ["tty-emitter"]}
 swc = "0.215.0"
-swc_ecma_ast = "0.90.3"
+swc_ecma_ast = "0.94.1"
 swc_atoms = "0.4.3"
 swc_ecma_visit = "0.76.6"
 swc_ecmascript = {version = "0.190.0", features = ["transforms", "visit"]}
