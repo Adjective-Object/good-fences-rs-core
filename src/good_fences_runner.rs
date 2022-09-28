@@ -8,8 +8,6 @@ use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::BufReader;
 use std::iter::{FromIterator, Iterator};
 
 #[derive(Debug, PartialEq)]
@@ -27,14 +25,9 @@ pub struct UndefinedTagReference<'a> {
 
 impl GoodFencesRunner {
     pub fn new(
-        tsconfig_paths_json_path: &str,
+        tsconfig_paths_json: TsconfigPathsJson,
         directory_paths_to_walk: &Vec<&str>,
     ) -> GoodFencesRunner {
-        // load tsconfig.json
-        let file = File::open(tsconfig_paths_json_path).unwrap();
-        let buf_reader = BufReader::new(file);
-        let tsconfig_paths_json: TsconfigPathsJson = serde_json::from_reader(buf_reader).unwrap();
-
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
@@ -234,7 +227,8 @@ mod test {
     #[test]
     fn good_fences_integration_test_runner_initialized() {
         let good_fences_runner = GoodFencesRunner::new(
-            "tests/good_fences_integration/tsconfig.json",
+            TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json".to_string())
+                .unwrap(),
             &vec!["tests/good_fences_integration/src"],
         );
 
@@ -437,7 +431,8 @@ mod test {
     #[test]
     fn good_fences_integration_test_violations() {
         let good_fences_runner = GoodFencesRunner::new(
-            "tests/good_fences_integration/tsconfig.json",
+            TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json".to_string())
+                .unwrap(),
             &vec!["tests/good_fences_integration"],
         );
 
@@ -507,7 +502,8 @@ mod test {
     #[test]
     fn good_fences_integration_test_find_undefined_tags() {
         let good_fences_runner = GoodFencesRunner::new(
-            "tests/good_fences_integration/tsconfig.json",
+            TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json".to_string())
+                .unwrap(),
             &vec!["tests/good_fences_integration/src"],
         );
 

@@ -30,3 +30,4 @@ swc_plugin = "0.89.1"
 swc_ecma_ast = "0.90.3"
 swc_ecma_loader = "0.39.7"
 path-clean = "0.1.0"
+clap = { version = "3.2.21", features = ["derive"] }

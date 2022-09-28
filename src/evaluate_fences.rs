@@ -6,19 +6,20 @@ use crate::walk_dirs::SourceFile;
 use glob::Pattern;
 use path_slash::PathBufExt;
 use relative_path::RelativePath;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ViolatedFenceClause<'a> {
     ExportRule(Option<&'a ExportRule>),
     DependencyRule(Option<&'a DependencyRule>),
     ImportAllowList,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct ImportRuleViolation<'fencelifetime, 'importlifetime> {
     pub violating_file_path: &'importlifetime str,
     pub violating_fence: &'fencelifetime Fence,

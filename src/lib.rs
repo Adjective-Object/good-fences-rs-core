@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod error;
 pub mod evaluate_fences;
 pub mod fence;
