@@ -1,7 +1,7 @@
 import test from 'ava'
 
-import { goodFences } from '../index.js'
+import {goodFences} from '../index.js'
 
 test('sum from native', (t) => {
-  goodFences(["packages", "shared"], "../tsconfig.paths.json", ".", "../client-web", undefined);
+  goodFences(["packages", "shared"], "../client-web/tsconfig.paths.json", ".", "../client-web", undefined);
 })

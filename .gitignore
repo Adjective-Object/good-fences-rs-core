@@ -8,4 +8,6 @@
 #/target
 Cargo.lock
 node_modules
-good-fences-rs.node
+*.node
+index.js
+index.d.ts
