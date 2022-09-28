@@ -1,6 +1,9 @@
 use std::{error::Error, fmt::Display, path::PathBuf};
 
 use relative_path::FromPathError;
+use serde::Serialize;
+
+use crate::evaluate_fences::ImportRuleViolation;
 
 #[derive(Debug)]
 pub enum GetImportError {
@@ -88,6 +91,44 @@ impl Display for OpenTsConfigError {
             OpenTsConfigError::IOError(err) => {
                 write!(f, "Error opening specified tsconfig file {}", err)
             }
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct JsonErrorFile<'a> {
+    pub violations: Vec<ImportRuleViolation<'a, 'a>>,
+}
+
+pub fn write_errors_as_json(
+    violations: Vec<Result<ImportRuleViolation, String>>,
+    err_file_output_path: String,
+) {
+    let unwraped_violations: Result<Vec<ImportRuleViolation>, String> =
+        violations.into_iter().collect();
+    match unwraped_violations {
+        Ok(v) => {
+            match std::fs::write(
+                &err_file_output_path,
+                serde_json::to_string_pretty(&JsonErrorFile { violations: v }).unwrap(),
+            ) {
+                Ok(_) => {
+                    let cwd = std::env::current_dir()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+                    println!(
+                        "Violations written to {}",
+                        format!("{} at {}", err_file_output_path, cwd)
+                    );
+                }
+                Err(err) => {
+                    eprintln!("Unable to write violations to {err_file_output_path}.\nError: {err}")
+                }
+            };
+        }
+        Err(e) => {
+            eprintln!("Error evaluating fences: {e}");
         }
     }
 }
