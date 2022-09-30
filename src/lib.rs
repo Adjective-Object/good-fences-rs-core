@@ -1,6 +1,6 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use std::{path::Path, time::Instant};
+use std::time::Instant;
 
 pub mod cli;
 pub mod error;
@@ -19,14 +19,13 @@ pub fn good_fences(
     paths: Vec<String>,
     project: String,
     base_url: Option<String>,
-    root: String,
     output: Option<String>,
 ) {
     let args = cli::Cli {
         paths,
         project,
         base_url,
-        root,
+        // root,
         output: output.unwrap_or("good-fences-violations.json".to_owned()),
     };
     run_evaluations(args);
@@ -34,20 +33,12 @@ pub fn good_fences(
 
 pub fn run_evaluations(args: cli::Cli) {
     let start = Instant::now();
-    let root = Path::new(args.root.as_str());
     let tsconfig_path = args.project;
     let mut tsconfig = import_resolver::TsconfigPathsJson::from_path(tsconfig_path).unwrap();
 
     if args.base_url.is_some() {
         tsconfig.compiler_options.base_url = args.base_url;
     }
-
-    assert!(std::env::set_current_dir(&root).is_ok());
-    println!(
-        "Successfully changed working directory to {}!",
-        root.display()
-    );
-
     println!("beginning file walks");
 
     let dirs_to_walk = &args.paths.iter().map(|x| x.as_str()).collect();

@@ -19,12 +19,6 @@ pub struct Cli {
     pub base_url: Option<String>,
 
     /**
-     * Argument to change the cwd of execution
-     */
-    #[clap(short, long, default_value = ".")]
-    pub root: String,
-
-    /**
      * Output file for violations, relative to '--root' argument
      */
     #[clap(short, long, default_value = "good-fences-violations.json")]
