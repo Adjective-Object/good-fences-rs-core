@@ -1,12 +1,17 @@
 {
-  "name": "good-fences-rs",
+  "name": "@good-fences/api",
   "version": "0.0.0",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "good-fences-rs",
+    "name": "@good-fences/api",
     "triples": {}
   },
+  "os": [
+    "darwin",
+    "win32",
+    "linux"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.11.4",

@@ -11,3 +11,4 @@ node_modules
 *.node
 index.js
 index.d.ts
+good-fences-violations.json
