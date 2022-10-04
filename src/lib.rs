@@ -50,7 +50,7 @@ pub fn good_fences(
                         source_file: Some(v.violating_file_path.to_string()),
                         raw_import: Some(v.violating_import_specifier.to_string()),
                         fence_path: Some(v.violating_fence.fence_path.clone()),
-                        detailed_message: "todo!()".to_string(),
+                        detailed_message: format!("Good-fences violation in {}\n", &v.violating_file_path).to_string()
                     })
                 }
                 Err(_) => return None,
