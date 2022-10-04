@@ -2,7 +2,6 @@ use napi_derive::napi;
 use serde::Serialize;
 use std::time::Instant;
 
-pub mod cli;
 pub mod error;
 pub mod evaluate_fences;
 pub mod fence;

@@ -7,6 +7,9 @@
     "name": "@good-fences/api",
     "triples": {}
   },
+  "bin": {
+    "good-fences": "./good-fences.js"
+  },
   "os": [
     "darwin",
     "win32",
@@ -27,5 +30,8 @@
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "version": "napi version"
+  },
+  "dependencies": {
+    "commander": "^9.4.1"
   }
 }
