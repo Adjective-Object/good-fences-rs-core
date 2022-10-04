@@ -1,0 +1,54 @@
+name: run unit tests
+on:
+  push:
+    branches:
+      - 'main'
+  workflow_dispatch:
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: install napi
+        run: yarn global add @napi-rs/cli
+      - name: napi build
+        run: yarn install && yarn build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: linux-napi
+          path: \@good-fences/*linux-*.node
+          if-no-files-found: error
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: install napi
+        run: yarn global add @napi-rs/cli
+      - name: napi build
+        run: yarn install && yarn build
+      - name: run napi tests
+        run: yarn test
+      - uses: actions/upload-artifact@v3
+        with:
+          name: windows-napi
+          path: |
+            \@good-fences/*win32-*.node
+            index.d.ts
+            index.js
+          if-no-files-found: error
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pull win artifacts
+        uses: actions/dowload-artifacts@v3
+        with:
+          name: windows-napi
+      - name: pull linux artifacts
+        uses: actions/dowload-artifacts@v3
+        with:
+          name: linux-napi
+      - name: display artifacts
+        run: ls -la @good-fences
+        
