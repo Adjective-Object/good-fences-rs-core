@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - 'main'
+    pull_request:
+      branches: [u/edgarivanv/enable-js-napi-access]
   workflow_dispatch:
 jobs:
   build-linux:
