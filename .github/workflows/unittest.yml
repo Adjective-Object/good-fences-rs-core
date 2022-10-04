@@ -66,15 +66,17 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs:
+      - tests-linux
+      - tests-win
       - tests-napi-win
       - tests-napi-linux
     steps:
       - name: pull win artifacts
-        uses: actions/dowload-artifacts@v3
+        uses: actions/download-artifacts@v3
         with:
           name: windows-napi
       - name: pull linux artifacts
-        uses: actions/dowload-artifacts@v3
+        uses: actions/download-artifacts@v3
         with:
           name: linux-napi
       - name: display artifacts
