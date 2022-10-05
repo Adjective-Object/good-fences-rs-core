@@ -110,5 +110,8 @@ jobs:
           name: linux-napi
       - name: pull macos artifacts
         uses: actions/download-artifact@v3
+        with:
+          name: macos-napi
+          path: artifacts
       - name: display artifacts
         run: ls -R
