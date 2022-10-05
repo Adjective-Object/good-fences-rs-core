@@ -51,7 +51,7 @@ jobs:
           name: linux-napi
           path: \@good-fences/
           if-no-files-found: error
-  tests-napi-linux:
+  tests-napi-macos:
     runs-on: macos-latest
     steps:
       - name: Check out code
