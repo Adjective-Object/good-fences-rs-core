@@ -21,6 +21,13 @@ jobs:
         uses: actions/checkout@v3
       - name: cargo test
         run: cargo test
+  tests-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: cargo test
+        run: cargo test
   tests-win:
     runs-on: windows-latest
     steps:
@@ -42,7 +49,25 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: linux-napi
-          path: \@good-fences/*linux-*.node
+          path: \@good-fences/
+          if-no-files-found: error
+  tests-napi-linux:
+    runs-on: macos-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: install napi
+        run: yarn global add @napi-rs/cli
+      - name: napi build
+        run: yarn install && yarn build
+      - name: run napi tests
+        run: yarn test
+      - name: list artifacts
+        run: ls -R @good-fences
+      - uses: actions/upload-artifact@v3
+        with:
+          name: macos-napi
+          path: \@good-fences/
           if-no-files-found: error
   tests-napi-win:
     runs-on: windows-latest
@@ -59,7 +84,7 @@ jobs:
         with:
           name: windows-napi
           path: |
-            \@good-fences/*win32-*.node
+            \@good-fences/
             index.d.ts
             index.js
           if-no-files-found: error
@@ -71,13 +96,19 @@ jobs:
       - tests-napi-win
       - tests-napi-linux
     steps:
+      - name: checkout
+        uses: actions/checkout@v3
       - name: pull win artifacts
         uses: actions/download-artifact@v3
         with:
+          path: artifacts
           name: windows-napi
       - name: pull linux artifacts
         uses: actions/download-artifact@v3
         with:
+          path: artifacts
           name: linux-napi
+      - name: pull macos artifacts
+        uses: actions/download-artifact@v3
       - name: display artifacts
         run: ls -R
