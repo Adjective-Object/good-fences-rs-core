@@ -80,5 +80,5 @@ jobs:
         with:
           name: linux-napi
       - name: display artifacts
-        run: ls -la @good-fences
+        run: ls -R
         
