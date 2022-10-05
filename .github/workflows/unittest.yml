@@ -95,6 +95,8 @@ jobs:
       - tests-win
       - tests-napi-win
       - tests-napi-linux
+      - tests-macos
+      - tests-napi-macos
     steps:
       - name: checkout
         uses: actions/checkout@v3
