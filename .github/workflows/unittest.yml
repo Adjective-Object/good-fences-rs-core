@@ -49,7 +49,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: linux-napi
-          path: \@good-fences*.node
+          path: ./*.node
           if-no-files-found: error
   tests-napi-macos:
     runs-on: macos-latest
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: macos-napi
-          path: \@good-fences*.node
+          path: ./*.node
           if-no-files-found: error
   tests-napi-win:
     runs-on: windows-latest
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: windows-napi
-          path: \@good-fences*.node
+          path: ./*.node
           if-no-files-found: error
       - uses: actions/upload-artifact@v3
         with:
