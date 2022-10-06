@@ -119,6 +119,7 @@ jobs:
         run: |
           mkdir artifacts
           cp *.node artifacts
+          yarn install
           yarn artifacts
           if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
           then
