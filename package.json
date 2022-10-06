@@ -33,10 +33,5 @@
   },
   "dependencies": {
     "commander": "^9.4.1"
-  },
-  "optionalDependencies": {
-    "@good-fences-win32-x64-msvc": "0.0.0",
-    "@good-fences-darwin-x64": "0.0.0",
-    "@good-fences-linux-x64-gnu": "0.0.0"
   }
 }
