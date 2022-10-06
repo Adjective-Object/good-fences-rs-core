@@ -40,8 +40,6 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: install napi
-        run: yarn global add @napi-rs/cli
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
@@ -56,14 +54,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: install napi
-        run: yarn global add @napi-rs/cli
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
         run: yarn test
-      - name: list artifacts
-        run: ls -R @good-fences
       - uses: actions/upload-artifact@v3
         with:
           name: macos-napi
@@ -121,3 +115,22 @@ jobs:
           name: js-files
       - name: display artifacts
         run: ls -R
+      - name: Publish
+        run: |
+          mkdir artifacts
+          cp *.node artifacts
+          yarn artifacts
+          if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
+          then
+            echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+            npm publish --access public
+          elif git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+";
+          then
+            echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+            npm publish --tag next --access public
+          else
+            echo "Not a release, skipping publish"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
