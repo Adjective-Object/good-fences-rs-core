@@ -49,7 +49,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: linux-napi
-          path: \@good-fences/
+          path: \@good-fences*.node
           if-no-files-found: error
   tests-napi-macos:
     runs-on: macos-latest
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: macos-napi
-          path: \@good-fences/
+          path: \@good-fences*.node
           if-no-files-found: error
   tests-napi-win:
     runs-on: windows-latest
@@ -83,11 +83,14 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: windows-napi
+          path: \@good-fences*.node
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v3
+        with:
+          name: js-files
           path: |
-            \@good-fences/
             index.d.ts
             index.js
-          if-no-files-found: error
   publish:
     runs-on: ubuntu-latest
     needs:
@@ -103,17 +106,18 @@ jobs:
       - name: pull win artifacts
         uses: actions/download-artifact@v3
         with:
-          path: artifacts
           name: windows-napi
       - name: pull linux artifacts
         uses: actions/download-artifact@v3
         with:
-          path: artifacts
           name: linux-napi
       - name: pull macos artifacts
         uses: actions/download-artifact@v3
         with:
           name: macos-napi
-          path: artifacts
+      - name: pull js files
+        uses: actions/download-artifact@v3
+        with:
+          name: js-files
       - name: display artifacts
         run: ls -R
