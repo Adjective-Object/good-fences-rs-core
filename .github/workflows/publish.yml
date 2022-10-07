@@ -51,11 +51,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs:
-      - tests-linux
-      - tests-win
       - build-napi-win
       - build-napi-linux
-      - tests-macos
       - build-napi-macos
     steps:
       - name: checkout
