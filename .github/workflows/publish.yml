@@ -3,46 +3,63 @@ on:
   push:
     branches:
       - 'main'
-    pull_request:
-      branches: [u/edgarivanv/enable-js-napi-access]
   workflow_dispatch:
 jobs:
-  build-linux:
+  build-napi-linux:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: install napi
-        run: yarn global add @napi-rs/cli
       - name: napi build
         run: yarn install && yarn build
       - uses: actions/upload-artifact@v3
         with:
           name: linux-napi
-          path: \@good-fences/*linux-*.node
+          path: ./*.node
           if-no-files-found: error
-  build-win:
+  build-napi-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: napi build
+        run: yarn install && yarn build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: macos-napi
+          path: ./*.node
+          if-no-files-found: error
+  build-napi-win:
     runs-on: windows-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: install napi
-        run: yarn global add @napi-rs/cli
       - name: napi build
         run: yarn install && yarn build
-      - name: run napi tests
-        run: yarn test
       - uses: actions/upload-artifact@v3
         with:
           name: windows-napi
+          path: ./*.node
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v3
+        with:
+          name: js-files
           path: |
-            \@good-fences/*win32-*.node
             index.d.ts
             index.js
           if-no-files-found: error
   publish:
     runs-on: ubuntu-latest
+    needs:
+      - tests-linux
+      - tests-win
+      - build-napi-win
+      - build-napi-linux
+      - tests-macos
+      - build-napi-macos
     steps:
+      - name: checkout
+        uses: actions/checkout@v3
       - name: pull win artifacts
         uses: actions/download-artifact@v3
         with:
@@ -51,6 +68,23 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: linux-napi
+      - name: pull macos artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-napi
+      - name: pull js files
+        uses: actions/download-artifact@v3
+        with:
+          name: js-files
       - name: display artifacts
-        run: ls -la @good-fences
-        
+        run: ls -R
+      - name: Publish
+        run: |
+          mkdir artifacts
+          cp *.node artifacts
+          yarn install
+          yarn artifacts
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+          npm publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
