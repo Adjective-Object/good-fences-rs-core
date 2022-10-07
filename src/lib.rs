@@ -14,9 +14,7 @@ mod path_utils;
 pub mod walk_dirs;
 
 #[napi]
-pub fn good_fences(
-    opts: GoodFencesOptions,
-) -> Vec<GoodFencesError> {
+pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     let start = Instant::now();
     let tsconfig_path = opts.project;
     let mut tsconfig = import_resolver::TsconfigPathsJson::from_path(tsconfig_path).unwrap();
