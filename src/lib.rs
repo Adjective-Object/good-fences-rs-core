@@ -14,23 +14,17 @@ mod path_utils;
 pub mod walk_dirs;
 
 #[napi]
-pub fn good_fences(
-    paths: Vec<String>,
-    project: String,
-    base_url: Option<String>,
-    err_output_path: Option<String>,
-) -> Vec<GoodFencesError> {
-    let output = err_output_path.unwrap_or("good-fences-violations.json".to_owned());
+pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     let start = Instant::now();
-    let tsconfig_path = project;
+    let tsconfig_path = opts.project;
     let mut tsconfig = import_resolver::TsconfigPathsJson::from_path(tsconfig_path).unwrap();
 
-    if base_url.is_some() {
-        tsconfig.compiler_options.base_url = base_url;
+    if opts.base_url.is_some() {
+        tsconfig.compiler_options.base_url = opts.base_url;
     }
     println!("beginning file walks");
 
-    let dirs_to_walk = &paths.iter().map(|x| x.as_str()).collect();
+    let dirs_to_walk = &opts.paths.iter().map(|x| x.as_str()).collect();
     let good_fences_runner = good_fences_runner::GoodFencesRunner::new(tsconfig, dirs_to_walk);
 
     println!("beginning fence evaluations");
@@ -62,9 +56,20 @@ pub fn good_fences(
         })
         .collect();
     // Write results to file
-    write_violations_as_json(violations, output);
+    if let Some(output) = opts.err_output_path {
+        write_violations_as_json(violations, output);
+    }
+
     println!("Elapsed time since start: {:?}", elapsed);
     errors
+}
+
+#[napi(object)]
+pub struct GoodFencesOptions {
+    pub paths: Vec<String>,
+    pub project: String,
+    pub base_url: Option<String>,
+    pub err_output_path: Option<String>,
 }
 
 #[napi]
