@@ -5,6 +5,8 @@ on:
       - 'main'
   workflow_dispatch:
 jobs:
+  tests:
+    uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
   check-versions:
     outputs:
       hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
@@ -24,7 +26,6 @@ jobs:
           git push --tags;
   publish:
     runs-on: ubuntu-latest
-    uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
     steps:
       - name: checkout
         uses: actions/checkout@v3
