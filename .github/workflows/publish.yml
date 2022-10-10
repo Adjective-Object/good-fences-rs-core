@@ -1,0 +1,60 @@
+name: publish artifacts
+on:
+  workflow_dispatch:
+jobs:
+  tests:
+    uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
+  check-versions:
+    outputs:
+      hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      - name: Check for new package versions
+        id: check-new-version-step
+        run: ./scripts/is-any-new-version.sh
+      - name: Tag release
+        if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
+        run: >
+          ./scripts/tag-versions.sh;
+          git push --tags;
+  publish:
+    if: needs.check-versions.outputs.hasversionbumps == 1
+    needs:
+      - check-versions
+      - tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: pull win artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: windows-napi
+      - name: pull linux artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: linux-napi
+      - name: pull macos artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-napi
+      - name: pull js files
+        uses: actions/download-artifact@v3
+        with:
+          name: js-files
+      - name: display artifacts
+        run: ls -R
+      - name: Publish
+        run: |
+          mkdir artifacts
+          cp *.node artifacts
+          yarn install
+          yarn artifacts
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+          npm publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

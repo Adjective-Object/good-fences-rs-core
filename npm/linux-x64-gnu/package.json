@@ -1,5 +1,5 @@
 {
-  "name": "@good-fences/api-linux-x64",
+  "name": "@good-fences/api-linux-x64-gnu",
   "version": "0.0.0",
   "os": [
     "linux"
@@ -7,9 +7,9 @@
   "cpu": [
     "x64"
   ],
-  "main": "good-fences-rs.linux-x64-gnu.node",
+  "main": "@good-fences.linux-x64-gnu.node",
   "files": [
-    "good-fences-rs.linux-x64-gnu.node"
+    "@good-fences.linux-x64-gnu.node"
   ],
   "license": "MIT",
   "engines": {

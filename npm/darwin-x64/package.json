@@ -7,9 +7,9 @@
   "cpu": [
     "x64"
   ],
-  "main": "good-fences-rs.darwin-x64.node",
+  "main": "@good-fences.darwin-x64.node",
   "files": [
-    "good-fences-rs.darwin-x64.node"
+    "@good-fences.darwin-x64.node"
   ],
   "license": "MIT",
   "engines": {
