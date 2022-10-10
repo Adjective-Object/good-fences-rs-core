@@ -5,55 +5,9 @@ on:
       - 'main'
   workflow_dispatch:
 jobs:
-  build-napi-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
-      - uses: actions/upload-artifact@v3
-        with:
-          name: linux-napi
-          path: ./*.node
-          if-no-files-found: error
-  build-napi-macos:
-    runs-on: macos-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
-      - uses: actions/upload-artifact@v3
-        with:
-          name: macos-napi
-          path: ./*.node
-          if-no-files-found: error
-  build-napi-win:
-    runs-on: windows-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
-      - uses: actions/upload-artifact@v3
-        with:
-          name: windows-napi
-          path: ./*.node
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v3
-        with:
-          name: js-files
-          path: |
-            index.d.ts
-            index.js
-          if-no-files-found: error
   publish:
     runs-on: ubuntu-latest
-    needs:
-      - build-napi-win
-      - build-napi-linux
-      - build-napi-macos
+    uses: Adjective-Object/good-fences-rs-core/.github/unittest.yml@main
     steps:
       - name: checkout
         uses: actions/checkout@v3
