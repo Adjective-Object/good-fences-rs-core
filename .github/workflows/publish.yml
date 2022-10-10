@@ -1,8 +1,5 @@
 name: publish artifacts
 on:
-  push:
-    branches:
-      - 'main'
   workflow_dispatch:
 jobs:
   tests:
