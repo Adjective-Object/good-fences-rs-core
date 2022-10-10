@@ -2,7 +2,7 @@ import test from 'ava'
 
 import {goodFences} from '../index.js'
 
-test('sum from native', (t) => {
+test('run tests/good_fences_integration through napi', (t) => {
   t.assert(
     goodFences({
       paths: ["tests/good_fences_integration/src"],
