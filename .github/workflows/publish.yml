@@ -25,6 +25,7 @@ jobs:
           ./scripts/tag-versions.sh;
           git push --tags;
   publish:
+    if: needs.check-versions.outputs.hasversionbumps == 1
     runs-on: ubuntu-latest
     steps:
       - name: checkout
