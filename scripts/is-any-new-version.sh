@@ -16,12 +16,7 @@ SCRIPTDIR=`dirname $0`
 ROOT=`realpath $SCRIPTDIR/..`
 
 source "$SCRIPTDIR/_isnewversion.sh"
-NPM_PUBLISHED_PACKAGES=(
-    "package.json" 
-    "npm/darwin-x64/package.json"
-    "npm/win32-x64-msvc/package.json"
-    "npm/linux-x64-gnu/package.json"
-)
+source "$SCRIPTDIR/_npm_published_packages.sh"
 
 ANY_NEW_VERSION=0
 
