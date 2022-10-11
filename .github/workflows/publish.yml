@@ -11,8 +11,13 @@ jobs:
     outputs:
       hasversionbumps: ${{ steps.cpv-main.outputs.changed == 'true' && steps.cpv-win.outputs.changed == 'true' && steps.cpv-darwin.outputs.changed == 'true' && steps.cpv-linux.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        experimental: [false]
     steps:
       - name: check darwin package version
+        
         id: cpv-darwin
         uses: EndBug/version-check@v1
         with:
