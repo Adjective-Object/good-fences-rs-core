@@ -15,17 +15,17 @@ jobs:
       - name: check main package version
         id: cpv-main
         uses: EndBug/version-check@v1
-      - name: check main package version
+      - name: check darwin package version
         id: cpv-darwin
         uses: EndBug/version-check@v1
         with:
           file-name: npm/darwin-x64/package.json
-      - name: check main package version
+      - name: check linux package version
         id: cpv-linux
         uses: EndBug/version-check@v1
         with:
           file-name: npm/linux-x64-gnu/package.json
-      - name: check main package version
+      - name: check windows package version
         id: cpv-win
         uses: EndBug/version-check@v1
         with:
