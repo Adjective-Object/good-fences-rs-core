@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Check for new package versions
         id: check-new-version-step
-        run: sh ./scripts/is-any-new-version.sh
+        run: bash ./scripts/is-any-new-version.sh
       - name: Tag release
         if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
         run: >
