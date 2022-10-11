@@ -9,37 +9,53 @@ jobs:
     uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
   check-versions:
     outputs:
-      hasversionbumps: ${{ steps.cpv-main.outputs.changed == 'true' && steps.cpv-win.outputs.changed == 'true' && steps.cpv-darwin.outputs.changed == 'true' && steps.cpv-linux.outputs.changed == 'true' }}
+      hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        experimental: [false]
     steps:
-      - name: check darwin package version
-        
-        id: cpv-darwin
-        uses: EndBug/version-check@v1
+      - name: Check out code
+        uses: actions/checkout@v3
         with:
-          file-name: npm/darwin-x64/package.json
-      - name: check linux package version
-        id: cpv-linux
-        uses: EndBug/version-check@v1
-        with:
-          file-name: npm/linux-x64-gnu/package.json
-      - name: check windows package version
-        id: cpv-win
-        uses: EndBug/version-check@v1
-        with:
-          file-name: npm/win32-x64-msvc/package.json
-      - name: check main package version
-        id: cpv-main
-        uses: EndBug/version-check@v1
+          fetch-depth: 2
+      - name: Check for new package versions
+        id: check-new-version-step
+        run: ./scripts/is-any-new-version.sh
       - name: Tag release
         if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
         run: >
           ./scripts/tag-versions.sh;
           git push --tags;
+  # check-versions:
+  #   outputs:
+  #     hasversionbumps: ${{ steps.cpv-main.outputs.changed == 'true' && steps.cpv-win.outputs.changed == 'true' && steps.cpv-darwin.outputs.changed == 'true' && steps.cpv-linux.outputs.changed == 'true' }}
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     fail-fast: true
+  #     matrix:
+  #       experimental: [false]
+  #   steps:
+  #     - name: check darwin package version
+  #       id: cpv-darwin
+  #       uses: EndBug/version-check@v1
+  #       with:
+  #         file-name: npm/darwin-x64/package.json
+  #     - name: check linux package version
+  #       id: cpv-linux
+  #       uses: EndBug/version-check@v1
+  #       with:
+  #         file-name: npm/linux-x64-gnu/package.json
+  #     - name: check windows package version
+  #       id: cpv-win
+  #       uses: EndBug/version-check@v1
+  #       with:
+  #         file-name: npm/win32-x64-msvc/package.json
+  #     - name: check main package version
+  #       id: cpv-main
+  #       uses: EndBug/version-check@v1
+  #     - name: Tag release
+  #       if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
+  #       run: >
+  #         ./scripts/tag-versions.sh;
+  #         git push --tags;
   publish:
     if: needs.check-versions.outputs.hasversionbumps == 1
     needs:
