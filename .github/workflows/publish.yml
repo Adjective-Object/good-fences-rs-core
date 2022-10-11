@@ -59,7 +59,7 @@ jobs:
   publish:
     if: needs.check-versions.outputs.hasversionbumps == 1
     needs:
-      - tests
+      # - tests
       - check-versions
     runs-on: ubuntu-latest
     steps:
