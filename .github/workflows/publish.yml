@@ -5,8 +5,8 @@ on:
       - main
   workflow_dispatch:
 jobs:
-  tests:
-    uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
+  # tests:
+  #   uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
   check-versions:
     outputs:
       hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
