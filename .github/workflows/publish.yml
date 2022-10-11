@@ -12,9 +12,6 @@ jobs:
       hasversionbumps: ${{ steps.cpv-main.outputs.changed == 'true' && steps.cpv-win.outputs.changed == 'true' && steps.cpv-darwin.outputs.changed == 'true' && steps.cpv-linux.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: check main package version
-        id: cpv-main
-        uses: EndBug/version-check@v1
       - name: check darwin package version
         id: cpv-darwin
         uses: EndBug/version-check@v1
@@ -30,6 +27,9 @@ jobs:
         uses: EndBug/version-check@v1
         with:
           file-name: npm/win32-x64-msvc/package.json
+      - name: check main package version
+        id: cpv-main
+        uses: EndBug/version-check@v1
       - name: Tag release
         if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
         run: >
