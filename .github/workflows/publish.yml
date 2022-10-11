@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 2
       - name: Check for new package versions
         id: check-new-version-step
         run: sh ./scripts/is-any-new-version.sh
