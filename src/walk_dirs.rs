@@ -45,9 +45,12 @@ lazy_static! {
     static ref WORKING_DIR_PATH: PathBuf = current_dir().unwrap();
 }
 
-pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
+pub fn discover_fences_and_files(
+    start_path: &str,
+    ignore_external_fences: bool,
+) -> Vec<WalkFileData> {
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
-        |read_dir_state, children| {
+        move |read_dir_state, children| {
             // Custom filter -- retain only directories and fence.json files
             children.retain(|dir_entry_result| {
                 dir_entry_result
@@ -55,7 +58,11 @@ pub fn discover_fences_and_files(start_path: &str) -> Vec<WalkFileData> {
                     .map(|dir_entry| {
                         dir_entry.file_type.is_dir()
                             || match dir_entry.file_name.to_str() {
-                                Some(file_name_str) => should_retain_file(file_name_str),
+                                Some(file_name_str) => {
+                                    !(ignore_external_fences.clone()
+                                        && file_name_str == "node_modules")
+                                        && should_retain_file(file_name_str)
+                                }
                                 None => false,
                             }
                     })
@@ -222,7 +229,8 @@ mod test {
 
     #[test]
     fn test_simple_contains_root_fence() {
-        let discovered: Vec<WalkFileData> = discover_fences_and_files("tests/walk_dir_simple");
+        let discovered: Vec<WalkFileData> =
+            discover_fences_and_files("tests/walk_dir_simple", false);
 
         let expected_root_fence = Fence {
             fence_path: "tests/walk_dir_simple/fence.json".to_owned(),
@@ -251,7 +259,7 @@ mod test {
     #[test]
     fn test_index_file() {
         let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("./tests/comments_panel_test");
+            discover_fences_and_files("./tests/comments_panel_test", false);
 
         let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
         assert!(
@@ -271,7 +279,8 @@ mod test {
 
     #[test]
     fn test_simple_contains_subsubdir_fence() {
-        let discovered: Vec<WalkFileData> = discover_fences_and_files("tests/walk_dir_simple");
+        let discovered: Vec<WalkFileData> =
+            discover_fences_and_files("tests/walk_dir_simple", false);
 
         let expected_subsubdir_fence = Fence {
             fence_path: "tests/walk_dir_simple/subdir/subsubdir/fence.json".to_owned(),
@@ -296,7 +305,8 @@ mod test {
 
     #[test]
     fn test_simple_contains_root_file_imports() {
-        let discovered: Vec<WalkFileData> = discover_fences_and_files("tests/walk_dir_simple");
+        let discovered: Vec<WalkFileData> =
+            discover_fences_and_files("tests/walk_dir_simple", false);
 
         let expected_root_ts_file = SourceFile {
             source_file_path: "tests/walk_dir_simple/rootFile.ts".to_owned(),
@@ -319,7 +329,8 @@ mod test {
 
     #[test]
     fn test_simple_contains_sub_dir_file_imports() {
-        let discovered: Vec<WalkFileData> = discover_fences_and_files("tests/walk_dir_simple");
+        let discovered: Vec<WalkFileData> =
+            discover_fences_and_files("tests/walk_dir_simple", false);
 
         let expected_subdir_ts_file = SourceFile {
             source_file_path: "tests/walk_dir_simple/subdir/subDirFile.ts".to_owned(),
@@ -343,7 +354,8 @@ mod test {
 
     #[test]
     fn test_simple_contains_sub_sub_dir_file_imports() {
-        let discovered: Vec<WalkFileData> = discover_fences_and_files("tests/walk_dir_simple");
+        let discovered: Vec<WalkFileData> =
+            discover_fences_and_files("tests/walk_dir_simple", false);
 
         let expected_subdir_ts_file = SourceFile {
             source_file_path: "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts".to_owned(),

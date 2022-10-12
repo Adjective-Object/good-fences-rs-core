@@ -25,7 +25,11 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     println!("beginning file walks");
 
     let dirs_to_walk = &opts.paths.iter().map(|x| x.as_str()).collect();
-    let good_fences_runner = good_fences_runner::GoodFencesRunner::new(tsconfig, dirs_to_walk);
+    let good_fences_runner = good_fences_runner::GoodFencesRunner::new(
+        tsconfig,
+        dirs_to_walk,
+        opts.ignore_external_fences,
+    );
 
     println!("beginning fence evaluations");
     let violations = good_fences_runner.find_import_violations();
@@ -70,6 +74,7 @@ pub struct GoodFencesOptions {
     pub project: String,
     pub base_url: Option<String>,
     pub err_output_path: Option<String>,
+    pub ignore_external_fences: bool,
 }
 
 #[napi]

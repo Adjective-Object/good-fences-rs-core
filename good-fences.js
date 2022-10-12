@@ -12,6 +12,7 @@
      .option('-p, --project <string> ', 'tsconfig.json file path, defaults `./tsconfig.json`')
      .option('-o, --output <string>', 'path to write found violations')
      .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument")
+     .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
      .arguments('<path> [morePaths...]', 'Dirs to look for fence and source files')
  program.parse(process.argv);
  
@@ -22,7 +23,8 @@
     paths: args,
     project: project,
     baseUrl: options.baseUrl,
-    errOutputPath: options.errOutputPath
+    errOutputPath: options.errOutputPath,
+    ignoreExternalFences: options.ignoreExternalFences
 });
  result.forEach(r => {
      console.error(r.detailedMessage);
