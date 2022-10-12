@@ -8,6 +8,8 @@ jobs:
   tests:
     uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@u/edgarivanv/fix-publish-yml
   check-versions:
+    needs:
+      - tests
     outputs:
       hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
     runs-on: ubuntu-latest
