@@ -4,7 +4,7 @@ use crate::fence::Fence;
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
 use crate::import_resolver::TsconfigPathsJson;
-use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
+use crate::walk_dirs::{discover_fences_and_files, ExternalFences, SourceFile, WalkFileData};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -27,11 +27,12 @@ impl GoodFencesRunner {
     pub fn new(
         tsconfig_paths_json: TsconfigPathsJson,
         directory_paths_to_walk: &Vec<&str>,
+        external_fences: ExternalFences,
     ) -> GoodFencesRunner {
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
-            .map(|path| discover_fences_and_files(path))
+            .map(|path| discover_fences_and_files(path, external_fences))
             .flatten();
 
         let (fences_wrapped, sources_wrapped): (Vec<WalkFileData>, Vec<WalkFileData>) =
@@ -195,7 +196,7 @@ mod test {
     use crate::fence_collection::FenceCollection;
     use crate::good_fences_runner::{GoodFencesRunner, UndefinedTagReference};
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
-    use crate::walk_dirs::SourceFile;
+    use crate::walk_dirs::{ExternalFences, SourceFile};
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
     use text_diff::print_diff;
@@ -230,6 +231,7 @@ mod test {
             TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json".to_string())
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
+            ExternalFences::Ignore,
         );
 
         assert_eq!(
@@ -434,6 +436,7 @@ mod test {
             TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json".to_string())
                 .unwrap(),
             &vec!["tests/good_fences_integration"],
+            ExternalFences::Ignore,
         );
 
         let mut violations = good_fences_runner.find_import_violations();
@@ -505,6 +508,7 @@ mod test {
             TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json".to_string())
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
+            ExternalFences::Ignore,
         );
 
         let orphans = good_fences_runner.find_undefined_tags();
