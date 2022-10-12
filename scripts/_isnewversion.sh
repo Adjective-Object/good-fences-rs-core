@@ -11,7 +11,7 @@ function isNewVersion() {
         echo "failed to parse git ref HEAD" >&2
         exit 1
     fi
-    _PRIOR_PKGJSON=$(git show HEAD~1:"$_PKGJSON_PATH" | jq .version)
+    _PRIOR_PKGJSON=$(git show HEAD^1:"$_PKGJSON_PATH" | jq .version)
     if [[ "$_PRIOR_PKGJSON" == "" ]]; then
         echo "failed to parse git ref HEAD" >&2
         exit 1
