@@ -21,7 +21,7 @@
  
  const result = goodFences({
     paths: args,
-    project: project,
+    project: options.project,
     baseUrl: options.baseUrl,
     errOutputPath: options.errOutputPath,
     ignoreExternalFences: options.ignoreExternalFences ? 1 : 0
