@@ -20,10 +20,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: cargo test
-        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
+      - name: cargo test
+        run: cargo test --release
       - name: run napi tests
         run: yarn test
       - name: upload-artifacts
@@ -45,10 +45,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: cargo test
-        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
+      - name: cargo test
+        run: cargo test --release
       - name: run napi tests
         run: yarn test
       - name: upload artifacts
@@ -62,10 +62,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
-      - name: cargo test
-        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
+      - name: cargo test
+        run: cargo test --release
       - name: run napi tests
         run: yarn test
       - name: upload artifacts
