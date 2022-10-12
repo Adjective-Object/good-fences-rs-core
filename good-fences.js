@@ -18,7 +18,12 @@
  const options = program.opts();
  const args = program.args;
  
- const result = goodFences(args, options.project, options.baseUrl, options.output);
+ const result = goodFences({
+    paths: args,
+    project: project,
+    baseUrl: options.baseUrl,
+    errOutputPath: options.errOutputPath
+});
  result.forEach(r => {
      console.error(r.detailedMessage);
  });
