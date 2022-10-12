@@ -21,7 +21,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
       - name: cargo test
-        run: cargo test
+        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
@@ -46,7 +46,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
       - name: cargo test
-        run: cargo test
+        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
@@ -63,7 +63,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
       - name: cargo test
-        run: cargo test
+        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
