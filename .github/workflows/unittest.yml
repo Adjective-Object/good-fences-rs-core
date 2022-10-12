@@ -20,46 +20,57 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      - name: napi build
+        run: yarn install && yarn build
       - name: cargo test
-        run: cargo test
+        run: cargo test --release
+      - name: run napi tests
+        run: yarn test
+      - name: upload-artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-napi
+          path: ./*.node
+          if-no-files-found: error
+      - name: upload js files
+        uses: actions/upload-artifact@v3
+        with:
+          name: js-files
+          if-no-files-found: error
+          path: |
+            index.js
+            index.d.ts
   tests-macos:
     runs-on: macos-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      - name: napi build
+        run: yarn install && yarn build
       - name: cargo test
-        run: cargo test
+        run: cargo test --release
+      - name: run napi tests
+        run: yarn test
+      - name: upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-napi
+          path: ./*.node
+          if-no-files-found: error
   tests-win:
     runs-on: windows-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      - name: napi build
+        run: yarn install && yarn build
       - name: cargo test
-        run: cargo test
-  tests-napi-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
+        run: cargo test --release
       - name: run napi tests
         run: yarn test
-  tests-napi-macos:
-    runs-on: macos-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
-      - name: run napi tests
-        run: yarn test
-  tests-napi-win:
-    runs-on: windows-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
-      - name: run napi tests
-        run: yarn test
+      - name: upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-napi
+          path: ./*.node
+          if-no-files-found: error

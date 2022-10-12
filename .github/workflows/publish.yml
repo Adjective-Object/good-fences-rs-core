@@ -1,10 +1,15 @@
 name: publish artifacts
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 jobs:
   tests:
     uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
   check-versions:
+    needs:
+      - tests
     outputs:
       hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
     runs-on: ubuntu-latest
@@ -15,7 +20,7 @@ jobs:
           fetch-depth: 2
       - name: Check for new package versions
         id: check-new-version-step
-        run: ./scripts/is-any-new-version.sh
+        run: bash ./scripts/is-any-new-version.sh
       - name: Tag release
         if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
         run: >
@@ -24,8 +29,8 @@ jobs:
   publish:
     if: needs.check-versions.outputs.hasversionbumps == 1
     needs:
-      - check-versions
       - tests
+      - check-versions
     runs-on: ubuntu-latest
     steps:
       - name: checkout
@@ -48,12 +53,15 @@ jobs:
           name: js-files
       - name: display artifacts
         run: ls -R
-      - name: Publish
+      - name: install deps
+        run: yarn install
+      - name: copy artifacts
         run: |
           mkdir artifacts
           cp *.node artifacts
-          yarn install
           yarn artifacts
+      - name: Publish
+        run: |
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           npm publish --access public
         env:
