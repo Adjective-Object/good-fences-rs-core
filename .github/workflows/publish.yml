@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 jobs:
   tests:
-    uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@u/edgarivanv/fix-publish-yml
+    uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
   check-versions:
     needs:
       - tests
