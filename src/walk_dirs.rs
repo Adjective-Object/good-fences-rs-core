@@ -2,6 +2,7 @@ use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
 use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
+use napi::bindgen_prelude::ToNapiValue;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
@@ -22,6 +23,13 @@ pub struct SourceFile {
     // ref to the strings of tags that apply to this file
     pub tags: HashSet<String>,
     pub imports: HashMap<String, Option<HashSet<String>>>,
+}
+
+#[derive(Eq, Debug, PartialEq)]
+#[napi_derive::napi]
+pub enum ExternalFences {
+    Ignore,
+    Include,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -47,7 +55,7 @@ lazy_static! {
 
 pub fn discover_fences_and_files(
     start_path: &str,
-    ignore_external_fences: bool,
+    ignore_external_fences: ExternalFences,
 ) -> Vec<WalkFileData> {
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         move |read_dir_state, children| {
@@ -59,7 +67,7 @@ pub fn discover_fences_and_files(
                         dir_entry.file_type.is_dir()
                             || match dir_entry.file_name.to_str() {
                                 Some(file_name_str) => {
-                                    !(ignore_external_fences.clone()
+                                    !(ignore_external_fences == ExternalFences::Ignore
                                         && file_name_str == "node_modules")
                                         && should_retain_file(file_name_str)
                                 }
@@ -229,8 +237,10 @@ mod test {
 
     #[test]
     fn test_simple_contains_root_fence() {
-        let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("tests/walk_dir_simple", false);
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+        );
 
         let expected_root_fence = Fence {
             fence_path: "tests/walk_dir_simple/fence.json".to_owned(),
@@ -258,8 +268,10 @@ mod test {
 
     #[test]
     fn test_index_file() {
-        let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("./tests/comments_panel_test", false);
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "./tests/comments_panel_test",
+            crate::walk_dirs::ExternalFences::Ignore,
+        );
 
         let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
         assert!(
@@ -279,8 +291,10 @@ mod test {
 
     #[test]
     fn test_simple_contains_subsubdir_fence() {
-        let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("tests/walk_dir_simple", false);
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+        );
 
         let expected_subsubdir_fence = Fence {
             fence_path: "tests/walk_dir_simple/subdir/subsubdir/fence.json".to_owned(),
@@ -305,8 +319,10 @@ mod test {
 
     #[test]
     fn test_simple_contains_root_file_imports() {
-        let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("tests/walk_dir_simple", false);
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+        );
 
         let expected_root_ts_file = SourceFile {
             source_file_path: "tests/walk_dir_simple/rootFile.ts".to_owned(),
@@ -329,8 +345,10 @@ mod test {
 
     #[test]
     fn test_simple_contains_sub_dir_file_imports() {
-        let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("tests/walk_dir_simple", false);
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+        );
 
         let expected_subdir_ts_file = SourceFile {
             source_file_path: "tests/walk_dir_simple/subdir/subDirFile.ts".to_owned(),
@@ -354,8 +372,10 @@ mod test {
 
     #[test]
     fn test_simple_contains_sub_sub_dir_file_imports() {
-        let discovered: Vec<WalkFileData> =
-            discover_fences_and_files("tests/walk_dir_simple", false);
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+        );
 
         let expected_subdir_ts_file = SourceFile {
             source_file_path: "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts".to_owned(),

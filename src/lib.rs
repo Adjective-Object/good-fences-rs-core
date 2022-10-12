@@ -1,6 +1,7 @@
 use napi_derive::napi;
 use serde::Serialize;
 use std::time::Instant;
+use walk_dirs::ExternalFences;
 
 pub mod error;
 pub mod evaluate_fences;
@@ -28,7 +29,10 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     let good_fences_runner = good_fences_runner::GoodFencesRunner::new(
         tsconfig,
         dirs_to_walk,
-        opts.ignore_external_fences,
+        match opts.ignore_external_fences {
+            Some(ief) => ief,
+            None => ExternalFences::Include,
+        },
     );
 
     println!("beginning fence evaluations");
@@ -74,7 +78,7 @@ pub struct GoodFencesOptions {
     pub project: String,
     pub base_url: Option<String>,
     pub err_output_path: Option<String>,
-    pub ignore_external_fences: bool,
+    pub ignore_external_fences: Option<ExternalFences>,
 }
 
 #[napi]

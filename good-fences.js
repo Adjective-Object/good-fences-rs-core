@@ -24,7 +24,7 @@
     project: project,
     baseUrl: options.baseUrl,
     errOutputPath: options.errOutputPath,
-    ignoreExternalFences: options.ignoreExternalFences
+    ignoreExternalFences: options.ignoreExternalFences ? 1 : 0
 });
  result.forEach(r => {
      console.error(r.detailedMessage);
