@@ -33,6 +33,7 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
             Some(ief) => ief,
             None => ExternalFences::Include,
         },
+        opts.ignored_dirs,
     );
 
     println!("beginning fence evaluations");
@@ -79,6 +80,7 @@ pub struct GoodFencesOptions {
     pub base_url: Option<String>,
     pub err_output_path: Option<String>,
     pub ignore_external_fences: Option<ExternalFences>,
+    pub ignored_dirs: Vec<String>,
 }
 
 #[napi]

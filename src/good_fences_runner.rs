@@ -28,11 +28,12 @@ impl GoodFencesRunner {
         tsconfig_paths_json: TsconfigPathsJson,
         directory_paths_to_walk: &Vec<&str>,
         external_fences: ExternalFences,
+        ignored_dirs: Vec<String>,
     ) -> GoodFencesRunner {
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
-            .map(|path| discover_fences_and_files(path, external_fences))
+            .map(|path| discover_fences_and_files(path, external_fences, ignored_dirs.clone()))
             .flatten();
 
         let (fences_wrapped, sources_wrapped): (Vec<WalkFileData>, Vec<WalkFileData>) =
@@ -232,6 +233,7 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
+            Vec::new(),
         );
 
         assert_eq!(
@@ -437,6 +439,7 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration"],
             ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let mut violations = good_fences_runner.find_import_violations();
@@ -509,6 +512,7 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let orphans = good_fences_runner.find_undefined_tags();

@@ -56,6 +56,7 @@ lazy_static! {
 pub fn discover_fences_and_files(
     start_path: &str,
     ignore_external_fences: ExternalFences,
+    ignored_dirs: Vec<String>,
 ) -> Vec<WalkFileData> {
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         move |read_dir_state, children| {
@@ -63,16 +64,17 @@ pub fn discover_fences_and_files(
             children.retain(|dir_entry_result| {
                 dir_entry_result
                     .as_ref()
-                    .map(|dir_entry| {
-                        dir_entry.file_type.is_dir()
-                            || match dir_entry.file_name.to_str() {
-                                Some(file_name_str) => {
-                                    !(ignore_external_fences == ExternalFences::Ignore
-                                        && file_name_str == "node_modules")
-                                        && should_retain_file(file_name_str)
-                                }
-                                None => false,
+                    .map(|dir_entry| match dir_entry.file_name.to_str() {
+                        Some(file_name_str) => {
+                            if dir_entry.file_type.is_dir() {
+                                return !(ignore_external_fences == ExternalFences::Ignore
+                                    && file_name_str == "node_modules")
+                                    && !ignored_dirs.contains(&file_name_str.to_string());
+                            } else {
+                                return should_retain_file(file_name_str);
                             }
+                        }
+                        None => todo!(),
                     })
                     .unwrap_or(false)
             });
@@ -240,6 +242,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_root_fence = Fence {
@@ -271,6 +274,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "./tests/comments_panel_test",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
@@ -294,6 +298,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_subsubdir_fence = Fence {
@@ -322,6 +327,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_root_ts_file = SourceFile {
@@ -348,6 +354,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_subdir_ts_file = SourceFile {
@@ -375,6 +382,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_subdir_ts_file = SourceFile {

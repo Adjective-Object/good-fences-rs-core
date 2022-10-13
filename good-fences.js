@@ -13,6 +13,7 @@
      .option('-o, --output <string>', 'path to write found violations')
      .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument")
      .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
+     .option('--ignoreDirs', 'Ignore matching dirs (e.g. `--ignoreDirs lib` will ignore all source and fence files in all subdirs with name `lib`', [])
      .arguments('<path> [morePaths...]', 'Dirs to look for fence and source files')
  program.parse(process.argv);
  
