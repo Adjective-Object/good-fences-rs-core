@@ -95,6 +95,15 @@ impl GoodFencesRunner {
             Some(dirs) => dirs,
             None => vec![],
         };
+
+        let ignored_dirs_regexs: Vec<regex::Regex> = ignored_dirs
+            .iter()
+            .map(|id| {
+                regex::Regex::new(&id.as_str())
+                    .expect(&format!("unable to create regex from --ignoredDirs {}", &id).as_str())
+            })
+            .collect();
+
         let violation_results = self
             .source_files
             .par_iter()
@@ -104,7 +113,7 @@ impl GoodFencesRunner {
                     &self.source_files,
                     &self.tsconfig_paths_json,
                     &source_file,
-                    ignored_dirs.clone(),
+                    Some(&ignored_dirs_regexs),
                 )
             })
             .collect::<Vec<_>>();
