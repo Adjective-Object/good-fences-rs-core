@@ -13,13 +13,13 @@
      .option('-o, --output <string>', 'path to write found violations')
      .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument")
      .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
-     .option('--ignoredDirs', 'Ignore matching dirs (e.g. `--ignoreDirs lib` will ignore all source and fence files in all subdirs with name `lib`', [])
+     .option('--ignoredDirs [paths...]', 'Excludes matching dirs from fence evaluation (e.g. `--ignoreDirs lib` will not evaluate source files in all dirs named `lib`', [])
      .arguments('<path> [morePaths...]', 'Dirs to look for fence and source files')
  program.parse(process.argv);
  
- const options = program.opts();
- const args = program.args;
- 
+const options = program.opts();
+const args = program.args;
+
  const result = goodFences({
     paths: args,
     project: options.project,

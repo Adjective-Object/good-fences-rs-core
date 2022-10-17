@@ -3,6 +3,7 @@ use crate::get_imports::get_imports_map_from_file;
 use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
 use napi::bindgen_prelude::ToNapiValue;
+use path_slash::PathExt;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
@@ -28,8 +29,8 @@ pub struct SourceFile {
 #[derive(Eq, Debug, PartialEq)]
 #[napi_derive::napi]
 pub enum ExternalFences {
-    Ignore,
-    Include,
+    Include = 0,
+    Ignore = 1,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -56,7 +57,6 @@ lazy_static! {
 pub fn discover_fences_and_files(
     start_path: &str,
     ignore_external_fences: ExternalFences,
-    ignored_dirs: Vec<String>,
 ) -> Vec<WalkFileData> {
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         move |read_dir_state, children| {
@@ -67,9 +67,11 @@ pub fn discover_fences_and_files(
                     .map(|dir_entry| match dir_entry.file_name.to_str() {
                         Some(file_name_str) => {
                             if dir_entry.file_type.is_dir() {
-                                return !(ignore_external_fences == ExternalFences::Ignore
-                                    && file_name_str == "node_modules")
-                                    && !ignored_dirs.contains(&file_name_str.to_string());
+                                if let Some(slashed) = dir_entry.path().to_slash() {
+                                    return !(ignore_external_fences == ExternalFences::Ignore
+                                        && slashed.to_string().ends_with("/node_modules"));
+                                }
+                                return true;
                             } else {
                                 return should_retain_file(file_name_str);
                             }
@@ -242,7 +244,6 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let expected_root_fence = Fence {
@@ -274,7 +275,6 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "./tests/comments_panel_test",
             crate::walk_dirs::ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
@@ -298,7 +298,6 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let expected_subsubdir_fence = Fence {
@@ -327,7 +326,6 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let expected_root_ts_file = SourceFile {
@@ -354,7 +352,6 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let expected_subdir_ts_file = SourceFile {
@@ -382,7 +379,6 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let expected_subdir_ts_file = SourceFile {

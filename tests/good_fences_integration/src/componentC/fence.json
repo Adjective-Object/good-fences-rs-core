@@ -1,0 +1,9 @@
+{
+    "tags": ["tagC"],
+    "exports": [
+        {
+            "modules": "helperC1",
+            "accessibleTo": ["tagA"]
+        }
+    ]
+}

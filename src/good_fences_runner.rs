@@ -28,12 +28,11 @@ impl GoodFencesRunner {
         tsconfig_paths_json: TsconfigPathsJson,
         directory_paths_to_walk: &Vec<&str>,
         external_fences: ExternalFences,
-        ignored_dirs: Vec<String>,
     ) -> GoodFencesRunner {
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
-            .map(|path| discover_fences_and_files(path, external_fences, ignored_dirs.clone()))
+            .map(|path| discover_fences_and_files(path, external_fences))
             .flatten();
 
         let (fences_wrapped, sources_wrapped): (Vec<WalkFileData>, Vec<WalkFileData>) =
@@ -89,8 +88,13 @@ impl GoodFencesRunner {
 
     pub fn find_import_violations<'a>(
         &'a self,
+        ignored_dirs: Option<Vec<String>>,
     ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
         let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
+        let ignored_dirs = match ignored_dirs {
+            Some(dirs) => dirs,
+            None => vec![],
+        };
         let violation_results = self
             .source_files
             .par_iter()
@@ -100,6 +104,7 @@ impl GoodFencesRunner {
                     &self.source_files,
                     &self.tsconfig_paths_json,
                     &source_file,
+                    ignored_dirs.clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -233,7 +238,6 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
-            Vec::new(),
         );
 
         assert_eq!(
@@ -439,10 +443,9 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration"],
             ExternalFences::Ignore,
-            Vec::new(),
         );
 
-        let mut violations = good_fences_runner.find_import_violations();
+        let mut violations = good_fences_runner.find_import_violations(Some(Vec::new()));
         violations.sort_by(compare_violations);
 
         let rule = ExportRule {
@@ -512,7 +515,6 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
-            Vec::new(),
         );
 
         let orphans = good_fences_runner.find_undefined_tags();

@@ -68,8 +68,19 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     source_files: &HashMap<String, SourceFile>,
     tsconfig_paths_json: &TsconfigPathsJson,
     source_file: &'sourcefilelifetime SourceFile,
+    ignored_dirs: Vec<String>,
 ) -> Result<Option<Vec<ImportRuleViolation<'fencecollectionlifetime, 'sourcefilelifetime>>>, String>
 {
+    match ignored_dirs.iter().find(|id| {
+        regex::Regex::new(&id.as_str())
+            .expect("unable to match --ignoredDirs")
+            .is_match(&source_file.source_file_path.as_str())
+    }) {
+        Some(_) => {
+            return Ok(None);
+        }
+        None => {}
+    }
     let mut violations = Vec::<ImportRuleViolation>::new();
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
         fence_collection.get_fences_for_path(&PathBuf::from(source_file.source_file_path.clone()));
@@ -384,6 +395,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(
@@ -421,6 +433,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(
@@ -458,6 +471,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(
@@ -495,6 +509,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(
@@ -538,6 +553,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(violations, Ok(None));
@@ -568,6 +584,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         let d = ExportRule {
@@ -615,6 +632,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         let d = ExportRule {
@@ -668,6 +686,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(violations, Ok(None));
@@ -689,6 +708,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(
@@ -722,6 +742,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(violations, Ok(None));
@@ -748,6 +769,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Vec::new(),
         );
 
         let d = DependencyRule {
@@ -799,6 +821,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(violations, Ok(None));
@@ -833,6 +856,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Vec::new(),
         );
 
         let r = DependencyRule {
@@ -888,6 +912,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Vec::new(),
         );
 
         assert_eq!(violations, Ok(None));

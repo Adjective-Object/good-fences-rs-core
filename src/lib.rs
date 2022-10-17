@@ -18,7 +18,8 @@ pub mod walk_dirs;
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     let start = Instant::now();
     let tsconfig_path = opts.project;
-    let mut tsconfig = import_resolver::TsconfigPathsJson::from_path(tsconfig_path).unwrap();
+    let mut tsconfig = import_resolver::TsconfigPathsJson::from_path(tsconfig_path)
+        .expect("Unable to find --project path");
 
     if opts.base_url.is_some() {
         tsconfig.compiler_options.base_url = opts.base_url;
@@ -33,11 +34,10 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
             Some(ief) => ief,
             None => ExternalFences::Include,
         },
-        opts.ignored_dirs,
     );
 
     println!("beginning fence evaluations");
-    let violations = good_fences_runner.find_import_violations();
+    let violations = good_fences_runner.find_import_violations(opts.ignored_dirs);
     let elapsed = start.elapsed();
 
     // Print results and statistics
@@ -80,7 +80,7 @@ pub struct GoodFencesOptions {
     pub base_url: Option<String>,
     pub err_output_path: Option<String>,
     pub ignore_external_fences: Option<ExternalFences>,
-    pub ignored_dirs: Vec<String>,
+    pub ignored_dirs: Option<Vec<String>>,
 }
 
 #[napi]
