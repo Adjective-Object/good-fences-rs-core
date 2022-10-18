@@ -90,6 +90,7 @@ impl GoodFencesRunner {
         &'a self,
         ignored_dirs: Option<Vec<String>>,
     ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
+        println!("Evaluating {} files", self.source_files.keys().len());
         let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
         let ignored_dirs = match ignored_dirs {
             Some(dirs) => dirs,
