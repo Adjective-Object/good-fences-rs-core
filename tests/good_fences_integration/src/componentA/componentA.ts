@@ -1,4 +1,4 @@
-import componentB from '../componentB/componentB';
+import componentB from '../componentB/componentB'; // INVALID IMPORT
 import helperA1 from './helperA1';
 import helperA2 from './helperA2';
 import {some, other, stuff} from './helperA1';

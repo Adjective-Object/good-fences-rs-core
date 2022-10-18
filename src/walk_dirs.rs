@@ -3,6 +3,7 @@ use crate::get_imports::get_imports_map_from_file;
 use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
 use napi::bindgen_prelude::ToNapiValue;
+use path_slash::PathExt;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
@@ -28,8 +29,8 @@ pub struct SourceFile {
 #[derive(Eq, Debug, PartialEq)]
 #[napi_derive::napi]
 pub enum ExternalFences {
-    Ignore,
-    Include,
+    Include = 0,
+    Ignore = 1,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -63,16 +64,19 @@ pub fn discover_fences_and_files(
             children.retain(|dir_entry_result| {
                 dir_entry_result
                     .as_ref()
-                    .map(|dir_entry| {
-                        dir_entry.file_type.is_dir()
-                            || match dir_entry.file_name.to_str() {
-                                Some(file_name_str) => {
-                                    !(ignore_external_fences == ExternalFences::Ignore
-                                        && file_name_str == "node_modules")
-                                        && should_retain_file(file_name_str)
+                    .map(|dir_entry| match dir_entry.file_name.to_str() {
+                        Some(file_name_str) => {
+                            if dir_entry.file_type.is_dir() {
+                                if let Some(slashed) = dir_entry.path().to_slash() {
+                                    return !(ignore_external_fences == ExternalFences::Ignore
+                                        && slashed.to_string().ends_with("/node_modules"));
                                 }
-                                None => false,
+                                return true;
+                            } else {
+                                return should_retain_file(file_name_str);
                             }
+                        }
+                        None => todo!(),
                     })
                     .unwrap_or(false)
             });

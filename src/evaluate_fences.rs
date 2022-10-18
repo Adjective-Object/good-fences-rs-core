@@ -68,8 +68,15 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     source_files: &HashMap<String, SourceFile>,
     tsconfig_paths_json: &TsconfigPathsJson,
     source_file: &'sourcefilelifetime SourceFile,
+    ignored_dirs: Option<&Vec<regex::Regex>>,
 ) -> Result<Option<Vec<ImportRuleViolation<'fencecollectionlifetime, 'sourcefilelifetime>>>, String>
 {
+    for reg in ignored_dirs.unwrap_or(&Vec::new()) {
+        if reg.is_match(&source_file.source_file_path.as_str()) {
+            return Ok(None);
+        }
+    }
+
     let mut violations = Vec::<ImportRuleViolation>::new();
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
         fence_collection.get_fences_for_path(&PathBuf::from(source_file.source_file_path.clone()));
@@ -384,6 +391,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -421,6 +429,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -458,6 +467,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -495,6 +505,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -538,6 +549,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -568,6 +580,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         let d = ExportRule {
@@ -615,6 +628,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         let d = ExportRule {
@@ -668,6 +682,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -689,6 +704,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -722,6 +738,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -748,6 +765,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         let d = DependencyRule {
@@ -799,6 +817,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -833,6 +852,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         let r = DependencyRule {
@@ -888,6 +908,7 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));

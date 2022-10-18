@@ -1,0 +1,6 @@
+{
+    "tags": ["tagB"],
+    "dependencies": [
+        "fs"
+    ]
+}

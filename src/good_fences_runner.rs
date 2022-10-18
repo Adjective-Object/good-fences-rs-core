@@ -88,8 +88,23 @@ impl GoodFencesRunner {
 
     pub fn find_import_violations<'a>(
         &'a self,
+        ignored_dirs: Option<Vec<String>>,
     ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
+        println!("Evaluating {} files", self.source_files.keys().len());
         let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
+        let ignored_dirs = match ignored_dirs {
+            Some(dirs) => dirs,
+            None => vec![],
+        };
+
+        let ignored_dirs_regexs: Vec<regex::Regex> = ignored_dirs
+            .iter()
+            .map(|id| {
+                regex::Regex::new(&id.as_str())
+                    .expect(&format!("unable to create regex from --ignoredDirs {}", &id).as_str())
+            })
+            .collect();
+
         let violation_results = self
             .source_files
             .par_iter()
@@ -99,6 +114,7 @@ impl GoodFencesRunner {
                     &self.source_files,
                     &self.tsconfig_paths_json,
                     &source_file,
+                    Some(&ignored_dirs_regexs),
                 )
             })
             .collect::<Vec<_>>();
@@ -192,7 +208,7 @@ impl GoodFencesRunner {
 mod test {
     extern crate text_diff;
     use crate::evaluate_fences::{ImportRuleViolation, ViolatedFenceClause};
-    use crate::fence::{ExportRule, Fence, ParsedFence};
+    use crate::fence::{DependencyRule, ExportRule, Fence, ParsedFence};
     use crate::fence_collection::FenceCollection;
     use crate::good_fences_runner::{GoodFencesRunner, UndefinedTagReference};
     use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
@@ -245,6 +261,59 @@ mod test {
                 },
                 fence_collection: FenceCollection {
                     fences_map: map!(
+                        "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/fence.json" => Fence {
+                            fence_path: "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/fence.json".to_owned(),
+                            fence: ParsedFence {
+                                tags: Some(
+                                    vec!["tagB".to_owned()]
+                                ),
+                                exports: None,
+                                dependencies: Some(
+                                    vec![
+                                        DependencyRule {
+                                            dependency: "fs".to_owned(),
+                                            accessible_to: vec!["*".to_owned()]
+                                        }
+                                    ]
+                                ),
+                                imports: None
+                            }
+                        },
+                        "tests/good_fences_integration/src/componentB/someDeep/componentA/fence.json" => Fence {
+                            fence_path:"tests/good_fences_integration/src/componentB/someDeep/componentA/fence.json".to_owned(),
+                            fence: ParsedFence {
+                                tags: Some(
+                                    vec!["tagB".to_owned()]
+                                ),
+                                exports: None,
+                                dependencies: Some(
+                                    vec![
+                                        DependencyRule {
+                                            dependency: "fs".to_owned(),
+                                            accessible_to: vec!["*".to_owned()]
+                                        }
+                                    ]
+                                ),
+                                imports: None
+                            }
+                        },
+
+                        "tests/good_fences_integration/src/componentC/fence.json" => Fence {
+                            fence_path: "tests/good_fences_integration/src/componentC/fence.json".to_owned(),
+                            fence: ParsedFence {
+                                tags: Some(vec!["tagC".to_owned()]),
+                                exports: Some(
+                                    vec![
+                                        ExportRule {
+                                            accessible_to:vec!["tagA".to_owned()],
+                                            modules: "helperC1".to_owned()
+                                        }
+                                    ]
+                                ),
+                                dependencies: None,
+                                imports: None
+                            }
+                        },
                         "tests/good_fences_integration/src/componentA/fence.json" => Fence {
                             fence_path: "tests/good_fences_integration/src/componentA/fence.json".to_owned(),
                             fence: ParsedFence {
@@ -300,6 +369,25 @@ mod test {
                     ),
                 },
                 source_files: map!(
+                    "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index" => SourceFile {
+                        source_file_path: "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index.ts".to_owned(),
+                        tags: set!("tagB".to_owned()),
+                        imports: map!(
+                            "../../../componentC/helperC1" => Some(set!("default".to_owned()))
+                        )
+                    },
+                    "tests/good_fences_integration/src/componentB/someDeep/componentA/index" => SourceFile {
+                        source_file_path: "tests/good_fences_integration/src/componentB/someDeep/componentA/index.ts".to_owned(),
+                        tags: set!("tagB".to_owned()),
+                        imports: map!(
+                            "../../../componentC/helperC1" => Some(set!("default".to_owned()))
+                        )
+                    },
+                    "tests/good_fences_integration/src/componentC/helperC1" => SourceFile {
+                        source_file_path: "tests/good_fences_integration/src/componentC/helperC1.ts".to_owned(),
+                        tags: set!("tagC".to_owned()),
+                        imports: HashMap::new(),
+                    },
                     "tests/good_fences_integration/src/requireImportTest" => SourceFile {
                         source_file_path:"tests/good_fences_integration/src/requireImportTest.ts".to_owned(),
                         tags: HashSet::new(),
@@ -439,14 +527,45 @@ mod test {
             ExternalFences::Ignore,
         );
 
-        let mut violations = good_fences_runner.find_import_violations();
+        let mut violations = good_fences_runner.find_import_violations(Some(vec![]));
         violations.sort_by(compare_violations);
 
         let rule = ExportRule {
             accessible_to: vec!["tagA".to_owned()],
             modules: "componentB".to_owned(),
         };
+
+        let rule_complex = ExportRule {
+            accessible_to: vec!["tagA".to_owned()],
+            modules: "helperC1".to_owned(),
+        };
         let mut expected_violations = vec![
+            Ok(
+                ImportRuleViolation {
+                    violating_file_path: "tests/good_fences_integration/src/componentB/someDeep/componentA/index.ts",
+                    violating_fence: good_fences_runner
+                        .fence_collection
+                        .fences_map
+                        .get("tests/good_fences_integration/src/componentC/fence.json")
+                        .unwrap(),
+                    violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule_complex)),
+                    violating_import_specifier: "../../../componentC/helperC1",
+                    violating_imported_name: None,
+                },
+            ),
+            Ok(
+                ImportRuleViolation {
+                    violating_file_path: "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index.ts",
+                    violating_fence: good_fences_runner
+                        .fence_collection
+                        .fences_map
+                        .get("tests/good_fences_integration/src/componentC/fence.json")
+                        .unwrap(),
+                    violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule_complex)),
+                    violating_import_specifier: "../../../componentC/helperC1",
+                    violating_imported_name: None,
+                },
+            ),
             Ok(ImportRuleViolation {
                 violating_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts",
                 violating_fence: good_fences_runner

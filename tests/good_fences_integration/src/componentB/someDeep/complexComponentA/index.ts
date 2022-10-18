@@ -1,0 +1,1 @@
+import a from '../../../componentC/helperC1'; // INVALID IMPORT
