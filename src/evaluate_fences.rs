@@ -73,11 +73,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     ignored_dirs: Option<&Vec<regex::Regex>>,
 ) -> Result<Option<Vec<ImportRuleViolation<'fencecollectionlifetime, 'sourcefilelifetime>>>, String>
 {
-    for reg in ignored_dirs.unwrap_or(&EMPTY_REGEX_VEC) {
-        if reg.is_match(&source_file.source_file_path.as_str()) {
-            return Ok(None);
-        }
-    }
+    let ignored_dirs = ignored_dirs.unwrap_or(&EMPTY_REGEX_VEC);
 
     let mut violations = Vec::<ImportRuleViolation>::new();
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
@@ -101,6 +97,12 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 // grab the project local file, check our tags against the exports of the
                 // fences of the file we are importing.
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
+                    if ignored_dirs
+                        .iter()
+                        .any(|d| d.is_match(project_local_path.to_str().unwrap()))
+                    {
+                        continue;
+                    }
                     let project_local_path_str = project_local_path.to_str().unwrap();
                     let imported_source_file_opt = source_files.get(no_ext(project_local_path_str));
                     let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
