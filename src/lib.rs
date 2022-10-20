@@ -26,6 +26,8 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     }
     println!("beginning file walks");
 
+    let ignored_dirs_regexs = create_ignored_dirs_regexes(opts.ignored_dirs);
+
     let dirs_to_walk = &opts.paths.iter().map(|x| x.as_str()).collect();
     let good_fences_runner = good_fences_runner::GoodFencesRunner::new(
         tsconfig,
@@ -34,10 +36,11 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
             Some(ief) => ief,
             None => ExternalFences::Include,
         },
+        &ignored_dirs_regexs,
     );
 
     println!("beginning fence evaluations");
-    let violations = good_fences_runner.find_import_violations(opts.ignored_dirs);
+    let violations = good_fences_runner.find_import_violations(ignored_dirs_regexs);
     let elapsed = start.elapsed();
 
     // Print results and statistics
@@ -71,6 +74,19 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
 
     println!("Elapsed time since start: {:?}", elapsed);
     errors
+}
+
+fn create_ignored_dirs_regexes(ignored_dirs: Option<Vec<String>>) -> Vec<regex::Regex> {
+    match ignored_dirs {
+        Some(dirs) => dirs
+            .iter()
+            .map(|id| {
+                regex::Regex::new(&id.as_str())
+                    .expect(&format!("unable to create regex from --ignoredDirs {}", &id).as_str())
+            })
+            .collect(),
+        None => Vec::new(),
+    }
 }
 
 #[napi(object)]

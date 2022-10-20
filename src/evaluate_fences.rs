@@ -12,6 +12,8 @@ use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
 
+static EMPTY_REGEX_VEC: Vec<regex::Regex> = Vec::new();
+
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ViolatedFenceClause<'a> {
     ExportRule(Option<&'a ExportRule>),
@@ -71,7 +73,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     ignored_dirs: Option<&Vec<regex::Regex>>,
 ) -> Result<Option<Vec<ImportRuleViolation<'fencecollectionlifetime, 'sourcefilelifetime>>>, String>
 {
-    for reg in ignored_dirs.unwrap_or(&Vec::new()) {
+    for reg in ignored_dirs.unwrap_or(&EMPTY_REGEX_VEC) {
         if reg.is_match(&source_file.source_file_path.as_str()) {
             return Ok(None);
         }
@@ -445,6 +447,32 @@ mod test {
                 violating_imported_name: Option::None
             }]))
         );
+    }
+
+    #[test]
+    pub fn test_ignore_file_with_regex() {
+        let fence_collection = FenceCollection {
+            fences_map: map!(
+                "path/to/source/fence.json" => parse_fence_str(
+                    r#"{"imports": ["some_tag"]}"#,
+                    &RelativePathBuf::from("path/to/source/fence.json")
+                ).unwrap(),
+                "path/to/protected/fence.json" => parse_fence_str(
+                    r#"{"tags": ["protected"]}"#,
+                    &RelativePathBuf::from("path/to/protected/fence.json")
+                ).unwrap()
+            ),
+        };
+
+        let violations = evaluate_fences(
+            &fence_collection,
+            &SOURCE_FILES,
+            &TSCONFIG_PATHS_JSON,
+            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            Some(&vec![regex::Regex::new("path").unwrap()]),
+        );
+
+        assert_eq!(violations, Ok(None));
     }
 
     #[test]

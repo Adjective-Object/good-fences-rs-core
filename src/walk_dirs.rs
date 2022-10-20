@@ -54,9 +54,10 @@ lazy_static! {
     static ref WORKING_DIR_PATH: PathBuf = current_dir().unwrap();
 }
 
-pub fn discover_fences_and_files(
-    start_path: &str,
+pub fn discover_fences_and_files<'a>(
+    start_path: &'a str,
     ignore_external_fences: ExternalFences,
+    ignored_dirs: Vec<regex::Regex>,
 ) -> Vec<WalkFileData> {
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         move |read_dir_state, children| {
@@ -159,16 +160,26 @@ pub fn discover_fences_and_files(
 
                                     let source_file_path = slashed_as_relative_path(&file_path);
 
-                                    let imports = match get_imports_map_from_file(&file_path) {
-                                        Ok(imps) => imps,
-                                        Err(e) => {
-                                            eprintln!("Error {}", e);
-                                            continue;
+                                    let source_file_path_str =
+                                        source_file_path.unwrap().to_string();
+
+                                    let imports = if ignored_dirs
+                                        .iter()
+                                        .any(|r| r.is_match(&source_file_path_str))
+                                    {
+                                        HashMap::new()
+                                    } else {
+                                        match get_imports_map_from_file(&file_path) {
+                                            Ok(imps) => imps,
+                                            Err(e) => {
+                                                eprintln!("Error {}", e);
+                                                continue;
+                                            }
                                         }
                                     };
 
                                     dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
-                                        source_file_path: source_file_path.unwrap().to_string(),
+                                        source_file_path: source_file_path_str,
                                         imports,
                                         tags: HashSet::from_iter(
                                             read_dir_state.iter().map(|x| x.to_owned()),
@@ -194,25 +205,11 @@ pub fn discover_fences_and_files(
         .collect();
 }
 
-// fn as_relative_path<'a>(file_path: &'a Path) -> Result<RelativePath, fmt::Error> {
-//     let slashed: PathBuf;
-//     #[cfg(target_os = "windows")] {
-//       slashed = match file_path.to_slash() {
-//         Some(slash_path) => PathBuf::from(slash_path.to_string()),
-//         None => {return Err() },
-//       }
-//     }
-//     #[cfg(not(target_os = "windows"))] {
-//       slashed = PathBuf::from(p)
-//     }
-//     return Ok(RelativePath::from_path(&slashed))
-//   }
-
 #[cfg(test)]
 mod test {
     use crate::fence::{Fence, ParsedFence};
     use crate::walk_dirs::{discover_fences_and_files, SourceFile, WalkFileData};
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::iter::{FromIterator, Iterator};
 
     macro_rules! map(
@@ -244,6 +241,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_root_fence = Fence {
@@ -275,6 +273,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "./tests/comments_panel_test",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
@@ -298,6 +297,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_subsubdir_fence = Fence {
@@ -326,6 +326,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_root_ts_file = SourceFile {
@@ -352,6 +353,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_subdir_ts_file = SourceFile {
@@ -379,6 +381,7 @@ mod test {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
+            Vec::new(),
         );
 
         let expected_subdir_ts_file = SourceFile {
@@ -391,6 +394,35 @@ mod test {
             imports: map!(
               "sub-sub-dir-file-abc-named-imports" => Option::Some(set!("a","b","c"))
             ),
+        };
+
+        assert!(
+            discovered.iter().any(|x| match x {
+                WalkFileData::SourceFile(y) => expected_subdir_ts_file == *y,
+                _ => false,
+            }),
+            "expected discovered files to contain {:?}, but it did not. Actual: {:?}",
+            expected_subdir_ts_file,
+            discovered
+        );
+    }
+
+    #[test]
+    fn test_retrieve_emtpy_imports_on_ignored_dirs_match() {
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+            vec![regex::Regex::new("tests/.**/subdir").unwrap()],
+        );
+
+        let expected_subdir_ts_file = SourceFile {
+            source_file_path: "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts".to_owned(),
+            tags: set!(
+                "root-fence-tag-1".to_owned(),
+                "root-fence-tag-2".to_owned(),
+                "subsubdir-fence-tag".to_owned()
+            ),
+            imports: HashMap::new(),
         };
 
         assert!(
