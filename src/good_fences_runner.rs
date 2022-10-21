@@ -33,12 +33,7 @@ impl GoodFencesRunner {
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
-            .map(|path| {
-                if ignored_dirs.iter().any(|d| d.is_match(path)) {
-                    return vec![WalkFileData::Nothing];
-                }
-                discover_fences_and_files(path, external_fences, ignored_dirs.clone())
-            })
+            .map(|path| discover_fences_and_files(path, external_fences, ignored_dirs.clone()))
             .flatten();
 
         let (fences_wrapped, sources_wrapped): (Vec<WalkFileData>, Vec<WalkFileData>) =

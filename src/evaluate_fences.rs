@@ -97,13 +97,14 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 // grab the project local file, check our tags against the exports of the
                 // fences of the file we are importing.
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
+                    let project_local_path_str = project_local_path.to_str().unwrap();
                     if ignored_dirs
                         .iter()
-                        .any(|d| d.is_match(project_local_path.to_str().unwrap()))
+                        .any(|d| d.is_match(project_local_path_str))
                     {
                         continue;
                     }
-                    let project_local_path_str = project_local_path.to_str().unwrap();
+
                     let imported_source_file_opt = source_files.get(no_ext(project_local_path_str));
                     let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
                         let mut clone_path_with_idx = project_local_path.clone();

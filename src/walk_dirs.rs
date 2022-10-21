@@ -54,8 +54,8 @@ lazy_static! {
     static ref WORKING_DIR_PATH: PathBuf = current_dir().unwrap();
 }
 
-pub fn discover_fences_and_files<'a>(
-    start_path: &'a str,
+pub fn discover_fences_and_files(
+    start_path: &str,
     ignore_external_fences: ExternalFences,
     ignored_dirs: Vec<regex::Regex>,
 ) -> Vec<WalkFileData> {
@@ -63,21 +63,30 @@ pub fn discover_fences_and_files<'a>(
         move |read_dir_state, children| {
             // Custom filter -- retain only directories and fence.json files
             children.retain(|dir_entry_result| {
+                match dir_entry_result {
+                    Ok(dir_entry) => {
+                        if let Some(slashed) = dir_entry.path().to_slash() {
+                            return !(ignore_external_fences == ExternalFences::Ignore
+                                && slashed.to_string().ends_with("/node_modules"))
+                                && !ignored_dirs.iter().any(|d| {
+                                    d.is_match(&slashed)
+                                        || d.is_match(dir_entry.file_name().to_str().unwrap())
+                                });
+                        }
+                    }
+                    Err(_) => todo!(),
+                }
                 dir_entry_result
                     .as_ref()
                     .map(|dir_entry| match dir_entry.file_name.to_str() {
                         Some(file_name_str) => {
                             if dir_entry.file_type.is_dir() {
-                                if let Some(slashed) = dir_entry.path().to_slash() {
-                                    return !(ignore_external_fences == ExternalFences::Ignore
-                                        && slashed.to_string().ends_with("/node_modules"));
-                                }
                                 return true;
                             } else {
                                 return should_retain_file(file_name_str);
                             }
                         }
-                        None => todo!(),
+                        None => return false,
                     })
                     .unwrap_or(false)
             });
@@ -163,18 +172,26 @@ pub fn discover_fences_and_files<'a>(
                                     let source_file_path_str =
                                         source_file_path.unwrap().to_string();
 
-                                    let imports = if ignored_dirs
-                                        .iter()
-                                        .any(|r| r.is_match(&source_file_path_str))
-                                    {
-                                        HashMap::new()
-                                    } else {
-                                        match get_imports_map_from_file(&file_path) {
-                                            Ok(imps) => imps,
-                                            Err(e) => {
-                                                eprintln!("Error {}", e);
-                                                continue;
-                                            }
+                                    // let imports = if ignored_dirs
+                                    //     .iter()
+                                    //     .any(|r| r.is_match(&source_file_path_str))
+                                    // {
+                                    //     HashMap::new()
+                                    // } else {
+                                    //     match get_imports_map_from_file(&file_path) {
+                                    //         Ok(imps) => imps,
+                                    //         Err(e) => {
+                                    //             eprintln!("Error {}", e);
+                                    //             continue;
+                                    //         }
+                                    //     }
+                                    // };
+
+                                    let imports = match get_imports_map_from_file(&file_path) {
+                                        Ok(imps) => imps,
+                                        Err(e) => {
+                                            eprintln!("Error {}", e);
+                                            continue;
                                         }
                                     };
 
@@ -408,7 +425,7 @@ mod test {
     }
 
     #[test]
-    fn test_retrieve_emtpy_imports_on_ignored_dirs_match() {
+    fn test_retrieve_empty_imports_on_ignored_dirs_match() {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
@@ -426,12 +443,33 @@ mod test {
         };
 
         assert!(
-            discovered.iter().any(|x| match x {
-                WalkFileData::SourceFile(y) => expected_subdir_ts_file == *y,
+            !discovered.iter().any(|x| match x {
+                WalkFileData::SourceFile(y) =>
+                    *y.source_file_path
+                        == "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts".to_owned(),
                 _ => false,
             }),
-            "expected discovered files to contain {:?}, but it did not. Actual: {:?}",
+            "Expected to have ignored {:?}, but it did not. Actual: {:?}",
             expected_subdir_ts_file,
+            discovered
+        );
+    }
+
+    #[test]
+    fn test_simple_ignore_subsubdir_fence() {
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+            vec![regex::Regex::new("tests/.**/subdir").unwrap()],
+        );
+
+        assert!(
+            !discovered.iter().any(|x| match x {
+                WalkFileData::Fence(y) =>
+                    *y.fence_path == "tests/walk_dir_simple/subdir/subsubdir/".to_owned(),
+                _ => false,
+            }),
+            "expected ignored files, got {:?}",
             discovered
         );
     }
