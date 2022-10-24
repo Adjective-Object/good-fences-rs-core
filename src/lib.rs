@@ -40,7 +40,7 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesError> {
     );
 
     println!("beginning fence evaluations");
-    let violations = good_fences_runner.find_import_violations(ignored_dirs_regexs);
+    let violations = good_fences_runner.find_import_violations();
     let elapsed = start.elapsed();
 
     // Print results and statistics

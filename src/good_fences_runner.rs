@@ -89,7 +89,6 @@ impl GoodFencesRunner {
 
     pub fn find_import_violations<'a>(
         &'a self,
-        ignored_dirs: Vec<regex::Regex>,
     ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
         println!("Evaluating {} files", self.source_files.keys().len());
         let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
@@ -103,7 +102,6 @@ impl GoodFencesRunner {
                     &self.source_files,
                     &self.tsconfig_paths_json,
                     &source_file,
-                    Some(&ignored_dirs),
                 )
             })
             .collect::<Vec<_>>();
@@ -518,7 +516,7 @@ mod test {
             &Vec::new(),
         );
 
-        let mut violations = good_fences_runner.find_import_violations(vec![]);
+        let mut violations = good_fences_runner.find_import_violations();
         violations.sort_by(compare_violations);
 
         let rule = ExportRule {

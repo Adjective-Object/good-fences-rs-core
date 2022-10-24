@@ -6,6 +6,7 @@ use napi::bindgen_prelude::ToNapiValue;
 use path_slash::PathExt;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::fmt::format;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 extern crate pathdiff;
@@ -68,10 +69,7 @@ pub fn discover_fences_and_files(
                         if let Some(slashed) = dir_entry.path().to_slash() {
                             return !(ignore_external_fences == ExternalFences::Ignore
                                 && slashed.to_string().ends_with("/node_modules"))
-                                && !ignored_dirs.iter().any(|d| {
-                                    d.is_match(&slashed)
-                                        || d.is_match(dir_entry.file_name().to_str().unwrap())
-                                });
+                                && !ignored_dirs.iter().any(|d| d.is_match(&slashed));
                         }
                     }
                     Err(_) => todo!(),
@@ -171,21 +169,6 @@ pub fn discover_fences_and_files(
 
                                     let source_file_path_str =
                                         source_file_path.unwrap().to_string();
-
-                                    // let imports = if ignored_dirs
-                                    //     .iter()
-                                    //     .any(|r| r.is_match(&source_file_path_str))
-                                    // {
-                                    //     HashMap::new()
-                                    // } else {
-                                    //     match get_imports_map_from_file(&file_path) {
-                                    //         Ok(imps) => imps,
-                                    //         Err(e) => {
-                                    //             eprintln!("Error {}", e);
-                                    //             continue;
-                                    //         }
-                                    //     }
-                                    // };
 
                                     let imports = match get_imports_map_from_file(&file_path) {
                                         Ok(imps) => imps,
@@ -425,7 +408,7 @@ mod test {
     }
 
     #[test]
-    fn test_retrieve_empty_imports_on_ignored_dirs_match() {
+    fn test_retrieve_nothing_on_ignored() {
         let discovered: Vec<WalkFileData> = discover_fences_and_files(
             "tests/walk_dir_simple",
             crate::walk_dirs::ExternalFences::Ignore,
@@ -466,10 +449,38 @@ mod test {
         assert!(
             !discovered.iter().any(|x| match x {
                 WalkFileData::Fence(y) =>
-                    *y.fence_path == "tests/walk_dir_simple/subdir/subsubdir/".to_owned(),
+                    *y.fence_path == "tests/walk_dir_simple/subdir/subsubdir/fence.json".to_owned(),
                 _ => false,
             }),
             "expected ignored files, got {:?}",
+            discovered
+        );
+    }
+
+    #[test]
+    fn test_simple_ignore_subsu_fence() {
+        let discovered: Vec<WalkFileData> = discover_fences_and_files(
+            "tests/walk_dir_simple",
+            crate::walk_dirs::ExternalFences::Ignore,
+            vec![regex::Regex::new("^subdir").unwrap()],
+        );
+
+        let expected_subdir_fence = Fence {
+            fence_path: "tests/walk_dir_simple/subdir/subsufence.json".to_owned(),
+            fence: ParsedFence {
+                tags: Some(vec!["subsubdir-fence-tag".to_owned()]),
+                exports: Option::None,
+                dependencies: Option::None,
+                imports: Option::None,
+            },
+        };
+
+        assert!(
+            !discovered.iter().any(|x| match x {
+                WalkFileData::Fence(y) => *y == expected_subdir_fence,
+                _ => false,
+            }),
+            "expected find file, got {:?}",
             discovered
         );
     }

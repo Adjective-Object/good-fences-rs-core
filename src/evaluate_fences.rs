@@ -12,8 +12,6 @@ use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
 
-static EMPTY_REGEX_VEC: Vec<regex::Regex> = Vec::new();
-
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ViolatedFenceClause<'a> {
     ExportRule(Option<&'a ExportRule>),
@@ -70,11 +68,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     source_files: &HashMap<String, SourceFile>,
     tsconfig_paths_json: &TsconfigPathsJson,
     source_file: &'sourcefilelifetime SourceFile,
-    ignored_dirs: Option<&Vec<regex::Regex>>,
 ) -> Result<Option<Vec<ImportRuleViolation<'fencecollectionlifetime, 'sourcefilelifetime>>>, String>
 {
-    let ignored_dirs = ignored_dirs.unwrap_or(&EMPTY_REGEX_VEC);
-
     let mut violations = Vec::<ImportRuleViolation>::new();
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
         fence_collection.get_fences_for_path(&PathBuf::from(source_file.source_file_path.clone()));
@@ -98,12 +93,6 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 // fences of the file we are importing.
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
                     let project_local_path_str = project_local_path.to_str().unwrap();
-                    if ignored_dirs
-                        .iter()
-                        .any(|d| d.is_match(project_local_path_str))
-                    {
-                        continue;
-                    }
 
                     let imported_source_file_opt = source_files.get(no_ext(project_local_path_str));
                     let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
@@ -396,7 +385,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -434,7 +422,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -450,32 +437,6 @@ mod test {
                 violating_imported_name: Option::None
             }]))
         );
-    }
-
-    #[test]
-    pub fn test_ignore_file_with_regex() {
-        let fence_collection = FenceCollection {
-            fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
-                    r#"{"imports": ["some_tag"]}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
-                ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
-                    r#"{"tags": ["protected"]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
-                ).unwrap()
-            ),
-        };
-
-        let violations = evaluate_fences(
-            &fence_collection,
-            &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&vec![regex::Regex::new("path").unwrap()]),
-        );
-
-        assert_eq!(violations, Ok(None));
     }
 
     #[test]
@@ -498,7 +459,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -536,7 +496,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -580,7 +539,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -611,7 +569,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         let d = ExportRule {
@@ -659,7 +616,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         let d = ExportRule {
@@ -713,7 +669,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -735,7 +690,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(
@@ -769,7 +723,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -796,7 +749,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         let d = DependencyRule {
@@ -848,7 +800,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
@@ -883,7 +834,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         let r = DependencyRule {
@@ -939,7 +889,6 @@ mod test {
             &SOURCE_FILES,
             &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
-            Some(&Vec::new()),
         );
 
         assert_eq!(violations, Ok(None));
