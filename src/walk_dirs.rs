@@ -6,7 +6,6 @@ use napi::bindgen_prelude::ToNapiValue;
 use path_slash::PathExt;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::fmt::format;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 extern crate pathdiff;
