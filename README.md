@@ -29,7 +29,6 @@ _Linux_:
 - Node.js > 14
 - `npm`
 
-# 
 
 # Installing CLI
 
