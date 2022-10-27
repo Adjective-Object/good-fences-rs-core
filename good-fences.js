@@ -4,7 +4,7 @@
  * `./index` is generated via `napi build` or `yarn build` along with `.node`
  * It contains js/ts friendly definitions of rust code annotated with `#[napi]`
  */
- const { goodFences } = require('./index');
+ const { goodFences, GoodFencesResultType } = require('./index');
  const { program } = require('commander');
  
  
@@ -13,7 +13,7 @@
     .option('-o, --output <string>', 'path to write found violations')
     .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument")
     .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
-    .option('--ignoredDirs [pathRegexs...]', 'Files under directories matching given regular expressions are excluded from fence evaluation and will not generate an import map but they are going to be included in the list sources and a fence configuration is still attached to their path (e.g. `--ignoreDirs lib` will not evaluate source files in all dirs named `lib`)', [])
+    .option('--ignoredDirs [pathRegexs...]', 'Files under directories matching given regular expressions are excluded from source file list and will not generate an import map (e.g. `--ignoreDirs lib` will not evaluate source files in all dirs named `lib`)', [])
     .arguments('<path> [morePaths...]', 'Dirs to look for fence and source files')
 program.parse(process.argv);
  
@@ -30,6 +30,11 @@ const result = goodFences({
 });
 
 result.forEach(r => {
-    console.error(r.detailedMessage);
+    if (r.resultType === GoodFencesResultType.EvaluationError) {
+        console.warn(r.detailedMessage);
+    }
+
+    if (r.resultType === GoodFencesResultType.Violation) {
+        console.error(r.detailedMessage);
+    }
 });
- 
