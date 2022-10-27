@@ -114,7 +114,7 @@ good-fences src --output fenceViolations.json
 cat fenceViolations.json
 ```
 
-For some cases, scanning your `cwd` could be needed but most projects have `node_modules` that isn't necessary to perform evaluations, in those cases `--ignoreExternalFences` makes the good-fences process to skil all directories and files from `node_modules`.
+For some cases, scanning your `cwd` could be needed but most projects have `node_modules` that isn't necessary to perform evaluations, in those cases `--ignoreExternalFences` makes good-fences skip all directories and files from `node_modules`.
 ``` sh
 good-fences . --ignoreExternalFences
 ```
