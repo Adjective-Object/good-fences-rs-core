@@ -15,7 +15,7 @@ The original good-fences implementation came with some limitations:
 - Its native dependencies only supported Node.js < v15.
 - It had performance issues in some of our biggest projects (scanning 40k+ files).
 
-Rust great implementation of concurrency and memory safety allowed us to re-write original project with performance benefits added. SWC library also enabled faster and more reliable lookups of import or require statements.
+Rust's safe concurrency and memory safety allows us to re-write original project with additional performance benefits, leaning on [swc](https://github.com/swc-project/swc/) for javascript/typescript parsing.
 ## Getting Started
 
 `good-fences-rs` includes a CLI and an API, under the name `@good-fences/api`.
