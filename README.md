@@ -120,7 +120,7 @@ good-fences . --ignoreExternalFences
 ```
 
 ### `--ignoredDirs`
-This takes a list of regular expressions as input value, separated with spaces, in case certain directories need to be ignored during the fence evaluation, this will perform regular expression matching on the paths to ignore them (e.g. `--ignoredDirs lib` will not evaluate files under any `lib` directory).
+This takes a list of regular expressions as input values, separated with spaces. In case certain directories need to be ignored during the fence evaluation, this will perform regular expression matching on fence paths to ignore them (e.g. `--ignoredDirs lib` will not evaluate files under any `lib` directory).
 
 ``` sh
 good-fences src --ignoredDirs ignored1 ignored2 ...
