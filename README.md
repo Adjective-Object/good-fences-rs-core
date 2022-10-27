@@ -107,7 +107,7 @@ good-fences src --project tsconfig.without-baseurl.json --baseUrl .
 ```
 
 ### `--output` or `-o`
-In case you want to store the violations captured during the evaluation process `--output` flag takes a string parameter and creates a file in case it doesn't exist. The output is json file.
+The `--output` flag takes a path. At the end of checking, fence violation errors will be saved to the provided path as json.
 
 ``` sh
 good-fences src --output fenceViolations.json
