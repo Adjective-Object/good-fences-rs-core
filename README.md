@@ -11,7 +11,7 @@ This is mostly a concern for large projects with many people working on them, wh
 
 ## Motivation
 
-Original good-fences implementation, as good as it was, came with some problems:
+The original good-fences implementation came with some limitations:
 - Its native dependencies only supported Node.js < v15.
 - It had performance issues in some of our biggest projects (scanning 40k+ files).
 
