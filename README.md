@@ -94,7 +94,7 @@ good-fences src
 ---
 ### `--project` or `-p`
 
-If you have your tsconfig file splitted and want to use the one containing `compilerOptions.paths` instead of the default `tsconfig.json`
+If you have your tsconfig file splitt and want to use the one containing `compilerOptions.paths` instead of the default `tsconfig.json`
 ``` sh
 good-fences src --project tsconfig.with-paths.json
 ```
