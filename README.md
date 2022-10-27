@@ -5,7 +5,7 @@
 
 <!-- Written against `rustc 1.47.0 (18bf6b4f0 2020-10-07)` -->
 
-From original [good-fences](https://github.com/smikula/good-fences):
+A rust reimplementation of [good-fences](https://github.com/smikula/good-fences):
 > Good-fences is a tool that allows you to segment a TypeScript project into conceptual areas and manage dependencies between those areas.
 This is mostly a concern for large projects with many people working on them, where it is impossible for every developer to have a wholistic understanding of the entire codebase. JavaScript's module system is a specialized form of anarchy because any file can import any other file, possibly allowing access to code that was really meant to be an internal implementation detail of some larger system. Other languages have concepts like DLL boundaries and the internal keyword to mitigate this. Good-fences provides a way to enforce similar boundaries in the TypeScript world.
 
