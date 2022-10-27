@@ -18,7 +18,7 @@ The original good-fences implementation came with some limitations:
 Rust great implementation of concurrency and memory safety allowed us to re-write original project with performance benefits added. SWC library also enabled faster and more reliable lookups of import or require statements.
 ## Getting Started
 
-`good-fences-rs` comes with two ways of usage: CLI and an API, under the name of `@good-fences/api`.
+`good-fences-rs` includes a CLI and an API, under the name `@good-fences/api`.
 
 # Requirements
 
