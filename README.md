@@ -12,7 +12,7 @@ This is mostly a concern for large projects with many people working on them, wh
 ## Motivation
 
 Original good-fences implementation, as good as it was, came with some problems:
-- Prevented upgrading Node.js (14).
+- Its native dependencies only supported Node.js < v15.
 - It had performance issues in some of our biggest projects (scanning 40k+ files).
 
 Rust great implementation of concurrency and memory safety allowed us to re-write original project with performance benefits added. SWC library also enabled faster and more reliable lookups of import or require statements.
