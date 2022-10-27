@@ -38,7 +38,7 @@ Via npm.
 npm install -g @good-fences/api
 ```
 
-Cloing the repo:
+Cloning the repo:
 
 ``` sh
 git clone https://github.com/Adjective-Object/good-fences-rs-core
