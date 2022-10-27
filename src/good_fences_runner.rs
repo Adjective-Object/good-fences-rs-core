@@ -1,5 +1,5 @@
 extern crate serde_json;
-use crate::evaluate_fences::{evaluate_fences, ImportRuleViolation};
+use crate::evaluate_fences::{evaluate_fences, FenceEvaluationResult};
 use crate::fence::Fence;
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
@@ -28,11 +28,12 @@ impl GoodFencesRunner {
         tsconfig_paths_json: TsconfigPathsJson,
         directory_paths_to_walk: &Vec<&str>,
         external_fences: ExternalFences,
+        ignored_dirs: &Vec<regex::Regex>,
     ) -> GoodFencesRunner {
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
-            .map(|path| discover_fences_and_files(path, external_fences))
+            .map(|path| discover_fences_and_files(path, external_fences, ignored_dirs.clone()))
             .flatten();
 
         let (fences_wrapped, sources_wrapped): (Vec<WalkFileData>, Vec<WalkFileData>) =
@@ -86,24 +87,9 @@ impl GoodFencesRunner {
         };
     }
 
-    pub fn find_import_violations<'a>(
-        &'a self,
-        ignored_dirs: Option<Vec<String>>,
-    ) -> Vec<Result<ImportRuleViolation<'a, 'a>, String>> {
+    pub fn find_import_violations<'a>(&'a self) -> FenceEvaluationResult<'a, 'a> {
         println!("Evaluating {} files", self.source_files.keys().len());
-        let mut all_violations: Vec<Result<ImportRuleViolation<'a, 'a>, String>> = vec![];
-        let ignored_dirs = match ignored_dirs {
-            Some(dirs) => dirs,
-            None => vec![],
-        };
-
-        let ignored_dirs_regexs: Vec<regex::Regex> = ignored_dirs
-            .iter()
-            .map(|id| {
-                regex::Regex::new(&id.as_str())
-                    .expect(&format!("unable to create regex from --ignoredDirs {}", &id).as_str())
-            })
-            .collect();
+        let mut evaluation_results = FenceEvaluationResult::new();
 
         let violation_results = self
             .source_files
@@ -114,23 +100,19 @@ impl GoodFencesRunner {
                     &self.source_files,
                     &self.tsconfig_paths_json,
                     &source_file,
-                    Some(&ignored_dirs_regexs),
                 )
             })
             .collect::<Vec<_>>();
-        for violations_wrapped in violation_results {
-            match violations_wrapped {
-                Err(e) => all_violations.push(Err(e)),
-                Ok(None) => {}
-                Ok(Some(violations)) => {
-                    for violation in violations {
-                        all_violations.push(Ok(violation));
-                    }
-                }
+        for result in violation_results {
+            for v in result.violations {
+                evaluation_results.violations.push(v);
+            }
+            for eval_error in result.evaluation_errors {
+                evaluation_results.evaluation_errors.push(eval_error);
             }
         }
 
-        return all_violations;
+        return evaluation_results;
     }
 
     /**
@@ -248,6 +230,7 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
+            &Vec::new(),
         );
 
         assert_eq!(
@@ -495,27 +478,18 @@ mod test {
         );
     }
 
-    fn compare_violations(
-        a: &Result<ImportRuleViolation, String>,
-        b: &Result<ImportRuleViolation, String>,
-    ) -> std::cmp::Ordering {
-        match (a, b) {
-            (Ok(a), Ok(b)) => a
-                .violating_file_path
-                .cmp(b.violating_file_path)
-                .then(
-                    a.violating_fence
-                        .fence_path
-                        .cmp(&b.violating_fence.fence_path),
-                )
-                .then(
-                    a.violating_import_specifier
-                        .cmp(&b.violating_import_specifier),
-                ),
-            (Ok(_a), Err(_b)) => std::cmp::Ordering::Less,
-            (Err(_a), Ok(_b)) => std::cmp::Ordering::Greater,
-            (Err(a), Err(b)) => a.cmp(&b),
-        }
+    fn compare_violations(a: &ImportRuleViolation, b: &ImportRuleViolation) -> std::cmp::Ordering {
+        a.violating_file_path
+            .cmp(b.violating_file_path)
+            .then(
+                a.violating_fence
+                    .fence_path
+                    .cmp(&b.violating_fence.fence_path),
+            )
+            .then(
+                a.violating_import_specifier
+                    .cmp(&b.violating_import_specifier),
+            )
     }
 
     #[test]
@@ -525,10 +499,11 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration"],
             ExternalFences::Ignore,
+            &Vec::new(),
         );
 
-        let mut violations = good_fences_runner.find_import_violations(Some(vec![]));
-        violations.sort_by(compare_violations);
+        let mut results = good_fences_runner.find_import_violations();
+        results.violations.sort_by(compare_violations);
 
         let rule = ExportRule {
             accessible_to: vec!["tagA".to_owned()],
@@ -540,33 +515,29 @@ mod test {
             modules: "helperC1".to_owned(),
         };
         let mut expected_violations = vec![
-            Ok(
-                ImportRuleViolation {
-                    violating_file_path: "tests/good_fences_integration/src/componentB/someDeep/componentA/index.ts",
-                    violating_fence: good_fences_runner
-                        .fence_collection
-                        .fences_map
-                        .get("tests/good_fences_integration/src/componentC/fence.json")
-                        .unwrap(),
-                    violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule_complex)),
-                    violating_import_specifier: "../../../componentC/helperC1",
-                    violating_imported_name: None,
-                },
-            ),
-            Ok(
-                ImportRuleViolation {
-                    violating_file_path: "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index.ts",
-                    violating_fence: good_fences_runner
-                        .fence_collection
-                        .fences_map
-                        .get("tests/good_fences_integration/src/componentC/fence.json")
-                        .unwrap(),
-                    violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule_complex)),
-                    violating_import_specifier: "../../../componentC/helperC1",
-                    violating_imported_name: None,
-                },
-            ),
-            Ok(ImportRuleViolation {
+            ImportRuleViolation {
+                violating_file_path: "tests/good_fences_integration/src/componentB/someDeep/componentA/index.ts",
+                violating_fence: good_fences_runner
+                    .fence_collection
+                    .fences_map
+                    .get("tests/good_fences_integration/src/componentC/fence.json")
+                    .unwrap(),
+                violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule_complex)),
+                violating_import_specifier: "../../../componentC/helperC1",
+                violating_imported_name: None,
+            },
+            ImportRuleViolation {
+                violating_file_path: "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index.ts",
+                violating_fence: good_fences_runner
+                    .fence_collection
+                    .fences_map
+                    .get("tests/good_fences_integration/src/componentC/fence.json")
+                    .unwrap(),
+                violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule_complex)),
+                violating_import_specifier: "../../../componentC/helperC1",
+                violating_imported_name: None,
+            },
+            ImportRuleViolation {
                 violating_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts",
                 violating_fence: good_fences_runner
                     .fence_collection
@@ -576,8 +547,8 @@ mod test {
                 violating_fence_clause: ViolatedFenceClause::ExportRule(None),
                 violating_import_specifier: "../componentB/helperB1",
                 violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
+            },
+            ImportRuleViolation {
                 violating_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts",
                 violating_fence: good_fences_runner
                     .fence_collection
@@ -587,8 +558,8 @@ mod test {
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
                 violating_import_specifier: "../componentB/helperB1",
                 violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
+            },
+            ImportRuleViolation {
                 violating_file_path: "tests/good_fences_integration/src/componentA/componentA.ts",
                 violating_fence: good_fences_runner
                     .fence_collection
@@ -598,8 +569,8 @@ mod test {
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
                 violating_import_specifier: "../componentB/componentB",
                 violating_imported_name: None,
-            }),
-            Ok(ImportRuleViolation {
+            },
+            ImportRuleViolation {
                 violating_file_path: "tests/good_fences_integration/src/index.ts",
                 violating_fence: good_fences_runner
                     .fence_collection
@@ -609,13 +580,13 @@ mod test {
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&rule)),
                 violating_import_specifier: "./componentB/componentB",
                 violating_imported_name: None,
-            }),
+            },
         ];
         expected_violations.sort_by(compare_violations);
 
-        let a: String = format!("{:#?}", violations);
+        let a: String = format!("{:#?}", results);
         let b: String = format!("{:#?}", expected_violations);
-        if violations != expected_violations {
+        if results.violations != expected_violations {
             print_diff(&a, &b, "\n");
             assert!(false);
         }
@@ -628,6 +599,7 @@ mod test {
                 .unwrap(),
             &vec!["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
+            &Vec::new(),
         );
 
         let orphans = good_fences_runner.find_undefined_tags();
