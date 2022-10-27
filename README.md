@@ -63,7 +63,7 @@ goodFences({...});
 
 # Using the CLI
 
-To run `good-fences` cli we need at least two things:
+To run the `good-fences` cli we need at least two things:
 - `fence.json` configuration files.
 - A `tsconfig.json` file. (see [tsconfig reference](https://www.typescriptlang.org/tsconfig))
 
