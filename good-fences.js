@@ -9,7 +9,7 @@
  
  
  program
-     .option('-p, --project <string> ', 'tsconfig.json file path, defaults `./tsconfig.json`', 'tsconfig.json')
+     .option('-p, --project <string> ', 'tsconfig.json file path, defaults to `./tsconfig.json`', 'tsconfig.json')
      .option('-o, --output <string>', 'path to write found violations')
      .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument")
      .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
