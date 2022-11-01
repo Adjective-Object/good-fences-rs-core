@@ -32,14 +32,14 @@ pub struct ImportRuleViolation<'fencelifetime, 'importlifetime> {
 #[derive(Debug)]
 pub struct FenceEvaluationResult<'fencelifetime, 'importlifetime> {
     pub violations: Vec<ImportRuleViolation<'fencelifetime, 'importlifetime>>,
-    pub evaluation_errors: Vec<EvaluateFencesError>,
+    pub unresolved_files: Vec<EvaluateFencesError>,
 }
 
 impl FenceEvaluationResult<'_, '_> {
     pub fn new() -> Self {
         Self {
             violations: Vec::new(),
-            evaluation_errors: Vec::new(),
+            unresolved_files: Vec::new(),
         }
     }
 }
@@ -86,7 +86,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     source_file: &'sourcefilelifetime SourceFile,
 ) -> FenceEvaluationResult<'fencecollectionlifetime, 'sourcefilelifetime> {
     let mut violations = Vec::<ImportRuleViolation>::new();
-    let mut evaluation_errors = Vec::<EvaluateFencesError>::new();
+    let mut unresolved_files = Vec::<EvaluateFencesError>::new();
     let source_fences: Vec<&'fencecollectionlifetime Fence> =
         fence_collection.get_fences_for_path(&PathBuf::from(source_file.source_file_path.clone()));
 
@@ -126,7 +126,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                         None => match imported_source_file_with_idx_opt {
                             Some(x) => x,
                             None => {
-                                evaluation_errors.push(EvaluateFencesError::NotScanned(
+                                unresolved_files.push(EvaluateFencesError::NotScanned(
                                     ResolvedImportNotFound {
                                         project_local_path_str: project_local_path_str.to_string(),
                                         source_file_path: source_file.source_file_path.clone(),
@@ -296,7 +296,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 ResolvedImport::ResourceFileImport => {}
             },
             Err(_) => {
-                evaluation_errors.push(EvaluateFencesError::ImportNotResolved {
+                unresolved_files.push(EvaluateFencesError::ImportNotResolved {
                     import_specifier: import_specifier.clone(),
                     source_file_path: source_file.source_file_path.to_string(),
                 });
@@ -306,7 +306,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
 
     return FenceEvaluationResult {
         violations,
-        evaluation_errors,
+        unresolved_files,
     };
 }
 
