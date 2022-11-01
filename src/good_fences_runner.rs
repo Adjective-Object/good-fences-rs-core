@@ -107,8 +107,8 @@ impl GoodFencesRunner {
             for v in result.violations {
                 evaluation_results.violations.push(v);
             }
-            for eval_error in result.evaluation_errors {
-                evaluation_results.evaluation_errors.push(eval_error);
+            for eval_error in result.unresolved_files {
+                evaluation_results.unresolved_files.push(eval_error);
             }
         }
 

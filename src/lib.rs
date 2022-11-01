@@ -46,9 +46,9 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
 
     // Print results and statistics
     println!("Violations: {:#?}", eval_results.violations);
-    println!("Evalation errors: {:#?}", eval_results.evaluation_errors);
+    println!("Evalation errors: {:#?}", eval_results.unresolved_files);
     println!("Total violations: {}", eval_results.violations.len());
-    println!("Total errors: {}", eval_results.evaluation_errors.len());
+    println!("Total errors: {}", eval_results.unresolved_files.len());
 
     let mut errors: Vec<GoodFencesResult> = Vec::new();
 
@@ -63,9 +63,9 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
         });
     });
 
-    eval_results.evaluation_errors.iter().for_each(|e| {
+    eval_results.unresolved_files.iter().for_each(|e| {
         errors.push(GoodFencesResult {
-            result_type: GoodFencesResultType::EvaluationError,
+            result_type: GoodFencesResultType::FileNotResolved,
             message: e.to_string(),
             source_file: None,
             raw_import: None,
@@ -78,7 +78,7 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
     if let Some(output) = opts.err_output_path {
         write_violations_as_json(
             eval_results.violations,
-            eval_results.evaluation_errors,
+            eval_results.unresolved_files,
             output,
         );
     }
@@ -113,7 +113,7 @@ pub struct GoodFencesOptions {
 #[derive(Eq, Debug, PartialEq)]
 #[napi]
 pub enum GoodFencesResultType {
-    EvaluationError = 0,
+    FileNotResolved = 0,
     Violation = 1,
 }
 

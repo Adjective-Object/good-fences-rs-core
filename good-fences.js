@@ -30,8 +30,8 @@ const result = goodFences({
 });
 
 result.forEach(r => {
-    if (r.resultType === GoodFencesResultType.EvaluationError) {
-        console.warn(r.detailedMessage);
+    if (r.resultType !== GoodFencesResultType.Violation) {
+        console.log(r.detailedMessage);
     }
 
     if (r.resultType === GoodFencesResultType.Violation) {
