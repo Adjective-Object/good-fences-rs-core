@@ -37,7 +37,7 @@ impl Display for ImportRuleViolation<'_, '_> {
                 if let Some(rule) = export_rule {
                     write!(
                         f,
-                        "Violation: Import of {} at {} violated the fence.json {} rule {}",
+                        "Violation: Import of {} at {} violated the fence.json {} with rule {}",
                         self.violating_import_specifier,
                         self.violating_file_path,
                         self.violating_fence.fence_path,
@@ -50,7 +50,7 @@ impl Display for ImportRuleViolation<'_, '_> {
                 } else {
                     write!(
                         f,
-                        "Violation: Import of {} at {} specifier is not in the allow list of {}",
+                        "Violation: Import of {} at {} is not in the allow list of the fence {}",
                         self.violating_import_specifier,
                         self.violating_file_path,
                         self.violating_fence.fence_path
@@ -61,7 +61,7 @@ impl Display for ImportRuleViolation<'_, '_> {
                 if let Some(rule) = dep_rule {
                     write!(
                         f,
-                        "Violation: Dependency {} at {} not exposed for tags {:?} of source {}",
+                        "Violation: Dependency {} at {} was not exposed for tags {:?} of source {}",
                         &rule.dependency,
                         self.violating_fence.fence_path,
                         &self.violating_fence.fence.tags,
@@ -70,7 +70,7 @@ impl Display for ImportRuleViolation<'_, '_> {
                 } else {
                     write!(
                         f,
-                        "Violation: Import {} at {} not in allowlist of {}",
+                        "Violation: Import {} at {} is not in allowlist of {}",
                         self.violating_import_specifier,
                         self.violating_file_path,
                         &self.violating_fence.fence_path,
@@ -80,7 +80,7 @@ impl Display for ImportRuleViolation<'_, '_> {
             ViolatedFenceClause::ImportAllowList => {
                 write!(
                     f,
-                    "Violation: File {} with tags {:?} not allowed to import {} at {}",
+                    "Violation: File {} with tags {:?} does not allow import {} at {}",
                     self.violating_file_path,
                     self.violating_fence.fence.tags,
                     self.violating_import_specifier,
