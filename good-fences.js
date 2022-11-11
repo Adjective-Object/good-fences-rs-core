@@ -4,9 +4,9 @@
  * `./index` is generated via `napi build` or `yarn build` along with `.node`
  * It contains js/ts friendly definitions of rust code annotated with `#[napi]`
  */
- const { goodFences, GoodFencesResultType } = require('./index');
- const { program } = require('commander');
- 
+const { goodFences, GoodFencesResultType } = require('./index');
+const { program } = require('commander');
+
  
 program
    .option('-p, --project <string> ', 'tsconfig.json file path, defaults to `./tsconfig.json`', 'tsconfig.json')
@@ -38,3 +38,7 @@ result.forEach(r => {
         console.error(r.detailedMessage);
     }
 });
+
+if (result.find(r => r.resultType === GoodFencesResultType.Violation)) {
+    process.exit(1);
+}

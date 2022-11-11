@@ -9,6 +9,7 @@ use path_slash::PathBufExt;
 use relative_path::RelativePath;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
@@ -27,6 +28,67 @@ pub struct ImportRuleViolation<'fencelifetime, 'importlifetime> {
     pub violating_fence_clause: ViolatedFenceClause<'fencelifetime>,
     pub violating_import_specifier: &'importlifetime str,
     pub violating_imported_name: Option<&'importlifetime str>,
+}
+
+impl Display for ImportRuleViolation<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.violating_fence_clause {
+            ViolatedFenceClause::ExportRule(export_rule) => {
+                if let Some(rule) = export_rule {
+                    write!(
+                        f,
+                        "Violation: Import of {} at {} violated the fence.json {} with rule {}",
+                        self.violating_import_specifier,
+                        self.violating_file_path,
+                        self.violating_fence.fence_path,
+                        format!(
+                            "{} only accessible to {:?}",
+                            rule.modules, rule.accessible_to,
+                        )
+                        .to_string()
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Violation: Import of {} at {} is not in the allow list of the fence {}",
+                        self.violating_import_specifier,
+                        self.violating_file_path,
+                        self.violating_fence.fence_path
+                    )
+                }
+            }
+            ViolatedFenceClause::DependencyRule(dep_rule) => {
+                if let Some(rule) = dep_rule {
+                    write!(
+                        f,
+                        "Violation: Dependency {} at {} was not exposed for tags {:?} of source {}",
+                        &rule.dependency,
+                        self.violating_fence.fence_path,
+                        &self.violating_fence.fence.tags,
+                        self.violating_file_path
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Violation: Import {} at {} is not in allowlist of {}",
+                        self.violating_import_specifier,
+                        self.violating_file_path,
+                        &self.violating_fence.fence_path,
+                    )
+                }
+            }
+            ViolatedFenceClause::ImportAllowList => {
+                write!(
+                    f,
+                    "Violation: File {} with tags {:?} does not allow import {} at {}",
+                    self.violating_file_path,
+                    self.violating_fence.fence.tags,
+                    self.violating_import_specifier,
+                    &self.violating_fence.fence_path,
+                )
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
