@@ -42,15 +42,19 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
     // Print results and statistics
     if eval_results.violations.len() != 0 {
         println!("Violations:");
-        eval_results.violations.iter().for_each(|v| println!("{}", v.to_string()));
+        eval_results
+            .violations
+            .iter()
+            .for_each(|v| println!("{}", v.to_string()));
         println!("Total violations: {}", eval_results.violations.len());
     }
 
     if eval_results.unresolved_files.len() != 0 {
-        println!(
-            "Unresolved files:",
-        );
-        eval_results.unresolved_files.iter().for_each(|f| println!("{}", f.to_string()));
+        println!("Unresolved files:",);
+        eval_results
+            .unresolved_files
+            .iter()
+            .for_each(|f| println!("{}", f.to_string()));
         println!(
             "Total unresolved files: {}",
             eval_results.unresolved_files.len()
