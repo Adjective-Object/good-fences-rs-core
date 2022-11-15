@@ -64,7 +64,7 @@ impl Display for ImportRuleViolation<'_, '_> {
                         "Violation: Dependency {} at {} was not exposed for tags {:?} of source {}",
                         &rule.dependency,
                         self.violating_fence.fence_path,
-                        self.violating_fence.fence.tags.as_ref().unwrap(),
+                        self.violating_fence.fence.tags.as_ref().unwrap_or(vec![].as_ref()),
                         self.violating_file_path
                     )
                 } else {
@@ -82,7 +82,7 @@ impl Display for ImportRuleViolation<'_, '_> {
                     f,
                     "Violation: File {} with tags {:?} does not allow import {} at {}",
                     self.violating_file_path,
-                    self.violating_fence.fence.tags.as_ref().unwrap(),
+                    self.violating_fence.fence.tags.as_ref().unwrap_or(vec![].as_ref()),
                     self.violating_import_specifier,
                     &self.violating_fence.fence_path,
                 )
