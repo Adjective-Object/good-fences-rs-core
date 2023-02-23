@@ -12,6 +12,7 @@ pub mod get_imports;
 pub mod good_fences_runner;
 pub mod import_resolver;
 mod path_utils;
+pub mod unused_finder;
 pub mod walk_dirs;
 
 #[napi]

@@ -120,7 +120,7 @@ fn get_imports_map_from_visitor(
     final_imports_map
 }
 
-fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
+pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
     let filename = fm.name.to_string();
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig {
