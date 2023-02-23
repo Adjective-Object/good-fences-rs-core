@@ -91,30 +91,32 @@ pub fn find_unused_items(
     let mut unused_file_exports: HashMap<&String, HashSet<ExportedItem>> = HashMap::new();
 
     let resolved_imports_map = get_map_of_imports(&tsconfig, &walked_files_map);
-    resolved_imports_map.iter().for_each(|(_f, path_items_map)| {
-        path_items_map.iter().for_each(|(p, items)| {
-            if let Some(used_items) = unused_file_exports.get_mut(p) {
-                for item in items.iter() {
-                    match item {
-                        ResolvedItem::Imported(imported_item) => {
-                            used_items.insert(imported_item.into());
-                        }
-                        ResolvedItem::Exported(exported_item) => {
-                            used_items.insert(exported_item.clone());
+    resolved_imports_map
+        .iter()
+        .for_each(|(_f, path_items_map)| {
+            path_items_map.iter().for_each(|(p, items)| {
+                if let Some(used_items) = unused_file_exports.get_mut(p) {
+                    for item in items.iter() {
+                        match item {
+                            ResolvedItem::Imported(imported_item) => {
+                                used_items.insert(imported_item.into());
+                            }
+                            ResolvedItem::Exported(exported_item) => {
+                                used_items.insert(exported_item.clone());
+                            }
                         }
                     }
+                } else {
+                    unused_file_exports.insert(
+                        p,
+                        HashSet::from_iter(items.iter().filter_map(|i| match i {
+                            ResolvedItem::Imported(imported) => return Some(imported.into()),
+                            ResolvedItem::Exported(exported) => return Some(exported.clone()),
+                        })),
+                    );
                 }
-            } else {
-                unused_file_exports.insert(
-                    p,
-                    HashSet::from_iter(items.iter().filter_map(|i| match i {
-                        ResolvedItem::Imported(imported) => return Some(imported.into()),
-                        ResolvedItem::Exported(exported) => return Some(exported.clone()),
-                    })),
-                );
-            }
+            });
         });
-    });
 
     // Get unused items from used files:
     // Compare the used items with ImportExportInfo and withold the unused items
