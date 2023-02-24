@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
-use relative_path::RelativePathBuf;
 use crate::error::WalkDirsError;
+use relative_path::RelativePathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn get_slashed_path_buf(p: &Path) -> Result<PathBuf, WalkDirsError> {
     let slashed: PathBuf;
