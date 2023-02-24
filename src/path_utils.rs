@@ -1,8 +1,5 @@
 use std::path::{Path, PathBuf};
-
-use path_slash::{PathBufExt, PathExt as _};
 use relative_path::RelativePathBuf;
-
 use crate::error::WalkDirsError;
 
 pub fn get_slashed_path_buf(p: &Path) -> Result<PathBuf, WalkDirsError> {

@@ -142,3 +142,15 @@ impl Display for EvaluateFencesError {
         }
     }
 }
+
+// equivalent to napi::Error, but declared separately so
+// it can be used in tested modules
+//
+// Test modules can't reference napi::Error directly, since
+// that would lead to a reference to `napi_delete_reference`,
+// which only exists when the library is linked with node.
+#[derive(Debug)]
+pub struct NapiLikeError {
+    pub status: napi::Status,
+    pub message: String,
+}

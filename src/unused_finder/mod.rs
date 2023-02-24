@@ -2,7 +2,6 @@ pub mod node_visitor;
 pub mod unused_finder_visitor_runner;
 mod utils;
 
-use napi_derive::napi;
 use rayon::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
@@ -38,12 +37,11 @@ impl Default for WalkedFile {
     }
 }
 
-#[napi]
 pub fn find_unused_items(
     paths_to_read: Vec<String>,
     ts_config_path: String,
     skipped: Vec<String>,
-) -> Result<Vec<String>, napi::Error> {
+) -> Result<Vec<String>, crate::error::NapiLikeError> {
     let tsconfig = match TsconfigPathsJson::from_path(ts_config_path) {
         Ok(tsconfig) => tsconfig,
         Err(e) => panic!("Unable to read tsconfig file: {}", e),
@@ -52,10 +50,10 @@ pub fn find_unused_items(
     let skipped: Arc<Vec<glob::Pattern>> = match skipped.into_iter().collect() {
         Ok(v) => Arc::new(v),
         Err(e) => {
-            return Err(napi::Error::new(
-                napi::Status::InvalidArg,
-                e.msg.to_string(),
-            ))
+            return Err(crate::error::NapiLikeError {
+                status: napi::Status::InvalidArg,
+                message: e.msg.to_string(),
+            })
         }
     };
     // Walk on all files and retrieve the WalkFileData from them
