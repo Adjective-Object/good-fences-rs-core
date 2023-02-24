@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vscode/master/extensions/configuration-editing/schemas/devContainer.schema.json",
+  "name": "good-fences-rs development container",
+  "build": {
+    "dockerfile": "./Dockerfile",
+    "args": {
+      "USERNAME": "vscode"
+    }
+  },
+  "remoteUser": "vscode",
+  // see https://github.com/microsoft/vscode-remote-release/issues/1333#issuecomment-528234042
+  "workspaceMount": "",
+  "runArgs": [
+    "--init",
+    "--volume=${localWorkspaceFolder}:/workspaces/ori:Z"
+  ],
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/zsh"
+  },
+  "workspaceFolder": "/workspaces/ori",
+  "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
+  "extensions": [
+    "rust-lang.rust-analyzer"
+  ],
+  "remoteEnv": {
+    "VM_REPO_PATH": "/workspaces/ori"
+  },
+  "forwardPorts": [
+    3000,
+    30001
+  ]
+}
