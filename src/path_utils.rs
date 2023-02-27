@@ -6,6 +6,8 @@ pub fn get_slashed_path_buf(p: &Path) -> Result<PathBuf, WalkDirsError> {
     let slashed: PathBuf;
     #[cfg(target_os = "windows")]
     {
+        // required for Path.to_slash()
+        use path_slash::PathExt;
         slashed = match p.to_slash() {
             Some(path) => PathBuf::from(path.to_string().as_str()),
             None => return Err(WalkDirsError::SlashError(p.to_string_lossy().to_string())),
@@ -32,6 +34,8 @@ pub fn as_slashed_pathbuf(p: &str) -> PathBuf {
     let slashed: PathBuf;
     #[cfg(target_os = "windows")]
     {
+        // required for PathBufExt.to_slash()
+        use path_slash::PathBufExt;
         slashed = PathBuf::from_slash(p);
     }
     #[cfg(not(target_os = "windows"))]
