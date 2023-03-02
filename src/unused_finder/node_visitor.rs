@@ -447,7 +447,7 @@ mod test {
             }
             export type { Foo as default };
             "#
-            .to_string()
+            .to_string(),
         );
 
         let mut parser = create_test_parser(&fm);
