@@ -124,8 +124,14 @@ impl UnusedFinderVisitor {
                 // Handles `export { foo as bar }`
                 if let Some(exported) = &named.exported {
                     if let ModuleExportName::Ident(id) = exported {
-                        self.exported_ids
-                            .insert(ExportedItem::Named(id.sym.to_string()));
+                        let sym = id.sym.to_string();
+                        // export { foo as default }
+                        if sym == "default" {
+                            self.exported_ids.insert(ExportedItem::Default);
+                        } else {
+                            self.exported_ids
+                                .insert(ExportedItem::Named(id.sym.to_string()));
+                        }
                     }
                 } else if let ModuleExportName::Ident(id) = &named.orig {
                     // handles `export { foo }`
@@ -411,6 +417,30 @@ mod test {
             r#"
             const foo = 1;
             export default foo;
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new();
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
+
+        assert_eq!(expected_map, visitor.exported_ids);
+    }
+
+    #[test]
+    fn test_expor_type_as_default() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            interface Foo {
+                bar: boolean;
+            }
+            export type { Foo as default };
             "#
             .to_string(),
         );
