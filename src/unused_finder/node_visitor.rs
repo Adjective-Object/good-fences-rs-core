@@ -293,8 +293,13 @@ impl Visit for UnusedFinderVisitor {
                                 // import { foo as bar } from './foo'
                                 match module_name {
                                     ModuleExportName::Ident(ident) => {
-                                        // ident = bar in `import { foo as bar } from './foo'`
-                                        return Some(ExportedItem::Named(ident.to_string()));
+                                        // sym_str = foo in `import { foo as bar } from './foo'`
+                                        let sym_str = ident.sym.to_string();
+                                        dbg!(&sym_str);
+                                        if sym_str == "default" {
+                                            return Some(ExportedItem::Default);
+                                        }
+                                        return Some(ExportedItem::Named(sym_str));
                                     }
                                     ModuleExportName::Str(s) => {
                                         return Some(ExportedItem::Named(s.value.to_string()))
@@ -441,6 +446,28 @@ mod test {
                 bar: boolean;
             }
             export type { Foo as default };
+            "#
+            .to_string()
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new();
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
+
+        assert_eq!(expected_map, visitor.exported_ids);
+    }
+
+    #[test]
+    fn test_export_default_execution() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            function foo() { return 1; }
+            export default foo();
             "#
             .to_string(),
         );
@@ -609,6 +636,52 @@ mod test {
         let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
             "./foo".to_owned(),
             HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
+        )]);
+        assert_eq!(expected_map, visitor.imported_ids_path_name);
+    }
+
+    #[test]
+    fn test_import_specifier_with_alias() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            import {foo as bar} from './foo';
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new();
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
+            "./foo".to_owned(),
+            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
+        )]);
+        assert_eq!(expected_map, visitor.imported_ids_path_name);
+    }
+
+    #[test]
+    fn test_import_default_with_alias() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            import {default as foo} from './foo';
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new();
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
+            "./foo".to_owned(),
+            HashSet::from_iter(vec![ImportedItem::Default]),
         )]);
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
