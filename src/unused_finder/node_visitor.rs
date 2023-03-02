@@ -295,7 +295,6 @@ impl Visit for UnusedFinderVisitor {
                                     ModuleExportName::Ident(ident) => {
                                         // sym_str = foo in `import { foo as bar } from './foo'`
                                         let sym_str = ident.sym.to_string();
-                                        dbg!(&sym_str);
                                         if sym_str == "default" {
                                             return Some(ExportedItem::Default);
                                         }
