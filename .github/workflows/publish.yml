@@ -7,27 +7,7 @@ on:
 jobs:
   tests:
     uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
-  check-versions:
-    needs:
-      - tests
-    outputs:
-      hasversionbumps: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 2
-      - name: Check for new package versions
-        id: check-new-version-step
-        run: bash ./scripts/is-any-new-version.sh
-      - name: Tag release
-        if: ${{ steps.check-new-version-step.outputs.ANY_NEW_VERSION == 1 }}
-        run: >
-          ./scripts/tag-versions.sh;
-          git push --tags;
   publish:
-    if: needs.check-versions.outputs.hasversionbumps == 1
     needs:
       - tests
       - check-versions
