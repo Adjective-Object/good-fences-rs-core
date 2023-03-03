@@ -1,6 +1,6 @@
 {
   "type": "patch",
-  "comment": "0.1.2",
+  "comment": "Added beachball for versioning",
   "packageName": "@good-fences/api-darwin-x64",
   "email": "edgar21_9@hotmail.com",
   "dependentChangeType": "patch"
