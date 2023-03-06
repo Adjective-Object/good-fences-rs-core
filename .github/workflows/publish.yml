@@ -10,7 +10,6 @@ jobs:
   publish:
     needs:
       - tests
-      - check-versions
     runs-on: ubuntu-latest
     steps:
       - name: checkout
