@@ -3,5 +3,6 @@
 /** @type {RepoOptions} */
 module.exports = {
   branch: "main",
-  access: "public"
+  access: "public",
+  registry: `https://registry.npmjs.org/:_authToken=${NPM_TOKEN}`
 };
