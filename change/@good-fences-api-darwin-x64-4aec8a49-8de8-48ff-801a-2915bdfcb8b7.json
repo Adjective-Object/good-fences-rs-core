@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Removed changefiles, added registry with token to beachbal config file",
+  "packageName": "@good-fences/api-darwin-x64",
+  "email": "edgar21_9@hotmail.com",
+  "dependentChangeType": "patch"
+}
