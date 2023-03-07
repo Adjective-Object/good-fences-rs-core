@@ -101,7 +101,13 @@ impl UnusedFinderVisitor {
                             return Some(ExportedItem::Default);
                         }
                         // export { foo } from 'foo'
-                        return Some(ExportedItem::Named(ident.sym.to_string()));
+                        if !self
+                            .skipped_items
+                            .iter()
+                            .any(|skipped| skipped.is_match(&ident.sym.to_string()))
+                        {
+                            return Some(ExportedItem::Named(ident.sym.to_string()));
+                        }
                     }
                 }
                 return None;
@@ -333,60 +339,73 @@ impl Visit for UnusedFinderVisitor {
             return;
         }
         // import .. from ..
-        let mut specifiers: Vec<ExportedItem> = import
-            .specifiers
-            .iter()
-            .filter_map(|spec| -> Option<ExportedItem> {
-                match spec {
-                    swc_ecma_ast::ImportSpecifier::Named(named) => {
-                        match &named.imported {
-                            Some(module_name) => {
-                                // import { foo as bar } from './foo'
-                                match module_name {
-                                    ModuleExportName::Ident(ident) => {
-                                        // sym_str = foo in `import { foo as bar } from './foo'`
-                                        let sym_str = ident.sym.to_string();
-                                        if sym_str == "default" {
-                                            return Some(ExportedItem::Default);
+        let mut specifiers: Vec<ExportedItem> =
+            import
+                .specifiers
+                .iter()
+                .filter_map(|spec| -> Option<ExportedItem> {
+                    match spec {
+                        swc_ecma_ast::ImportSpecifier::Named(named) => {
+                            match &named.imported {
+                                Some(module_name) => {
+                                    // import { foo as bar } from './foo'
+                                    match module_name {
+                                        ModuleExportName::Ident(ident) => {
+                                            // sym_str = foo in `import { foo as bar } from './foo'`
+                                            let sym_str = ident.sym.to_string();
+                                            if sym_str == "default" {
+                                                // import { default as foo } from 'foo'
+                                                if !self.skipped_items.iter().any(|s| {
+                                                    s.is_match(&named.local.sym.to_string())
+                                                }) {
+                                                    return Some(ExportedItem::Default);
+                                                }
+                                            }
+                                            if !self
+                                                .skipped_items
+                                                .iter()
+                                                .any(|skipped| skipped.is_match(&sym_str))
+                                            {
+                                                return Some(ExportedItem::Named(sym_str));
+                                            }
+                                            None
                                         }
-                                        if !self
-                                            .skipped_items
-                                            .iter()
-                                            .any(|skipped| skipped.is_match(&sym_str))
-                                        {
-                                            return Some(ExportedItem::Named(sym_str));
+                                        ModuleExportName::Str(s) => {
+                                            if !self.skipped_items.iter().any(|skipped| {
+                                                skipped.is_match(&s.value.to_string())
+                                            }) {
+                                                return Some(ExportedItem::Named(
+                                                    s.value.to_string(),
+                                                ));
+                                            }
+                                            None
                                         }
-                                        None
-                                    }
-                                    ModuleExportName::Str(s) => {
-                                        if !self
-                                            .skipped_items
-                                            .iter()
-                                            .any(|skipped| skipped.is_match(&s.value.to_string()))
-                                        {
-                                            return Some(ExportedItem::Named(s.value.to_string()));
-                                        }
-                                        None
                                     }
                                 }
-                            }
-                            None => {
-                                // import { foo } from './foo'
-                                return Some(ExportedItem::Named(named.local.sym.to_string()));
+                                None => {
+                                    // import { foo } from './foo'
+                                    if !self.skipped_items.iter().any(|skipped| {
+                                        skipped.is_match(&named.local.sym.to_string())
+                                    }) {
+                                        return Some(ExportedItem::Named(
+                                            named.local.sym.to_string(),
+                                        ));
+                                    }
+                                    None
+                                }
                             }
                         }
+                        swc_ecma_ast::ImportSpecifier::Default(_) => {
+                            // import foo from 'foo'
+                            return Some(ExportedItem::Default);
+                        }
+                        swc_ecma_ast::ImportSpecifier::Namespace(_) => {
+                            // import * as foo from 'foo'
+                            return Some(ExportedItem::Namespace);
+                        }
                     }
-                    swc_ecma_ast::ImportSpecifier::Default(_) => {
-                        // import foo from 'foo'
-                        return Some(ExportedItem::Default);
-                    }
-                    swc_ecma_ast::ImportSpecifier::Namespace(_) => {
-                        // import * as foo from 'foo'
-                        return Some(ExportedItem::Namespace);
-                    }
-                }
-            })
-            .collect();
+                })
+                .collect();
 
         if let Some(entry) = self.imported_ids_path_name.get_mut(&src) {
             specifiers.drain(0..).for_each(|s| {
@@ -866,6 +885,32 @@ mod test {
             HashSet::from_iter(vec!["./foo".to_owned()]),
             visitor.imported_paths
         );
+    }
+
+    #[test]
+    fn test_ignored_regex_pattern() {
+        let cm = Lrc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            import foo, {Bar} from './foo';
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor =
+            UnusedFinderVisitor::new(std::sync::Arc::new(vec![
+                regex::Regex::new("[A-Z].*").unwrap()
+            ]));
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
+            "./foo".to_owned(),
+            HashSet::from_iter(vec![ImportedItem::Default]),
+        )]);
+        assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
     fn create_test_parser<'a>(
