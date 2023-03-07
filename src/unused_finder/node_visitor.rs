@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     iter::FromIterator,
+    sync::Arc,
 };
 use swc_ecma_ast::{
     BindingIdent, CallExpr, Callee, ExportAll, ExportDecl, ExportDefaultDecl, ExportDefaultExpr,
@@ -60,10 +61,11 @@ pub struct UnusedFinderVisitor {
     // exported from this file
     // const foo = require('foo') generates ["foo"]
     require_identifiers: HashSet<Id>,
+    skipped_items: Arc<Vec<regex::Regex>>,
 }
 
 impl UnusedFinderVisitor {
-    pub fn new() -> Self {
+    pub fn new(skipped_items: Arc<Vec<regex::Regex>>) -> Self {
         Self {
             imported_ids_path_name: HashMap::new(),
             require_paths: HashSet::new(),
@@ -71,6 +73,7 @@ impl UnusedFinderVisitor {
             export_from_ids: HashMap::new(),
             require_identifiers: HashSet::new(),
             exported_ids: HashSet::new(),
+            skipped_items,
         }
     }
 
@@ -129,14 +132,26 @@ impl UnusedFinderVisitor {
                         if sym == "default" {
                             self.exported_ids.insert(ExportedItem::Default);
                         } else {
-                            self.exported_ids
-                                .insert(ExportedItem::Named(id.sym.to_string()));
+                            if !self
+                                .skipped_items
+                                .iter()
+                                .any(|skipped| skipped.is_match(&sym))
+                            {
+                                self.exported_ids
+                                    .insert(ExportedItem::Named(id.sym.to_string()));
+                            }
                         }
                     }
                 } else if let ModuleExportName::Ident(id) = &named.orig {
                     // handles `export { foo }`
-                    self.exported_ids
-                        .insert(ExportedItem::Named(id.sym.to_string()));
+                    if !self
+                        .skipped_items
+                        .iter()
+                        .any(|skipped| skipped.is_match(&id.sym.to_string()))
+                    {
+                        self.exported_ids
+                            .insert(ExportedItem::Named(id.sym.to_string()));
+                    }
                 }
             }
             _ => {}
@@ -162,38 +177,74 @@ impl Visit for UnusedFinderVisitor {
         match &export.decl {
             swc_ecma_ast::Decl::Class(decl) => {
                 // export class Foo {}
-                self.exported_ids
-                    .insert(ExportedItem::Named(decl.ident.sym.to_string()));
+                if !self
+                    .skipped_items
+                    .iter()
+                    .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
+                {
+                    self.exported_ids
+                        .insert(ExportedItem::Named(decl.ident.sym.to_string()));
+                }
             }
             swc_ecma_ast::Decl::Fn(decl) => {
                 // export function foo() {}
-                self.exported_ids
-                    .insert(ExportedItem::Named(decl.ident.sym.to_string()));
+                if !self
+                    .skipped_items
+                    .iter()
+                    .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
+                {
+                    self.exported_ids
+                        .insert(ExportedItem::Named(decl.ident.sym.to_string()));
+                }
             }
             swc_ecma_ast::Decl::Var(decl) => {
                 // export const foo = 1;
                 if let Some(d) = decl.decls.first() {
                     if let Pat::Ident(ident) = &d.name {
-                        self.exported_ids
-                            .insert(ExportedItem::Named(ident.sym.to_string()));
+                        if !self
+                            .skipped_items
+                            .iter()
+                            .any(|skipped| skipped.is_match(&ident.sym.to_string()))
+                        {
+                            self.exported_ids
+                                .insert(ExportedItem::Named(ident.sym.to_string()));
+                        }
                     }
                 }
                 // self.exported_ids.insert(ExportedItem::Named(decl.ident.sym.to_string()));
             }
             swc_ecma_ast::Decl::TsInterface(decl) => {
                 // export interface Foo {}
-                self.exported_ids
-                    .insert(ExportedItem::Named(decl.id.sym.to_string()));
+                if !self
+                    .skipped_items
+                    .iter()
+                    .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
+                {
+                    self.exported_ids
+                        .insert(ExportedItem::Named(decl.id.sym.to_string()));
+                }
             }
             swc_ecma_ast::Decl::TsTypeAlias(decl) => {
                 // export type foo = string
-                self.exported_ids
-                    .insert(ExportedItem::Named(decl.id.sym.to_string()));
+                if !self
+                    .skipped_items
+                    .iter()
+                    .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
+                {
+                    self.exported_ids
+                        .insert(ExportedItem::Named(decl.id.sym.to_string()));
+                }
             }
             swc_ecma_ast::Decl::TsEnum(decl) => {
                 // export enum Foo { foo, bar }
-                self.exported_ids
-                    .insert(ExportedItem::Named(decl.id.sym.to_string()));
+                if !self
+                    .skipped_items
+                    .iter()
+                    .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
+                {
+                    self.exported_ids
+                        .insert(ExportedItem::Named(decl.id.sym.to_string()));
+                }
             }
             swc_ecma_ast::Decl::TsModule(decl) => {
                 dbg!(decl);
@@ -298,10 +349,24 @@ impl Visit for UnusedFinderVisitor {
                                         if sym_str == "default" {
                                             return Some(ExportedItem::Default);
                                         }
-                                        return Some(ExportedItem::Named(sym_str));
+                                        if !self
+                                            .skipped_items
+                                            .iter()
+                                            .any(|skipped| skipped.is_match(&sym_str))
+                                        {
+                                            return Some(ExportedItem::Named(sym_str));
+                                        }
+                                        None
                                     }
                                     ModuleExportName::Str(s) => {
-                                        return Some(ExportedItem::Named(s.value.to_string()))
+                                        if !self
+                                            .skipped_items
+                                            .iter()
+                                            .any(|skipped| skipped.is_match(&s.value.to_string()))
+                                        {
+                                            return Some(ExportedItem::Named(s.value.to_string()));
+                                        }
+                                        None
                                     }
                                 }
                             }
@@ -381,7 +446,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -404,7 +469,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -426,7 +491,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -450,7 +515,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -472,7 +537,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -493,7 +558,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -514,7 +579,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -536,7 +601,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -559,7 +624,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -582,7 +647,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -605,7 +670,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -628,7 +693,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -651,7 +716,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -674,7 +739,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -697,7 +762,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -723,7 +788,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -746,7 +811,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -769,7 +834,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -792,7 +857,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new();
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);

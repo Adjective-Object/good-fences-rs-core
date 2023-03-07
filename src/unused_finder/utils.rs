@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
+use std::sync::Arc;
 
 use jwalk::WalkDirGeneric;
 use path_slash::PathExt;
@@ -149,12 +150,16 @@ pub fn get_map_of_imports(
     return complex_hash;
 }
 
-pub fn retrieve_files(start_path: &str, skipped: Option<Vec<glob::Pattern>>) -> Vec<WalkedFile> {
+pub fn retrieve_files(
+    start_path: &str,
+    skipped_dirs: Option<Vec<glob::Pattern>>,
+    skipped_items: Arc<Vec<regex::Regex>>,
+) -> Vec<WalkedFile> {
     let walk_dir = WalkDirGeneric::<(HashSet<String>, WalkedFile)>::new(start_path)
         .process_read_dir(move |_, children| {
             children.retain(|dir_entry_result| match dir_entry_result {
                 Ok(dir_entry) => {
-                    return should_retain_dir_entry(dir_entry, &skipped);
+                    return should_retain_dir_entry(dir_entry, &skipped_dirs);
                 }
                 Err(_) => todo!(),
             });
@@ -174,8 +179,10 @@ pub fn retrieve_files(start_path: &str, skipped: Option<Vec<glob::Pattern>>) -> 
                                     Some(slashed) => slashed,
                                     None => todo!(),
                                 };
-                                let visitor_result =
-                                    get_import_export_paths_map(slashed.to_string());
+                                let visitor_result = get_import_export_paths_map(
+                                    slashed.to_string(),
+                                    skipped_items.clone(),
+                                );
                                 match visitor_result {
                                     Ok(import_export_info) => {
                                         dir_entry.client_state =
