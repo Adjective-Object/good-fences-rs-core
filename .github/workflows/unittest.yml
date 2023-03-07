@@ -8,8 +8,9 @@ on:
   workflow_call:
   workflow_dispatch:
 jobs:
-  format-check:
+  run-checks:
     runs-on: ubuntu-18.04
+    name: 'Run checks'
     steps:
       - name: check gclib version
         run: ldd --version
@@ -17,6 +18,10 @@ jobs:
         uses: actions/checkout@v3
       - name: cargo fmt --check
         run: cargo fmt --check
+      - name: install dependencies
+        run: yarn install
+      - name: Check changefile
+        run: yarn check-changefile
   tests-linux:
     runs-on: ubuntu-18.04
     steps:
