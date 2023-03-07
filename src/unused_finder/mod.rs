@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
     iter::FromIterator,
+    str::FromStr,
     sync::Arc,
 };
 
@@ -40,14 +41,15 @@ impl Default for WalkedFile {
 pub fn find_unused_items(
     paths_to_read: Vec<String>,
     ts_config_path: String,
-    skipped: Vec<String>,
+    skipped_dirs: Vec<String>,
+    skipped_items: Vec<String>,
 ) -> Result<Vec<String>, crate::error::NapiLikeError> {
     let tsconfig = match TsconfigPathsJson::from_path(ts_config_path) {
         Ok(tsconfig) => tsconfig,
         Err(e) => panic!("Unable to read tsconfig file: {}", e),
     };
-    let skipped = skipped.iter().map(|s| glob::Pattern::new(s));
-    let skipped: Arc<Vec<glob::Pattern>> = match skipped.into_iter().collect() {
+    let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
+    let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
         Ok(v) => Arc::new(v),
         Err(e) => {
             return Err(crate::error::NapiLikeError {
@@ -56,11 +58,26 @@ pub fn find_unused_items(
             })
         }
     };
+
+    let skipped_items = skipped_items
+        .iter()
+        .map(|s| regex::Regex::from_str(s.as_str()));
+    let skipped_items: Vec<regex::Regex> = match skipped_items.into_iter().collect() {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(crate::error::NapiLikeError {
+                status: napi::Status::InvalidArg,
+                message: e.to_string(),
+            })
+        }
+    };
+    let skipped_items = Arc::new(skipped_items);
     // Walk on all files and retrieve the WalkFileData from them
     let mut flattened_walk_file_data: Vec<WalkFileMetaData> = paths_to_read
         .par_iter()
         .map(|path| {
-            let mut walked_files = retrieve_files(path, Some(skipped.to_vec()));
+            let mut walked_files =
+                retrieve_files(path, Some(skipped_dirs.to_vec()), skipped_items.clone());
             let walked_files_data: Vec<WalkFileMetaData> = walked_files
                 .drain(0..)
                 .filter_map(|walked_file| {
@@ -186,11 +203,30 @@ mod test {
     #[test]
     fn test_error_in_glob() {
         let result = find_unused_items(
-            vec![".".to_string()],
+            vec!["tests/unused_finder".to_string()],
             "tests/unused_finder/tsconfig.json".to_string(),
             vec![".....///invalidpath****".to_string()],
+            vec!["[A-Z].*".to_string(), "something".to_string()],
         );
-        dbg!(&result);
         assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message,
+            "wildcards are either regular `*` or recursive `**`"
+        )
+    }
+
+    #[test]
+    fn test_error_in_regex() {
+        let result = find_unused_items(
+            vec!["tests/unused_finder".to_string()],
+            "tests/unused_finder/tsconfig.json".to_string(),
+            vec![],
+            vec!["[A-Z.*".to_string(), "something".to_string()],
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message,
+            "regex parse error:\n    [A-Z.*\n    ^\nerror: unclosed character class"
+        )
     }
 }

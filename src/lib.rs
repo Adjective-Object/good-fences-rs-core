@@ -200,11 +200,13 @@ fn convert_napi_like_err_result<T>(
 pub fn find_unused_items(
     paths_to_read: Vec<String>,
     ts_config_path: String,
-    skipped: Vec<String>,
+    skipped_dirs: Vec<String>,
+    skipped_items: Vec<String>,
 ) -> Result<Vec<String>, napi::Error> {
     convert_napi_like_err_result(unused_finder::find_unused_items(
         paths_to_read,
         ts_config_path,
-        skipped,
+        skipped_dirs,
+        skipped_items,
     ))
 }

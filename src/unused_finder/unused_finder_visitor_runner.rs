@@ -42,7 +42,10 @@ impl Default for ImportExportInfo {
     }
 }
 
-pub fn get_import_export_paths_map(file_path: String) -> Result<ImportExportInfo, String> {
+pub fn get_import_export_paths_map(
+    file_path: String,
+    skipped_items: Arc<Vec<regex::Regex>>,
+) -> Result<ImportExportInfo, String> {
     let path = PathBuf::from(&file_path);
 
     let cm = Arc::<swc_common::SourceMap>::default();
@@ -80,11 +83,11 @@ pub fn get_import_export_paths_map(file_path: String) -> Result<ImportExportInfo
             parser_errors.push(diagnostic.message());
             // Avoid panic
             diagnostic.cancel();
-            todo!();
+            return Err("Error parsing TS file".to_string());
         }
     };
 
-    let mut visitor = UnusedFinderVisitor::new();
+    let mut visitor = UnusedFinderVisitor::new(skipped_items);
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {
