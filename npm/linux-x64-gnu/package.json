@@ -1,6 +1,7 @@
 {
   "name": "@good-fences/api-linux-x64-gnu",
   "version": "0.1.3",
+  "private": true,
   "os": [
     "linux"
   ],
