@@ -7,6 +7,10 @@
     "name": "@good-fences",
     "triples": {}
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adjective-Object/good-fences-rs-core"
+  },
   "bin": {
     "good-fences": "./good-fences.js"
   },
