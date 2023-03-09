@@ -42,7 +42,8 @@ jobs:
       - name: Publish
         run: |
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-          yarn run prepublishOnly
-          yarn beachball publish -c .beachball.js -y --token $NPM_TOKEN
+          # Skipping publish on this step, only to create tags, push to main new version, this command fails given it needs to publish ona package per platform.
+          yarn beachball publish -c .beachball.js -y --no-publish 
+          npm publish --access public
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
