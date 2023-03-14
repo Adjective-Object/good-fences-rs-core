@@ -43,6 +43,7 @@ jobs:
           yarn artifacts
       - name: Publish
         run: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           git config user.email "mhuan13@gmail.com"
           git config user.name "$GITHUB_ACTOR"
           git remote set-url origin https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
