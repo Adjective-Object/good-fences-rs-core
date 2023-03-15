@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Removed prepublish step",
+  "packageName": "@good-fences/api-win32-x64-msvc",
+  "email": "edgar21_9@hotmail.com",
+  "dependentChangeType": "patch"
+}
