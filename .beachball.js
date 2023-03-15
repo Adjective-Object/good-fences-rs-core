@@ -3,5 +3,5 @@
 /** @type {RepoOptions} */
 module.exports = {
   branch: "main",
-  access: "public"
+  access: "public",
 };
