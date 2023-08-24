@@ -93,7 +93,7 @@ pub fn find_unused_items(
         .flatten()
         .collect();
 
-    let mut walked_files_map: HashMap<String, ImportExportInfo> = flattened_walk_file_data
+    let walked_files_map: HashMap<String, ImportExportInfo> = flattened_walk_file_data
         .drain(0..)
         .map(|f| {
             (
@@ -102,96 +102,150 @@ pub fn find_unused_items(
             )
         })
         .collect();
-
     // HashMap wher key = the used file path, value = a hashset with the items imported from that file, note that those items could not belong to that file (for the cases of export from)
-    let mut unused_file_exports: HashMap<&String, HashSet<ExportedItem>> = HashMap::new();
+    let mut path_unused_items_map: HashMap<String, HashSet<ExportedItem>> = HashMap::new();
+
+    walked_files_map
+        .clone()
+        .drain()
+        .for_each(|(path, imp_exp_info)| {
+            // Populate `unused_file_exports`
+            path_unused_items_map.insert(path, imp_exp_info.exported_ids);
+        });
+
+    let mut unused_files: HashSet<_> = walked_files_map.keys().clone().into_iter().collect();
 
     let resolved_imports_map = get_map_of_imports(&tsconfig, &walked_files_map);
     resolved_imports_map
         .iter()
-        .for_each(|(_f, path_items_map)| {
-            path_items_map.iter().for_each(|(p, items)| {
-                if let Some(used_items) = unused_file_exports.get_mut(p) {
-                    for item in items.iter() {
-                        match item {
-                            ResolvedItem::Imported(imported_item) => {
-                                used_items.insert(imported_item.into());
+        .for_each(|(path, imported_things)| {
+            // Iterate over each file and remove all imported items from
+            imported_things
+                .iter()
+                .for_each(|(imported_path, imported_items)| {
+                    if let Some(origin_file_exported_items) =
+                        path_unused_items_map.get_mut(imported_path)
+                    {
+                        imported_items.iter().for_each(|item| {
+                            match item {
+                                ResolvedItem::Imported(imported) => {
+                                    match imported {
+                                        node_visitor::ImportedItem::ExecutionOnly => {
+                                            origin_file_exported_items.clear(); // Even if exported elements are not imported specifically, side effects take place
+                                            unused_files.remove(imported_path);
+                                        }
+                                        node_visitor::ImportedItem::Namespace => {
+                                            origin_file_exported_items.clear();
+                                            unused_files.remove(imported_path);
+                                        }
+                                        _ => {
+                                            unused_files.remove(imported_path);
+                                            let i = ExportedItem::from(imported);
+                                            // println!("Removing item from {}", imported_path);
+                                            origin_file_exported_items.remove(&i);
+                                        }
+                                    }
+                                }
+                                ResolvedItem::Exported(_) => {}
                             }
-                            ResolvedItem::Exported(exported_item) => {
-                                used_items.insert(exported_item.clone());
-                            }
-                        }
+                        });
                     }
-                } else {
-                    unused_file_exports.insert(
-                        p,
-                        HashSet::from_iter(items.iter().filter_map(|i| match i {
-                            ResolvedItem::Imported(imported) => return Some(imported.into()),
-                            ResolvedItem::Exported(exported) => return Some(exported.clone()),
-                        })),
-                    );
-                }
-            });
+                });
         });
+
+    // resolved_imports_map
+    //     .iter()
+    //     .for_each(|(_f, path_items_map)| {
+    //         path_items_map.iter().for_each(|(p, items)| {
+    //             if let Some(used_items) = unused_file_exports.get_mut(p) {
+    //                 for item in items.iter() {
+    //                     match item {
+    //                         ResolvedItem::Imported(imported_item) => {
+    //                             used_items.insert(imported_item.into());
+    //                         }
+    //                         ResolvedItem::Exported(exported_item) => {
+    //                             used_items.insert(exported_item.clone());
+    //                         }
+    //                     }
+    //                 }
+    //             } else {
+    //                 unused_file_exports.insert(
+    //                     p,
+    //                     HashSet::from_iter(items.iter().filter_map(|i| match i {
+    //                         ResolvedItem::Imported(imported) => return Some(imported.into()),
+    //                         ResolvedItem::Exported(exported) => return Some(exported.clone()),
+    //                     })),
+    //                 );
+    //             }
+    //         });
+    //     });
 
     // Get unused items from used files:
     // Compare the used items with ImportExportInfo and withold the unused items
-    let mut is_executed = false;
-    unused_file_exports
-        .iter()
-        .for_each(|(used_path, used_items)| {
-            is_executed = false;
-            if let Some(found_file) = walked_files_map.get_mut(*used_path) {
-                used_items.iter().for_each(|used_item| {
-                    match &used_item {
-                        // Remove from 'exported_ids' the items that were used if named or default
-                        ExportedItem::Default | ExportedItem::Named(_) => {
-                            if !found_file.exported_ids.remove(used_item) {
-                                return;
-                            }
-                        }
-                        ExportedItem::Namespace => {
-                            found_file
-                                .exported_ids
-                                .retain(|k| &ExportedItem::Default == k);
-                        }
-                        ExportedItem::ExecutionOnly => {
-                            is_executed = true;
-                        }
-                    }
-                });
-                // TODO resolve export from ids and mark them as used
-            }
-            if is_executed {
-                walked_files_map.remove(*used_path);
-            }
-        });
+    // let mut is_executed = false;
+    // path_unused_items_map
+    //     .iter()
+    //     .for_each(|(used_path, used_items)| {
+    //         is_executed = false;
+    //         if let Some(found_file) = walked_files_map.get_mut(&*used_path) {
+    //             used_items.iter().for_each(|used_item| {
+    //                 match &used_item {
+    //                     // Remove from 'exported_ids' the items that were used if named or default
+    //                     ExportedItem::Default | ExportedItem::Named(_) => {
+    //                         if !found_file.exported_ids.remove(used_item) {
+    //                             return;
+    //                         }
+    //                     }
+    //                     ExportedItem::Namespace => {
+    //                         found_file
+    //                             .exported_ids
+    //                             .retain(|k| &ExportedItem::Default == k);
+    //                     }
+    //                     ExportedItem::ExecutionOnly => {
+    //                         is_executed = true;
+    //                     }
+    //                 }
+    //             });
+    //             // TODO resolve export from ids and mark them as used
+    //         }
+    //         if is_executed {
+    //             walked_files_map.remove(&*used_path);
+    //         }
+    //     });
 
     let mut unused_items_len = 0;
 
     // Print the unused items for each file
-    let mut vec_keys: Vec<&&String> = unused_file_exports.keys().into_iter().collect();
-    vec_keys.sort();
-    let mut results: Vec<String> = Vec::new();
-    for key in vec_keys {
-        if let Some(used_file) = walked_files_map.remove(*key) {
-            if !used_file.exported_ids.is_empty() {
-                unused_items_len += used_file.exported_ids.len();
-                results.push(
-                    format!(
-                        "From file {} found {:?} unused items",
-                        key, used_file.exported_ids
-                    )
-                    .to_string(),
-                );
-                println!(
-                    "From file {} found {:?} unused items",
-                    key, used_file.exported_ids
-                );
-            }
+    let mut path_unused_items: Vec<_> = path_unused_items_map.into_iter().collect();
+    path_unused_items.sort_by(|x, y| x.0.cmp(&y.0));
+    path_unused_items.iter().for_each(|(k, v)| {
+        if v.len() > 0 {
+            println!("From file {} found {:?} unused items", k, v);
         }
-    }
-    println!("Total unused files: {}", walked_files_map.keys().len());
+        unused_items_len += v.len();
+    });
+    // let mut vec_keys: Vec<&String> = path_unused_items_map.keys().into_iter().collect();
+    // vec_keys.sort();
+    let mut results: Vec<String> = Vec::new();
+    // for key in vec_keys {
+    //     if let Some(used_file) = walked_files_map.remove(&*key) {
+    //         if !used_file.exported_ids.is_empty() {
+    //             unused_items_len += used_file.exported_ids.len();
+    //             results.push(
+    //                 format!(
+    //                     "From file {} found {:?} unused items",
+    //                     key, used_file.exported_ids
+    //                 )
+    //                 .to_string(),
+    //             );
+    //             println!(
+    //                 "From file {} found {:?} unused items",
+    //                 key, used_file.exported_ids
+    //             );
+    //         }
+    //     }
+    // }
+    println!("Total unused files: {}", unused_files.len());
     println!("Total unused items: {}", unused_items_len);
 
     Ok(results)

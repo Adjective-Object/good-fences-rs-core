@@ -59,8 +59,10 @@ pub struct UnusedFinderVisitor {
     // import('./foo') and import './foo' generates ["./foo"]
     pub imported_paths: HashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: HashMap<String, HashSet<ExportedItem>>,
+    pub export_from_ids: HashMap<String, HashSet<ImportedItem>>,
     pub exported_ids: HashSet<ExportedItem>,
+    // import './foo';
+    pub executed_paths: HashSet<String>,
     // exported from this file
     // const foo = require('foo') generates ["foo"]
     require_identifiers: HashSet<Id>,
@@ -74,6 +76,7 @@ impl UnusedFinderVisitor {
             require_paths: HashSet::new(),
             imported_paths: HashSet::new(),
             export_from_ids: HashMap::new(),
+            executed_paths: HashSet::new(),
             require_identifiers: HashSet::new(),
             exported_ids: HashSet::new(),
             skipped_items,
@@ -88,20 +91,20 @@ impl UnusedFinderVisitor {
      * - `export { foo } from 'foo'`
      */
     fn handle_export_from_specifiers(&mut self, export: &NamedExport, source: &Str) {
-        let mut specifiers: Vec<ExportedItem> = export
+        let mut specifiers: Vec<ImportedItem> = export
             .specifiers
             .iter()
-            .filter_map(|spec| -> Option<ExportedItem> {
+            .filter_map(|spec| -> Option<ImportedItem> {
                 if spec.is_namespace() {
                     // export * as foo from 'foo;
-                    return Some(ExportedItem::Namespace);
+                    return Some(ImportedItem::Namespace);
                 }
                 if let Some(named) = spec.as_named() {
                     // export { foo } from 'foo'
                     if let ModuleExportName::Ident(ident) = &named.orig {
                         // export { default as foo } from 'foo'
                         if ident.sym.to_string() == "default" {
-                            return Some(ExportedItem::Default);
+                            return Some(ImportedItem::Default);
                         }
                         // export { foo } from 'foo'
                         if !self
@@ -109,25 +112,20 @@ impl UnusedFinderVisitor {
                             .iter()
                             .any(|skipped| skipped.is_match(&ident.sym.to_string()))
                         {
-                            return Some(ExportedItem::Named(ident.sym.to_string()));
+                            return Some(ImportedItem::Named(ident.sym.to_string()));
                         }
                     }
                 }
                 return None;
             })
             .collect();
-        if let Some(entry) = self
-            .export_from_ids
-            .get_mut(&source.value.to_string().replace("/lib", "/src"))
-        {
+        if let Some(entry) = self.export_from_ids.get_mut(&source.value.to_string()) {
             specifiers.drain(0..).for_each(|s| {
                 entry.insert(s);
             })
         } else {
-            self.export_from_ids.insert(
-                source.value.to_string().replace("/lib", "/src"),
-                HashSet::from_iter(specifiers),
-            );
+            self.export_from_ids
+                .insert(source.value.to_string(), HashSet::from_iter(specifiers));
         }
     }
 
@@ -272,10 +270,10 @@ impl Visit for UnusedFinderVisitor {
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
 
-        let source = export.src.value.to_string().replace("/lib", "/src");
+        let source = export.src.value.to_string();
 
         self.export_from_ids
-            .insert(source, HashSet::from_iter(vec![ExportedItem::Namespace]));
+            .insert(source, HashSet::from_iter(vec![ImportedItem::Namespace]));
     }
 
     // export {foo} from './foo';
@@ -304,7 +302,7 @@ impl Visit for UnusedFinderVisitor {
         decl.visit_children_with(self);
         if let Some(module_ref) = decl.module_ref.as_ts_external_module_ref() {
             self.imported_paths
-                .insert(module_ref.expr.value.to_string().replace("/lib", "/src"));
+                .insert(module_ref.expr.value.to_string());
         }
     }
 
@@ -316,8 +314,7 @@ impl Visit for UnusedFinderVisitor {
         if let Callee::Import(_) = &expr.callee {
             match extract_argument_value(expr) {
                 Some(import_path) => {
-                    self.imported_paths
-                        .insert(import_path.replace("/lib", "/src"));
+                    self.imported_paths.insert(import_path);
                 }
                 None => return,
             }
@@ -328,8 +325,7 @@ impl Visit for UnusedFinderVisitor {
                     if !self.require_identifiers.contains(&ident.to_id()) {
                         match extract_argument_value(expr) {
                             Some(import_path) => {
-                                self.require_paths
-                                    .insert(import_path.replace("/lib", "/src"));
+                                self.require_paths.insert(import_path);
                             }
                             None => return,
                         }
@@ -343,10 +339,10 @@ impl Visit for UnusedFinderVisitor {
     fn visit_import_decl(&mut self, import: &ImportDecl) {
         import.visit_children_with(self);
 
-        let src = import.src.value.to_string().replace("/lib", "/src");
+        let src = import.src.value.to_string();
         // import './foo';
         if import.specifiers.is_empty() {
-            self.imported_paths.insert(src);
+            self.executed_paths.insert(src);
             return;
         }
         // import .. from ..
@@ -638,9 +634,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ExportedItem>> = HashMap::from([(
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
             "./foo".to_owned(),
-            HashSet::from_iter(vec![ExportedItem::Named("foo".to_owned())]),
+            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
         )]);
         assert_eq!(expected_map, visitor.export_from_ids);
     }
@@ -661,9 +657,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ExportedItem>> = HashMap::from([(
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
             "./foo".to_owned(),
-            HashSet::from_iter(vec![ExportedItem::Default]),
+            HashSet::from_iter(vec![ImportedItem::Default]),
         )]);
         assert_eq!(expected_map, visitor.export_from_ids);
     }
@@ -684,9 +680,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ExportedItem>> = HashMap::from([(
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
             "./foo".to_owned(),
-            HashSet::from_iter(vec![ExportedItem::Namespace]),
+            HashSet::from_iter(vec![ImportedItem::Namespace]),
         )]);
         assert_eq!(expected_map, visitor.export_from_ids);
     }
@@ -943,7 +939,7 @@ mod test {
 
         assert_eq!(
             HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.imported_paths
+            visitor.executed_paths
         );
     }
 
