@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 
 use jwalk::WalkDirGeneric;
-use path_slash::{PathBufExt, PathExt};
+use path_slash::PathBufExt;
 use relative_path::RelativePath;
 
 use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};

@@ -451,7 +451,6 @@ mod test {
     use std::iter::FromIterator;
     use std::sync::Arc;
 
-    use swc_core::common::input::StringInput;
     use swc_core::common::{FileName, SourceFile, SourceMap};
     use swc_core::ecma::visit::visit_module;
     use swc_ecma_parser::lexer::Lexer;

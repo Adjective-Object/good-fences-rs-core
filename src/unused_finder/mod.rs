@@ -5,7 +5,6 @@ mod utils;
 use rayon::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
-    iter::FromIterator,
     str::FromStr,
     sync::Arc,
 };
@@ -118,7 +117,7 @@ pub fn find_unused_items(
     let resolved_imports_map = get_map_of_imports(&tsconfig, &walked_files_map);
     resolved_imports_map
         .iter()
-        .for_each(|(path, imported_things)| {
+        .for_each(|(_path, imported_things)| {
             // Iterate over each file and remove all imported items from
             imported_things
                 .iter()
@@ -226,7 +225,7 @@ pub fn find_unused_items(
     });
     // let mut vec_keys: Vec<&String> = path_unused_items_map.keys().into_iter().collect();
     // vec_keys.sort();
-    let mut results: Vec<String> = Vec::new();
+    let results: Vec<String> = Vec::new();
     // for key in vec_keys {
     //     if let Some(used_file) = walked_files_map.remove(&*key) {
     //         if !used_file.exported_ids.is_empty() {
