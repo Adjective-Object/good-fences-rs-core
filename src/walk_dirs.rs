@@ -8,6 +8,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
+use napi::bindgen_prelude::FromNapiValue;
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {

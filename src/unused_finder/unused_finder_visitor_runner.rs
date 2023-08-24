@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, sync::Arc};
 
-use swc_common::{errors::Handler, Globals, Mark, GLOBALS};
-use swc_ecma_parser::{Capturing, Parser};
-use swc_ecmascript::transforms::resolver;
-use swc_ecmascript::visit::{fold_module, visit_module};
+use swc_core::common::{SourceMap, Globals, GLOBALS, Mark};
+use swc_core::common::errors::Handler;
+use swc_core::ecma::transforms::base::resolver;
+use swc_core::ecma::visit::{fold_module, visit_module};
+use swc_ecma_parser::{Parser, Capturing};
 
 use crate::get_imports::create_lexer;
 
@@ -48,7 +49,7 @@ pub fn get_import_export_paths_map(
 ) -> Result<ImportExportInfo, String> {
     let path = PathBuf::from(&file_path);
 
-    let cm = Arc::<swc_common::SourceMap>::default();
+    let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(path.as_path()) {
         Ok(f) => f,
         Err(_) => todo!(), // TODO create err module

@@ -14,6 +14,7 @@ pub mod import_resolver;
 mod path_utils;
 pub mod unused_finder;
 pub mod walk_dirs;
+use napi::bindgen_prelude::*;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
@@ -191,7 +192,7 @@ fn convert_napi_like_err_result<T>(
     result: Result<T, crate::error::NapiLikeError>,
 ) -> Result<T, napi::Error> {
     match result {
-        Err(err) => Err(napi::Error::new(err.status, err.message)),
+        Err(err) => Err(napi::Error::new(err.status, err.reason)),
         Ok(t) => Ok(t),
     }
 }
@@ -202,7 +203,7 @@ pub fn find_unused_items(
     ts_config_path: String,
     skipped_dirs: Vec<String>,
     skipped_items: Vec<String>,
-) -> Result<Vec<String>, napi::Error> {
+) -> napi::Result<Vec<String>> {
     convert_napi_like_err_result(unused_finder::find_unused_items(
         paths_to_read,
         ts_config_path,

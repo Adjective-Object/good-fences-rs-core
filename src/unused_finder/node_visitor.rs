@@ -3,12 +3,8 @@ use std::{
     iter::FromIterator,
     sync::Arc,
 };
-use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, ExportAll, ExportDecl, ExportDefaultDecl, ExportDefaultExpr,
-    ExportSpecifier, Id, ImportDecl, Lit, ModuleExportName, NamedExport, Pat, TsImportEqualsDecl,
-};
-use swc_ecmascript::visit::{Visit, VisitWith};
 
+use swc_core::ecma::{ast::{Id, NamedExport, Str, ModuleExportName, ExportSpecifier, ExportDefaultExpr, ExportDefaultDecl, ExportDecl, Decl, Pat, ExportAll, BindingIdent, TsImportEqualsDecl, CallExpr, Callee, ImportDecl, ImportSpecifier, Lit}, visit::Visit};
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ExportedItem {
     Named(String),
@@ -84,7 +80,7 @@ impl UnusedFinderVisitor {
      * - `export { default as foo } from 'foo'`
      * - `export { foo } from 'foo'`
      */
-    fn handle_export_from_specifiers(&mut self, export: &NamedExport, source: &swc_ecma_ast::Str) {
+    fn handle_export_from_specifiers(&mut self, export: &NamedExport, source: &Str) {
         let mut specifiers: Vec<ExportedItem> = export
             .specifiers
             .iter()
@@ -181,7 +177,7 @@ impl Visit for UnusedFinderVisitor {
     // Handles scenarios `export` has an inline declaration, e.g. `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
         match &export.decl {
-            swc_ecma_ast::Decl::Class(decl) => {
+            Decl::Class(decl) => {
                 // export class Foo {}
                 if !self
                     .skipped_items
@@ -192,7 +188,7 @@ impl Visit for UnusedFinderVisitor {
                         .insert(ExportedItem::Named(decl.ident.sym.to_string()));
                 }
             }
-            swc_ecma_ast::Decl::Fn(decl) => {
+            Decl::Fn(decl) => {
                 // export function foo() {}
                 if !self
                     .skipped_items
@@ -203,7 +199,7 @@ impl Visit for UnusedFinderVisitor {
                         .insert(ExportedItem::Named(decl.ident.sym.to_string()));
                 }
             }
-            swc_ecma_ast::Decl::Var(decl) => {
+            Decl::Var(decl) => {
                 // export const foo = 1;
                 if let Some(d) = decl.decls.first() {
                     if let Pat::Ident(ident) = &d.name {
@@ -219,7 +215,7 @@ impl Visit for UnusedFinderVisitor {
                 }
                 // self.exported_ids.insert(ExportedItem::Named(decl.ident.sym.to_string()));
             }
-            swc_ecma_ast::Decl::TsInterface(decl) => {
+            Decl::TsInterface(decl) => {
                 // export interface Foo {}
                 if !self
                     .skipped_items
@@ -230,7 +226,7 @@ impl Visit for UnusedFinderVisitor {
                         .insert(ExportedItem::Named(decl.id.sym.to_string()));
                 }
             }
-            swc_ecma_ast::Decl::TsTypeAlias(decl) => {
+            Decl::TsTypeAlias(decl) => {
                 // export type foo = string
                 if !self
                     .skipped_items
@@ -241,7 +237,7 @@ impl Visit for UnusedFinderVisitor {
                         .insert(ExportedItem::Named(decl.id.sym.to_string()));
                 }
             }
-            swc_ecma_ast::Decl::TsEnum(decl) => {
+            Decl::TsEnum(decl) => {
                 // export enum Foo { foo, bar }
                 if !self
                     .skipped_items
@@ -252,10 +248,11 @@ impl Visit for UnusedFinderVisitor {
                         .insert(ExportedItem::Named(decl.id.sym.to_string()));
                 }
             }
-            swc_ecma_ast::Decl::TsModule(decl) => {
+            Decl::TsModule(decl) => {
                 dbg!(decl);
                 // self.exported_ids.insert(ExportedItem::Named(decl.id.as_ident().unwrap().to_string()));
             }
+            Decl::Using(_) => {},
         }
     }
 
@@ -345,7 +342,7 @@ impl Visit for UnusedFinderVisitor {
                 .iter()
                 .filter_map(|spec| -> Option<ExportedItem> {
                     match spec {
-                        swc_ecma_ast::ImportSpecifier::Named(named) => {
+                        ImportSpecifier::Named(named) => {
                             match &named.imported {
                                 Some(module_name) => {
                                     // import { foo as bar } from './foo'
@@ -395,11 +392,11 @@ impl Visit for UnusedFinderVisitor {
                                 }
                             }
                         }
-                        swc_ecma_ast::ImportSpecifier::Default(_) => {
+                        ImportSpecifier::Default(_) => {
                             // import foo from 'foo'
                             return Some(ExportedItem::Default);
                         }
-                        swc_ecma_ast::ImportSpecifier::Namespace(_) => {
+                        ImportSpecifier::Namespace(_) => {
                             // import * as foo from 'foo'
                             return Some(ExportedItem::Namespace);
                         }
@@ -442,10 +439,13 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
 mod test {
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
-    use swc_common::sync::Lrc;
-    use swc_common::{FileName, SourceMap};
-    use swc_ecma_parser::{Capturing, Parser};
-    use swc_ecma_visit::visit_module;
+    use std::sync::Arc;
+
+    use swc_core::common::input::StringInput;
+    use swc_core::common::{SourceMap, FileName, SourceFile};
+    use swc_core::ecma::visit::visit_module;
+    use swc_ecma_parser::{Parser, Capturing};
+    use swc_ecma_parser::lexer::Lexer;
 
     use crate::get_imports::create_lexer;
     use crate::unused_finder::node_visitor::{ExportedItem, ImportedItem};
@@ -454,7 +454,7 @@ mod test {
 
     #[test]
     fn test_export_named() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -477,7 +477,7 @@ mod test {
 
     #[test]
     fn test_export_named_as_bar() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -499,7 +499,7 @@ mod test {
     }
     #[test]
     fn test_export_default() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -521,7 +521,7 @@ mod test {
 
     #[test]
     fn test_expor_type_as_default() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -545,7 +545,7 @@ mod test {
 
     #[test]
     fn test_export_default_execution() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -567,7 +567,7 @@ mod test {
 
     #[test]
     fn test_export_default_class() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -588,7 +588,7 @@ mod test {
 
     #[test]
     fn test_export_const() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -610,7 +610,7 @@ mod test {
 
     #[test]
     fn test_export_from() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -633,7 +633,7 @@ mod test {
 
     #[test]
     fn test_export_default_from() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -656,7 +656,7 @@ mod test {
 
     #[test]
     fn test_export_star_from() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -679,7 +679,7 @@ mod test {
 
     #[test]
     fn test_import_default() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -702,7 +702,7 @@ mod test {
 
     #[test]
     fn test_import_specifier() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -725,7 +725,7 @@ mod test {
 
     #[test]
     fn test_import_specifier_with_alias() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -748,7 +748,7 @@ mod test {
 
     #[test]
     fn test_import_default_with_alias() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -771,7 +771,7 @@ mod test {
 
     #[test]
     fn test_import_default_and_specifier() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -797,7 +797,7 @@ mod test {
 
     #[test]
     fn test_import_star() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -820,7 +820,7 @@ mod test {
 
     #[test]
     fn test_require() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -843,7 +843,7 @@ mod test {
 
     #[test]
     fn test_import_equals() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -866,7 +866,7 @@ mod test {
 
     #[test]
     fn test_import_statement() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -889,7 +889,7 @@ mod test {
 
     #[test]
     fn test_ignored_regex_pattern() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -914,8 +914,8 @@ mod test {
     }
 
     fn create_test_parser<'a>(
-        fm: &'a Lrc<swc_common::SourceFile>,
-    ) -> Parser<Capturing<swc_ecma_parser::lexer::Lexer<'a, swc_ecma_parser::StringInput<'a>>>>
+        fm: &'a Arc<SourceFile>,
+    ) -> Parser<Capturing<Lexer>>
     {
         let lexer = create_lexer(fm);
         let capturing = Capturing::new(lexer);

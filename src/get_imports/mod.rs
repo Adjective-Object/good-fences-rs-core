@@ -1,15 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use swc_common::errors::Handler;
-use swc_common::{Globals, Mark, GLOBALS};
+use swc_core::common::errors::Handler;
+use swc_core::common::{SourceFile, Globals, Mark, GLOBALS, SourceMap};
+use swc_core::ecma::transforms::base::resolver;
+use swc_core::ecma::visit::{fold_module, visit_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, TsConfig};
 mod import_path_visitor;
 
 pub use import_path_visitor::*;
-use swc_ecmascript::transforms::resolver;
-use swc_ecmascript::visit::{fold_module, visit_module};
 
 use crate::error::GetImportError;
 
@@ -24,7 +24,7 @@ pub fn get_imports_map_from_file<'a>(
             })
         }
     };
-    let cm = Arc::<swc_common::SourceMap>::default();
+    let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
         Err(e) => {
@@ -120,7 +120,7 @@ fn get_imports_map_from_visitor(
     final_imports_map
 }
 
-pub fn create_lexer<'a>(fm: &'a swc_common::SourceFile) -> Lexer<'a, StringInput<'a>> {
+pub fn create_lexer<'a>(fm: &'a SourceFile) -> Lexer {
     let filename = fm.name.to_string();
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig {
