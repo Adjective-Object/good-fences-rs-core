@@ -8,7 +8,8 @@
     "triples": {}
   },
   "bin": {
-    "good-fences": "./good-fences.js"
+    "good-fences": "./good-fences.js",
+    "unused": "./unused.js"
   },
   "license": "MIT",
   "devDependencies": {
