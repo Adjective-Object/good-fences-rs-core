@@ -4,7 +4,14 @@ use std::{
     sync::Arc,
 };
 
-use swc_core::ecma::{ast::{Id, NamedExport, Str, ModuleExportName, ExportSpecifier, ExportDefaultExpr, ExportDefaultDecl, ExportDecl, Decl, Pat, ExportAll, BindingIdent, TsImportEqualsDecl, CallExpr, Callee, ImportDecl, ImportSpecifier, Lit}, visit::Visit};
+use swc_core::ecma::{
+    ast::{
+        BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
+        ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
+        NamedExport, Pat, Str, TsImportEqualsDecl,
+    },
+    visit::{Visit, VisitWith},
+};
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ExportedItem {
     Named(String),
@@ -109,13 +116,18 @@ impl UnusedFinderVisitor {
                 return None;
             })
             .collect();
-        if let Some(entry) = self.export_from_ids.get_mut(&source.value.to_string()) {
+        if let Some(entry) = self
+            .export_from_ids
+            .get_mut(&source.value.to_string().replace("/lib", "/src"))
+        {
             specifiers.drain(0..).for_each(|s| {
                 entry.insert(s);
             })
         } else {
-            self.export_from_ids
-                .insert(source.value.to_string(), HashSet::from_iter(specifiers));
+            self.export_from_ids.insert(
+                source.value.to_string().replace("/lib", "/src"),
+                HashSet::from_iter(specifiers),
+            );
         }
     }
 
@@ -252,7 +264,7 @@ impl Visit for UnusedFinderVisitor {
                 dbg!(decl);
                 // self.exported_ids.insert(ExportedItem::Named(decl.id.as_ident().unwrap().to_string()));
             }
-            Decl::Using(_) => {},
+            Decl::Using(_) => {}
         }
     }
 
@@ -260,7 +272,7 @@ impl Visit for UnusedFinderVisitor {
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
 
-        let source = export.src.value.to_string();
+        let source = export.src.value.to_string().replace("/lib", "/src");
 
         self.export_from_ids
             .insert(source, HashSet::from_iter(vec![ExportedItem::Namespace]));
@@ -292,7 +304,7 @@ impl Visit for UnusedFinderVisitor {
         decl.visit_children_with(self);
         if let Some(module_ref) = decl.module_ref.as_ts_external_module_ref() {
             self.imported_paths
-                .insert(module_ref.expr.value.to_string());
+                .insert(module_ref.expr.value.to_string().replace("/lib", "/src"));
         }
     }
 
@@ -304,7 +316,8 @@ impl Visit for UnusedFinderVisitor {
         if let Callee::Import(_) = &expr.callee {
             match extract_argument_value(expr) {
                 Some(import_path) => {
-                    self.imported_paths.insert(import_path);
+                    self.imported_paths
+                        .insert(import_path.replace("/lib", "/src"));
                 }
                 None => return,
             }
@@ -315,7 +328,8 @@ impl Visit for UnusedFinderVisitor {
                     if !self.require_identifiers.contains(&ident.to_id()) {
                         match extract_argument_value(expr) {
                             Some(import_path) => {
-                                self.require_paths.insert(import_path);
+                                self.require_paths
+                                    .insert(import_path.replace("/lib", "/src"));
                             }
                             None => return,
                         }
@@ -329,7 +343,7 @@ impl Visit for UnusedFinderVisitor {
     fn visit_import_decl(&mut self, import: &ImportDecl) {
         import.visit_children_with(self);
 
-        let src = import.src.value.to_string();
+        let src = import.src.value.to_string().replace("/lib", "/src");
         // import './foo';
         if import.specifiers.is_empty() {
             self.imported_paths.insert(src);
@@ -442,10 +456,10 @@ mod test {
     use std::sync::Arc;
 
     use swc_core::common::input::StringInput;
-    use swc_core::common::{SourceMap, FileName, SourceFile};
+    use swc_core::common::{FileName, SourceFile, SourceMap};
     use swc_core::ecma::visit::visit_module;
-    use swc_ecma_parser::{Parser, Capturing};
     use swc_ecma_parser::lexer::Lexer;
+    use swc_ecma_parser::{Capturing, Parser};
 
     use crate::get_imports::create_lexer;
     use crate::unused_finder::node_visitor::{ExportedItem, ImportedItem};
@@ -770,6 +784,52 @@ mod test {
     }
 
     #[test]
+    fn test_replace_lib_with_src() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            import {default as foo} from 'cool-package/lib/coolFile';
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
+            "cool-package/src/coolFile".to_owned(),
+            HashSet::from_iter(vec![ImportedItem::Default]),
+        )]);
+        assert_eq!(expected_map, visitor.imported_ids_path_name);
+    }
+
+    #[test]
+    fn test_replace_lib_with_src_named_import() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            import {foo} from 'cool-package/lib/coolFile';
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
+            "cool-package/src/coolFile".to_owned(),
+            HashSet::from_iter(vec![ImportedItem::Named("foo".to_string())]),
+        )]);
+        assert_eq!(expected_map, visitor.imported_ids_path_name);
+    }
+
+    #[test]
     fn test_import_default_and_specifier() {
         let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
@@ -913,10 +973,7 @@ mod test {
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
-    fn create_test_parser<'a>(
-        fm: &'a Arc<SourceFile>,
-    ) -> Parser<Capturing<Lexer>>
-    {
+    fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
         let lexer = create_lexer(fm);
         let capturing = Capturing::new(lexer);
         let parser = Parser::new_from(capturing);

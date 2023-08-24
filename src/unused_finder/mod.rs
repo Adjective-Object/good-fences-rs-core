@@ -22,6 +22,7 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct WalkFileMetaData {
+    pub package_name: String,
     pub source_file_path: String,
     pub import_export_info: ImportExportInfo,
 }
@@ -44,9 +45,9 @@ pub fn find_unused_items(
     skipped_dirs: Vec<String>,
     skipped_items: Vec<String>,
 ) -> Result<Vec<String>, crate::error::NapiLikeError> {
-    let tsconfig = match TsconfigPathsJson::from_path(ts_config_path) {
+    let tsconfig = match TsconfigPathsJson::from_path(ts_config_path.clone()) {
         Ok(tsconfig) => tsconfig,
-        Err(e) => panic!("Unable to read tsconfig file: {}", e),
+        Err(e) => panic!("Unable to read tsconfig file {}: {}", ts_config_path, e),
     };
     let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
     let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {

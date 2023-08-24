@@ -3,14 +3,15 @@ extern crate serde;
 use path_clean::PathClean as _;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
-use swc_core::common::FileName;
-use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
+use swc_core::common::FileName;
+use swc_core::ecma::loader::resolve::Resolve;
+use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
 
 use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};

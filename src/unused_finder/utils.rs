@@ -155,8 +155,18 @@ pub fn retrieve_files(
     skipped_dirs: Option<Vec<glob::Pattern>>,
     skipped_items: Arc<Vec<regex::Regex>>,
 ) -> Vec<WalkedFile> {
-    let walk_dir = WalkDirGeneric::<(HashSet<String>, WalkedFile)>::new(start_path)
-        .process_read_dir(move |_, children| {
+    let walk_dir = WalkDirGeneric::<(String, WalkedFile)>::new(start_path).process_read_dir(
+        move |dir_state, children| {
+            children.iter_mut().for_each(|dir_entry_res| {
+                if let Ok(dir_entry) = dir_entry_res {
+                    if dir_entry.file_type().is_dir()
+                        && (dir_entry.file_name() == "node_modules"
+                            || dir_entry.file_name() == "lib")
+                    {
+                        dir_entry.read_children_path = None;
+                    }
+                }
+            });
             children.retain(|dir_entry_result| match dir_entry_result {
                 Ok(dir_entry) => {
                     return should_retain_dir_entry(dir_entry, &skipped_dirs);
@@ -164,13 +174,31 @@ pub fn retrieve_files(
                 Err(_) => todo!(),
             });
 
-            for child_result in children.iter_mut() {
+            children.iter_mut().for_each(|dir_entry_result| {
+                if let Ok(dir_entry) = dir_entry_result {
+                    if dir_entry.file_name() == "package.json" {
+                        match std::fs::read_to_string(dir_entry.path()) {
+                            Ok(text) => {
+                                let pkg_json: serde_json::Value =
+                                    serde_json::from_str(&text).unwrap();
+                                let name = pkg_json["name"].as_str();
+                                if let Some(name) = name {
+                                    *dir_state = name.to_string();
+                                }
+                            }
+                            Err(_) => {} // invalid package.json file
+                        }
+                    }
+                }
+            });
+
+            children.iter_mut().for_each(|child_result| {
                 match child_result {
                     Ok(dir_entry) => {
                         match dir_entry.file_name.to_str() {
                             Some(file_name) => {
                                 if dir_entry.file_type.is_dir() {
-                                    continue;
+                                    return;
                                 }
                                 // Source file [.ts, .tsx, .js, .jsx]
                                 let joined = &dir_entry.parent_path.join(file_name);
@@ -187,6 +215,7 @@ pub fn retrieve_files(
                                     Ok(import_export_info) => {
                                         dir_entry.client_state =
                                             WalkedFile::SourceFile(WalkFileMetaData {
+                                                package_name: dir_state.clone(),
                                                 import_export_info,
                                                 source_file_path: dir_entry
                                                     .path()
@@ -203,8 +232,9 @@ pub fn retrieve_files(
                     }
                     Err(_) => todo!(),
                 }
-            }
-        });
+            });
+        },
+    );
     walk_dir
         .into_iter()
         .filter_map(|entry| match entry {
@@ -215,7 +245,7 @@ pub fn retrieve_files(
 }
 
 fn should_retain_dir_entry(
-    dir_entry: &jwalk::DirEntry<(HashSet<String>, WalkedFile)>,
+    dir_entry: &jwalk::DirEntry<(String, WalkedFile)>,
     skip_dirs: &Option<Vec<glob::Pattern>>,
 ) -> bool {
     match dir_entry.path().to_slash() {

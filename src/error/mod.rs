@@ -157,7 +157,7 @@ pub struct NapiLikeError {
 
 impl AsRef<str> for NapiLikeError {
     fn as_ref(&self) -> &str {
-        &self
+        &self.message
     }
 }
 
@@ -166,4 +166,3 @@ impl Display for NapiLikeError {
         write!(f, "Status: {}. {}", self.status, self.message)
     }
 }
-

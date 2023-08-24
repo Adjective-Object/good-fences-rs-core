@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, sync::Arc};
 
-use swc_core::common::{SourceMap, Globals, GLOBALS, Mark};
 use swc_core::common::errors::Handler;
+use swc_core::common::{Globals, Mark, SourceMap, GLOBALS};
 use swc_core::ecma::transforms::base::resolver;
 use swc_core::ecma::visit::{fold_module, visit_module};
-use swc_ecma_parser::{Parser, Capturing};
+use swc_ecma_parser::{Capturing, Parser};
 
 use crate::get_imports::create_lexer;
 

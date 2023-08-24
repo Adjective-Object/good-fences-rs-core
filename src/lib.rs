@@ -178,25 +178,6 @@ pub struct JsonErrorFile<'a> {
     pub evaluation_errors: Vec<String>,
 }
 
-/**
- * Members of the node-facing API are kept in
- * this separate module so that the remainder of
- * the crate can be compiled into a test binary
- *
- * References to symbols from the node api require
- * linking to a real instance of node, which means that
- * `cargo test` can't link anything
- */
-
-fn convert_napi_like_err_result<T>(
-    result: Result<T, crate::error::NapiLikeError>,
-) -> Result<T, napi::Error> {
-    match result {
-        Err(err) => Err(napi::Error::new(err.status, err.reason)),
-        Ok(t) => Ok(t),
-    }
-}
-
 #[napi]
 pub fn find_unused_items(
     paths_to_read: Vec<String>,
@@ -204,10 +185,13 @@ pub fn find_unused_items(
     skipped_dirs: Vec<String>,
     skipped_items: Vec<String>,
 ) -> napi::Result<Vec<String>> {
-    convert_napi_like_err_result(unused_finder::find_unused_items(
+    match unused_finder::find_unused_items(
         paths_to_read,
         ts_config_path,
         skipped_dirs,
         skipped_items,
-    ))
+    ) {
+        Ok(ok) => return Ok(ok),
+        Err(e) => return Err(napi::Error::new(e.status, e.message)),
+    }
 }

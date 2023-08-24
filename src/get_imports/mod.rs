@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use swc_core::common::errors::Handler;
-use swc_core::common::{SourceFile, Globals, Mark, GLOBALS, SourceMap};
+use swc_core::common::{Globals, Mark, SourceFile, SourceMap, GLOBALS};
 use swc_core::ecma::transforms::base::resolver;
 use swc_core::ecma::visit::{fold_module, visit_module};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};

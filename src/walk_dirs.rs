@@ -2,13 +2,13 @@ use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
 use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
+use napi::bindgen_prelude::FromNapiValue;
 use napi::bindgen_prelude::ToNapiValue;
 use path_slash::PathExt;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
-use napi::bindgen_prelude::FromNapiValue;
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {

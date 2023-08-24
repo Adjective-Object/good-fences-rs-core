@@ -3,7 +3,13 @@ use std::{
     iter::FromIterator,
 };
 
-use swc_core::ecma::{ast::{Id, NamedExport, ModuleExportName, BindingIdent, TsImportEqualsDecl, CallExpr, Callee, ImportDecl, ImportSpecifier, Lit}, visit::Visit};
+use swc_core::ecma::{
+    ast::{
+        BindingIdent, CallExpr, Callee, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
+        NamedExport, TsImportEqualsDecl,
+    },
+    visit::{Visit, VisitWith},
+};
 
 #[derive(Debug)]
 pub struct ImportPathVisitor {
@@ -114,10 +120,7 @@ impl Visit for ImportPathVisitor {
     }
 }
 
-fn append_imported_names(
-    spec: &ImportSpecifier,
-    imported_names: &mut HashSet<String>,
-) {
+fn append_imported_names(spec: &ImportSpecifier, imported_names: &mut HashSet<String>) {
     if let Some(named) = spec.as_named() {
         match &named.imported {
             Some(imported) => match imported {
@@ -158,9 +161,18 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::{HashMap, HashSet}, sync::Arc};
-    use swc_core::{common::{SourceMap, FileName, Globals, GLOBALS, Mark, SourceFile}, ecma::{visit::{visit_module, fold_module}, transforms::base::resolver}};
-    use swc_ecma_parser::{Capturing, Parser, lexer::Lexer};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
+    use swc_core::{
+        common::{FileName, Globals, Mark, SourceFile, SourceMap, GLOBALS},
+        ecma::{
+            transforms::base::resolver,
+            visit::{fold_module, visit_module},
+        },
+    };
+    use swc_ecma_parser::{lexer::Lexer, Capturing, Parser};
 
     use crate::get_imports::create_lexer;
 
@@ -404,10 +416,7 @@ mod test {
         assert_eq!(expected_require_set, visitor.require_paths);
     }
 
-    fn create_test_parser<'a>(
-        fm: &'a Arc<SourceFile>,
-    ) -> Parser<Capturing<Lexer>>
-    {
+    fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
         let lexer = create_lexer(fm);
         let capturing = Capturing::new(lexer);
         let parser = Parser::new_from(capturing);
