@@ -800,8 +800,11 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        
-        assert_eq!(HashSet::from_iter(vec!["./foo".to_string(), "./lazyIndex".to_string()]), visitor.imported_paths);
+
+        assert_eq!(
+            HashSet::from_iter(vec!["./foo".to_string(), "./lazyIndex".to_string()]),
+            visitor.imported_paths
+        );
     }
 
     #[test]

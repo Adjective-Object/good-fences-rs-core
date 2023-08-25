@@ -152,7 +152,7 @@ pub fn find_unused_items(
                                             // In case of namespace import (import * as foo from 'foo'), an exhaustive search on which items of `foo` are used.
                                             // For now, assume that all items are used and by clearing the map we mark all items as used
                                             // TODO add node visitor that does search for specific items used.
-                                            origin_file_exported_items.clear(); 
+                                            origin_file_exported_items.clear();
                                             unused_files.remove(imported_path);
                                         }
                                         _ => {
