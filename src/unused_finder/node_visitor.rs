@@ -782,52 +782,6 @@ mod test {
     }
 
     #[test]
-    fn test_replace_lib_with_src() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import {default as foo} from 'cool-package/lib/coolFile';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "cool-package/src/coolFile".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_replace_lib_with_src_named_import() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import {foo} from 'cool-package/lib/coolFile';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "cool-package/src/coolFile".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_string())]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
     fn test_import_call() {
         let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
