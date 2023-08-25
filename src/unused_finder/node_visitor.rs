@@ -173,19 +173,22 @@ impl UnusedFinderVisitor {
 
 impl Visit for UnusedFinderVisitor {
     // Handles `export default foo`
-    fn visit_export_default_expr(&mut self, _: &ExportDefaultExpr) {
+    fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
+        expr.visit_children_with(self);
         self.exported_ids.insert(ExportedItem::Default);
     }
 
     /**
      * Handles scenarios where `export default` has an inline declaration, e.g. `export default class Foo {}` or `export default function foo() {}`
      */
-    fn visit_export_default_decl(&mut self, _: &ExportDefaultDecl) {
+    fn visit_export_default_decl(&mut self, decl: &ExportDefaultDecl) {
+        decl.visit_children_with(self);
         self.exported_ids.insert(ExportedItem::Default);
     }
 
     // Handles scenarios `export` has an inline declaration, e.g. `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
+        export.visit_children_with(self);
         match &export.decl {
             Decl::Class(decl) => {
                 // export class Foo {}
@@ -223,7 +226,6 @@ impl Visit for UnusedFinderVisitor {
                         }
                     }
                 }
-                // self.exported_ids.insert(ExportedItem::Named(decl.ident.sym.to_string()));
             }
             Decl::TsInterface(decl) => {
                 // export interface Foo {}
@@ -259,8 +261,9 @@ impl Visit for UnusedFinderVisitor {
                 }
             }
             Decl::TsModule(decl) => {
-                dbg!(decl);
-                // self.exported_ids.insert(ExportedItem::Named(decl.id.as_ident().unwrap().to_string()));
+                // if let Some(module_name) = decl.id.as_str() {
+                //     self.exported_ids.insert(ExportedItem::Named(module_name.value.to_string()));
+                // }
             }
             Decl::Using(_) => {}
         }
@@ -822,6 +825,29 @@ mod test {
             HashSet::from_iter(vec![ImportedItem::Named("foo".to_string())]),
         )]);
         assert_eq!(expected_map, visitor.imported_ids_path_name);
+    }
+
+    #[test]
+    fn test_import_call() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            const lazyModule = new LazyModule(() => import(/* webpackChunkName: "mailStore" */ './foo'));
+            export const lazyModule = new LazyModule(
+                () => import(/* webpackChunkName: "SxSStore" */ './lazyIndex')
+            );
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+        
+        assert_eq!(HashSet::from_iter(vec!["./foo".to_string(), "./lazyIndex".to_string()]), visitor.imported_paths);
     }
 
     #[test]

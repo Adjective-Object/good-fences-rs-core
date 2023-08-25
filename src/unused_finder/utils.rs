@@ -103,6 +103,11 @@ fn process_import_path_ids(
                     } else {
                         resolved.to_slash().unwrap().to_string()
                     };
+                    if imported_path.contains("./AgendaViewPage.base") {
+                        dbg!(imported_path);
+                        dbg!(&slashed);
+                        dbg!(imported_items);
+                    }
                     if let Some(items) = resolved_map.get_mut(&slashed) {
                         for ie in imported_items {
                             items.insert(ie.to_owned().into());
@@ -175,11 +180,11 @@ fn process_async_imported_paths(
                     resolved.to_slash().unwrap().to_string()
                 };
                 if let Some(items) = resolved_map.get_mut(&slashed) {
-                    items.insert(ExportedItem::Default.into());
+                    items.insert(ImportedItem::Namespace.into());
                 } else {
                     resolved_map.insert(
                         slashed.clone(),
-                        HashSet::from_iter(vec![ExportedItem::ExecutionOnly.into()]),
+                        HashSet::from_iter(vec![ImportedItem::Namespace.into()]),
                     );
                 }
             }
@@ -235,11 +240,11 @@ fn process_require_paths(
                     resolved.to_slash().unwrap().to_string()
                 };
                 if let Some(items) = resolved_map.get_mut(&slashed) {
-                    items.insert(ExportedItem::Default.into());
+                    items.insert(ImportedItem::Namespace.into());
                 } else {
                     resolved_map.insert(
                         slashed.clone(),
-                        HashSet::from_iter(vec![ExportedItem::Default.into()]),
+                        HashSet::from_iter(vec![ImportedItem::Namespace.into()]),
                     );
                 }
             }

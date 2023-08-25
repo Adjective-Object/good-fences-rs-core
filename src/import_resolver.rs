@@ -160,7 +160,7 @@ pub fn resolve_ts_import<'a>(
     let ext = buf.extension();
     match ext {
         Some(ext) => {
-            if ext != "tsx" && ext != "ts" {
+            if ["scss", "css", "svg", "png", "json"].contains(&ext.to_string_lossy().as_ref()) {
                 return Ok(ResolvedImport::ResourceFileImport);
             }
         }
