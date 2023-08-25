@@ -260,7 +260,7 @@ impl Visit for UnusedFinderVisitor {
                         .insert(ExportedItem::Named(decl.id.sym.to_string()));
                 }
             }
-            Decl::TsModule(decl) => {
+            Decl::TsModule(_decl) => {
                 // if let Some(module_name) = decl.id.as_str() {
                 //     self.exported_ids.insert(ExportedItem::Named(module_name.value.to_string()));
                 // }
