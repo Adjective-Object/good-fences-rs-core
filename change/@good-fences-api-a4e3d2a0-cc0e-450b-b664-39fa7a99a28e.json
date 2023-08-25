@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Removed OS from package json to avoid errors",
+  "packageName": "@good-fences/api",
+  "email": "edgar21_9@hotmail.com",
+  "dependentChangeType": "patch"
+}
