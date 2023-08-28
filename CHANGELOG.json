@@ -1,0 +1,28 @@
+{
+  "name": "@good-fences/api",
+  "entries": [
+    {
+      "date": "Mon, 28 Aug 2023 21:17:08 GMT",
+      "version": "0.2.0",
+      "tag": "@good-fences/api_v0.2.0",
+      "comments": {
+        "none": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "84411f8e5e17744e9f451b7fa95972acdfb0a7e8",
+            "comment": "Removed not-needed changefiles"
+          }
+        ],
+        "minor": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "84411f8e5e17744e9f451b7fa95972acdfb0a7e8",
+            "comment": "Changed validations done to check if item was being unused"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,7 +1,0 @@
-{
-  "type": "minor",
-  "comment": "Changed validations done to check if item was being unused",
-  "packageName": "@good-fences/api",
-  "email": "edgar21_9@hotmail.com",
-  "dependentChangeType": "patch"
-}
