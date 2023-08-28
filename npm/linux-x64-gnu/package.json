@@ -1,6 +1,11 @@
 {
   "name": "@good-fences/api-linux-x64-gnu",
-  "version": "0.1.2",
+  "version": "0.1.5",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adjective-Object/good-fences-rs-core",
+    "directory": "npm/linux-x64-gnu"
+  },
   "os": [
     "linux"
   ],

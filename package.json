@@ -1,11 +1,15 @@
 {
   "name": "@good-fences/api",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
     "name": "@good-fences",
     "triples": {}
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adjective-Object/good-fences-rs-core"
   },
   "bin": {
     "good-fences": "./good-fences.js",

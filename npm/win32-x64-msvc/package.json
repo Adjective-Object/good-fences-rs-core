@@ -1,6 +1,11 @@
 {
   "name": "@good-fences/api-win32-x64-msvc",
-  "version": "0.1.2",
+  "version": "0.1.5",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adjective-Object/good-fences-rs-core",
+    "directory": "npm/win32-x64-msvc"
+  },
   "os": [
     "win32"
   ],
