@@ -134,9 +134,9 @@ pub fn find_unused_items(
     let resolved_imports_map = get_map_of_imports(&tsconfig, &walked_files_map);
     resolved_imports_map
         .iter()
-        .for_each(|(_path, imported_things)| {
+        .for_each(|(_path, imported_path_items_map)| {
             // Iterate over each file and mark the imported items as used in the origin file.
-            imported_things
+            imported_path_items_map
                 .iter()
                 .for_each(|(imported_path, imported_items)| {
                     if let Some(origin_file_exported_items) =
