@@ -1,16 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, sync::Arc};
 
-use swc_common::{errors::Handler, Globals, Mark, GLOBALS};
+use swc_core::common::errors::Handler;
+use swc_core::common::{Globals, Mark, SourceMap, GLOBALS};
+use swc_core::ecma::transforms::base::resolver;
+use swc_core::ecma::visit::{fold_module, visit_module};
 use swc_ecma_parser::{Capturing, Parser};
-use swc_ecmascript::transforms::resolver;
-use swc_ecmascript::visit::{fold_module, visit_module};
 
 use crate::get_imports::create_lexer;
 
 use super::node_visitor::{ExportedItem, ImportedItem, UnusedFinderVisitor};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportExportInfo {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
     pub imported_path_ids: HashMap<String, HashSet<ImportedItem>>,
@@ -19,9 +20,10 @@ pub struct ImportExportInfo {
     // import('./foo') generates ["./foo"]
     pub imported_paths: HashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: HashMap<String, HashSet<ExportedItem>>,
+    pub export_from_ids: HashMap<String, HashSet<ImportedItem>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
     pub exported_ids: HashSet<ExportedItem>,
+    pub executed_paths: HashSet<String>,
 }
 
 impl ImportExportInfo {
@@ -32,6 +34,7 @@ impl ImportExportInfo {
             imported_paths: HashSet::new(),
             export_from_ids: HashMap::new(),
             exported_ids: HashSet::new(),
+            executed_paths: HashSet::new(),
         }
     }
 }
@@ -48,11 +51,14 @@ pub fn get_import_export_paths_map(
 ) -> Result<ImportExportInfo, String> {
     let path = PathBuf::from(&file_path);
 
-    let cm = Arc::<swc_common::SourceMap>::default();
+    let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(path.as_path()) {
         Ok(f) => f,
         Err(_) => todo!(), // TODO create err module
     };
+    if fm.src.contains("// This file is auto-generated") {
+        return Err("Auto-generated file".to_string());
+    }
 
     let mut parser_errors: Vec<String> = Vec::new();
 
@@ -105,5 +111,6 @@ pub fn get_import_export_paths_map(
         imported_paths: visitor.imported_paths,
         export_from_ids: visitor.export_from_ids, // TODO replace with ExportVisitor maps
         exported_ids: visitor.exported_ids,
+        executed_paths: visitor.executed_paths,
     })
 }

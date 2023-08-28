@@ -3,11 +3,14 @@ use std::{
     iter::FromIterator,
 };
 
-use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, Id, ImportDecl, Lit, ModuleExportName, NamedExport,
-    TsImportEqualsDecl,
+use swc_core::ecma::{
+    ast::{
+        BindingIdent, CallExpr, Callee, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
+        NamedExport, TsImportEqualsDecl,
+    },
+    visit::{Visit, VisitWith},
 };
-use swc_ecmascript::visit::{Visit, VisitWith};
+
 #[derive(Debug)]
 pub struct ImportPathVisitor {
     pub require_paths: HashSet<String>,
@@ -117,10 +120,7 @@ impl Visit for ImportPathVisitor {
     }
 }
 
-fn append_imported_names(
-    spec: &swc_ecma_ast::ImportSpecifier,
-    imported_names: &mut HashSet<String>,
-) {
+fn append_imported_names(spec: &ImportSpecifier, imported_names: &mut HashSet<String>) {
     if let Some(named) = spec.as_named() {
         match &named.imported {
             Some(imported) => match imported {
@@ -161,12 +161,18 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{HashMap, HashSet};
-    use swc_common::sync::Lrc;
-    use swc_common::{FileName, Globals, Mark, SourceMap, GLOBALS};
-    use swc_ecma_parser::{Capturing, Parser};
-    use swc_ecma_visit::{fold_module, visit_module};
-    use swc_ecmascript::transforms::resolver;
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
+    use swc_core::{
+        common::{FileName, Globals, Mark, SourceFile, SourceMap, GLOBALS},
+        ecma::{
+            transforms::base::resolver,
+            visit::{fold_module, visit_module},
+        },
+    };
+    use swc_ecma_parser::{lexer::Lexer, Capturing, Parser};
 
     use crate::get_imports::create_lexer;
 
@@ -174,7 +180,7 @@ mod test {
 
     #[test]
     fn text_export_from() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"export { default as a, foo as bar } from './foo'"#.to_string(),
@@ -195,7 +201,7 @@ mod test {
 
     #[test]
     fn test_require_imports() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"require('hello-world')"#.to_string(),
@@ -213,7 +219,7 @@ mod test {
 
     #[test]
     fn test_import_call() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -232,7 +238,7 @@ mod test {
 
     #[test]
     fn test_nested_import_call() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -253,7 +259,7 @@ mod test {
     fn test_require_shadowing() {
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Lrc::<SourceMap>::default();
+            let cm = Arc::<SourceMap>::default();
             let fm = cm.new_source_file(
                 FileName::Custom("test.ts".into()),
                 r#"
@@ -280,7 +286,7 @@ mod test {
 
     #[test]
     fn test_imports() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -303,7 +309,7 @@ mod test {
 
     #[test]
     fn test_imports_specifiers() {
-        let cm = Lrc::<SourceMap>::default();
+        let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
             r#"
@@ -331,7 +337,7 @@ mod test {
         let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Lrc::<SourceMap>::default();
+            let cm = Arc::<SourceMap>::default();
             let fm = cm.new_source_file(
                 FileName::Custom("test.ts".into()),
                 r#"
@@ -359,7 +365,7 @@ mod test {
         let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Lrc::<SourceMap>::default();
+            let cm = Arc::<SourceMap>::default();
             let fm = cm.new_source_file(
                 FileName::Custom("test.ts".into()),
                 r#"
@@ -389,7 +395,7 @@ mod test {
         let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Lrc::<SourceMap>::default();
+            let cm = Arc::<SourceMap>::default();
             let fm = cm.new_source_file(
                 FileName::Custom("test.ts".into()),
                 r#"
@@ -410,10 +416,7 @@ mod test {
         assert_eq!(expected_require_set, visitor.require_paths);
     }
 
-    fn create_test_parser<'a>(
-        fm: &'a Lrc<swc_common::SourceFile>,
-    ) -> Parser<Capturing<swc_ecma_parser::lexer::Lexer<'a, swc_ecma_parser::StringInput<'a>>>>
-    {
+    fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
         let lexer = create_lexer(fm);
         let capturing = Capturing::new(lexer);
         let parser = Parser::new_from(capturing);

@@ -9,9 +9,9 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::vec::Vec;
-use swc_common::FileName;
-use swc_ecma_loader::resolve::Resolve;
-use swc_ecma_loader::resolvers::node::NodeModulesResolver;
+use swc_core::common::FileName;
+use swc_core::ecma::loader::resolve::Resolve;
+use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
 
 use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
@@ -160,7 +160,7 @@ pub fn resolve_ts_import<'a>(
     let ext = buf.extension();
     match ext {
         Some(ext) => {
-            if ext != "tsx" && ext != "ts" {
+            if ["scss", "css", "svg", "png", "json"].contains(&ext.to_string_lossy().as_ref()) {
                 return Ok(ResolvedImport::ResourceFileImport);
             }
         }

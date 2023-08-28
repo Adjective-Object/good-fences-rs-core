@@ -14,6 +14,7 @@ pub mod import_resolver;
 mod path_utils;
 pub mod unused_finder;
 pub mod walk_dirs;
+use napi::bindgen_prelude::*;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
@@ -187,26 +188,20 @@ pub struct JsonErrorFile<'a> {
  * `cargo test` can't link anything
  */
 
-fn convert_napi_like_err_result<T>(
-    result: Result<T, crate::error::NapiLikeError>,
-) -> Result<T, napi::Error> {
-    match result {
-        Err(err) => Err(napi::Error::new(err.status, err.message)),
-        Ok(t) => Ok(t),
-    }
-}
-
 #[napi]
 pub fn find_unused_items(
     paths_to_read: Vec<String>,
     ts_config_path: String,
     skipped_dirs: Vec<String>,
     skipped_items: Vec<String>,
-) -> Result<Vec<String>, napi::Error> {
-    convert_napi_like_err_result(unused_finder::find_unused_items(
+) -> napi::Result<Vec<String>> {
+    match unused_finder::find_unused_items(
         paths_to_read,
         ts_config_path,
         skipped_dirs,
         skipped_items,
-    ))
+    ) {
+        Ok(ok) => return Ok(ok),
+        Err(e) => return Err(napi::Error::new(e.status, e.message)),
+    }
 }

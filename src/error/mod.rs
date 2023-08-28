@@ -154,3 +154,15 @@ pub struct NapiLikeError {
     pub status: napi::Status,
     pub message: String,
 }
+
+impl AsRef<str> for NapiLikeError {
+    fn as_ref(&self) -> &str {
+        &self.message
+    }
+}
+
+impl Display for NapiLikeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Status: {}. {}", self.status, self.message)
+    }
+}

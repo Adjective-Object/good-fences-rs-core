@@ -22,18 +22,11 @@ pathdiff = "0.2.0"
 text-diff = "0.4.0"
 rayon = "1.5.0"
 path-slash = "0.2.1"
-swc_ecma_parser = {version = "0.117.0", features = ["typescript"]}
-swc_common = {version = "0.27.0", features = ["tty-emitter"]}
-swc = "0.215.0"
-swc_atoms = "0.4.3"
-swc_ecma_visit = "0.76.6"
-swc_ecmascript = {version = "0.190.0", features = ["transforms", "visit"]}
-swc_plugin = "0.89.1"
-swc_ecma_ast = "0.90.3"
-swc_ecma_loader = "0.39.7"
 path-clean = "0.1.0"
-napi = { version = "2.7.0", default-features = false, features = ["napi4"] }
-napi-derive = "2.7.0"
+swc_core = { version = "0.79.70", features = ["ecma_plugin_transform", "ecma_loader_node"] }
+napi = { version = "2.13.0", default-features = false, features = ["napi4"] }
+napi-derive = "2.13.0"
+swc_ecma_parser = "0.137.15"
 
 [build-dependencies]
 napi-build = "2.0.1"
