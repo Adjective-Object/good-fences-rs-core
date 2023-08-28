@@ -178,6 +178,16 @@ pub struct JsonErrorFile<'a> {
     pub evaluation_errors: Vec<String>,
 }
 
+/**
+ * Members of the node-facing API are kept in
+ * this separate module so that the remainder of
+ * the crate can be compiled into a test binary
+ *
+ * References to symbols from the node api require
+ * linking to a real instance of node, which means that
+ * `cargo test` can't link anything
+ */
+
 #[napi]
 pub fn find_unused_items(
     paths_to_read: Vec<String>,
