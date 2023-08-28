@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "Removed prepublish step",
-  "packageName": "@good-fences/api-linux-x64-gnu",
-  "email": "edgar21_9@hotmail.com",
-  "dependentChangeType": "patch"
-}
