@@ -4,6 +4,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   tests:
     uses: Adjective-Object/good-fences-rs-core/.github/workflows/unittest.yml@main
