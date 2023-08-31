@@ -50,6 +50,6 @@ jobs:
           yarn beachball publish -c .beachball.js -y --token $NPM_TOKEN
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BEACHBALL_PUSH_PAT }}
           GITHUB_ACTOR: autobot
           
