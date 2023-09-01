@@ -9,7 +9,7 @@ use swc_ecma_parser::{Capturing, Parser};
 
 use crate::get_imports::create_lexer;
 
-use super::node_visitor::{ExportedItem, ImportedItem, UnusedFinderVisitor};
+use super::node_visitor::{ExportedItem, ExportsCollector, ImportedItem};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportExportInfo {
@@ -65,7 +65,7 @@ pub fn get_import_export_paths_map(
     let dest_vector: Vec<u8> = Vec::new();
     let dst = Box::new(dest_vector);
     let handler = Handler::with_emitter_writer(dst, Some(cm.clone()));
-    let lexer = create_lexer(&fm);
+    let lexer = create_lexer(&fm, None);
     let capturing = Capturing::new(lexer);
 
     let mut parser = Parser::new_from(capturing);
@@ -93,7 +93,7 @@ pub fn get_import_export_paths_map(
         }
     };
 
-    let mut visitor = UnusedFinderVisitor::new(skipped_items);
+    let mut visitor = ExportsCollector::new(skipped_items, Default::default());
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {

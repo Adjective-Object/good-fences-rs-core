@@ -4,13 +4,16 @@ use std::{
     sync::Arc,
 };
 
-use swc_core::ecma::{
-    ast::{
-        BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
-        ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
-        NamedExport, Pat, Str, TsImportEqualsDecl,
+use swc_core::{
+    common::comments::SingleThreadedComments,
+    ecma::{
+        ast::{
+            BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
+            ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit,
+            ModuleExportName, NamedExport, Pat, Str, TsImportEqualsDecl,
+        },
+        visit::{Visit, VisitWith},
     },
-    visit::{Visit, VisitWith},
 };
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ExportedItem {
@@ -51,7 +54,7 @@ impl From<&ExportedItem> for ImportedItem {
 }
 
 #[derive(Debug)]
-pub struct UnusedFinderVisitor {
+pub struct ExportsCollector {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
     pub imported_ids_path_name: HashMap<String, HashSet<ImportedItem>>,
     // require('foo') generates ['foo']
@@ -67,10 +70,11 @@ pub struct UnusedFinderVisitor {
     // const foo = require('foo') generates ["foo"]
     require_identifiers: HashSet<Id>,
     skipped_items: Arc<Vec<regex::Regex>>,
+    pub comments: SingleThreadedComments,
 }
 
-impl UnusedFinderVisitor {
-    pub fn new(skipped_items: Arc<Vec<regex::Regex>>) -> Self {
+impl ExportsCollector {
+    pub fn new(skipped_items: Arc<Vec<regex::Regex>>, comments: SingleThreadedComments) -> Self {
         Self {
             imported_ids_path_name: HashMap::new(),
             require_paths: HashSet::new(),
@@ -80,6 +84,7 @@ impl UnusedFinderVisitor {
             require_identifiers: HashSet::new(),
             exported_ids: HashSet::new(),
             skipped_items,
+            comments,
         }
     }
 
@@ -171,7 +176,7 @@ impl UnusedFinderVisitor {
     }
 }
 
-impl Visit for UnusedFinderVisitor {
+impl Visit for ExportsCollector {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);
@@ -462,7 +467,7 @@ mod test {
     use crate::get_imports::create_lexer;
     use crate::unused_finder::node_visitor::{ExportedItem, ImportedItem};
 
-    use super::UnusedFinderVisitor;
+    use super::ExportsCollector;
 
     #[test]
     fn test_export_named() {
@@ -477,7 +482,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -500,7 +505,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -522,7 +527,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -546,7 +551,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -568,7 +573,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -589,7 +594,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -610,7 +615,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -632,7 +637,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -655,7 +660,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -678,7 +683,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -701,7 +706,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -724,7 +729,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -747,7 +752,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -770,7 +775,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -796,7 +801,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -819,7 +824,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -845,7 +850,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -868,7 +873,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -891,7 +896,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -914,7 +919,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor = UnusedFinderVisitor::new(std::sync::Arc::new(vec![]));
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -937,10 +942,10 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm);
-        let mut visitor =
-            UnusedFinderVisitor::new(std::sync::Arc::new(vec![
-                regex::Regex::new("[A-Z].*").unwrap()
-            ]));
+        let mut visitor = ExportsCollector::new(
+            std::sync::Arc::new(vec![regex::Regex::new("[A-Z].*").unwrap()]),
+            Default::default(),
+        );
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
@@ -952,7 +957,7 @@ mod test {
     }
 
     fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
-        let lexer = create_lexer(fm);
+        let lexer = create_lexer(fm, None);
         let capturing = Capturing::new(lexer);
         let parser = Parser::new_from(capturing);
         parser

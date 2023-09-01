@@ -348,7 +348,7 @@ mod test {
                 .to_string(),
             );
 
-            let lexer = create_lexer(&fm);
+            let lexer = create_lexer(&fm, None);
             let capturing = Capturing::new(lexer);
             let mut parser = Parser::new_from(capturing);
             let module = parser.parse_typescript_module().unwrap();
@@ -375,7 +375,7 @@ mod test {
                 .to_string(),
             );
 
-            let lexer = create_lexer(&fm);
+            let lexer = create_lexer(&fm, None);
             let capturing = Capturing::new(lexer);
             let mut parser = Parser::new_from(capturing);
             let module = parser.parse_typescript_module().unwrap();
@@ -404,7 +404,7 @@ mod test {
                 .to_string(),
             );
 
-            let lexer = create_lexer(&fm);
+            let lexer = create_lexer(&fm, None);
             let capturing = Capturing::new(lexer);
             let mut parser = Parser::new_from(capturing);
             let module = parser.parse_typescript_module().unwrap();
@@ -417,7 +417,7 @@ mod test {
     }
 
     fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
-        let lexer = create_lexer(fm);
+        let lexer = create_lexer(fm, None);
         let capturing = Capturing::new(lexer);
         let parser = Parser::new_from(capturing);
         parser
