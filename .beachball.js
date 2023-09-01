@@ -4,6 +4,4 @@
 module.exports = {
   branch: "main",
   access: "public",
-  publish: false,
-  push: true,
 };
