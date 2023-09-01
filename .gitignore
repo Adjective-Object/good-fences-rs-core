@@ -11,3 +11,7 @@ node_modules
 index.js
 index.d.ts
 good-fences-violations.json
+
+# Previous accidentally committed files
+token
+*.stackdump
