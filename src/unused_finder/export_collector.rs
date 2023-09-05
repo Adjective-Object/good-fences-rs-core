@@ -210,8 +210,6 @@ impl Visit for ExportsCollector {
     // Handles scenarios `export` has an inline declaration, e.g. `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
         export.visit_children_with(self);
-        dbg!(self.comments.get_leading(export.span_lo()));
-        dbg!(self.has_disable_export_comment(export.span_lo()));
         if self.has_disable_export_comment(export.span_lo()) {
             return;
         }
