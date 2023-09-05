@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, sync::Arc};
 
+use swc_core::common::comments::SingleThreadedComments;
 use swc_core::common::errors::Handler;
 use swc_core::common::{Globals, Mark, SourceMap, GLOBALS};
 use swc_core::ecma::transforms::base::resolver;
@@ -9,7 +10,7 @@ use swc_ecma_parser::{Capturing, Parser};
 
 use crate::get_imports::create_lexer;
 
-use super::node_visitor::{ExportedItem, ExportsCollector, ImportedItem};
+use super::export_collector::{ExportedItem, ExportsCollector, ImportedItem};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportExportInfo {
@@ -65,7 +66,8 @@ pub fn get_import_export_paths_map(
     let dest_vector: Vec<u8> = Vec::new();
     let dst = Box::new(dest_vector);
     let handler = Handler::with_emitter_writer(dst, Some(cm.clone()));
-    let lexer = create_lexer(&fm, None);
+    let comments = SingleThreadedComments::default();
+    let lexer = create_lexer(&fm, Some(&comments));
     let capturing = Capturing::new(lexer);
 
     let mut parser = Parser::new_from(capturing);
@@ -93,7 +95,7 @@ pub fn get_import_export_paths_map(
         }
     };
 
-    let mut visitor = ExportsCollector::new(skipped_items, Default::default());
+    let mut visitor = ExportsCollector::new(skipped_items, comments);
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {

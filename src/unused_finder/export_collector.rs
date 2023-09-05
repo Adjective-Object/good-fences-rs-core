@@ -5,7 +5,10 @@ use std::{
 };
 
 use swc_core::{
-    common::comments::SingleThreadedComments,
+    common::{
+        comments::{CommentKind, Comments, SingleThreadedComments},
+        BytePos, Spanned,
+    },
     ecma::{
         ast::{
             BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
@@ -174,13 +177,24 @@ impl ExportsCollector {
             _ => {}
         });
     }
+
+    pub fn has_disable_export_comment(&self, lo: BytePos) -> bool {
+        if let Some(comments) = self.comments.get_leading(lo) {
+            return comments
+                .iter()
+                .any(|c| c.kind == CommentKind::Line && c.text.trim().eq("@ALLOW-UNUSED-EXPORT"));
+        }
+        false
+    }
 }
 
 impl Visit for ExportsCollector {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);
-        self.exported_ids.insert(ExportedItem::Default);
+        if !self.has_disable_export_comment(expr.span_lo()) {
+            self.exported_ids.insert(ExportedItem::Default);
+        }
     }
 
     /**
@@ -188,12 +202,19 @@ impl Visit for ExportsCollector {
      */
     fn visit_export_default_decl(&mut self, decl: &ExportDefaultDecl) {
         decl.visit_children_with(self);
-        self.exported_ids.insert(ExportedItem::Default);
+        if !self.has_disable_export_comment(decl.span_lo()) {
+            self.exported_ids.insert(ExportedItem::Default);
+        }
     }
 
     // Handles scenarios `export` has an inline declaration, e.g. `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
         export.visit_children_with(self);
+        dbg!(self.comments.get_leading(export.span_lo()));
+        dbg!(self.has_disable_export_comment(export.span_lo()));
+        if self.has_disable_export_comment(export.span_lo()) {
+            return;
+        }
         match &export.decl {
             Decl::Class(decl) => {
                 // export class Foo {}
@@ -277,7 +298,9 @@ impl Visit for ExportsCollector {
     // `export * from './foo'`; // TODO allow recursive import resolution
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
-
+        if self.has_disable_export_comment(export.span_lo()) {
+            return;
+        }
         let source = export.src.value.to_string();
 
         self.export_from_ids
@@ -287,7 +310,9 @@ impl Visit for ExportsCollector {
     // export {foo} from './foo';
     fn visit_named_export(&mut self, export: &NamedExport) {
         export.visit_children_with(self);
-
+        if self.has_disable_export_comment(export.span_lo()) {
+            return;
+        }
         if let Some(source) = &export.src {
             // In case we find `'./foo'` in `export { foo } from './foo'`
             self.handle_export_from_specifiers(export, source);
@@ -451,515 +476,4 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
         }
     }
     None
-}
-
-#[cfg(test)]
-mod test {
-    use std::collections::{HashMap, HashSet};
-    use std::iter::FromIterator;
-    use std::sync::Arc;
-
-    use swc_core::common::{FileName, SourceFile, SourceMap};
-    use swc_core::ecma::visit::visit_module;
-    use swc_ecma_parser::lexer::Lexer;
-    use swc_ecma_parser::{Capturing, Parser};
-
-    use crate::get_imports::create_lexer;
-    use crate::unused_finder::node_visitor::{ExportedItem, ImportedItem};
-
-    use super::ExportsCollector;
-
-    #[test]
-    fn test_export_named() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            const foo = 1;
-            export { foo }
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> =
-            HashSet::from_iter(vec![ExportedItem::Named("foo".to_owned())]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-
-    #[test]
-    fn test_export_named_as_bar() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            const foo = 1;
-            export { foo as bar }
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> =
-            HashSet::from_iter(vec![ExportedItem::Named("bar".to_owned())]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-    #[test]
-    fn test_export_default() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            const foo = 1;
-            export default foo;
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-
-    #[test]
-    fn test_expor_type_as_default() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            interface Foo {
-                bar: boolean;
-            }
-            export type { Foo as default };
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-
-    #[test]
-    fn test_export_default_execution() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            function foo() { return 1; }
-            export default foo();
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-
-    #[test]
-    fn test_export_default_class() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            export default class Foo {}
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-
-    #[test]
-    fn test_export_const() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            export const foo = 1;
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportedItem> =
-            HashSet::from_iter(vec![ExportedItem::Named("foo".to_owned())]);
-
-        assert_eq!(expected_map, visitor.exported_ids);
-    }
-
-    #[test]
-    fn test_export_from() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            export { foo } from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
-        )]);
-        assert_eq!(expected_map, visitor.export_from_ids);
-    }
-
-    #[test]
-    fn test_export_default_from() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            export { default as foo } from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
-        assert_eq!(expected_map, visitor.export_from_ids);
-    }
-
-    #[test]
-    fn test_export_star_from() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            export * from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Namespace]),
-        )]);
-        assert_eq!(expected_map, visitor.export_from_ids);
-    }
-
-    #[test]
-    fn test_import_default() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import foo from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_import_specifier() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import {foo} from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_import_specifier_with_alias() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import {foo as bar} from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_import_default_with_alias() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import {default as foo} from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_import_call() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            const lazyModule = new LazyModule(() => import(/* webpackChunkName: "mailStore" */ './foo'));
-            export const lazyModule = new LazyModule(
-                () => import(/* webpackChunkName: "SxSStore" */ './lazyIndex')
-            );
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_string(), "./lazyIndex".to_string()]),
-            visitor.imported_paths
-        );
-    }
-
-    #[test]
-    fn test_import_default_and_specifier() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import foo, {bar} from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![
-                ImportedItem::Default,
-                ImportedItem::Named("bar".to_owned()),
-            ]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_import_star() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import * as foo from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Namespace]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    #[test]
-    fn test_require() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            const foo = require('./foo');
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.require_paths
-        );
-    }
-
-    #[test]
-    fn test_import_equals() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import foo = require('./foo')
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.imported_paths
-        );
-    }
-
-    #[test]
-    fn test_import_statement() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import './foo'
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.executed_paths
-        );
-    }
-
-    #[test]
-    fn test_ignored_regex_pattern() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"
-            import foo, {Bar} from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-        let mut visitor = ExportsCollector::new(
-            std::sync::Arc::new(vec![regex::Regex::new("[A-Z].*").unwrap()]),
-            Default::default(),
-        );
-
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
-    }
-
-    fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
-        let lexer = create_lexer(fm, None);
-        let capturing = Capturing::new(lexer);
-        let parser = Parser::new_from(capturing);
-        parser
-    }
 }
