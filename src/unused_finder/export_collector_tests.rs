@@ -3,25 +3,28 @@ mod test {
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
     use std::sync::Arc;
-    
-    use swc_core::common::comments::{SingleThreadedComments, Comments};
+
+    use swc_core::common::comments::{Comments, SingleThreadedComments};
     use swc_core::common::{FileName, SourceFile, SourceMap};
     use swc_core::ecma::visit::visit_module;
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
-    
+
     use crate::get_imports::create_lexer;
     use crate::unused_finder::export_collector::{ExportedItem, ImportedItem};
-    
+
     use crate::unused_finder::export_collector::ExportsCollector;
 
-    fn create_test_parser<'a>(fm: &'a Arc<SourceFile>, comments: Option<&'a dyn Comments>) -> Parser<Capturing<Lexer<'a>>> {
+    fn create_test_parser<'a>(
+        fm: &'a Arc<SourceFile>,
+        comments: Option<&'a dyn Comments>,
+    ) -> Parser<Capturing<Lexer<'a>>> {
         let lexer = create_lexer(fm, comments);
         let capturing = Capturing::new(lexer);
         let parser = Parser::new_from(capturing);
         parser
     }
-    
+
     #[test]
     fn test_allowed_unused_export_named() {
         let cm = Arc::<SourceMap>::default();
@@ -35,17 +38,17 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
-    
+
         assert_eq!(expected_map, visitor.exported_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_named_as_bar() {
         let cm = Arc::<SourceMap>::default();
@@ -59,14 +62,14 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
-    
+
         assert_eq!(expected_map, visitor.exported_ids);
     }
     #[test]
@@ -82,16 +85,16 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
         assert_eq!(expected_map, visitor.exported_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_type_as_default() {
         let cm = Arc::<SourceMap>::default();
@@ -107,16 +110,16 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
         assert_eq!(expected_map, visitor.exported_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_default_execution() {
         let cm = Arc::<SourceMap>::default();
@@ -130,16 +133,16 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
         assert_eq!(expected_map, visitor.exported_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_default_class() {
         let cm = Arc::<SourceMap>::default();
@@ -152,16 +155,16 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
         assert_eq!(expected_map, visitor.exported_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_const() {
         let cm = Arc::<SourceMap>::default();
@@ -174,17 +177,17 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashSet<ExportedItem> = HashSet::new();
-    
+
         assert_eq!(expected_map, visitor.exported_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_from() {
         let cm = Arc::<SourceMap>::default();
@@ -197,16 +200,16 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::new();
         assert_eq!(expected_map, visitor.export_from_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_default_from() {
         let cm = Arc::<SourceMap>::default();
@@ -219,16 +222,16 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
         let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::new();
         assert_eq!(expected_map, visitor.export_from_ids);
     }
-    
+
     #[test]
     fn test_allowed_unused_export_star_from() {
         let cm = Arc::<SourceMap>::default();
@@ -241,9 +244,9 @@ mod test {
                 "#
             .to_string(),
         );
-    
+
         let mut parser = create_test_parser(&fm, Some(&comments));
-        
+
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
@@ -251,7 +254,6 @@ mod test {
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
-    
     #[test]
     fn test_export_named() {
         let cm = Arc::<SourceMap>::default();

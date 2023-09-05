@@ -1,7 +1,7 @@
 pub mod export_collector;
+mod export_collector_tests;
 pub mod unused_finder_visitor_runner;
 mod utils;
-mod export_collector_tests;
 
 use napi_derive::napi;
 use rayon::prelude::*;
