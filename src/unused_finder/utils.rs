@@ -103,11 +103,6 @@ fn process_import_path_ids(
                     } else {
                         resolved.to_slash().unwrap().to_string()
                     };
-                    if imported_path.contains("./AgendaViewPage.base") {
-                        dbg!(imported_path);
-                        dbg!(&slashed);
-                        dbg!(imported_items);
-                    }
                     if let Some(items) = resolved_map.get_mut(&slashed) {
                         for ie in imported_items {
                             items.insert(ie.to_owned().into());

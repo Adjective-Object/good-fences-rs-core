@@ -1,3 +1,4 @@
+mod export_collector_tests;
 pub mod node_visitor;
 pub mod unused_finder_visitor_runner;
 mod utils;
