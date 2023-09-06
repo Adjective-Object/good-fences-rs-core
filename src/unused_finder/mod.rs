@@ -1,4 +1,4 @@
-pub mod export_collector;
+pub mod node_visitor;
 mod export_collector_tests;
 pub mod unused_finder_visitor_runner;
 mod utils;
@@ -15,7 +15,7 @@ use crate::{
     file_extension::no_ext,
     import_resolver::TsconfigPathsJson,
     unused_finder::{
-        export_collector::ExportedItem,
+        node_visitor::ExportedItem,
         unused_finder_visitor_runner::ImportExportInfo,
         utils::{get_map_of_imports, retrieve_files, ResolvedItem},
     },
@@ -147,8 +147,8 @@ pub fn find_unused_items(
                             match item {
                                 ResolvedItem::Imported(imported) => {
                                     match imported {
-                                        export_collector::ImportedItem::ExecutionOnly
-                                        | export_collector::ImportedItem::Namespace => {
+                                        node_visitor::ImportedItem::ExecutionOnly
+                                        | node_visitor::ImportedItem::Namespace => {
                                             // Even if exported elements are not imported specifically, side effects take place
                                             // In case of namespace import (import * as foo from 'foo'), an exhaustive search on which items of `foo` are used.
                                             // For now, assume that all items are used and by clearing the map we mark all items as used
