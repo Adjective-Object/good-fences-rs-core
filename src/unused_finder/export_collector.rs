@@ -180,9 +180,9 @@ impl ExportsCollector {
 
     pub fn has_disable_export_comment(&self, lo: BytePos) -> bool {
         if let Some(comments) = self.comments.get_leading(lo) {
-            return comments
-                .iter()
-                .any(|c| c.kind == CommentKind::Line && c.text.trim().eq("@ALLOW-UNUSED-EXPORT"));
+            return comments.iter().any(|c| {
+                c.kind == CommentKind::Line && c.text.trim().starts_with("@ALLOW-UNUSED-EXPORT")
+            });
         }
         false
     }

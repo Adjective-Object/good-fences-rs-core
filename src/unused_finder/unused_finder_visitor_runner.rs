@@ -24,6 +24,7 @@ pub struct ImportExportInfo {
     pub export_from_ids: HashMap<String, HashSet<ImportedItem>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
     pub exported_ids: HashSet<ExportedItem>,
+    // `import './foo'`
     pub executed_paths: HashSet<String>,
 }
 

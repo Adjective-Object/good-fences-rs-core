@@ -278,6 +278,95 @@ mod test {
     }
 
     #[test]
+    fn test_allow_unused_export_and_collect_not_marked_export() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            // some comment
+            const foo = 1;
+            export { foo as bar };
+            
+            // another comment
+            // @ALLOW-UNUSED-EXPORT this are some docs
+            export const zoo = 2;
+            "#
+            .to_string(),
+        );
+
+        let comments = SingleThreadedComments::default();
+
+        let mut parser = create_test_parser(&fm, Some(&comments));
+        let module = parser.parse_typescript_module().unwrap();
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
+
+        visit_module(&mut visitor, &module);
+        let expected_map: HashSet<ExportedItem> =
+            HashSet::from_iter(vec![ExportedItem::Named("bar".to_owned())]);
+
+        assert_eq!(expected_map, visitor.exported_ids);
+    }
+
+    #[test]
+    fn test_allow_unused_export_and_collect_not_marked_export_default() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            // some comment
+            const foo = 1;
+            export default foo;
+            
+            // another comment
+            // @ALLOW-UNUSED-EXPORT this are some docs
+            export const zoo = 2;
+            "#
+            .to_string(),
+        );
+
+        let comments = SingleThreadedComments::default();
+
+        let mut parser = create_test_parser(&fm, Some(&comments));
+        let module = parser.parse_typescript_module().unwrap();
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
+
+        visit_module(&mut visitor, &module);
+        let expected_map: HashSet<ExportedItem> = HashSet::from_iter(vec![ExportedItem::Default]);
+
+        assert_eq!(expected_map, visitor.exported_ids);
+    }
+
+    #[test]
+    fn test_allow_unused_export_default_and_collect_not_marked_named_export() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            // some comment
+            const foo = 1;
+            // @ALLOW-UNUSED-EXPORT this are some docs
+            export default foo;
+            
+            // another comment
+            export const zoo = 2;
+            "#
+            .to_string(),
+        );
+
+        let comments = SingleThreadedComments::default();
+
+        let mut parser = create_test_parser(&fm, Some(&comments));
+        let module = parser.parse_typescript_module().unwrap();
+        let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
+
+        visit_module(&mut visitor, &module);
+        let expected_map: HashSet<ExportedItem> =
+            HashSet::from_iter(vec![ExportedItem::Named("zoo".to_string())]);
+
+        assert_eq!(expected_map, visitor.exported_ids);
+    }
+
+    #[test]
     fn test_export_named_as_bar() {
         let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
@@ -299,6 +388,7 @@ mod test {
 
         assert_eq!(expected_map, visitor.exported_ids);
     }
+
     #[test]
     fn test_export_default() {
         let cm = Arc::<SourceMap>::default();
