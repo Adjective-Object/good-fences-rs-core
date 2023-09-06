@@ -10,7 +10,7 @@ use swc_ecma_parser::{Capturing, Parser};
 
 use crate::get_imports::create_lexer;
 
-use super::exports_collector::{ExportedItem, ExportsCollector, ImportedItem};
+use super::node_visitor::{ExportedItem, ExportsCollector, ImportedItem};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportExportInfo {

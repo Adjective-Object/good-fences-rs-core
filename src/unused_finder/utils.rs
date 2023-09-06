@@ -9,7 +9,7 @@ use relative_path::RelativePath;
 
 use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
 
-use super::exports_collector::{ExportedItem, ImportedItem};
+use super::node_visitor::{ExportedItem, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
 use super::{WalkFileMetaData, WalkedFile};
 
