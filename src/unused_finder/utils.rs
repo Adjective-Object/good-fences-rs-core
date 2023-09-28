@@ -1,13 +1,12 @@
-use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
-
 use std::sync::Arc;
 
 use jwalk::WalkDirGeneric;
 use path_slash::PathBufExt;
 use relative_path::RelativePath;
 
-use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
+use crate::import_resolver::{
+    resolve_ts_import, resolve_with_extension, ResolvedImport, TsconfigPathsJson,
+};
 
 use super::node_visitor::{ExportedItem, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
@@ -31,220 +30,179 @@ impl From<ExportedItem> for ResolvedItem {
     }
 }
 
-/**
- * transform files to know exactly what items are being imported
- * key - String: Source file path
- * value - Hashmap with keys: the resolved imported paths from the outer key file, value: the items imported from the key path
- */
-pub fn get_map_of_imports(
-    tsconfig: &TsconfigPathsJson,
-    walked_files: &HashMap<String, ImportExportInfo>,
-) -> HashMap<String, HashMap<String, HashSet<ResolvedItem>>> {
-    let complex_hash: HashMap<String, HashMap<String, HashSet<ResolvedItem>>> = walked_files
-        .iter()
-        .map(|(source_file_path, import_export_info)| {
-            let mut resolved_map: HashMap<String, HashSet<ResolvedItem>> = HashMap::new();
-            process_require_paths(
-                import_export_info,
-                tsconfig,
-                source_file_path,
-                &mut resolved_map,
-            );
-            process_async_imported_paths(
-                import_export_info,
-                tsconfig,
-                source_file_path,
-                &mut resolved_map,
-            );
-            process_exports_from(
-                import_export_info,
-                tsconfig,
-                source_file_path,
-                &mut resolved_map,
-            );
-            process_import_path_ids(
-                import_export_info,
-                tsconfig,
-                source_file_path,
-                &mut resolved_map,
-            );
-            process_executed_paths(
-                import_export_info,
-                tsconfig,
-                source_file_path,
-                &mut resolved_map,
-            );
-
-            (source_file_path.clone(), resolved_map)
-        })
-        .collect();
-    return complex_hash;
-}
-
 // import foo, {bar as something} from './foo'`
-fn process_import_path_ids(
-    import_export_info: &ImportExportInfo,
+pub fn process_import_path_ids(
+    import_export_info: &mut ImportExportInfo,
     tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
-    resolved_map: &mut HashMap<String, HashSet<ResolvedItem>>,
 ) {
-    import_export_info
+    import_export_info.imported_path_ids = import_export_info
         .imported_path_ids
-        .iter()
-        .for_each(|(imported_path, imported_items)| {
-            if let Ok(resolved) = resolve_ts_import(
+        .drain()
+        .filter_map(|(imported_path, imported_items)| {
+            match resolve_ts_import(
                 &tsconfig,
                 &RelativePath::new(&source_file_path.to_string()),
                 &imported_path,
             ) {
-                if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                    let slashed = if resolved.is_dir() {
-                        resolved.join("index").to_slash().unwrap().to_string()
-                    } else {
-                        resolved.to_slash().unwrap().to_string()
-                    };
-                    if let Some(items) = resolved_map.get_mut(&slashed) {
-                        for ie in imported_items {
-                            items.insert(ie.to_owned().into());
-                        }
-                    } else {
-                        resolved_map.insert(
-                            slashed.clone(),
-                            imported_items.iter().map(|i| i.clone().into()).collect(),
-                        );
+                Ok(resolved) => {
+                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
+                        let slashed = resolved.to_slash().unwrap().to_string();
+                        match resolve_with_extension(&slashed, tsconfig) {
+                            Ok(resolved) => return Some((resolved, imported_items)),
+                            Err(e) => {
+                                dbg!(&slashed);
+                                dbg!(e);
+                                return None;
+                            }
+                        };
                     }
                 }
+                Err(_e) => {}
             }
-        });
+
+            None
+        })
+        .collect();
 }
 
 // `export {default as foo, bar} from './foo'`
-fn process_exports_from(
-    import_export_info: &ImportExportInfo,
+pub fn process_exports_from(
+    import_export_info: &mut ImportExportInfo,
     tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
-    resolved_map: &mut HashMap<String, HashSet<ResolvedItem>>,
 ) {
-    import_export_info
+    import_export_info.export_from_ids = import_export_info
         .export_from_ids
-        .iter()
-        .for_each(|(imported_path, imported_items)| {
-            if let Ok(resolved) = resolve_ts_import(
+        .drain()
+        .filter_map(|(imported_path, imported_items)| {
+            // match resolve_ts_import(tsconfig_paths, initial_path, raw_import_path)
+            match resolve_ts_import(
                 &tsconfig,
-                &RelativePath::new(&source_file_path.to_string()),
+                &RelativePath::new(&source_file_path),
                 &imported_path,
             ) {
-                if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                    let slashed = if resolved.is_dir() {
-                        resolved.join("index").to_slash().unwrap().to_string()
-                    } else {
-                        resolved.to_slash().unwrap().to_string()
-                    };
-                    if let Some(items) = resolved_map.get_mut(&slashed) {
-                        for ie in imported_items {
-                            items.insert(ie.to_owned().into());
-                        }
-                    } else {
-                        resolved_map.insert(
-                            slashed.clone(),
-                            imported_items.iter().map(|i| i.clone().into()).collect(),
-                        );
+                Ok(resolved) => {
+                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
+                        let slashed = resolved.to_slash().unwrap().to_string();
+                        match resolve_with_extension(&slashed, tsconfig) {
+                            Ok(resolved) => return Some((resolved, imported_items)),
+                            Err(e) => {
+                                dbg!(e);
+                                return None;
+                            }
+                        };
                     }
                 }
+                Err(_e) => {}
             }
-        });
+
+            None
+        })
+        .collect();
 }
 
 // import('./foo')
-fn process_async_imported_paths(
-    import_export_info: &ImportExportInfo,
+pub fn process_async_imported_paths(
+    import_export_info: &mut ImportExportInfo,
     tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
-    resolved_map: &mut HashMap<String, HashSet<ResolvedItem>>,
 ) {
-    import_export_info.imported_paths.iter().for_each(|path| {
-        if let Ok(resolved) = resolve_ts_import(
-            &tsconfig,
-            &RelativePath::new(&source_file_path.to_string()),
-            path,
-        ) {
-            if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                let slashed = if resolved.is_dir() {
-                    resolved.join("index").to_slash().unwrap().to_string()
-                } else {
-                    resolved.to_slash().unwrap().to_string()
-                };
-                if let Some(items) = resolved_map.get_mut(&slashed) {
-                    items.insert(ImportedItem::Namespace.into());
-                } else {
-                    resolved_map.insert(
-                        slashed.clone(),
-                        HashSet::from_iter(vec![ImportedItem::Namespace.into()]),
-                    );
+    import_export_info.imported_paths = import_export_info
+        .imported_paths
+        .drain()
+        .filter_map(|path| {
+            match resolve_ts_import(
+                &tsconfig,
+                &RelativePath::new(&source_file_path.to_string()),
+                &path,
+            ) {
+                Ok(resolved) => {
+                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
+                        let slashed = resolved.to_slash().unwrap().to_string();
+                        match resolve_with_extension(&slashed, tsconfig) {
+                            Ok(resolved) => return Some(resolved),
+                            Err(e) => {
+                                dbg!(e);
+                                return None;
+                            }
+                        };
+                    }
                 }
+                Err(_e) => {}
             }
-        }
-    });
+            None
+        })
+        .collect();
 }
 
 // import './foo'
-fn process_executed_paths(
-    import_export_info: &ImportExportInfo,
+pub fn process_executed_paths(
+    import_export_info: &mut ImportExportInfo,
     tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
-    resolved_map: &mut HashMap<String, HashSet<ResolvedItem>>,
 ) {
-    import_export_info.executed_paths.iter().for_each(|path| {
-        if let Ok(resolved) = resolve_ts_import(
-            &tsconfig,
-            &RelativePath::new(&source_file_path.to_string()),
-            path,
-        ) {
-            if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                let slashed = if resolved.is_dir() {
-                    resolved.join("index").to_slash().unwrap().to_string()
-                } else {
-                    resolved.to_slash().unwrap().to_string()
-                };
-                resolved_map.insert(
-                    slashed.clone(),
-                    HashSet::from_iter(vec![ImportedItem::ExecutionOnly.into()]),
-                );
+    import_export_info.executed_paths = import_export_info
+        .executed_paths
+        .drain()
+        .filter_map(|path| {
+            match resolve_ts_import(
+                &tsconfig,
+                &RelativePath::new(&source_file_path.to_string()),
+                &path,
+            ) {
+                Ok(resolved) => {
+                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
+                        let slashed = resolved.to_slash().unwrap().to_string();
+                        match resolve_with_extension(&slashed, tsconfig) {
+                            Ok(resolved) => return Some(resolved),
+                            Err(e) => {
+                                dbg!(e);
+                                return None;
+                            }
+                        };
+                    }
+                }
+                Err(_e) => {}
             }
-        }
-    });
+
+            None
+        })
+        .collect();
 }
 
 // require('foo')
-fn process_require_paths(
-    import_export_info: &ImportExportInfo,
+pub fn process_require_paths(
+    import_export_info: &mut ImportExportInfo,
     tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
-    resolved_map: &mut HashMap<String, HashSet<ResolvedItem>>,
 ) {
-    import_export_info.require_paths.iter().for_each(|path| {
-        if let Ok(resolved) = resolve_ts_import(
-            &tsconfig,
-            &RelativePath::new(&source_file_path.to_string()),
-            path,
-        ) {
-            if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                let slashed = if resolved.is_dir() {
-                    resolved.join("index").to_slash().unwrap().to_string()
-                } else {
-                    resolved.to_slash().unwrap().to_string()
-                };
-                if let Some(items) = resolved_map.get_mut(&slashed) {
-                    items.insert(ImportedItem::Namespace.into());
-                } else {
-                    resolved_map.insert(
-                        slashed.clone(),
-                        HashSet::from_iter(vec![ImportedItem::Namespace.into()]),
-                    );
+    import_export_info.require_paths = import_export_info
+        .require_paths
+        .drain()
+        .filter_map(|path| {
+            match resolve_ts_import(
+                &tsconfig,
+                &RelativePath::new(&source_file_path.to_string()),
+                &path,
+            ) {
+                Ok(resolved) => {
+                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
+                        let slashed = resolved.to_slash().unwrap().to_string();
+                        match resolve_with_extension(&slashed, tsconfig) {
+                            Ok(resolved) => return Some(resolved),
+                            Err(e) => {
+                                dbg!(e);
+                                return None;
+                            }
+                        };
+                    }
                 }
+                Err(_e) => return None,
             }
-        }
-    });
+            None
+        })
+        .collect();
 }
 
 pub fn retrieve_files(
@@ -256,21 +214,11 @@ pub fn retrieve_files(
         move |dir_state, children| {
             children.iter_mut().for_each(|dir_entry_res| {
                 if let Ok(dir_entry) = dir_entry_res {
-                    if dir_entry.file_type().is_dir()
-                        && (dir_entry.file_name() == "node_modules"
-                            || dir_entry.file_name() == "lib")
-                    {
+                    if dir_entry.file_name() == "node_modules" || dir_entry.file_name() == "lib" {
                         dir_entry.read_children_path = None;
                     }
                 }
             });
-            children.retain(|dir_entry_result| match dir_entry_result {
-                Ok(dir_entry) => {
-                    return should_retain_dir_entry(dir_entry, &skipped_dirs);
-                }
-                Err(_) => todo!(),
-            });
-
             children.iter_mut().for_each(|dir_entry_result| {
                 if let Ok(dir_entry) = dir_entry_result {
                     if dir_entry.file_name() == "package.json" {
@@ -288,6 +236,12 @@ pub fn retrieve_files(
                     }
                 }
             });
+            children.retain(|dir_entry_result| match dir_entry_result {
+                Ok(dir_entry) => {
+                    should_retain_dir_entry(dir_entry, &skipped_dirs)
+                }
+                Err(_) => todo!(),
+            });
 
             children.iter_mut().for_each(|child_result| {
                 match child_result {
@@ -304,9 +258,6 @@ pub fn retrieve_files(
                                     Some(slashed) => slashed,
                                     None => todo!(),
                                 };
-                                if slashed.starts_with("packages/common/controls/packages/controls/header/owa-suite-header/src/components/OwaSuiteHeaderButton") {
-                                    println!("Processing");
-                                }
                                 let visitor_result = get_import_export_paths_map(
                                     slashed.to_string(),
                                     skipped_items.clone(),
@@ -324,7 +275,7 @@ pub fn retrieve_files(
                                                     .to_string(),
                                             });
                                     }
-                                    Err(_) => {},
+                                    Err(_) => {}
                                 }
                             }
                             None => todo!(),
@@ -357,6 +308,9 @@ fn should_retain_dir_entry(
             }
 
             if dir_entry.file_type.is_file() {
+                if !slashed.contains("/src/") {
+                    return false;
+                }
                 return is_js_ts_file(slashed.as_ref());
             }
         }
