@@ -190,9 +190,7 @@ pub struct JsonErrorFile<'a> {
  */
 
 #[napi]
-pub fn find_unused_items(
-    config: FindUnusedItemsConfig
-) -> napi::Result<Vec<String>> {
+pub fn find_unused_items(config: FindUnusedItemsConfig) -> napi::Result<Vec<String>> {
     match unused_finder::find_unused_items(config) {
         Ok(ok) => return Ok(ok),
         Err(e) => return Err(napi::Error::new(e.status, e.message)),

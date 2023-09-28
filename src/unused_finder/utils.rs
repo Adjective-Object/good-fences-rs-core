@@ -237,9 +237,7 @@ pub fn retrieve_files(
                 }
             });
             children.retain(|dir_entry_result| match dir_entry_result {
-                Ok(dir_entry) => {
-                    should_retain_dir_entry(dir_entry, &skipped_dirs)
-                }
+                Ok(dir_entry) => should_retain_dir_entry(dir_entry, &skipped_dirs),
                 Err(_) => todo!(),
             });
 

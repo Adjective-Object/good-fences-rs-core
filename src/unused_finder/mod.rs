@@ -228,11 +228,19 @@ pub fn find_unused_items(
             let mut export_from_paths: HashMap<String, HashSet<ImportedItem>> = HashMap::new();
             {
                 if let Some(used_file) = used_files.get_mut(path) {
-                    used_file.import_export_info.exported_ids.retain(|i| !items.contains(&ImportedItem::from(i)));
-                    export_from_paths = used_file.import_export_info.export_from_ids.iter().map(|(path, items)| {
-                        // used_files.insert(path.clone(), unused_files.remove(path).unwrap());
-                        (path.to_string(), items.clone())
-                    }).collect();
+                    used_file
+                        .import_export_info
+                        .exported_ids
+                        .retain(|i| !items.contains(&ImportedItem::from(i)));
+                    export_from_paths = used_file
+                        .import_export_info
+                        .export_from_ids
+                        .iter()
+                        .map(|(path, items)| {
+                            // used_files.insert(path.clone(), unused_files.remove(path).unwrap());
+                            (path.to_string(), items.clone())
+                        })
+                        .collect();
                 }
             }
             for (p, items) in export_from_paths {
@@ -242,32 +250,37 @@ pub fn find_unused_items(
                             match item {
                                 ImportedItem::ExecutionOnly | ImportedItem::Namespace => {
                                     removed.import_export_info.exported_ids.clear();
-                                },
+                                }
                                 _ => {
-                                    removed.import_export_info.exported_ids.remove(&node_visitor::ExportedItem::from(&item));
+                                    removed
+                                        .import_export_info
+                                        .exported_ids
+                                        .remove(&node_visitor::ExportedItem::from(&item));
                                 }
                             }
                         }
                         used_files.insert(p, removed);
-                    },
+                    }
                     None => {
                         if let Some(used_file) = used_files.get_mut(&p) {
                             for item in items {
                                 match item {
                                     ImportedItem::ExecutionOnly | ImportedItem::Namespace => {
                                         used_file.import_export_info.exported_ids.clear();
-                                    },
+                                    }
                                     _ => {
-                                        used_file.import_export_info.exported_ids.remove(&node_visitor::ExportedItem::from(&item));
+                                        used_file
+                                            .import_export_info
+                                            .exported_ids
+                                            .remove(&node_visitor::ExportedItem::from(&item));
                                     }
                                 }
                             }
                         }
-                    },
-                } 
+                    }
+                }
             }
         });
-    
     });
 
     loop {

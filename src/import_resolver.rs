@@ -4,7 +4,6 @@ use path_clean::PathClean as _;
 use path_slash::PathBufExt;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
-use swc_core::ecma::loader::TargetEnv;
 use std::collections::HashMap;
 use std::env::current_dir;
 use std::fs::File;
@@ -17,6 +16,7 @@ use swc_core::ecma::loader::resolve::Resolve;
 use swc_core::ecma::loader::resolvers::lru::CachingResolver;
 use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
 use swc_core::ecma::loader::resolvers::tsc::TsConfigResolver;
+use swc_core::ecma::loader::TargetEnv;
 
 use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
@@ -59,19 +59,28 @@ pub enum ResolvedImport {
 
 pub fn resolve_with_extension(
     imported_path: &str,
-    tsconfig_paths: &TsconfigPathsJson
+    tsconfig_paths: &TsconfigPathsJson,
 ) -> Result<String, String> {
     let extensions = &["ts", "js", "tsx", "jsx", "d.ts"];
     for ext in extensions {
         let file_with_ext = PathBuf::from_slash(format!("{}.{}", imported_path, ext));
         if file_with_ext.exists() {
-            return Ok(file_with_ext.to_slash().unwrap().to_string())
+            return Ok(file_with_ext.to_slash().unwrap().to_string());
         }
     }
 
     let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
         40,
-        TsConfigResolver::new(NodeModulesResolver::new(TargetEnv::Node, Default::default(), false), ".".into(), tsconfig_paths.compiler_options.paths.clone().into_iter().collect()),
+        TsConfigResolver::new(
+            NodeModulesResolver::new(TargetEnv::Node, Default::default(), false),
+            ".".into(),
+            tsconfig_paths
+                .compiler_options
+                .paths
+                .clone()
+                .into_iter()
+                .collect(),
+        ),
     );
 
     let base = FileName::Real("./package.json".into());
@@ -87,12 +96,12 @@ pub fn resolve_with_extension(
         Err(e) => {
             dbg!(&base, &imported_path);
             dbg!(&e);
-            return Err(e.to_string())
-        },
+            return Err(e.to_string());
+        }
     };
     // let resolved = RelativePath::new(&resolved.to_string())..to_path("");
     let resolved = resolved.to_string();
-    
+
     let cwd = current_dir().unwrap().to_slash().unwrap().to_string();
     Ok(resolved.replacen(&format!("{}/", cwd), "", 1))
 }
@@ -104,7 +113,16 @@ pub fn resolve_import<'a>(
 ) -> Result<ResolvedImport, String> {
     let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
         500000,
-        TsConfigResolver::new(NodeModulesResolver::new(TargetEnv::Node, Default::default(), false), ".".into(), tsconfig_paths.compiler_options.paths.clone().into_iter().collect()),
+        TsConfigResolver::new(
+            NodeModulesResolver::new(TargetEnv::Node, Default::default(), false),
+            ".".into(),
+            tsconfig_paths
+                .compiler_options
+                .paths
+                .clone()
+                .into_iter()
+                .collect(),
+        ),
     );
     // dbg!(initial_path.as_str());
     let base = FileName::Real(PathBuf::from(initial_path.as_str()));
@@ -122,8 +140,8 @@ pub fn resolve_import<'a>(
         Err(e) => {
             dbg!(&base, raw_import_path);
             dbg!(&e);
-            return Err(e.to_string())
-        },
+            return Err(e.to_string());
+        }
     };
 
     if is_resource_file(&file_path) {
