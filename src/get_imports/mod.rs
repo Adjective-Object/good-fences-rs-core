@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use swc_core::common::comments::Comments;
 use swc_core::common::errors::Handler;
 use swc_core::common::{Globals, Mark, SourceFile, SourceMap, GLOBALS};
 use swc_core::ecma::transforms::base::resolver;
@@ -39,7 +40,7 @@ pub fn get_imports_map_from_file<'a>(
     let dest_vector: Vec<u8> = Vec::new();
     let dst = Box::new(dest_vector);
     let handler = Handler::with_emitter_writer(dst, Some(cm.clone()));
-    let lexer = create_lexer(&fm);
+    let lexer = create_lexer(&fm, None);
     let capturing = Capturing::new(lexer);
     let mut parser = Parser::new_from(capturing);
 
@@ -120,7 +121,7 @@ fn get_imports_map_from_visitor(
     final_imports_map
 }
 
-pub fn create_lexer<'a>(fm: &'a SourceFile) -> Lexer {
+pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) -> Lexer<'a> {
     let filename = fm.name.to_string();
     let lexer = Lexer::new(
         Syntax::Typescript(TsConfig {
@@ -130,7 +131,7 @@ pub fn create_lexer<'a>(fm: &'a SourceFile) -> Lexer {
         }),
         Default::default(),
         StringInput::from(fm),
-        None,
+        comments,
     );
     return lexer;
 }
