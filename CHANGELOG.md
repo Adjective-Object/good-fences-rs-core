@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Fri, 29 Sep 2023 22:46:14 GMT and should not be manually modified.
+This log was last generated on Mon, 02 Oct 2023 19:18:23 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.5.0
+
+Mon, 02 Oct 2023 19:18:23 GMT
+
+### Minor changes
+
+- Added metadata struct for exported items (edgar21_9@hotmail.com)
 
 ## 0.4.0
 
