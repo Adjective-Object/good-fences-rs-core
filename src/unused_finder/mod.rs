@@ -15,8 +15,8 @@ use crate::{
     file_extension::no_ext,
     import_resolver::TsconfigPathsJson,
     unused_finder::{
-        node_visitor::ExportedItem,
-        unused_finder_visitor_runner::ImportExportInfo,
+        node_visitor::ExportKind,
+        unused_finder_visitor_runner::{ExportedItem, ImportExportInfo},
         utils::{get_map_of_imports, retrieve_files, ResolvedItem},
     },
 };
@@ -158,8 +158,11 @@ pub fn find_unused_items(
                                         }
                                         _ => {
                                             unused_files.remove(imported_path);
-                                            let i = ExportedItem::from(imported);
-                                            origin_file_exported_items.remove(&i);
+                                            let i = ExportKind::from(imported);
+                                            origin_file_exported_items.retain(|exp_item| {
+                                                exp_item.metadata.export_type != i
+                                            });
+                                            // origin_file_exported_items.remove(&i);
                                         }
                                     }
                                 }
@@ -174,13 +177,14 @@ pub fn find_unused_items(
     // Print the unused items for each file, sort them by file first
     let mut path_unused_items: Vec<_> = path_unused_items_map.into_iter().collect();
     path_unused_items.sort_by(|x, y| x.0.cmp(&y.0));
-    path_unused_items.iter().for_each(|(k, v)| {
-        if v.len() > 0 {
+    path_unused_items.iter_mut().for_each(|(k, items)| {
+        items.retain(|i| !i.metadata.allow_unused);
+        if items.len() > 0 {
             if !unused_files.contains(k) {
-                println!("From file {} found {:?} unused items", k, v);
+                println!("From file {} found {:?} unused items", k, items);
             }
         }
-        unused_items_len += v.len();
+        unused_items_len += items.len();
     });
 
     let results: Vec<String> = Vec::new();
