@@ -308,6 +308,30 @@ mod test {
     }
 
     #[test]
+    fn trest_import_with_satisfies() {
+        let cm = Arc::<SourceMap>::default();
+        let fm = cm.new_source_file(
+            FileName::Custom("test.ts".into()),
+            r#"
+            import foo from './bar';
+            foo satisfies never;
+            "#
+            .to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm);
+
+        let mut visitor = ImportPathVisitor::new();
+        let module = parser.parse_typescript_module().unwrap();
+        visit_module(&mut visitor, &module);
+
+        let expected_import_map =
+            HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
+
+        assert_eq!(expected_import_map, visitor.imports_map);
+    }
+
+    #[test]
     fn test_imports_specifiers() {
         let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(

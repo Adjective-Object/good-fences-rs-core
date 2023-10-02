@@ -10,7 +10,7 @@ use swc_ecma_parser::{Capturing, Parser};
 
 use crate::get_imports::create_lexer;
 
-use super::node_visitor::{ExportedItem, ExportsCollector, ImportedItem};
+use super::node_visitor::{ExportedItemMetadata, ExportsCollector, ImportedItem};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportExportInfo {
@@ -26,6 +26,12 @@ pub struct ImportExportInfo {
     pub exported_ids: HashSet<ExportedItem>,
     // `import './foo'`
     pub executed_paths: HashSet<String>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Default)]
+pub struct ExportedItem {
+    pub metadata: ExportedItemMetadata,
+    pub source_file_path: PathBuf,
 }
 
 impl ImportExportInfo {
@@ -113,7 +119,14 @@ pub fn get_import_export_paths_map(
         require_paths: visitor.require_paths,
         imported_paths: visitor.imported_paths,
         export_from_ids: visitor.export_from_ids, // TODO replace with ExportVisitor maps
-        exported_ids: visitor.exported_ids,
+        exported_ids: visitor
+            .exported_ids
+            .drain()
+            .map(|metadata| ExportedItem {
+                metadata,
+                source_file_path: path.clone(),
+            })
+            .collect(),
         executed_paths: visitor.executed_paths,
     })
 }

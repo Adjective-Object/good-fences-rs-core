@@ -134,7 +134,12 @@ pub fn find_unused_items(
                 file_path: file.source_file_path.clone(),
                 import_export_info: file.import_export_info.clone(),
                 is_used: false,
-                unused_exports: file.import_export_info.exported_ids.clone(),
+                unused_exports: file
+                    .import_export_info
+                    .exported_ids
+                    .iter()
+                    .map(|e| e.metadata.export_type.clone())
+                    .collect(),
             }
         })
         .collect();

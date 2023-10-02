@@ -4,9 +4,8 @@ use std::{
 };
 
 use super::{
-    node_visitor::{ExportedItem, ImportedItem},
+    node_visitor::{ImportedItem, ExportKind},
     unused_finder_visitor_runner::ImportExportInfo,
-    WalkFileMetaData,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -14,32 +13,18 @@ pub struct GraphFile {
     pub is_used: bool,
     // pub package_name: String,
     pub file_path: String,
-    pub unused_exports: HashSet<ExportedItem>,
+    pub unused_exports: HashSet<ExportKind>,
     pub import_export_info: ImportExportInfo,
 }
 
 impl GraphFile {
-    pub fn new(source_file: WalkFileMetaData) -> Self {
-        Self {
-            is_used: false,
-            file_path: source_file.source_file_path,
-            unused_exports: source_file.import_export_info.exported_ids.clone(),
-            import_export_info: source_file.import_export_info,
-            ..Default::default()
-        }
-    }
 
     pub fn mark_item_as_used(&mut self, item: &ImportedItem) -> bool {
-        let item = ExportedItem::from(item);
+        let item = ExportKind::from(item);
         self.unused_exports.remove(&item)
     }
 }
 
-impl From<WalkFileMetaData> for GraphFile {
-    fn from(source_file: WalkFileMetaData) -> Self {
-        Self::new(source_file)
-    }
-}
 
 pub type Edge = (String, String, ImportedItem);
 
