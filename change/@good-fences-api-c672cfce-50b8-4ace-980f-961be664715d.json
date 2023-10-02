@@ -1,7 +1,0 @@
-{
-  "type": "none",
-  "comment": "Fixed action yml to avoid duplicated workflow on merge to main",
-  "packageName": "@good-fences/api",
-  "email": "edgar21_9@hotmail.com",
-  "dependentChangeType": "none"
-}
