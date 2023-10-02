@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{
-    node_visitor::{ImportedItem, ExportKind},
+    node_visitor::{ExportKind, ImportedItem},
     unused_finder_visitor_runner::ImportExportInfo,
 };
 
@@ -18,13 +18,11 @@ pub struct GraphFile {
 }
 
 impl GraphFile {
-
     pub fn mark_item_as_used(&mut self, item: &ImportedItem) -> bool {
         let item = ExportKind::from(item);
         self.unused_exports.remove(&item)
     }
 }
-
 
 pub type Edge = (String, String, ImportedItem);
 

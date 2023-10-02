@@ -167,14 +167,12 @@ pub fn find_unused_items(
     let max_iters = 10_000_000;
     let mut current_iter = 0;
     loop {
-        current_iter +=1;
+        current_iter += 1;
         new_entries = graph.bfs(new_entries);
         if current_iter > max_iters || new_entries.is_empty() {
             break;
         }
     }
-
-
 
     let results: Vec<String> = Vec::new();
     let unused_files = BTreeMap::from_iter(graph.files.drain().filter(|f| !f.1.is_used));
