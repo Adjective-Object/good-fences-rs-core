@@ -1,4 +1,5 @@
 mod export_collector_tests;
+pub mod graph;
 pub mod node_visitor;
 pub mod unused_finder_visitor_runner;
 mod utils;
@@ -6,8 +7,9 @@ mod utils;
 use napi_derive::napi;
 use rayon::prelude::*;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     iter::FromIterator,
+    rc::Rc,
     str::FromStr,
     sync::Arc,
 };
@@ -15,7 +17,7 @@ use std::{
 use crate::{
     import_resolver::TsconfigPathsJson,
     unused_finder::{
-        node_visitor::ImportedItem,
+        graph::{Graph, GraphFile},
         unused_finder_visitor_runner::ImportExportInfo,
         utils::{
             process_async_imported_paths, process_executed_paths, process_exports_from,
@@ -123,240 +125,59 @@ pub fn find_unused_items(
         .collect();
 
     let total_files = flattened_walk_file_data.len();
-    let mut used_files: HashMap<String, &mut WalkFileMetaData> =
-        HashMap::with_capacity(flattened_walk_file_data.len());
 
-    let entry_files: Vec<WalkFileMetaData> = flattened_walk_file_data
+    let mut files: Vec<GraphFile> = flattened_walk_file_data
+        .par_iter_mut()
+        .map(|file| {
+            process_import_export_info(file, &tsconfig);
+            GraphFile {
+                file_path: file.source_file_path.clone(),
+                import_export_info: file.import_export_info.clone(),
+                is_used: false,
+                unused_exports: file.import_export_info.exported_ids.clone(),
+            }
+        })
+        .collect();
+
+    let files = files
+        .drain(0..)
+        .map(|file| (file.file_path.clone(), Rc::new(file)))
+        .collect();
+
+    let mut graph = Graph {
+        files,
+        ..Default::default()
+    };
+
+    let entry_files: Vec<String> = flattened_walk_file_data
         .iter_mut()
         .filter_map(|file| {
             if entry_packages.contains(&file.package_name) {
-                let mut f = file.clone();
-                process_import_export_info(&mut f, &tsconfig);
-                return Some(f);
+                return Some(file.source_file_path.clone());
             }
             None
         })
         .collect();
-    let mut unused_files: HashMap<String, &mut WalkFileMetaData> = flattened_walk_file_data
-        .iter_mut()
-        .filter_map(|f| {
-            if f.source_file_path == "shared/internal/owa-service/src/contract/TokenResponse.ts" {
-                dbg!(entry_packages.contains(&f.package_name));
-            }
-            if !entry_packages.contains(&f.package_name) {
-                process_import_export_info(f, &tsconfig);
-                return Some((f.source_file_path.clone(), f));
-            }
-            None
-        })
-        .collect();
-
-    dbg!(unused_files.len());
-    entry_files.iter().for_each(|file| {
-        let ImportExportInfo {
-            imported_path_ids,
-            require_paths,
-            imported_paths,
-            export_from_ids,
-            exported_ids: _,
-            executed_paths,
-        } = &file.import_export_info;
-        for (key, values) in imported_path_ids.iter() {
-            match unused_files.remove(key) {
-                Some(r) => {
-                    r.import_export_info
-                        .exported_ids
-                        .retain(|ids| !values.contains(&ImportedItem::from(ids)));
-                    used_files.insert(key.clone(), r);
-                }
-                None => {
-                    if let Some(used_file) = used_files.get_mut(key) {
-                        used_file
-                            .import_export_info
-                            .exported_ids
-                            .retain(|ids| !values.contains(&ImportedItem::from(ids)));
-                    }
-                }
-            }
-        }
-        for (key, values) in export_from_ids {
-            match unused_files.remove(key) {
-                Some(r) => {
-                    r.import_export_info
-                        .exported_ids
-                        .retain(|ids| !values.contains(&ImportedItem::from(ids)));
-                    used_files.insert(key.clone(), r);
-                }
-                None => {
-                    if let Some(used_file) = used_files.get_mut(key) {
-                        used_file
-                            .import_export_info
-                            .exported_ids
-                            .retain(|ids| !values.contains(&ImportedItem::from(ids)));
-                    }
-                }
-            }
-        }
-        for key in require_paths {
-            match unused_files.remove(key) {
-                Some(r) => {
-                    r.import_export_info.exported_ids.clear();
-                    used_files.insert(key.clone(), r);
-                }
-                None => {}
-            }
-        }
-        for key in imported_paths {
-            match unused_files.remove(key) {
-                Some(r) => {
-                    r.import_export_info.exported_ids.clear();
-                    used_files.insert(key.clone(), r);
-                }
-                None => {}
-            }
-        }
-        for key in executed_paths {
-            match unused_files.remove(key) {
-                Some(r) => {
-                    r.import_export_info.exported_ids.clear();
-                    used_files.insert(key.clone(), r);
-                }
-                None => {}
-            }
-        }
-        imported_path_ids.iter().for_each(|(path, items)| {
-            let mut export_from_paths: HashMap<String, HashSet<ImportedItem>> = HashMap::new();
-            {
-                if let Some(used_file) = used_files.get_mut(path) {
-                    used_file
-                        .import_export_info
-                        .exported_ids
-                        .retain(|i| !items.contains(&ImportedItem::from(i)));
-                    export_from_paths = used_file
-                        .import_export_info
-                        .export_from_ids
-                        .iter()
-                        .map(|(path, items)| {
-                            // used_files.insert(path.clone(), unused_files.remove(path).unwrap());
-                            (path.to_string(), items.clone())
-                        })
-                        .collect();
-                }
-            }
-            for (p, items) in export_from_paths {
-                match unused_files.remove(&p) {
-                    Some(removed) => {
-                        for item in items {
-                            match item {
-                                ImportedItem::ExecutionOnly | ImportedItem::Namespace => {
-                                    removed.import_export_info.exported_ids.clear();
-                                }
-                                _ => {
-                                    removed
-                                        .import_export_info
-                                        .exported_ids
-                                        .remove(&node_visitor::ExportedItem::from(&item));
-                                }
-                            }
-                        }
-                        used_files.insert(p, removed);
-                    }
-                    None => {
-                        if let Some(used_file) = used_files.get_mut(&p) {
-                            for item in items {
-                                match item {
-                                    ImportedItem::ExecutionOnly | ImportedItem::Namespace => {
-                                        used_file.import_export_info.exported_ids.clear();
-                                    }
-                                    _ => {
-                                        used_file
-                                            .import_export_info
-                                            .exported_ids
-                                            .remove(&node_visitor::ExportedItem::from(&item));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    });
-
+    let mut new_entries = entry_files;
+    let max_iters = 10_000_000;
+    let mut current_iter = 0;
     loop {
-        let old_size = unused_files.len();
-        let mut new_used_files: HashMap<String, &mut WalkFileMetaData> = HashMap::new();
-
-        used_files.iter_mut().for_each(|(_used_file_path, file)| {
-            let ImportExportInfo {
-                imported_path_ids,
-                require_paths,
-                imported_paths,
-                export_from_ids,
-                exported_ids: _,
-                executed_paths,
-            } = &file.import_export_info;
-            for (key, values) in imported_path_ids {
-                match unused_files.remove(key) {
-                    Some(r) => {
-                        r.import_export_info
-                            .exported_ids
-                            .retain(|ids| !values.contains(&ImportedItem::from(ids)));
-                        new_used_files.insert(key.clone(), r);
-                    }
-                    None => {}
-                }
-            }
-            for (key, values) in export_from_ids {
-                match unused_files.remove(key) {
-                    Some(r) => {
-                        r.import_export_info
-                            .exported_ids
-                            .retain(|ids| !values.contains(&ImportedItem::from(ids)));
-                        new_used_files.insert(key.clone(), r);
-                    }
-                    None => {}
-                }
-            }
-            for key in require_paths {
-                match unused_files.remove(key) {
-                    Some(r) => {
-                        new_used_files.insert(key.clone(), r);
-                    }
-                    None => {}
-                }
-            }
-            for key in imported_paths {
-                match unused_files.remove(key) {
-                    Some(r) => {
-                        new_used_files.insert(key.clone(), r);
-                    }
-                    None => {}
-                }
-            }
-            for key in executed_paths {
-                match unused_files.remove(key) {
-                    Some(r) => {
-                        new_used_files.insert(key.clone(), r);
-                    }
-                    None => {}
-                }
-            }
-        });
-
-        used_files.extend(new_used_files);
-
-        if old_size == unused_files.len() {
+        current_iter +=1;
+        new_entries = graph.bfs(new_entries);
+        if current_iter > max_iters || new_entries.is_empty() {
             break;
         }
     }
+
+
+
     let results: Vec<String> = Vec::new();
-    let unused_files = BTreeMap::from_iter(unused_files.iter());
+    let unused_files = BTreeMap::from_iter(graph.files.drain().filter(|f| !f.1.is_used));
     unused_files.iter().for_each(|f| {
         println!("\"{}\",", f.0);
     });
-    println!("Total files: {}", total_files);
-    println!("Total used files: {}", used_files.len());
+    println!("Total files: {}", &total_files);
+    println!("Total used files: {}", (total_files - unused_files.len()));
     println!("Total unused files: {}", unused_files.len());
 
     Ok(results)
