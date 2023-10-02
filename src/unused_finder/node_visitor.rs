@@ -21,7 +21,7 @@ use swc_core::{
 
 #[derive(Debug, Default, Eq, PartialEq, Clone, Hash)]
 pub struct ExportedItemMetadata {
-    pub export_type: ExportKind,
+    pub export_kind: ExportKind,
     pub span: Span,
     pub allow_unused: bool,
 }
@@ -29,7 +29,7 @@ pub struct ExportedItemMetadata {
 impl ExportedItemMetadata {
     pub fn new(export_type: ExportKind, span: Span, allow_unused: bool) -> Self {
         Self {
-            export_type,
+            export_kind: export_type,
             span,
             allow_unused,
         }
@@ -180,7 +180,7 @@ impl ExportsCollector {
                         // export { foo as default }
                         if sym == "default" {
                             self.exported_ids.insert(ExportedItemMetadata {
-                                export_type: ExportKind::Default,
+                                export_kind: ExportKind::Default,
                                 span,
                                 allow_unused,
                             });
@@ -191,7 +191,7 @@ impl ExportsCollector {
                                 .any(|skipped| skipped.is_match(&sym))
                             {
                                 self.exported_ids.insert(ExportedItemMetadata {
-                                    export_type: ExportKind::Named(id.sym.to_string()),
+                                    export_kind: ExportKind::Named(id.sym.to_string()),
                                     span,
                                     allow_unused,
                                 });
@@ -206,7 +206,7 @@ impl ExportsCollector {
                         .any(|skipped| skipped.is_match(&id.sym.to_string()))
                     {
                         self.exported_ids.insert(ExportedItemMetadata {
-                            export_type: ExportKind::Named(id.sym.to_string()),
+                            export_kind: ExportKind::Named(id.sym.to_string()),
                             span,
                             allow_unused,
                         });
@@ -233,7 +233,7 @@ impl Visit for ExportsCollector {
         expr.visit_children_with(self);
         if !self.has_disable_export_comment(expr.span_lo()) {
             self.exported_ids.insert(ExportedItemMetadata {
-                export_type: ExportKind::Default,
+                export_kind: ExportKind::Default,
                 span: expr.span(),
                 allow_unused: self.has_disable_export_comment(expr.span_lo()),
             });
@@ -247,7 +247,7 @@ impl Visit for ExportsCollector {
         decl.visit_children_with(self);
         if !self.has_disable_export_comment(decl.span_lo()) {
             self.exported_ids.insert(ExportedItemMetadata {
-                export_type: ExportKind::Default,
+                export_kind: ExportKind::Default,
                 span: decl.span(),
                 allow_unused: self.has_disable_export_comment(decl.span_lo()),
             });
@@ -267,7 +267,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportKind::Named(decl.ident.sym.to_string()),
+                        export_kind: ExportKind::Named(decl.ident.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -281,7 +281,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportKind::Named(decl.ident.sym.to_string()),
+                        export_kind: ExportKind::Named(decl.ident.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -297,7 +297,7 @@ impl Visit for ExportsCollector {
                             .any(|skipped| skipped.is_match(&ident.sym.to_string()))
                         {
                             self.exported_ids.insert(ExportedItemMetadata {
-                                export_type: ExportKind::Named(ident.sym.to_string()),
+                                export_kind: ExportKind::Named(ident.sym.to_string()),
                                 span: export.span(),
                                 allow_unused,
                             });
@@ -313,7 +313,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportKind::Named(decl.id.sym.to_string()),
+                        export_kind: ExportKind::Named(decl.id.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -327,7 +327,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportKind::Named(decl.id.sym.to_string()),
+                        export_kind: ExportKind::Named(decl.id.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -341,7 +341,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportKind::Named(decl.id.sym.to_string()),
+                        export_kind: ExportKind::Named(decl.id.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });

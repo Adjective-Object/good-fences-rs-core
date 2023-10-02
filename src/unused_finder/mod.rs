@@ -138,7 +138,7 @@ pub fn find_unused_items(
                     .import_export_info
                     .exported_ids
                     .iter()
-                    .map(|e| e.metadata.export_type.clone())
+                    .map(|e| e.metadata.export_kind.clone())
                     .collect(),
             }
         })
