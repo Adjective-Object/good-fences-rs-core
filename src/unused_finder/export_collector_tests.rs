@@ -11,7 +11,7 @@ mod test {
     use swc_ecma_parser::{Capturing, Parser};
 
     use crate::get_imports::create_lexer;
-    use crate::unused_finder::node_visitor::{ExportType, ImportedItem};
+    use crate::unused_finder::node_visitor::{ExportKind, ImportedItem};
 
     use crate::unused_finder::node_visitor::ExportsCollector;
 
@@ -74,7 +74,7 @@ mod test {
         assert!(visitor
             .exported_ids
             .iter()
-            .all(|e| e.allow_unused && e.export_type == ExportType::Named("bar".to_string())));
+            .all(|e| e.allow_unused && e.export_type == ExportKind::Named("bar".to_string())));
     }
     #[test]
     fn test_allowed_unused_export_default() {
@@ -95,7 +95,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::new();
+        let expected_map: HashSet<ExportKind> = HashSet::new();
         assert_eq!(
             expected_map,
             visitor
@@ -130,7 +130,7 @@ mod test {
         assert!(visitor
             .exported_ids
             .iter()
-            .all(|e| e.allow_unused && e.export_type == ExportType::Default));
+            .all(|e| e.allow_unused && e.export_type == ExportKind::Default));
     }
 
     #[test]
@@ -152,7 +152,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::new();
+        let expected_map: HashSet<ExportKind> = HashSet::new();
         assert_eq!(
             expected_map,
             visitor
@@ -181,7 +181,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::new();
+        let expected_map: HashSet<ExportKind> = HashSet::new();
         assert_eq!(
             expected_map,
             visitor
@@ -296,8 +296,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> =
-            HashSet::from_iter(vec![ExportType::Named("foo".to_owned())]);
+        let expected_map: HashSet<ExportKind> =
+            HashSet::from_iter(vec![ExportKind::Named("foo".to_owned())]);
 
         assert_eq!(
             expected_map,
@@ -338,14 +338,14 @@ mod test {
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportType::Named("bar".to_owned()) || !e.allow_unused),
+                .any(|e| e.export_type == ExportKind::Named("bar".to_owned()) || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportType::Named("zoo".to_owned()) || e.allow_unused),
+                .any(|e| e.export_type == ExportKind::Named("zoo".to_owned()) || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -379,14 +379,14 @@ mod test {
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportType::Named("foo".to_owned()) || !e.allow_unused),
+                .any(|e| e.export_type == ExportKind::Named("foo".to_owned()) || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportType::Default || e.allow_unused),
+                .any(|e| e.export_type == ExportKind::Default || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -415,8 +415,8 @@ mod test {
         let mut visitor = ExportsCollector::new(std::sync::Arc::new(vec![]), comments);
 
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> =
-            HashSet::from_iter(vec![ExportType::Named("zoo".to_string())]);
+        let expected_map: HashSet<ExportKind> =
+            HashSet::from_iter(vec![ExportKind::Named("zoo".to_string())]);
 
         assert_eq!(
             expected_map,
@@ -445,8 +445,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> =
-            HashSet::from_iter(vec![ExportType::Named("bar".to_owned())]);
+        let expected_map: HashSet<ExportKind> =
+            HashSet::from_iter(vec![ExportKind::Named("bar".to_owned())]);
 
         assert_eq!(
             expected_map,
@@ -475,7 +475,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::from_iter(vec![ExportType::Default]);
+        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
 
         assert_eq!(
             expected_map,
@@ -506,7 +506,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::from_iter(vec![ExportType::Default]);
+        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
 
         assert_eq!(
             expected_map,
@@ -535,7 +535,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::from_iter(vec![ExportType::Default]);
+        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
 
         assert_eq!(
             expected_map,
@@ -563,7 +563,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> = HashSet::from_iter(vec![ExportType::Default]);
+        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
 
         assert_eq!(
             expected_map,
@@ -591,8 +591,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         visit_module(&mut visitor, &module);
-        let expected_map: HashSet<ExportType> =
-            HashSet::from_iter(vec![ExportType::Named("foo".to_owned())]);
+        let expected_map: HashSet<ExportKind> =
+            HashSet::from_iter(vec![ExportKind::Named("foo".to_owned())]);
 
         assert_eq!(
             expected_map,

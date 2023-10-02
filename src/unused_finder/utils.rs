@@ -9,14 +9,14 @@ use relative_path::RelativePath;
 
 use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
 
-use super::node_visitor::{ExportType, ImportedItem};
+use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
 use super::{WalkFileMetaData, WalkedFile};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum ResolvedItem {
     Imported(ImportedItem),
-    Exported(ExportType),
+    Exported(ExportKind),
 }
 
 impl From<ImportedItem> for ResolvedItem {
@@ -25,8 +25,8 @@ impl From<ImportedItem> for ResolvedItem {
     }
 }
 
-impl From<ExportType> for ResolvedItem {
-    fn from(item: ExportType) -> Self {
+impl From<ExportKind> for ResolvedItem {
+    fn from(item: ExportKind) -> Self {
         ResolvedItem::Exported(item)
     }
 }

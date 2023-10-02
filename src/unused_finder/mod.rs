@@ -15,7 +15,7 @@ use crate::{
     file_extension::no_ext,
     import_resolver::TsconfigPathsJson,
     unused_finder::{
-        node_visitor::ExportType,
+        node_visitor::ExportKind,
         unused_finder_visitor_runner::{ExportedItem, ImportExportInfo},
         utils::{get_map_of_imports, retrieve_files, ResolvedItem},
     },
@@ -158,7 +158,7 @@ pub fn find_unused_items(
                                         }
                                         _ => {
                                             unused_files.remove(imported_path);
-                                            let i = ExportType::from(imported);
+                                            let i = ExportKind::from(imported);
                                             origin_file_exported_items.retain(|exp_item| {
                                                 exp_item.metadata.export_type != i
                                             });
