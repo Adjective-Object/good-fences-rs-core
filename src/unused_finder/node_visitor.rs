@@ -21,13 +21,13 @@ use swc_core::{
 
 #[derive(Debug, Default, Eq, PartialEq, Clone, Hash)]
 pub struct ExportedItemMetadata {
-    pub export_type: ExportType,
+    pub export_type: ExportKind,
     pub span: Span,
     pub allow_unused: bool,
 }
 
 impl ExportedItemMetadata {
-    pub fn new(export_type: ExportType, span: Span, allow_unused: bool) -> Self {
+    pub fn new(export_type: ExportKind, span: Span, allow_unused: bool) -> Self {
         Self {
             export_type,
             span,
@@ -37,26 +37,26 @@ impl ExportedItemMetadata {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum ExportType {
+pub enum ExportKind {
     Named(String),
     Default,
     Namespace,
     ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
 }
 
-impl Default for ExportType {
+impl Default for ExportKind {
     fn default() -> Self {
         Self::Default
     }
 }
 
-impl From<&ImportedItem> for ExportType {
+impl From<&ImportedItem> for ExportKind {
     fn from(i: &ImportedItem) -> Self {
         match i {
-            ImportedItem::Named(named) => ExportType::Named(named.clone()),
-            ImportedItem::Default => ExportType::Default,
-            ImportedItem::Namespace => ExportType::Namespace,
-            ImportedItem::ExecutionOnly => ExportType::ExecutionOnly,
+            ImportedItem::Named(named) => ExportKind::Named(named.clone()),
+            ImportedItem::Default => ExportKind::Default,
+            ImportedItem::Namespace => ExportKind::Namespace,
+            ImportedItem::ExecutionOnly => ExportKind::ExecutionOnly,
         }
     }
 }
@@ -69,13 +69,13 @@ pub enum ImportedItem {
     ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
 }
 
-impl From<&ExportType> for ImportedItem {
-    fn from(e: &ExportType) -> Self {
+impl From<&ExportKind> for ImportedItem {
+    fn from(e: &ExportKind) -> Self {
         match e {
-            ExportType::Named(name) => ImportedItem::Named(name.clone()),
-            ExportType::Default => ImportedItem::Default,
-            ExportType::Namespace => ImportedItem::Namespace,
-            ExportType::ExecutionOnly => ImportedItem::ExecutionOnly,
+            ExportKind::Named(name) => ImportedItem::Named(name.clone()),
+            ExportKind::Default => ImportedItem::Default,
+            ExportKind::Namespace => ImportedItem::Namespace,
+            ExportKind::ExecutionOnly => ImportedItem::ExecutionOnly,
         }
     }
 }
@@ -180,7 +180,7 @@ impl ExportsCollector {
                         // export { foo as default }
                         if sym == "default" {
                             self.exported_ids.insert(ExportedItemMetadata {
-                                export_type: ExportType::Default,
+                                export_type: ExportKind::Default,
                                 span,
                                 allow_unused,
                             });
@@ -191,7 +191,7 @@ impl ExportsCollector {
                                 .any(|skipped| skipped.is_match(&sym))
                             {
                                 self.exported_ids.insert(ExportedItemMetadata {
-                                    export_type: ExportType::Named(id.sym.to_string()),
+                                    export_type: ExportKind::Named(id.sym.to_string()),
                                     span,
                                     allow_unused,
                                 });
@@ -206,7 +206,7 @@ impl ExportsCollector {
                         .any(|skipped| skipped.is_match(&id.sym.to_string()))
                     {
                         self.exported_ids.insert(ExportedItemMetadata {
-                            export_type: ExportType::Named(id.sym.to_string()),
+                            export_type: ExportKind::Named(id.sym.to_string()),
                             span,
                             allow_unused,
                         });
@@ -233,7 +233,7 @@ impl Visit for ExportsCollector {
         expr.visit_children_with(self);
         if !self.has_disable_export_comment(expr.span_lo()) {
             self.exported_ids.insert(ExportedItemMetadata {
-                export_type: ExportType::Default,
+                export_type: ExportKind::Default,
                 span: expr.span(),
                 allow_unused: self.has_disable_export_comment(expr.span_lo()),
             });
@@ -247,7 +247,7 @@ impl Visit for ExportsCollector {
         decl.visit_children_with(self);
         if !self.has_disable_export_comment(decl.span_lo()) {
             self.exported_ids.insert(ExportedItemMetadata {
-                export_type: ExportType::Default,
+                export_type: ExportKind::Default,
                 span: decl.span(),
                 allow_unused: self.has_disable_export_comment(decl.span_lo()),
             });
@@ -267,7 +267,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportType::Named(decl.ident.sym.to_string()),
+                        export_type: ExportKind::Named(decl.ident.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -281,7 +281,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportType::Named(decl.ident.sym.to_string()),
+                        export_type: ExportKind::Named(decl.ident.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -297,7 +297,7 @@ impl Visit for ExportsCollector {
                             .any(|skipped| skipped.is_match(&ident.sym.to_string()))
                         {
                             self.exported_ids.insert(ExportedItemMetadata {
-                                export_type: ExportType::Named(ident.sym.to_string()),
+                                export_type: ExportKind::Named(ident.sym.to_string()),
                                 span: export.span(),
                                 allow_unused,
                             });
@@ -313,7 +313,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportType::Named(decl.id.sym.to_string()),
+                        export_type: ExportKind::Named(decl.id.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -327,7 +327,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportType::Named(decl.id.sym.to_string()),
+                        export_type: ExportKind::Named(decl.id.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -341,7 +341,7 @@ impl Visit for ExportsCollector {
                     .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
-                        export_type: ExportType::Named(decl.id.sym.to_string()),
+                        export_type: ExportKind::Named(decl.id.sym.to_string()),
                         span: export.span(),
                         allow_unused,
                     });
@@ -443,11 +443,11 @@ impl Visit for ExportsCollector {
             return;
         }
         // import .. from ..
-        let mut specifiers: Vec<ExportType> =
+        let mut specifiers: Vec<ExportKind> =
             import
                 .specifiers
                 .iter()
-                .filter_map(|spec| -> Option<ExportType> {
+                .filter_map(|spec| -> Option<ExportKind> {
                     match spec {
                         ImportSpecifier::Named(named) => {
                             match &named.imported {
@@ -462,7 +462,7 @@ impl Visit for ExportsCollector {
                                                 if !self.skipped_items.iter().any(|s| {
                                                     s.is_match(&named.local.sym.to_string())
                                                 }) {
-                                                    return Some(ExportType::Default);
+                                                    return Some(ExportKind::Default);
                                                 }
                                             }
                                             if !self
@@ -470,7 +470,7 @@ impl Visit for ExportsCollector {
                                                 .iter()
                                                 .any(|skipped| skipped.is_match(&sym_str))
                                             {
-                                                return Some(ExportType::Named(sym_str));
+                                                return Some(ExportKind::Named(sym_str));
                                             }
                                             None
                                         }
@@ -478,7 +478,7 @@ impl Visit for ExportsCollector {
                                             if !self.skipped_items.iter().any(|skipped| {
                                                 skipped.is_match(&s.value.to_string())
                                             }) {
-                                                return Some(ExportType::Named(
+                                                return Some(ExportKind::Named(
                                                     s.value.to_string(),
                                                 ));
                                             }
@@ -491,7 +491,7 @@ impl Visit for ExportsCollector {
                                     if !self.skipped_items.iter().any(|skipped| {
                                         skipped.is_match(&named.local.sym.to_string())
                                     }) {
-                                        return Some(ExportType::Named(
+                                        return Some(ExportKind::Named(
                                             named.local.sym.to_string(),
                                         ));
                                     }
@@ -501,11 +501,11 @@ impl Visit for ExportsCollector {
                         }
                         ImportSpecifier::Default(_) => {
                             // import foo from 'foo'
-                            return Some(ExportType::Default);
+                            return Some(ExportKind::Default);
                         }
                         ImportSpecifier::Namespace(_) => {
                             // import * as foo from 'foo'
-                            return Some(ExportType::Namespace);
+                            return Some(ExportKind::Namespace);
                         }
                     }
                 })
