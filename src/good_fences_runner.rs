@@ -2,7 +2,6 @@ extern crate serde_json;
 use crate::evaluate_fences::{evaluate_fences, FenceEvaluationResult};
 use crate::fence::Fence;
 use crate::fence_collection::FenceCollection;
-use crate::file_extension::no_ext;
 use crate::import_resolver::TsconfigPathsJson;
 use crate::walk_dirs::{discover_fences_and_files, ExternalFences, SourceFile, WalkFileData};
 use rayon::prelude::*;
@@ -64,13 +63,11 @@ impl GoodFencesRunner {
             .collect();
 
         // build sources map
-        let source_file_map: HashMap<String, SourceFile> =
-            HashMap::from_iter(sources.into_iter().map(|source_file| {
-                (
-                    no_ext(&source_file.source_file_path).to_owned(),
-                    source_file,
-                )
-            }));
+        let source_file_map: HashMap<String, SourceFile> = HashMap::from_iter(
+            sources
+                .into_iter()
+                .map(|source_file| (source_file.source_file_path.clone(), source_file)),
+        );
         // println!("source file map: {:#?}", source_file_map);
         // build fences map
         let fences_map: HashMap<String, Fence> =

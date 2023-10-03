@@ -9,9 +9,9 @@ const { program } = require('commander');
 
  
 program
-   .option('-p, --project <string> ', 'tsconfig.json file path, defaults to `./tsconfig.json`', 'tsconfig.json')
+   .option('-p, --project <string> ', 'tsconfig.json file path, defaults to `./tsconfig.json`', './tsconfig.paths.json')
    .option('-o, --output <string>', 'path to write found violations')
-   .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument")
+   .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument", '.')
    .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
    .option('--ignoredDirs [pathRegexs...]', 'Directories matching given regular expressions are excluded from fence evaluation (e.g. `--ignoreDirs lib` will not evaluate source files in all dirs named `lib`', [])
    .arguments('<path> [morePaths...]', 'Dirs to look for fence and source files')
@@ -21,12 +21,12 @@ const options = program.opts();
 const args = program.args;
 
 const result = goodFences({
-    paths: args ?? [],
+    paths: args ?? ['packages', 'shared'],
     project: options.project,
     baseUrl: options.baseUrl,
     errOutputPath: options.output,
     ignoreExternalFences: options.ignoreExternalFences ? 1 : 0,
-    ignoredDirs: options.ignoredDirs
+    ignoredDirs: options.ignoredDirs,
 });
 
 result.forEach(r => {

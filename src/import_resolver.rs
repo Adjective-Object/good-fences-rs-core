@@ -1,9 +1,11 @@
 extern crate relative_path;
 extern crate serde;
 use path_clean::PathClean as _;
+use path_slash::PathBufExt;
 use relative_path::{RelativePath, RelativePathBuf};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::env::current_dir;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -11,12 +13,15 @@ use std::string::String;
 use std::vec::Vec;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
+use swc_core::ecma::loader::resolvers::lru::CachingResolver;
 use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
+use swc_core::ecma::loader::resolvers::tsc::TsConfigResolver;
+use swc_core::ecma::loader::TargetEnv;
 
 use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TsconfigPathsJson {
     pub compiler_options: TsconfigPathsCompilerOptions,
@@ -38,7 +43,7 @@ impl TsconfigPathsJson {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TsconfigPathsCompilerOptions {
     pub base_url: Option<String>,
@@ -52,89 +57,53 @@ pub enum ResolvedImport {
     ResourceFileImport,
 }
 
-pub fn resolve_import<'a>(
-    tsconfig_paths: &'a TsconfigPathsJson,
-    initial_path: &RelativePath,
-    raw_import_path: &'a str,
-) -> Result<ResolvedImport, String> {
-    let resolver = NodeModulesResolver::default();
-    let base = FileName::Real(PathBuf::from(initial_path.as_str()));
-
-    let resolved = resolver.resolve(&base, raw_import_path);
-
-    let file_path = match resolved {
-        Ok(filename) => {
-            if let FileName::Real(f) = filename {
-                f
-            } else {
-                return Err("".to_string());
-            }
+pub fn resolve_with_extension(
+    imported_path: &str,
+    tsconfig_paths: &TsconfigPathsJson,
+) -> Result<String, String> {
+    let extensions = &["ts", "js", "tsx", "jsx", "d.ts"];
+    for ext in extensions {
+        let file_with_ext = PathBuf::from_slash(format!("{}.{}", imported_path, ext));
+        if file_with_ext.exists() {
+            return Ok(file_with_ext.to_slash().unwrap().to_string());
         }
-        Err(e) => return Err(e.to_string()),
+    }
+
+    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
+        40,
+        TsConfigResolver::new(
+            NodeModulesResolver::new(TargetEnv::Node, Default::default(), false),
+            ".".into(),
+            tsconfig_paths
+                .compiler_options
+                .paths
+                .clone()
+                .into_iter()
+                .collect(),
+        ),
+    );
+
+    let base = FileName::Real("./package.json".into());
+
+    let imported_path = if imported_path.starts_with("./") {
+        imported_path.to_string()
+    } else {
+        format!("./{}", imported_path)
     };
 
-    if is_resource_file(&file_path) {
-        return Ok(ResolvedImport::ResourceFileImport);
-    }
-    if raw_import_path.starts_with(".") {
-        return Ok(ResolvedImport::ProjectLocalImport(file_path));
-    }
-
-    for segment in file_path.ancestors() {
-        let stub_to_check_option = segment.to_str();
-
-        if !stub_to_check_option.is_some() {
-            return Err("accumulated specifier was empty.".to_owned());
+    let resolved = match resolver.resolve(&base, &imported_path) {
+        Ok(r) => r,
+        Err(e) => {
+            dbg!(&base, &imported_path);
+            dbg!(&e);
+            return Err(e.to_string());
         }
-        let stub_to_check = stub_to_check_option.unwrap();
-        if let Some(no_star_stub_entry) = tsconfig_paths.compiler_options.paths.get(stub_to_check) {
-            if no_star_stub_entry.len() != 1 {
-                return Err(format!(
-                    "Expected all members of paths: to have a single entry, but got {:?}",
-                    no_star_stub_entry
-                ));
-            }
-            return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
-                tsconfig_paths,
-                &no_star_stub_entry[0],
-            )));
-        }
-        let mut star_stub_to_check = stub_to_check.to_owned();
-        star_stub_to_check.push_str("/*");
-        if let Some(star_stub_entry) = tsconfig_paths
-            .compiler_options
-            .paths
-            .get(&star_stub_to_check)
-        {
-            if star_stub_entry.len() != 1 {
-                return Err(format!(
-                    "Expected all members of paths: to have a single entry, but got {:?}",
-                    star_stub_entry,
-                ));
-            }
-            return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
-                tsconfig_paths,
-                &switch_specifier_prefix(
-                    &star_stub_to_check,
-                    &star_stub_entry[0],
-                    &file_path.to_str().unwrap(),
-                ),
-            )));
-        }
-    }
+    };
+    // let resolved = RelativePath::new(&resolved.to_string())..to_path("");
+    let resolved = resolved.to_string();
 
-    return Ok(ResolvedImport::NodeModulesImport(
-        raw_import_path.to_string(),
-    ));
-}
-
-fn is_resource_file(file: &PathBuf) -> bool {
-    if let Some(ext) = file.extension() {
-        if ext != ".tsx" && ext != ".ts" {
-            return true;
-        }
-    }
-    false
+    let cwd = current_dir().unwrap().to_slash().unwrap().to_string();
+    Ok(resolved.replacen(&format!("{}/", cwd), "", 1))
 }
 
 pub fn resolve_ts_import<'a>(
@@ -199,10 +168,13 @@ pub fn resolve_ts_import<'a>(
                         no_star_stub_option
                     ));
                 }
-                return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
-                    tsconfig_paths,
-                    &no_star_stub_entry[0],
-                )));
+                let resolved_pathbuf =
+                    path_buf_from_tsconfig(tsconfig_paths, &no_star_stub_entry[0]);
+                let resolved =
+                    resolve_with_extension(&resolved_pathbuf.to_slash().unwrap(), tsconfig_paths)
+                        .unwrap();
+
+                return Ok(ResolvedImport::ProjectLocalImport(resolved.into()));
             }
             let mut star_stub_to_check = stub_to_check.to_owned();
             star_stub_to_check.push_str("/*");
@@ -220,14 +192,19 @@ pub fn resolve_ts_import<'a>(
                         no_star_stub_option
                     ));
                 }
-                return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
+                let resolved_pathbuf = path_buf_from_tsconfig(
                     tsconfig_paths,
                     &switch_specifier_prefix(
                         &star_stub_to_check,
                         &star_stub_entry[0],
                         &import_specifier,
                     ),
-                )));
+                );
+
+                let resolved =
+                    resolve_with_extension(&resolved_pathbuf.to_slash().unwrap(), tsconfig_paths)
+                        .unwrap();
+                return Ok(ResolvedImport::ProjectLocalImport(resolved.into()));
             }
         }
     }

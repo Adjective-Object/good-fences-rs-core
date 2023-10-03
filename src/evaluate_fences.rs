@@ -2,7 +2,9 @@ use crate::error::{EvaluateFencesError, ResolvedImportNotFound};
 use crate::fence::{DependencyRule, ExportRule, Fence};
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
-use crate::import_resolver::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
+use crate::import_resolver::{
+    resolve_ts_import, resolve_with_extension, ResolvedImport, TsconfigPathsJson,
+};
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
 use path_slash::PathBufExt;
@@ -178,15 +180,29 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 // grab the project local file, check our tags against the exports of the
                 // fences of the file we are importing.
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
-                    let project_local_path_str = project_local_path.to_str().unwrap();
+                    let slashed_project_local_path = project_local_path.to_slash().unwrap();
+                    let with_extension =
+                        resolve_with_extension(&slashed_project_local_path, tsconfig_paths_json);
+                    let project_local_path_str = match with_extension {
+                        Ok(with_extension) => {
+                            if ![".tsx", ".ts", ".jsx", "js"]
+                                .iter()
+                                .any(|ext| with_extension.ends_with(ext))
+                            {
+                                continue;
+                            }
+                            with_extension
+                        }
+                        Err(_) => project_local_path.to_slash().unwrap().to_string(),
+                    };
+                    let project_local_path_str = project_local_path_str.as_str();
 
-                    let imported_source_file_opt = source_files.get(no_ext(project_local_path_str));
+                    let imported_source_file_opt = source_files.get(project_local_path_str);
                     let imported_source_file_with_idx_opt = if imported_source_file_opt.is_none() {
                         let mut clone_path_with_idx = project_local_path.clone();
                         clone_path_with_idx.push("index");
                         let clone_path_with_idx_str =
                             clone_path_with_idx.to_slash().unwrap().to_string();
-
                         source_files.get(clone_path_with_idx_str.as_str())
                     } else {
                         None
