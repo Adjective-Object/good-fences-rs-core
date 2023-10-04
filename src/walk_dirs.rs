@@ -72,7 +72,7 @@ pub fn discover_fences_and_files(
                                 && !ignored_dirs.iter().any(|d| d.is_match(&slashed));
                         }
                     }
-                    Err(_) => {},
+                    Err(_) => {}
                 }
                 dir_entry_result
                     .as_ref()
