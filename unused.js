@@ -99,6 +99,7 @@ unused({
         "**/scripts/**",
         "**/*.Test.ts",
         "**/*.Tests.ts",
+        "**/*.d.ts",
     ],
     skippedItems: [],
     tsConfigPath: './tsconfig.paths.json'

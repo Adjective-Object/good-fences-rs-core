@@ -4,17 +4,18 @@ pub mod node_visitor;
 pub mod unused_finder_visitor_runner;
 mod utils;
 
+use napi::Status;
 use napi_derive::napi;
 use rayon::prelude::*;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     iter::FromIterator,
-    rc::Rc,
     str::FromStr,
     sync::Arc,
 };
 
 use crate::{
+    error::NapiLikeError,
     import_resolver::TsconfigPathsJson,
     unused_finder::{
         graph::{Graph, GraphFile},
@@ -133,7 +134,7 @@ pub fn find_unused_items(
             GraphFile {
                 file_path: file.source_file_path.clone(),
                 import_export_info: file.import_export_info.clone(),
-                is_used: false,
+                is_used: entry_packages.contains(&file.package_name), // mark files from entry_packages as used
                 unused_exports: file
                     .import_export_info
                     .exported_ids
@@ -144,9 +145,9 @@ pub fn find_unused_items(
         })
         .collect();
 
-    let files = files
-        .drain(0..)
-        .map(|file| (file.file_path.clone(), Rc::new(file)))
+    let files: HashMap<String, Arc<GraphFile>> = files
+        .par_drain(0..)
+        .map(|file| (file.file_path.clone(), Arc::new(file)))
         .collect();
 
     let mut graph = Graph {
@@ -155,7 +156,7 @@ pub fn find_unused_items(
     };
 
     let entry_files: Vec<String> = flattened_walk_file_data
-        .iter_mut()
+        .par_iter_mut()
         .filter_map(|file| {
             if entry_packages.contains(&file.package_name) {
                 return Some(file.source_file_path.clone());
@@ -163,22 +164,25 @@ pub fn find_unused_items(
             None
         })
         .collect();
-    let mut new_entries = entry_files;
-    let max_iters = 10_000_000;
-    let mut current_iter = 0;
-    loop {
-        current_iter += 1;
-        new_entries = graph.bfs(new_entries);
-        if current_iter > max_iters || new_entries.is_empty() {
+    let mut frontier = entry_files;
+    for i in 0..10_000_000 {
+        frontier = graph.bfs_step(frontier);
+
+        if frontier.is_empty() {
             break;
+        }
+        if i == 10_000_000 {
+            return Err(NapiLikeError {
+                message: "exceeded max iterations".to_string(),
+                status: Status::GenericFailure,
+            });
         }
     }
 
-    let results: Vec<String> = Vec::new();
     let unused_files = BTreeMap::from_iter(graph.files.drain().filter(|f| !f.1.is_used));
-    unused_files.iter().for_each(|f| {
-        println!("\"{}\",", f.0);
-    });
+    let results: Vec<String> = unused_files.iter().map(|f| {
+        format!("\"{}\",", f.0)
+    }).collect();
     println!("Total files: {}", &total_files);
     println!("Total used files: {}", (total_files - unused_files.len()));
     println!("Total unused files: {}", unused_files.len());

@@ -1,7 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    rc::Rc,
+    sync::Arc,
 };
+
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use super::{
     node_visitor::{ExportKind, ImportedItem},
@@ -19,6 +21,7 @@ pub struct GraphFile {
 
 impl GraphFile {
     pub fn mark_item_as_used(&mut self, item: &ImportedItem) -> bool {
+        self.is_used = true;
         let item = ExportKind::from(item);
         self.unused_exports.remove(&item)
     }
@@ -28,43 +31,45 @@ pub type Edge = (String, String, ImportedItem);
 
 #[derive(Default, Debug)]
 pub struct Graph {
-    pub files: HashMap<String, Rc<GraphFile>>,
-    pub edges: HashSet<Edge>,
+    pub files: HashMap<String, Arc<GraphFile>>,
 }
 
 impl<'a> Graph {
-    pub fn bfs(&mut self, entries: Vec<String>) -> Vec<String> {
+    pub fn bfs_step(&mut self, entries: Vec<String>) -> Vec<String> {
         let edges = self.get_edges(entries);
-        let mut new_used_stuff = false;
         let new_entries = edges
             .iter()
-            .filter_map(|(_, imported, item)| {
-                if let Some(file) = self.files.get_mut(imported) {
-                    if let Some(file) = Rc::get_mut(file) {
-                        if !file.is_used {
-                            file.is_used = true;
-                            new_used_stuff = true;
-                        }
-                        new_used_stuff = new_used_stuff || file.mark_item_as_used(item);
-                        if new_used_stuff {
-                            new_used_stuff = false;
-                            return Some(imported.clone());
-                        }
-                    }
+            .filter_map(|(entry_path, imported, item)| {
+                if self.files.contains_key(entry_path) {
+                    return self.resolve_edge(imported, item);
                 }
                 None
             })
             .collect();
-        self.edges.extend(edges);
         new_entries
+    }
+
+    fn resolve_edge(&mut self, imported: &String, item: &ImportedItem) -> Option<String> {
+        let mut any_used = false;
+        if let Some(imported_file_rc) = self.files.get_mut(imported) {
+            if let Some(imported_file) = Arc::get_mut(imported_file_rc) {
+                // If `file` was already marked as used
+                any_used = any_used || !imported_file.is_used;
+                // if `item` was already marked as used
+                any_used = imported_file.mark_item_as_used(item) || any_used;
+                if any_used {
+                    return Some(imported.clone());
+                }
+            }
+        }
+        None
     }
 
     fn get_edges(&mut self, entries: Vec<String>) -> HashSet<(String, String, ImportedItem)> {
         let edges: HashSet<Edge> = entries
-            .iter()
+            .par_iter()
             .filter_map(|entry| {
-                if let Some(e) = self.files.get_mut(entry) {
-                    Rc::get_mut(e).unwrap().is_used = true;
+                if let Some(e) = self.files.get(entry) {
                     let mut edges: HashSet<Edge> = e
                         .import_export_info
                         .imported_paths
