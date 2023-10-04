@@ -8,6 +8,10 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::{FromIterator, Iterator};
+use swc_core::ecma::loader::resolvers::lru::CachingResolver;
+use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
+use swc_core::ecma::loader::resolvers::tsc::TsConfigResolver;
+use swc_core::ecma::loader::TargetEnv;
 
 #[derive(Debug, PartialEq)]
 pub struct GoodFencesRunner {
@@ -88,14 +92,28 @@ impl GoodFencesRunner {
         println!("Evaluating {} files", self.source_files.keys().len());
         let mut evaluation_results = FenceEvaluationResult::new();
 
+        let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
+            60_000,
+            TsConfigResolver::new(
+                NodeModulesResolver::new(TargetEnv::Node, Default::default(), false),
+                ".".into(),
+                self.tsconfig_paths_json
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
+        );
+
         let violation_results = self
             .source_files
             .par_iter()
             .map(|(_, source_file)| {
                 evaluate_fences(
+                    &resolver,
                     &self.fence_collection,
                     &self.source_files,
-                    &self.tsconfig_paths_json,
                     &source_file,
                 )
             })
@@ -349,26 +367,26 @@ mod test {
                     ),
                 },
                 source_files: map!(
-                    "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index" => SourceFile {
+                    "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/index.ts".to_owned(),
                         tags: set!("tagB".to_owned()),
                         imports: map!(
                             "../../../componentC/helperC1" => Some(set!("default".to_owned()))
                         )
                     },
-                    "tests/good_fences_integration/src/componentB/someDeep/componentA/index" => SourceFile {
+                    "tests/good_fences_integration/src/componentB/someDeep/componentA/index.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/someDeep/componentA/index.ts".to_owned(),
                         tags: set!("tagB".to_owned()),
                         imports: map!(
                             "../../../componentC/helperC1" => Some(set!("default".to_owned()))
                         )
                     },
-                    "tests/good_fences_integration/src/componentC/helperC1" => SourceFile {
+                    "tests/good_fences_integration/src/componentC/helperC1.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentC/helperC1.ts".to_owned(),
                         tags: set!("tagC".to_owned()),
                         imports: HashMap::new(),
                     },
-                    "tests/good_fences_integration/src/requireImportTest" => SourceFile {
+                    "tests/good_fences_integration/src/requireImportTest.ts" => SourceFile {
                         source_file_path:"tests/good_fences_integration/src/requireImportTest.ts".to_owned(),
                         tags: HashSet::new(),
                         imports: map!(
@@ -376,7 +394,7 @@ mod test {
                             "fs" => None
                         )
                     },
-                    "tests/good_fences_integration/src/componentA/helperA1" => SourceFile {
+                    "tests/good_fences_integration/src/componentA/helperA1.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentA/helperA1.ts".to_owned(),
                         tags: set!(
                             "tagA".to_owned()
@@ -389,7 +407,7 @@ mod test {
                             )
                         ),
                     },
-                    "tests/good_fences_integration/src/componentB/componentB" => SourceFile {
+                    "tests/good_fences_integration/src/componentB/componentB.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/componentB.ts".to_owned(),
                         tags: set!(
                             "tagB".to_owned()
@@ -407,21 +425,21 @@ mod test {
                             )
                         ),
                     },
-                    "tests/good_fences_integration/src/componentB/helperB2" => SourceFile {
+                    "tests/good_fences_integration/src/componentB/helperB2.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/helperB2.ts".to_owned(),
                         tags: set!(
                             "tagB".to_owned()
                         ),
                         imports: HashMap::new(),
                     },
-                    "tests/good_fences_integration/src/componentA/helperA2" => SourceFile {
+                    "tests/good_fences_integration/src/componentA/helperA2.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentA/helperA2.ts".to_owned(),
                         tags: set!(
                             "tagA".to_owned()
                         ),
                         imports: HashMap::new(),
                     },
-                    "tests/good_fences_integration/src/index" => SourceFile {
+                    "tests/good_fences_integration/src/index.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/index.ts".to_owned(),
                         tags: HashSet::new(),
                         imports: map!(
@@ -437,14 +455,14 @@ mod test {
                                 )
                             ),
                     },
-                    "tests/good_fences_integration/src/componentB/helperB1" => SourceFile {
+                    "tests/good_fences_integration/src/componentB/helperB1.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentB/helperB1.ts".to_owned(),
                         tags: set!(
                             "tagB".to_owned()
                         ),
                         imports: HashMap::new()
                     },
-                    "tests/good_fences_integration/src/componentA/componentA" => SourceFile {
+                    "tests/good_fences_integration/src/componentA/componentA.ts" => SourceFile {
                         source_file_path: "tests/good_fences_integration/src/componentA/componentA.ts".to_owned(),
                         tags: set!(
                             "tagA".to_owned()

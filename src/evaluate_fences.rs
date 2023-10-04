@@ -2,19 +2,18 @@ use crate::error::{EvaluateFencesError, ResolvedImportNotFound};
 use crate::fence::{DependencyRule, ExportRule, Fence};
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
-use crate::import_resolver::{
-    resolve_ts_import, resolve_with_extension, ResolvedImport, TsconfigPathsJson,
-};
+use crate::import_resolver::{resolve_with_extension, ResolvedImport};
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
 use path_slash::PathBufExt;
-use relative_path::RelativePath;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
+use swc_core::common::FileName;
+use swc_core::ecma::loader::resolve::Resolve;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ViolatedFenceClause<'a> {
@@ -120,6 +119,9 @@ fn is_node_dependency_matching(
     permitted_node_dependency_pattern: &str,
     node_dependency: &str,
 ) -> bool {
+    if permitted_node_dependency_pattern == node_dependency {
+        return true;
+    }
     let export_rule_glob = Pattern::new(permitted_node_dependency_pattern);
 
     match export_rule_glob {
@@ -152,9 +154,9 @@ fn is_importer_allowed(accessible_to: &Vec<String>, source_file: &SourceFile) ->
 }
 
 pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
+    resolver: &dyn Resolve,
     fence_collection: &'fencecollectionlifetime FenceCollection,
     source_files: &HashMap<String, SourceFile>,
-    tsconfig_paths_json: &TsconfigPathsJson,
     source_file: &'sourcefilelifetime SourceFile,
 ) -> FenceEvaluationResult<'fencecollectionlifetime, 'sourcefilelifetime> {
     let mut violations = Vec::<ImportRuleViolation>::new();
@@ -169,10 +171,10 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     let source_fences_set: HashSet<&Fence> = HashSet::from_iter(source_fences);
 
     for (import_specifier, _imported_names) in source_file.imports.iter() {
-        let resolved_import = resolve_ts_import(
-            tsconfig_paths_json,
-            &RelativePath::new(&source_file.source_file_path),
+        let resolved_import = resolve_with_extension(
+            FileName::Real(source_file.source_file_path.clone().into()),
             &import_specifier,
+            resolver,
         );
 
         match resolved_import {
@@ -181,20 +183,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 // fences of the file we are importing.
                 ResolvedImport::ProjectLocalImport(project_local_path) => {
                     let slashed_project_local_path = project_local_path.to_slash().unwrap();
-                    let with_extension =
-                        resolve_with_extension(&slashed_project_local_path, tsconfig_paths_json);
-                    let project_local_path_str = match with_extension {
-                        Ok(with_extension) => {
-                            if ![".tsx", ".ts", ".jsx", "js"]
-                                .iter()
-                                .any(|ext| with_extension.ends_with(ext))
-                            {
-                                continue;
-                            }
-                            with_extension
-                        }
-                        Err(_) => project_local_path.to_slash().unwrap().to_string(),
-                    };
+                    let project_local_path_str = slashed_project_local_path.to_string();
                     let project_local_path_str = project_local_path_str.as_str();
 
                     let imported_source_file_opt = source_files.get(project_local_path_str);
@@ -322,10 +311,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                 ResolvedImport::NodeModulesImport(node_module_filter) => {
                     for source_fence in source_fences_set.iter() {
                         // only filter on dependencies if there is a dependency list
-                        if source_fence.fence.dependencies.is_some() {
-                            let allowed_dependencies: &'fencecollectionlifetime Vec<
-                                DependencyRule,
-                            > = source_fence.fence.dependencies.as_ref().unwrap();
+                        if let Some(allowed_dependencies) = source_fence.fence.dependencies.as_ref()
+                        {
                             let matching_dependency_clauses: Vec<
                                 &'fencecollectionlifetime DependencyRule,
                             > = allowed_dependencies
@@ -340,6 +327,8 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                 .collect();
                             if matching_dependency_clauses.len() == 0 {
                                 // violation: dependency not on allowlist
+                                dbg!(matching_dependency_clauses);
+                                dbg!(&allowed_dependencies, &node_module_filter);
                                 violations.push(ImportRuleViolation {
                                     violating_file_path: &source_file.source_file_path,
                                     violating_fence: source_fence,
@@ -357,8 +346,9 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                     });
                                 if !any_matching_dependency_clauses_allows_import {
                                     // none of the applicable clauses allow this import
-                                    for dependency_clause in matching_dependency_clauses {
+                                    for dependency_clause in &matching_dependency_clauses {
                                         {
+                                            dbg!(&matching_dependency_clauses);
                                             // violation: dependency on allowlist, but not exposed
                                             // to tags for this file
                                             violations.push(ImportRuleViolation {
@@ -407,6 +397,8 @@ mod test {
     use relative_path::RelativePathBuf;
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
+    use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
+    use swc_core::ecma::loader::resolvers::tsc::TsConfigResolver;
 
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {
@@ -489,9 +481,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -526,9 +527,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -563,9 +573,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -600,9 +619,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -643,9 +671,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
         );
 
@@ -673,9 +710,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -720,9 +766,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -773,9 +828,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
         );
 
@@ -794,9 +858,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -827,9 +900,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -853,9 +935,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/index").unwrap(),
         );
 
@@ -904,9 +995,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
         );
 
@@ -938,9 +1038,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
         );
 
@@ -993,9 +1102,18 @@ mod test {
         };
 
         let violations = evaluate_fences(
+            &TsConfigResolver::new(
+                NodeModulesResolver::default(),
+                ".".into(),
+                TSCONFIG_PATHS_JSON
+                    .compiler_options
+                    .paths
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            ),
             &fence_collection,
             &SOURCE_FILES,
-            &TSCONFIG_PATHS_JSON,
             SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
         );
 

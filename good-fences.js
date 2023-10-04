@@ -29,16 +29,16 @@ const result = goodFences({
     ignoredDirs: options.ignoredDirs,
 });
 
-result.forEach(r => {
-    if (r.resultType !== GoodFencesResultType.Violation) {
-        console.log(r.detailedMessage);
-    }
+// result.forEach(r => {
+//     if (r.resultType !== GoodFencesResultType.Violation) {
+//         console.log(r.detailedMessage);
+//     }
 
-    if (r.resultType === GoodFencesResultType.Violation) {
-        console.error(r.detailedMessage);
-    }
-});
+//     if (r.resultType === GoodFencesResultType.Violation) {
+//         console.error(r.detailedMessage);
+//     }
+// });
 
-if (result.find(r => r.resultType === GoodFencesResultType.Violation)) {
-    process.exit(1);
-}
+// if (result.find(r => r.resultType === GoodFencesResultType.Violation)) {
+//     process.exit(1);
+// }

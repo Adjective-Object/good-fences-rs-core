@@ -13,10 +13,6 @@ use std::string::String;
 use std::vec::Vec;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
-use swc_core::ecma::loader::resolvers::lru::CachingResolver;
-use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
-use swc_core::ecma::loader::resolvers::tsc::TsConfigResolver;
-use swc_core::ecma::loader::TargetEnv;
 
 use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
@@ -57,53 +53,57 @@ pub enum ResolvedImport {
     ResourceFileImport,
 }
 
+const SOURCE_EXTENSIONS: &[&str] = &["js", "ts", "d.ts", "tsx", "jsx"];
+pub const ASSET_EXTENSION: &[&str] = &["scss", "css", "svg", "png", "json", "gif"];
+
 pub fn resolve_with_extension(
+    base: FileName,
     imported_path: &str,
-    tsconfig_paths: &TsconfigPathsJson,
-) -> Result<String, String> {
-    let extensions = &["ts", "js", "tsx", "jsx", "d.ts"];
-    for ext in extensions {
-        let file_with_ext = PathBuf::from_slash(format!("{}.{}", imported_path, ext));
-        if file_with_ext.exists() {
-            return Ok(file_with_ext.to_slash().unwrap().to_string());
-        }
+    resolver: &dyn Resolve,
+) -> Result<ResolvedImport, String> {
+    if is_resource_file(&imported_path.to_string()) {
+        return Ok(ResolvedImport::ResourceFileImport);
     }
-
-    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
-        40,
-        TsConfigResolver::new(
-            NodeModulesResolver::new(TargetEnv::Node, Default::default(), false),
-            ".".into(),
-            tsconfig_paths
-                .compiler_options
-                .paths
-                .clone()
-                .into_iter()
-                .collect(),
-        ),
-    );
-
-    let base = FileName::Real("./package.json".into());
-
-    let imported_path = if imported_path.starts_with("./") {
-        imported_path.to_string()
-    } else {
-        format!("./{}", imported_path)
-    };
-
+    let cwd = current_dir().unwrap().to_slash().unwrap().to_string();
     let resolved = match resolver.resolve(&base, &imported_path) {
         Ok(r) => r,
         Err(e) => {
-            dbg!(&base, &imported_path);
-            dbg!(&e);
+            if let Some(source) = e.source() {
+                if source.to_string() == "failed to get the node_modules path" {
+                    return Ok(ResolvedImport::NodeModulesImport(imported_path.to_owned()));
+                }
+            }
+            for ext in SOURCE_EXTENSIONS {
+                let file_with_ext = format!("{}.{}", &imported_path, ext);
+                if let Ok(resolved) = resolver.resolve(&base, &file_with_ext) {
+                    let resolved = resolved.to_string();
+                    return Ok(ResolvedImport::ProjectLocalImport(
+                        resolved.replacen(&format!("{}/", cwd), "", 1).into(),
+                    ));
+                }
+            }
             return Err(e.to_string());
+            // return Ok(ResolvedImport::NodeModulesImport(imported_specifier.to_string()))
         }
     };
     // let resolved = RelativePath::new(&resolved.to_string())..to_path("");
     let resolved = resolved.to_string();
+    // If we found a local file it starts with cwd
+    if resolved.starts_with(&cwd) {
+        if is_resource_file(&resolved) || resolved.ends_with(".graphql") {
+            return Ok(ResolvedImport::ResourceFileImport);
+        }
+        return Ok(ResolvedImport::ProjectLocalImport(
+            resolved.replacen(&format!("{}/", cwd), "", 1).into(),
+        ));
+    }
+    Ok(ResolvedImport::NodeModulesImport(imported_path.into()))
+}
 
-    let cwd = current_dir().unwrap().to_slash().unwrap().to_string();
-    Ok(resolved.replacen(&format!("{}/", cwd), "", 1))
+fn is_resource_file(resolved: &String) -> bool {
+    ASSET_EXTENSION
+        .iter()
+        .any(|ext| resolved.ends_with(&format!(".{}", ext)))
 }
 
 pub fn resolve_ts_import<'a>(
@@ -129,7 +129,7 @@ pub fn resolve_ts_import<'a>(
     let ext = buf.extension();
     match ext {
         Some(ext) => {
-            if ["scss", "css", "svg", "png", "json"].contains(&ext.to_string_lossy().as_ref()) {
+            if ext != "tsx" && ext != "ts" {
                 return Ok(ResolvedImport::ResourceFileImport);
             }
         }
@@ -168,13 +168,10 @@ pub fn resolve_ts_import<'a>(
                         no_star_stub_option
                     ));
                 }
-                let resolved_pathbuf =
-                    path_buf_from_tsconfig(tsconfig_paths, &no_star_stub_entry[0]);
-                let resolved =
-                    resolve_with_extension(&resolved_pathbuf.to_slash().unwrap(), tsconfig_paths)
-                        .unwrap();
-
-                return Ok(ResolvedImport::ProjectLocalImport(resolved.into()));
+                return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
+                    tsconfig_paths,
+                    &no_star_stub_entry[0],
+                )));
             }
             let mut star_stub_to_check = stub_to_check.to_owned();
             star_stub_to_check.push_str("/*");
@@ -192,19 +189,14 @@ pub fn resolve_ts_import<'a>(
                         no_star_stub_option
                     ));
                 }
-                let resolved_pathbuf = path_buf_from_tsconfig(
+                return Ok(ResolvedImport::ProjectLocalImport(path_buf_from_tsconfig(
                     tsconfig_paths,
                     &switch_specifier_prefix(
                         &star_stub_to_check,
                         &star_stub_entry[0],
                         &import_specifier,
                     ),
-                );
-
-                let resolved =
-                    resolve_with_extension(&resolved_pathbuf.to_slash().unwrap(), tsconfig_paths)
-                        .unwrap();
-                return Ok(ResolvedImport::ProjectLocalImport(resolved.into()));
+                )));
             }
         }
     }
