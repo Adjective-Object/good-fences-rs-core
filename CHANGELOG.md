@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 02 Oct 2023 19:18:23 GMT and should not be manually modified.
+This log was last generated on Wed, 04 Oct 2023 21:00:21 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.5.1
+
+Wed, 04 Oct 2023 21:00:21 GMT
+
+### Patches
+
+- Added support for files with multiple `.` in the name (edgar21_9@hotmail.com)
 
 ## 0.5.0
 
