@@ -426,31 +426,31 @@ mod test {
 
     lazy_static! {
         static ref SOURCE_FILES: HashMap<String, SourceFile> = map!(
-            "path/to/source/index" => SourceFile {
+            "tests/evaluate_fences/path/to/source/index.ts" => SourceFile {
                 tags: HashSet::new(),
-                source_file_path: "path/to/source/index.ts".to_owned(),
+                source_file_path: "tests/evaluate_fences/path/to/source/index.ts".to_owned(),
                 imports: map!(
                         "../protected/internal" => Option::None,
-                        "node-import" => Option::None
+                        "node:querystring" => Option::None
                     ),
 
             },
-            "path/to/source/friend/index" => SourceFile {
+            "tests/evaluate_fences/path/to/source/friend/index.ts" => SourceFile {
                 tags: set!(
                     "friend"
                 ),
-                source_file_path: "path/to/source/friend/index.ts".to_owned(),
+                source_file_path: "tests/evaluate_fences/path/to/source/friend/index.ts".to_owned(),
                 imports: map!(
                         "../../protected/internal" => Option::None,
-                        "node-import" => Option::None
+                        "node:querystring" => Option::None
                     ),
 
             },
-            "path/to/protected/internal" => SourceFile {
+            "tests/evaluate_fences/path/to/protected/internal.ts" => SourceFile {
                 tags: set!(
                     "protected"
                 ),
-                source_file_path: "path/to/protected/internal.ts".to_owned(),
+                source_file_path: "tests/evaluate_fences/path/to/protected/internal.ts".to_owned(),
                 imports: HashMap::new(),
             }
         );
@@ -469,13 +469,13 @@ mod test {
     pub fn test_imports_allow_list_empty_violation() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{"imports": []}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -493,16 +493,18 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/source/fence.json")
+                    .get("tests/evaluate_fences/path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
                 violating_import_specifier: "../protected/internal",
@@ -515,13 +517,13 @@ mod test {
     pub fn test_imports_allow_list_mismatch_violation() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{"imports": ["some_tag"]}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -539,16 +541,18 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/source/fence.json")
+                    .get("tests/evaluate_fences/path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
                 violating_import_specifier: "../protected/internal",
@@ -561,13 +565,13 @@ mod test {
     pub fn test_imports_exports_list_empty() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"], "exports": []}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -585,16 +589,18 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/protected/fence.json")
+                    .get("tests/evaluate_fences/path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Option::None),
                 violating_import_specifier: "../protected/internal",
@@ -607,13 +613,13 @@ mod test {
     pub fn test_imports_exports_list_mismatch() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"], "exports": ["protected-exposed"]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -631,16 +637,18 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/protected/fence.json")
+                    .get("tests/evaluate_fences/path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Option::None),
                 violating_import_specifier: "../protected/internal",
@@ -653,19 +661,19 @@ mod test {
     pub fn test_imports_exports_list_conflicting_match_allowed() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/source/friend/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/friend/fence.json" => parse_fence_str(
                     r#"{
                         "tags": ["friend"]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/friend/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"], "exports": [{"modules": "*", "accessibleTo": "test"}, {"modules": "*", "accessibleTo": "friend"}]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -683,7 +691,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/friend/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -693,18 +703,18 @@ mod test {
     pub fn test_imports_exports_list_not_on_allow_list() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"], "exports": [{
                          "modules": "internal.ts",
                          "accessibleTo": [
                              "nothing"
                          ]
                     }]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -722,7 +732,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         let d = ExportRule {
@@ -733,10 +745,10 @@ mod test {
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/protected/fence.json")
+                    .get("tests/evaluate_fences/path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&d)),
                 violating_import_specifier: "../protected/internal",
@@ -749,18 +761,18 @@ mod test {
     pub fn test_imports_exports_list_not_on_allow_list_glob() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"], "exports": [{
                          "modules": "*.ts",
                          "accessibleTo": [
                              "nothing"
                          ]
                     }]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -778,7 +790,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         let d = ExportRule {
@@ -789,10 +803,10 @@ mod test {
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/protected/fence.json")
+                    .get("tests/evaluate_fences/path/to/protected/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::ExportRule(Some(&d)),
                 violating_import_specifier: "../protected/internal",
@@ -805,24 +819,24 @@ mod test {
     pub fn test_imports_exports_list_on_allow_list_glob() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/source/friend/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/friend/fence.json" => parse_fence_str(
                     r#"{
                         "tags": ["friend"]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/friend/fence.json")
                 ).unwrap(),
-                "path/to/protected/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/protected/fence.json" => parse_fence_str(
                     r#"{"tags": ["protected"], "exports": [{
                          "modules": "*.ts",
                          "accessibleTo": [
                              "friend"
                          ]
                     }]}"#,
-                    &RelativePathBuf::from("path/to/protected/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/protected/fence.json")
                 ).unwrap()
             ),
         };
@@ -840,7 +854,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/friend/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -850,9 +866,9 @@ mod test {
     pub fn test_dependencies_not_allowed_empty_arr() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{"dependencies": []}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap()
             ),
         };
@@ -870,19 +886,21 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/source/fence.json")
+                    .get("tests/evaluate_fences/path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::DependencyRule(None),
-                violating_import_specifier: "node-import",
+                violating_import_specifier: "node:querystring",
                 violating_imported_name: Option::None
             }]
         );
@@ -892,9 +910,9 @@ mod test {
     pub fn test_dependencies_allowed_on_allow_list() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
-                    r#"{"dependencies": ["node-import"]}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
+                    r#"{"dependencies": ["node:querystring"]}"#,
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap()
             ),
         };
@@ -912,7 +930,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -922,14 +942,14 @@ mod test {
     pub fn test_dependencies_not_allowed_when_not_accessible_to() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{"dependencies": [
                         {
-                            "dependency": "node-import",
+                            "dependency": "node:querystring",
                             "accessibleTo": "some-tag"
                         }
                     ]}"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap()
             ),
         };
@@ -947,24 +967,26 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/index.ts")
+                .unwrap(),
         );
 
         let d = DependencyRule {
-            dependency: "node-import".to_owned(),
+            dependency: "node:querystring".to_owned(),
             accessible_to: vec!["some-tag".to_owned()],
         };
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/source/fence.json")
+                    .get("tests/evaluate_fences/path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::DependencyRule(Some(&d)),
-                violating_import_specifier: "node-import",
+                violating_import_specifier: "node:querystring",
                 violating_imported_name: Option::None
             }]
         );
@@ -974,22 +996,22 @@ mod test {
     pub fn test_dependencies_allowed_when_on_dependency_allow_list() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{
                         "dependencies": [
                             {
-                                "dependency": "node-import",
+                                "dependency": "node:querystring",
                                 "accessibleTo": "friend"
                             }
                         ]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/source/friend/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/friend/fence.json" => parse_fence_str(
                     r#"{
                         "tags": ["friend"]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/friend/fence.json")
                 ).unwrap()
             ),
         };
@@ -1007,7 +1029,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/friend/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -1017,22 +1041,22 @@ mod test {
     pub fn test_dependencies_not_allowed_when_on_dependency_not_on_allow_list() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{
                         "dependencies": [
                             {
-                                "dependency": "node-import",
+                                "dependency": "node:querystring",
                                 "accessibleTo": "friendzzz"
                             }
                         ]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/source/friend/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/friend/fence.json" => parse_fence_str(
                     r#"{
                         "tags": ["friend"]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/friend/fence.json")
                 ).unwrap()
             ),
         };
@@ -1050,24 +1074,26 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/friend/index.ts")
+                .unwrap(),
         );
 
         let r = DependencyRule {
-            dependency: "node-import".to_owned(),
+            dependency: "node:querystring".to_owned(),
             accessible_to: vec!["friendzzz".to_owned()],
         };
 
         assert_eq!(
             violations.violations,
             vec![ImportRuleViolation {
-                violating_file_path: "path/to/source/friend/index.ts",
+                violating_file_path: "tests/evaluate_fences/path/to/source/friend/index.ts",
                 violating_fence: fence_collection
                     .fences_map
-                    .get("path/to/source/fence.json")
+                    .get("tests/evaluate_fences/path/to/source/fence.json")
                     .unwrap(),
                 violating_fence_clause: ViolatedFenceClause::DependencyRule(Some(&r)),
-                violating_import_specifier: "node-import",
+                violating_import_specifier: "node:querystring",
                 violating_imported_name: None
             }]
         );
@@ -1077,26 +1103,26 @@ mod test {
     pub fn test_dependencies_allowed_when_on_dependency_allow_list_with_accessible_to_conflict() {
         let fence_collection = FenceCollection {
             fences_map: map!(
-                "path/to/source/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/fence.json" => parse_fence_str(
                     r#"{
                         "dependencies": [
                             {
-                                "dependency": "node-import",
+                                "dependency": "node:querystring",
                                 "accessibleTo": "friend"
                             },
                             {
-                                "dependency": "node-import",
+                                "dependency": "node:querystring",
                                 "accessibleTo": "friendzzz"
                             }
                         ]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/fence.json")
                 ).unwrap(),
-                "path/to/source/friend/fence.json" => parse_fence_str(
+                "tests/evaluate_fences/path/to/source/friend/fence.json" => parse_fence_str(
                     r#"{
                         "tags": ["friend"]
                     }"#,
-                    &RelativePathBuf::from("path/to/source/friend/fence.json")
+                    &RelativePathBuf::from("tests/evaluate_fences/path/to/source/friend/fence.json")
                 ).unwrap()
             ),
         };
@@ -1114,7 +1140,9 @@ mod test {
             ),
             &fence_collection,
             &SOURCE_FILES,
-            SOURCE_FILES.get("path/to/source/friend/index").unwrap(),
+            SOURCE_FILES
+                .get("tests/evaluate_fences/path/to/source/friend/index.ts")
+                .unwrap(),
         );
 
         assert_eq!(violations.violations, Vec::new());
