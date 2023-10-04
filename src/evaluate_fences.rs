@@ -327,8 +327,6 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                 .collect();
                             if matching_dependency_clauses.len() == 0 {
                                 // violation: dependency not on allowlist
-                                dbg!(matching_dependency_clauses);
-                                dbg!(&allowed_dependencies, &node_module_filter);
                                 violations.push(ImportRuleViolation {
                                     violating_file_path: &source_file.source_file_path,
                                     violating_fence: source_fence,
@@ -348,7 +346,6 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                     // none of the applicable clauses allow this import
                                     for dependency_clause in &matching_dependency_clauses {
                                         {
-                                            dbg!(&matching_dependency_clauses);
                                             // violation: dependency on allowlist, but not exposed
                                             // to tags for this file
                                             violations.push(ImportRuleViolation {
