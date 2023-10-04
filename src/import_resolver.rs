@@ -64,7 +64,14 @@ pub fn resolve_with_extension(
     if is_resource_file(&imported_path.to_string()) {
         return Ok(ResolvedImport::ResourceFileImport);
     }
-    let cwd = current_dir().unwrap().to_slash().unwrap().to_string();
+    // canonicalize() adds "\\\\?\\" for windows to guarantee we remove cwd from the final resolved path
+    let cwd = current_dir()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .to_slash()
+        .unwrap()
+        .to_string();
     let resolved = match resolver.resolve(&base, &imported_path) {
         Ok(r) => r,
         Err(e) => {
@@ -76,7 +83,10 @@ pub fn resolve_with_extension(
             for ext in SOURCE_EXTENSIONS {
                 let file_with_ext = format!("{}.{}", &imported_path, ext);
                 if let Ok(resolved) = resolver.resolve(&base, &file_with_ext) {
-                    let resolved = resolved.to_string();
+                    let resolved = match resolved {
+                        FileName::Real(f) => f.to_slash().unwrap().to_string(),
+                        _ => resolved.to_string(),
+                    };
                     return Ok(ResolvedImport::ProjectLocalImport(
                         resolved.replacen(&format!("{}/", cwd), "", 1).into(),
                     ));
@@ -87,7 +97,10 @@ pub fn resolve_with_extension(
         }
     };
     // let resolved = RelativePath::new(&resolved.to_string())..to_path("");
-    let resolved = resolved.to_string();
+    let resolved = match resolved {
+        FileName::Real(f) => f.to_slash().unwrap().to_string(),
+        _ => resolved.to_string(),
+    };
     // If we found a local file it starts with cwd
     if resolved.starts_with(&cwd) {
         if is_resource_file(&resolved) || resolved.ends_with(".graphql") {
