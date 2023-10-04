@@ -23,7 +23,7 @@ text-diff = "0.4.0"
 rayon = "1.5.0"
 path-slash = "0.2.1"
 path-clean = "0.1.0"
-swc_core = { version = "0.83.32", features = ["ecma_plugin_transform", "ecma_loader_node", "swc_node_base"] }
+swc_core = { version = "0.83.32", features = ["ecma_plugin_transform", "ecma_loader_node", "ecma_loader_tsc", "swc_node_base", "ecma_loader_lru", "ecma_loader_parking_lot"] }
 napi = { version = "2.13.0", default-features = false, features = ["napi4"] }
 napi-derive = "2.13.0"
 swc_ecma_parser = "0.140.0"
