@@ -7,12 +7,15 @@ mod utils;
 use napi::Status;
 use napi_derive::napi;
 use rayon::prelude::*;
-use swc_core::ecma::loader::{resolve::Resolve, resolvers::{lru::CachingResolver, tsc::TsConfigResolver, node::NodeModulesResolver}};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     iter::FromIterator,
     str::FromStr,
     sync::Arc,
+};
+use swc_core::ecma::loader::{
+    resolve::Resolve,
+    resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
 };
 
 use crate::{
@@ -193,9 +196,10 @@ pub fn find_unused_items(
     }
 
     let unused_files = BTreeMap::from_iter(graph.files.drain().filter(|f| !f.1.is_used));
-    let results: Vec<String> = unused_files.iter().map(|f| {
-        format!("\"{}\",", f.0)
-    }).collect();
+    let results: Vec<String> = unused_files
+        .iter()
+        .map(|f| format!("\"{}\",", f.0))
+        .collect();
     println!("Total files: {}", &total_files);
     println!("Total used files: {}", (total_files - unused_files.len()));
     println!("Total unused files: {}", unused_files.len());

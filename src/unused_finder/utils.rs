@@ -5,8 +5,7 @@ use path_slash::PathBufExt;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
 
-
-use crate::import_resolver::{ResolvedImport, resolve_with_extension};
+use crate::import_resolver::{resolve_with_extension, ResolvedImport};
 
 use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
@@ -41,15 +40,17 @@ pub fn process_import_path_ids(
         .drain()
         .filter_map(|(imported_path, imported_items)| {
             match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),&imported_path,resolver
+                FileName::Real(source_file_path.clone().into()),
+                &imported_path,
+                resolver,
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        return Some((slashed, imported_items))
+                        return Some((slashed, imported_items));
                     }
                 }
-                Err(_e) => return None
+                Err(_e) => return None,
             }
             None
         })
@@ -68,14 +69,15 @@ pub fn process_exports_from(
         .filter_map(|(imported_path, imported_items)| {
             // match resolve_ts_import(tsconfig_paths, initial_path, raw_import_path)
             match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),&imported_path,resolver
+                FileName::Real(source_file_path.clone().into()),
+                &imported_path,
+                resolver,
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        
-                        return Some((slashed, imported_items))
-                        
+
+                        return Some((slashed, imported_items));
                     }
                 }
                 Err(_e) => {}
@@ -97,14 +99,15 @@ pub fn process_async_imported_paths(
         .drain()
         .filter_map(|imported_path| {
             match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),&imported_path,resolver
+                FileName::Real(source_file_path.clone().into()),
+                &imported_path,
+                resolver,
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        
-                            return Some(slashed)
-                        
+
+                        return Some(slashed);
                     }
                 }
                 Err(_e) => {}
@@ -125,14 +128,15 @@ pub fn process_executed_paths(
         .drain()
         .filter_map(|executed_path| {
             match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),&executed_path,resolver
+                FileName::Real(source_file_path.clone().into()),
+                &executed_path,
+                resolver,
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        
-                            return Some(slashed)
-                        
+
+                        return Some(slashed);
                     }
                 }
                 Err(_e) => {}
@@ -154,15 +158,15 @@ pub fn process_require_paths(
         .drain()
         .filter_map(|required_path| {
             match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),&required_path,resolver
-
+                FileName::Real(source_file_path.clone().into()),
+                &required_path,
+                resolver,
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        
-                            return Some(slashed)
-                        
+
+                        return Some(slashed);
                     }
                 }
                 Err(_e) => return None,
