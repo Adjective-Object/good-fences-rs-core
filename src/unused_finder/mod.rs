@@ -7,6 +7,7 @@ mod utils;
 use napi::Status;
 use napi_derive::napi;
 use rayon::prelude::*;
+use swc_core::ecma::loader::{resolve::Resolve, resolvers::{lru::CachingResolver, tsc::TsConfigResolver, node::NodeModulesResolver}};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     iter::FromIterator,
@@ -126,11 +127,23 @@ pub fn find_unused_items(
         .collect();
 
     let total_files = flattened_walk_file_data.len();
-
+    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
+        60_000,
+        TsConfigResolver::new(
+            NodeModulesResolver::default(),
+            ".".into(),
+            tsconfig
+                .compiler_options
+                .paths
+                .clone()
+                .into_iter()
+                .collect(),
+        ),
+    );
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
         .map(|file| {
-            process_import_export_info(file, &tsconfig);
+            process_import_export_info(file, &resolver);
             GraphFile {
                 file_path: file.source_file_path.clone(),
                 import_export_info: file.import_export_info.clone(),
@@ -190,12 +203,12 @@ pub fn find_unused_items(
     Ok(results)
 }
 
-fn process_import_export_info(f: &mut WalkFileMetaData, tsconfig: &TsconfigPathsJson) {
-    process_executed_paths(&mut f.import_export_info, tsconfig, &f.source_file_path);
-    process_async_imported_paths(&mut f.import_export_info, tsconfig, &f.source_file_path);
-    process_exports_from(&mut f.import_export_info, tsconfig, &f.source_file_path);
-    process_require_paths(&mut f.import_export_info, tsconfig, &f.source_file_path);
-    process_import_path_ids(&mut f.import_export_info, tsconfig, &f.source_file_path);
+fn process_import_export_info(f: &mut WalkFileMetaData, resolver: &dyn Resolve) {
+    process_executed_paths(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_async_imported_paths(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_exports_from(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_require_paths(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_import_path_ids(&mut f.import_export_info, &f.source_file_path, resolver);
 }
 
 #[cfg(test)]

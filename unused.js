@@ -86,7 +86,7 @@ const entries = [
 const workers = require("/workspaces/client-web/workers.glob.json");
 
 
-unused({
+let report = unused({
     entryPackages: entries,
     filesIgnoredExports: [],
     filesIgnoredImports: [],
@@ -104,3 +104,4 @@ unused({
     skippedItems: [],
     tsConfigPath: './tsconfig.paths.json'
 });
+report.forEach(r => console.log(r));

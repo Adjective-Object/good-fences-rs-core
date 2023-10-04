@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use jwalk::WalkDirGeneric;
 use path_slash::PathBufExt;
-use relative_path::RelativePath;
+use swc_core::common::FileName;
+use swc_core::ecma::loader::resolve::Resolve;
 
-use crate::import_resolver::{
-    resolve_ts_import, resolve_with_extension, ResolvedImport, TsconfigPathsJson,
-};
+
+use crate::import_resolver::{ResolvedImport, resolve_with_extension};
 
 use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
@@ -33,34 +33,24 @@ impl From<ExportKind> for ResolvedItem {
 // import foo, {bar as something} from './foo'`
 pub fn process_import_path_ids(
     import_export_info: &mut ImportExportInfo,
-    tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
+    resolver: &dyn Resolve,
 ) {
     import_export_info.imported_path_ids = import_export_info
         .imported_path_ids
         .drain()
         .filter_map(|(imported_path, imported_items)| {
-            match resolve_ts_import(
-                &tsconfig,
-                &RelativePath::new(&source_file_path.to_string()),
-                &imported_path,
+            match resolve_with_extension(
+                FileName::Real(source_file_path.clone().into()),&imported_path,resolver
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        match resolve_with_extension(&slashed, tsconfig) {
-                            Ok(resolved) => return Some((resolved, imported_items)),
-                            Err(e) => {
-                                dbg!(&slashed);
-                                dbg!(e);
-                                return None;
-                            }
-                        };
+                        return Some((slashed, imported_items))
                     }
                 }
-                Err(_e) => {}
+                Err(_e) => return None
             }
-
             None
         })
         .collect();
@@ -69,29 +59,23 @@ pub fn process_import_path_ids(
 // `export {default as foo, bar} from './foo'`
 pub fn process_exports_from(
     import_export_info: &mut ImportExportInfo,
-    tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
+    resolver: &dyn Resolve,
 ) {
     import_export_info.export_from_ids = import_export_info
         .export_from_ids
         .drain()
         .filter_map(|(imported_path, imported_items)| {
             // match resolve_ts_import(tsconfig_paths, initial_path, raw_import_path)
-            match resolve_ts_import(
-                &tsconfig,
-                &RelativePath::new(&source_file_path),
-                &imported_path,
+            match resolve_with_extension(
+                FileName::Real(source_file_path.clone().into()),&imported_path,resolver
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        match resolve_with_extension(&slashed, tsconfig) {
-                            Ok(resolved) => return Some((resolved, imported_items)),
-                            Err(e) => {
-                                dbg!(e);
-                                return None;
-                            }
-                        };
+                        
+                        return Some((slashed, imported_items))
+                        
                     }
                 }
                 Err(_e) => {}
@@ -105,28 +89,22 @@ pub fn process_exports_from(
 // import('./foo')
 pub fn process_async_imported_paths(
     import_export_info: &mut ImportExportInfo,
-    tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
+    resolver: &dyn Resolve,
 ) {
     import_export_info.imported_paths = import_export_info
         .imported_paths
         .drain()
-        .filter_map(|path| {
-            match resolve_ts_import(
-                &tsconfig,
-                &RelativePath::new(&source_file_path.to_string()),
-                &path,
+        .filter_map(|imported_path| {
+            match resolve_with_extension(
+                FileName::Real(source_file_path.clone().into()),&imported_path,resolver
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        match resolve_with_extension(&slashed, tsconfig) {
-                            Ok(resolved) => return Some(resolved),
-                            Err(e) => {
-                                dbg!(e);
-                                return None;
-                            }
-                        };
+                        
+                            return Some(slashed)
+                        
                     }
                 }
                 Err(_e) => {}
@@ -139,28 +117,22 @@ pub fn process_async_imported_paths(
 // import './foo'
 pub fn process_executed_paths(
     import_export_info: &mut ImportExportInfo,
-    tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
+    resolver: &dyn Resolve,
 ) {
     import_export_info.executed_paths = import_export_info
         .executed_paths
         .drain()
-        .filter_map(|path| {
-            match resolve_ts_import(
-                &tsconfig,
-                &RelativePath::new(&source_file_path.to_string()),
-                &path,
+        .filter_map(|executed_path| {
+            match resolve_with_extension(
+                FileName::Real(source_file_path.clone().into()),&executed_path,resolver
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        match resolve_with_extension(&slashed, tsconfig) {
-                            Ok(resolved) => return Some(resolved),
-                            Err(e) => {
-                                dbg!(e);
-                                return None;
-                            }
-                        };
+                        
+                            return Some(slashed)
+                        
                     }
                 }
                 Err(_e) => {}
@@ -174,28 +146,23 @@ pub fn process_executed_paths(
 // require('foo')
 pub fn process_require_paths(
     import_export_info: &mut ImportExportInfo,
-    tsconfig: &TsconfigPathsJson,
     source_file_path: &String,
+    resolver: &dyn Resolve,
 ) {
     import_export_info.require_paths = import_export_info
         .require_paths
         .drain()
-        .filter_map(|path| {
-            match resolve_ts_import(
-                &tsconfig,
-                &RelativePath::new(&source_file_path.to_string()),
-                &path,
+        .filter_map(|required_path| {
+            match resolve_with_extension(
+                FileName::Real(source_file_path.clone().into()),&required_path,resolver
+
             ) {
                 Ok(resolved) => {
                     if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
                         let slashed = resolved.to_slash().unwrap().to_string();
-                        match resolve_with_extension(&slashed, tsconfig) {
-                            Ok(resolved) => return Some(resolved),
-                            Err(e) => {
-                                dbg!(e);
-                                return None;
-                            }
-                        };
+                        
+                            return Some(slashed)
+                        
                     }
                 }
                 Err(_e) => return None,

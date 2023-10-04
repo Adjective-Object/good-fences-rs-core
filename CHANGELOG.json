@@ -2,6 +2,36 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Wed, 04 Oct 2023 21:00:21 GMT",
+      "version": "0.5.1",
+      "tag": "@good-fences/api_v0.5.1",
+      "comments": {
+        "patch": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "f959a67a0656e8696ed87f78e9e20f8ce69cf74c",
+            "comment": "Added support for files with multiple `.` in the name"
+          }
+        ]
+      }
+    },
+    {
+      "date": "Mon, 02 Oct 2023 19:44:54 GMT",
+      "version": "0.5.0",
+      "tag": "@good-fences/api_v0.5.0",
+      "comments": {
+        "none": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "b156eb5515d901474df0ef13b1e84dfd78cf5a10",
+            "comment": "Fixed action yml to avoid duplicated workflow on merge to main"
+          }
+        ]
+      }
+    },
+    {
       "date": "Mon, 02 Oct 2023 19:18:23 GMT",
       "version": "0.5.0",
       "tag": "@good-fences/api_v0.5.0",
