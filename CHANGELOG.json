@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Mon, 09 Oct 2023 19:37:23 GMT",
+      "version": "0.6.0",
+      "tag": "@good-fences/api_v0.6.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "7685f8b2855051b0209326d6e6d71f63cc6c93fe",
+            "comment": "Changed logic to find unused exports from sweeping all files to doing tree shaking"
+          }
+        ]
+      }
+    },
+    {
       "date": "Wed, 04 Oct 2023 21:00:21 GMT",
       "version": "0.5.1",
       "tag": "@good-fences/api_v0.5.1",

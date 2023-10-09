@@ -1,7 +1,0 @@
-{
-  "type": "minor",
-  "comment": "Changed logic to find unused exports from sweeping all files to doing tree shaking",
-  "packageName": "@good-fences/api",
-  "email": "edgar21_9@hotmail.com",
-  "dependentChangeType": "patch"
-}

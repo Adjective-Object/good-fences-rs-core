@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Wed, 04 Oct 2023 21:00:21 GMT and should not be manually modified.
+This log was last generated on Mon, 09 Oct 2023 19:37:23 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.6.0
+
+Mon, 09 Oct 2023 19:37:23 GMT
+
+### Minor changes
+
+- Changed logic to find unused exports from sweeping all files to doing tree shaking (edgar21_9@hotmail.com)
 
 ## 0.5.1
 
