@@ -36,19 +36,72 @@ const entry = [
     '**/owa-immersive-bizchat-bootstrap/**',
 ];
 
+const entries = [
+    "owa-addins-osfruntime-resources",
+    "owa-analytics",
+    "owa-analytics-worker",
+    "owa-data-worker",
+    "owa-data-worker-bootstrap",
+    "owa-fluent-icons-svg",
+    "owa-fluent-mobile-brand-icons-svg",
+    'addison-bootstrap',
+    'bookwithme-bootstrap',
+    'create-clone-opx',
+    'eventify-bootstrap',
+    'meet-bootstrap',
+    'native-host-bootstrap',
+    'native-host-deep-bootstrap',
+    'oobe-bootstrap',
+    'owa-adbar-frame',
+    'owa-ads-frame',
+    'owa-bookings-bootstrap',
+    'owa-bookings-c2-bootstrap',
+    'owa-bookings-mobile-bootstrap',
+    'owa-bookingsv2-bootstrap',
+    'owa-calendar-deeplink-opx-bootstrap',
+    'owa-calendar-widget',
+    'owa-data-worker-bootstrap',
+    'owa-deeplink-bootstrap',
+    'owa-findtime-bootstrap',
+    'owa-immersive-bizchat-bootstrap',
+    'owa-jit-experience',
+    'owa-mail-bootstrap',
+    'owa-mail-deeplink-opx-bootstrap',
+    'owa-message-recall',
+    'owa-new-user-setup',
+    'owa-opx-app-bootstrap',
+    'owa-publishedcalendar-bootstrap',
+    'owa-safelink-waitingpage',
+    'owa-semantic-overview',
+    'owa-serviceworker-v2',
+    'owa-todo-widget',
+    'owa-tokenprovider',
+    'owa-webpush-serviceworker',
+    'places-bootstrap',
+    'pwa-localization',
+    'sample-query-common',
+    'sample-query-field-policy',
+];
 
-unused(
-    ['packages', 'shared'], 
-    './tsconfig.paths.json', 
-    [
-        ...entry,
-        "**/__mocks__/**",
+const workers = require("/workspaces/client-web/workers.glob.json");
+
+
+let report = unused({
+    entryPackages: entries,
+    filesIgnoredExports: [],
+    filesIgnoredImports: [],
+    pathsToRead: ['shared', 'packages'],
+    skippedDirs: [
+        // ...workers.files,
+        // ...workers.excludedFiles,
+        "**/osfruntime_strings.js",
         "**/test/**",
-        "**/owa-fluent-icons-svg/**",
-        "**/__generated__/**",
-        "**/*.g.ts",
-        "**/owa-addins-osfruntime-resources/**",
-        "**/owa-fluent-mobile-brand-icons-svg/**"
+        "**/scripts/**",
+        "**/*.Test.ts",
+        "**/*.Tests.ts",
+        "**/*.d.ts",
     ],
-    [".*Props$", ".*Tests$", "^(?i)test_.*"]
-);
+    skippedItems: [],
+    tsConfigPath: './tsconfig.paths.json'
+});
+report.forEach(r => console.log(r));

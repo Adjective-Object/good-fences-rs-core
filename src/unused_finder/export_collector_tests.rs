@@ -74,7 +74,7 @@ mod test {
         assert!(visitor
             .exported_ids
             .iter()
-            .all(|e| e.allow_unused && e.export_type == ExportKind::Named("bar".to_string())));
+            .all(|e| e.allow_unused && e.export_kind == ExportKind::Named("bar".to_string())));
     }
     #[test]
     fn test_allowed_unused_export_default() {
@@ -101,13 +101,13 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
 
     #[test]
-    fn test_allowed_unused_export_type_as_default() {
+    fn test_allowed_unused_export_kind_as_default() {
         let cm = Arc::<SourceMap>::default();
         let comments = SingleThreadedComments::default();
         let fm = cm.new_source_file(
@@ -130,7 +130,7 @@ mod test {
         assert!(visitor
             .exported_ids
             .iter()
-            .all(|e| e.allow_unused && e.export_type == ExportKind::Default));
+            .all(|e| e.allow_unused && e.export_kind == ExportKind::Default));
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -187,7 +187,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -304,7 +304,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -338,14 +338,14 @@ mod test {
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportKind::Named("bar".to_owned()) || !e.allow_unused),
+                .any(|e| e.export_kind == ExportKind::Named("bar".to_owned()) || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportKind::Named("zoo".to_owned()) || e.allow_unused),
+                .any(|e| e.export_kind == ExportKind::Named("zoo".to_owned()) || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -379,14 +379,14 @@ mod test {
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportKind::Named("foo".to_owned()) || !e.allow_unused),
+                .any(|e| e.export_kind == ExportKind::Named("foo".to_owned()) || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_type == ExportKind::Default || e.allow_unused),
+                .any(|e| e.export_kind == ExportKind::Default || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -423,7 +423,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -453,7 +453,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -482,13 +482,13 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
 
     #[test]
-    fn test_export_type_as_default() {
+    fn test_export_kind_as_default() {
         let cm = Arc::<SourceMap>::default();
         let fm = cm.new_source_file(
             FileName::Custom("test.ts".into()),
@@ -513,7 +513,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -542,7 +542,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -570,7 +570,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }
@@ -599,7 +599,7 @@ mod test {
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_type)
+                .map(|e| e.export_kind)
                 .collect::<HashSet<_>>()
         );
     }

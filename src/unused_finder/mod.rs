@@ -1,27 +1,37 @@
 mod export_collector_tests;
+pub mod graph;
 pub mod node_visitor;
 pub mod unused_finder_visitor_runner;
 mod utils;
 
+use napi::Status;
 use napi_derive::napi;
 use rayon::prelude::*;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
+    iter::FromIterator,
     str::FromStr,
     sync::Arc,
 };
+use swc_core::ecma::loader::{
+    resolve::Resolve,
+    resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
+};
 
 use crate::{
-    file_extension::no_ext,
+    error::NapiLikeError,
     import_resolver::TsconfigPathsJson,
     unused_finder::{
-        node_visitor::ExportKind,
-        unused_finder_visitor_runner::{ExportedItem, ImportExportInfo},
-        utils::{get_map_of_imports, retrieve_files, ResolvedItem},
+        graph::{Graph, GraphFile},
+        unused_finder_visitor_runner::ImportExportInfo,
+        utils::{
+            process_async_imported_paths, process_executed_paths, process_exports_from,
+            process_import_path_ids, process_require_paths, retrieve_files,
+        },
     },
 };
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct WalkFileMetaData {
     pub package_name: String,
     pub source_file_path: String,
@@ -40,6 +50,7 @@ impl Default for WalkedFile {
     }
 }
 
+#[derive(Default)]
 #[napi(object)]
 pub struct FindUnusedItemsConfig {
     pub paths_to_read: Vec<String>,
@@ -54,14 +65,22 @@ pub struct FindUnusedItemsConfig {
     // items and files imported by matching files will not be marked as used.
     pub files_ignored_imports: Vec<String>,
     pub files_ignored_exports: Vec<String>,
+    pub entry_packages: Vec<String>,
 }
 
 pub fn find_unused_items(
-    paths_to_read: Vec<String>,
-    ts_config_path: String,
-    skipped_dirs: Vec<String>,
-    skipped_items: Vec<String>,
+    config: FindUnusedItemsConfig,
 ) -> Result<Vec<String>, crate::error::NapiLikeError> {
+    let FindUnusedItemsConfig {
+        paths_to_read,
+        ts_config_path,
+        skipped_dirs,
+        skipped_items,
+        files_ignored_imports: _,
+        files_ignored_exports: _,
+        entry_packages,
+    } = config;
+    let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
     let tsconfig = match TsconfigPathsJson::from_path(ts_config_path.clone()) {
         Ok(tsconfig) => tsconfig,
         Err(e) => panic!("Unable to read tsconfig file {}: {}", ts_config_path, e),
@@ -110,107 +129,107 @@ pub fn find_unused_items(
         .flatten()
         .collect();
 
-    let walked_files_map: HashMap<String, ImportExportInfo> = flattened_walk_file_data
-        .drain(0..)
-        .map(|f| {
-            (
-                no_ext(&f.source_file_path).to_string(),
-                f.import_export_info,
-            )
+    let total_files = flattened_walk_file_data.len();
+    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
+        60_000,
+        TsConfigResolver::new(
+            NodeModulesResolver::default(),
+            ".".into(),
+            tsconfig
+                .compiler_options
+                .paths
+                .clone()
+                .into_iter()
+                .collect(),
+        ),
+    );
+    let mut files: Vec<GraphFile> = flattened_walk_file_data
+        .par_iter_mut()
+        .map(|file| {
+            process_import_export_info(file, &resolver);
+            GraphFile {
+                file_path: file.source_file_path.clone(),
+                import_export_info: file.import_export_info.clone(),
+                is_used: entry_packages.contains(&file.package_name), // mark files from entry_packages as used
+                unused_exports: file
+                    .import_export_info
+                    .exported_ids
+                    .iter()
+                    .map(|e| e.metadata.export_kind.clone())
+                    .collect(),
+            }
         })
         .collect();
-    // HashMap wher key = the used file path, value = a hashset with the items imported from that file, note that those items could not belong to that file (for the cases of export from)
-    let mut path_unused_items_map: HashMap<String, HashSet<ExportedItem>> = HashMap::new();
 
-    walked_files_map
-        .clone()
-        .drain()
-        .for_each(|(path, imp_exp_info)| {
-            // Populate `unused_file_exports`
-            path_unused_items_map.insert(path, imp_exp_info.exported_ids);
-        });
+    let files: HashMap<String, Arc<GraphFile>> = files
+        .par_drain(0..)
+        .map(|file| (file.file_path.clone(), Arc::new(file)))
+        .collect();
 
-    let mut unused_files: HashSet<_> = walked_files_map.keys().clone().into_iter().collect();
+    let mut graph = Graph {
+        files,
+        ..Default::default()
+    };
 
-    let resolved_imports_map = get_map_of_imports(&tsconfig, &walked_files_map);
-    resolved_imports_map
-        .iter()
-        .for_each(|(_path, imported_path_items_map)| {
-            // Iterate over each file and mark the imported items as used in the origin file.
-            imported_path_items_map
-                .iter()
-                .for_each(|(imported_path, imported_items)| {
-                    if let Some(origin_file_exported_items) =
-                        path_unused_items_map.get_mut(imported_path)
-                    {
-                        imported_items.iter().for_each(|item| {
-                            match item {
-                                ResolvedItem::Imported(imported) => {
-                                    match imported {
-                                        node_visitor::ImportedItem::ExecutionOnly
-                                        | node_visitor::ImportedItem::Namespace => {
-                                            // Even if exported elements are not imported specifically, side effects take place
-                                            // In case of namespace import (import * as foo from 'foo'), an exhaustive search on which items of `foo` are used.
-                                            // For now, assume that all items are used and by clearing the map we mark all items as used
-                                            // TODO add node visitor that does search for specific items used.
-                                            origin_file_exported_items.clear();
-                                            unused_files.remove(imported_path);
-                                        }
-                                        _ => {
-                                            unused_files.remove(imported_path);
-                                            let i = ExportKind::from(imported);
-                                            origin_file_exported_items.retain(|exp_item| {
-                                                exp_item.metadata.export_type != i
-                                            });
-                                            // origin_file_exported_items.remove(&i);
-                                        }
-                                    }
-                                }
-                                ResolvedItem::Exported(_) => {}
-                            }
-                        });
-                    }
-                });
-        });
-    let mut unused_items_len = 0;
-
-    // Print the unused items for each file, sort them by file first
-    let mut path_unused_items: Vec<_> = path_unused_items_map.into_iter().collect();
-    path_unused_items.sort_by(|x, y| x.0.cmp(&y.0));
-    path_unused_items.iter_mut().for_each(|(k, items)| {
-        items.retain(|i| !i.metadata.allow_unused);
-        if items.len() > 0 {
-            if !unused_files.contains(k) {
-                println!("From file {} found {:?} unused items", k, items);
+    let entry_files: Vec<String> = flattened_walk_file_data
+        .par_iter_mut()
+        .filter_map(|file| {
+            if entry_packages.contains(&file.package_name) {
+                return Some(file.source_file_path.clone());
             }
-        }
-        unused_items_len += items.len();
-    });
+            None
+        })
+        .collect();
+    let mut frontier = entry_files;
+    for i in 0..10_000_000 {
+        frontier = graph.bfs_step(frontier);
 
-    let results: Vec<String> = Vec::new();
-    let mut unused_files: Vec<_> = unused_files.into_iter().collect();
-    unused_files.sort();
-    unused_files.iter().for_each(|f| {
-        println!("Unused file: {}", f);
-    });
+        if frontier.is_empty() {
+            break;
+        }
+        if i == 10_000_000 {
+            return Err(NapiLikeError {
+                message: "exceeded max iterations".to_string(),
+                status: Status::GenericFailure,
+            });
+        }
+    }
+
+    let unused_files = BTreeMap::from_iter(graph.files.drain().filter(|f| !f.1.is_used));
+    let results: Vec<String> = unused_files
+        .iter()
+        .map(|f| format!("\"{}\",", f.0))
+        .collect();
+    println!("Total files: {}", &total_files);
+    println!("Total used files: {}", (total_files - unused_files.len()));
     println!("Total unused files: {}", unused_files.len());
-    println!("Total unused items: {}", unused_items_len);
 
     Ok(results)
 }
 
+fn process_import_export_info(f: &mut WalkFileMetaData, resolver: &dyn Resolve) {
+    process_executed_paths(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_async_imported_paths(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_exports_from(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_require_paths(&mut f.import_export_info, &f.source_file_path, resolver);
+    process_import_path_ids(&mut f.import_export_info, &f.source_file_path, resolver);
+}
+
 #[cfg(test)]
 mod test {
+    use crate::unused_finder::FindUnusedItemsConfig;
+
     use super::find_unused_items;
 
     #[test]
     fn test_error_in_glob() {
-        let result = find_unused_items(
-            vec!["tests/unused_finder".to_string()],
-            "tests/unused_finder/tsconfig.json".to_string(),
-            vec![".....///invalidpath****".to_string()],
-            vec!["[A-Z].*".to_string(), "something".to_string()],
-        );
+        let result = find_unused_items(FindUnusedItemsConfig {
+            paths_to_read: vec!["tests/unused_finder".to_string()],
+            ts_config_path: "tests/unused_finder/tsconfig.json".to_string(),
+            skipped_dirs: vec![".....///invalidpath****".to_string()],
+            skipped_items: vec!["[A-Z].*".to_string(), "something".to_string()],
+            ..Default::default()
+        });
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message,
@@ -220,12 +239,12 @@ mod test {
 
     #[test]
     fn test_error_in_regex() {
-        let result = find_unused_items(
-            vec!["tests/unused_finder".to_string()],
-            "tests/unused_finder/tsconfig.json".to_string(),
-            vec![],
-            vec!["[A-Z.*".to_string(), "something".to_string()],
-        );
+        let result = find_unused_items(FindUnusedItemsConfig {
+            paths_to_read: vec!["tests/unused_finder".to_string()],
+            ts_config_path: "tests/unused_finder/tsconfig.json".to_string(),
+            skipped_items: vec!["[A-Z.*".to_string(), "something".to_string()],
+            ..Default::default()
+        });
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message,

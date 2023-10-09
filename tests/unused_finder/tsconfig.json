@@ -8,6 +8,7 @@
         "noImplicitAny": false,
         "noUnusedLocals": true,
         "paths": {
+            "some-file":["../good_fences_integration/tsconfig.json"]
         }
     },
     "exclude": [
