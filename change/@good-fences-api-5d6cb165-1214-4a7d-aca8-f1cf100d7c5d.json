@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "Add feature to resolve export-from and track unused items",
-  "packageName": "@good-fences/api",
-  "email": "edgar21_9@hotmail.com",
-  "dependentChangeType": "patch"
-}
