@@ -204,6 +204,10 @@ pub fn find_unused_items(
         .iter()
         .map(|f| format!("\"{}\",", f.0))
         .chain(graph.files.iter().filter_map(|(path, file)| {
+            // shortcircuit to not report unused items on files with `@allow-unused-file` comment
+            if file.import_export_info.allow_unused {
+                return None;
+            }
             let items = file
                 .unused_exports
                 .iter()

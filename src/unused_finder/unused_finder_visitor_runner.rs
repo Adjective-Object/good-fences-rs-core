@@ -116,10 +116,12 @@ pub fn get_import_export_paths_map(
         visit_module(&mut visitor, &resolved);
     });
 
-    let (leading,_) = comments.take_all();
+    let (leading, _) = comments.take_all();
     let comments = leading.borrow();
     let allow_unused = if let Some((_, comments)) = comments.iter().next() {
-        comments.iter().any(|c| c.text.to_string().trim() == "@allow-unused-file")
+        comments
+            .iter()
+            .any(|c| c.text.to_string().trim() == "@allow-unused-file")
     } else {
         false
     };
@@ -147,7 +149,6 @@ mod test {
     use std::sync::Arc;
 
     use super::get_import_export_paths_map;
-
 
     #[test]
     fn test_allow_unused_file_comment() {
