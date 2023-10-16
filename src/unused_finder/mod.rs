@@ -195,7 +195,12 @@ pub fn find_unused_items(
         }
     }
 
-    let unused_files = BTreeMap::from_iter(graph.files.drain().filter(|f| !f.1.is_used));
+    let unused_files = BTreeMap::from_iter(
+        graph
+            .files
+            .drain()
+            .filter(|f| !f.1.is_used && !f.1.import_export_info.allow_unused),
+    );
     let results: Vec<String> = unused_files
         .iter()
         .map(|f| format!("\"{}\",", f.0))

@@ -14,6 +14,7 @@ use super::node_visitor::{ExportedItemMetadata, ExportsCollector, ImportedItem};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ImportExportInfo {
+    pub allow_unused: bool,
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
     pub imported_path_ids: HashMap<String, HashSet<ImportedItem>>,
     // require('foo') generates ['foo']
@@ -37,6 +38,7 @@ pub struct ExportedItem {
 impl ImportExportInfo {
     pub fn new() -> Self {
         Self {
+            allow_unused: false,
             imported_path_ids: HashMap::new(),
             require_paths: HashSet::new(),
             imported_paths: HashSet::new(),
@@ -102,7 +104,7 @@ pub fn get_import_export_paths_map(
         }
     };
 
-    let mut visitor = ExportsCollector::new(skipped_items, comments);
+    let mut visitor = ExportsCollector::new(skipped_items, comments.clone());
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {
@@ -114,7 +116,16 @@ pub fn get_import_export_paths_map(
         visit_module(&mut visitor, &resolved);
     });
 
+    let (leading,_) = comments.take_all();
+    let comments = leading.borrow();
+    let allow_unused = if let Some((_, comments)) = comments.iter().next() {
+        comments.iter().any(|c| c.text.to_string().trim() == "@allow-unused-file")
+    } else {
+        false
+    };
+
     Ok(ImportExportInfo {
+        allow_unused,
         imported_path_ids: visitor.imported_ids_path_name,
         require_paths: visitor.require_paths,
         imported_paths: visitor.imported_paths,
@@ -129,4 +140,19 @@ pub fn get_import_export_paths_map(
             .collect(),
         executed_paths: visitor.executed_paths,
     })
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use super::get_import_export_paths_map;
+
+
+    #[test]
+    fn test_allow_unused_file_comment() {
+        let filename = "tests/comments_panel_test/packages/accelerator/accelerator-common/src/CommentsPanel/index.ts";
+        let info = get_import_export_paths_map(filename.to_string(), Arc::new(vec![]));
+        assert!(info.unwrap().allow_unused);
+    }
 }
