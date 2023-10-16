@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Mon, 16 Oct 2023 17:13:19 GMT",
+      "version": "0.6.1",
+      "tag": "@good-fences/api_v0.6.1",
+      "comments": {
+        "patch": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "e9660d644370edcf2bf17dc2c4c198775e1e17c0",
+            "comment": "Add feature to resolve export-from and track unused items"
+          }
+        ]
+      }
+    },
+    {
       "date": "Mon, 09 Oct 2023 19:37:23 GMT",
       "version": "0.6.0",
       "tag": "@good-fences/api_v0.6.0",

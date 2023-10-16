@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 09 Oct 2023 19:37:23 GMT and should not be manually modified.
+This log was last generated on Mon, 16 Oct 2023 17:13:19 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.6.1
+
+Mon, 16 Oct 2023 17:13:19 GMT
+
+### Patches
+
+- Add feature to resolve export-from and track unused items (edgar21_9@hotmail.com)
 
 ## 0.6.0
 

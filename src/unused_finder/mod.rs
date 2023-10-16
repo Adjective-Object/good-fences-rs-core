@@ -147,17 +147,16 @@ pub fn find_unused_items(
         .par_iter_mut()
         .map(|file| {
             process_import_export_info(file, &resolver);
-            GraphFile {
-                file_path: file.source_file_path.clone(),
-                import_export_info: file.import_export_info.clone(),
-                is_used: entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-                unused_exports: file
-                    .import_export_info
+            GraphFile::new(
+                file.source_file_path.clone(),
+                file.import_export_info
                     .exported_ids
                     .iter()
                     .map(|e| e.metadata.export_kind.clone())
                     .collect(),
-            }
+                file.import_export_info.clone(),
+                entry_packages.contains(&file.package_name), // mark files from entry_packages as used
+            )
         })
         .collect();
 
@@ -204,6 +203,18 @@ pub fn find_unused_items(
     let results: Vec<String> = unused_files
         .iter()
         .map(|f| format!("\"{}\",", f.0))
+        .chain(graph.files.iter().filter_map(|(path, file)| {
+            let items = file
+                .unused_exports
+                .iter()
+                .map(|items| items.to_string())
+                .collect::<Vec<_>>();
+            if items.len() > 0 {
+                let items = items.join(", ");
+                return Some(format!("From file \"{}\": {}", path, items));
+            }
+            None
+        }))
         .collect();
     println!("Total files: {}", &total_files);
     println!("Total used files: {}", (total_files - unused_files.len()));
