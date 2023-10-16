@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "Added feature to not mark files starting with `@allow-unused-file` as unused",
+  "packageName": "@good-fences/api",
+  "email": "edgar21_9@hotmail.com",
+  "dependentChangeType": "patch"
+}
