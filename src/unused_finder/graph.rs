@@ -35,11 +35,14 @@ impl GraphFile {
         is_used: bool,
     ) -> Self {
         let mut export_from = HashMap::new();
-        import_export_info.export_from_ids.iter().for_each(|(source_file, items)| {
-            for item in items {
-                export_from.insert(item.into(), source_file.clone());
-            }
-        });
+        import_export_info
+            .export_from_ids
+            .iter()
+            .for_each(|(source_file, items)| {
+                for item in items {
+                    export_from.insert(item.into(), source_file.clone());
+                }
+            });
         Self {
             is_used,
             export_from,
@@ -104,13 +107,11 @@ impl<'a> Graph {
                 any_used = any_used || !imported_file.is_used;
                 // if `item` was already marked as used
                 match imported_file.mark_item_as_used(&item.into()) {
-                    MarkItemResult::MarkedAsUsed => {
-                        any_used = true
-                    },
-                    MarkItemResult::AlreadyMarked => {},
+                    MarkItemResult::MarkedAsUsed => any_used = true,
+                    MarkItemResult::AlreadyMarked => {}
                     MarkItemResult::ResolveExportFrom(origin) => {
                         pending_paths.push((origin, item));
-                    },
+                    }
                 }
             }
         }

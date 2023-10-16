@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Display,
     iter::FromIterator,
-    sync::Arc, fmt::Display,
+    sync::Arc,
 };
 
 use swc_core::{
