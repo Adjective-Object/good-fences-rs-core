@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     iter::FromIterator,
-    sync::Arc,
+    sync::Arc, fmt::Display,
 };
 
 use swc_core::{
@@ -42,6 +42,17 @@ pub enum ExportKind {
     Default,
     Namespace,
     ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
+}
+
+impl Display for ExportKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExportKind::Named(name) => write!(f, "{}", name),
+            ExportKind::Default => write!(f, "default"),
+            ExportKind::Namespace => write!(f, "*"),
+            ExportKind::ExecutionOnly => write!(f, "import '<path>'"),
+        }
+    }
 }
 
 impl Default for ExportKind {

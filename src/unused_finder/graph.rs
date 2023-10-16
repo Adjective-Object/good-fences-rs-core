@@ -10,20 +10,64 @@ use super::{
     unused_finder_visitor_runner::ImportExportInfo,
 };
 
+pub enum MarkItemResult {
+    MarkedAsUsed,
+    AlreadyMarked,
+    ResolveExportFrom(String),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GraphFile {
     pub is_used: bool,
     // pub package_name: String,
     pub file_path: String,
     pub unused_exports: HashSet<ExportKind>,
+    //
+    pub export_from: HashMap<ExportKind, String>,
     pub import_export_info: ImportExportInfo,
 }
 
 impl GraphFile {
-    pub fn mark_item_as_used(&mut self, item: &ImportedItem) -> bool {
+    pub fn new(
+        file_path: String,
+        unused_exports: HashSet<ExportKind>,
+        import_export_info: ImportExportInfo,
+        is_used: bool,
+    ) -> Self {
+        let mut export_from = HashMap::new();
+        import_export_info.export_from_ids.iter().for_each(|(source_file, items)| {
+            for item in items {
+                export_from.insert(item.into(), source_file.clone());
+            }
+        });
+        Self {
+            is_used,
+            export_from,
+            file_path,
+            unused_exports,
+            import_export_info,
+        }
+    }
+
+    pub fn resolve_export_from_items(&mut self, files: &mut HashMap<String, Arc<GraphFile>>) {
+        self.export_from.iter().for_each(|(item, path)| {
+            if let Some(origin) = files.get_mut(path) {
+                Arc::get_mut(origin).unwrap().mark_item_as_used(item);
+                // origin.mark_item_as_used(item);
+            }
+        });
+    }
+
+    pub fn mark_item_as_used(&mut self, item: &ExportKind) -> MarkItemResult {
         self.is_used = true;
-        let item = ExportKind::from(item);
-        self.unused_exports.remove(&item)
+        // let item = ExportKind::from(item);
+        if self.unused_exports.remove(&item) {
+            return MarkItemResult::MarkedAsUsed;
+        }
+        if let Some(from) = self.export_from.get(item) {
+            return MarkItemResult::ResolveExportFrom(from.clone());
+        }
+        MarkItemResult::AlreadyMarked
     }
 }
 
@@ -45,22 +89,40 @@ impl<'a> Graph {
                 }
                 None
             })
+            .flatten()
             .collect();
         new_entries
     }
 
-    fn resolve_edge(&mut self, imported: &String, item: &ImportedItem) -> Option<String> {
+    fn resolve_edge(&mut self, imported: &String, item: &ImportedItem) -> Option<Vec<String>> {
         let mut any_used = false;
+        let mut pending_paths: Vec<(String, &ImportedItem)> = Vec::new();
+        let mut resolved = vec![];
         if let Some(imported_file_rc) = self.files.get_mut(imported) {
             if let Some(imported_file) = Arc::get_mut(imported_file_rc) {
                 // If `file` was already marked as used
                 any_used = any_used || !imported_file.is_used;
                 // if `item` was already marked as used
-                any_used = imported_file.mark_item_as_used(item) || any_used;
-                if any_used {
-                    return Some(imported.clone());
+                match imported_file.mark_item_as_used(&item.into()) {
+                    MarkItemResult::MarkedAsUsed => {
+                        any_used = true
+                    },
+                    MarkItemResult::AlreadyMarked => {},
+                    MarkItemResult::ResolveExportFrom(origin) => {
+                        pending_paths.push((origin, item));
+                    },
                 }
             }
+        }
+        for (imported, item) in pending_paths {
+            if let Some(resolutions) = self.resolve_edge(&imported, item) {
+                any_used = true;
+                resolved.extend(resolutions);
+            }
+        }
+        if any_used {
+            resolved.push(imported.clone());
+            return Some(resolved);
         }
         None
     }
