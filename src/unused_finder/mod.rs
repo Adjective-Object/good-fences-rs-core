@@ -219,7 +219,10 @@ pub fn find_unused_items(
         }))
         .collect();
     println!("Total files: {}", &total_files);
-    println!("Total used files: {}", (total_files - reported_unused_files.len()));
+    println!(
+        "Total used files: {}",
+        (total_files - reported_unused_files.len())
+    );
     println!("Total unused files: {}", reported_unused_files.len());
 
     Ok(results)
