@@ -194,8 +194,15 @@ pub fn find_unused_items(
         }
     }
 
-    let unused_files = BTreeMap::from_iter(graph.files.iter().filter(|f| !f.1.is_used));
-    let results: Vec<String> = unused_files
+    let allow_list: Vec<glob::Pattern> = read_allow_list();
+
+    let reported_unused_files = BTreeMap::from_iter(
+        graph
+            .files
+            .iter()
+            .filter(|f| !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))),
+    );
+    let results: Vec<String> = reported_unused_files
         .iter()
         .map(|f| format!("\"{}\",", f.0))
         .chain(graph.files.iter().filter_map(|(path, file)| {
@@ -212,10 +219,33 @@ pub fn find_unused_items(
         }))
         .collect();
     println!("Total files: {}", &total_files);
-    println!("Total used files: {}", (total_files - unused_files.len()));
-    println!("Total unused files: {}", unused_files.len());
+    println!(
+        "Total used files: {}",
+        (total_files - reported_unused_files.len())
+    );
+    println!("Total unused files: {}", reported_unused_files.len());
 
     Ok(results)
+}
+
+// Looks in cwd for a file called `.unusedignore`
+// allowed items can be:
+// - specific file paths like `shared/internal/owa-react-hooks/src/useWhyDidYouUpdate.ts`
+// - glob patterns (similar to a `.gitignore` file) `shared/internal/owa-datetime-formatters/**`
+fn read_allow_list() -> Vec<glob::Pattern> {
+    match std::fs::read_to_string(".unusedignore") {
+        Ok(list) => {
+            return list
+                .split("\n")
+                .filter_map(|line| match glob::Pattern::new(line) {
+                    Ok(p) => Some(p),
+                    Err(_) => None,
+                })
+                .collect()
+        }
+        Err(_) => {}
+    }
+    vec![]
 }
 
 fn process_import_export_info(f: &mut WalkFileMetaData, resolver: &dyn Resolve) {
