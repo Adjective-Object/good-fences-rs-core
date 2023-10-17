@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 16 Oct 2023 17:13:19 GMT and should not be manually modified.
+This log was last generated on Tue, 17 Oct 2023 20:48:23 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.7.0
+
+Tue, 17 Oct 2023 20:48:23 GMT
+
+### Minor changes
+
+- Added support for `.unusedignore` file (edgar21_9@hotmail.com)
 
 ## 0.6.1
 
