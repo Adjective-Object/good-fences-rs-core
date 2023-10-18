@@ -2,7 +2,7 @@ use error::EvaluateFencesError;
 use napi::bindgen_prelude::ToNapiValue;
 use napi_derive::napi;
 use serde::Serialize;
-use unused_finder::FindUnusedItemsConfig;
+use unused_finder::{FindUnusedItemsConfig, UnusedFinderReport};
 use walk_dirs::ExternalFences;
 pub mod error;
 pub mod evaluate_fences;
@@ -190,7 +190,7 @@ pub struct JsonErrorFile<'a> {
  */
 
 #[napi]
-pub fn find_unused_items(config: FindUnusedItemsConfig) -> napi::Result<Vec<String>> {
+pub fn find_unused_items(config: FindUnusedItemsConfig) -> napi::Result<UnusedFinderReport> {
     match unused_finder::find_unused_items(config) {
         Ok(ok) => return Ok(ok),
         Err(e) => return Err(napi::Error::new(e.status, e.message)),

@@ -68,9 +68,16 @@ pub struct FindUnusedItemsConfig {
     pub entry_packages: Vec<String>,
 }
 
+#[derive(Debug)]
+#[napi(object)]
+pub struct UnusedFinderReport {
+    pub unused_files: Vec<String>,
+    pub unused_files_items: HashMap<String, Vec<String>>,
+}
+
 pub fn find_unused_items(
     config: FindUnusedItemsConfig,
-) -> Result<Vec<String>, crate::error::NapiLikeError> {
+) -> Result<UnusedFinderReport, crate::error::NapiLikeError> {
     let FindUnusedItemsConfig {
         paths_to_read,
         ts_config_path,
@@ -202,6 +209,22 @@ pub fn find_unused_items(
             .iter()
             .filter(|f| !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))),
     );
+    let unused_files_items: HashMap<String, Vec<String>> = graph
+        .files
+        .iter()
+        .filter_map(|(file_path, info)| {
+            if info.is_used {
+                return Some((
+                    file_path.to_string(),
+                    info.unused_exports
+                        .iter()
+                        .map(|unused_item| unused_item.to_string())
+                        .collect(),
+                ));
+            }
+            None
+        })
+        .collect();
     let results: Vec<String> = reported_unused_files
         .iter()
         .map(|f| format!("\"{}\",", f.0))
@@ -218,6 +241,7 @@ pub fn find_unused_items(
             None
         }))
         .collect();
+    println!("{}", results.join("\n"));
     println!("Total files: {}", &total_files);
     println!(
         "Total used files: {}",
@@ -225,7 +249,13 @@ pub fn find_unused_items(
     );
     println!("Total unused files: {}", reported_unused_files.len());
 
-    Ok(results)
+    Ok(UnusedFinderReport {
+        unused_files: reported_unused_files
+            .iter()
+            .map(|(p, _)| p.to_string())
+            .collect(),
+        unused_files_items,
+    })
 }
 
 // Looks in cwd for a file called `.unusedignore`
