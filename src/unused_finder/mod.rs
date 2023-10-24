@@ -1,6 +1,7 @@
 mod export_collector_tests;
 pub mod graph;
 pub mod node_visitor;
+pub mod unused_finder;
 pub mod unused_finder_visitor_runner;
 mod utils;
 
@@ -13,9 +14,12 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
-use swc_core::ecma::loader::{
-    resolve::Resolve,
-    resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
+use swc_core::{
+    common::source_map::Pos,
+    ecma::loader::{
+        resolve::Resolve,
+        resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
+    },
 };
 
 use crate::{
@@ -50,7 +54,7 @@ impl Default for WalkedFile {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 #[napi(object)]
 pub struct FindUnusedItemsConfig {
     pub paths_to_read: Vec<String>,
@@ -68,11 +72,89 @@ pub struct FindUnusedItemsConfig {
     pub entry_packages: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct ExportedItemReport {
+    pub id: String,
+    pub start: i32,
+    pub end: i32,
+}
+
+#[derive(Debug, Clone, Default)]
 #[napi(object)]
 pub struct UnusedFinderReport {
     pub unused_files: Vec<String>,
-    pub unused_files_items: HashMap<String, Vec<String>>,
+    pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
+    // pub flattened_walk_file_data: Vec<WalkFileMetaData>,
+}
+
+fn create_caching_resolver(
+    tsconfig: &TsconfigPathsJson,
+) -> CachingResolver<TsConfigResolver<NodeModulesResolver>> {
+    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
+        60_000,
+        TsConfigResolver::new(
+            NodeModulesResolver::default(),
+            ".".into(),
+            tsconfig
+                .compiler_options
+                .paths
+                .clone()
+                .into_iter()
+                .collect(),
+        ),
+    );
+    resolver
+}
+
+fn create_report_map_from_flattened_files(
+    flattened_walk_file_data: &Vec<WalkFileMetaData>,
+) -> HashMap<String, Vec<ExportedItemReport>> {
+    let file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
+        flattened_walk_file_data
+            .clone()
+            .par_drain(0..)
+            .map(|file| {
+                let ids = file
+                    .import_export_info
+                    .exported_ids
+                    .iter()
+                    .map(|exported_item| ExportedItemReport {
+                        id: exported_item.metadata.export_kind.to_string(),
+                        start: exported_item.metadata.span.lo.to_usize() as i32,
+                        end: exported_item.metadata.span.hi.to_usize() as i32,
+                    })
+                    .collect();
+                (file.source_file_path.clone(), ids)
+            })
+            .collect();
+    file_path_exported_items_map
+}
+
+fn create_flattened_walked_files(
+    paths_to_read: &Vec<String>,
+    skipped_dirs: &Arc<Vec<glob::Pattern>>,
+    skipped_items: &Arc<Vec<regex::Regex>>,
+) -> Vec<WalkFileMetaData> {
+    let flattened_walk_file_data: Vec<WalkFileMetaData> = paths_to_read
+        .par_iter()
+        .map(|path| {
+            let mut walked_files =
+                retrieve_files(path, Some(skipped_dirs.to_vec()), skipped_items.clone());
+            let walked_files_data: Vec<WalkFileMetaData> = walked_files
+                .drain(0..)
+                .filter_map(|walked_file| {
+                    if let WalkedFile::SourceFile(w) = walked_file {
+                        return Some(w);
+                    }
+                    None
+                })
+                .collect();
+            walked_files_data
+        })
+        .flatten()
+        .collect();
+    flattened_walk_file_data
 }
 
 pub fn find_unused_items(
@@ -117,39 +199,14 @@ pub fn find_unused_items(
     };
     let skipped_items = Arc::new(skipped_items);
     // Walk on all files and retrieve the WalkFileData from them
-    let mut flattened_walk_file_data: Vec<WalkFileMetaData> = paths_to_read
-        .par_iter()
-        .map(|path| {
-            let mut walked_files =
-                retrieve_files(path, Some(skipped_dirs.to_vec()), skipped_items.clone());
-            let walked_files_data: Vec<WalkFileMetaData> = walked_files
-                .drain(0..)
-                .filter_map(|walked_file| {
-                    if let WalkedFile::SourceFile(w) = walked_file {
-                        return Some(w);
-                    }
-                    None
-                })
-                .collect();
-            walked_files_data
-        })
-        .flatten()
-        .collect();
+    let mut flattened_walk_file_data: Vec<WalkFileMetaData> =
+        create_flattened_walked_files(&paths_to_read, &skipped_dirs, &skipped_items);
 
-    let total_files = flattened_walk_file_data.len();
-    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
-        60_000,
-        TsConfigResolver::new(
-            NodeModulesResolver::default(),
-            ".".into(),
-            tsconfig
-                .compiler_options
-                .paths
-                .clone()
-                .into_iter()
-                .collect(),
-        ),
-    );
+    let _total_files = flattened_walk_file_data.len();
+    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
+        create_caching_resolver(&tsconfig);
+    let mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
+        create_report_map_from_flattened_files(&flattened_walk_file_data);
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
         .map(|file| {
@@ -209,45 +266,33 @@ pub fn find_unused_items(
             .iter()
             .filter(|f| !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))),
     );
-    let unused_files_items: HashMap<String, Vec<String>> = graph
+    let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = graph
         .files
         .iter()
         .filter_map(|(file_path, info)| {
             if info.is_used {
-                return Some((
-                    file_path.to_string(),
-                    info.unused_exports
-                        .iter()
-                        .map(|unused_item| unused_item.to_string())
-                        .collect(),
-                ));
+                match file_path_exported_items_map.remove(file_path) {
+                    Some(mut exported_items) => {
+                        let unused_exports = &info.unused_exports;
+                        if unused_exports.is_empty() {
+                            return None;
+                        }
+                        let unused_exports = exported_items
+                            .drain(0..)
+                            .filter(|exported| {
+                                unused_exports
+                                    .iter()
+                                    .any(|unused| unused.to_string() == exported.id.to_string())
+                            })
+                            .collect();
+                        return Some((file_path.to_string(), unused_exports));
+                    }
+                    None => return None,
+                }
             }
             None
         })
         .collect();
-    let results: Vec<String> = reported_unused_files
-        .iter()
-        .map(|f| format!("\"{}\",", f.0))
-        .chain(graph.files.iter().filter_map(|(path, file)| {
-            let items = file
-                .unused_exports
-                .iter()
-                .map(|items| items.to_string())
-                .collect::<Vec<_>>();
-            if items.len() > 0 {
-                let items = items.join(", ");
-                return Some(format!("From file \"{}\": {}", path, items));
-            }
-            None
-        }))
-        .collect();
-    println!("{}", results.join("\n"));
-    println!("Total files: {}", &total_files);
-    println!(
-        "Total used files: {}",
-        (total_files - reported_unused_files.len())
-    );
-    println!("Total unused files: {}", reported_unused_files.len());
 
     Ok(UnusedFinderReport {
         unused_files: reported_unused_files

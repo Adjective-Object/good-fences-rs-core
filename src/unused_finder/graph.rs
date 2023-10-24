@@ -76,7 +76,7 @@ impl GraphFile {
 
 pub type Edge = (String, String, ImportedItem);
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Graph {
     pub files: HashMap<String, Arc<GraphFile>>,
 }
