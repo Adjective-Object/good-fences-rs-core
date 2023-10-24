@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "Added struct/class to run unused finder tool with in memory representation",
+  "packageName": "@good-fences/api",
+  "email": "edgar21_9@hotmail.com",
+  "dependentChangeType": "patch"
+}
