@@ -1,3 +1,5 @@
+use std::{collections::HashSet, iter::FromIterator};
+
 use error::EvaluateFencesError;
 use napi::bindgen_prelude::ToNapiValue;
 use napi_derive::napi;
@@ -193,6 +195,21 @@ pub struct JsonErrorFile<'a> {
 pub fn find_unused_items(config: FindUnusedItemsConfig) -> napi::Result<UnusedFinderReport> {
     match unused_finder::find_unused_items(config) {
         Ok(ok) => return Ok(ok),
+        Err(e) => return Err(napi::Error::new(e.status, e.message)),
+    }
+}
+
+#[napi]
+pub fn find_unused_items_for_open_files(
+    config: FindUnusedItemsConfig,
+    files: Vec<String>,
+) -> napi::Result<UnusedFinderReport> {
+    match unused_finder::find_unused_items(config) {
+        Ok(mut ok) => {
+            let files: HashSet<String> = HashSet::from_iter(files);
+            ok.unused_files_items.retain(|key, _| files.contains(key));
+            return Ok(ok);
+        }
         Err(e) => return Err(napi::Error::new(e.status, e.message)),
     }
 }

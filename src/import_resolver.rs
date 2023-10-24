@@ -17,7 +17,7 @@ use swc_core::ecma::loader::resolve::Resolve;
 use crate::error::OpenTsConfigError;
 use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TsconfigPathsJson {
     pub compiler_options: TsconfigPathsCompilerOptions,
@@ -39,7 +39,7 @@ impl TsconfigPathsJson {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TsconfigPathsCompilerOptions {
     pub base_url: Option<String>,
