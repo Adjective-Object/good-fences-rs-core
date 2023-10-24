@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Wed, 18 Oct 2023 02:57:33 GMT and should not be manually modified.
+This log was last generated on Tue, 24 Oct 2023 21:41:35 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.9.0
+
+Tue, 24 Oct 2023 21:41:35 GMT
+
+### Minor changes
+
+- Added struct/class to run unused finder tool with in memory representation (edgar21_9@hotmail.com)
 
 ## 0.8.0
 

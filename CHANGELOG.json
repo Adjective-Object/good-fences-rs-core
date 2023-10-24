@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Tue, 24 Oct 2023 21:41:35 GMT",
+      "version": "0.9.0",
+      "tag": "@good-fences/api_v0.9.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "edgar21_9@hotmail.com",
+            "package": "@good-fences/api",
+            "commit": "c577a638755504be763929b74ad3f301176df63c",
+            "comment": "Added struct/class to run unused finder tool with in memory representation"
+          }
+        ]
+      }
+    },
+    {
       "date": "Wed, 18 Oct 2023 02:57:33 GMT",
       "version": "0.8.0",
       "tag": "@good-fences/api_v0.8.0",
