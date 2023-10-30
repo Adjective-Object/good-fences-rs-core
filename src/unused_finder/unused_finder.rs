@@ -213,18 +213,14 @@ impl UnusedFinder {
         let mut file_path_exported_items_map = self.file_path_exported_items_map.clone();
 
         let mut frontier = self.entry_files.clone();
-        for i in 0..10_000_000 {
+        for _ in 0..10_000_000 {
             frontier = self.graph.bfs_step(frontier);
-
-            if frontier.is_empty() {
-                break;
-            }
-            if i == 10_000_000 {
-                return Err(napi::Error::new(
-                    napi::Status::GenericFailure,
-                    "exceeded max iterations".to_string(),
-                ));
-            }
+        }
+        if !frontier.is_empty() {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                "exceeded max iterations".to_string(),
+            ));
         }
 
         let allow_list: Vec<glob::Pattern> = read_allow_list();
