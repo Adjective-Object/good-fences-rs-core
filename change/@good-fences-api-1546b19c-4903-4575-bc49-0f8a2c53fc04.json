@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "Added comments to unused finder struct. Improve validations for bfs_step. Remove rendundant property in unusedFinder struct",
+  "packageName": "@good-fences/api",
+  "email": "edgar21_9@hotmail.com",
+  "dependentChangeType": "patch"
+}
