@@ -210,7 +210,11 @@ pub fn find_unused_items(
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
         .map(|file| {
-            process_import_export_info(file, &resolver);
+            process_import_export_info(
+                &mut file.import_export_info,
+                &file.source_file_path,
+                &resolver,
+            );
             GraphFile::new(
                 file.source_file_path.clone(),
                 file.import_export_info
@@ -323,12 +327,16 @@ fn read_allow_list() -> Vec<glob::Pattern> {
     vec![]
 }
 
-fn process_import_export_info(f: &mut WalkFileMetaData, resolver: &dyn Resolve) {
-    process_executed_paths(&mut f.import_export_info, &f.source_file_path, resolver);
-    process_async_imported_paths(&mut f.import_export_info, &f.source_file_path, resolver);
-    process_exports_from(&mut f.import_export_info, &f.source_file_path, resolver);
-    process_require_paths(&mut f.import_export_info, &f.source_file_path, resolver);
-    process_import_path_ids(&mut f.import_export_info, &f.source_file_path, resolver);
+fn process_import_export_info(
+    f: &mut ImportExportInfo,
+    source_file_path: &String,
+    resolver: &dyn Resolve,
+) {
+    process_executed_paths(f, source_file_path, resolver);
+    process_async_imported_paths(f, source_file_path, resolver);
+    process_exports_from(f, source_file_path, resolver);
+    process_require_paths(f, source_file_path, resolver);
+    process_import_path_ids(f, source_file_path, resolver);
 }
 
 #[cfg(test)]
