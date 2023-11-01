@@ -7,11 +7,8 @@ use std::{
 
 use napi_derive::napi;
 use rayon::prelude::*;
-use swc_core::{
-    common::source_map::Pos,
-    ecma::loader::resolvers::{
-        lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver,
-    },
+use swc_core::ecma::loader::resolvers::{
+    lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver,
 };
 
 use crate::import_resolver::TsconfigPathsJson;
@@ -24,7 +21,7 @@ use super::{
     ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport, WalkFileMetaData,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 #[napi(js_name = "UnusedFinder")]
 pub struct UnusedFinder {
     pub report: UnusedFinderReport,
@@ -34,10 +31,9 @@ pub struct UnusedFinder {
     file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
     skipped_items: Arc<Vec<regex::Regex>>,
     skipped_dirs: Arc<Vec<glob::Pattern>>,
-    tsconfig: TsconfigPathsJson,
-    flattened_walk_file_data: Vec<WalkFileMetaData>,
+    entry_files: Vec<String>,
     graph: Graph,
-    // resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>>,
+    resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
 }
 
 #[napi]
@@ -63,19 +59,8 @@ impl UnusedFinder {
                 ));
             }
         };
-        let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
-            60_000,
-            TsConfigResolver::new(
-                NodeModulesResolver::default(),
-                ".".into(),
-                tsconfig
-                    .compiler_options
-                    .paths
-                    .clone()
-                    .into_iter()
-                    .collect(),
-            ),
-        );
+        let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
+            create_caching_resolver(&tsconfig);
         let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
 
         let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
@@ -106,7 +91,11 @@ impl UnusedFinder {
         let mut files: Vec<GraphFile> = flattened_walk_file_data
             .par_iter_mut()
             .map(|file| {
-                process_import_export_info(file, &resolver);
+                process_import_export_info(
+                    &mut file.import_export_info,
+                    &file.source_file_path,
+                    &resolver,
+                );
                 GraphFile::new(
                     file.source_file_path.clone(),
                     file.import_export_info
@@ -133,54 +122,55 @@ impl UnusedFinder {
         Ok(Self {
             config,
             entry_packages,
-            tsconfig,
             skipped_dirs,
             skipped_items,
-            flattened_walk_file_data,
+            resolver: Some(resolver),
             graph,
             file_path_exported_items_map,
             ..Default::default()
         })
     }
 
+    // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
     #[napi]
     pub fn refresh_file_list(&mut self) {
-        let resolver = create_caching_resolver(&self.tsconfig);
-        self.flattened_walk_file_data = create_flattened_walked_files(
+        // Get a vector with all WalkFileMetaData
+        let mut flattened_walk_file_data = create_flattened_walked_files(
             &self.config.paths_to_read,
             &self.skipped_dirs,
             &self.skipped_items,
         );
-        self.file_path_exported_items_map = self
-            .flattened_walk_file_data
-            .clone()
-            .par_drain(0..)
-            .map(|file| {
-                let ids = file
-                    .import_export_info
-                    .exported_ids
-                    .iter()
-                    .map(|exported_item| ExportedItemReport {
-                        id: exported_item.metadata.export_kind.to_string(),
-                        start: exported_item.metadata.span.lo.to_usize() as i32,
-                        end: exported_item.metadata.span.hi.to_usize() as i32,
-                    })
-                    .collect();
-                (file.source_file_path.clone(), ids)
+        // Proccess all information with swc resolver to resolve symbols within tsconfig.paths.json
+        flattened_walk_file_data.par_iter_mut().for_each(|file| {
+            process_import_export_info(
+                &mut file.import_export_info,
+                &file.source_file_path,
+                &self.resolver.as_ref().unwrap(),
+            );
+        });
+
+        // Create a report map with all the files
+        self.file_path_exported_items_map =
+            create_report_map_from_flattened_files(&flattened_walk_file_data);
+
+        // Create a record of all files listed as entry points, this will serve during `find_unused_items` as the first `frontier` iteration
+        self.entry_files = flattened_walk_file_data
+            .par_iter()
+            .filter_map(|file| {
+                if self.entry_packages.contains(&file.package_name) {
+                    return Some(file.source_file_path.clone());
+                }
+                None
             })
             .collect();
-        self.flattened_walk_file_data
-            .par_iter_mut()
-            .for_each(|file| {
-                process_import_export_info(file, &resolver);
-            });
 
-        self.refresh_graph();
+        // Refresh graph representation with latest changes from disk
+        self.refresh_graph(&flattened_walk_file_data);
     }
 
-    fn refresh_graph(&mut self) {
-        let files: HashMap<String, Arc<GraphFile>> = self
-            .flattened_walk_file_data
+    // Given a Vec<WalkFileMetadata> refreshes the in-memory representation of imports/exports of source file graph
+    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<WalkFileMetaData>) {
+        let files: HashMap<String, Arc<GraphFile>> = flattened_walk_file_data
             .par_iter()
             .map(|file| {
                 (
@@ -215,37 +205,22 @@ impl UnusedFinder {
         {
             self.logs.push("Refreshing all files".to_string());
             self.refresh_file_list();
-            self.refresh_graph();
         } else {
             self.logs.push("Refreshing only some files!".to_string());
             self.refresh_files_to_check(&files_to_check);
         }
-        self.file_path_exported_items_map =
-            create_report_map_from_flattened_files(&self.flattened_walk_file_data);
+        // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
         let mut file_path_exported_items_map = self.file_path_exported_items_map.clone();
-        let entry_files: Vec<String> = self
-            .flattened_walk_file_data
-            .par_iter()
-            .filter_map(|file| {
-                if self.entry_packages.contains(&file.package_name) {
-                    return Some(file.source_file_path.clone());
-                }
-                None
-            })
-            .collect();
-        let mut frontier = entry_files;
-        for i in 0..10_000_000 {
-            frontier = self.graph.bfs_step(frontier);
 
-            if frontier.is_empty() {
-                break;
-            }
-            if i == 10_000_000 {
-                return Err(napi::Error::new(
-                    napi::Status::GenericFailure,
-                    "exceeded max iterations".to_string(),
-                ));
-            }
+        let mut frontier = self.entry_files.clone();
+        for _ in 0..10_000_000 {
+            frontier = self.graph.bfs_step(frontier);
+        }
+        if !frontier.is_empty() {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                "exceeded max iterations".to_string(),
+            ));
         }
 
         let allow_list: Vec<glob::Pattern> = read_allow_list();
@@ -297,26 +272,28 @@ impl UnusedFinder {
         return Ok(ok);
     }
 
+    // Reads files from disk and updates information within `self.graph` for specified paths in `files_to_check`
     fn refresh_files_to_check(&mut self, files_to_check: &Vec<String>) {
         files_to_check.iter().for_each(|f| {
-            match self
-                .flattened_walk_file_data
-                .par_iter_mut()
-                .find_first(|walk_file_info| &walk_file_info.source_file_path == f)
-            {
-                Some(current_file) => {
-                    let visitor_result =
-                        get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
-                    if let Ok(ok) = visitor_result {
-                        current_file.import_export_info = ok;
+            // Read/parse file from disk
+            let visitor_result =
+                get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
+            if let Ok(ok) = visitor_result {
+                match self.graph.files.get_mut(f) {
+                    // Check file exists in graph
+                    Some(current_graph_file) => {
+                        let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
+                        current_graph_file.import_export_info = ok; // Update import_export_info within self.graph
                         self.logs.push(format!("refreshing {}", f.to_string()));
                         process_import_export_info(
-                            current_file,
-                            &create_caching_resolver(&self.tsconfig),
+                            // Process import/export info to use resolver.
+                            &mut current_graph_file.import_export_info,
+                            &f,
+                            &self.resolver.as_ref().unwrap(),
                         );
                     }
+                    None => todo!(),
                 }
-                None => todo!(),
             }
         });
     }
