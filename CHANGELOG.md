@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 24 Oct 2023 21:41:35 GMT and should not be manually modified.
+This log was last generated on Wed, 01 Nov 2023 15:24:31 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.10.0
+
+Wed, 01 Nov 2023 15:24:31 GMT
+
+### Minor changes
+
+- Added comments to unused finder struct. Improve validations for bfs_step. Remove rendundant property in unusedFinder struct (edgar21_9@hotmail.com)
 
 ## 0.9.0
 
