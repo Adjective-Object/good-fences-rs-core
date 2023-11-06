@@ -83,9 +83,10 @@ const entries = [
   "sample-query-field-policy",
 ];
 
+const { UnusedFinder } = require("./index");
 const workers = require("/workspaces/client-web/workers.glob.json");
 
-let report = unused({
+const config = {
   entryPackages: entries,
   filesIgnoredExports: [],
   filesIgnoredImports: [],
@@ -94,10 +95,7 @@ let report = unused({
     // ...workers.files,
     // ...workers.excludedFiles,
     "**/osfruntime_strings.js",
-    "**/test/**",
     "**/scripts/**",
-    "**/*.Test.ts",
-    "**/*.Tests.ts",
     "**/*.d.ts",
     "**/*.d.scss.ts",
     "**/*.d.json.ts",
@@ -105,5 +103,8 @@ let report = unused({
   ],
   skippedItems: [],
   tsConfigPath: "./tsconfig.paths.json",
-});
+};
+
+let report = new UnusedFinder(config).findUnusedItems([]);
+// let report = unused(config);
 console.log(report);

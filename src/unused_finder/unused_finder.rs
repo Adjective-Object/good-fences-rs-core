@@ -26,13 +26,15 @@ use super::{
 pub struct UnusedFinder {
     pub report: UnusedFinderReport,
     pub logs: Vec<String>,
-    config: FindUnusedItemsConfig,
     entry_packages: HashSet<String>,
+    // Hashmap containing metadata necessary to locate unused exported items within files in vscode diagnostics
     file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
     skipped_items: Arc<Vec<regex::Regex>>,
     skipped_dirs: Arc<Vec<glob::Pattern>>,
+    src_files: Vec<WalkFileMetaData>,
+    test_files: Vec<WalkFileMetaData>,
     entry_files: Vec<String>,
-    graph: Graph,
+    paths_to_read: Vec<String>,
     resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
 }
 
@@ -85,76 +87,64 @@ impl UnusedFinder {
             }
         };
         let skipped_items = Arc::new(skipped_items);
-        let mut flattened_walk_file_data =
-            create_flattened_walked_files(&paths_to_read, &skipped_dirs, &skipped_items);
+        let all_files =
+            retrieve_and_process_files(&paths_to_read, &skipped_dirs, &skipped_items, &resolver);
 
-        let mut files: Vec<GraphFile> = flattened_walk_file_data
-            .par_iter_mut()
-            .map(|file| {
-                process_import_export_info(
-                    &mut file.import_export_info,
-                    &file.source_file_path,
-                    &resolver,
-                );
-                GraphFile::new(
-                    file.source_file_path.clone(),
-                    file.import_export_info
-                        .exported_ids
-                        .iter()
-                        .map(|e| e.metadata.export_kind.clone())
-                        .collect(),
-                    file.import_export_info.clone(),
-                    entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-                )
-            })
-            .collect();
+        let mut source_files: Vec<WalkFileMetaData> = Vec::with_capacity(all_files.len());
 
-        let files: HashMap<String, Arc<GraphFile>> = files
-            .par_drain(0..)
-            .map(|file| (file.file_path.clone(), Arc::new(file)))
-            .collect();
+        let mut test_files: Vec<WalkFileMetaData> = vec![];
 
-        let graph = Graph { files };
+        for file in all_files {
+            if file.is_test_file {
+                test_files.push(file);
+            } else {
+                source_files.push(file);
+            }
+        }
 
-        let file_path_exported_items_map =
-            create_report_map_from_flattened_files(&flattened_walk_file_data);
+        let file_path_exported_items_map = create_report_map_from_flattened_files(&source_files);
 
         Ok(Self {
-            config,
             entry_packages,
             skipped_dirs,
             skipped_items,
             resolver: Some(resolver),
-            graph,
             file_path_exported_items_map,
+            src_files: source_files,
+            test_files,
             ..Default::default()
         })
     }
 
     // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
     #[napi]
-    pub fn refresh_file_list(&mut self) {
+    pub fn refresh_all_files(&mut self) {
         // Get a vector with all WalkFileMetaData
-        let mut flattened_walk_file_data = create_flattened_walked_files(
-            &self.config.paths_to_read,
+        let all_files = retrieve_and_process_files(
+            &self.paths_to_read,
             &self.skipped_dirs,
             &self.skipped_items,
+            self.resolver
+                .as_ref()
+                .expect("Unable to find node modules resolver"),
         );
-        // Proccess all information with swc resolver to resolve symbols within tsconfig.paths.json
-        flattened_walk_file_data.par_iter_mut().for_each(|file| {
-            process_import_export_info(
-                &mut file.import_export_info,
-                &file.source_file_path,
-                &self.resolver.as_ref().unwrap(),
-            );
-        });
+        let mut source_files: Vec<WalkFileMetaData> = Vec::with_capacity(all_files.len());
+
+        let mut test_files: Vec<WalkFileMetaData> = vec![];
+
+        for file in all_files {
+            if file.is_test_file {
+                test_files.push(file);
+            } else {
+                source_files.push(file);
+            }
+        }
 
         // Create a report map with all the files
-        self.file_path_exported_items_map =
-            create_report_map_from_flattened_files(&flattened_walk_file_data);
+        self.file_path_exported_items_map = create_report_map_from_flattened_files(&source_files);
 
         // Create a record of all files listed as entry points, this will serve during `find_unused_items` as the first `frontier` iteration
-        self.entry_files = flattened_walk_file_data
+        self.entry_files = source_files
             .par_iter()
             .filter_map(|file| {
                 if self.entry_packages.contains(&file.package_name) {
@@ -164,32 +154,9 @@ impl UnusedFinder {
             })
             .collect();
 
-        // Refresh graph representation with latest changes from disk
-        self.refresh_graph(&flattened_walk_file_data);
-    }
+        self.src_files = source_files;
 
-    // Given a Vec<WalkFileMetadata> refreshes the in-memory representation of imports/exports of source file graph
-    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<WalkFileMetaData>) {
-        let files: HashMap<String, Arc<GraphFile>> = flattened_walk_file_data
-            .par_iter()
-            .map(|file| {
-                (
-                    file.source_file_path.to_string(),
-                    Arc::new(GraphFile::new(
-                        file.source_file_path.clone(),
-                        file.import_export_info
-                            .exported_ids
-                            .iter()
-                            .map(|e| e.metadata.export_kind.clone())
-                            .collect(),
-                        file.import_export_info.clone(),
-                        self.entry_packages.clone().contains(&file.package_name), // mark files from entry_packages as used
-                    )),
-                )
-            })
-            .collect();
-
-        self.graph = Graph { files };
+        self.test_files = test_files;
     }
 
     #[napi]
@@ -199,22 +166,33 @@ impl UnusedFinder {
     ) -> napi::Result<UnusedFinderReport> {
         self.logs = vec![];
         self.logs.push(format!("{:?}", &files_to_check));
+        let mut graph = create_graph(&self.src_files, &self.entry_packages);
         if files_to_check
             .iter()
             .any(|file| !self.file_path_exported_items_map.contains_key(file))
         {
             self.logs.push("Refreshing all files".to_string());
-            self.refresh_file_list();
+            self.refresh_all_files();
         } else {
             self.logs.push("Refreshing only some files!".to_string());
-            self.refresh_files_to_check(&files_to_check);
+            self.refresh_files_to_check(&files_to_check, &mut graph);
         }
         // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
-        let mut file_path_exported_items_map = self.file_path_exported_items_map.clone();
-
-        let mut frontier = self.entry_files.clone();
+        let file_path_exported_items_map = self.file_path_exported_items_map.clone();
+        // let entry_packages = self.entry_packages;
+        let entry_packages = &self.entry_packages;
+        let mut frontier = self
+            .src_files
+            .par_iter_mut()
+            .filter_map(|file| {
+                if entry_packages.contains(&file.package_name) {
+                    return Some(file.source_file_path.clone());
+                }
+                None
+            })
+            .collect();
         for _ in 0..10_000_000 {
-            frontier = self.graph.bfs_step(frontier);
+            frontier = graph.bfs_step(frontier);
         }
         if !frontier.is_empty() {
             return Err(napi::Error::new(
@@ -225,47 +203,76 @@ impl UnusedFinder {
 
         let allow_list: Vec<glob::Pattern> = read_allow_list();
 
-        let reported_unused_files = BTreeMap::from_iter(
-            self.graph
-                .files
-                .iter()
-                .filter(|f| !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))),
-        );
-        let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = self
-            .graph
-            .files
+        let unused_items = create_used_files_unused_items_map(&graph, file_path_exported_items_map);
+
+        let reported_unused_files = BTreeMap::from_iter(graph.files.iter().filter(|f| {
+            !f.1.is_test_file && !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))
+        }));
+
+        let all_files: Vec<_> = self
+            .test_files
+            .clone()
+            .par_drain(0..)
+            .chain(self.src_files.clone().par_drain(0..))
+            .collect();
+        let entry_files = self
+            .test_files
+            .par_iter()
+            .map(|f| f.source_file_path.to_string());
+        let file_path_exported_items_map = create_report_map_from_flattened_files(&all_files);
+        let mut graph = create_graph(&all_files, &self.entry_packages);
+
+        let mut frontier: Vec<String> = entry_files.collect();
+        for _ in 0..10_000_000 {
+            frontier = graph.bfs_step(frontier);
+        }
+        if !frontier.is_empty() {
+            return Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                "exceeded max iterations".to_string(),
+            ));
+        }
+
+        let test_unused_items =
+            create_used_files_unused_items_map(&graph, file_path_exported_items_map);
+
+        let test_only_used_files: Vec<String> = test_unused_items
             .iter()
-            .filter_map(|(file_path, info)| {
-                if info.is_used {
-                    match file_path_exported_items_map.remove(file_path) {
-                        Some(mut exported_items) => {
-                            let unused_exports = &info.unused_exports;
-                            if unused_exports.is_empty() {
-                                return None;
-                            }
-                            let unused_exports = exported_items
-                                .drain(0..)
-                                .filter(|exported| {
-                                    unused_exports
-                                        .iter()
-                                        .any(|unused| unused.to_string() == exported.id.to_string())
-                                })
-                                .collect();
-                            return Some((file_path.to_string(), unused_exports));
-                        }
-                        None => return None,
-                    }
+            .filter_map(|(file, _)| {
+                if unused_items.contains_key(file) {
+                    return Some(file.to_string());
                 }
                 None
             })
             .collect();
+
+        let mut test_only_used_items: HashMap<String, Vec<ExportedItemReport>> = test_unused_items
+            .iter()
+            .filter_map(|(file, items)| {
+                if let Some(items_prod) = unused_items.get(file) {
+                    // if something is unused in prod but used in tests
+                    return Some((
+                        file.to_string(),
+                        items_prod
+                            .iter()
+                            .filter(|item| !items.contains(&item))
+                            .map(|i| i.clone())
+                            .collect::<Vec<_>>(),
+                    ));
+                }
+                None
+            })
+            .collect();
+        test_only_used_items.retain(|_, v| !v.is_empty());
 
         let mut ok = UnusedFinderReport {
             unused_files: reported_unused_files
                 .iter()
                 .map(|(p, _)| p.to_string())
                 .collect(),
-            unused_files_items,
+            unused_files_items: test_unused_items,
+            test_only_used_files,
+            test_only_used_items,
         };
         let files: HashSet<String> = HashSet::from_iter(files_to_check);
         ok.unused_files_items.retain(|key, _| files.contains(key));
@@ -273,13 +280,13 @@ impl UnusedFinder {
     }
 
     // Reads files from disk and updates information within `self.graph` for specified paths in `files_to_check`
-    fn refresh_files_to_check(&mut self, files_to_check: &Vec<String>) {
+    fn refresh_files_to_check(&mut self, files_to_check: &Vec<String>, graph: &mut Graph) {
         files_to_check.iter().for_each(|f| {
             // Read/parse file from disk
             let visitor_result =
                 get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
             if let Ok(ok) = visitor_result {
-                match self.graph.files.get_mut(f) {
+                match graph.files.get_mut(f) {
                     // Check file exists in graph
                     Some(current_graph_file) => {
                         let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
@@ -297,4 +304,91 @@ impl UnusedFinder {
             }
         });
     }
+}
+
+fn create_used_files_unused_items_map(
+    graph: &Graph,
+    mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
+) -> HashMap<String, Vec<ExportedItemReport>> {
+    let unused_items: HashMap<String, Vec<ExportedItemReport>> = graph
+        .files
+        .iter()
+        .filter_map(|(file_path, info)| {
+            if info.is_used {
+                match file_path_exported_items_map.remove(file_path) {
+                    Some(mut exported_items) => {
+                        let unused_exports = &info.unused_exports;
+                        if unused_exports.is_empty() {
+                            return None;
+                        }
+                        let unused_exports = exported_items
+                            .drain(0..)
+                            .filter(|exported| {
+                                unused_exports
+                                    .iter()
+                                    .any(|unused| unused.to_string() == exported.id.to_string())
+                            })
+                            .collect();
+                        return Some((file_path.to_string(), unused_exports));
+                    }
+                    None => return None,
+                }
+            }
+            None
+        })
+        .collect();
+    unused_items
+}
+
+fn create_graph(source_files: &Vec<WalkFileMetaData>, entry_packages: &HashSet<String>) -> Graph {
+    let mut files = create_graph_files(source_files, entry_packages);
+
+    let files: HashMap<String, Arc<GraphFile>> = files
+        .par_drain(0..)
+        .map(|file| (file.file_path.clone(), Arc::new(file)))
+        .collect();
+
+    let graph = Graph { files };
+    graph
+}
+
+fn retrieve_and_process_files(
+    paths_to_read: &Vec<String>,
+    skipped_dirs: &Arc<Vec<glob::Pattern>>,
+    skipped_items: &Arc<Vec<regex::Regex>>,
+    resolver: &CachingResolver<TsConfigResolver<NodeModulesResolver>>,
+) -> Vec<WalkFileMetaData> {
+    let mut all_files = create_flattened_walked_files(&paths_to_read, skipped_dirs, skipped_items);
+
+    all_files.par_iter_mut().for_each(|file| {
+        process_import_export_info(
+            &mut file.import_export_info,
+            &file.source_file_path,
+            resolver,
+        );
+    });
+    all_files
+}
+
+fn create_graph_files(
+    source_files: &Vec<WalkFileMetaData>,
+    entry_packages: &HashSet<String>,
+) -> Vec<GraphFile> {
+    let files: Vec<GraphFile> = source_files
+        .par_iter()
+        .map(|file| {
+            GraphFile::new(
+                file.source_file_path.clone(),
+                file.import_export_info
+                    .exported_ids
+                    .iter()
+                    .map(|e| e.metadata.export_kind.clone())
+                    .collect(),
+                file.import_export_info.clone(),
+                entry_packages.contains(&file.package_name) || file.is_test_file, // mark files from entry_packages as used
+                file.is_test_file,
+            )
+        })
+        .collect();
+    files
 }

@@ -40,6 +40,7 @@ pub struct WalkFileMetaData {
     pub package_name: String,
     pub source_file_path: String,
     pub import_export_info: ImportExportInfo,
+    pub is_test_file: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -72,7 +73,7 @@ pub struct FindUnusedItemsConfig {
     pub entry_packages: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[napi(object)]
 pub struct ExportedItemReport {
     pub id: String,
@@ -85,6 +86,8 @@ pub struct ExportedItemReport {
 pub struct UnusedFinderReport {
     pub unused_files: Vec<String>,
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
+    pub test_only_used_files: Vec<String>,
+    pub test_only_used_items: HashMap<String, Vec<ExportedItemReport>>,
     // pub flattened_walk_file_data: Vec<WalkFileMetaData>,
 }
 
@@ -224,6 +227,7 @@ pub fn find_unused_items(
                     .collect(),
                 file.import_export_info.clone(),
                 entry_packages.contains(&file.package_name), // mark files from entry_packages as used
+                file.is_test_file,
             )
         })
         .collect();
@@ -304,6 +308,7 @@ pub fn find_unused_items(
             .map(|(p, _)| p.to_string())
             .collect(),
         unused_files_items,
+        ..Default::default()
     })
 }
 
