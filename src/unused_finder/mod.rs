@@ -336,7 +336,7 @@ fn read_allow_list() -> Vec<glob::Pattern> {
 
 #[napi(js_name = "UnusedFinder")]
 pub struct UnusedFinderJs {
-    unused_finder: UnusedFinder
+    unused_finder: UnusedFinder,
 }
 
 #[napi]
@@ -344,10 +344,8 @@ impl UnusedFinderJs {
     #[napi(constructor)]
     pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
         match UnusedFinder::new(config) {
-            Ok(unused_finder) => Ok(UnusedFinderJs {
-                unused_finder
-            }),
-            Err(e) => Err(e)
+            Ok(unused_finder) => Ok(UnusedFinderJs { unused_finder }),
+            Err(e) => Err(e),
         }
     }
 

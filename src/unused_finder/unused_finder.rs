@@ -36,7 +36,6 @@ pub struct UnusedFinder {
     resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
 }
 
-
 impl UnusedFinder {
     pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
         let FindUnusedItemsConfig {
@@ -114,7 +113,6 @@ impl UnusedFinder {
     }
 
     // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
-    
     pub fn refresh_all_files(&mut self) {
         // Get a vector with all WalkFileMetaData
         let all_files = retrieve_and_process_files(
@@ -156,7 +154,6 @@ impl UnusedFinder {
         self.test_files = test_files;
     }
 
-    
     pub fn find_unused_items(
         &mut self,
         files_to_check: Vec<String>,
@@ -181,15 +178,15 @@ impl UnusedFinder {
         // Create binding to entry_packages to avoid borrow checker complain about borrowing `self`
         let entry_packages = &self.entry_packages;
         let entry_pkgs_files: Vec<String> = self
-        .src_files
-        .par_iter_mut()
-        .filter_map(|file| {
-            if entry_packages.contains(&file.package_name) {
-                return Some(file.source_file_path.clone());
-            }
-            None
-        })
-        .collect();
+            .src_files
+            .par_iter_mut()
+            .filter_map(|file| {
+                if entry_packages.contains(&file.package_name) {
+                    return Some(file.source_file_path.clone());
+                }
+                None
+            })
+            .collect();
         let mut frontier = entry_pkgs_files.clone();
         for _ in 0..10_000_000 {
             frontier = graph.bfs_step(frontier);
@@ -209,7 +206,6 @@ impl UnusedFinder {
         let reported_unused_files = BTreeMap::from_iter(graph.files.iter().filter(|f| {
             !f.1.is_test_file && !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))
         }));
-
 
         // Create Vec containing the string paths of source_files + test_files
         let all_files: Vec<_> = self
