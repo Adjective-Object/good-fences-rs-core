@@ -105,6 +105,7 @@ const config = {
   tsConfigPath: "./tsconfig.paths.json",
 };
 
-let report = new UnusedFinder(config).findUnusedItems([]);
-// let report = unused(config);
-console.log(report);
+// let report = new UnusedFinder(config).findUnusedItems([]);
+let report = unused(config);
+// console.log(report);
+console.log(report.unusedFilesItems);

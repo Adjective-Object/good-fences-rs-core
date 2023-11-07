@@ -273,7 +273,7 @@ impl UnusedFinder {
                 .iter()
                 .map(|(p, _)| p.to_string())
                 .collect(),
-            unused_files_items: test_unused_items,
+            unused_files_items: unused_items,
             test_only_used_files,
             test_only_used_items,
         };
