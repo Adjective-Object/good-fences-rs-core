@@ -349,6 +349,7 @@ impl UnusedFinderJs {
         }
     }
 
+    #[napi]
     pub fn find_unused_items(
         &mut self,
         files_to_check: Vec<String>,
