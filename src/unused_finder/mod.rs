@@ -231,7 +231,6 @@ pub fn find_unused_items(
                     .collect(),
                 file.import_export_info.clone(),
                 entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-                file.is_test_file,
             )
         })
         .collect();

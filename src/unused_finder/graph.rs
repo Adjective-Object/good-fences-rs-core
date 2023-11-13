@@ -23,10 +23,8 @@ pub struct GraphFile {
     // pub package_name: String,
     pub file_path: String,
     pub unused_exports: HashSet<ExportKind>,
-    //
     pub export_from: HashMap<ExportKind, String>,
     pub import_export_info: ImportExportInfo,
-    pub only_used_in_test: HashSet<ExportKind>,
 }
 
 impl GraphFile {
@@ -35,7 +33,6 @@ impl GraphFile {
         unused_exports: HashSet<ExportKind>,
         import_export_info: ImportExportInfo,
         is_used: bool,
-        is_test_file: bool,
     ) -> Self {
         let mut export_from = HashMap::new();
         import_export_info
@@ -52,7 +49,6 @@ impl GraphFile {
             file_path,
             unused_exports,
             import_export_info,
-            is_test_file,
             ..Default::default()
         }
     }
@@ -76,12 +72,6 @@ impl GraphFile {
             return MarkItemResult::ResolveExportFrom(from.clone());
         }
         MarkItemResult::AlreadyMarked
-    }
-
-    pub fn mark_item_as_used_in_test(&mut self, item: &ExportKind) {
-        if let Some(taken) = self.unused_exports.take(item) {
-            self.only_used_in_test.insert(taken);
-        }
     }
 }
 

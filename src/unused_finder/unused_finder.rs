@@ -373,7 +373,6 @@ fn create_graph_files(
                     .collect(),
                 file.import_export_info.clone(),
                 entry_packages.contains(&file.package_name) || file.is_test_file, // mark files from entry_packages as used
-                file.is_test_file,
             )
         })
         .collect();

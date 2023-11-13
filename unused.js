@@ -73,4 +73,4 @@ const config = {
 let report = new UnusedFinder(config).findUnusedItems([]);
 // let report = unused(config);
 // console.log(report);
-console.log(report.unusedFilesItems);
+console.log(report.testOnlyUsedFiles);
