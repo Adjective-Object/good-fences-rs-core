@@ -226,10 +226,8 @@ impl UnusedFinder {
             .collect();
 
         unused_items.iter_mut().for_each(|(file, items)| {
-            match graph.files.get_mut(file) {
+            match graph.files.get(file) {
                 Some(graph_file) => {
-                    // Get interior mutable object reference
-                    let graph_file = Arc::get_mut(graph_file).unwrap();
                     // Iterate over each unused item from entry files
                     for item in items.iter_mut() {
                         // If the item is no longer in the list of unused items of graph_file, it was used only by test files
