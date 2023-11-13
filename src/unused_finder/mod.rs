@@ -75,12 +75,13 @@ pub struct FindUnusedItemsConfig {
     pub entry_packages: Vec<String>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 #[napi(object)]
 pub struct ExportedItemReport {
     pub id: String,
     pub start: i32,
     pub end: i32,
+    pub test_only_use: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -89,8 +90,6 @@ pub struct UnusedFinderReport {
     pub unused_files: Vec<String>,
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
     pub test_only_used_files: Vec<String>,
-    pub test_only_used_items: HashMap<String, Vec<ExportedItemReport>>,
-    // pub flattened_walk_file_data: Vec<WalkFileMetaData>,
 }
 
 fn create_caching_resolver(
@@ -114,11 +113,13 @@ fn create_caching_resolver(
 
 fn create_report_map_from_flattened_files(
     flattened_walk_file_data: &Vec<WalkFileMetaData>,
+    entry_packages: &HashSet<String>,
 ) -> HashMap<String, Vec<ExportedItemReport>> {
     let file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         flattened_walk_file_data
             .clone()
             .par_drain(0..)
+            .filter(|file| !entry_packages.contains(&file.package_name))
             .map(|file| {
                 let ids = file
                     .import_export_info
@@ -128,6 +129,7 @@ fn create_report_map_from_flattened_files(
                         id: exported_item.metadata.export_kind.to_string(),
                         start: exported_item.metadata.span.lo.to_usize() as i32,
                         end: exported_item.metadata.span.hi.to_usize() as i32,
+                        test_only_use: false,
                     })
                     .collect();
                 (file.source_file_path.clone(), ids)
@@ -211,7 +213,7 @@ pub fn find_unused_items(
     let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
         create_caching_resolver(&tsconfig);
     let mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
-        create_report_map_from_flattened_files(&flattened_walk_file_data);
+        create_report_map_from_flattened_files(&flattened_walk_file_data, &entry_packages);
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
         .map(|file| {

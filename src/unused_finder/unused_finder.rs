@@ -30,7 +30,6 @@ pub struct UnusedFinder {
     skipped_items: Arc<Vec<regex::Regex>>,
     skipped_dirs: Arc<Vec<glob::Pattern>>,
     src_files: Vec<WalkFileMetaData>,
-    test_files: Vec<WalkFileMetaData>,
     entry_files: Vec<String>,
     paths_to_read: Vec<String>,
     resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
@@ -86,19 +85,8 @@ impl UnusedFinder {
         let all_files =
             retrieve_and_process_files(&paths_to_read, &skipped_dirs, &skipped_items, &resolver);
 
-        let mut source_files: Vec<WalkFileMetaData> = Vec::with_capacity(all_files.len());
-
-        let mut test_files: Vec<WalkFileMetaData> = vec![];
-
-        for file in all_files {
-            if file.is_test_file {
-                test_files.push(file);
-            } else {
-                source_files.push(file);
-            }
-        }
-
-        let file_path_exported_items_map = create_report_map_from_flattened_files(&source_files);
+        let file_path_exported_items_map =
+            create_report_map_from_flattened_files(&all_files, &entry_packages);
 
         Ok(Self {
             entry_packages,
@@ -106,8 +94,7 @@ impl UnusedFinder {
             skipped_items,
             resolver: Some(resolver),
             file_path_exported_items_map,
-            src_files: source_files,
-            test_files,
+            src_files: all_files,
             ..Default::default()
         })
     }
@@ -123,23 +110,12 @@ impl UnusedFinder {
                 .as_ref()
                 .expect("Unable to find node modules resolver"),
         );
-        let mut source_files: Vec<WalkFileMetaData> = Vec::with_capacity(all_files.len());
-
-        let mut test_files: Vec<WalkFileMetaData> = vec![];
-
-        for file in all_files {
-            if file.is_test_file {
-                test_files.push(file);
-            } else {
-                source_files.push(file);
-            }
-        }
-
         // Create a report map with all the files
-        self.file_path_exported_items_map = create_report_map_from_flattened_files(&source_files);
+        self.file_path_exported_items_map =
+            create_report_map_from_flattened_files(&all_files, &self.entry_packages);
 
         // Create a record of all files listed as entry points, this will serve during `find_unused_items` as the first `frontier` iteration
-        self.entry_files = source_files
+        self.entry_files = all_files
             .par_iter()
             .filter_map(|file| {
                 if self.entry_packages.contains(&file.package_name) {
@@ -149,9 +125,7 @@ impl UnusedFinder {
             })
             .collect();
 
-        self.src_files = source_files;
-
-        self.test_files = test_files;
+        self.src_files = all_files;
     }
 
     pub fn find_unused_items(
@@ -173,7 +147,7 @@ impl UnusedFinder {
             self.refresh_files_to_check(&files_to_check, &mut graph);
         }
         // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
-        let file_path_exported_items_map = self.file_path_exported_items_map.clone();
+        let mut file_path_exported_items_map = self.file_path_exported_items_map.clone();
         // let entry_packages = self.entry_packages;
         // Create binding to entry_packages to avoid borrow checker complain about borrowing `self`
         let entry_packages = &self.entry_packages;
@@ -188,6 +162,7 @@ impl UnusedFinder {
             })
             .collect();
         let mut frontier = entry_pkgs_files.clone();
+        // Do graph bfs for entry package files
         for _ in 0..10_000_000 {
             frontier = graph.bfs_step(frontier);
         }
@@ -201,28 +176,27 @@ impl UnusedFinder {
         let allow_list: Vec<glob::Pattern> = read_allow_list();
 
         // Create map where key: list of used files, value: Vec containing items exported but never imported
-        let unused_items = create_used_files_unused_items_map(&graph, file_path_exported_items_map);
+        let mut unused_items: HashMap<String, Vec<ExportedItemReport>> =
+            create_used_files_unused_items_map(&graph, &mut file_path_exported_items_map);
 
-        let reported_unused_files = BTreeMap::from_iter(graph.files.iter().filter(|f| {
-            !f.1.is_test_file && !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))
-        }));
+        let files = graph.files.clone();
+        let unused_prod_files = BTreeMap::from_iter(
+            files
+                .iter()
+                .filter(|(_, graph_file)| !graph_file.is_test_file && !graph_file.is_used),
+        );
 
-        // Create Vec containing the string paths of source_files + test_files
-        let all_files: Vec<_> = self
-            .test_files
-            .clone()
-            .par_drain(0..)
-            .chain(self.src_files.clone().par_drain(0..))
+        // Set initial frontier as the list of test files
+        let mut frontier: Vec<String> = self
+            .src_files
+            .iter()
+            .filter_map(|walkfile| match walkfile.is_test_file {
+                true => Some(walkfile.source_file_path.to_string()),
+                false => None,
+            })
             .collect();
-        let entry_files = self
-            .test_files
-            .par_iter()
-            .map(|f| f.source_file_path.to_string());
-        let file_path_exported_items_map = create_report_map_from_flattened_files(&all_files);
-        let mut graph = create_graph(&all_files, &self.entry_packages);
-
-        let mut frontier: Vec<String> = entry_files.collect();
-        for _ in 0..10_000_000 {
+        // Do graph bfs for test files
+        for _ in 0..100_000 {
             frontier = graph.bfs_step(frontier);
         }
         if !frontier.is_empty() {
@@ -232,53 +206,65 @@ impl UnusedFinder {
             ));
         }
 
-        let test_unused_items: HashMap<String, Vec<ExportedItemReport>> =
-            create_used_files_unused_items_map(&graph, file_path_exported_items_map);
-
-        // Get the files list that were only imported by test files
-        let test_only_used_files: Vec<String> = test_unused_items
+        // Get file paths only reachable by test files
+        let test_only_used_files: Vec<String> = graph
+            .files
             .iter()
-            .filter_map(|(file, _)| {
-                if unused_items.contains_key(file) {
-                    return Some(file.to_string());
+            .filter_map(|(file_path, graph_file)| {
+                // If after a graph bfs on test files is marked and used
+                // And file list of reachable files from entries contains said file
+                // said file is reachable only by test files
+                // If a file file was previously marked as unused, and graph_file.is_used == true after bfs on test files
+                if graph_file.is_used && !unused_prod_files.contains_key(file_path) {
+                    // If allow list contains a file or pattern that matches said file, we don't include it in the list
+                    if !allow_list.iter().any(|p| p.matches(&file_path)) {
+                        return Some(file_path.to_string());
+                    }
                 }
                 None
             })
             .collect();
 
-        // Create a map where:
-        // Key: file reachable from entry points
-        // Value: List of items that were only imported by test files
-        let mut test_only_used_items: HashMap<String, Vec<ExportedItemReport>> = test_unused_items
-            .iter()
-            .filter_map(|(file, items)| {
-                if let Some(items_prod) = unused_items.get(file) {
-                    // if something is unused in prod but used in tests
-                    return Some((
-                        file.to_string(),
-                        items_prod
+        unused_items.iter_mut().for_each(|(file, items)| {
+            match graph.files.get_mut(file) {
+                Some(graph_file) => {
+                    // Get interior mutable object reference
+                    let graph_file = Arc::get_mut(graph_file).unwrap();
+                    // Iterate over each unused item from entry files
+                    for item in items.iter_mut() {
+                        // If the item is no longer in the list of unused items of graph_file, it was used only by test files
+                        if !graph_file
+                            .unused_exports
                             .iter()
-                            .filter(|item| !items.contains(&item))
-                            .map(|i| i.clone())
-                            .collect::<Vec<_>>(),
-                    ));
+                            .any(|export| export.to_string() == item.id)
+                        {
+                            // Mark item as only used by tests
+                            item.test_only_use = true;
+                        }
+                    }
                 }
-                None
-            })
-            .collect();
-        test_only_used_items.retain(|_, v| !v.is_empty());
+                None => {}
+            }
+        });
+        // Retain only items that are not from files marked to be allowed-unused
+        unused_items.retain(|k, _| !allow_list.iter().any(|p| p.matches(&k)));
 
         let mut ok = UnusedFinderReport {
-            unused_files: reported_unused_files
+            unused_files: unused_prod_files
                 .iter()
+                // filter out all unused files from allowlist
+                .filter(|(file_path, _)| !allow_list.iter().any(|p| p.matches(&file_path)))
+                // Convert to a list of strings
                 .map(|(p, _)| p.to_string())
                 .collect(),
             unused_files_items: unused_items,
             test_only_used_files,
-            test_only_used_items,
+            ..Default::default()
         };
-        let files: HashSet<String> = HashSet::from_iter(files_to_check);
-        ok.unused_files_items.retain(|key, _| files.contains(key));
+        if !files_to_check.is_empty() {
+            let files: HashSet<String> = HashSet::from_iter(files_to_check);
+            ok.unused_files_items.retain(|key, _| files.contains(key));
+        }
         return Ok(ok);
     }
 
@@ -311,7 +297,7 @@ impl UnusedFinder {
 
 fn create_used_files_unused_items_map(
     graph: &Graph,
-    mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
+    file_path_exported_items_map: &mut HashMap<String, Vec<ExportedItemReport>>,
 ) -> HashMap<String, Vec<ExportedItemReport>> {
     let unused_items: HashMap<String, Vec<ExportedItemReport>> = graph
         .files
