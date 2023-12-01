@@ -66,6 +66,8 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v3
+      - name: add rust target
+        run: rustup target add aarch64-apple-darwin
       - name: napi build
         run: yarn install && yarn build --target aarch64-apple-darwin
       - name: cargo test
