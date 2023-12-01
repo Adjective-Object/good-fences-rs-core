@@ -63,7 +63,6 @@ jobs:
           if-no-files-found: error
   tests-macos-arm:
     runs-on: macos-latest
-    target: aarch64-apple-darwin
     steps:
       - name: Check out code
         uses: actions/checkout@v3
