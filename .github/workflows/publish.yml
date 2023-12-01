@@ -31,6 +31,10 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: macos-napi
+      - name: pull macos apple-sillicon artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-arm-napi
       - name: pull js files
         uses: actions/download-artifact@v3
         with:

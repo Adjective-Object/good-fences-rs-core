@@ -61,6 +61,24 @@ jobs:
           name: macos-napi
           path: ./*.node
           if-no-files-found: error
+  tests-macos-arm:
+    runs-on: macos-latest
+    target: aarch64-apple-darwin
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: napi build
+        run: yarn install && yarn build --target aarch64-apple-darwin
+      - name: cargo test
+        run: cargo test --release
+      - name: run napi tests
+        run: yarn test
+      - name: upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-arm-napi
+          path: ./*.node
+          if-no-files-found: error
   tests-win:
     runs-on: windows-latest
     steps:
