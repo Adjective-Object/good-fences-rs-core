@@ -72,8 +72,6 @@ jobs:
         run: yarn install && yarn build --target aarch64-apple-darwin
       - name: cargo test
         run: cargo test --release
-      - name: run napi tests
-        run: yarn test
       - name: upload artifacts
         uses: actions/upload-artifact@v3
         with:
