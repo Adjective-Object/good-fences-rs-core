@@ -5,7 +5,11 @@
   "types": "index.d.ts",
   "napi": {
     "name": "@good-fences",
-    "triples": {}
+    "triples": {
+      "additional": [
+        "aarch64-apple-darwin"
+      ]
+    }
   },
   "repository": {
     "type": "git",
