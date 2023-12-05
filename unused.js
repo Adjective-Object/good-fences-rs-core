@@ -1,41 +1,6 @@
 #! /usr/bin/env node
 let unused = require("./index").findUnusedItems;
 
-const entry = [
-  "**/owa-calendar-deeplink-opx-bootstrap/**",
-  "**/owa-publishedcalendar-bootstrap/**",
-  "**/owa-mail-bootstrap/**",
-  "**/owa-deeplink-bootstrap/**",
-  "**/owa-mail-deeplink-opx-bootstrap/**",
-  "**/meet-bootstrap/**",
-  "**/owa-message-recall/**",
-  "**/native-host-bootstrap/**",
-  "**/native-host-deep-bootstrap/**",
-  "**/owa-tokenprovider/**",
-  "**/owa-bookings-bootstrap/**",
-  "**/owa-bookingsv2-bootstrap/**",
-  "**/owa-bookings-mobile-bootstrap/**",
-  "**/owa-bookings-c2-bootstrap/**",
-  "**/owa-serviceworker-v2/**",
-  "**/owa-webpush-serviceworker/**",
-  "**/owa-findtime-bootstrap/**",
-  "**/owa-jit-experience/**",
-  "**/eventify-bootstrap/**",
-  "**/owa-opx-app-bootstrap/**",
-  "**/owa-safelink-waitingpage/**",
-  "**/owa-calendar-widget/**",
-  "**/owa-todo-widget/**",
-  "**/bookwithme-bootstrap/**",
-  "**/owa-ads-frame/**",
-  "**/owa-adbar-frame/**",
-  "**/owa-fluent-icons-svg/App/**",
-  "**/oobe-bootstrap/**",
-  "**/addison-bootstrap/**",
-  "**/places-bootstrap/**",
-  "**/owa-immersive-bizchat-bootstrap/**",
-  "**/owa-immersive-bizchat-bootstrap/**",
-];
-
 const entries = [
   "owa-addins-osfruntime-resources",
   "owa-analytics",
@@ -83,9 +48,10 @@ const entries = [
   "sample-query-field-policy",
 ];
 
+const { UnusedFinder } = require("./index");
 const workers = require("/workspaces/client-web/workers.glob.json");
 
-let report = unused({
+const config = {
   entryPackages: entries,
   filesIgnoredExports: [],
   filesIgnoredImports: [],
@@ -94,10 +60,7 @@ let report = unused({
     // ...workers.files,
     // ...workers.excludedFiles,
     "**/osfruntime_strings.js",
-    "**/test/**",
     "**/scripts/**",
-    "**/*.Test.ts",
-    "**/*.Tests.ts",
     "**/*.d.ts",
     "**/*.d.scss.ts",
     "**/*.d.json.ts",
@@ -105,5 +68,9 @@ let report = unused({
   ],
   skippedItems: [],
   tsConfigPath: "./tsconfig.paths.json",
-});
-console.log(report);
+};
+
+let report = new UnusedFinder(config).findUnusedItems([]);
+// let report = unused(config);
+// console.log(report);
+console.log(report.testOnlyUsedFiles);

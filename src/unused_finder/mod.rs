@@ -29,17 +29,20 @@ use crate::{
         graph::{Graph, GraphFile},
         unused_finder_visitor_runner::ImportExportInfo,
         utils::{
-            process_async_imported_paths, process_executed_paths, process_exports_from,
-            process_import_path_ids, process_require_paths, retrieve_files,
+            process_exports_from_paths, resolve_async_imported_paths, resolve_executed_paths,
+            resolve_import_item_from_paths, resolve_require_paths, retrieve_files,
         },
     },
 };
+
+use self::unused_finder::UnusedFinder;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct WalkFileMetaData {
     pub package_name: String,
     pub source_file_path: String,
     pub import_export_info: ImportExportInfo,
+    pub is_test_file: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -72,12 +75,13 @@ pub struct FindUnusedItemsConfig {
     pub entry_packages: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 #[napi(object)]
 pub struct ExportedItemReport {
     pub id: String,
     pub start: i32,
     pub end: i32,
+    pub test_only_use: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -85,7 +89,7 @@ pub struct ExportedItemReport {
 pub struct UnusedFinderReport {
     pub unused_files: Vec<String>,
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
-    // pub flattened_walk_file_data: Vec<WalkFileMetaData>,
+    pub test_only_used_files: Vec<String>,
 }
 
 fn create_caching_resolver(
@@ -109,11 +113,13 @@ fn create_caching_resolver(
 
 fn create_report_map_from_flattened_files(
     flattened_walk_file_data: &Vec<WalkFileMetaData>,
+    entry_packages: &HashSet<String>,
 ) -> HashMap<String, Vec<ExportedItemReport>> {
     let file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         flattened_walk_file_data
             .clone()
             .par_drain(0..)
+            .filter(|file| !entry_packages.contains(&file.package_name))
             .map(|file| {
                 let ids = file
                     .import_export_info
@@ -123,6 +129,7 @@ fn create_report_map_from_flattened_files(
                         id: exported_item.metadata.export_kind.to_string(),
                         start: exported_item.metadata.span.lo.to_usize() as i32,
                         end: exported_item.metadata.span.hi.to_usize() as i32,
+                        test_only_use: false,
                     })
                     .collect();
                 (file.source_file_path.clone(), ids)
@@ -206,11 +213,11 @@ pub fn find_unused_items(
     let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
         create_caching_resolver(&tsconfig);
     let mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
-        create_report_map_from_flattened_files(&flattened_walk_file_data);
+        create_report_map_from_flattened_files(&flattened_walk_file_data, &entry_packages);
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
         .map(|file| {
-            process_import_export_info(
+            resolve_paths_from_import_export_info(
                 &mut file.import_export_info,
                 &file.source_file_path,
                 &resolver,
@@ -304,6 +311,7 @@ pub fn find_unused_items(
             .map(|(p, _)| p.to_string())
             .collect(),
         unused_files_items,
+        ..Default::default()
     })
 }
 
@@ -327,16 +335,40 @@ fn read_allow_list() -> Vec<glob::Pattern> {
     vec![]
 }
 
-fn process_import_export_info(
+#[napi(js_name = "UnusedFinder")]
+pub struct UnusedFinderJs {
+    unused_finder: UnusedFinder,
+}
+
+#[napi]
+impl UnusedFinderJs {
+    #[napi(constructor)]
+    pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
+        match UnusedFinder::new(config) {
+            Ok(unused_finder) => Ok(UnusedFinderJs { unused_finder }),
+            Err(e) => Err(e),
+        }
+    }
+
+    #[napi]
+    pub fn find_unused_items(
+        &mut self,
+        files_to_check: Vec<String>,
+    ) -> napi::Result<UnusedFinderReport> {
+        self.unused_finder.find_unused_items(files_to_check)
+    }
+}
+
+fn resolve_paths_from_import_export_info(
     f: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
 ) {
-    process_executed_paths(f, source_file_path, resolver);
-    process_async_imported_paths(f, source_file_path, resolver);
-    process_exports_from(f, source_file_path, resolver);
-    process_require_paths(f, source_file_path, resolver);
-    process_import_path_ids(f, source_file_path, resolver);
+    resolve_executed_paths(f, source_file_path, resolver);
+    resolve_async_imported_paths(f, source_file_path, resolver);
+    process_exports_from_paths(f, source_file_path, resolver);
+    resolve_require_paths(f, source_file_path, resolver);
+    resolve_import_item_from_paths(f, source_file_path, resolver);
 }
 
 #[cfg(test)]

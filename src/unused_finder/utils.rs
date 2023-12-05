@@ -30,7 +30,7 @@ impl From<ExportKind> for ResolvedItem {
 }
 
 // import foo, {bar as something} from './foo'`
-pub fn process_import_path_ids(
+pub fn resolve_import_item_from_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
@@ -58,7 +58,7 @@ pub fn process_import_path_ids(
 }
 
 // `export {default as foo, bar} from './foo'`
-pub fn process_exports_from(
+pub fn process_exports_from_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
@@ -89,7 +89,7 @@ pub fn process_exports_from(
 }
 
 // import('./foo')
-pub fn process_async_imported_paths(
+pub fn resolve_async_imported_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
@@ -118,7 +118,7 @@ pub fn process_async_imported_paths(
 }
 
 // import './foo'
-pub fn process_executed_paths(
+pub fn resolve_executed_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
@@ -148,7 +148,7 @@ pub fn process_executed_paths(
 }
 
 // require('foo')
-pub fn process_require_paths(
+pub fn resolve_require_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
@@ -181,6 +181,7 @@ pub fn retrieve_files(
     skipped_dirs: Option<Vec<glob::Pattern>>,
     skipped_items: Arc<Vec<regex::Regex>>,
 ) -> Vec<WalkedFile> {
+    let test_pattern = glob::Pattern::new("**/test/**").unwrap();
     let walk_dir = WalkDirGeneric::<(String, WalkedFile)>::new(start_path).process_read_dir(
         move |dir_state, children| {
             children.iter_mut().for_each(|dir_entry_res| {
@@ -235,6 +236,7 @@ pub fn retrieve_files(
                                     Ok(import_export_info) => {
                                         dir_entry.client_state =
                                             WalkedFile::SourceFile(WalkFileMetaData {
+                                                is_test_file: test_pattern.matches(&slashed),
                                                 package_name: dir_state.clone(),
                                                 import_export_info,
                                                 source_file_path: dir_entry

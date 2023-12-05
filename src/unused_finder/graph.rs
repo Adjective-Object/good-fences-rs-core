@@ -19,10 +19,10 @@ pub enum MarkItemResult {
 #[derive(Debug, Clone, Default)]
 pub struct GraphFile {
     pub is_used: bool,
+    pub is_test_file: bool,
     // pub package_name: String,
     pub file_path: String,
     pub unused_exports: HashSet<ExportKind>,
-    //
     pub export_from: HashMap<ExportKind, String>,
     pub import_export_info: ImportExportInfo,
 }
@@ -49,6 +49,7 @@ impl GraphFile {
             file_path,
             unused_exports,
             import_export_info,
+            ..Default::default()
         }
     }
 
