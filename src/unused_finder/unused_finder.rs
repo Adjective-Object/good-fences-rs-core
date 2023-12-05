@@ -82,8 +82,12 @@ impl UnusedFinder {
             }
         };
         let skipped_items = Arc::new(skipped_items);
-        let all_files =
-            retrieve_files_and_resolve_import_paths(&paths_to_read, &skipped_dirs, &skipped_items, &resolver);
+        let all_files = retrieve_files_and_resolve_import_paths(
+            &paths_to_read,
+            &skipped_dirs,
+            &skipped_items,
+            &resolver,
+        );
 
         let file_path_exported_items_map =
             create_report_map_from_flattened_files(&all_files, &entry_packages);
