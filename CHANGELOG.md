@@ -1,8 +1,20 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Wed, 01 Nov 2023 15:24:31 GMT and should not be manually modified.
+This log was last generated on Tue, 05 Dec 2023 20:57:23 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.11.0
+
+Tue, 05 Dec 2023 20:57:23 GMT
+
+### Minor changes
+
+- Added support for apple sillicon (edgar21_9@hotmail.com)
+
+### Patches
+
+- Added triples additional property (edgar21_9@hotmail.com)
 
 ## 0.10.0
 
