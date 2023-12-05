@@ -83,7 +83,7 @@ impl UnusedFinder {
         };
         let skipped_items = Arc::new(skipped_items);
         let all_files =
-            retrieve_and_process_files(&paths_to_read, &skipped_dirs, &skipped_items, &resolver);
+            retrieve_files_and_resolve_import_paths(&paths_to_read, &skipped_dirs, &skipped_items, &resolver);
 
         let file_path_exported_items_map =
             create_report_map_from_flattened_files(&all_files, &entry_packages);
@@ -102,7 +102,7 @@ impl UnusedFinder {
     // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
     pub fn refresh_all_files(&mut self) {
         // Get a vector with all WalkFileMetaData
-        let all_files = retrieve_and_process_files(
+        let all_files = retrieve_files_and_resolve_import_paths(
             &self.paths_to_read,
             &self.skipped_dirs,
             &self.skipped_items,
@@ -339,7 +339,7 @@ fn create_graph(source_files: &Vec<WalkFileMetaData>, entry_packages: &HashSet<S
     graph
 }
 
-fn retrieve_and_process_files(
+fn retrieve_files_and_resolve_import_paths(
     paths_to_read: &Vec<String>,
     skipped_dirs: &Arc<Vec<glob::Pattern>>,
     skipped_items: &Arc<Vec<regex::Regex>>,
