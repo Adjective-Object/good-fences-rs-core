@@ -161,7 +161,7 @@ impl UnusedFinder {
                 None
             })
             .collect();
-        let mut frontier = entry_pkgs_files.clone();
+        let mut frontier = entry_pkgs_files;
         // Do graph bfs for entry package files
         for _ in 0..10_000_000 {
             frontier = graph.bfs_step(frontier);
