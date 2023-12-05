@@ -15,7 +15,7 @@ use crate::import_resolver::TsconfigPathsJson;
 use super::{
     create_caching_resolver, create_flattened_walked_files, create_report_map_from_flattened_files,
     graph::{Graph, GraphFile},
-    process_import_export_info, read_allow_list,
+    read_allow_list, resolve_paths_from_import_export_info,
     unused_finder_visitor_runner::get_import_export_paths_map,
     ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport, WalkFileMetaData,
 };
@@ -279,7 +279,7 @@ impl UnusedFinder {
                         let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
                         current_graph_file.import_export_info = ok; // Update import_export_info within self.graph
                         self.logs.push(format!("refreshing {}", f.to_string()));
-                        process_import_export_info(
+                        resolve_paths_from_import_export_info(
                             // Process import/export info to use resolver.
                             &mut current_graph_file.import_export_info,
                             &f,
@@ -348,7 +348,7 @@ fn retrieve_and_process_files(
     let mut all_files = create_flattened_walked_files(&paths_to_read, skipped_dirs, skipped_items);
 
     all_files.par_iter_mut().for_each(|file| {
-        process_import_export_info(
+        resolve_paths_from_import_export_info(
             &mut file.import_export_info,
             &file.source_file_path,
             resolver,

@@ -29,8 +29,8 @@ use crate::{
         graph::{Graph, GraphFile},
         unused_finder_visitor_runner::ImportExportInfo,
         utils::{
-            process_async_imported_paths, process_executed_paths, process_exports_from,
-            process_import_path_ids, process_require_paths, retrieve_files,
+            process_exports_from_paths, resolve_async_imported_paths, resolve_executed_paths,
+            resolve_import_item_from_paths, resolve_require_paths, retrieve_files,
         },
     },
 };
@@ -217,7 +217,7 @@ pub fn find_unused_items(
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
         .map(|file| {
-            process_import_export_info(
+            resolve_paths_from_import_export_info(
                 &mut file.import_export_info,
                 &file.source_file_path,
                 &resolver,
@@ -359,16 +359,16 @@ impl UnusedFinderJs {
     }
 }
 
-fn process_import_export_info(
+fn resolve_paths_from_import_export_info(
     f: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
 ) {
-    process_executed_paths(f, source_file_path, resolver);
-    process_async_imported_paths(f, source_file_path, resolver);
-    process_exports_from(f, source_file_path, resolver);
-    process_require_paths(f, source_file_path, resolver);
-    process_import_path_ids(f, source_file_path, resolver);
+    resolve_executed_paths(f, source_file_path, resolver);
+    resolve_async_imported_paths(f, source_file_path, resolver);
+    process_exports_from_paths(f, source_file_path, resolver);
+    resolve_require_paths(f, source_file_path, resolver);
+    resolve_import_item_from_paths(f, source_file_path, resolver);
 }
 
 #[cfg(test)]
