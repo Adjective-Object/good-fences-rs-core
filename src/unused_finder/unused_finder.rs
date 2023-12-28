@@ -22,7 +22,6 @@ use super::{
 };
 
 #[derive(Debug, Default)]
-#[napi(js_name = "UnusedFinder")]
 pub struct UnusedFinder {
     pub report: UnusedFinderReport,
     pub logs: Vec<String>,
@@ -36,10 +35,43 @@ pub struct UnusedFinder {
     resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
 }
 
+#[derive(Debug, Default)]
+#[napi(js_name = "UnusedFinder")]
+pub struct UnusedFinderWrapper {
+    unused_finder: UnusedFinder,
+}
+
 #[napi]
-impl UnusedFinder {
+impl UnusedFinderWrapper {
     #[napi(constructor)]
     pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
+        let finder = UnusedFinder::new(config);
+        match finder {
+            Ok(finder) => {
+                return Ok(Self {
+                    unused_finder: finder,
+                })
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    #[napi]
+    pub fn refresh_file_list(&mut self) {
+        self.unused_finder.refresh_file_list();
+    }
+
+    #[napi]
+    pub fn find_unused_items(
+        &mut self,
+        files_to_check: Vec<String>,
+    ) -> napi::Result<UnusedFinderReport> {
+        self.unused_finder.find_unused_items(files_to_check)
+    }
+}
+
+impl UnusedFinder {
+    pub fn new(config: FindUnusedItemsConfig) -> anyhow::Result<Self, napi::Error> {
         let FindUnusedItemsConfig {
             paths_to_read,
             ts_config_path,
@@ -132,7 +164,7 @@ impl UnusedFinder {
     }
 
     // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
-    #[napi]
+
     pub fn refresh_file_list(&mut self) {
         // Get a vector with all WalkFileMetaData
         let mut flattened_walk_file_data = create_flattened_walked_files(
@@ -192,7 +224,6 @@ impl UnusedFinder {
         self.graph = Graph { files };
     }
 
-    #[napi]
     pub fn find_unused_items(
         &mut self,
         files_to_check: Vec<String>,
@@ -292,7 +323,7 @@ impl UnusedFinder {
                             &self.resolver.as_ref().unwrap(),
                         );
                     }
-                    None => todo!(),
+                    None => {}
                 }
             }
         });

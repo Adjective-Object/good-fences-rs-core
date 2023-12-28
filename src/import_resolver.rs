@@ -60,15 +60,13 @@ pub fn resolve_with_extension(
     base: FileName,
     imported_path: &str,
     resolver: &dyn Resolve,
-) -> Result<ResolvedImport, String> {
+) -> anyhow::Result<ResolvedImport> {
     if is_resource_file(&imported_path.to_string()) {
         return Ok(ResolvedImport::ResourceFileImport);
     }
     // canonicalize() adds "\\\\?\\" for windows to guarantee we remove cwd from the final resolved path
-    let cwd = current_dir()
-        .unwrap()
-        .canonicalize()
-        .unwrap()
+    let cwd = current_dir()?
+        .canonicalize()?
         .to_slash()
         .unwrap()
         .to_string();
@@ -92,7 +90,7 @@ pub fn resolve_with_extension(
                     ));
                 }
             }
-            return Err(e.to_string());
+            return Err(e);
             // return Ok(ResolvedImport::NodeModulesImport(imported_specifier.to_string()))
         }
     };
@@ -123,7 +121,7 @@ pub fn resolve_ts_import<'a>(
     tsconfig_paths: &'a TsconfigPathsJson,
     initial_path: &RelativePath,
     raw_import_specifier: &'a str,
-) -> Result<ResolvedImport, String> {
+) -> anyhow::Result<ResolvedImport, String> {
     // println!("resole import! {:?}, {:?}", initial_path, import_specifier);
 
     // this is a directory import, so we want to add index.ts to the end of the file
@@ -152,12 +150,10 @@ pub fn resolve_ts_import<'a>(
     if import_specifier.starts_with(".") {
         // relative import -- bypass tsconfig
         let parent_path = initial_path.parent();
-        if !parent_path.is_some() {
-            return Err(format!("source path {:} had no parent?", initial_path));
-        }
-        let joined_path: RelativePathBuf = parent_path
-            .unwrap()
-            .join(RelativePath::new(&import_specifier));
+        let joined_path: RelativePathBuf = match parent_path {
+            Some(p) => p.join(RelativePath::new(&import_specifier)),
+            None => return Err(format!("source path {:} had no parent?", initial_path)),
+        };
         return Ok(ResolvedImport::ProjectLocalImport(PathBuf::from(
             joined_path.normalize().as_str(),
         )));

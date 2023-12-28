@@ -2,7 +2,7 @@ use crate::error::WalkDirsError;
 use relative_path::RelativePathBuf;
 use std::path::{Path, PathBuf};
 
-pub fn get_slashed_path_buf(p: &Path) -> Result<PathBuf, WalkDirsError> {
+pub fn get_slashed_path_buf(p: &Path) -> anyhow::Result<PathBuf, WalkDirsError> {
     let slashed: PathBuf;
     #[cfg(target_os = "windows")]
     {
@@ -20,7 +20,9 @@ pub fn get_slashed_path_buf(p: &Path) -> Result<PathBuf, WalkDirsError> {
     return Ok(slashed);
 }
 
-pub fn slashed_as_relative_path(slashed: &PathBuf) -> Result<RelativePathBuf, WalkDirsError> {
+pub fn slashed_as_relative_path(
+    slashed: &PathBuf,
+) -> anyhow::Result<RelativePathBuf, WalkDirsError> {
     match RelativePathBuf::from_path(slashed) {
         Ok(rel_path) => Ok(rel_path),
         Err(e) => Err(WalkDirsError::RelativePathError {

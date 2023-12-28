@@ -146,7 +146,7 @@ pub fn write_violations_as_json(
     violations: Vec<evaluate_fences::ImportRuleViolation>,
     fence_eval_errors: Vec<EvaluateFencesError>,
     err_file_output_path: String,
-) {
+) -> anyhow::Result<()> {
     let evaluation_errors: Vec<String> = fence_eval_errors
         .iter()
         .map(|error| error.to_string())
@@ -156,23 +156,22 @@ pub fn write_violations_as_json(
         serde_json::to_string_pretty(&JsonErrorFile {
             violations,
             evaluation_errors,
-        })
-        .unwrap(),
+        })?,
     ) {
         Ok(_) => {
-            let cwd = std::env::current_dir()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let cwd = std::env::current_dir()?.to_string_lossy().to_string();
             println!(
                 "Violations written to {}",
                 format!("{} at {}", err_file_output_path, cwd)
             );
         }
         Err(err) => {
-            eprintln!("Unable to write violations to {err_file_output_path}.\nError: {err}")
+            return Err(anyhow::format_err!(
+                "Unable to write violations to {err_file_output_path}.\nError: {err}"
+            ));
         }
     };
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
