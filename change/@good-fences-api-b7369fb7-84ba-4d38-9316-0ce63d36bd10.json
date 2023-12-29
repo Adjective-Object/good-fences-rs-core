@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "Added anyhow and thiserror to do better error handling",
+  "packageName": "@good-fences/api",
+  "email": "edgarivanv@microsoft.com",
+  "dependentChangeType": "patch"
+}
