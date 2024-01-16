@@ -209,7 +209,7 @@ pub fn retrieve_files(
             });
             children.retain(|dir_entry_result| match dir_entry_result {
                 Ok(dir_entry) => should_retain_dir_entry(dir_entry, &skipped_dirs),
-                Err(_) => todo!(),
+                Err(_) => false,
             });
 
             children.iter_mut().for_each(|child_result| {
@@ -222,11 +222,7 @@ pub fn retrieve_files(
                                 }
                                 // Source file [.ts, .tsx, .js, .jsx]
                                 let joined = &dir_entry.parent_path.join(file_name);
-                                let slashed = joined.to_slash();
-                                let slashed = match slashed {
-                                    Some(slashed) => slashed,
-                                    None => todo!(),
-                                };
+                                let slashed = joined.to_slash().unwrap();
                                 let visitor_result = get_import_export_paths_map(
                                     slashed.to_string(),
                                     skipped_items.clone(),
@@ -247,10 +243,10 @@ pub fn retrieve_files(
                                     Err(_) => {}
                                 }
                             }
-                            None => todo!(),
+                            None => return,
                         }
                     }
-                    Err(_) => todo!(),
+                    Err(_) => {}
                 }
             });
         },

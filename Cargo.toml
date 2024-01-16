@@ -27,6 +27,8 @@ swc_core = { version = "0.83.32", features = ["ecma_plugin_transform", "ecma_loa
 napi = { version = "2.13.0", default-features = false, features = ["napi4"] }
 napi-derive = "2.13.0"
 swc_ecma_parser = "0.140.0"
+anyhow = "1.0.75"
+thiserror = "1.0.52"
 
 [build-dependencies]
 napi-build = "2.0.1"
