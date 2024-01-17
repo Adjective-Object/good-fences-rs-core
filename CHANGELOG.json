@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Wed, 17 Jan 2024 00:11:33 GMT",
+      "version": "0.12.0",
+      "tag": "@good-fences/api_v0.12.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "edgarivanv@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "2748f6796f650ce6c7605bfd9fd2d423e8a46c9f",
+            "comment": "Added anyhow and thiserror to do better error handling"
+          }
+        ]
+      }
+    },
+    {
       "date": "Tue, 05 Dec 2023 20:57:23 GMT",
       "version": "0.11.0",
       "tag": "@good-fences/api_v0.11.0",
