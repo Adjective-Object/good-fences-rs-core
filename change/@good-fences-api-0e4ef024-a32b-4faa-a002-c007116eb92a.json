@@ -1,7 +1,0 @@
-{
-  "type": "minor",
-  "comment": "Reverted good-fences resolver function to enable run quick checks on local environments",
-  "packageName": "@good-fences/api",
-  "email": "edgarivanv@microsoft.com",
-  "dependentChangeType": "patch"
-}

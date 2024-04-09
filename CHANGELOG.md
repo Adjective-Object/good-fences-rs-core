@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Wed, 17 Jan 2024 00:11:33 GMT and should not be manually modified.
+This log was last generated on Tue, 09 Apr 2024 21:53:14 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.13.0
+
+Tue, 09 Apr 2024 21:53:14 GMT
+
+### Minor changes
+
+- Reverted good-fences resolver function to enable run quick checks on local environments (edgarivanv@microsoft.com)
 
 ## 0.12.0
 
