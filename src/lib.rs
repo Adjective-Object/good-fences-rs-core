@@ -96,7 +96,8 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
             eval_results.violations,
             eval_results.unresolved_files,
             output,
-        );
+        )
+        .unwrap();
     }
 
     errors

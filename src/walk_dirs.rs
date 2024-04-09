@@ -62,6 +62,13 @@ pub fn discover_fences_and_files(
 ) -> Vec<WalkFileData> {
     let walk_dir = WalkDirGeneric::<(TagList, WalkFileData)>::new(start_path).process_read_dir(
         move |read_dir_state, children| {
+            children.iter_mut().for_each(|child| {
+                if let Ok(dir_entry) = child {
+                    if dir_entry.file_name() == "node_modules" || dir_entry.file_name() == "lib" {
+                        dir_entry.read_children_path = None;
+                    }
+                }
+            });
             // Custom filter -- retain only directories and fence.json files
             children.retain(|dir_entry_result| {
                 match dir_entry_result {
