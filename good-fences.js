@@ -35,7 +35,7 @@ result.forEach(r => {
     }
 
     if (r.resultType === GoodFencesResultType.Violation) {
-        console.error(r.detailedMessage);
+        // console.error(r.detailedMessage);
     }
 });
 

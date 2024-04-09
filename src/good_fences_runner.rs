@@ -8,10 +8,6 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::{FromIterator, Iterator};
-use swc_core::ecma::loader::resolvers::lru::CachingResolver;
-use swc_core::ecma::loader::resolvers::node::NodeModulesResolver;
-use swc_core::ecma::loader::resolvers::tsc::TsConfigResolver;
-use swc_core::ecma::loader::TargetEnv;
 
 #[derive(Debug, PartialEq)]
 pub struct GoodFencesRunner {
@@ -92,29 +88,15 @@ impl GoodFencesRunner {
         println!("Evaluating {} files", self.source_files.keys().len());
         let mut evaluation_results = FenceEvaluationResult::new();
 
-        let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
-            60_000,
-            TsConfigResolver::new(
-                NodeModulesResolver::new(TargetEnv::Node, Default::default(), false),
-                ".".into(),
-                self.tsconfig_paths_json
-                    .compiler_options
-                    .paths
-                    .clone()
-                    .into_iter()
-                    .collect(),
-            ),
-        );
-
         let violation_results = self
             .source_files
             .par_iter()
             .map(|(_, source_file)| {
                 evaluate_fences(
-                    &resolver,
                     &self.fence_collection,
                     &self.source_files,
                     &source_file,
+                    &self.tsconfig_paths_json,
                 )
             })
             .collect::<Vec<_>>();
@@ -599,8 +581,10 @@ mod test {
         ];
         expected_violations.sort_by(compare_violations);
 
-        let a: String = format!("{:#?}", results);
+        let a: String = format!("{:#?}", results.violations);
         let b: String = format!("{:#?}", expected_violations);
+        dbg!(a.len());
+        dbg!(b.len());
         if results.violations != expected_violations {
             print_diff(&a, &b, "\n");
             assert!(false);

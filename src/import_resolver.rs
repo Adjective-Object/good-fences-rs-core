@@ -53,7 +53,7 @@ pub enum ResolvedImport {
     ResourceFileImport,
 }
 
-const SOURCE_EXTENSIONS: &[&str] = &["js", "ts", "d.ts", "tsx", "jsx"];
+pub const SOURCE_EXTENSIONS: &[&str] = &["js", "ts", "d.ts", "tsx", "jsx"];
 pub const ASSET_EXTENSION: &[&str] = &["scss", "css", "svg", "png", "json", "gif"];
 
 pub fn resolve_with_extension(
