@@ -172,7 +172,6 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     let source_fences_set: HashSet<&Fence> = HashSet::from_iter(source_fences);
 
     for (import_specifier, _imported_names) in source_file.imports.iter() {
-        
         let importer_rel_path = RelativePath::from_path(&source_file.source_file_path).unwrap();
         let resolved_src_import =
             resolve_ts_import(tsconfig_paths_json, importer_rel_path, &import_specifier);
