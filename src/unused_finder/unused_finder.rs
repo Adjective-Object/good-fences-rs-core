@@ -181,9 +181,8 @@ impl UnusedFinder {
             );
         });
 
-        // Create a report map with all the files
-        self.file_path_exported_items_map =
-            create_report_map_from_flattened_files(&flattened_walk_file_data);
+        // Refresh graph representation with latest changes from disk
+        self.refresh_graph(&flattened_walk_file_data);
 
         // Create a record of all files listed as entry points, this will serve during `find_unused_items` as the first `frontier` iteration
         self.entry_files = flattened_walk_file_data
@@ -196,8 +195,9 @@ impl UnusedFinder {
             })
             .collect();
 
-        // Refresh graph representation with latest changes from disk
-        self.refresh_graph(&flattened_walk_file_data);
+        // Create a report map with all the files
+        self.file_path_exported_items_map =
+            create_report_map_from_flattened_files(&flattened_walk_file_data);
     }
 
     // Given a Vec<WalkFileMetadata> refreshes the in-memory representation of imports/exports of source file graph
@@ -230,7 +230,9 @@ impl UnusedFinder {
     ) -> napi::Result<UnusedFinderReport> {
         self.logs = vec![];
         self.logs.push(format!("{:?}", &files_to_check));
-        if files_to_check
+        if files_to_check.is_empty() {
+            self.logs.push("Using local representation".to_string());
+        } else if !files_to_check
             .iter()
             .any(|file| !self.file_path_exported_items_map.contains_key(file))
         {
@@ -240,12 +242,16 @@ impl UnusedFinder {
             self.logs.push("Refreshing only some files!".to_string());
             self.refresh_files_to_check(&files_to_check);
         }
+
         // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
         let mut file_path_exported_items_map = self.file_path_exported_items_map.clone();
 
         let mut frontier = self.entry_files.clone();
         for _ in 0..10_000_000 {
             frontier = self.graph.bfs_step(frontier);
+            if frontier.is_empty() {
+                break;
+            }
         }
         if !frontier.is_empty() {
             return Err(napi::Error::new(
@@ -256,12 +262,10 @@ impl UnusedFinder {
 
         let allow_list: Vec<glob::Pattern> = read_allow_list();
 
-        let reported_unused_files = BTreeMap::from_iter(
-            self.graph
-                .files
-                .iter()
-                .filter(|f| !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))),
-        );
+        let reported_unused_files =
+            BTreeMap::from_iter(self.graph.files.iter().filter(|(file_name, graph_file)| {
+                !graph_file.is_used && !allow_list.iter().any(|p| p.matches(file_name))
+            }));
         let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = self
             .graph
             .files
