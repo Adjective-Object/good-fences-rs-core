@@ -583,8 +583,6 @@ mod test {
 
         let a: String = format!("{:#?}", results.violations);
         let b: String = format!("{:#?}", expected_violations);
-        dbg!(a.len());
-        dbg!(b.len());
         if results.violations != expected_violations {
             print_diff(&a, &b, "\n");
             assert!(false);
