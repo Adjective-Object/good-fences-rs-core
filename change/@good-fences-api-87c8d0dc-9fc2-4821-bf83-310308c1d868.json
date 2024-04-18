@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "Fix UnusedFinder struct not using in-memory representation",
-  "packageName": "@good-fences/api",
-  "email": "edgarivanv@microsoft.com",
-  "dependentChangeType": "patch"
-}

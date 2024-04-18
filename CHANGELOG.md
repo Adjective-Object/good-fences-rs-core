@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 09 Apr 2024 21:53:14 GMT and should not be manually modified.
+This log was last generated on Thu, 18 Apr 2024 00:06:46 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.13.1
+
+Thu, 18 Apr 2024 00:06:46 GMT
+
+### Patches
+
+- Fix UnusedFinder struct not using in-memory representation (edgarivanv@microsoft.com)
 
 ## 0.13.0
 
