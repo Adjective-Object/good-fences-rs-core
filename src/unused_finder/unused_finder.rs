@@ -68,6 +68,11 @@ impl UnusedFinderWrapper {
     ) -> napi::Result<UnusedFinderReport> {
         self.unused_finder.find_unused_items(files_to_check)
     }
+
+    #[napi]
+    pub fn find_all_unused_items(&mut self) -> napi::Result<UnusedFinderReport> {
+        self.unused_finder.find_all_unused_items()
+    }
 }
 
 impl UnusedFinder {
@@ -224,6 +229,32 @@ impl UnusedFinder {
         self.graph = Graph { files };
     }
 
+    pub fn find_all_unused_items(&mut self) -> napi::Result<UnusedFinderReport> {
+        self.refresh_file_list();
+        // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
+        let file_path_exported_items_map = self.file_path_exported_items_map.clone();
+
+        if let Some(value) = self.walk_file_graph() {
+            return value;
+        }
+
+        let allow_list: Vec<glob::Pattern> = read_allow_list();
+
+        let reported_unused_files = self.get_unused_files(allow_list);
+        let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
+
+        let ok = UnusedFinderReport {
+            unused_files: reported_unused_files
+                .iter()
+                .map(|(p, _)| p.to_string())
+                .collect(),
+            unused_files_items,
+        };
+        Ok(ok)
+    }
+
+    pub fn find_file_unused_items() {}
+
     pub fn find_unused_items(
         &mut self,
         files_to_check: Vec<String>,
@@ -244,28 +275,33 @@ impl UnusedFinder {
         }
 
         // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
-        let mut file_path_exported_items_map = self.file_path_exported_items_map.clone();
+        let file_path_exported_items_map = self.file_path_exported_items_map.clone();
 
-        let mut frontier = self.entry_files.clone();
-        for _ in 0..10_000_000 {
-            frontier = self.graph.bfs_step(frontier);
-            if frontier.is_empty() {
-                break;
-            }
-        }
-        if !frontier.is_empty() {
-            return Err(napi::Error::new(
-                napi::Status::GenericFailure,
-                "exceeded max iterations".to_string(),
-            ));
+        if let Some(value) = self.walk_file_graph() {
+            return value;
         }
 
         let allow_list: Vec<glob::Pattern> = read_allow_list();
 
-        let reported_unused_files =
-            BTreeMap::from_iter(self.graph.files.iter().filter(|(file_name, graph_file)| {
-                !graph_file.is_used && !allow_list.iter().any(|p| p.matches(file_name))
-            }));
+        let reported_unused_files = self.get_unused_files(allow_list);
+        let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
+
+        let mut ok = UnusedFinderReport {
+            unused_files: reported_unused_files
+                .iter()
+                .map(|(p, _)| p.to_string())
+                .collect(),
+            unused_files_items,
+        };
+        let files: HashSet<String> = HashSet::from_iter(files_to_check);
+        ok.unused_files_items.retain(|key, _| files.contains(key));
+        return Ok(ok);
+    }
+
+    fn get_unused_items_file(
+        &self,
+        mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
+    ) -> HashMap<String, Vec<ExportedItemReport>> {
         let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = self
             .graph
             .files
@@ -294,17 +330,35 @@ impl UnusedFinder {
                 None
             })
             .collect();
+        unused_files_items
+    }
 
-        let mut ok = UnusedFinderReport {
-            unused_files: reported_unused_files
-                .iter()
-                .map(|(p, _)| p.to_string())
-                .collect(),
-            unused_files_items,
-        };
-        let files: HashSet<String> = HashSet::from_iter(files_to_check);
-        ok.unused_files_items.retain(|key, _| files.contains(key));
-        return Ok(ok);
+    fn get_unused_files(
+        &self,
+        allow_list: Vec<glob::Pattern>,
+    ) -> BTreeMap<&String, &Arc<GraphFile>> {
+        let reported_unused_files =
+            BTreeMap::from_iter(self.graph.files.iter().filter(|(file_name, graph_file)| {
+                !graph_file.is_used && !allow_list.iter().any(|p| p.matches(file_name))
+            }));
+        reported_unused_files
+    }
+
+    fn walk_file_graph(&mut self) -> Option<Result<UnusedFinderReport, napi::Error>> {
+        let mut frontier = self.entry_files.clone();
+        for _ in 0..10_000_000 {
+            frontier = self.graph.bfs_step(frontier);
+            if frontier.is_empty() {
+                break;
+            }
+        }
+        if !frontier.is_empty() {
+            return Some(Err(napi::Error::new(
+                napi::Status::GenericFailure,
+                "exceeded max iterations".to_string(),
+            )));
+        }
+        None
     }
 
     // Reads files from disk and updates information within `self.graph` for specified paths in `files_to_check`
