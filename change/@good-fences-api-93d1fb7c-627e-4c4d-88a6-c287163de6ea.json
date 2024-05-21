@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Fixed issue preventing unused-finder work on newly-created codespaces",
+  "packageName": "@good-fences/api",
+  "email": "edgarivanv@microsoft.com",
+  "dependentChangeType": "patch"
+}
