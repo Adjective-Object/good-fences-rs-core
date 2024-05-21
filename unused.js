@@ -75,7 +75,7 @@ let report = new UnusedFinder({
   skippedItems: [],
   tsConfigPath: "./tsconfig.paths.json",
 });
-console.log(report.findUnusedItems([]).unusedFiles);
+console.log(report.findAllUnusedItems().unusedFiles);
 // report.unusedFiles.forEach((file) => {
 //   console.log(file);
 // });
