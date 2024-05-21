@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Thu, 18 Apr 2024 00:06:46 GMT and should not be manually modified.
+This log was last generated on Tue, 21 May 2024 21:28:51 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.13.2
+
+Tue, 21 May 2024 21:28:51 GMT
+
+### Patches
+
+- Fixed issue preventing unused-finder work on newly-created codespaces (edgarivanv@microsoft.com)
 
 ## 0.13.1
 

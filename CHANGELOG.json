@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Tue, 21 May 2024 21:28:51 GMT",
+      "version": "0.13.2",
+      "tag": "@good-fences/api_v0.13.2",
+      "comments": {
+        "patch": [
+          {
+            "author": "edgarivanv@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "2df0639ffcb7dbfc426b10e5cb3c5293deaf079a",
+            "comment": "Fixed issue preventing unused-finder work on newly-created codespaces"
+          }
+        ]
+      }
+    },
+    {
       "date": "Thu, 18 Apr 2024 00:06:46 GMT",
       "version": "0.13.1",
       "tag": "@good-fences/api_v0.13.1",
