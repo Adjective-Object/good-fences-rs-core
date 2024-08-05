@@ -43,9 +43,8 @@ Cloning the repo:
 ``` sh
 git clone https://github.com/Adjective-Object/good-fences-rs-core
 cd good-fences-rs-core
-npm install
-npm run build
-npm install -g
+yarn
+yarn run build
 ```
 
 # Installing as Node dependency
