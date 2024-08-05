@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 21 May 2024 21:28:51 GMT and should not be manually modified.
+This log was last generated on Mon, 05 Aug 2024 18:41:53 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.14.0
+
+Mon, 05 Aug 2024 18:41:53 GMT
+
+### Minor changes
+
+- update yarn + cargo (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.13.2
 
