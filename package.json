@@ -41,5 +41,6 @@
   },
   "dependencies": {
     "commander": "^9.4.1"
-  }
+  },
+  "packageManager": "yarn@4.4.0"
 }
