@@ -5,20 +5,15 @@ use std::{
     sync::Arc,
 };
 
-use napi_derive::napi;
-use rayon::prelude::*;
-use swc_core::ecma::loader::resolvers::{
-    lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver,
-};
-
-use crate::import_resolver::TsconfigPathsJson;
+use import_resolver::create_caching_resolver;
+use tsconfig_paths::TsconfigPathsJson;
 
 use super::{
-    create_caching_resolver, create_flattened_walked_files, create_report_map_from_flattened_files,
+    create_flattened_walked_files, create_report_map_from_flattened_files,
     graph::{Graph, GraphFile},
     process_import_export_info, read_allow_list,
     unused_finder_visitor_runner::get_import_export_paths_map,
-    ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport, WalkFileMetaData,
+    ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
 };
 
 #[derive(Debug, Default)]
@@ -33,46 +28,6 @@ pub struct UnusedFinder {
     entry_files: Vec<String>,
     graph: Graph,
     resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
-}
-
-#[derive(Debug, Default)]
-#[napi(js_name = "UnusedFinder")]
-pub struct UnusedFinderWrapper {
-    unused_finder: UnusedFinder,
-}
-
-#[napi]
-impl UnusedFinderWrapper {
-    #[napi(constructor)]
-    pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
-        let finder = UnusedFinder::new(config);
-        match finder {
-            Ok(finder) => {
-                return Ok(Self {
-                    unused_finder: finder,
-                })
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-
-    #[napi]
-    pub fn refresh_file_list(&mut self) {
-        self.unused_finder.refresh_file_list();
-    }
-
-    #[napi]
-    pub fn find_unused_items(
-        &mut self,
-        files_to_check: Vec<String>,
-    ) -> napi::Result<UnusedFinderReport> {
-        self.unused_finder.find_unused_items(files_to_check)
-    }
-
-    #[napi]
-    pub fn find_all_unused_items(&mut self) -> napi::Result<UnusedFinderReport> {
-        self.unused_finder.find_all_unused_items()
-    }
 }
 
 impl UnusedFinder {

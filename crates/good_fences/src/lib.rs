@@ -1,7 +1,11 @@
 use std::{collections::HashSet, iter::FromIterator};
 
+extern crate serde;
+extern crate serde_json;
+extern crate unused_finder;
+extern crate import_resolver;
+
 use error::EvaluateFencesError;
-use napi::bindgen_prelude::ToNapiValue;
 use napi_derive::napi;
 use serde::Serialize;
 use unused_finder::{FindUnusedItemsConfig, UnusedFinderReport};
@@ -13,11 +17,8 @@ pub mod fence_collection;
 pub mod file_extension;
 pub mod get_imports;
 pub mod good_fences_runner;
-pub mod import_resolver;
-mod path_utils;
-pub mod unused_finder;
 pub mod walk_dirs;
-use napi::bindgen_prelude::*;
+pub mod unused_finder_napi;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
@@ -193,10 +194,7 @@ pub struct JsonErrorFile<'a> {
 
 #[napi]
 pub fn find_unused_items(config: FindUnusedItemsConfig) -> napi::Result<UnusedFinderReport> {
-    match unused_finder::find_unused_items(config) {
-        Ok(ok) => return Ok(ok),
-        Err(e) => return Err(napi::Error::new(e.status, e.message)),
-    }
+    unused_finder::find_unused_items(config).map_err(|e: JsErr| e.to_napi())
 }
 
 #[napi]
@@ -210,6 +208,6 @@ pub fn find_unused_items_for_open_files(
             ok.unused_files_items.retain(|key, _| files.contains(key));
             return Ok(ok);
         }
-        Err(e) => return Err(napi::Error::new(e.status, e.message)),
+        Err(e) => return Err(e.to_napi()),
     }
 }

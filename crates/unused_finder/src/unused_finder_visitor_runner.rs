@@ -8,7 +8,8 @@ use swc_core::ecma::transforms::base::resolver;
 use swc_core::ecma::visit::{fold_module, visit_module};
 use swc_ecma_parser::{Capturing, Parser};
 
-use crate::get_imports::create_lexer;
+use swc_utils::create_lexer;
+use anyhow;
 
 use super::node_visitor::{ExportedItemMetadata, ExportsCollector, ImportedItem};
 
@@ -76,7 +77,7 @@ pub fn get_import_export_paths_map(
         Ok(f) => f,
         Err(e) => {
             return Err(
-                anyhow::Error::new(SourceFileParseError::LoadFileError(file_path.clone()))
+                anyhow!(SourceFileParseError::LoadFileError(file_path.clone()))
                     .context(e),
             )
         }

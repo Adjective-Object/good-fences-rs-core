@@ -2,12 +2,11 @@ use crate::error::{EvaluateFencesError, ResolvedImportNotFound};
 use crate::fence::{DependencyRule, ExportRule, Fence};
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
-use crate::import_resolver::{
+use import_resolver::{
     resolve_ts_import, ResolvedImport, TsconfigPathsJson, SOURCE_EXTENSIONS,
 };
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
-use path_slash::PathBufExt;
 use relative_path::RelativePath;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -419,7 +418,7 @@ mod test {
     use crate::evaluate_fences::{evaluate_fences, ImportRuleViolation, ViolatedFenceClause};
     use crate::fence::{parse_fence_str, DependencyRule, ExportRule};
     use crate::fence_collection::FenceCollection;
-    use crate::import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
+    use import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::SourceFile;
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;

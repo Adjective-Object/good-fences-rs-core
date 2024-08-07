@@ -1,6 +1,3 @@
-extern crate serde;
-extern crate serde_json;
-
 use relative_path::RelativePath;
 use serde::de::{Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
@@ -8,10 +5,13 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::str::FromStr;
 use void::Void;
+use anyhow::{Context, Error, Result};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub struct Fence {
+    // relative path to the fence, from the root of the workspace
     pub fence_path: String,
+    // the parsed fence
     pub fence: ParsedFence,
 }
 
@@ -207,29 +207,25 @@ where
     }
 }
 
-pub fn parse_fence_str(fence_str: &str, fence_path: &RelativePath) -> Result<Fence, String> {
-    let fence_result = serde_json::from_str(&fence_str);
-    if !fence_result.is_ok() {
-        return Err(format!(
-            "failed to parse fence from '{:?}' err {:?}",
-            fence_path, fence_result
-        ));
-    }
+pub fn parse_fence_str(fence_str: &str, fence_path: &RelativePath) -> Result<Fence, Error> {
+    let fence= serde_json::from_str(&fence_str)
+        .with_context(|| format!(
+            "failed to parse fence from {:?}",
+            fence_path,
+        ))?;
 
-    return Ok(Fence {
+    return Result::Ok(Fence {
         fence_path: fence_path.to_string(),
-        fence: fence_result.unwrap(),
+        fence,
     });
 }
 
-pub fn parse_fence_file(fence_path: &RelativePath) -> Result<Fence, String> {
-    let fence_text_result = std::fs::read_to_string(fence_path.to_path(Path::new(".")));
-    if !fence_text_result.is_ok() {
-        return Err(format!("error reading fence file \"{:?}\"", fence_path));
-    }
+pub fn parse_fence_file<P: AsRef<RelativePath>>(fence_path: P) -> Result<Fence, Error> {
+    let fence_path_ref = fence_path.as_ref();
+    let fence_text = std::fs::read_to_string(fence_path_ref.to_path(Path::new(".")))
+        .with_context(||format!("error reading fence file \"{:?}\"", fence_path_ref))?;
 
-    let fence_text = fence_text_result.unwrap();
-    parse_fence_str(&fence_text, fence_path)
+    parse_fence_str(&fence_text, fence_path_ref)
 }
 
 impl Fence {
@@ -248,18 +244,17 @@ mod test {
     use crate::fence::{parse_fence_str, DependencyRule, ExportRule, Fence, ParsedFence};
     use relative_path::RelativePath;
     use std::option::Option;
+    use anyhow::{Result, Ok};
 
     #[test]
     fn loads_empty_fence() {
-        let result = parse_fence_str(
+        let result: Result<Fence> = parse_fence_str(
             r#"
       {}
       "#,
             RelativePath::new("test/path/to/fence.json"),
         );
-        assert_eq!(
-            result,
-            Result::Ok(Fence {
+        let expected: Result<Fence> = Ok(Fence {
                 fence_path: String::from("test/path/to/fence.json"),
                 fence: ParsedFence {
                     tags: Option::None,
@@ -267,8 +262,8 @@ mod test {
                     dependencies: Option::None,
                     imports: Option::None,
                 }
-            })
-        )
+            });
+        assert_eq!(result,expected);
     }
 
     #[test]

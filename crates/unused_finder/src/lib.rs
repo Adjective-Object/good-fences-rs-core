@@ -1,3 +1,8 @@
+extern crate import_resolver;
+extern crate tsconfig_paths;
+#[macro_use]
+extern crate anyhow;
+
 mod export_collector_tests;
 pub mod graph;
 pub mod node_visitor;
@@ -5,8 +10,6 @@ pub mod unused_finder;
 pub mod unused_finder_visitor_runner;
 mod utils;
 
-use napi::Status;
-use napi_derive::napi;
 use rayon::prelude::*;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -14,16 +17,13 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
-use swc_core::{
-    common::source_map::Pos,
-    ecma::loader::{
-        resolve::Resolve,
-        resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
-    },
+use swc_core::ecma::loader::{
+    resolve::Resolve,
+    resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
 };
 
+use js_err::JsErr;
 use crate::{
-    error::NapiLikeError,
     import_resolver::TsconfigPathsJson,
     unused_finder::{
         graph::{Graph, GraphFile},
@@ -35,27 +35,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct WalkFileMetaData {
-    pub package_name: String,
-    pub source_file_path: String,
-    pub import_export_info: ImportExportInfo,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum WalkedFile {
-    SourceFile(WalkFileMetaData),
-    Nothing,
-}
-
-impl Default for WalkedFile {
-    fn default() -> Self {
-        WalkedFile::Nothing
-    }
-}
-
 #[derive(Debug, Default, Clone)]
-#[napi(object)]
 pub struct FindUnusedItemsConfig {
     pub paths_to_read: Vec<String>,
     pub ts_config_path: String,
@@ -86,25 +66,6 @@ pub struct UnusedFinderReport {
     pub unused_files: Vec<String>,
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
     // pub flattened_walk_file_data: Vec<WalkFileMetaData>,
-}
-
-fn create_caching_resolver(
-    tsconfig: &TsconfigPathsJson,
-) -> CachingResolver<TsConfigResolver<NodeModulesResolver>> {
-    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
-        60_000,
-        TsConfigResolver::new(
-            NodeModulesResolver::default(),
-            ".".into(),
-            tsconfig
-                .compiler_options
-                .paths
-                .clone()
-                .into_iter()
-                .collect(),
-        ),
-    );
-    resolver
 }
 
 fn create_report_map_from_flattened_files(
@@ -159,7 +120,7 @@ fn create_flattened_walked_files(
 
 pub fn find_unused_items(
     config: FindUnusedItemsConfig,
-) -> Result<UnusedFinderReport, crate::error::NapiLikeError> {
+) -> Result<UnusedFinderReport, js_err::JsErr> {
     let FindUnusedItemsConfig {
         paths_to_read,
         ts_config_path,
@@ -178,10 +139,7 @@ pub fn find_unused_items(
     let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
         Ok(v) => Arc::new(v),
         Err(e) => {
-            return Err(crate::error::NapiLikeError {
-                status: napi::Status::InvalidArg,
-                message: e.msg.to_string(),
-            })
+            return Err(JsErr::invalid_arg(e.msg.to_string()))
         }
     };
 
@@ -191,10 +149,7 @@ pub fn find_unused_items(
     let skipped_items: Vec<regex::Regex> = match skipped_items.into_iter().collect() {
         Ok(r) => r,
         Err(e) => {
-            return Err(crate::error::NapiLikeError {
-                status: napi::Status::InvalidArg,
-                message: e.to_string(),
-            })
+            return Err(JsErr::invalid_arg(e.to_string()))
         }
     };
     let skipped_items = Arc::new(skipped_items);
@@ -248,17 +203,15 @@ pub fn find_unused_items(
         })
         .collect();
     let mut frontier = entry_files;
-    for i in 0..10_000_000 {
+    const MAX_ITERATIONS: i32 = 10_000_000;
+    for i in 0..MAX_ITERATIONS {
         frontier = graph.bfs_step(frontier);
 
         if frontier.is_empty() {
             break;
         }
-        if i == 10_000_000 {
-            return Err(NapiLikeError {
-                message: "exceeded max iterations".to_string(),
-                status: Status::GenericFailure,
-            });
+        if i >= MAX_ITERATIONS {
+            return Err(JsErr::generic_failure("exceeded max iterations".to_string()));
         }
     }
 
@@ -341,7 +294,7 @@ fn process_import_export_info(
 
 #[cfg(test)]
 mod test {
-    use crate::unused_finder::FindUnusedItemsConfig;
+    use crate::FindUnusedItemsConfig;
 
     use super::find_unused_items;
 
@@ -356,7 +309,7 @@ mod test {
         });
         assert!(result.is_err());
         assert_eq!(
-            result.unwrap_err().message,
+            result.unwrap_err().message(),
             "wildcards are either regular `*` or recursive `**`"
         )
     }
@@ -371,7 +324,7 @@ mod test {
         });
         assert!(result.is_err());
         assert_eq!(
-            result.unwrap_err().message,
+            result.unwrap_err().message(),
             "regex parse error:\n    [A-Z.*\n    ^\nerror: unclosed character class"
         )
     }

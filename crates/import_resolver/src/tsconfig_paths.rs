@@ -1,50 +1,13 @@
-extern crate relative_path;
-extern crate serde;
 use path_clean::PathClean as _;
 use path_slash::PathBufExt;
 use relative_path::{RelativePath, RelativePathBuf};
-use serde::Deserialize;
-use std::collections::HashMap;
 use std::env::current_dir;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::string::String;
-use std::vec::Vec;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
-
-use crate::error::OpenTsConfigError;
-use crate::path_utils::{as_slashed_pathbuf, slashed_as_relative_path};
-
-#[derive(Debug, Deserialize, PartialEq, Eq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TsconfigPathsJson {
-    pub compiler_options: TsconfigPathsCompilerOptions,
-}
-
-impl TsconfigPathsJson {
-    // Reads and parses the tsconfig.json at the provided path
-    pub fn from_path(tsconfig_path: String) -> Result<Self, OpenTsConfigError> {
-        let file = match File::open(tsconfig_path) {
-            Ok(f) => f,
-            Err(err) => return Err(OpenTsConfigError::IOError(err)),
-        };
-        let buf_reader = BufReader::new(file);
-        let tsconfig_paths_json: TsconfigPathsJson = match serde_json::from_reader(buf_reader) {
-            Ok(tsconfig) => tsconfig,
-            Err(e) => return Err(OpenTsConfigError::SerdeError(e)),
-        };
-        Ok(tsconfig_paths_json)
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq, Eq, Default, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TsconfigPathsCompilerOptions {
-    pub base_url: Option<String>,
-    pub paths: HashMap<String, Vec<String>>,
-}
+use serde::Deserialize;
+use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub enum ResolvedImport {
@@ -129,7 +92,7 @@ pub fn resolve_ts_import<'a>(
         if raw_import_specifier.ends_with('/') || raw_import_specifier.ends_with('.') {
             let mut x = RelativePathBuf::from(raw_import_specifier);
             x.push("index");
-            x.normalize();
+            x = x.normalize();
             x.to_string()
         } else {
             raw_import_specifier.to_owned()
@@ -245,20 +208,13 @@ fn path_buf_from_tsconfig(
     tsconfig_paths_json: &TsconfigPathsJson,
     specifier_from_tsconfig_paths: &str,
 ) -> PathBuf {
-    if tsconfig_paths_json.compiler_options.base_url.is_some() {
+    if let Some(base_url) = &tsconfig_paths_json.compiler_options.base_url {
         // Join the base url onto the path, if present in the config
         let mut builder: RelativePathBuf = RelativePathBuf::new();
-        builder.push(
-            tsconfig_paths_json
-                .compiler_options
-                .base_url
-                .as_ref()
-                .unwrap(),
-        );
+        builder.push(base_url);
         builder.push(specifier_from_tsconfig_paths);
-        let rel_path =
-            slashed_as_relative_path(&as_slashed_pathbuf(builder.into_string().as_str())).unwrap();
-        return PathBuf::from(rel_path.as_str()).clean();
+        return PathBuf::from(RelativePathBuf::from(builder.to_string()).as_str())
+            .clean();
     } else {
         return PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
             .clean();
@@ -269,9 +225,10 @@ fn path_buf_from_tsconfig(
 mod test {
     extern crate lazy_static;
     extern crate relative_path;
-    use crate::import_resolver::{
-        resolve_ts_import, ResolvedImport, TsconfigPathsCompilerOptions, TsconfigPathsJson,
+    use super::{
+        resolve_ts_import, ResolvedImport, TsconfigPathsJson,
     };
+    use tsconfig_paths::TsconfigPathsCompilerOptions;
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::path::PathBuf;

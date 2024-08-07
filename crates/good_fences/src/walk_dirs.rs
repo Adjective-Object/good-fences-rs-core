@@ -1,14 +1,12 @@
 use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
-use crate::path_utils::{get_slashed_path_buf, slashed_as_relative_path};
 use jwalk::WalkDirGeneric;
-use napi::bindgen_prelude::FromNapiValue;
-use napi::bindgen_prelude::ToNapiValue;
 use path_slash::PathExt;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
+use relative_path::RelativePathBuf;
+use anyhow::{anyhow, Context, Error, Result};
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
@@ -55,6 +53,37 @@ lazy_static! {
     static ref WORKING_DIR_PATH: PathBuf = current_dir().unwrap();
 }
 
+fn as_relative_slash_path<P: AsRef<Path>>(
+    p: P,
+) -> Result<RelativePathBuf> {
+    let pref = p.as_ref();
+    let relative_fence_path: RelativePathBuf = RelativePathBuf::from_path(pref)
+        .with_context(|| {
+            let pref_str = pref.to_string_lossy();  
+            format!("failed to convert path to relative-path: \"{pref_str}\"")
+        })?;
+    let slashed_pbuf = PathBuf::from(relative_fence_path.as_str()).to_slash().map(|s| s.to_string())
+    .with_context(|| {
+        let rel_fence_str = relative_fence_path.as_str();
+        format!("failed to convert relative-path to a slashed path: \"{rel_fence_str}\"")
+    })?;
+    Ok(RelativePathBuf::from(slashed_pbuf))
+}
+
+fn discover_js_ts_src(file_path: &PathBuf, tags: HashSet<String>) -> Result<WalkFileData, Error> {
+    let relative_file_path = as_relative_slash_path(&file_path)?;
+    let imports = get_imports_map_from_file(&relative_file_path)
+        .map_err(|e| anyhow!(
+            "Error getting imports from file {:?}: {}", file_path, e
+        ))?;
+
+    Ok(WalkFileData::SourceFile(SourceFile {
+        source_file_path: relative_file_path.into_string(),
+        imports,
+        tags: tags,
+    }))
+}
+
 pub fn discover_fences_and_files(
     start_path: &str,
     ignore_external_fences: ExternalFences,
@@ -97,6 +126,9 @@ pub fn discover_fences_and_files(
             });
 
             // Look for fence.json files and add their tags to the tag list for this walk
+            //
+            // We do this in a separate iteration from the one below, because we need to ensure tags
+            // are applied to the walk's taglist before we start processing the files.
             for child_result in children.iter_mut() {
                 match child_result {
                     Ok(dir_entry) => {
@@ -104,50 +136,36 @@ pub fn discover_fences_and_files(
                         match f {
                             Some(file_name) => {
                                 if file_name.ends_with("fence.json") {
-                                    let _working_dir_path: &Path = &WORKING_DIR_PATH;
-                                    let joined = &dir_entry.parent_path.join(file_name);
-                                    let slashed = match get_slashed_path_buf(joined) {
-                                        Ok(slashed) => slashed,
+                                    let fence_path = &dir_entry.parent_path.join(file_name);
+                                    let parsed_fence: Result<Fence, _> = as_relative_slash_path(fence_path)
+                                        .and_then(|x| parse_fence_file(x));
+                                    let fence = match parsed_fence {
+                                        Ok(fence) => fence,
                                         Err(e) => {
                                             eprintln!("{}", e.to_string());
                                             continue;
                                         }
                                     };
-                                    let fence_path = match slashed_as_relative_path(&slashed) {
-                                        Ok(fence_path) => fence_path,
-                                        Err(e) => {
-                                            eprintln!("{}", e.to_string());
-                                            continue;
-                                        }
-                                    };
-                                    let fence_result =
-                                        parse_fence_file(fence_path.as_relative_path());
-                                    match fence_result {
-                                        Ok(fence) => {
-                                            // update fences
-                                            let tags_clone = fence.fence.tags.clone();
-                                            if tags_clone.is_some() {
-                                                for tag in tags_clone.unwrap() {
-                                                    read_dir_state.insert(tag);
-                                                }
-                                            }
-
-                                            // fence.path_relative_to(&WORKING_DIR_PATH);
-                                            // update client state from the walk
-                                            dir_entry.client_state = WalkFileData::Fence(fence);
-                                        }
-                                        Err(error_message) => {
-                                            println!("Error parsing fence!: {:}", error_message)
+                                    // update fences
+                                    let tags_clone = fence.fence.tags.clone();
+                                    if tags_clone.is_some() {
+                                        for tag in tags_clone.unwrap() {
+                                            read_dir_state.insert(tag);
                                         }
                                     }
+
+                                    // fence.path_relative_to(&WORKING_DIR_PATH);
+                                    // update client state from the walk
+                                    dir_entry.client_state = WalkFileData::Fence(fence);
                                 }
                             }
-                            None => panic!("c_str was not a string?"),
+                            None => panic!("c_str was not a string?: {}", dir_entry.file_name.to_string_lossy()),
                         }
                     }
-                    // TODO maybe don't swallow errors here? not sure
-                    // when this error even fires.
-                    Err(_) => (),
+                    Err(e) => {
+                        eprintln!("Unknown Walk Error {}", e);
+                        continue;
+                    }
                 }
             }
 
@@ -162,44 +180,28 @@ pub fn discover_fences_and_files(
                                     || file_name.ends_with(".jsx")
                                     || file_name.ends_with(".js")
                                 {
-                                    let file_path = dir_entry.parent_path.join(file_name);
-                                    let file_path = match get_slashed_path_buf(&file_path) {
-                                        Ok(slashed) => slashed,
-                                        Err(e) => {
-                                            eprintln!("{}", e.to_string());
-                                            continue;
-                                        }
-                                    };
-                                    let _working_dir_path: &Path = &WORKING_DIR_PATH;
-
-                                    let source_file_path = slashed_as_relative_path(&file_path);
-
-                                    let source_file_path_str =
-                                        source_file_path.unwrap().to_string();
-
-                                    let imports = match get_imports_map_from_file(&file_path) {
-                                        Ok(imps) => imps,
+                                    let file_path: PathBuf = dir_entry.parent_path.join(file_name);
+                                    dir_entry.client_state = match discover_js_ts_src(
+                                        &file_path,
+                                        read_dir_state.clone(),
+                                    ) {
+                                        Ok(sf) => sf,
                                         Err(e) => {
                                             eprintln!("Error {}", e);
                                             continue;
                                         }
                                     };
-
-                                    dir_entry.client_state = WalkFileData::SourceFile(SourceFile {
-                                        source_file_path: source_file_path_str,
-                                        imports,
-                                        tags: HashSet::from_iter(
-                                            read_dir_state.iter().map(|x| x.to_owned()),
-                                        ),
-                                    });
                                 }
-                            }
-                            None => panic!("c_str was not a string?"),
+                            },
+                            None => panic!("c_str was not a string?: {}", dir_entry.file_name.to_string_lossy()),
                         }
-                    }
+                    },
                     // TODO maybe don't swallow errors here? not sure
                     // when this error even fires.
-                    Err(_) => (),
+                    Err(e) => {
+                        eprintln!("Unknown Walk Error {}", e);
+                        continue;
+                    }
                 }
             }
         },

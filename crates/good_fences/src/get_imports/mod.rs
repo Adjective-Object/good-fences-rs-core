@@ -1,30 +1,20 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use swc_core::common::comments::Comments;
-use swc_core::common::errors::Handler;
-use swc_core::common::{Globals, Mark, SourceFile, SourceMap, GLOBALS};
-use swc_core::ecma::transforms::base::resolver;
-use swc_core::ecma::visit::{fold_module, visit_module};
-use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
-use swc_ecma_parser::{Capturing, TsConfig};
+use swc_core::common::SourceFile;
+use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
+use swc_ecma_parser::TsConfig;
 mod import_path_visitor;
 
 pub use import_path_visitor::*;
 
 use crate::error::GetImportError;
 
-pub fn get_imports_map_from_file<'a>(
-    file_path: &'a PathBuf,
-) -> Result<HashMap<String, Option<HashSet<String>>>, GetImportError> {
-    let path_string = match file_path.to_str() {
-        Some(path) => path,
-        None => {
-            return Err(GetImportError::PathError {
-                filepath: file_path.clone(),
-            })
-        }
-    };
+pub type FileImports = HashMap<String, Option<HashSet<String>>>;
+
+pub fn get_imports_map_from_file<'a, P: AsRef<str>>(
+    file_path: &'a P,
+) -> Result<FileImports, GetImportError> {
+    let path_string: str = file_path.as_ref();
     let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
@@ -86,8 +76,8 @@ pub fn get_imports_map_from_file<'a>(
 
 fn get_imports_map_from_visitor(
     visitor: ImportPathVisitor,
-) -> HashMap<String, Option<HashSet<String>>> {
-    let mut final_imports_map: HashMap<String, Option<HashSet<String>>> = HashMap::new();
+) -> FileImports {
+    let mut final_imports_map: FileImports = HashMap::new();
     let ImportPathVisitor {
         mut require_paths,
         mut import_paths,
@@ -138,7 +128,7 @@ pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) 
 
 #[cfg(test)]
 mod test {
-    use crate::get_imports::get_imports_map_from_file;
+    use crate::get_imports::{get_imports_map_from_file, FileImports};
     use std::{
         collections::{HashMap, HashSet},
         path::PathBuf,
@@ -147,15 +137,15 @@ mod test {
     #[test]
     fn test_get_imports_from_file() {
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
-        let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).unwrap();
+        let imports = get_imports_map_from_file(&filename).unwrap();
         assert_eq!(3, imports.len());
     }
 
     #[test]
     fn test_get_imports_map() {
         let filename = "tests/good_fences_integration/src/componentA/componentA.ts";
-        let import_map = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).unwrap();
-        let expected_map: HashMap<String, Option<HashSet<String>>> = HashMap::from([
+        let import_map = get_imports_map_from_file(&filename).unwrap();
+        let expected_map: FileImports = HashMap::from([
             (
                 String::from("../componentB/componentB"),
                 Some(HashSet::from(["default".to_string()])),
@@ -180,7 +170,7 @@ mod test {
     #[test]
     fn test_get_imports_from_non_existent_path() {
         let filename = "path/to/nowhere/nothing.ts";
-        let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned())).map_err(|e| e);
+        let imports = get_imports_map_from_file(&filename).map_err(|e| e);
         assert!(imports.is_err());
         #[cfg(target_os = "windows")]
         assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"The system cannot find the path specified.\" }]".to_string(), imports.unwrap_err().to_string());
@@ -192,7 +182,7 @@ mod test {
     #[test]
     fn test_parser_error() {
         let filename = "tests/good_fences_integration/src/parseError/parseError.ts";
-        let imports = get_imports_map_from_file(&PathBuf::from(filename.to_owned()));
+        let imports = get_imports_map_from_file(&filename);
         assert!(imports.is_err());
         let error = imports.unwrap_err();
         assert_eq!(

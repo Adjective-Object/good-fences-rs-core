@@ -1,0 +1,19 @@
+[package]
+name = "swc_utils"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+swc_core = { version = "0.83.32", features = [
+    "ecma_plugin_transform",
+    "ecma_loader_node",
+    "ecma_loader_tsc",
+    "swc_node_base",
+    "ecma_loader_lru",
+    "ecma_loader_parking_lot",
+] }
+swc_ecma_parser = "0.140.0"

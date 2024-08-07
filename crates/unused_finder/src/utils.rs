@@ -5,7 +5,7 @@ use path_slash::PathBufExt;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
 
-use crate::import_resolver::{resolve_with_extension, ResolvedImport};
+use import_resolver::{resolve_with_extension, ResolvedImport};
 
 use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};

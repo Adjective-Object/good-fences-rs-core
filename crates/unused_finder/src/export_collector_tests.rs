@@ -10,10 +10,10 @@ mod test {
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
 
-    use crate::get_imports::create_lexer;
-    use crate::unused_finder::node_visitor::{ExportKind, ImportedItem};
+    use swc_utils::create_lexer;
+    use crate::node_visitor::{ExportKind, ImportedItem};
 
-    use crate::unused_finder::node_visitor::ExportsCollector;
+    use crate::node_visitor::ExportsCollector;
 
     fn create_test_parser<'a>(
         fm: &'a Arc<SourceFile>,

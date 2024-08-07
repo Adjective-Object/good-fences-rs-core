@@ -72,27 +72,6 @@ impl Display for WalkDirsError {
 }
 
 #[derive(Debug)]
-pub enum OpenTsConfigError {
-    SerdeError(serde_json::Error),
-    IOError(std::io::Error),
-}
-
-impl Error for OpenTsConfigError {}
-
-impl Display for OpenTsConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OpenTsConfigError::SerdeError(err) => {
-                write!(f, "Error parsing specified tsconfig file {}", err)
-            }
-            OpenTsConfigError::IOError(err) => {
-                write!(f, "Error opening specified tsconfig file {}", err)
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct ResolvedImportNotFound {
     pub project_local_path_str: String,
     pub source_file_path: String,
@@ -140,29 +119,5 @@ impl Display for EvaluateFencesError {
                 )
             }
         }
-    }
-}
-
-// equivalent to napi::Error, but declared separately so
-// it can be used in tested modules
-//
-// Test modules can't reference napi::Error directly, since
-// that would lead to a reference to `napi_delete_reference`,
-// which only exists when the library is linked with node.
-#[derive(Debug)]
-pub struct NapiLikeError {
-    pub status: napi::Status,
-    pub message: String,
-}
-
-impl AsRef<str> for NapiLikeError {
-    fn as_ref(&self) -> &str {
-        &self.message
-    }
-}
-
-impl Display for NapiLikeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Status: {}. {}", self.status, self.message)
     }
 }
