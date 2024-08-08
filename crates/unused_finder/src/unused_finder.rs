@@ -6,14 +6,17 @@ use std::{
 };
 
 use import_resolver::create_caching_resolver;
+use js_err::JsErr;
 use tsconfig_paths::TsconfigPathsJson;
 
-use super::{
-    create_flattened_walked_files, create_report_map_from_flattened_files,
+use crate::{
     graph::{Graph, GraphFile},
+    walk_src_files, create_report_map_from_flattened_files,
     process_import_export_info, read_allow_list,
     unused_finder_visitor_runner::get_import_export_paths_map,
-    ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
+    api::{
+        ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -31,7 +34,7 @@ pub struct UnusedFinder {
 }
 
 impl UnusedFinder {
-    pub fn new(config: FindUnusedItemsConfig) -> anyhow::Result<Self, napi::Error> {
+    pub fn new(config: FindUnusedItemsConfig) -> anyhow::Result<Self, JsErr> {
         let FindUnusedItemsConfig {
             paths_to_read,
             ts_config_path,
@@ -45,8 +48,7 @@ impl UnusedFinder {
         {
             Ok(tsconfig) => tsconfig,
             Err(e) => {
-                return Err(napi::Error::new(
-                    napi::Status::InvalidArg,
+                return Err(JsErr::invalid_arg(
                     format!("Unable to read tsconfig file {}: {}", ts_config_path, e),
                 ));
             }
@@ -60,10 +62,7 @@ impl UnusedFinder {
             Ok(v) => Arc::new(v),
             Err(e) => {
                 // return None;
-                return Err(napi::Error::new(
-                    napi::Status::InvalidArg,
-                    e.msg.to_string(),
-                ));
+                return Err(JsErr::invalid_arg(e.msg.to_string()));
             }
         };
 
@@ -73,12 +72,12 @@ impl UnusedFinder {
         let skipped_items: Vec<regex::Regex> = match skipped_items.into_iter().collect() {
             Ok(r) => r,
             Err(e) => {
-                return Err(napi::Error::new(napi::Status::InvalidArg, e.to_string()));
+                return Err(JsErr::invalid_arg(e.to_string()));
             }
         };
         let skipped_items = Arc::new(skipped_items);
         let mut flattened_walk_file_data =
-            create_flattened_walked_files(&paths_to_read, &skipped_dirs, &skipped_items);
+            walk_src_files(&paths_to_read, &skipped_dirs, &skipped_items);
 
         let mut files: Vec<GraphFile> = flattened_walk_file_data
             .par_iter_mut()
@@ -126,8 +125,8 @@ impl UnusedFinder {
     // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
 
     pub fn refresh_file_list(&mut self) {
-        // Get a vector with all WalkFileMetaData
-        let mut flattened_walk_file_data = create_flattened_walked_files(
+        // Get a vector with all SourceFile
+        let mut flattened_walk_file_data = walk_src_files(
             &self.config.paths_to_read,
             &self.skipped_dirs,
             &self.skipped_items,
@@ -160,8 +159,8 @@ impl UnusedFinder {
             create_report_map_from_flattened_files(&flattened_walk_file_data);
     }
 
-    // Given a Vec<WalkFileMetadata> refreshes the in-memory representation of imports/exports of source file graph
-    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<WalkFileMetaData>) {
+    // Given a Vec<SourceFile> refreshes the in-memory representation of imports/exports of source file graph
+    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<SourceFile>) {
         let files: HashMap<String, Arc<GraphFile>> = flattened_walk_file_data
             .par_iter()
             .map(|file| {
@@ -308,8 +307,7 @@ impl UnusedFinder {
             }
         }
         if !frontier.is_empty() {
-            return Some(Err(napi::Error::new(
-                napi::Status::GenericFailure,
+            return Some(Err(JsErr::generic_failure(
                 "exceeded max iterations".to_string(),
             )));
         }

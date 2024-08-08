@@ -29,3 +29,4 @@ regex.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 path-slash.workspace = true
+jwalk.workspace = true

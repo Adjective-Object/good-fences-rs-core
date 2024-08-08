@@ -9,7 +9,7 @@ use import_resolver::{resolve_with_extension, ResolvedImport};
 
 use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
-use super::{WalkFileMetaData, WalkedFile};
+use super::{SourceFile, WalkedFile};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum ResolvedItem {
@@ -230,7 +230,7 @@ pub fn retrieve_files(
                                 match visitor_result {
                                     Ok(import_export_info) => {
                                         dir_entry.client_state =
-                                            WalkedFile::SourceFile(WalkFileMetaData {
+                                            WalkedFile::SourceFile(SourceFile {
                                                 package_name: dir_state.clone(),
                                                 import_export_info,
                                                 source_file_path: dir_entry

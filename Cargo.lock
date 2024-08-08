@@ -2569,6 +2569,7 @@ dependencies = [
  "glob",
  "import_resolver",
  "js_err",
+ "jwalk",
  "path-slash",
  "rayon",
  "regex",
