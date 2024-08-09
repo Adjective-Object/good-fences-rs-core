@@ -7,9 +7,11 @@ use swc_core::ecma::loader::resolve::Resolve;
 
 use import_resolver::{resolve_with_extension, ResolvedImport};
 
+use crate::import_export_info::ImportExportInfo;
+
 use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
-use super::{SourceFile, WalkedFile};
+use crate::walked_file::{SourceFile, WalkedFile};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum ResolvedItem {
@@ -182,7 +184,7 @@ pub fn retrieve_files(
     skipped_items: Arc<Vec<regex::Regex>>,
 ) -> Vec<WalkedFile> {
     let walk_dir = WalkDirGeneric::<(String, WalkedFile)>::new(start_path).process_read_dir(
-        move |dir_state, children| {
+        move |dir_state, children: &mut Vec<Result<jwalk::DirEntry<(String, _)>, jwalk::Error>>| {
             children.iter_mut().for_each(|dir_entry_res| {
                 if let Ok(dir_entry) = dir_entry_res {
                     if dir_entry.file_name() == "node_modules" || dir_entry.file_name() == "lib" {

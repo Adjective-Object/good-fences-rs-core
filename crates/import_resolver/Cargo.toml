@@ -10,8 +10,8 @@ crate-type = ["lib"]
 [dependencies]
 serde_derive = "1.0.117"
 serde_bytes = "0.11.5"
-serde = { version = "1.0.117", features = ["rc"] }
-serde_json = "1.0.59"
+serde.workspace = true
+serde_json.workspace = true
 glob = "0.3.0"
 swc_core = { version = "0.83.32", features = [
     "ecma_plugin_transform",

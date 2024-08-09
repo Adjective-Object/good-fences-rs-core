@@ -1,12 +1,13 @@
 use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
+use anyhow::{anyhow, Context, Error, Result};
 use jwalk::WalkDirGeneric;
 use path_slash::PathExt;
+use path_utils::as_relative_slash_path;
+use relative_path::RelativePathBuf;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use relative_path::RelativePathBuf;
-use anyhow::{anyhow, Context, Error, Result};
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
@@ -53,29 +54,10 @@ lazy_static! {
     static ref WORKING_DIR_PATH: PathBuf = current_dir().unwrap();
 }
 
-fn as_relative_slash_path<P: AsRef<Path>>(
-    p: P,
-) -> Result<RelativePathBuf> {
-    let pref = p.as_ref();
-    let relative_fence_path: RelativePathBuf = RelativePathBuf::from_path(pref)
-        .with_context(|| {
-            let pref_str = pref.to_string_lossy();  
-            format!("failed to convert path to relative-path: \"{pref_str}\"")
-        })?;
-    let slashed_pbuf = PathBuf::from(relative_fence_path.as_str()).to_slash().map(|s| s.to_string())
-    .with_context(|| {
-        let rel_fence_str = relative_fence_path.as_str();
-        format!("failed to convert relative-path to a slashed path: \"{rel_fence_str}\"")
-    })?;
-    Ok(RelativePathBuf::from(slashed_pbuf))
-}
-
 fn discover_js_ts_src(file_path: &PathBuf, tags: HashSet<String>) -> Result<WalkFileData, Error> {
     let relative_file_path = as_relative_slash_path(&file_path)?;
     let imports = get_imports_map_from_file(&relative_file_path)
-        .map_err(|e| anyhow!(
-            "Error getting imports from file {:?}: {}", file_path, e
-        ))?;
+        .map_err(|e| anyhow!("Error getting imports from file {:?}: {}", file_path, e))?;
 
     Ok(WalkFileData::SourceFile(SourceFile {
         source_file_path: relative_file_path.into_string(),
@@ -137,8 +119,9 @@ pub fn discover_fences_and_files(
                             Some(file_name) => {
                                 if file_name.ends_with("fence.json") {
                                     let fence_path = &dir_entry.parent_path.join(file_name);
-                                    let parsed_fence: Result<Fence, _> = as_relative_slash_path(fence_path)
-                                        .and_then(|x| parse_fence_file(x));
+                                    let parsed_fence: Result<Fence, _> =
+                                        as_relative_slash_path(fence_path)
+                                            .and_then(|x| parse_fence_file(x));
                                     let fence = match parsed_fence {
                                         Ok(fence) => fence,
                                         Err(e) => {
@@ -159,7 +142,10 @@ pub fn discover_fences_and_files(
                                     dir_entry.client_state = WalkFileData::Fence(fence);
                                 }
                             }
-                            None => panic!("c_str was not a string?: {}", dir_entry.file_name.to_string_lossy()),
+                            None => panic!(
+                                "c_str was not a string?: {}",
+                                dir_entry.file_name.to_string_lossy()
+                            ),
                         }
                     }
                     Err(e) => {
@@ -192,10 +178,13 @@ pub fn discover_fences_and_files(
                                         }
                                     };
                                 }
-                            },
-                            None => panic!("c_str was not a string?: {}", dir_entry.file_name.to_string_lossy()),
+                            }
+                            None => panic!(
+                                "c_str was not a string?: {}",
+                                dir_entry.file_name.to_string_lossy()
+                            ),
                         }
-                    },
+                    }
                     // TODO maybe don't swallow errors here? not sure
                     // when this error even fires.
                     Err(e) => {

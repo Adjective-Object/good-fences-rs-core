@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, sync::Arc};
 
 use swc_core::common::comments::SingleThreadedComments;
@@ -8,11 +7,11 @@ use swc_core::ecma::transforms::base::resolver;
 use swc_core::ecma::visit::{fold_module, visit_module};
 use swc_ecma_parser::{Capturing, Parser};
 
-use swc_utils::create_lexer;
 use anyhow;
+use swc_utils::create_lexer;
 
-use crate::node_visitor::ExportsCollector;
 use crate::import_export_info::{ExportedItem, ImportExportInfo};
+use crate::node_visitor::ExportsCollector;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceFileParseError {
@@ -36,10 +35,7 @@ pub fn get_import_export_paths_map(
     let fm = match cm.load_file(path.as_path()) {
         Ok(f) => f,
         Err(e) => {
-            return Err(
-                anyhow!(SourceFileParseError::LoadFileError(file_path.clone()))
-                    .context(e),
-            )
+            return Err(anyhow!(SourceFileParseError::LoadFileError(file_path.clone())).context(e))
         }
     };
     if fm.src.contains("// This file is auto-generated") {

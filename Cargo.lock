@@ -2573,6 +2573,8 @@ dependencies = [
  "path-slash",
  "rayon",
  "regex",
+ "serde",
+ "serde_json",
  "swc_core",
  "swc_ecma_parser",
  "swc_utils",
@@ -2635,6 +2637,28 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
+
+[[package]]
+name = "walk_src"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "glob",
+ "import_resolver",
+ "js_err",
+ "jwalk",
+ "path-slash",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "swc_core",
+ "swc_ecma_parser",
+ "swc_utils",
+ "thiserror",
+ "tsconfig_paths",
+]
 
 [[package]]
 name = "wasi"
