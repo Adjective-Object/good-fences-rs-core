@@ -1,12 +1,12 @@
 use path_clean::PathClean as _;
 use path_slash::PathBufExt;
 use relative_path::{RelativePath, RelativePathBuf};
+use serde::Deserialize;
 use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
-use serde::Deserialize;
 use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -213,8 +213,7 @@ fn path_buf_from_tsconfig(
         let mut builder: RelativePathBuf = RelativePathBuf::new();
         builder.push(base_url);
         builder.push(specifier_from_tsconfig_paths);
-        return PathBuf::from(RelativePathBuf::from(builder.to_string()).as_str())
-            .clean();
+        return PathBuf::from(RelativePathBuf::from(builder.to_string()).as_str()).clean();
     } else {
         return PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
             .clean();
@@ -225,13 +224,11 @@ fn path_buf_from_tsconfig(
 mod test {
     extern crate lazy_static;
     extern crate relative_path;
-    use super::{
-        resolve_ts_import, ResolvedImport, TsconfigPathsJson,
-    };
-    use tsconfig_paths::TsconfigPathsCompilerOptions;
+    use super::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::path::PathBuf;
+    use tsconfig_paths::TsconfigPathsCompilerOptions;
 
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {

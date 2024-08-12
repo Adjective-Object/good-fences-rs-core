@@ -17,76 +17,148 @@ impl JsErr {
         Self { status, message }
     }
     pub fn ok(message: String) -> Self {
-        Self{ status: napi::Status::Ok, message }
+        Self {
+            status: napi::Status::Ok,
+            message: message.to_string(),
+        }
     }
-    pub fn invalid_arg(message: String) -> Self {
-        Self{ status: napi::Status::InvalidArg, message }
+    pub fn invalid_arg<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::InvalidArg,
+            message: message.to_string(),
+        }
     }
-    pub fn object_expected(message: String) -> Self {
-        Self{ status: napi::Status::ObjectExpected, message }
+    pub fn object_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::ObjectExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn string_expected(message: String) -> Self {
-        Self{ status: napi::Status::StringExpected, message }
+    pub fn string_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::StringExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn name_expected(message: String) -> Self {
-        Self{ status: napi::Status::NameExpected, message }
+    pub fn name_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::NameExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn function_expected(message: String) -> Self {
-        Self{ status: napi::Status::FunctionExpected, message }
+    pub fn function_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::FunctionExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn number_expected(message: String) -> Self {
-        Self{ status: napi::Status::NumberExpected, message }
+    pub fn number_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::NumberExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn boolean_expected(message: String) -> Self {
-        Self{ status: napi::Status::BooleanExpected, message }
+    pub fn boolean_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::BooleanExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn array_expected(message: String) -> Self {
-        Self{ status: napi::Status::ArrayExpected, message }
+    pub fn array_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::ArrayExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn generic_failure(message: String) -> Self {
-        Self{ status: napi::Status::GenericFailure, message }
+    pub fn generic_failure<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::GenericFailure,
+            message: message.to_string(),
+        }
     }
-    pub fn pending_exception(message: String) -> Self {
-        Self{ status: napi::Status::PendingException, message }
+    pub fn pending_exception<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::PendingException,
+            message: message.to_string(),
+        }
     }
-    pub fn cancelled(message: String) -> Self {
-        Self{ status: napi::Status::Cancelled, message }
+    pub fn cancelled<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::Cancelled,
+            message: message.to_string(),
+        }
     }
-    pub fn escape_called_twice(message: String) -> Self {
-        Self{ status: napi::Status::EscapeCalledTwice, message }
+    pub fn escape_called_twice<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::EscapeCalledTwice,
+            message: message.to_string(),
+        }
     }
-    pub fn handle_scope_mismatch(message: String) -> Self {
-        Self{ status: napi::Status::HandleScopeMismatch, message }
+    pub fn handle_scope_mismatch<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::HandleScopeMismatch,
+            message: message.to_string(),
+        }
     }
-    pub fn callback_scope_mismatch(message: String) -> Self {
-        Self{ status: napi::Status::CallbackScopeMismatch, message }
+    pub fn callback_scope_mismatch<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::CallbackScopeMismatch,
+            message: message.to_string(),
+        }
     }
-    pub fn queue_full(message: String) -> Self {
-        Self{ status: napi::Status::QueueFull, message }
+    pub fn queue_full<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::QueueFull,
+            message: message.to_string(),
+        }
     }
-    pub fn closing(message: String) -> Self {
-        Self{ status: napi::Status::Closing, message }
+    pub fn closing<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::Closing,
+            message: message.to_string(),
+        }
     }
-    pub fn bigint_expected(message: String) -> Self {
-        Self{ status: napi::Status::BigintExpected, message }
+    pub fn bigint_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::BigintExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn date_expected(message: String) -> Self {
-        Self{ status: napi::Status::DateExpected, message }
+    pub fn date_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::DateExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn array_buffer_expected(message: String) -> Self {
-        Self{ status: napi::Status::ArrayBufferExpected, message }
+    pub fn array_buffer_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::ArrayBufferExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn detachable_arraybuffer_expected(message: String) -> Self {
-        Self{ status: napi::Status::DetachableArraybufferExpected, message }
+    pub fn detachable_arraybuffer_expected<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::DetachableArraybufferExpected,
+            message: message.to_string(),
+        }
     }
-    pub fn would_deadlock(message: String) -> Self {
-        Self{ status: napi::Status::WouldDeadlock, message }
+    pub fn would_deadlock<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::WouldDeadlock,
+            message: message.to_string(),
+        }
     }
-    pub fn no_external_buffers_allowed(message: String) -> Self {
-        Self{ status: napi::Status::NoExternalBuffersAllowed, message }
+    pub fn no_external_buffers_allowed<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::NoExternalBuffersAllowed,
+            message: message.to_string(),
+        }
     }
-    pub fn unknown(message: String) -> Self {
-        Self{ status: napi::Status::Unknown, message }
+    pub fn unknown<P: ToString>(message: P) -> Self {
+        Self {
+            status: napi::Status::Unknown,
+            message: message.to_string(),
+        }
     }
 
     pub fn message<'a>(self: &'a Self) -> &'a str {
@@ -106,5 +178,11 @@ impl AsRef<str> for JsErr {
 impl Display for JsErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Status: {}. {}", self.status, self.message)
+    }
+}
+
+impl Into<napi::Error> for JsErr {
+    fn into(self) -> napi::Error {
+        napi::Error::new(self.status, self.message)
     }
 }

@@ -1,13 +1,12 @@
 use crate::fence::{parse_fence_file, Fence};
 use crate::get_imports::get_imports_map_from_file;
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Error, Result};
 use jwalk::WalkDirGeneric;
 use path_slash::PathExt;
 use path_utils::as_relative_slash_path;
-use relative_path::RelativePathBuf;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {

@@ -5,21 +5,22 @@ use std::{
     sync::Arc,
 };
 
-use import_resolver::create_caching_resolver;
+use import_resolver::swc_resolver::{create_tsconfig_paths_resolver, TsconfigPathsResolver};
 use js_err::JsErr;
+use rayon::prelude::*;
 use tsconfig_paths::TsconfigPathsJson;
 
 use crate::{
-    graph::{Graph, GraphFile},
-    walk_src_files, create_report_map_from_flattened_files,
-    process_import_export_info, read_allow_list,
-    unused_finder_visitor_runner::get_import_export_paths_map,
-    api::{
-        ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
+    core::{
+        create_report_map_from_flattened_files, process_import_export_info, read_allow_list,
+        walk_src_files, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
     },
+    graph::{Graph, GraphFile},
+    unused_finder_visitor_runner::get_import_export_paths_map,
+    walked_file::UnusedFinderSourceFile,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UnusedFinder {
     pub report: UnusedFinderReport,
     pub logs: Vec<String>,
@@ -30,7 +31,7 @@ pub struct UnusedFinder {
     skipped_dirs: Arc<Vec<glob::Pattern>>,
     entry_files: Vec<String>,
     graph: Graph,
-    resolver: Option<CachingResolver<TsConfigResolver<NodeModulesResolver>>>,
+    resolver: TsconfigPathsResolver,
 }
 
 impl UnusedFinder {
@@ -48,13 +49,13 @@ impl UnusedFinder {
         {
             Ok(tsconfig) => tsconfig,
             Err(e) => {
-                return Err(JsErr::invalid_arg(
-                    format!("Unable to read tsconfig file {}: {}", ts_config_path, e),
-                ));
+                return Err(JsErr::invalid_arg(format!(
+                    "Unable to read tsconfig file {}: {}",
+                    ts_config_path, e
+                )));
             }
         };
-        let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
-            create_caching_resolver(&tsconfig);
+        let resolver: TsconfigPathsResolver = create_tsconfig_paths_resolver(&tsconfig);
         let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
 
         let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
@@ -115,10 +116,14 @@ impl UnusedFinder {
             entry_packages,
             skipped_dirs,
             skipped_items,
-            resolver: Some(resolver),
+            resolver: resolver,
             graph,
             file_path_exported_items_map,
-            ..Default::default()
+            // These fields are empty because they are populated by
+            // the mutation methods below (refresh_file_list, walk_file_graph, etc)
+            entry_files: Default::default(),
+            report: Default::default(),
+            logs: Default::default(),
         })
     }
 
@@ -136,7 +141,7 @@ impl UnusedFinder {
             process_import_export_info(
                 &mut file.import_export_info,
                 &file.source_file_path,
-                &self.resolver.as_ref().unwrap(),
+                &self.resolver,
             );
         });
 
@@ -160,7 +165,7 @@ impl UnusedFinder {
     }
 
     // Given a Vec<SourceFile> refreshes the in-memory representation of imports/exports of source file graph
-    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<SourceFile>) {
+    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<UnusedFinderSourceFile>) {
         let files: HashMap<String, Arc<GraphFile>> = flattened_walk_file_data
             .par_iter()
             .map(|file| {
@@ -183,7 +188,7 @@ impl UnusedFinder {
         self.graph = Graph { files };
     }
 
-    pub fn find_all_unused_items(&mut self) -> napi::Result<UnusedFinderReport> {
+    pub fn find_all_unused_items(&mut self) -> Result<UnusedFinderReport, JsErr> {
         self.refresh_file_list();
         // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
         let file_path_exported_items_map = self.file_path_exported_items_map.clone();
@@ -192,7 +197,7 @@ impl UnusedFinder {
             return value;
         }
 
-        let allow_list: Vec<glob::Pattern> = read_allow_list();
+        let allow_list: Vec<glob::Pattern> = read_allow_list().map_err(JsErr::generic_failure)?;
 
         let reported_unused_files = self.get_unused_files(allow_list);
         let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
@@ -212,7 +217,7 @@ impl UnusedFinder {
     pub fn find_unused_items(
         &mut self,
         files_to_check: Vec<String>,
-    ) -> napi::Result<UnusedFinderReport> {
+    ) -> Result<UnusedFinderReport, JsErr> {
         self.logs = vec![];
         self.logs.push(format!("{:?}", &files_to_check));
         if files_to_check.is_empty() {
@@ -235,7 +240,7 @@ impl UnusedFinder {
             return value;
         }
 
-        let allow_list: Vec<glob::Pattern> = read_allow_list();
+        let allow_list: Vec<glob::Pattern> = read_allow_list().map_err(JsErr::generic_failure)?;
 
         let reported_unused_files = self.get_unused_files(allow_list);
         let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
@@ -298,7 +303,7 @@ impl UnusedFinder {
         reported_unused_files
     }
 
-    fn walk_file_graph(&mut self) -> Option<Result<UnusedFinderReport, napi::Error>> {
+    fn walk_file_graph(&mut self) -> Option<Result<UnusedFinderReport, JsErr>> {
         let mut frontier = self.entry_files.clone();
         for _ in 0..10_000_000 {
             frontier = self.graph.bfs_step(frontier);
@@ -331,7 +336,7 @@ impl UnusedFinder {
                             // Process import/export info to use resolver.
                             &mut current_graph_file.import_export_info,
                             &f,
-                            &self.resolver.as_ref().unwrap(),
+                            &self.resolver,
                         );
                     }
                     None => {}

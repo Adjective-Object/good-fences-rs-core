@@ -102,7 +102,9 @@ pub struct ExportsCollector {
     pub imported_paths: HashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
     pub export_from_ids: HashMap<String, HashSet<ImportedItem>>,
+    // IDs exported from this file, that were locally declared
     pub exported_ids: HashSet<ExportedItemMetadata>,
+    // Side-effect-only imports.
     // import './foo';
     pub executed_paths: HashSet<String>,
     // exported from this file

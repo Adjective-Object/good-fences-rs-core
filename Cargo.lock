@@ -664,6 +664,7 @@ dependencies = [
  "anyhow",
  "glob",
  "import_resolver",
+ "js_err",
  "jwalk",
  "lazy_static",
  "napi",
@@ -671,6 +672,7 @@ dependencies = [
  "napi-derive",
  "path-clean",
  "path-slash",
+ "path_utils",
  "pathdiff",
  "rayon",
  "regex",
@@ -681,8 +683,10 @@ dependencies = [
  "serde_json",
  "swc_core",
  "swc_ecma_parser",
+ "swc_utils",
  "text-diff",
  "thiserror",
+ "tsconfig_paths",
  "unused_finder",
  "void",
 ]
@@ -770,6 +774,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "swc_core",
+ "swc_ecma_loader",
  "swc_ecma_parser",
  "thiserror",
  "tsconfig_paths",
@@ -2556,7 +2561,9 @@ checksum = "0336d538f7abc86d282a4189614dfaa90810dfc2c6f6427eaf88e16311dd225d"
 name = "unused_bin"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "clap",
+ "serde_json",
  "unused_finder",
 ]
 
@@ -2570,6 +2577,8 @@ dependencies = [
  "import_resolver",
  "js_err",
  "jwalk",
+ "napi",
+ "napi-derive",
  "path-slash",
  "rayon",
  "regex",
@@ -2637,28 +2646,6 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
-
-[[package]]
-name = "walk_src"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "clap",
- "glob",
- "import_resolver",
- "js_err",
- "jwalk",
- "path-slash",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "swc_core",
- "swc_ecma_parser",
- "swc_utils",
- "thiserror",
- "tsconfig_paths",
-]
 
 [[package]]
 name = "wasi"

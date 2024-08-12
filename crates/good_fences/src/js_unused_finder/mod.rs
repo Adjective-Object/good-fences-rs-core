@@ -1,17 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use swc_core::common::comments::Comments;
-use swc_core::common::SourceFile;
-use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
-use swc_ecma_parser::TsConfig;
+use napi_derive::napi;
+use unused_finder::{FindUnusedItemsConfig, UnusedFinder, UnusedFinderReport};
 
-#[derive(Debug, Default)]
+/**
+ * Provides a napi wrapper for the UnusedFinder, which plumbs
+ * the UnusedFinder's functionality to JavaScript.
+ */
+#[derive(Debug)]
 #[napi(js_name = "UnusedFinder")]
-pub struct UnusedFinderWrapper {
+pub struct JsUnusedFinder {
     unused_finder: UnusedFinder,
 }
 
 #[napi]
-impl UnusedFinderWrapper {
+impl JsUnusedFinder {
     #[napi(constructor)]
     pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
         let finder = UnusedFinder::new(config);
@@ -35,11 +36,15 @@ impl UnusedFinderWrapper {
         &mut self,
         files_to_check: Vec<String>,
     ) -> napi::Result<UnusedFinderReport> {
-        self.unused_finder.find_unused_items(files_to_check)
+        self.unused_finder
+            .find_unused_items(files_to_check)
+            .map_err(|e| e.into())
     }
 
     #[napi]
     pub fn find_all_unused_items(&mut self) -> napi::Result<UnusedFinderReport> {
-        self.unused_finder.find_all_unused_items()
+        self.unused_finder
+            .find_all_unused_items()
+            .map_err(|e| e.into())
     }
 }

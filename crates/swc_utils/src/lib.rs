@@ -1,12 +1,9 @@
 extern crate swc_core;
 extern crate swc_ecma_parser;
 use swc_core::common::comments::Comments;
-use swc_core::common::errors::Handler;
-use swc_core::common::{Globals, Mark, SourceFile, SourceMap, GLOBALS};
-use swc_core::ecma::transforms::base::resolver;
-use swc_core::ecma::visit::{fold_module, visit_module};
-use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
-use swc_ecma_parser::{Capturing, TsConfig};
+use swc_core::common::SourceFile;
+use swc_ecma_parser::TsConfig;
+use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
 
 pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) -> Lexer<'a> {
     let filename = fm.name.to_string();

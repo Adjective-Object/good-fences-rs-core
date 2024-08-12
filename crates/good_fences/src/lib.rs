@@ -1,14 +1,16 @@
 use std::{collections::HashSet, iter::FromIterator};
 
+extern crate import_resolver;
+extern crate js_err;
 extern crate serde;
 extern crate serde_json;
+extern crate swc_utils;
+extern crate tsconfig_paths;
 extern crate unused_finder;
-extern crate import_resolver;
 
 use error::EvaluateFencesError;
 use napi_derive::napi;
 use serde::Serialize;
-use unused_finder::{FindUnusedItemsConfig, UnusedFinderReport};
 use walk_dirs::ExternalFences;
 pub mod error;
 pub mod evaluate_fences;
@@ -17,13 +19,13 @@ pub mod fence_collection;
 pub mod file_extension;
 pub mod get_imports;
 pub mod good_fences_runner;
+pub mod js_unused_finder;
 pub mod walk_dirs;
-pub mod unused_finder_napi;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
     let tsconfig_path = opts.project;
-    let mut tsconfig = import_resolver::TsconfigPathsJson::from_path(tsconfig_path)
+    let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(tsconfig_path)
         .expect("Unable to find --project path");
 
     if opts.base_url.is_some() {
@@ -193,15 +195,17 @@ pub struct JsonErrorFile<'a> {
  */
 
 #[napi]
-pub fn find_unused_items(config: FindUnusedItemsConfig) -> napi::Result<UnusedFinderReport> {
-    unused_finder::find_unused_items(config).map_err(|e: JsErr| e.to_napi())
+pub fn find_unused_items(
+    config: unused_finder::FindUnusedItemsConfig,
+) -> napi::Result<unused_finder::UnusedFinderReport> {
+    unused_finder::find_unused_items(config.into()).map_err(|e: js_err::JsErr| e.to_napi())
 }
 
 #[napi]
 pub fn find_unused_items_for_open_files(
-    config: FindUnusedItemsConfig,
+    config: unused_finder::FindUnusedItemsConfig,
     files: Vec<String>,
-) -> napi::Result<UnusedFinderReport> {
+) -> napi::Result<unused_finder::UnusedFinderReport> {
     match unused_finder::find_unused_items(config) {
         Ok(mut ok) => {
             let files: HashSet<String> = HashSet::from_iter(files);

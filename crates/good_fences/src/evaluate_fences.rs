@@ -2,11 +2,10 @@ use crate::error::{EvaluateFencesError, ResolvedImportNotFound};
 use crate::fence::{DependencyRule, ExportRule, Fence};
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
-use import_resolver::{
-    resolve_ts_import, ResolvedImport, TsconfigPathsJson, SOURCE_EXTENSIONS,
-};
 use crate::walk_dirs::SourceFile;
 use glob::Pattern;
+use import_resolver::manual_resolver::{resolve_ts_import, ResolvedImport, SOURCE_EXTENSIONS};
+use path_slash::PathBufExt;
 use relative_path::RelativePath;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -14,6 +13,7 @@ use std::fmt::Display;
 use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
+use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ViolatedFenceClause<'a> {
@@ -418,12 +418,12 @@ mod test {
     use crate::evaluate_fences::{evaluate_fences, ImportRuleViolation, ViolatedFenceClause};
     use crate::fence::{parse_fence_str, DependencyRule, ExportRule};
     use crate::fence_collection::FenceCollection;
-    use import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::SourceFile;
     use lazy_static::lazy_static;
     use relative_path::RelativePathBuf;
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
+    use tsconfig_paths::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
 
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {

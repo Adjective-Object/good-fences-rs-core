@@ -1,28 +1,37 @@
-
-use import_resolver::create_caching_resolver;
+use anyhow::Result;
+use import_resolver::swc_resolver::create_tsconfig_paths_resolver;
 use rayon::prelude::*;
+use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     iter::FromIterator,
     str::FromStr,
     sync::Arc,
 };
-use swc_core::{common::source_map::Pos, ecma::loader::{
-    resolve::Resolve,
-    resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
-}};
+use swc_core::{
+    common::source_map::Pos,
+    ecma::loader::{
+        resolve::Resolve,
+        resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
+    },
+};
 
-use js_err::JsErr;
-use tsconfig_paths::TsconfigPathsJson;
-use crate::{graph::{Graph, GraphFile}, walked_file::WalkedFile};
-use crate::walked_file::WalkedSourceFile;
 use crate::import_export_info::ImportExportInfo;
 use crate::utils::{
     process_async_imported_paths, process_executed_paths, process_exports_from,
     process_import_path_ids, process_require_paths, retrieve_files,
 };
+use crate::walked_file::UnusedFinderSourceFile;
+use crate::{
+    graph::{Graph, GraphFile},
+    walked_file::WalkedFile,
+};
+use js_err::JsErr;
+use tsconfig_paths::TsconfigPathsJson;
 
-#[derive(Debug, Default, Clone)]
+#[cfg(feature = "napi")]
+#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct FindUnusedItemsConfig {
     pub paths_to_read: Vec<String>,
     pub ts_config_path: String,
@@ -41,6 +50,7 @@ pub struct FindUnusedItemsConfig {
 
 // Represents a single exported item in a file
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "napi", napi(object))]
 pub struct ExportedItemReport {
     pub id: String,
     pub start: i32,
@@ -49,14 +59,15 @@ pub struct ExportedItemReport {
 
 // Report of unused symbols within a project
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "napi", napi(object))]
 pub struct UnusedFinderReport {
     pub unused_files: Vec<String>,
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
     // pub flattened_walk_file_data: Vec<WalkedSourceFile>,
 }
 
-fn create_report_map_from_flattened_files(
-    flattened_walk_file_data: &Vec<WalkedSourceFile>,
+pub fn create_report_map_from_flattened_files(
+    flattened_walk_file_data: &Vec<UnusedFinderSourceFile>,
 ) -> HashMap<String, Vec<ExportedItemReport>> {
     let file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         flattened_walk_file_data
@@ -79,17 +90,17 @@ fn create_report_map_from_flattened_files(
     file_path_exported_items_map
 }
 
-fn walk_src_files(
+pub fn walk_src_files(
     paths_to_read: &Vec<String>,
     skipped_dirs: &Arc<Vec<glob::Pattern>>,
     skipped_items: &Arc<Vec<regex::Regex>>,
-) -> Vec<WalkedSourceFile> {
-    let flattened_walk_file_data: Vec<WalkedSourceFile> = paths_to_read
+) -> Vec<UnusedFinderSourceFile> {
+    let flattened_walk_file_data: Vec<UnusedFinderSourceFile> = paths_to_read
         .par_iter()
         .map(|path| {
             let mut walked_files =
                 retrieve_files(path, Some(skipped_dirs.to_vec()), skipped_items.clone());
-            let walked_files_data: Vec<WalkedSourceFile> = walked_files
+            let walked_files_data: Vec<UnusedFinderSourceFile> = walked_files
                 .drain(0..)
                 .filter_map(|walked_file| {
                     if let WalkedFile::SourceFile(w) = walked_file {
@@ -125,28 +136,26 @@ pub fn find_unused_items(
     let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
     let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
         Ok(v) => Arc::new(v),
-        Err(e) => {
-            return Err(JsErr::invalid_arg(e.msg.to_string()))
-        }
+        Err(e) => return Err(JsErr::invalid_arg(e.msg.to_string())),
     };
 
-    let skipped_items = skipped_items
+    let skipped_items: Vec<regex::Regex> = skipped_items
         .iter()
-        .map(|s| regex::Regex::from_str(s.as_str()));
-    let skipped_items: Vec<regex::Regex> = match skipped_items.into_iter().collect() {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(JsErr::invalid_arg(e.to_string()))
-        }
-    };
+        .map(|s| {
+            regex::Regex::from_str(s.as_str())
+                // convert regex err to JsErr
+                .map_err(JsErr::invalid_arg)
+        })
+        .collect::<Result<Vec<regex::Regex>, JsErr>>()?;
+
     let skipped_items = Arc::new(skipped_items);
     // Walk on all files and retrieve the WalkFileData from them
-    let mut flattened_walk_file_data: Vec<WalkedSourceFile> =
+    let mut flattened_walk_file_data: Vec<UnusedFinderSourceFile> =
         walk_src_files(&paths_to_read, &skipped_dirs, &skipped_items);
 
     let _total_files = flattened_walk_file_data.len();
     let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
-        create_caching_resolver(&tsconfig);
+        create_tsconfig_paths_resolver(&tsconfig);
     let mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         create_report_map_from_flattened_files(&flattened_walk_file_data);
     let mut files: Vec<GraphFile> = flattened_walk_file_data
@@ -198,11 +207,13 @@ pub fn find_unused_items(
             break;
         }
         if i >= MAX_ITERATIONS {
-            return Err(JsErr::generic_failure("exceeded max iterations".to_string()));
+            return Err(JsErr::generic_failure(
+                "exceeded max iterations".to_string(),
+            ));
         }
     }
 
-    let allow_list: Vec<glob::Pattern> = read_allow_list();
+    let allow_list: Vec<glob::Pattern> = read_allow_list().map_err(JsErr::generic_failure)?;
 
     let reported_unused_files = BTreeMap::from_iter(
         graph
@@ -251,23 +262,21 @@ pub fn find_unused_items(
 // allowed items can be:
 // - specific file paths like `shared/internal/owa-react-hooks/src/useWhyDidYouUpdate.ts`
 // - glob patterns (similar to a `.gitignore` file) `shared/internal/owa-datetime-formatters/**`
-fn read_allow_list() -> Vec<glob::Pattern> {
-    match std::fs::read_to_string(".unusedignore") {
-        Ok(list) => {
-            return list
-                .split("\n")
-                .filter_map(|line| match glob::Pattern::new(line) {
-                    Ok(p) => Some(p),
-                    Err(_) => None,
-                })
-                .collect()
-        }
-        Err(_) => {}
-    }
-    vec![]
+pub fn read_allow_list() -> Result<Vec<glob::Pattern>> {
+    return match std::fs::read_to_string(".unusedignore") {
+        Ok(list) => list
+            .split("\n")
+            .enumerate()
+            .map(|(idx, line)| {
+                glob::Pattern::new(line)
+                    .map_err(|e| anyhow!("line {}: failed to parse pattern: {}", idx, e))
+            })
+            .collect::<Result<Vec<glob::Pattern>, anyhow::Error>>(),
+        Err(e) => Err(anyhow!("failed to read .unusedignore file: {}", e)),
+    };
 }
 
-fn process_import_export_info(
+pub fn process_import_export_info(
     f: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,

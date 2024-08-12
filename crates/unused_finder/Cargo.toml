@@ -32,3 +32,9 @@ path-slash.workspace = true
 jwalk.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+napi = { workspace = true, optional = true }
+napi-derive = { workspace = true, optional = true }
+
+[features]
+default = []
+napi = ["dep:napi", "dep:napi-derive"]

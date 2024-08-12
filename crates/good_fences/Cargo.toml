@@ -7,17 +7,12 @@ edition = "2018"
 [lib]
 crate-type = ["cdylib", "lib", "staticlib"]
 
-[[bin]]
-name = "unused"
-path = "src/bin/unused.rs"
-
 [dependencies]
+anyhow.workspace = true
 jwalk.workspace = true
 lazy_static = "1.4.0"
 serde_derive = "1.0.117"
 serde_bytes = "0.11.5"
-serde = { version = "1.0.117", features = ["rc"] }
-serde_json = "1.0.59"
 void = "1.0.2"
 relative-path = { workspace = true }
 regex = { workspace = true }
@@ -27,6 +22,7 @@ text-diff = "0.4.0"
 rayon = { workspace = true }
 path-slash = "0.2.1"
 path-clean = "0.1.0"
+swc_ecma_parser = "0.140.0"
 swc_core = { version = "0.83.32", features = [
     "ecma_plugin_transform",
     "ecma_loader_node",
@@ -35,13 +31,19 @@ swc_core = { version = "0.83.32", features = [
     "ecma_loader_lru",
     "ecma_loader_parking_lot",
 ] }
-napi = { version = "2.16.6", default-features = false, features = ["napi4"] }
-napi-derive = "2.16.9"
-swc_ecma_parser = "0.140.0"
-anyhow = { workspace = true }
+napi.workspace = true
+napi-derive.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+js_err = { path = "../js_err" }
+
+unused_finder = { path = "../unused_finder", features = ["napi"] }
 import_resolver = { path = "../import_resolver" }
-unused_finder = { path = "../unused_finder" }
+path_utils = { path = "../path_utils" }
+tsconfig_paths = { path = "../tsconfig_paths" }
+swc_utils = { path = "../swc_utils" }
+
 
 [build-dependencies]
 napi-build = "2.0.1"

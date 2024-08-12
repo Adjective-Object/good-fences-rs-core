@@ -1,20 +1,25 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::Arc;
 use swc_core::common::comments::Comments;
-use swc_core::common::SourceFile;
+use swc_core::common::errors::Handler;
+use swc_core::common::{Globals, Mark, GLOBALS};
+use swc_core::common::{SourceFile, SourceMap};
+use swc_core::ecma::transforms::base::resolver;
 use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
-use swc_ecma_parser::TsConfig;
+use swc_ecma_parser::{Capturing, Parser, TsConfig};
 mod import_path_visitor;
+use crate::error::GetImportError;
+use swc_core::ecma::visit::{fold_module, visit_module};
 
 pub use import_path_visitor::*;
-
-use crate::error::GetImportError;
 
 pub type FileImports = HashMap<String, Option<HashSet<String>>>;
 
 pub fn get_imports_map_from_file<'a, P: AsRef<str>>(
     file_path: &'a P,
 ) -> Result<FileImports, GetImportError> {
-    let path_string: str = file_path.as_ref();
+    let path_string: &str = file_path.as_ref();
     let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
@@ -74,9 +79,7 @@ pub fn get_imports_map_from_file<'a, P: AsRef<str>>(
     return Ok(imports_map);
 }
 
-fn get_imports_map_from_visitor(
-    visitor: ImportPathVisitor,
-) -> FileImports {
+fn get_imports_map_from_visitor(visitor: ImportPathVisitor) -> FileImports {
     let mut final_imports_map: FileImports = HashMap::new();
     let ImportPathVisitor {
         mut require_paths,

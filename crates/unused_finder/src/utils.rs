@@ -1,17 +1,13 @@
-use std::sync::Arc;
-
+use super::node_visitor::{ExportKind, ImportedItem};
+use super::unused_finder_visitor_runner::get_import_export_paths_map;
+use crate::import_export_info::ImportExportInfo;
+use crate::walked_file::{UnusedFinderSourceFile, WalkedFile};
+use import_resolver::manual_resolver::{resolve_with_extension, ResolvedImport};
 use jwalk::WalkDirGeneric;
 use path_slash::PathBufExt;
+use std::sync::Arc;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
-
-use import_resolver::{resolve_with_extension, ResolvedImport};
-
-use crate::import_export_info::ImportExportInfo;
-
-use super::node_visitor::{ExportKind, ImportedItem};
-use super::unused_finder_visitor_runner::{get_import_export_paths_map, ImportExportInfo};
-use crate::walked_file::{SourceFile, WalkedFile};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum ResolvedItem {
@@ -232,7 +228,7 @@ pub fn retrieve_files(
                                 match visitor_result {
                                     Ok(import_export_info) => {
                                         dir_entry.client_state =
-                                            WalkedFile::SourceFile(SourceFile {
+                                            WalkedFile::SourceFile(UnusedFinderSourceFile {
                                                 package_name: dir_state.clone(),
                                                 import_export_info,
                                                 source_file_path: dir_entry

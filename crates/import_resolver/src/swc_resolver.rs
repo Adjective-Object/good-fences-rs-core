@@ -3,9 +3,9 @@ use swc_core::ecma::loader::resolvers::{
 };
 use tsconfig_paths::TsconfigPathsJson;
 
-pub fn create_caching_resolver(
-    tsconfig: &TsconfigPathsJson,
-) -> CachingResolver<TsConfigResolver<NodeModulesResolver>> {
+pub type TsconfigPathsResolver = CachingResolver<TsConfigResolver<NodeModulesResolver>>;
+
+pub fn create_tsconfig_paths_resolver(tsconfig: &TsconfigPathsJson) -> TsconfigPathsResolver {
     let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> = CachingResolver::new(
         60_000,
         TsConfigResolver::new(

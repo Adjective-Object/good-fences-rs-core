@@ -2,12 +2,12 @@ extern crate serde_json;
 use crate::evaluate_fences::{evaluate_fences, FenceEvaluationResult};
 use crate::fence::Fence;
 use crate::fence_collection::FenceCollection;
-use import_resolver::TsconfigPathsJson;
 use crate::walk_dirs::{discover_fences_and_files, ExternalFences, SourceFile, WalkFileData};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::{FromIterator, Iterator};
+use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, PartialEq)]
 pub struct GoodFencesRunner {
@@ -190,11 +190,11 @@ mod test {
     use crate::fence::{DependencyRule, ExportRule, Fence, ParsedFence};
     use crate::fence_collection::FenceCollection;
     use crate::good_fences_runner::{GoodFencesRunner, UndefinedTagReference};
-    use import_resolver::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
     use crate::walk_dirs::{ExternalFences, SourceFile};
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
     use text_diff::print_diff;
+    use tsconfig_paths::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
 
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {

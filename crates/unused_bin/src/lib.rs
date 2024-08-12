@@ -1,7 +1,11 @@
-use clap::Parser
-use anyhow::{Context, Result};
+extern crate serde_json;
+extern crate unused_finder;
 
-#[Parser, Debug]
+use std::{env, fs, path::Path};
+
+use clap::Parser;
+
+#[derive(Parser, Debug)]
 struct CliArgs {
     #[arg(short, long, default_value = None)]
     config_path: Option<String>,
@@ -16,8 +20,23 @@ fn main() {
         DEFAULT_CONFIG_PATH.to_string()
     });
 
-    // read the config file
-    let config = match fs::read_to_string(&config_path).with_context(|| {
-        format!("Failed to read config file: {}", config_path)
-    }).unwrap()
+    println!("reading config from path {config_path}");
+
+    // read and parse the config file
+    let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
+    let config: unused_finder::FindUnusedItemsConfig =
+        serde_json::from_str(&config_str).expect("Failed to parse unused-finder config");
+
+    // move the the working directory of the config path
+    let config_dir = Path::new(&config_path)
+        .parent()
+        .expect("Failed to get parent directory of config file")
+        .to_path_buf();
+    println!("working in {}", config_dir.display());
+    env::set_current_dir(&config_dir)
+        .expect("Failed to change working directory to config file directory");
+
+    unused_finder::find_unused_items(config).unwrap();
+
+    return ();
 }

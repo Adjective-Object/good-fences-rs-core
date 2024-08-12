@@ -22,6 +22,7 @@ swc_core = { version = "0.83.32", features = [
     "ecma_loader_parking_lot",
 ] }
 swc_ecma_parser = "0.140.0"
+swc_ecma_loader = "0.44.5"
 anyhow = { workspace = true }
 thiserror.workspace = true
 path_utils = { path = "../path_utils" }
