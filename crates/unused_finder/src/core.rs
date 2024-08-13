@@ -29,7 +29,6 @@ use crate::{
 use js_err::JsErr;
 use tsconfig_paths::TsconfigPathsJson;
 
-#[cfg(feature = "napi")]
 #[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct FindUnusedItemsConfig {
