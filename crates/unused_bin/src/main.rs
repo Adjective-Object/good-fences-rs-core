@@ -32,11 +32,15 @@ fn main() {
         .parent()
         .expect("Failed to get parent directory of config file")
         .to_path_buf();
-    println!("working in {}", config_dir.display());
+    println!("working in {}..", config_dir.display());
     env::set_current_dir(&config_dir)
         .expect("Failed to change working directory to config file directory");
 
-    unused_finder::find_unused_items(config).unwrap();
+    let start_time = std::time::Instant::now();
+    let result = unused_finder::find_unused_items(config).unwrap();
+    let delta = start_time.elapsed();
+    println!("result ({}ms):\n{}", delta.as_millis(), result);
+    
 
     return ();
 }

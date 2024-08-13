@@ -10,17 +10,13 @@
             "name": "Debug unused-finder against open config file'",
             "cargo": {
                 "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
+                    "build",
                     "--package=unused_bin"
-                ],
-                "filter": {
-                    "name": "unused_bin",
-                    "kind": "lib"
-                }
+                ]
             },
-            "args": [],
+            "args": [
+                "--config-path=${file}"
+            ],
             "cwd": "${workspaceFolder}"
         }
     ]

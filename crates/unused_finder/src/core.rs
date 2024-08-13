@@ -3,10 +3,7 @@ use import_resolver::swc_resolver::create_tsconfig_paths_resolver;
 use rayon::prelude::*;
 use serde::Deserialize;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    iter::FromIterator,
-    str::FromStr,
-    sync::Arc,
+    collections::{BTreeMap, HashMap, HashSet}, fmt::Display, iter::FromIterator, str::FromStr, sync::Arc
 };
 use swc_core::{
     common::source_map::Pos,
@@ -31,6 +28,7 @@ use tsconfig_paths::TsconfigPathsJson;
 
 #[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FindUnusedItemsConfig {
     pub paths_to_read: Vec<String>,
     pub ts_config_path: String,
