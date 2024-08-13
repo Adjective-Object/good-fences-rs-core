@@ -61,9 +61,37 @@ pub struct ExportedItemReport {
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "napi", napi(object))]
 pub struct UnusedFinderReport {
+    // files that are completely unused
     pub unused_files: Vec<String>,
+    // items that are unused within files
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
-    // pub flattened_walk_file_data: Vec<WalkedSourceFile>,
+}
+
+impl Display for UnusedFinderReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut unused_files = self.unused_files.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+        unused_files.sort();
+        let unused_files_set = self.unused_files.iter().map(|x| x.to_string()).collect::<HashSet<String>>();
+
+        for file_path in unused_files.iter() {
+            match self.unused_files_items.get(file_path) {
+                Some(items) => write!(f, "{} is completely unused ({} items)\n", file_path, items.len())?,
+                None => write!(f, "{} is completely unused\n", file_path)?,
+            };
+        }
+
+        for (file_path, items) in self.unused_files_items.iter() {
+            if unused_files_set.contains(file_path) {
+                continue;
+            }
+            write!(f, "{} has {} unused export(s):\n", file_path, items.len())?;
+            for item in items.iter() {
+                write!(f, "  - {}\n", item.id)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub fn create_report_map_from_flattened_files(
