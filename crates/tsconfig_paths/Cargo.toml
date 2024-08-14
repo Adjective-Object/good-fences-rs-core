@@ -1,0 +1,13 @@
+[package]
+name = "tsconfig_paths"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+thiserror.workspace = true
+serde = { version = "1.0.117", features = ["rc"] }
+serde_json = "1.0.59"

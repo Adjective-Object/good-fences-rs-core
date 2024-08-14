@@ -1,34 +1,18 @@
-[package]
-name = "good-fences-rs-core"
-version = "0.2.0"
-authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
-edition = "2018"
+[workspace]
+members = ["crates/*"]
+resolver = "2"
 
-[lib]
-crate-type = ["cdylib", "lib", "staticlib"]
-
-[dependencies]
-jwalk = "0.5"
-lazy_static = "1.4.0"
-serde_derive = "1.0.117"
-serde_bytes = "0.11.5"
-serde = { version = "1.0.117", features = ["rc"]}
-serde_json = "1.0.59"
-void = "1.0.2"
-regex = "1"
-relative-path = "1.7.2"
-glob = "0.3.0"
-pathdiff = "0.2.0"
-text-diff = "0.4.0"
-rayon = "1.5.0"
-path-slash = "0.2.1"
-path-clean = "0.1.0"
-swc_core = { version = "0.83.32", features = ["ecma_plugin_transform", "ecma_loader_node", "ecma_loader_tsc", "swc_node_base", "ecma_loader_lru", "ecma_loader_parking_lot"] }
-napi = { version = "2.13.0", default-features = false, features = ["napi4"] }
-napi-derive = "2.13.0"
-swc_ecma_parser = "0.140.0"
+[workspace.dependencies]
 anyhow = "1.0.75"
+path-clean = "0.1.0"
+path-slash = "0.2.1"
+relative-path = "1.7.2"
+regex = "1"
+glob = "0.3.0"
+rayon = "1.5.1"
 thiserror = "1.0.52"
-
-[build-dependencies]
-napi-build = "2.0.1"
+jwalk = "0.5"
+serde = { version = "1.0.117", features = ["rc"] }
+serde_json = "1.0.59"
+napi = { version = "2.16.6", default-features = false, features = ["napi4"] }
+napi-derive = "2.16.9"

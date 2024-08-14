@@ -1,0 +1,16 @@
+
+[package]
+name = "unused_bin"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2018"
+
+[[bin]]
+name = "unused-finder"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.13", features = ["derive"] }
+unused_finder = { path = "../unused_finder" }
+anyhow.workspace = true
+serde_json.workspace = true
