@@ -39,8 +39,7 @@ fn main() {
     let start_time = std::time::Instant::now();
     let result = unused_finder::find_unused_items(config).unwrap();
     let delta = start_time.elapsed();
-    println!("result ({}ms):\n{}", delta.as_millis(), result);
-    
+    println!("result ({}ms):\n{:?}", delta.as_millis(), result);
 
     return ();
 }
