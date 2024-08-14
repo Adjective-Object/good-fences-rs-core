@@ -132,9 +132,7 @@ pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) 
 #[cfg(test)]
 mod test {
     use crate::get_imports::{get_imports_map_from_file, FileImports};
-    use std::{
-        collections::{HashMap, HashSet},
-    };
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_get_imports_from_file() {
