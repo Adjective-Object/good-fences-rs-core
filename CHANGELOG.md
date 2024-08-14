@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 05 Aug 2024 18:41:53 GMT and should not be manually modified.
+This log was last generated on Wed, 14 Aug 2024 16:58:33 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.14.1
+
+Wed, 14 Aug 2024 16:58:33 GMT
+
+### Patches
+
+- refactor into multi-crate workspace (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.14.0
 
