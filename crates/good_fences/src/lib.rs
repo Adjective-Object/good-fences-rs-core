@@ -8,6 +8,7 @@ extern crate swc_utils;
 extern crate tsconfig_paths;
 extern crate unused_finder;
 
+use anyhow::Context;
 use error::EvaluateFencesError;
 use napi_derive::napi;
 use serde::Serialize;
@@ -24,9 +25,10 @@ pub mod walk_dirs;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
-    let tsconfig_path = opts.project;
+    let tsconfig_path = opts.project.clone();
     let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(tsconfig_path)
-        .expect("Unable to find --project path");
+        .with_context(|| format!("Unable to find --project path {}", &opts.project))
+        .unwrap();
 
     if opts.base_url.is_some() {
         tsconfig.compiler_options.base_url = opts.base_url;
