@@ -88,15 +88,19 @@ pub fn resolve_ts_import<'a>(
     // println!("resole import! {:?}, {:?}", initial_path, import_specifier);
 
     // this is a directory import, so we want to add index.ts to the end of the file
-    let import_specifier: String =
-        if raw_import_specifier.ends_with('/') || raw_import_specifier.ends_with('.') {
-            let mut x = RelativePathBuf::from(raw_import_specifier);
-            x.push("index");
-            x = x.normalize();
-            x.to_string()
-        } else {
-            raw_import_specifier.to_owned()
-        };
+    let import_specifier: String = if raw_import_specifier.ends_with('/') {
+        let mut r = String::with_capacity(raw_import_specifier.len() + 5);
+        r.push_str(raw_import_specifier);
+        r.push_str("index");
+        r
+    } else if raw_import_specifier == "." || raw_import_specifier == ".." {
+        let mut r = String::with_capacity(raw_import_specifier.len() + 6);
+        r.push_str(raw_import_specifier);
+        r.push_str("/index");
+        r
+    } else {
+        raw_import_specifier.to_owned()
+    };
 
     // short circuit when importing non-ts resource files.
     let buf = PathBuf::from(import_specifier.clone());
