@@ -134,7 +134,6 @@ mod test {
     use crate::get_imports::{get_imports_map_from_file, FileImports};
     use std::{
         collections::{HashMap, HashSet},
-        path::PathBuf,
     };
 
     #[test]

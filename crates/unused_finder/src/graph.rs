@@ -6,8 +6,8 @@ use std::{
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
-    node_visitor::{ExportKind, ImportedItem},
     import_export_info::ImportExportInfo,
+    node_visitor::{ExportKind, ImportedItem},
 };
 
 pub enum MarkItemResult {

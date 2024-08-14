@@ -2,7 +2,7 @@
 name = "good_fences"
 version = "0.2.0"
 authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib", "staticlib"]

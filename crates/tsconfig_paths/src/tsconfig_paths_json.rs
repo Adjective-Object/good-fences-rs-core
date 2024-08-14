@@ -1,10 +1,9 @@
-
+use crate::error::OpenTsConfigError;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::vec::Vec;
-use crate::error::OpenTsConfigError;
-use serde::Deserialize;
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Default, Clone)]
 #[serde(rename_all = "camelCase")]

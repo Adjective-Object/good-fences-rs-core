@@ -10,8 +10,8 @@ mod test {
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
 
-    use swc_utils::create_lexer;
     use crate::node_visitor::{ExportKind, ImportedItem};
+    use swc_utils::create_lexer;
 
     use crate::node_visitor::ExportsCollector;
 

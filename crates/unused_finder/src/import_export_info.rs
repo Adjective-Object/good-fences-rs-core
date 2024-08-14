@@ -1,5 +1,5 @@
+use crate::node_visitor::{ExportedItemMetadata, ImportedItem};
 use std::collections::{HashMap, HashSet};
-use crate::node_visitor::{ImportedItem, ExportedItemMetadata};
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
