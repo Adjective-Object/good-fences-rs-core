@@ -44,9 +44,9 @@ pub fn resolve_with_extension(
             for ext in SOURCE_EXTENSIONS {
                 let file_with_ext = format!("{}.{}", &imported_path, ext);
                 if let Ok(resolved) = resolver.resolve(&base, &file_with_ext) {
-                    let resolved = match resolved {
+                    let resolved = match resolved.filename {
                         FileName::Real(f) => f.to_slash().unwrap().to_string(),
-                        _ => resolved.to_string(),
+                        _ => resolved.filename.to_string(),
                     };
                     return Ok(ResolvedImport::ProjectLocalImport(
                         resolved.replacen(&format!("{}/", cwd), "", 1).into(),
@@ -58,9 +58,9 @@ pub fn resolve_with_extension(
         }
     };
     // let resolved = RelativePath::new(&resolved.to_string())..to_path("");
-    let resolved = match resolved {
+    let resolved = match resolved.filename {
         FileName::Real(f) => f.to_slash().unwrap().to_string(),
-        _ => resolved.to_string(),
+        _ => resolved.filename.to_string(),
     };
     // If we found a local file it starts with cwd
     if resolved.starts_with(&cwd) {

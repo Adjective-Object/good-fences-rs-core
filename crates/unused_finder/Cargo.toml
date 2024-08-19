@@ -3,7 +3,7 @@
 name = "unused_finder"
 version = "0.2.0"
 authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 crate-type = ["lib"]
@@ -14,15 +14,6 @@ glob = "0.3.1"
 swc_utils = { path = "../swc_utils" }
 import_resolver = { path = "../import_resolver" }
 tsconfig_paths = { path = "../tsconfig_paths" }
-swc_core = { version = "0.83.32", features = [
-    "ecma_plugin_transform",
-    "ecma_loader_node",
-    "ecma_loader_tsc",
-    "swc_node_base",
-    "ecma_loader_lru",
-    "ecma_loader_parking_lot",
-] }
-swc_ecma_parser = "0.140.0"
 js_err = { path = "../js_err" }
 rayon.workspace = true
 regex.workspace = true
@@ -34,6 +25,11 @@ serde.workspace = true
 serde_json.workspace = true
 napi = { workspace = true, optional = true }
 napi-derive = { workspace = true, optional = true }
+maplit = "1.0.2"
+swc_core.workspace = true
+swc_ecma_parser.workspace = true
+swc.workspace = true
+pretty_assertions.workspace = true
 
 [features]
 default = []

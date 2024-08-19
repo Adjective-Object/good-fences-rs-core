@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 use swc_core::{
-    common::source_map::Pos,
+    common::source_map::SmallPos,
     ecma::loader::{
         resolve::Resolve,
         resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
