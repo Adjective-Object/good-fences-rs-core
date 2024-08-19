@@ -16,3 +16,14 @@ serde = { version = "1.0.117", features = ["rc"] }
 serde_json = "1.0.59"
 napi = { version = "2.16.6", default-features = false, features = ["napi4"] }
 napi-derive = "2.16.9"
+swc_core = { version = "0.101.3", features = [
+    "ecma_plugin_transform",
+    "ecma_loader_node",
+    "ecma_loader_tsc",
+    "ecma_loader_lru",
+    "ecma_loader_parking_lot",
+] }
+swc_ecma_parser = "0.149.0"
+swc = "0.284.1"
+swc_ecma_loader = "0.44.5"
+pretty_assertions = "1.4.0"

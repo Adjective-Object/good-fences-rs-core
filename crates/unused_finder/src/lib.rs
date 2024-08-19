@@ -9,6 +9,9 @@ extern crate anyhow;
 #[macro_use]
 extern crate napi_derive;
 
+#[cfg_attr(test, macro_use)]
+extern crate pretty_assertions;
+
 mod core;
 mod export_collector_tests;
 pub mod graph;

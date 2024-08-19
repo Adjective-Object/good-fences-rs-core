@@ -4,7 +4,7 @@ use swc_core::common::comments::SingleThreadedComments;
 use swc_core::common::errors::Handler;
 use swc_core::common::{Globals, Mark, SourceMap, GLOBALS};
 use swc_core::ecma::transforms::base::resolver;
-use swc_core::ecma::visit::{fold_module, visit_module};
+use swc_core::ecma::visit::{Fold, VisitWith};
 use swc_ecma_parser::{Capturing, Parser};
 
 use anyhow;
@@ -85,9 +85,9 @@ pub fn get_import_export_paths_map(
         // Create resolver for variables
         let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
         // Assign tags to identifiers
-        let resolved = fold_module(&mut resolver, ts_module.clone());
+        let resolved = resolver.fold_module(ts_module.clone());
         // Do ast walk with our visitor
-        visit_module(&mut visitor, &resolved);
+        resolved.visit_with(&mut visitor)
     });
 
     Ok(ImportExportInfo {

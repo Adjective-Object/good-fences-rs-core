@@ -166,13 +166,14 @@ mod test {
         sync::Arc,
     };
     use swc_core::{
-        common::{FileName, Globals, Mark, SourceFile, SourceMap, GLOBALS},
+        common::{Globals, Mark, SourceFile, GLOBALS},
         ecma::{
             transforms::base::resolver,
-            visit::{fold_module, visit_module},
+            visit::{FoldWith, VisitWith},
         },
     };
     use swc_ecma_parser::{lexer::Lexer, Capturing, Parser};
+    use swc_utils::parse_ecma_src;
 
     use crate::get_imports::create_lexer;
 
@@ -180,18 +181,13 @@ mod test {
 
     #[test]
     fn text_export_from() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"export { default as a, foo as bar } from './foo'"#.to_string(),
+        let (_, module) = parse_ecma_src(
+            "test.ts",
+            r#"export { default as a, foo as bar } from './foo'"#,
         );
 
-        let mut parser = create_test_parser(&fm);
-
         let mut visitor = ImportPathVisitor::new();
-        let module = parser.parse_typescript_module().unwrap();
-
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
         let expected_map: HashMap<String, HashSet<String>> = HashMap::from([(
             "./foo".to_owned(),
             HashSet::from(["default".to_owned(), "foo".to_owned()]),
@@ -201,56 +197,41 @@ mod test {
 
     #[test]
     fn test_require_imports() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
-            r#"require('hello-world')"#.to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm);
-
+        let (_, module) = parse_ecma_src("test.ts", r#"require('hello-world')"#.to_string());
         let mut visitor = ImportPathVisitor::new();
-        let module = parser.parse_typescript_module().unwrap();
-
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
         let expected_require_set = HashSet::from(["hello-world".to_string()]);
         assert_eq!(expected_require_set, visitor.require_paths);
     }
 
     #[test]
     fn test_import_call() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
+        let (_, module) = parse_ecma_src(
+            "test.ts",
             r#"
                 import('foo')
                 "#
             .to_string(),
         );
-        let mut parser = create_test_parser(&fm);
-        let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ImportPathVisitor::new();
 
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
         let expected_import_paths = HashSet::from(["foo".to_string()]);
         assert_eq!(expected_import_paths, visitor.import_paths);
     }
 
     #[test]
     fn test_nested_import_call() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
+        let (_, module) = parse_ecma_src(
+            "test.ts",
             r#"
                 import(import('import_subrequire').default + '/parent')
                 "#
             .to_string(),
         );
-        let mut parser = create_test_parser(&fm);
-        let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ImportPathVisitor::new();
 
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
         let expected_import_paths = HashSet::from(["import_subrequire".to_string()]);
         assert_eq!(expected_import_paths, visitor.import_paths);
     }
@@ -259,9 +240,8 @@ mod test {
     fn test_require_shadowing() {
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Arc::<SourceMap>::default();
-            let fm = cm.new_source_file(
-                FileName::Custom("test.ts".into()),
+            let (_, module) = parse_ecma_src(
+                "test.ts",
                 r#"
                 require("foo");
                 (function() {
@@ -272,13 +252,11 @@ mod test {
                 "#
                 .to_string(),
             );
-            let mut parser = create_test_parser(&fm);
-            let module = parser.parse_typescript_module().unwrap();
             let mut visitor = ImportPathVisitor::new();
 
             let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = fold_module(&mut resolver, module.clone());
-            visit_module(&mut visitor, &resolved);
+            let resolved = module.clone().fold_with(&mut resolver);
+            resolved.visit_with(&mut visitor);
             let expected_require_set = HashSet::from(["foo".to_string(), "original".to_string()]);
             assert_eq!(expected_require_set, visitor.require_paths);
         });
@@ -286,20 +264,15 @@ mod test {
 
     #[test]
     fn test_imports() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
+        let (_, module) = parse_ecma_src(
+            "test.ts",
             r#"
             import foo from './bar';
-            "#
-            .to_string(),
+            "#,
         );
 
-        let mut parser = create_test_parser(&fm);
-
         let mut visitor = ImportPathVisitor::new();
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
 
         let expected_import_map =
             HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
@@ -309,21 +282,16 @@ mod test {
 
     #[test]
     fn trest_import_with_satisfies() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
+        let (_, module) = parse_ecma_src(
+            "test.ts",
             r#"
             import foo from './bar';
             foo satisfies never;
-            "#
-            .to_string(),
+            "#,
         );
 
-        let mut parser = create_test_parser(&fm);
-
         let mut visitor = ImportPathVisitor::new();
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
 
         let expected_import_map =
             HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
@@ -333,20 +301,15 @@ mod test {
 
     #[test]
     fn test_imports_specifiers() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            FileName::Custom("test.ts".into()),
+        let (_, module) = parse_ecma_src(
+            "test.ts",
             r#"
             import {foo, bar} from './bar';
-            "#
-            .to_string(),
+            "#,
         );
 
-        let mut parser = create_test_parser(&fm);
-
         let mut visitor = ImportPathVisitor::new();
-        let module = parser.parse_typescript_module().unwrap();
-        visit_module(&mut visitor, &module);
+        module.visit_with(&mut visitor);
 
         let expected_import_map = HashMap::from([(
             "./bar".to_string(),
@@ -361,9 +324,8 @@ mod test {
         let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Arc::<SourceMap>::default();
-            let fm = cm.new_source_file(
-                FileName::Custom("test.ts".into()),
+            let (_, module) = parse_ecma_src(
+                "test.ts",
                 r#"
                 require('before_definition')
                 var require = function(){}
@@ -372,13 +334,9 @@ mod test {
                 .to_string(),
             );
 
-            let lexer = create_lexer(&fm, None);
-            let capturing = Capturing::new(lexer);
-            let mut parser = Parser::new_from(capturing);
-            let module = parser.parse_typescript_module().unwrap();
             let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = fold_module(&mut resolver, module.clone());
-            visit_module(&mut visitor, &resolved);
+            let resolved = module.clone().fold_with(&mut resolver);
+            resolved.visit_with(&mut visitor);
         });
         let expected_require_set = HashSet::from(["before_definition".to_string()]);
         assert_eq!(expected_require_set, visitor.require_paths);
@@ -389,9 +347,8 @@ mod test {
         let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Arc::<SourceMap>::default();
-            let fm = cm.new_source_file(
-                FileName::Custom("test.ts".into()),
+            let (_, module) = parse_ecma_src(
+                "test.ts",
                 r#"
                 (function otherFunction() {})(require('arg_subrequire'))
                 (require('callee_subrequire'))("foo")
@@ -399,13 +356,9 @@ mod test {
                 .to_string(),
             );
 
-            let lexer = create_lexer(&fm, None);
-            let capturing = Capturing::new(lexer);
-            let mut parser = Parser::new_from(capturing);
-            let module = parser.parse_typescript_module().unwrap();
             let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = fold_module(&mut resolver, module.clone());
-            visit_module(&mut visitor, &resolved);
+            let resolved = module.clone().fold_with(&mut resolver);
+            resolved.visit_with(&mut visitor);
         });
         let expected_require_set = HashSet::from([
             "arg_subrequire".to_string(),
@@ -419,22 +372,17 @@ mod test {
         let mut visitor = ImportPathVisitor::new();
         let globals = Globals::new();
         GLOBALS.set(&globals, || {
-            let cm = Arc::<SourceMap>::default();
-            let fm = cm.new_source_file(
-                FileName::Custom("test.ts".into()),
+            let (_, module) = parse_ecma_src(
+                "test.ts",
                 r#"
                 require(require('require_subrequire').default + '/parent')
                 "#
                 .to_string(),
             );
 
-            let lexer = create_lexer(&fm, None);
-            let capturing = Capturing::new(lexer);
-            let mut parser = Parser::new_from(capturing);
-            let module = parser.parse_typescript_module().unwrap();
             let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = fold_module(&mut resolver, module.clone());
-            visit_module(&mut visitor, &resolved);
+            let resolved = module.clone().fold_with(&mut resolver);
+            resolved.visit_with(&mut visitor);
         });
         let expected_require_set = HashSet::from(["require_subrequire".to_string()]);
         assert_eq!(expected_require_set, visitor.require_paths);

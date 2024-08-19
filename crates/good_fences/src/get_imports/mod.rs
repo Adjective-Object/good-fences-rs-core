@@ -6,11 +6,11 @@ use swc_core::common::errors::Handler;
 use swc_core::common::{Globals, Mark, GLOBALS};
 use swc_core::common::{SourceFile, SourceMap};
 use swc_core::ecma::transforms::base::resolver;
+use swc_core::ecma::visit::{FoldWith, VisitWith};
 use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
-use swc_ecma_parser::{Capturing, Parser, TsConfig};
+use swc_ecma_parser::{Capturing, Parser, TsSyntax};
 mod import_path_visitor;
 use crate::error::GetImportError;
-use swc_core::ecma::visit::{fold_module, visit_module};
 
 pub use import_path_visitor::*;
 
@@ -71,8 +71,8 @@ pub fn get_imports_map_from_file<'a, P: AsRef<str>>(
     let globals = Globals::new();
     GLOBALS.set(&globals, || {
         let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-        let resolved = fold_module(&mut resolver, ts_module.clone());
-        visit_module(&mut visitor, &resolved);
+        let resolved = ts_module.clone().fold_with(&mut resolver);
+        resolved.visit_with(&mut visitor);
     });
     let imports_map = get_imports_map_from_visitor(visitor);
 
@@ -117,7 +117,7 @@ fn get_imports_map_from_visitor(visitor: ImportPathVisitor) -> FileImports {
 pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) -> Lexer<'a> {
     let filename = fm.name.to_string();
     let lexer = Lexer::new(
-        Syntax::Typescript(TsConfig {
+        Syntax::Typescript(TsSyntax {
             tsx: filename.ends_with(".tsx") || filename.ends_with(".jsx"),
             decorators: true,
             ..Default::default()
