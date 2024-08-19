@@ -33,7 +33,12 @@ use tsconfig_paths::TsconfigPathsJson;
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindUnusedItemsConfig {
+    // Trace exported symbols that are not imported anywhere in the project
+    pub report_exported_items: bool,
+    // Paths to read as source files
     pub paths_to_read: Vec<String>,
+    // Path to the root tsconfig.paths.json file used to resolve ts imports between projects.
+    // Note: this should be removed and replaced with normal node resolution.
     pub ts_config_path: String,
     // Files under matching dirs won't be scanned.
     pub skipped_dirs: Vec<String>,
@@ -120,6 +125,7 @@ pub fn find_unused_items(
     config: FindUnusedItemsConfig,
 ) -> Result<UnusedFinderReport, js_err::JsErr> {
     let FindUnusedItemsConfig {
+        report_exported_items,
         paths_to_read,
         ts_config_path,
         skipped_dirs,
@@ -221,33 +227,38 @@ pub fn find_unused_items(
             .iter()
             .filter(|f| !f.1.is_used && !allow_list.iter().any(|p| p.matches(f.0))),
     );
-    let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = graph
-        .files
-        .iter()
-        .filter_map(|(file_path, info)| {
-            if info.is_used {
-                match file_path_exported_items_map.remove(file_path) {
-                    Some(mut exported_items) => {
-                        let unused_exports = &info.unused_exports;
-                        if unused_exports.is_empty() {
-                            return None;
+
+    let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = if report_exported_items {
+        graph
+            .files
+            .iter()
+            .filter_map(|(file_path, info)| {
+                if info.is_used {
+                    match file_path_exported_items_map.remove(file_path) {
+                        Some(mut exported_items) => {
+                            let unused_exports = &info.unused_exports;
+                            if unused_exports.is_empty() {
+                                return None;
+                            }
+                            let unused_exports = exported_items
+                                .drain(0..)
+                                .filter(|exported| {
+                                    unused_exports
+                                        .iter()
+                                        .any(|unused| unused.to_string() == exported.id.to_string())
+                                })
+                                .collect();
+                            return Some((file_path.to_string(), unused_exports));
                         }
-                        let unused_exports = exported_items
-                            .drain(0..)
-                            .filter(|exported| {
-                                unused_exports
-                                    .iter()
-                                    .any(|unused| unused.to_string() == exported.id.to_string())
-                            })
-                            .collect();
-                        return Some((file_path.to_string(), unused_exports));
+                        None => return None,
                     }
-                    None => return None,
                 }
-            }
-            None
-        })
-        .collect();
+                None
+            })
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     Ok(UnusedFinderReport {
         unused_files: reported_unused_files
