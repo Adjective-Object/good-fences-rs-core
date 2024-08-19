@@ -14,6 +14,7 @@ extern crate pretty_assertions;
 
 mod core;
 mod export_collector_tests;
+mod fixer;
 pub mod graph;
 pub mod import_export_info;
 pub mod node_visitor;
