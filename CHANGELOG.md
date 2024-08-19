@@ -1,8 +1,20 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 19 Aug 2024 23:17:54 GMT and should not be manually modified.
+This log was last generated on Mon, 19 Aug 2024 23:19:27 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.15.0
+
+Mon, 19 Aug 2024 23:19:27 GMT
+
+### Minor changes
+
+- add report_exported_items flag to gate reporting exported items (Maxwell.HuangHobbs@microsoft.com)
+
+### Patches
+
+- upgrade swc, add pretty_assertions (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.14.2
 

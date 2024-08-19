@@ -2,6 +2,29 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Mon, 19 Aug 2024 23:19:27 GMT",
+      "version": "0.15.0",
+      "tag": "@good-fences/api_v0.15.0",
+      "comments": {
+        "patch": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "not available",
+            "comment": "upgrade swc, add pretty_assertions"
+          }
+        ],
+        "minor": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "6afa7ace68125e46bc7d8d54f5bacc952f85c28c",
+            "comment": "add report_exported_items flag to gate reporting exported items"
+          }
+        ]
+      }
+    },
+    {
       "date": "Mon, 19 Aug 2024 23:17:54 GMT",
       "version": "0.14.2",
       "tag": "@good-fences/api_v0.14.2",
