@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    fmt::Display,
     iter::FromIterator,
     str::FromStr,
     sync::Arc,
@@ -85,9 +86,10 @@ impl Display for UnusedFinderReport {
             match self.unused_files_items.get(file_path) {
                 Some(items) => write!(
                     f,
-                    "{} is completely unused ({} items)\n",
+                    "{} is completely unused ({} item{})\n",
                     file_path,
-                    items.len()
+                    items.len(),
+                    if items.len() > 1 { "s" } else { "" },
                 )?,
                 None => write!(f, "{} is completely unused\n", file_path)?,
             };
@@ -97,7 +99,13 @@ impl Display for UnusedFinderReport {
             if unused_files_set.contains(file_path) {
                 continue;
             }
-            write!(f, "{} has {} unused export(s):\n", file_path, items.len())?;
+            write!(
+                f,
+                "{} is partially unused ({} unused export{}):\n",
+                file_path,
+                items.len(),
+                if items.len() > 1 { "s" } else { "" },
+            )?;
             for item in items.iter() {
                 write!(f, "  - {}\n", item.id)?;
             }
@@ -331,9 +339,52 @@ pub fn process_import_export_info(
 
 #[cfg(test)]
 mod test {
-    use crate::FindUnusedItemsConfig;
+    use crate::{ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport};
 
     use super::find_unused_items;
+
+    #[test]
+    fn test_format_report() {
+        let report = UnusedFinderReport {
+            unused_files: vec!["file1".to_string()],
+            unused_files_items: vec![
+                (
+                    "file1".to_string(),
+                    vec![ExportedItemReport {
+                        id: "unused".to_string(),
+                        start: 1,
+                        end: 2,
+                    }],
+                ),
+                (
+                    "file2".to_string(),
+                    vec![
+                        ExportedItemReport {
+                            id: "item1".to_string(),
+                            start: 1,
+                            end: 2,
+                        },
+                        ExportedItemReport {
+                            id: "item2".to_string(),
+                            start: 3,
+                            end: 4,
+                        },
+                    ],
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_eq!(
+            format!("{}", report),
+            r#"file1 is completely unused (1 item)
+file2 is partially unused (2 unused exports):
+  - item1
+  - item2
+"#
+        );
+    }
 
     #[test]
     fn test_error_in_glob() {
