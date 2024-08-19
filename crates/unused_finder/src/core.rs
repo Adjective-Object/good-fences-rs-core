@@ -69,13 +69,26 @@ pub struct UnusedFinderReport {
 
 impl Display for UnusedFinderReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut unused_files = self.unused_files.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+        let mut unused_files = self
+            .unused_files
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
         unused_files.sort();
-        let unused_files_set = self.unused_files.iter().map(|x| x.to_string()).collect::<HashSet<String>>();
+        let unused_files_set = self
+            .unused_files
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<HashSet<String>>();
 
         for file_path in unused_files.iter() {
             match self.unused_files_items.get(file_path) {
-                Some(items) => write!(f, "{} is completely unused ({} items)\n", file_path, items.len())?,
+                Some(items) => write!(
+                    f,
+                    "{} is completely unused ({} items)\n",
+                    file_path,
+                    items.len()
+                )?,
                 None => write!(f, "{} is completely unused\n", file_path)?,
             };
         }
