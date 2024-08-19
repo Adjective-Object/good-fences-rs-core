@@ -37,6 +37,7 @@ pub struct UnusedFinder {
 impl UnusedFinder {
     pub fn new(config: FindUnusedItemsConfig) -> anyhow::Result<Self, JsErr> {
         let FindUnusedItemsConfig {
+            report_exported_items: _,
             paths_to_read,
             ts_config_path,
             skipped_dirs,
