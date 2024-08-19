@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "upgrade swc, add pretty_assertions",
-  "packageName": "@good-fences/api",
-  "email": "Maxwell.HuangHobbs@microsoft.com",
-  "dependentChangeType": "patch"
-}
