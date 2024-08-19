@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "add report_exported_items flag to gate reporting exported items",
+  "packageName": "@good-fences/api",
+  "email": "Maxwell.HuangHobbs@microsoft.com",
+  "dependentChangeType": "patch"
+}
