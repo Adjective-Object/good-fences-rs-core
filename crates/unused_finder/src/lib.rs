@@ -1,3 +1,5 @@
+#![feature(closure_lifetime_binder)]
+
 extern crate import_resolver;
 extern crate serde_json;
 extern crate tsconfig_paths;

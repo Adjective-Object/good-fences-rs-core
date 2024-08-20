@@ -387,11 +387,4 @@ mod test {
         let expected_require_set = HashSet::from(["require_subrequire".to_string()]);
         assert_eq!(expected_require_set, visitor.require_paths);
     }
-
-    fn create_test_parser<'a>(fm: &'a Arc<SourceFile>) -> Parser<Capturing<Lexer>> {
-        let lexer = create_lexer(fm, None);
-        let capturing = Capturing::new(lexer);
-        let parser = Parser::new_from(capturing);
-        parser
-    }
 }

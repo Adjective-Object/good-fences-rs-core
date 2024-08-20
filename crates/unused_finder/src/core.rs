@@ -35,6 +35,7 @@ use tsconfig_paths::TsconfigPathsJson;
 #[serde(rename_all = "camelCase")]
 pub struct FindUnusedItemsConfig {
     // Trace exported symbols that are not imported anywhere in the project
+    #[serde(default)]
     pub report_exported_items: bool,
     // Paths to read as source files
     pub paths_to_read: Vec<String>,
@@ -215,13 +216,13 @@ pub fn find_unused_items(
         create_report_map_from_flattened_files(&flattened_walk_file_data);
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
-        .map(|file| {
+        .map(|file| -> Result<GraphFile> {
             process_import_export_info(
                 &mut file.import_export_info,
                 &file.source_file_path,
                 &resolver,
-            );
-            GraphFile::new(
+            )?;
+            Ok(GraphFile::new(
                 file.source_file_path.clone(),
                 file.import_export_info
                     .exported_ids
@@ -230,9 +231,10 @@ pub fn find_unused_items(
                     .collect(),
                 file.import_export_info.clone(),
                 entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-            )
+            ))
         })
-        .collect();
+        .collect::<Result<Vec<GraphFile>>>()
+        .map_err(JsErr::generic_failure)?;
 
     let files: HashMap<String, Arc<GraphFile>> = files
         .par_drain(0..)
@@ -340,12 +342,14 @@ pub fn process_import_export_info(
     f: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
-) {
-    process_executed_paths(f, source_file_path, resolver);
-    process_async_imported_paths(f, source_file_path, resolver);
-    process_exports_from(f, source_file_path, resolver);
-    process_require_paths(f, source_file_path, resolver);
-    process_import_path_ids(f, source_file_path, resolver);
+) -> Result<()> {
+    process_executed_paths(f, source_file_path, resolver)?;
+    process_async_imported_paths(f, source_file_path, resolver)?;
+    process_exports_from(f, source_file_path, resolver)?;
+    process_require_paths(f, source_file_path, resolver)?;
+    process_import_path_ids(f, source_file_path, resolver)?;
+
+    return Ok(());
 }
 
 #[cfg(test)]

@@ -2,9 +2,11 @@ use super::node_visitor::{ExportKind, ImportedItem};
 use super::unused_finder_visitor_runner::get_import_export_paths_map;
 use crate::import_export_info::ImportExportInfo;
 use crate::walked_file::{UnusedFinderSourceFile, WalkedFile};
+use anyhow::{Error, Result};
 use import_resolver::manual_resolver::{resolve_with_extension, ResolvedImport};
 use jwalk::WalkDirGeneric;
 use path_slash::PathBufExt;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use swc_core::common::FileName;
 use swc_core::ecma::loader::resolve::Resolve;
@@ -27,32 +29,58 @@ impl From<ExportKind> for ResolvedItem {
     }
 }
 
-// import foo, {bar as something} from './foo'`
-pub fn process_import_path_ids(
-    import_export_info: &mut ImportExportInfo,
-    source_file_path: &String,
+// shared logic for "process_*" methods that maps a collection into another colleciton,
+// resolving the import paths of each of the elements.
+fn resolve_imports_collection<TCollection, TCollectionOut, T>(
+    source_file_path: &str,
     resolver: &dyn Resolve,
-) {
-    import_export_info.imported_path_ids = import_export_info
-        .imported_path_ids
-        .drain()
-        .filter_map(|(imported_path, imported_items)| {
+    collection: TCollection,
+    import_from_item: for<'a> fn(&'a T) -> &'a str,
+    update_item: for<'a> fn(T, String) -> T,
+) -> Result<TCollectionOut, Error>
+where
+    TCollection: IntoIterator<Item = T>,
+    TCollectionOut: FromIterator<T>,
+{
+    collection
+        .into_iter()
+        .filter_map(|v| {
+            let imported_path = import_from_item(&v);
             match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),
+                FileName::Real(source_file_path.into()),
                 &imported_path,
                 resolver,
             ) {
-                Ok(resolved) => {
-                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                        let slashed = resolved.to_slash().unwrap().to_string();
-                        return Some((slashed, imported_items));
-                    }
+                Ok(ResolvedImport::ProjectLocalImport(resolved)) => {
+                    let slashed = resolved.to_slash().unwrap().to_string();
+                    Some(Ok(update_item(v, slashed)))
                 }
-                Err(_e) => return None,
+                Err(e) => Some(Err(e)),
+                _ => None,
             }
-            None
         })
-        .collect();
+        .collect()
+}
+
+// import foo, {bar as something} from './foo'`
+pub fn process_import_path_ids(
+    import_export_info: &mut ImportExportInfo,
+    source_file_path: &str,
+    resolver: &dyn Resolve,
+) -> Result<(), Error> {
+    let res: Result<HashMap<String, _>, _> = resolve_imports_collection(
+        source_file_path,
+        resolver,
+        import_export_info.imported_path_ids.drain(),
+        for<'a> |(a, _): &'a (String, HashSet<ImportedItem>)| -> &'a str { a },
+        |(_, names), resolved| (resolved, names),
+    );
+
+    return res.map(|res| {
+        // on success, update the import_export_info.
+        // Otherwise, hide Ok() value and return the error.
+        import_export_info.imported_path_ids = res;
+    });
 }
 
 // `export {default as foo, bar} from './foo'`
@@ -60,30 +88,20 @@ pub fn process_exports_from(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
-) {
-    import_export_info.export_from_ids = import_export_info
-        .export_from_ids
-        .drain()
-        .filter_map(|(imported_path, imported_items)| {
-            // match resolve_ts_import(tsconfig_paths, initial_path, raw_import_path)
-            match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),
-                &imported_path,
-                resolver,
-            ) {
-                Ok(resolved) => {
-                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                        let slashed = resolved.to_slash().unwrap().to_string();
+) -> Result<(), Error> {
+    let res: Result<HashMap<String, _>, _> = resolve_imports_collection(
+        source_file_path,
+        resolver,
+        import_export_info.export_from_ids.drain(),
+        for<'a> |(a, _): &'a (String, HashSet<ImportedItem>)| -> &'a str { a },
+        |(_, names), resolved| (resolved, names),
+    );
 
-                        return Some((slashed, imported_items));
-                    }
-                }
-                Err(_e) => {}
-            }
-
-            None
-        })
-        .collect();
+    return res.map(|res| {
+        // on success, update the import_export_info.
+        // Otherwise, hide Ok() value and return the error.
+        import_export_info.export_from_ids = res;
+    });
 }
 
 // import('./foo')
@@ -91,28 +109,20 @@ pub fn process_async_imported_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
-) {
-    import_export_info.imported_paths = import_export_info
-        .imported_paths
-        .drain()
-        .filter_map(|imported_path| {
-            match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),
-                &imported_path,
-                resolver,
-            ) {
-                Ok(resolved) => {
-                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                        let slashed = resolved.to_slash().unwrap().to_string();
+) -> Result<(), Error> {
+    let res: Result<HashSet<String>, _> = resolve_imports_collection(
+        source_file_path,
+        resolver,
+        import_export_info.imported_paths.drain(),
+        for<'a> |a: &'a String| -> &'a str { a },
+        |_, resolved| resolved,
+    );
 
-                        return Some(slashed);
-                    }
-                }
-                Err(_e) => {}
-            }
-            None
-        })
-        .collect();
+    return res.map(|res| {
+        // on success, update the import_export_info.
+        // Otherwise, hide Ok() value and return the error.
+        import_export_info.imported_paths = res;
+    });
 }
 
 // import './foo'
@@ -120,29 +130,20 @@ pub fn process_executed_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
-) {
-    import_export_info.executed_paths = import_export_info
-        .executed_paths
-        .drain()
-        .filter_map(|executed_path| {
-            match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),
-                &executed_path,
-                resolver,
-            ) {
-                Ok(resolved) => {
-                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                        let slashed = resolved.to_slash().unwrap().to_string();
+) -> Result<(), Error> {
+    let res: Result<HashSet<String>, _> = resolve_imports_collection(
+        source_file_path,
+        resolver,
+        import_export_info.executed_paths.drain(),
+        for<'a> |a: &'a String| -> &'a str { a },
+        |_, resolved| resolved,
+    );
 
-                        return Some(slashed);
-                    }
-                }
-                Err(_e) => {}
-            }
-
-            None
-        })
-        .collect();
+    return res.map(|res| {
+        // on success, update the import_export_info.
+        // Otherwise, hide Ok() value and return the error.
+        import_export_info.executed_paths = res;
+    });
 }
 
 // require('foo')
@@ -150,28 +151,20 @@ pub fn process_require_paths(
     import_export_info: &mut ImportExportInfo,
     source_file_path: &String,
     resolver: &dyn Resolve,
-) {
-    import_export_info.require_paths = import_export_info
-        .require_paths
-        .drain()
-        .filter_map(|required_path| {
-            match resolve_with_extension(
-                FileName::Real(source_file_path.clone().into()),
-                &required_path,
-                resolver,
-            ) {
-                Ok(resolved) => {
-                    if let ResolvedImport::ProjectLocalImport(resolved) = resolved {
-                        let slashed = resolved.to_slash().unwrap().to_string();
+) -> Result<(), Error> {
+    let res: Result<HashMap<String, _>, _> = resolve_imports_collection(
+        source_file_path,
+        resolver,
+        import_export_info.export_from_ids.drain(),
+        for<'a> |(a, _): &'a (String, HashSet<ImportedItem>)| -> &'a str { a },
+        |(_, names), resolved| (resolved, names),
+    );
 
-                        return Some(slashed);
-                    }
-                }
-                Err(_e) => return None,
-            }
-            None
-        })
-        .collect();
+    return res.map(|res| {
+        // on success, update the import_export_info.
+        // Otherwise, hide Ok() value and return the error.
+        import_export_info.export_from_ids = res;
+    });
 }
 
 pub fn retrieve_files(

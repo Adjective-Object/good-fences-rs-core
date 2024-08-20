@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::Result;
 use import_resolver::swc_resolver::{create_tsconfig_paths_resolver, TsconfigPathsResolver};
 use js_err::JsErr;
 use rayon::prelude::*;
@@ -83,13 +84,13 @@ impl UnusedFinder {
 
         let mut files: Vec<GraphFile> = flattened_walk_file_data
             .par_iter_mut()
-            .map(|file| {
+            .map(|file| -> Result<GraphFile> {
                 process_import_export_info(
                     &mut file.import_export_info,
                     &file.source_file_path,
                     &resolver,
-                );
-                GraphFile::new(
+                )?;
+                Ok(GraphFile::new(
                     file.source_file_path.clone(),
                     file.import_export_info
                         .exported_ids
@@ -98,9 +99,10 @@ impl UnusedFinder {
                         .collect(),
                     file.import_export_info.clone(),
                     entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<GraphFile>>>()
+            .map_err(JsErr::generic_failure)?;
 
         let files: HashMap<String, Arc<GraphFile>> = files
             .par_drain(0..)
@@ -137,14 +139,27 @@ impl UnusedFinder {
             &self.skipped_dirs,
             &self.skipped_items,
         );
+        let logs = &mut self.logs;
         // Proccess all information with swc resolver to resolve symbols within tsconfig.paths.json
-        flattened_walk_file_data.par_iter_mut().for_each(|file| {
-            process_import_export_info(
-                &mut file.import_export_info,
-                &file.source_file_path,
-                &self.resolver,
-            );
-        });
+        let errs = flattened_walk_file_data
+            .par_iter_mut()
+            .map(|file| {
+                process_import_export_info(
+                    &mut file.import_export_info,
+                    &file.source_file_path,
+                    &self.resolver,
+                )
+            })
+            .filter_map(|e| {
+                if let Err(e) = e {
+                    return Some(e);
+                }
+                None
+            })
+            .collect::<Vec<_>>();
+        for err in errs {
+            logs.push(format!("Error processing import/export info: {:?}", err));
+        }
 
         // Refresh graph representation with latest changes from disk
         self.refresh_graph(&flattened_walk_file_data);
@@ -322,27 +337,50 @@ impl UnusedFinder {
 
     // Reads files from disk and updates information within `self.graph` for specified paths in `files_to_check`
     fn refresh_files_to_check(&mut self, files_to_check: &Vec<String>) {
-        files_to_check.iter().for_each(|f| {
-            // Read/parse file from disk
-            let visitor_result =
-                get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
-            if let Ok(ok) = visitor_result {
-                match self.graph.files.get_mut(f) {
-                    // Check file exists in graph
-                    Some(current_graph_file) => {
-                        let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
-                        current_graph_file.import_export_info = ok; // Update import_export_info within self.graph
-                        self.logs.push(format!("refreshing {}", f.to_string()));
-                        process_import_export_info(
-                            // Process import/export info to use resolver.
-                            &mut current_graph_file.import_export_info,
-                            &f,
-                            &self.resolver,
-                        );
-                    }
-                    None => {}
+        let results = files_to_check
+            .iter()
+            .map(|f| -> Result<Option<String>> {
+                // Read/parse file from disk
+                let visitor_result =
+                    get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
+                let ok = match visitor_result {
+                    Ok(ok) => ok,
+                    Err(e) => return Err(anyhow!("Error reading file {}: {:?}", f, e)),
+                };
+
+                let current_graph_file = match self.graph.files.get_mut(f) {
+                    Some(current_graph_file) => current_graph_file,
+                    None => return Ok(None),
+                };
+
+                // Check file exists in graph
+                let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
+                current_graph_file.import_export_info = ok; // Update import_export_info within self.graph
+                return match process_import_export_info(
+                    // Process import/export info to use resolver.
+                    &mut current_graph_file.import_export_info,
+                    &f,
+                    &self.resolver,
+                ) {
+                    Ok(_) => Ok(Some(current_graph_file.file_path.clone())),
+                    Err(e) => Err(e.context(format!("Error processing file: {:?}", f))),
+                };
+            })
+            .collect::<Vec<_>>();
+
+        // this has to be done in this scope after the above iterator is fully processed,
+        // to avoid borrowing issues with `self.logs`
+        for res in results {
+            match res {
+                Ok(Some(file_path)) => {
+                    self.logs
+                        .push(format!("Refreshed file path: {:?}", file_path));
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    self.logs.push(format!("Error refreshing file: {:?}", err));
                 }
             }
-        });
+        }
     }
 }
