@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    fmt::Display,
     iter::FromIterator,
     str::FromStr,
     sync::Arc,
@@ -66,9 +67,57 @@ pub struct ExportedItemReport {
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "napi", napi(object))]
 pub struct UnusedFinderReport {
+    // files that are completely unused
     pub unused_files: Vec<String>,
+    // items that are unused within files
     pub unused_files_items: HashMap<String, Vec<ExportedItemReport>>,
-    // pub flattened_walk_file_data: Vec<WalkedSourceFile>,
+}
+
+impl Display for UnusedFinderReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut unused_files = self
+            .unused_files
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        unused_files.sort();
+        let unused_files_set = self
+            .unused_files
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<HashSet<String>>();
+
+        for file_path in unused_files.iter() {
+            match self.unused_files_items.get(file_path) {
+                Some(items) => write!(
+                    f,
+                    "{} is completely unused ({} item{})\n",
+                    file_path,
+                    items.len(),
+                    if items.len() > 1 { "s" } else { "" },
+                )?,
+                None => write!(f, "{} is completely unused\n", file_path)?,
+            };
+        }
+
+        for (file_path, items) in self.unused_files_items.iter() {
+            if unused_files_set.contains(file_path) {
+                continue;
+            }
+            write!(
+                f,
+                "{} is partially unused ({} unused export{}):\n",
+                file_path,
+                items.len(),
+                if items.len() > 1 { "s" } else { "" },
+            )?;
+            for item in items.iter() {
+                write!(f, "  - {}\n", item.id)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub fn create_report_map_from_flattened_files(
@@ -301,9 +350,52 @@ pub fn process_import_export_info(
 
 #[cfg(test)]
 mod test {
-    use crate::FindUnusedItemsConfig;
+    use crate::{ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport};
 
     use super::find_unused_items;
+
+    #[test]
+    fn test_format_report() {
+        let report = UnusedFinderReport {
+            unused_files: vec!["file1".to_string()],
+            unused_files_items: vec![
+                (
+                    "file1".to_string(),
+                    vec![ExportedItemReport {
+                        id: "unused".to_string(),
+                        start: 1,
+                        end: 2,
+                    }],
+                ),
+                (
+                    "file2".to_string(),
+                    vec![
+                        ExportedItemReport {
+                            id: "item1".to_string(),
+                            start: 1,
+                            end: 2,
+                        },
+                        ExportedItemReport {
+                            id: "item2".to_string(),
+                            start: 3,
+                            end: 4,
+                        },
+                    ],
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_eq!(
+            format!("{}", report),
+            r#"file1 is completely unused (1 item)
+file2 is partially unused (2 unused exports):
+  - item1
+  - item2
+"#
+        );
+    }
 
     #[test]
     fn test_error_in_glob() {
