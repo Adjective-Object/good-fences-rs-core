@@ -1,5 +1,5 @@
 use super::context_data::ContextData;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use path_clean::PathClean;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -125,7 +125,13 @@ impl ContextData for ProcessedTsconfig {
 
                 Ok((pat, to))
             })
-            .try_collect()?;
+            .try_collect()
+            .with_context(|| {
+                format!(
+                    "Failed to parse {:?} as tsconfig.json file: paths is not well-formed",
+                    file_path
+                )
+            })?;
 
         let as_buf = PathBuf::from(base_url);
         let for_swc = ProcessedTsconfigPaths {

@@ -47,7 +47,15 @@ impl ContextData for PackageJson {
         _: (),
         path: &std::path::Path,
     ) -> anyhow::Result<Option<Self>, anyhow::Error> {
-        let file = std::fs::File::open(path)?;
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return Ok(None);
+                }
+                return Err(e.into());
+            }
+        };
         serde_json::from_reader(file)
             .map(Some)
             .map_err(|e| e.into())

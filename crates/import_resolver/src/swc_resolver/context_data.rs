@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use dashmap::DashMap;
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::path::{Path, PathBuf};
@@ -11,13 +11,6 @@ use tracing::debug;
 pub trait ContextData<TArgs: Copy = ()>: Sized {
     /// Creates a new ContextData from a filepath
     fn read_context_data(args: TArgs, path: &Path) -> Result<Option<Self>, Error>;
-}
-
-pub trait ContextDataFactory<TArgs> {
-    type Data: Sized;
-
-    /// Creates a new ContextData from a filepath
-    fn read_context_data(args: TArgs, path: &Path) -> Result<Option<Self::Data>, Error>;
 }
 
 impl ContextData for () {
@@ -211,7 +204,15 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         root_dir: &Path,
         base: &'base_path Path,
     ) -> Result<Option<(&'base_path Path, CtxOptRef<'a, T>)>, Error> {
-        let mut head: Option<&'base_path Path> = Some(base);
+        if !root_dir.is_absolute() {
+            return Err(anyhow!(
+                "probe_path must be called with an absolute root_dir (got {})",
+                root_dir.display()
+            ));
+        }
+        let is_abs = base.is_absolute();
+
+        let mut head: Option<&'base_path Path> = base.parent();
         for _ in 0..Self::MAX_PROBE_DEPTH {
             let head_path = match head {
                 None => return Ok(None),
@@ -225,7 +226,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
 
             // if we would walk above <root>/tsconfig.json,
             // we should stop the traversal
-            if head_path == root_dir {
+            if is_abs && head_path == root_dir {
                 // walked to root dir, and we don't want to
                 // escape the root dir
                 return Ok(None);
@@ -253,9 +254,9 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     // filesystem for a tsconfig.json file and caches the result.
     fn check_dir<'a>(&'a self, base: &Path) -> Result<CtxRef<'a, Option<T>>, Error> {
         let entry = self.cache.entry(base.to_owned());
-        let res = entry.or_try_insert_with(|| match self.check_dir_os_fs(base) {
-            Ok(x) => Ok(x),
-            Err(e) => Err(e),
+        let res = entry.or_try_insert_with(|| {
+            self.check_dir_os_fs(base)
+                .with_context(|| format!("Failed while checking {:?} for {}", base, CONTEXT_FNAME))
         })?;
 
         return Ok(res.downgrade());
@@ -264,7 +265,8 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     fn check_dir_os_fs<'a>(&self, base: &Path) -> Result<Option<T>, Error> {
         // probe the real FS for a tsconfig.json file
         let context_file_path = base.to_owned().join(CONTEXT_FNAME);
-        let result = T::read_context_data(self.args, &context_file_path);
+        let result = T::read_context_data(self.args, &context_file_path)
+            .with_context(|| "in read_context_data");
         debug!(
             "Checking {}/{}: {}",
             base.to_string_lossy(),

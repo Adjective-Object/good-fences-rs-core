@@ -54,10 +54,6 @@ where
             ) {
                 Ok(ResolvedImport::ProjectLocalImport(resolved)) => {
                     let slashed = resolved.to_slash().unwrap().to_string();
-                    println!("resolved: {:?} -> {:?}", imported_path, slashed);
-                    if imported_path.contains("getReadWriteRecipientViewStateFromEmailAddress") {
-                        println!("imported_path: {:?}", imported_path);
-                    }
                     Some(Ok(update_item(v, slashed)))
                 }
                 Err(e) => Some(Err(e)),

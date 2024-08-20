@@ -47,7 +47,7 @@ impl UnusedFinder {
             files_ignored_exports: _,
             entry_packages,
         } = config.clone();
-        let root_dir = {
+        let root_dir: PathBuf = {
             // scope here to contain the mutability
             let mut x = PathBuf::from(ts_config_path);
             x.pop();
@@ -61,7 +61,7 @@ impl UnusedFinder {
             Ok(v) => Arc::new(v),
             Err(e) => {
                 // return None;
-                return Err(JsErr::invalid_arg(e.msg.to_string()));
+                return Err(JsErr::invalid_arg(e));
             }
         };
 
@@ -71,7 +71,7 @@ impl UnusedFinder {
         let skipped_items: Vec<regex::Regex> = match skipped_items.into_iter().collect() {
             Ok(r) => r,
             Err(e) => {
-                return Err(JsErr::invalid_arg(e.to_string()));
+                return Err(JsErr::invalid_arg(e));
             }
         };
         let skipped_items = Arc::new(skipped_items);
@@ -324,9 +324,9 @@ impl UnusedFinder {
             }
         }
         if !frontier.is_empty() {
-            return Some(Err(JsErr::generic_failure(
-                "exceeded max iterations".to_string(),
-            )));
+            return Some(Err(JsErr::generic_failure(anyhow!(
+                "exceeded max iterations"
+            ))));
         }
         None
     }

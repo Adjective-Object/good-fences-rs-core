@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-anyhow = "1.0.75"
+anyhow = { version = "1.0.75", features = ["backtrace"] }
 path-clean = "0.1.0"
 path-slash = "0.2.1"
 relative-path = "1.7.2"

@@ -190,7 +190,7 @@ pub fn find_unused_items(
     let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
     let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
         Ok(v) => Arc::new(v),
-        Err(e) => return Err(JsErr::invalid_arg(e.msg.to_string())),
+        Err(e) => return Err(JsErr::invalid_arg(e)),
     };
 
     let skipped_items: Vec<regex::Regex> = skipped_items
@@ -267,9 +267,7 @@ pub fn find_unused_items(
             break;
         }
         if i >= MAX_ITERATIONS {
-            return Err(JsErr::generic_failure(
-                "exceeded max iterations".to_string(),
-            ));
+            return Err(JsErr::generic_failure(anyhow!("exceeded max iterations")));
         }
     }
 
