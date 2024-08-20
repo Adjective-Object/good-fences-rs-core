@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 19 Aug 2024 23:19:27 GMT and should not be manually modified.
+This log was last generated on Tue, 20 Aug 2024 15:59:23 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.16.0
+
+Tue, 20 Aug 2024 15:59:23 GMT
+
+### Minor changes
+
+- Implement display() for unused report (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.15.0
 

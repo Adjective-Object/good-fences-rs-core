@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Tue, 20 Aug 2024 15:59:23 GMT",
+      "version": "0.16.0",
+      "tag": "@good-fences/api_v0.16.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "8035c047c9b1f6d2894be17a8b6b293be639407a",
+            "comment": "Implement display() for unused report"
+          }
+        ]
+      }
+    },
+    {
       "date": "Mon, 19 Aug 2024 23:19:27 GMT",
       "version": "0.15.0",
       "tag": "@good-fences/api_v0.15.0",
