@@ -25,3 +25,12 @@ path-clean = { workspace = true }
 path-slash = { workspace = true }
 relative-path = { workspace = true }
 lazy_static = "1.4.0"
+pretty_assertions.workspace = true
+swc_common.workspace = true
+pathdiff = "0.2.1"
+parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
+dashmap = "6.0.1"
+tracing = "0.1.40"
+tracing-test = "0.2.5"
+test_tmpdir = { path = "../test_tmpdir" }
+ouroboros = "0.18.4"

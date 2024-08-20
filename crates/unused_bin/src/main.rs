@@ -3,6 +3,7 @@ extern crate unused_finder;
 
 use std::{env, fs, path::Path};
 
+use anyhow::Context;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -24,8 +25,9 @@ fn main() {
 
     // read and parse the config file
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
-    let config: unused_finder::FindUnusedItemsConfig =
-        serde_json::from_str(&config_str).expect("Failed to parse unused-finder config");
+    let config: unused_finder::FindUnusedItemsConfig = serde_json::from_str(&config_str)
+        .with_context(|| format!("Parsing unused-finder config {config_path}"))
+        .unwrap();
 
     // move the the working directory of the config path
     let config_dir = Path::new(&config_path)

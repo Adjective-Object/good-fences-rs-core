@@ -23,7 +23,8 @@ swc_core = { version = "0.101.3", features = [
     "ecma_loader_lru",
     "ecma_loader_parking_lot",
 ] }
+swc_common = "0.37.4"
 swc_ecma_parser = "0.149.0"
 swc = "0.284.1"
-swc_ecma_loader = "0.44.5"
+swc_ecma_loader = "0.49.1"
 pretty_assertions = "1.4.0"

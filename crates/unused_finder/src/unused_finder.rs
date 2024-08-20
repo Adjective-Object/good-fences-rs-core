@@ -1,15 +1,15 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     iter::FromIterator,
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
 
 use anyhow::Result;
-use import_resolver::swc_resolver::{create_tsconfig_paths_resolver, TsconfigPathsResolver};
+use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
 use rayon::prelude::*;
-use tsconfig_paths::TsconfigPathsJson;
 
 use crate::{
     core::{
@@ -32,7 +32,7 @@ pub struct UnusedFinder {
     skipped_dirs: Arc<Vec<glob::Pattern>>,
     entry_files: Vec<String>,
     graph: Graph,
-    resolver: TsconfigPathsResolver,
+    resolver: MonorepoResolver,
 }
 
 impl UnusedFinder {
@@ -47,17 +47,13 @@ impl UnusedFinder {
             files_ignored_exports: _,
             entry_packages,
         } = config.clone();
-        let tsconfig: TsconfigPathsJson = match TsconfigPathsJson::from_path(ts_config_path.clone())
-        {
-            Ok(tsconfig) => tsconfig,
-            Err(e) => {
-                return Err(JsErr::invalid_arg(format!(
-                    "Unable to read tsconfig file {}: {}",
-                    ts_config_path, e
-                )));
-            }
+        let root_dir = {
+            // scope here to contain the mutability
+            let mut x = PathBuf::from(ts_config_path);
+            x.pop();
+            x
         };
-        let resolver: TsconfigPathsResolver = create_tsconfig_paths_resolver(&tsconfig);
+        let resolver: MonorepoResolver = MonorepoResolver::new_default_resolver(root_dir);
         let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
 
         let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));

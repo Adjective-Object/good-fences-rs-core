@@ -1,19 +1,21 @@
 use anyhow::Result;
-use import_resolver::swc_resolver::create_tsconfig_paths_resolver;
+use import_resolver::swc_resolver::MonorepoResolver;
 use rayon::prelude::*;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Display,
     iter::FromIterator,
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
 use swc_core::{
-    common::source_map::SmallPos,
+    common::{collections::AHashMap, source_map::SmallPos},
     ecma::loader::{
         resolve::Resolve,
         resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
+        TargetEnv,
     },
 };
 
@@ -185,10 +187,6 @@ pub fn find_unused_items(
         entry_packages,
     } = config;
     let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
-    let tsconfig = match TsconfigPathsJson::from_path(ts_config_path.clone()) {
-        Ok(tsconfig) => tsconfig,
-        Err(e) => panic!("Unable to read tsconfig file {}: {}", ts_config_path, e),
-    };
     let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
     let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
         Ok(v) => Arc::new(v),
@@ -210,8 +208,13 @@ pub fn find_unused_items(
         walk_src_files(&paths_to_read, &skipped_dirs, &skipped_items);
 
     let _total_files = flattened_walk_file_data.len();
-    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
-        create_tsconfig_paths_resolver(&tsconfig);
+    let root_dir: PathBuf = {
+        // scope here to contain the mutability
+        let mut x = PathBuf::from(ts_config_path);
+        x.pop();
+        x
+    };
+    let resolver = MonorepoResolver::new_default_resolver(root_dir);
     let mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         create_report_map_from_flattened_files(&flattened_walk_file_data);
     let mut files: Vec<GraphFile> = flattened_walk_file_data

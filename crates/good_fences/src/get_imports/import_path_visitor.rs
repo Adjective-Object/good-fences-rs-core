@@ -161,21 +161,18 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::{HashMap, HashSet},
-        sync::Arc,
-    };
+    use std::collections::{HashMap, HashSet};
     use swc_core::{
-        common::{Globals, Mark, SourceFile, GLOBALS},
+        common::{Globals, Mark, GLOBALS},
         ecma::{
             transforms::base::resolver,
             visit::{FoldWith, VisitWith},
         },
     };
-    use swc_ecma_parser::{lexer::Lexer, Capturing, Parser};
+    
     use swc_utils::parse_ecma_src;
 
-    use crate::get_imports::create_lexer;
+    
 
     use super::ImportPathVisitor;
 

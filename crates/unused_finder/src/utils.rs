@@ -46,6 +46,7 @@ where
         .into_iter()
         .filter_map(|v| {
             let imported_path = import_from_item(&v);
+
             match resolve_with_extension(
                 FileName::Real(source_file_path.into()),
                 &imported_path,
@@ -53,6 +54,10 @@ where
             ) {
                 Ok(ResolvedImport::ProjectLocalImport(resolved)) => {
                     let slashed = resolved.to_slash().unwrap().to_string();
+                    println!("resolved: {:?} -> {:?}", imported_path, slashed);
+                    if imported_path.contains("getReadWriteRecipientViewStateFromEmailAddress") {
+                        println!("imported_path: {:?}", imported_path);
+                    }
                     Some(Ok(update_item(v, slashed)))
                 }
                 Err(e) => Some(Err(e)),

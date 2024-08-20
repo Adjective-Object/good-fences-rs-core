@@ -25,8 +25,7 @@ pub mod walk_dirs;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
-    let tsconfig_path = opts.project.clone();
-    let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(tsconfig_path)
+    let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(&opts.project)
         .with_context(|| format!("Unable to find --project path {}", &opts.project))
         .unwrap();
 

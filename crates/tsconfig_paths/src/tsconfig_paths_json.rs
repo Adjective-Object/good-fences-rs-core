@@ -13,7 +13,7 @@ pub struct TsconfigPathsJson {
 
 impl TsconfigPathsJson {
     // Reads and parses the tsconfig.json at the provided path
-    pub fn from_path(tsconfig_path: String) -> Result<Self, OpenTsConfigError> {
+    pub fn from_path(tsconfig_path: &str) -> Result<Self, OpenTsConfigError> {
         let file = match File::open(tsconfig_path) {
             Ok(f) => f,
             Err(err) => return Err(OpenTsConfigError::IOError(err)),
