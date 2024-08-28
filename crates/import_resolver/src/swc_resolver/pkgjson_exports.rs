@@ -4,6 +4,7 @@ use std::{fmt::Display, path::PathBuf, str::FromStr};
 use anyhow::{anyhow, Result};
 use hashbrown::Equivalent;
 use path_clean::PathClean;
+use path_slash::PathBufExt;
 
 use super::package::PackageJsonExports;
 use copy_from_str::CopyFromStrExt;
@@ -46,12 +47,8 @@ pub struct PackageExportRewriteData {
 }
 
 fn clean_path(p: &str) -> String {
-    PathBuf::from_str(p)
-        .unwrap()
-        .clean()
-        .to_str()
-        .unwrap()
-        .to_string()
+    let mut store_str = String::new();
+    return String::from(clean_path_avoid_alloc(p, &mut store_str));
 }
 
 // Cleans a path, removing any unnecessary characters and normalizing it
@@ -85,7 +82,9 @@ fn clean_path_avoid_alloc<'a>(
                         // consecutive slashes or './'
                         (c == '/' && (bytes[i-1] == b'.' || bytes[i-1] == b'/'))))
         {
-            store.copy_from_str(PathBuf::from_str(o).unwrap().clean().to_str().unwrap());
+            store.clear();
+            store.push_str("./");
+            store.push_str(&PathBuf::from_str(o).unwrap().clean().to_slash().unwrap());
             return store;
         }
     }

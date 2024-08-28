@@ -76,8 +76,10 @@ impl Resolve for MonorepoResolver {
 #[cfg(test)]
 mod test {
     use super::*;
+    use tracing_test::traced_test;
 
     #[test]
+    #[traced_test]
     fn test_resolve() {
         let resolver =
             MonorepoResolver::new_default_resolver(PathBuf::from("/workspaces/client-web"));

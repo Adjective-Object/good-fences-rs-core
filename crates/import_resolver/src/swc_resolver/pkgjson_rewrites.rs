@@ -104,7 +104,7 @@ pub struct PackageJsonRewriteData {
     // Browser rewrites to use for cjs requires
     pub browser_cache: Option<BrowserCache>,
     // map of paths to rewrite
-    pub exports_rewrite: Option<PackageExportRewriteData>,
+    pub exports: Option<PackageExportRewriteData>,
 }
 
 // Helper function to compute the rewrite cache for a package.json file
@@ -133,7 +133,7 @@ impl PackageJsonRewriteData {
 
         return Ok(Self {
             browser_cache,
-            exports_rewrite,
+            exports: exports_rewrite,
         });
     }
 

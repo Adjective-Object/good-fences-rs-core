@@ -91,13 +91,9 @@ impl<TVal, TDerived> WithCache<TVal, Option<TDerived>>
 where
     TVal: ContextData,
 {
-    pub fn get_cached_or_init<'a, TArgs, TFn>(
-        &'a self,
-        args: TArgs,
-        f: TFn,
-    ) -> WCMappedReadGuard<'a, TDerived>
+    pub fn get_cached_or_init<'a, TFn>(&'a self, f: TFn) -> WCMappedReadGuard<'a, TDerived>
     where
-        TFn: Fn(TArgs, &TVal) -> TDerived,
+        TFn: Fn(&TVal) -> TDerived,
     {
         // most of the time, we expect this to already be initialized, so try to read it first
         {
@@ -113,7 +109,7 @@ where
         // check that nobody else filled the cache while we were waiting before
         // we call the initializer function
         if let None = write_lock.as_ref() {
-            *write_lock = Some(f(args, &self.inner));
+            *write_lock = Some(f(&self.inner));
         }
 
         // downgrade and map the

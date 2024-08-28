@@ -66,7 +66,10 @@ pub(crate) fn is_core_module(s: &str) -> bool {
     NODE_BUILTINS.contains(&s)
 }
 
-static DEFAULT_EXPORT_CONDITIONS: &'static [&str] = &["default", "import", "require"];
+static DEFAULT_EXPORT_CONDITIONS: &'static [&str] = &[
+    // TODO: make this configurable and drop "source"
+    "source", "default", "import", "require",
+];
 
 // Adaptation of NodeModulesResolver from swc that stores
 // intermediate data in shared caches instead of going to disk
@@ -290,7 +293,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             PackageJsonRewriteData::create(self, pkg_dir, pkgjson)
         })?;
         let mut out = String::new();
-        if let Some(exports_map) = resolution_data.exports_rewrite.as_ref() {
+        if let Some(exports_map) = resolution_data.exports.as_ref() {
             if let Some(rewritten) = exports_map.rewrite_relative_export(
                 ".",
                 DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
@@ -373,6 +376,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 None => break,
             };
 
+            tracing::debug!("found node_modules directory: {:#?}", nm_dir_path);
+
             // Use a cached resolution if it exists
             match nm_dir_entry.get_cached().get(target) {
                 Some(CachedResolution::Resolution(path)) => {
@@ -392,7 +397,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 Some((pkg, rest)) => (pkg, rest),
                 None => continue,
             };
-            let nm_pkg_path = nm_dir_path.join(package_name);
+            let nm_pkg_path = nm_dir_path.join(NODE_MODULES).join(package_name);
 
             // Get the cached derived data + pkgjson entry for this path.
             let cached_entry: dashmap::mapref::one::Ref<
@@ -408,51 +413,66 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     )
                 })?;
             let cached_entry_value = cached_entry.value();
-            let pkg_rewrite_data = match cached_entry_value {
-                Some(pkg_with_rewrite) => pkg_with_rewrite.get_cached(),
-                // no package.json file found, so we can't do any rewrites.
-                // Continue the loop, walking up the node_modules directories.
-                None => continue,
-            };
 
-            // target_file_path is the actual path of the target file we're trying to resolve.
-            //
-            // If the package has "exports" fields, we should use them to rewrite the path
-            let target_file_path: PathBuf = if let Some(Some(rewrite_data)) = pkg_rewrite_data
-                .as_ref()
-                .map(|rewrite_data| &rewrite_data.exports_rewrite)
-            {
-                // if there is a rewrite data, rewrite the path against it.
-                let mut out = String::new();
-                let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
-                    &rel_import,
-                    DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
-                    &mut out,
-                )?;
-                if let Some(rewritten_to) = rewritten_to {
-                    match rewritten_to.rewritten_export {
-                        ExportedPath::Exported(exported_rel_path) => nm_dir_path
-                            .join(NODE_MODULES)
-                            .join(package_name)
-                            .join(exported_rel_path),
-                        // tried to import a file that is explicitly marked private
-                        ExportedPath::Private => {
-                            return Err(anyhow::anyhow!(
-                                "Import '{target}' is marked as private by export '{}' in {}",
-                                rewritten_to.export_kind,
-                                nm_pkg_path.join(PACKAGE).display(),
-                            ));
+            let target_file_path = match cached_entry_value {
+                Some(pkg_with_rewrite) => {
+                    let cached_data = pkg_with_rewrite.try_get_cached_or_init(|pkg| {
+                        PackageJsonRewriteData::create(self, &nm_pkg_path, pkg)
+                    })?;
+                    match *cached_data {
+                        PackageJsonRewriteData {
+                            exports: Some(ref rewrite_data),
+                            ..
+                        } => {
+                            // if there is a rewrite data, rewrite the path against it.
+                            let mut out = String::new();
+                            let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
+                                &rel_import,
+                                DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
+                                &mut out,
+                            )?;
+                            if let Some(rewritten_to) = rewritten_to {
+                                match rewritten_to.rewritten_export {
+                                    ExportedPath::Exported(exported_rel_path) => nm_dir_path
+                                        .join(NODE_MODULES)
+                                        .join(package_name)
+                                        .join(exported_rel_path),
+                                    // tried to import a file that is explicitly marked private
+                                    ExportedPath::Private => {
+                                        return Err(anyhow::anyhow!(
+                                            "Import '{target}' is marked as private by export '{}' in {}",
+                                            rewritten_to.export_kind,
+                                            nm_pkg_path.join(PACKAGE).display(),
+                                        ));
+                                    }
+                                }
+                            } else {
+                                // no matched rewrite, so just use node_modules/imported/path
+                                tracing::debug!(
+                                    "no matched rewrite in {:#?} for {rel_import:#?}. Rewrites: {rewrite_data:#?}",
+                                    nm_pkg_path.display()
+                                );
+                                nm_dir_path.join(NODE_MODULES).join(target)
+                            }
+                        }
+                        _ => {
+                            // no rewrite data, so just use node_modules/imported/path
+                            tracing::debug!(
+                                "no rewrite data in ${:#?} for {rel_import:#?}",
+                                nm_pkg_path.display()
+                            );
+                            nm_dir_path.join(NODE_MODULES).join(target)
                         }
                     }
-                } else {
-                    // no matched rewrite, so just use node_modules/imported/path
+                }
+                None => {
+                    tracing::debug!("no package.json found in: {:#?}", nm_pkg_path);
+                    // TODO: fall through to default resolution
                     nm_dir_path.join(NODE_MODULES).join(target)
                 }
-            } else {
-                // default: no rewrite, just use node_modules/imported/path
-                nm_dir_path.join(NODE_MODULES).join(target)
             };
 
+            tracing::debug!("attempting resolution: {target_file_path:#?}");
             if let Some(result) = self
                 .resolve_as_file(&target_file_path)
                 .ok()
@@ -464,8 +484,10 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     target.to_string(),
                     CachedResolution::Resolution(result.clone()),
                 );
+                tracing::debug!("resolved: {target_file_path:#?}");
                 return Ok(Some(result));
             } else {
+                tracing::debug!("caching failed resolution: {target_file_path:#?}");
                 // failed to resolve! Cache the failure so we don't try again,
                 // and continue the loop to try the next node_modules directory.
                 nm_dir_entry
