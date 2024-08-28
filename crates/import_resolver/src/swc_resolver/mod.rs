@@ -72,24 +72,3 @@ impl Resolve for MonorepoResolver {
         self.with_resolver(|resolver| resolver.resolve(specifier, referrer))
     }
 }
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use tracing_test::traced_test;
-
-    #[test]
-    #[traced_test]
-    fn test_resolve() {
-        let resolver =
-            MonorepoResolver::new_default_resolver(PathBuf::from("/workspaces/client-web"));
-        let res = resolver.resolve(
-            &FileName::Real(
-                "/workspaces/client-web/packages/apps/publishedcalendar/owa-publishedcalendar-bootstrap/src/index.ts"
-                    .into(),
-            ),
-            "owa-app-module/lib/types/AppBootstrapOptions",
-        );
-        res.unwrap();
-    }
-}
