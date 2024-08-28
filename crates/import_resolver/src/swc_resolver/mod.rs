@@ -18,8 +18,11 @@ mod common;
 mod context_data;
 mod node_resolver;
 mod package;
+mod pkgjson_exports;
+mod pkgjson_rewrites;
 mod tsconfig;
 mod tsconfig_resolver;
+mod util;
 
 // Wrapper for Combined resolver that owns its own caches, instead of
 // referencing an externally-owned set of caches.
@@ -67,5 +70,24 @@ impl Debug for MonorepoResolver {
 impl Resolve for MonorepoResolver {
     fn resolve(&self, specifier: &FileName, referrer: &str) -> Result<Resolution, Error> {
         self.with_resolver(|resolver| resolver.resolve(specifier, referrer))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_resolve() {
+        let resolver =
+            MonorepoResolver::new_default_resolver(PathBuf::from("/workspaces/client-web"));
+        let res = resolver.resolve(
+            &FileName::Real(
+                "/workspaces/client-web/packages/apps/publishedcalendar/owa-publishedcalendar-bootstrap/src/index.ts"
+                    .into(),
+            ),
+            "owa-app-module/lib/types/AppBootstrapOptions",
+        );
+        res.unwrap();
     }
 }

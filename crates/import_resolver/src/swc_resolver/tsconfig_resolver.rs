@@ -94,6 +94,10 @@ impl<'tsconfig, R: Resolve> TsconfigPathsResolver<'tsconfig, R> {
 /// Lifted from swc_ecma_loader-0.45.23/src/resolvers/tsc.rs
 impl<'tsconfig, R: Resolve> Resolve for TsconfigPathsResolver<'tsconfig, R> {
     fn resolve(&self, base: &FileName, module_specifier: &str) -> Result<Resolution> {
+        if module_specifier.contains("getReadWriteRecipientViewStateFromEmailAddress") {
+            println!("tsconfig-resolver: {:?}", module_specifier);
+        }
+
         let _tracing = if cfg!(debug_assertions) {
             Some(
                 tracing::span!(

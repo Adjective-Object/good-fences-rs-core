@@ -68,6 +68,10 @@ where
     TVal: ContextData<TArgs>,
     TCached: Default,
 {
+    pub fn inner(&self) -> &TVal {
+        &self.inner
+    }
+
     pub fn get_cached<'a>(&'a self) -> WCReadGuard<'a, TCached> {
         self.cached.read()
     }
@@ -119,13 +123,9 @@ where
         unsafe_map_unwrap_locked_option(readonly_lock)
     }
 
-    pub fn try_get_cached_or_init<'a, TArgs, TFn>(
-        &'a self,
-        args: TArgs,
-        f: TFn,
-    ) -> Result<WCMappedReadGuard<TDerived>>
+    pub fn try_get_cached_or_init<'a, TFn>(&'a self, f: TFn) -> Result<WCMappedReadGuard<TDerived>>
     where
-        TFn: Fn(TArgs, &'a TVal) -> Result<TDerived>,
+        TFn: Fn(&'a TVal) -> Result<TDerived>,
     {
         // most of the time, we expect this to already be initialized, so try to read it first
         {
@@ -141,7 +141,7 @@ where
         // check that nobody else filled the cache while we were waiting before
         // we call the initializer function
         if let None = write_lock.as_ref() {
-            let val = f(args, &self.inner)?;
+            let val = f(&self.inner)?;
             *write_lock = Some(val);
         }
 
@@ -252,7 +252,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     //
     // First, checks the cache. If no entry is found, checks the real
     // filesystem for a tsconfig.json file and caches the result.
-    fn check_dir<'a>(&'a self, base: &Path) -> Result<CtxRef<'a, Option<T>>, Error> {
+    pub fn check_dir<'a>(&'a self, base: &Path) -> Result<CtxRef<'a, Option<T>>, Error> {
         let entry = self.cache.entry(base.to_owned());
         let res = entry.or_try_insert_with(|| {
             self.check_dir_os_fs(base)

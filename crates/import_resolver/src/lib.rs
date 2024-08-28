@@ -5,6 +5,7 @@
 #![feature(iterator_try_collect)]
 
 extern crate anyhow;
+extern crate copy_from_str;
 extern crate dashmap;
 extern crate parking_lot;
 extern crate path_clean;

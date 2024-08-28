@@ -34,3 +34,5 @@ tracing = "0.1.40"
 tracing-test = "0.2.5"
 test_tmpdir = { path = "../test_tmpdir" }
 ouroboros = "0.18.4"
+copy_from_str = "1.0.6"
+hashbrown = "0.14.5"

@@ -3,44 +3,37 @@
 //!
 //! See https://github.com/swc-project/swc/blob/f988b66e1fd921266a8abf6fe9bb997b6878e949/crates/swc_ecma_loader/src/resolvers/node.rs
 
-use std::{
-    env::current_dir,
-    fs::File,
-    io::BufReader,
-    path::{Component, Path, PathBuf},
+use super::common::AHashMap;
+use super::package::{Browser, PackageJson};
+use super::pkgjson_exports::ExportedPath;
+use super::pkgjson_rewrites::PackageJsonRewriteData;
+use super::util::to_absolute_path;
+use super::{
+    context_data::{FileContextCache, WithCache},
+    util,
 };
-
-use super::package::{Browser, PackageJson, StringOrBool};
 use anyhow::{bail, Context, Error, Result};
 use path_clean::PathClean;
-#[cfg(windows)]
-use path_clean::PathClean;
 use pathdiff::diff_paths;
-use swc_common::{
-    collections::{AHashMap, AHashSet},
-    FileName,
+use std::{
+    env::current_dir,
+    path::{Component, Path, PathBuf},
 };
-use tracing::{debug, trace, Level};
-
+use swc_common::FileName;
 use swc_ecma_loader::{
     resolve::{Resolution, Resolve},
     TargetEnv, NODE_BUILTINS,
 };
-
-use super::context_data::{FileContextCache, WithCache};
+use tracing::{debug, trace, Level};
 
 pub type PackageJsonCacheEntry = WithCache<
     // context defined by package.json files
     PackageJson,
-    // each package.json file also has an associated BrowserCache
+    // each package.json file also has an associated RewriteData cache.
     //
-    // This is a cache of resolved browser fields for a package.json file
-    //
-    // This is a double-nested Option because the value is lazily populated
-    // and also optional. The outer Option is None if the lazy population
-    // has not yet occurred, and the inner Option is None if the package.json
-    // file does not have a "browser" field.
-    Option<Option<BrowserCache>>,
+    // The RewriteData cache is used to store derived resolution data for
+    // the package.json file, and is lazily populated on-demand.
+    Option<PackageJsonRewriteData>,
 >;
 
 pub type PackageJsonCache = FileContextCache<PackageJsonCacheEntry, "package.json">;
@@ -68,25 +61,6 @@ pub enum CachedResolution {
 }
 
 static PACKAGE: &str = "package.json";
-
-#[derive(Debug, Default)]
-pub struct BrowserCache {
-    rewrites: AHashMap<PathBuf, PathBuf>,
-    ignores: AHashSet<PathBuf>,
-    module_rewrites: AHashMap<String, PathBuf>,
-    module_ignores: AHashSet<String>,
-}
-
-pub fn to_absolute_path(path: &Path) -> Result<PathBuf, Error> {
-    let absolute_path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        current_dir()?.join(path)
-    }
-    .clean();
-
-    Ok(absolute_path)
-}
 
 pub(crate) fn is_core_module(s: &str) -> bool {
     NODE_BUILTINS.contains(&s)
@@ -148,7 +122,15 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
     /// Resolve a path as a file. If `path` refers to a file, it is returned;
     /// otherwise the `path` + each extension is tried.
-    fn resolve_as_file(&self, path: &Path) -> Result<Option<PathBuf>, Error> {
+    pub fn resolve_as_file(&self, path: &Path) -> Result<Option<PathBuf>, Error> {
+        if path
+            .to_str()
+            .unwrap_or("")
+            .contains("getReadWriteRecipientViewStateFromEmailAddress")
+        {
+            println!("node-resolver resolve_as_file: {:?}", path);
+        }
+
         let _tracing = if cfg!(debug_assertions) {
             Some(
                 tracing::span!(
@@ -226,7 +208,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
     /// Resolve a path as a directory, using the "main" key from a package.json
     /// file if it exists, or resolving to the index.EXT file if it exists.
-    fn resolve_as_directory(
+    pub fn resolve_as_directory(
         &self,
         path: &Path,
         allow_package_entry: bool,
@@ -266,7 +248,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         Ok(None)
     }
 
-    /// Resolve using the package.json "main" or "browser" keys.
+    /// Resolve a package import (e.g. no package subpath), using the package.json
+    /// "main", "browser", and "exports" fields
     fn resolve_package_entry(
         &self,
         pkg_dir: &Path,
@@ -286,13 +269,26 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             None
         };
 
-        // TODO: use pkgjson cache here
-        let file = File::open(pkg_path)?;
-        let reader = BufReader::new(file);
-        let pkg: PackageJson = serde_json::from_reader(reader)
-            .context(format!("failed to deserialize {}", pkg_path.display()))?;
-        // TODO: parse pkgjson exports field here
+        // Probe the fs or the cache for a package.json file at that path
+        let pkg_cache_entry = self.pkg_json_cache.check_dir(&pkg_dir).with_context(|| {
+            format!(
+                "failed to get package.json for directory {:#?}",
+                pkg_dir.display(),
+            )
+        })?;
+        let pkg_cache_entry = pkg_cache_entry.value().as_ref();
+        // Check if there was a package.json file at the path
+        let pkg_with_resolution_cache = match pkg_cache_entry {
+            Some(pkg) => pkg,
+            // there was no pkg json file to load, so we can't resolve anything.
+            None => return Ok(None),
+        };
+        // Get the cached resolution data data for this package.json file
+        let resolution_data = pkg_with_resolution_cache.try_get_cached_or_init(|pkgjson| {
+            PackageJsonRewriteData::create(self, pkg_dir, pkgjson)
+        })?;
 
+        let pkg = pkg_with_resolution_cache.inner();
         let main_fields = match self.target_env {
             TargetEnv::Node => {
                 vec![pkg.module.as_ref(), pkg.main.as_ref()]
@@ -326,7 +322,10 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
     /// Resolve by walking up node_modules folders.
     fn resolve_node_modules<'a>(
         &'a self,
+        // the path to the node_modules directory
         base_dir: &Path,
+        // the import target to resolve
+        // e.g. something like `react` or `@react/react-dom`
         target: &str,
     ) -> Result<Option<PathBuf>, Error> {
         if self.ignore_node_modules {
@@ -340,18 +339,15 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             .probe_path_iter(&self.monorepo_root, &abs_base);
 
         loop {
+            // loop through the node_modules direcotires
             let (nm_dir_path, nm_dir_entry) = match iter.next() {
                 Some(Ok((path, entry))) => (path, entry),
                 Some(Err(e)) => return Err(e),
                 None => break,
             };
 
-            let cached_resolution: Option<CachedResolution> = {
-                let cached = nm_dir_entry.get_cached();
-                cached.get(target).map(|v| v.clone())
-            };
-
-            match cached_resolution {
+            // Use a cached resolution if it exists
+            match nm_dir_entry.get_cached().get(target) {
                 Some(CachedResolution::Resolution(path)) => {
                     // cached a resolution, return it
                     return Ok(Some(path.clone()));
@@ -360,29 +356,98 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     // cached a non-resolution, continue iteration onto the next node_modules directory
                     continue;
                 }
-                None => {
-                    // no cache hit for this resolution against this nm_directory.
-                    //
-                    // resolve it, then cache the result
-                    let path = nm_dir_path.join(NODE_MODULES).join(target);
-                    if let Some(result) = self
-                        .resolve_as_file(&path)
-                        .ok()
-                        .or_else(|| self.resolve_as_directory(&path, true).ok())
-                        .flatten()
-                    {
-                        nm_dir_entry.get_cached_mut().insert(
-                            target.to_string(),
-                            CachedResolution::Resolution(result.clone()),
-                        );
+                None => {}
+            };
 
-                        return Ok(Some(result));
-                    } else {
-                        nm_dir_entry
-                            .get_cached_mut()
-                            .insert(target.to_string(), CachedResolution::NoResolution);
+            // fall through: we have to actually try resolving against this node_modules directory
+            // Search for a package.json file to perform package rewrites against
+            let (package_name, rel_import) = match util::split_package_import(target) {
+                Some((pkg, rest)) => (pkg, rest),
+                None => continue,
+            };
+            let nm_pkg_path = nm_dir_path.join(package_name);
+
+            // Get the cached derived data + pkgjson entry for this path.
+            let cached_entry: dashmap::mapref::one::Ref<
+                PathBuf,
+                Option<WithCache<PackageJson, Option<PackageJsonRewriteData>>>,
+            > = self
+                .pkg_json_cache
+                .check_dir(&nm_pkg_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read package.json for directory {:#?}",
+                        nm_pkg_path.display(),
+                    )
+                })?;
+            let cached_entry_value = cached_entry.value();
+            let path_rewrite_data = match cached_entry_value {
+                Some(cached) => cached.get_cached(),
+                // no package.json file found, so we can't do any rewrites.
+                // Continue the loop, walking up the node_modules directories.
+                None => continue,
+            };
+
+            // target_file_path is the actual path of the target file we're trying to resolve.
+            //
+            // If the package has "exports" fields, we should use them to rewrite the path
+            let target_file_path: PathBuf = if let Some(rewrite_data) = path_rewrite_data
+                .as_ref()
+                .map(|rewrite_data| rewrite_data.exports_rewrite)
+                .flatten()
+            {
+                // if there is a rewrite data, rewrite the path against it.
+                let mut out = String::new();
+                let rewritten_to = rewrite_data.rewrite_relative_export(
+                    &rel_import,
+                    &vec![
+                        // TODO make this configurable on the resolver
+                        "source", "import", "require",
+                    ],
+                    &mut out,
+                )?;
+                if let Some(rewritten_to) = rewritten_to {
+                    match rewritten_to.rewritten_export {
+                        ExportedPath::Exported(exported_rel_path) => nm_dir_path
+                            .join(NODE_MODULES)
+                            .join(package_name)
+                            .join(exported_rel_path),
+                        // tried to import a file that is explicitly marked private
+                        ExportedPath::Private => {
+                            return Err(anyhow::anyhow!(
+                                "Import '{target}' is marked as private by export '{}' in {}",
+                                rewritten_to.export_kind,
+                                nm_pkg_path.join(PACKAGE).display(),
+                            ));
+                        }
                     }
+                } else {
+                    // default: no rewrite, just use node_modules/imported/path
+                    nm_dir_path.join(NODE_MODULES).join(target)
                 }
+            } else {
+                // default: no rewrite, just use node_modules/imported/path
+                nm_dir_path.join(NODE_MODULES).join(target)
+            };
+
+            if let Some(result) = self
+                .resolve_as_file(&target_file_path)
+                .ok()
+                .or_else(|| self.resolve_as_directory(&target_file_path, true).ok())
+                .flatten()
+            {
+                // Resolved! Cache the result and return it.
+                nm_dir_entry.get_cached_mut().insert(
+                    target.to_string(),
+                    CachedResolution::Resolution(result.clone()),
+                );
+                return Ok(Some(result));
+            } else {
+                // failed to resolve! Cache the failure so we don't try again,
+                // and continue the loop to try the next node_modules directory.
+                nm_dir_entry
+                    .get_cached_mut()
+                    .insert(target.to_string(), CachedResolution::NoResolution);
             }
         }
 
@@ -484,25 +549,16 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             if let TargetEnv::Browser = self.target_env {
                 if let FileName::Real(path) = &v {
                     // probe for a package.json file
-                    if let Some((_, browser_cache)) =
+                    if let Some((pkg_path, browser_cache)) =
                         self.pkg_json_cache.probe_path(self.monorepo_root, base)?
                     {
-                        // once we find a package.json file, see if it contains a browser field
-                        if let Some(ref pkgjson_browser_cache) = *(browser_cache
-                            .try_get_cached_or_init(
-                                (self, base_dir),
-                                compute_pkgjson_browsercache,
-                            )?)
-                        {
-                            // resolve the path against the browser field
-                            let path = to_absolute_path(path).unwrap();
-                            if pkgjson_browser_cache.ignores.contains(&path) {
-                                return Ok(FileName::Custom(path.display().to_string()));
-                            }
-                            if let Some(rewrite) = pkgjson_browser_cache.rewrites.get(&path) {
-                                return self.wrap(Some(rewrite.to_path_buf()));
-                            }
-                        }
+                        let cache_entry_lock = browser_cache.try_get_cached_or_init(|pkgjson| {
+                            PackageJsonRewriteData::create(self, pkg_path, pkgjson)
+                        })?;
+
+                        let as_abspath = to_absolute_path(path)?;
+                        let rewrite = (*cache_entry_lock).rewrite_browser(as_abspath)?;
+                        return self.wrap(Some(rewrite.to_path_buf()));
                     }
                 }
             }
@@ -511,76 +567,6 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
         file_name
     }
-}
-
-// Helper function to compute the browser cache for a package.json file
-//
-// This will be lazily computed and cached in the PackageJsonCacheEntry as-needed
-fn compute_pkgjson_browsercache(
-    (resolver, pkg_dir): (&CachingNodeModulesResolver, &Path),
-    pkgjson: &PackageJson,
-) -> Result<Option<BrowserCache>> {
-    let map = match &pkgjson.browser {
-        Some(Browser::Obj(map)) => map,
-        _ => return Ok(None),
-    };
-
-    let mut bucket = BrowserCache::default();
-
-    for (k, v) in map.iter() {
-        let target_key = Path::new(k);
-        let mut components = target_key.components();
-
-        // Relative file paths are sources for this package
-        let source = if let Some(Component::CurDir) = components.next() {
-            let path = pkg_dir.join(k);
-            if let Ok(file) = resolver
-                .resolve_as_file(&path)
-                .or_else(|_| resolver.resolve_as_directory(&path, false))
-            {
-                file.map(|file| file.clean())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        match v {
-            StringOrBool::Str(dest) => {
-                let path = pkg_dir.join(dest);
-                let file = resolver
-                    .resolve_as_file(&path)
-                    .or_else(|_| resolver.resolve_as_directory(&path, false))?;
-                if let Some(file) = file {
-                    let target = file.clean();
-                    let target = target
-                        .strip_prefix(current_dir().unwrap_or_default())
-                        .map(|target| target.to_path_buf())
-                        .unwrap_or(target);
-
-                    if let Some(source) = source {
-                        bucket.rewrites.insert(source, target);
-                    } else {
-                        bucket.module_rewrites.insert(k.clone(), target);
-                    }
-                }
-            }
-            StringOrBool::Bool(flag) => {
-                // If somebody set boolean `true` which is an
-                // invalid value we will just ignore it
-                if !flag {
-                    if let Some(source) = source {
-                        bucket.ignores.insert(source);
-                    } else {
-                        bucket.module_ignores.insert(k.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    return Ok(Some(bucket));
 }
 
 impl<'a> Resolve for CachingNodeModulesResolver<'a> {

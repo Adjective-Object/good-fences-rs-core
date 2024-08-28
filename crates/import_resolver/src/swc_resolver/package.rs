@@ -18,8 +18,10 @@ pub enum StringOrBool {
 #[serde(untagged)]
 pub enum Browser {
     Str(String),
-    Obj(AHashMap<String, StringOrBool>),
+    Obj(BrowserMap),
 }
+
+pub type BrowserMap = AHashMap<String, StringOrBool>;
 
 // Subset of package.json used during file resolution
 #[derive(Debug, Deserialize, Clone)]
@@ -30,16 +32,37 @@ pub struct PackageJson {
     pub module: Option<String>,
     #[serde(default)]
     pub browser: Option<Browser>,
+    #[serde(default)]
+    pub exports: Option<PackageJsonExports>,
 }
-
-/// Processed data derived from the package.json file's .browser object field
-#[derive(Debug, Default)]
-
-struct BrowserRewriteCache {
-    rewrites: AHashMap<PathBuf, PathBuf>,
-    ignores: AHashSet<PathBuf>,
-    module_rewrites: AHashMap<String, PathBuf>,
-    module_ignores: AHashSet<String>,
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum PackageJsonExports {
+    // An un-nested hashmap of that only maps the index of the module to the path
+    //
+    // e.g:
+    // {
+    //   "import": "./module.js",
+    //   "require": "./main.js"
+    //   "default": "./main.js"
+    // }
+    Single(AHashMap<String, Option<String>>),
+    // A nested hashmap that maps multiple import paths into the module:
+    //
+    // e.g:
+    // {
+    //   ".": {
+    //     "import": "./module.js",
+    //     "require": "./main.js"
+    //     "default": "./main.js"
+    //   },
+    //   "./lib/util": {
+    //     "import": "./lib/util.esm",
+    //     "require": "./lib/util.cjs"
+    //     "default": "./lib/util.js"
+    //   }
+    // }
+    Multiple(AHashMap<String, AHashMap<String, Option<String>>>),
 }
 
 impl ContextData for PackageJson {
