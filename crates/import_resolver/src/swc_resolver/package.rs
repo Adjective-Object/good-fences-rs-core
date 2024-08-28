@@ -1,7 +1,6 @@
 use serde::Deserialize;
-use std::path::PathBuf;
 
-use swc_common::collections::{AHashMap, AHashSet};
+use swc_common::collections::AHashMap;
 
 use super::context_data::ContextData;
 

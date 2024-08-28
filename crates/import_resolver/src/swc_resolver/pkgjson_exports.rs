@@ -7,7 +7,6 @@ use path_clean::PathClean;
 use path_slash::PathBufExt;
 
 use super::package::PackageJsonExports;
-use copy_from_str::CopyFromStrExt;
 
 // Pair path, export-condfition of form ('package-name/imported-path', 'import')
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]

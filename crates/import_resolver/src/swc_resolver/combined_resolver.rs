@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Error};
-use ouroboros::self_referencing;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use swc_common::{collections::AHashMap, FileName};
 use swc_core::ecma::loader::resolve::Resolution;
 use swc_ecma_loader::{resolve::Resolve, TargetEnv};
@@ -49,7 +48,7 @@ impl CombinedResolverCaches {
         };
     }
 
-    /// Mark the tsconfig.json files in the given path as dirty
+    /// Mark the files files in the given path as dirty
     pub fn mark_dirty_root(&mut self, root: &Path) {
         self.tsconfig_cache.mark_dirty_root(root);
         self.node_modules_cache.mark_dirty_root(root);

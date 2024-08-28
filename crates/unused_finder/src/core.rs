@@ -11,12 +11,8 @@ use std::{
     sync::Arc,
 };
 use swc_core::{
-    common::{collections::AHashMap, source_map::SmallPos},
-    ecma::loader::{
-        resolve::Resolve,
-        resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
-        TargetEnv,
-    },
+    common::source_map::SmallPos,
+    ecma::loader::resolve::Resolve,
 };
 
 use crate::import_export_info::ImportExportInfo;
@@ -30,7 +26,6 @@ use crate::{
     walked_file::WalkedFile,
 };
 use js_err::JsErr;
-use tsconfig_paths::TsconfigPathsJson;
 
 #[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone, Deserialize)]

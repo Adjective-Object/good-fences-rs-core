@@ -182,13 +182,6 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
 {
     const MAX_PROBE_DEPTH: i64 = 1000;
 
-    pub fn new_with_args(args: TArgs) -> Self {
-        Self {
-            cache: DashMap::new(),
-            args,
-        }
-    }
-
     /// Checks the given path for a context file (e.g. a package.json file or a tsconfig.json file)
     ///
     /// This function will probe all parent directories between the given path and the root directory
