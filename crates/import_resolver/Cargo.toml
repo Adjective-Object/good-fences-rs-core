@@ -19,6 +19,7 @@ swc.workspace = true
 swc_ecma_loader.workspace = true
 anyhow = { workspace = true }
 thiserror.workspace = true
+tracing-test.workspace = true
 path_utils = { path = "../path_utils" }
 tsconfig_paths = { path = "../tsconfig_paths" }
 path-clean = { workspace = true }
@@ -31,7 +32,6 @@ pathdiff = "0.2.1"
 parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
 dashmap = "6.0.1"
 tracing = "0.1.40"
-tracing-test = "0.2.5"
 test_tmpdir = { path = "../test_tmpdir" }
 ouroboros = "0.18.4"
 copy_from_str = "1.0.6"

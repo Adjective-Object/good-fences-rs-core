@@ -66,6 +66,8 @@ pub(crate) fn is_core_module(s: &str) -> bool {
     NODE_BUILTINS.contains(&s)
 }
 
+static DEFAULT_EXPORT_CONDITIONS: &'static [&str] = &["default", "import", "require"];
+
 // Adaptation of NodeModulesResolver from swc that stores
 // intermediate data in shared caches instead of going to disk
 // for every resolution.
@@ -269,7 +271,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             None
         };
 
-        // Probe the fs or the cache for a package.json file at that path
+        // Probe the FS or the cache for a package.json file at that path
         let pkg_cache_entry = self.pkg_json_cache.check_dir(&pkg_dir).with_context(|| {
             format!(
                 "failed to get package.json for directory {:#?}",
@@ -287,6 +289,31 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         let resolution_data = pkg_with_resolution_cache.try_get_cached_or_init(|pkgjson| {
             PackageJsonRewriteData::create(self, pkg_dir, pkgjson)
         })?;
+        let mut out = String::new();
+        if let Some(exports_map) = resolution_data.exports_rewrite.as_ref() {
+            if let Some(rewritten) = exports_map.rewrite_relative_export(
+                ".",
+                DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
+                &mut out,
+            )? {
+                match rewritten.rewritten_export {
+                    ExportedPath::Exported(exported_rel_path) => {
+                        let path = pkg_dir.join(exported_rel_path);
+                        // there was a resolved export, try to resolve it
+                        return self
+                            .resolve_as_file(&path)
+                            .or_else(|_| self.resolve_as_directory(&path, false));
+                    }
+                    ExportedPath::Private => {
+                        return Err(anyhow::anyhow!(
+                            "Index export is marked as private by export '{}' in {}",
+                            rewritten.export_kind,
+                            pkg_path.display(),
+                        ));
+                    }
+                }
+            }
+        }
 
         let pkg = pkg_with_resolution_cache.inner();
         let main_fields = match self.target_env {
@@ -381,8 +408,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     )
                 })?;
             let cached_entry_value = cached_entry.value();
-            let path_rewrite_data = match cached_entry_value {
-                Some(cached) => cached.get_cached(),
+            let pkg_rewrite_data = match cached_entry_value {
+                Some(pkg_with_rewrite) => pkg_with_rewrite.get_cached(),
                 // no package.json file found, so we can't do any rewrites.
                 // Continue the loop, walking up the node_modules directories.
                 None => continue,
@@ -391,19 +418,15 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             // target_file_path is the actual path of the target file we're trying to resolve.
             //
             // If the package has "exports" fields, we should use them to rewrite the path
-            let target_file_path: PathBuf = if let Some(rewrite_data) = path_rewrite_data
+            let target_file_path: PathBuf = if let Some(Some(rewrite_data)) = pkg_rewrite_data
                 .as_ref()
-                .map(|rewrite_data| rewrite_data.exports_rewrite)
-                .flatten()
+                .map(|rewrite_data| &rewrite_data.exports_rewrite)
             {
                 // if there is a rewrite data, rewrite the path against it.
                 let mut out = String::new();
-                let rewritten_to = rewrite_data.rewrite_relative_export(
+                let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
                     &rel_import,
-                    &vec![
-                        // TODO make this configurable on the resolver
-                        "source", "import", "require",
-                    ],
+                    DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
                     &mut out,
                 )?;
                 if let Some(rewritten_to) = rewritten_to {
@@ -422,7 +445,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                         }
                     }
                 } else {
-                    // default: no rewrite, just use node_modules/imported/path
+                    // no matched rewrite, so just use node_modules/imported/path
                     nm_dir_path.join(NODE_MODULES).join(target)
                 }
             } else {
@@ -557,7 +580,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                         })?;
 
                         let as_abspath = to_absolute_path(path)?;
-                        let rewrite = (*cache_entry_lock).rewrite_browser(as_abspath)?;
+                        let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
                         return self.wrap(Some(rewrite.to_path_buf()));
                     }
                 }

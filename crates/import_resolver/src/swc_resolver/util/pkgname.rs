@@ -1,13 +1,23 @@
 // Extracts the package name from a package import specifier
 pub fn package_name(import_specifier: &str) -> Option<&str> {
+    if import_specifier.len() == 0 {
+        return None;
+    }
     let idx = import_specifier
         .find('/')
         .unwrap_or_else(|| import_specifier.len());
     let first_slash = &import_specifier[..idx];
+
     if import_specifier.starts_with('@') {
-        return first_slash
-            .find('/')
-            .map(|idx2| &import_specifier[..idx + idx2]);
+        if idx + 1 >= import_specifier.len() {
+            return None;
+        }
+        return match import_specifier[idx + 1..].find('/') {
+            Some(tail_len) => Some(&import_specifier[..idx + tail_len + 1]),
+            None => Some(&import_specifier),
+        };
+    } else if first_slash == "." || first_slash == ".." {
+        return None;
     } else {
         return Some(first_slash);
     }
@@ -21,16 +31,18 @@ pub fn split_package_import(import_specifier: &str) -> Option<(&str, String)> {
             let rest_str = &import_specifier[idx..];
 
             if rest_str.starts_with('/') {
-                let mut s = String::with_capacity(1 + rest_str.len());
+                let mut s: String = String::with_capacity(1 + rest_str.len());
                 s.push('.');
                 s.push_str(rest_str);
                 return Some((pkg, s));
-            } else if !rest_str.starts_with("./") {
+            } else if rest_str == "" {
+                return Some((pkg, ".".to_string()));
+            } else if rest_str.starts_with("./") {
+                return Some((pkg, rest_str.to_string()));
+            } else {
                 let mut s = String::with_capacity(2 + rest_str.len());
                 s.push_str("./");
                 s.push_str(rest_str);
-                return Some((pkg, s));
-            } else {
                 return Some((pkg, rest_str.to_string()));
             }
         }
@@ -48,10 +60,13 @@ mod test {
         assert_eq!(package_name(""), None);
         assert_eq!(package_name("./src/index.ts"), None);
         assert_eq!(package_name("react"), Some("react"));
-        assert_eq!(package_name("react-dom"), Some("react"));
+        assert_eq!(package_name("react-dom"), Some("react-dom"));
         assert_eq!(package_name("@react"), None);
-        assert_eq!(package_name("@react/react-dom"), Some("@react"));
-        assert_eq!(package_name("@react/react-dom/server"), Some("@react"));
+        assert_eq!(package_name("@react/react-dom"), Some("@react/react-dom"));
+        assert_eq!(
+            package_name("@react/react-dom/server"),
+            Some("@react/react-dom")
+        );
     }
 
     #[test]
@@ -65,7 +80,7 @@ mod test {
         );
         assert_eq!(
             split_package_import("react-dom"),
-            Some(("react", ".".to_string()))
+            Some(("react-dom", ".".to_string()))
         );
         assert_eq!(split_package_import("@react"), None);
         assert_eq!(
@@ -74,7 +89,7 @@ mod test {
         );
         assert_eq!(
             split_package_import("@react/react-dom/server"),
-            Some(("@react/react=-dom", "/server".to_string()))
+            Some(("@react/react-dom", "./server".to_string()))
         );
     }
 }
