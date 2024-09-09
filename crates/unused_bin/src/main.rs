@@ -1,10 +1,9 @@
 extern crate serde_json;
 extern crate unused_finder;
 
-use std::{env, fs, path::Path};
-
 use anyhow::Context;
 use clap::Parser;
+use std::{env, fs, path::Path};
 
 #[derive(Parser, Debug)]
 struct CliArgs {
@@ -14,7 +13,34 @@ struct CliArgs {
 
 const DEFAULT_CONFIG_PATH: &'static str = "unused-finder.json";
 
+fn start_deadlock_detector() {
+    // only for #[cfg]
+    use parking_lot::deadlock;
+    use std::thread;
+    use std::time::Duration;
+
+    // Create a background thread which checks for deadlocks every 10s
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(10));
+        let deadlocks = deadlock::check_deadlock();
+        if deadlocks.is_empty() {
+            continue;
+        }
+
+        println!("{} deadlocks detected", deadlocks.len());
+        for (i, threads) in deadlocks.iter().enumerate() {
+            println!("Deadlock #{}", i);
+            for t in threads {
+                println!("Thread Id {:#?}", t.thread_id());
+                println!("{:#?}", t.backtrace());
+            }
+        }
+    });
+}
+
 fn main() {
+    start_deadlock_detector();
+
     let args = CliArgs::parse();
     let config_path = args.config_path.unwrap_or_else(|| {
         println!("No config file path provided, using default config file path");
@@ -25,7 +51,7 @@ fn main() {
 
     // read and parse the config file
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
-    let config: unused_finder::FindUnusedItemsConfig = serde_json::from_str(&config_str)
+    let mut config: unused_finder::FindUnusedItemsConfig = serde_json::from_str(&config_str)
         .with_context(|| format!("Parsing unused-finder config {config_path}"))
         .unwrap();
 
@@ -34,6 +60,13 @@ fn main() {
         .parent()
         .expect("Failed to get parent directory of config file")
         .to_path_buf();
+    config.ts_config_path = config_dir
+        .join("tsconfig.json")
+        .to_str()
+        .with_context(|| format!("Failed to coerce unprintable directory to a string!"))
+        .unwrap()
+        .to_string();
+
     println!("working in {}..", config_dir.display());
     env::set_current_dir(&config_dir)
         .expect("Failed to change working directory to config file directory");

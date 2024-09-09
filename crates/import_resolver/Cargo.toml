@@ -29,7 +29,7 @@ lazy_static = "1.4.0"
 pretty_assertions.workspace = true
 swc_common.workspace = true
 pathdiff = "0.2.1"
-parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
+parking_lot.workspace = true
 dashmap = "6.0.1"
 tracing = "0.1.40"
 test_tmpdir = { path = "../test_tmpdir" }

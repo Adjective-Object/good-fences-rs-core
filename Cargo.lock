@@ -3369,6 +3369,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
+ "parking_lot",
  "serde_json",
  "unused_finder",
 ]
