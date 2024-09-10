@@ -21,8 +21,8 @@ mod test {
     ) -> Parser<Capturing<Lexer<'a>>> {
         let lexer = create_lexer(fm, comments);
         let capturing = Capturing::new(lexer);
-        let parser = Parser::new_from(capturing);
-        parser
+        
+        Parser::new_from(capturing)
     }
 
     #[test]

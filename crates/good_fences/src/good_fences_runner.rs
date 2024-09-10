@@ -25,28 +25,22 @@ pub struct UndefinedTagReference<'a> {
 impl GoodFencesRunner {
     pub fn new(
         tsconfig_paths_json: TsconfigPathsJson,
-        directory_paths_to_walk: &Vec<&str>,
+        directory_paths_to_walk: &[&str],
         external_fences: ExternalFences,
-        ignored_dirs: &Vec<regex::Regex>,
+        ignored_dirs: &[regex::Regex],
     ) -> GoodFencesRunner {
         // find files
         let walked_files = directory_paths_to_walk
             .iter()
-            .map(|path| discover_fences_and_files(path, external_fences, ignored_dirs.clone()))
-            .flatten();
+            .flat_map(|path| discover_fences_and_files(path, external_fences, ignored_dirs.into()));
 
         let (fences_wrapped, sources_wrapped): (Vec<WalkFileData>, Vec<WalkFileData>) =
             // filter to Fences and Source FIles
-            walked_files.filter(|x| match x {
-                WalkFileData::Fence(_fence) => true,
-                WalkFileData::SourceFile(_source_file) => true,
-                _ => false
-            }).partition(|file| match file {
-                // partition to 2 arrays
-                WalkFileData::Fence(_fence) => true,
-                WalkFileData::SourceFile(_source_file) => false,
-                _ => false,
-            });
+            walked_files
+                .filter(|x|
+                    matches!(x, WalkFileData::Fence(_) | WalkFileData::SourceFile(_)))
+                .partition(|file|
+                    matches!(file, WalkFileData::Fence(_)));
         let fences: Vec<Fence> = fences_wrapped
             .into_iter()
             .map(|x| match x {
@@ -75,16 +69,16 @@ impl GoodFencesRunner {
                 let k = fence_file.fence_path.clone();
                 (k, fence_file)
             }));
-        return GoodFencesRunner {
+        GoodFencesRunner {
             source_files: source_file_map,
             fence_collection: FenceCollection {
-                fences_map: fences_map,
+                fences_map,
             },
-            tsconfig_paths_json: tsconfig_paths_json,
-        };
+            tsconfig_paths_json,
+        }
     }
 
-    pub fn find_import_violations<'a>(&'a self) -> FenceEvaluationResult<'a, 'a> {
+    pub fn find_import_violations(&self) -> FenceEvaluationResult<'_, '_> {
         println!("Evaluating {} files", self.source_files.keys().len());
         let mut evaluation_results = FenceEvaluationResult::new();
 
@@ -95,7 +89,7 @@ impl GoodFencesRunner {
                 evaluate_fences(
                     &self.fence_collection,
                     &self.source_files,
-                    &source_file,
+                    source_file,
                     &self.tsconfig_paths_json,
                 )
             })
@@ -109,7 +103,7 @@ impl GoodFencesRunner {
             }
         }
 
-        return evaluation_results;
+        evaluation_results
     }
 
     /**
@@ -120,28 +114,20 @@ impl GoodFencesRunner {
         let mut referenced_tags = HashSet::<&'a str>::new();
         for (_, fence) in self.fence_collection.fences_map.iter() {
             // add encountered tags
-            match fence.fence.tags.as_ref() {
-                Some(tag_set) => {
-                    for tag in tag_set {
-                        defined_tags.insert(&tag);
-                    }
+            if let Some(tag_set) = fence.fence.tags.as_ref() {
+                for tag in tag_set {
+                    defined_tags.insert(tag);
                 }
-                // noop on nothing
-                None => {}
             }
             // add consumed tags
-            match fence.fence.exports.as_ref() {
-                Some(exports) => {
-                    for export in exports {
-                        for tag in export.accessible_to.iter() {
-                            if tag != "*" {
-                                referenced_tags.insert(tag);
-                            }
+            if let Some(exports) = fence.fence.exports.as_ref() {
+                for export in exports {
+                    for tag in export.accessible_to.iter() {
+                        if tag != "*" {
+                            referenced_tags.insert(tag);
                         }
                     }
                 }
-                // noop on nothing
-                None => {}
             }
         }
 
@@ -150,28 +136,24 @@ impl GoodFencesRunner {
         // outlier, and maintaining the map between the consuming file paths and fence
         // items is overhead we don't want to deal with
         let undefined_tags_set: HashSet<&'a str> =
-            HashSet::from_iter(referenced_tags.difference(&defined_tags).map(|x| *x));
-        if undefined_tags_set.len() > 0 {
+            HashSet::from_iter(referenced_tags.difference(&defined_tags).copied());
+        if !undefined_tags_set.is_empty() {
             let mut undefined_tag_references = Vec::<UndefinedTagReference>::new();
 
             for (_, fence) in self.fence_collection.fences_map.iter() {
                 // add consumed tags
-                match fence.fence.exports.as_ref() {
-                    Some(exports) => {
-                        for export in exports {
-                            for tag in export.accessible_to.iter() {
-                                let tag_as_str_ref: &'a str = tag;
-                                if undefined_tags_set.contains(tag_as_str_ref) {
-                                    undefined_tag_references.push(UndefinedTagReference {
-                                        tag: tag,
-                                        referencing_fence_path: fence.fence_path.as_ref(),
-                                    })
-                                }
+                if let Some(exports) = fence.fence.exports.as_ref() {
+                    for export in exports {
+                        for tag in export.accessible_to.iter() {
+                            let tag_as_str_ref: &'a str = tag;
+                            if undefined_tags_set.contains(tag_as_str_ref) {
+                                undefined_tag_references.push(UndefinedTagReference {
+                                    tag,
+                                    referencing_fence_path: fence.fence_path.as_ref(),
+                                })
                             }
                         }
                     }
-                    // noop on nothing
-                    None => {}
                 }
             }
 
@@ -484,7 +466,7 @@ mod test {
             )
             .then(
                 a.violating_import_specifier
-                    .cmp(&b.violating_import_specifier),
+                    .cmp(b.violating_import_specifier),
             )
     }
 
@@ -583,7 +565,7 @@ mod test {
         let b: String = format!("{:#?}", expected_violations);
         if results.violations != expected_violations {
             print_diff(&a, &b, "\n");
-            assert!(false);
+            panic!("violations failed!");
         }
     }
 

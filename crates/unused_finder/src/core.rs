@@ -11,10 +11,9 @@ use std::{
     sync::Arc,
 };
 use swc_core::{
-    common::source_map::SmallPos,
     ecma::loader::resolve::Resolve,
+    common::source_map::SmallPos
 };
-
 use crate::import_export_info::ImportExportInfo;
 use crate::utils::{
     process_async_imported_paths, process_executed_paths, process_exports_from,
@@ -88,14 +87,14 @@ impl Display for UnusedFinderReport {
 
         for file_path in unused_files.iter() {
             match self.unused_files_items.get(file_path) {
-                Some(items) => write!(
+                Some(items) => writeln!(
                     f,
-                    "{} is completely unused ({} item{})\n",
+                    "{} is completely unused ({} item{})",
                     file_path,
                     items.len(),
                     if items.len() > 1 { "s" } else { "" },
                 )?,
-                None => write!(f, "{} is completely unused\n", file_path)?,
+                None => writeln!(f, "{} is completely unused", file_path)?,
             };
         }
 
@@ -103,15 +102,15 @@ impl Display for UnusedFinderReport {
             if unused_files_set.contains(file_path) {
                 continue;
             }
-            write!(
+            writeln!(
                 f,
-                "{} is partially unused ({} unused export{}):\n",
+                "{} is partially unused ({} unused export{}):",
                 file_path,
                 items.len(),
                 if items.len() > 1 { "s" } else { "" },
             )?;
             for item in items.iter() {
-                write!(f, "  - {}\n", item.id)?;
+                writeln!(f, "  - {}", item.id)?;
             }
         }
 
@@ -124,8 +123,7 @@ pub fn create_report_map_from_flattened_files(
 ) -> HashMap<String, Vec<ExportedItemReport>> {
     let file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         flattened_walk_file_data
-            .clone()
-            .par_drain(0..)
+            .par_iter()
             .map(|file| {
                 let ids = file
                     .import_export_info
@@ -157,7 +155,8 @@ pub fn walk_src_files(
                 .drain(0..)
                 .filter_map(|walked_file| {
                     if let WalkedFile::SourceFile(w) = walked_file {
-                        return Some(w);
+                        // copy the source file into the result type here.
+                        return Some(*w);
                     }
                     None
                 })
@@ -242,7 +241,6 @@ pub fn find_unused_items(
 
     let mut graph = Graph {
         files,
-        ..Default::default()
     };
 
     let entry_files: Vec<String> = flattened_walk_file_data
@@ -293,7 +291,7 @@ pub fn find_unused_items(
                                 .filter(|exported| {
                                     unused_exports
                                         .iter()
-                                        .any(|unused| unused.to_string() == exported.id.to_string())
+                                        .any(|unused| unused.to_string() == exported.id)
                                 })
                                 .collect();
                             return Some((file_path.to_string(), unused_exports));
@@ -309,9 +307,7 @@ pub fn find_unused_items(
     };
 
     Ok(UnusedFinderReport {
-        unused_files: reported_unused_files
-            .iter()
-            .map(|(p, _)| p.to_string())
+        unused_files: reported_unused_files.keys().map(|p| p.to_string())
             .collect(),
         unused_files_items,
     })
@@ -337,7 +333,7 @@ pub fn read_allow_list() -> Result<Vec<glob::Pattern>> {
 
 pub fn process_import_export_info(
     f: &mut ImportExportInfo,
-    source_file_path: &String,
+    source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<()> {
     process_executed_paths(f, source_file_path, resolver)?;
@@ -346,7 +342,7 @@ pub fn process_import_export_info(
     process_require_paths(f, source_file_path, resolver)?;
     process_import_path_ids(f, source_file_path, resolver)?;
 
-    return Ok(());
+    Ok(())
 }
 
 #[cfg(test)]

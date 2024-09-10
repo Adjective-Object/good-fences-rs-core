@@ -16,7 +16,7 @@ struct CliArgs {
     rstack: bool,
 }
 
-const DEFAULT_CONFIG_PATH: &'static str = "unused-finder.json";
+const DEFAULT_CONFIG_PATH: &str = "unused-finder.json";
 
 fn start_deadlock_detector() {
     // only for #[cfg]
@@ -104,7 +104,7 @@ fn main() -> Result<()> {
     config.ts_config_path = config_dir
         .join("tsconfig.json")
         .to_str()
-        .with_context(|| format!("Failed to coerce unprintable directory to a string!"))?
+        .with_context(|| "Failed to coerce unprintable directory to a string!".to_string())?
         .to_string();
 
     println!("working in {}..", config_dir.display());
@@ -116,5 +116,5 @@ fn main() -> Result<()> {
     let delta = start_time.elapsed();
     println!("result ({}ms):\n{result}", delta.as_millis());
 
-    return Ok(());
+    Ok(())
 }

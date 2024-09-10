@@ -8,13 +8,10 @@ pub struct UnusedFinderSourceFile {
 }
 
 #[derive(Debug, PartialEq)]
+#[derive(Default)]
 pub enum WalkedFile {
-    SourceFile(UnusedFinderSourceFile),
+    SourceFile(Box<UnusedFinderSourceFile>),
+    #[default]
     Nothing,
 }
 
-impl Default for WalkedFile {
-    fn default() -> Self {
-        WalkedFile::Nothing
-    }
-}

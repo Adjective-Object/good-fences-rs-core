@@ -72,15 +72,18 @@ fn clean_path_avoid_alloc<'a>(
     for (i, c) in o.chars().enumerate() {
         // if we encounter anything that could be a character in an unclean
         // path, just fall back to path.Clean
-        if
-        // escaped characters
-        c == '\\'
-            || (i > 0 &&
-                    // possible part of '/.' or '..'
-                    ((c == '.' && (bytes[i-1] == b'.' || bytes[i-1] == b'/')) ||
-                        // consecutive slashes or './'
-                        (c == '/' && (bytes[i-1] == b'.' || bytes[i-1] == b'/'))))
-        {
+
+        let is_complex_path = match c {
+            // escaped chars
+            '\\' => true,
+            // possible part of '/.' or '..'
+            '.' => i > 0 && (bytes[i-1] == b'.' || bytes[i-1] == b'/'),
+            // consecutive slashes or './'
+            '/' => i > 0 && (bytes[i-1] == b'.' || bytes[i-1] == b'/'),
+            _ => false,
+        };
+
+        if is_complex_path {
             store.clear();
             store.push_str("./");
             store.push_str(&PathBuf::from_str(o).unwrap().clean().to_slash().unwrap());
@@ -88,7 +91,7 @@ fn clean_path_avoid_alloc<'a>(
         }
     }
 
-    return original;
+    original
 }
 
 fn match_star_pattern<'a>(
@@ -97,27 +100,21 @@ fn match_star_pattern<'a>(
     // The import specifier to match. Must already be cleaned!C
     relative_import_specifier: &'a str,
 ) -> Option<&'a str> {
-    let idx = star_pattern.find('*')?;
+    let (prefix, star_suffix) = star_pattern.split_once('*')?;
 
     // This only handles a single "*", and not any more complex * patterns
-    let prefix = &star_pattern[..idx];
-    if relative_import_specifier.starts_with(prefix) {
-        // the pattern ends with a star, so we don't need to do a suffix match
-        if star_pattern.len() == idx + 1 {
-            let remainder: &'a str = &relative_import_specifier[prefix.len()..];
+    if let Some(remainder) = relative_import_specifier.strip_prefix(prefix) {
+        // the pattern ends with the first star, so we don't need to do a suffix match.
+        // The star match is the remainder of the string.
+        if star_suffix.is_empty() {
             return Some(remainder);
-        } else {
             // check the suffix of the pattern _after_ the star matches the tail of the import
-            let suffix = &star_pattern[idx + 1..];
-            if relative_import_specifier.ends_with(suffix) {
-                let matched_subslice = &relative_import_specifier
-                    [prefix.len()..(relative_import_specifier.len() - suffix.len())];
-                return Some(matched_subslice);
-            }
+        } else if let Some(star_match) = remainder.strip_suffix(star_suffix) {
+            return Some(star_match);
         }
     }
 
-    return None;
+    None
 }
 
 pub enum ExportCondition<'a> {
@@ -168,7 +165,7 @@ fn resolve_export_condition<'a, TStr: Into<&'a str>, TItem, TOut>(
         return Some((resolved, ExportCondition::Default));
     }
 
-    return None;
+    None
 }
 
 fn rewrite_star_export(
@@ -236,7 +233,7 @@ pub struct MatchedExport<'a> {
 impl<'a> MatchedExport<'a> {
     fn with_kind(rewritten_export: ExportedPath<'a>, export_kind: ExportCondition<'a>) -> Self {
         Self {
-            rewritten_export: rewritten_export,
+            rewritten_export,
             export_kind,
         }
     }
@@ -290,20 +287,17 @@ impl PackageExportRewriteData {
                     .next()
             },
         );
-        match directory_match {
-            Some(((directory_pattern, directory_export), export_condition)) => {
-                return Ok(Some(MatchedExport::with_kind(
-                    directory_export
-                        .as_ref()
-                        .map(|v| {
-                            rewrite_dir_export(clean_relative_import, directory_pattern, &v, out);
-                            out as &str
-                        })
-                        .into(),
-                    export_condition,
-                )));
-            }
-            None => {}
+        if let Some(((directory_pattern, directory_export), export_condition)) = directory_match {
+            return Ok(Some(MatchedExport::with_kind(
+                directory_export
+                    .as_ref()
+                    .map(|v| {
+                        rewrite_dir_export(clean_relative_import, directory_pattern, v, out);
+                        out as &str
+                    })
+                    .into(),
+                export_condition,
+            )));
         }
 
         // check for star matches in the resolution data
@@ -319,22 +313,19 @@ impl PackageExportRewriteData {
                     .next()
             },
         );
-        match star_match {
-            Some(((star_match, target), export_condition)) => {
-                return Ok(Some(MatchedExport::with_kind(
-                    // if we have a star match, rewrite the path and store it in `out`. Otherwise,
-                    // do nothing
-                    target
-                        .as_ref()
-                        .map(|v| {
-                            rewrite_star_export(star_match, &v, out);
-                            out as &str
-                        })
-                        .into(),
-                    export_condition,
-                )));
-            }
-            None => {}
+        if let Some(((star_match, target), export_condition)) = star_match {
+            return Ok(Some(MatchedExport::with_kind(
+                // if we have a star match, rewrite the path and store it in `out`. Otherwise,
+                // do nothing
+                target
+                    .as_ref()
+                    .map(|v| {
+                        rewrite_star_export(star_match, v, out);
+                        out as &str
+                    })
+                    .into(),
+                export_condition,
+            )));
         }
 
         // No matches found
@@ -366,10 +357,10 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                     )
                     .collect();
 
-                return Ok(PackageExportRewriteData {
+                Ok(PackageExportRewriteData {
                     static_exports,
                     ..Default::default()
-                });
+                })
             }
             PackageJsonExports::Multiple(exports_map) => {
                 // Iterate through the exports map and build up the export resolution data
@@ -390,7 +381,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                                 .entry_ref(export_condition)
                                 .or_insert_with(Vec::new)
                                 .push((
-                                    clean_path(&export_path),
+                                    clean_path(export_path),
                                     export_target.as_ref().map(|e| clean_path(e)),
                                 ));
                         }
@@ -408,7 +399,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                                 .entry_ref(export_condition)
                                 .or_insert_with(Vec::new)
                                 .push((
-                                    clean_path(&export_path),
+                                    clean_path(export_path),
                                     export_target.as_ref().map(|e| clean_path(e)),
                                 ));
                         }
@@ -416,14 +407,14 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                         // literal export
                         for (export_condition, export_target) in conditional_exports.iter() {
                             resolution_data.static_exports.insert(
-                                ExportKey(clean_path(&export_path), export_condition.clone()),
+                                ExportKey(clean_path(export_path), export_condition.clone()),
                                 export_target.as_ref().map(|e| clean_path(e)),
                             );
                         }
                     }
                 }
 
-                return Ok(resolution_data);
+                Ok(resolution_data)
             }
         }
     }

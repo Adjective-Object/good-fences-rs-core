@@ -80,7 +80,7 @@ impl JsErr {
     pub fn ok(err: Error) -> Self {
         Self {
             status: Status::Ok,
-            err: err.into(),
+            err,
         }
     }
     pub fn invalid_arg<P: Into<Error>>(err: P) -> Self {
@@ -223,7 +223,7 @@ impl JsErr {
     }
 
     pub fn message(&self) -> String {
-        return format!("{}", self.err);
+        format!("{}", self.err)
     }
 
     #[cfg(feature = "napi")]
@@ -248,17 +248,17 @@ impl std::error::Error for JsErr {
 }
 
 #[cfg(feature = "napi")]
-impl Into<napi::Error> for JsErr {
-    fn into(self) -> napi::Error {
-        napi::Error::new(self.status.into(), self.err)
+impl From<JsErr> for napi::Error {
+    fn from(val: JsErr) -> Self {
+        napi::Error::new(val.status.into(), val.err)
     }
 }
 
 
 #[cfg(feature = "napi")]
-impl Into<napi::Status> for Status {
-    fn into(self) -> napi::Status {
-        match self {
+impl From<Status> for napi::Status {
+    fn from(val: Status) -> Self {
+        match val {
             Status::Ok => napi::Status::Ok,
             Status::InvalidArg => napi::Status::InvalidArg,
             Status::ObjectExpected => napi::Status::ObjectExpected,

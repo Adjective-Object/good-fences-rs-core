@@ -24,11 +24,11 @@ impl ContextData for () {
                     return Ok(None);
                 }
 
-                return Err(anyhow!(
+                Err(anyhow!(
                     "Failed check path {:?} for existence: {:?}",
                     path,
                     e
-                ));
+                ))
             }
         }
     }
@@ -52,14 +52,11 @@ where
 {
     fn read_context_data(args: TArgs, path: &Path) -> Result<Option<Self>, Error> {
         let inner = TVal::read_context_data(args, path)?;
-        Ok(match inner {
-            None => None,
-            Some(inner) => Some(WithCache {
+        Ok(inner.map(|inner| WithCache {
                 _phantom_targs: Default::default(),
                 inner,
                 cached: RwLock::new(TCached::default()),
-            }),
-        })
+            }))
     }
 }
 
@@ -72,11 +69,11 @@ where
         &self.inner
     }
 
-    pub fn get_cached<'a>(&'a self) -> WCReadGuard<'a, TCached> {
+    pub fn get_cached(&self) -> WCReadGuard<'_, TCached> {
         self.cached.read()
     }
 
-    pub fn get_cached_mut<'a>(&'a self) -> WCWriteGuard<'a, TCached> {
+    pub fn get_cached_mut(&self) -> WCWriteGuard<'_, TCached> {
         self.cached.write()
     }
 }
@@ -91,7 +88,7 @@ impl<TVal, TDerived> WithCache<TVal, Option<TDerived>>
 where
     TVal: ContextData,
 {
-    pub fn get_cached_or_init<'a, TFn>(&'a self, f: TFn) -> WCMappedReadGuard<'a, TDerived>
+    pub fn get_cached_or_init<TFn>(&self, f: TFn) -> WCMappedReadGuard<'_, TDerived>
     where
         TFn: Fn(&TVal) -> TDerived,
     {
@@ -108,7 +105,7 @@ where
 
         // check that nobody else filled the cache while we were waiting before
         // we call the initializer function
-        if let None = write_lock.as_ref() {
+        if write_lock.as_ref().is_none() {
             *write_lock = Some(f(&self.inner));
         }
 
@@ -136,7 +133,7 @@ where
 
         // check that nobody else filled the cache while we were waiting before
         // we call the initializer function
-        if let None = write_lock.as_ref() {
+        if write_lock.as_ref().is_none() {
             let val = f(&self.inner)?;
             *write_lock = Some(val);
         }
@@ -224,9 +221,9 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
             head = head_path.parent()
         }
 
-        return Err(anyhow!(
+        Err(anyhow!(
             "Max probe depth reached while searching for a tsconfig file among parent directories"
-        ));
+        ))
     }
 
     pub fn probe_path_iter<'context_cache, 'root_dir, 'base_path>(
@@ -251,7 +248,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         return Ok(res.downgrade());
     }
 
-    fn check_dir_os_fs<'a>(&self, base: &Path) -> Result<Option<T>, Error> {
+    fn check_dir_os_fs(&self, base: &Path) -> Result<Option<T>, Error> {
         // probe the real FS for a tsconfig.json file
         let context_file_path = base.to_owned().join(CONTEXT_FNAME);
         let result = T::read_context_data(self.args, &context_file_path)
@@ -273,7 +270,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     /// Clears the cache for all paths under a subdirectory, recursively.
     pub fn mark_dirty_root(&self, path: &Path) {
         self.cache.retain(|key, _| {
-            return !key.starts_with(path);
+            !key.starts_with(path)
         });
     }
 }
@@ -315,7 +312,7 @@ where
         Self {
             i: 0,
             cache: iter,
-            root_dir: root_dir,
+            root_dir,
             head: Some(base),
         }
     }
@@ -386,9 +383,9 @@ where
         }
 
         // we hit the max probe depth, this is an issue!
-        return Some(Err(anyhow!(
+        Some(Err(anyhow!(
             "Max probe depth reached while searching for {} in parent directories",
             CONTEXT_FNAME
-        )));
+        )))
     }
 }

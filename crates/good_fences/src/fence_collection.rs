@@ -17,16 +17,10 @@ impl FenceCollection {
             let mut key = PathBuf::from(stub);
             key.push("fence.json");
 
-            match key.to_slash() {
-                Some(key_str) => {
-                    let fence_option = self.fences_map.get(key_str.deref());
+            if let Some(key_str) = key.to_slash() {
+                let fence_option = self.fences_map.get(key_str.deref());
 
-                    match fence_option {
-                        Some(fence) => fences.push(fence),
-                        None => {}
-                    }
-                }
-                None => {}
+                if let Some(fence) = fence_option { fences.push(fence) }
             }
         }
         fences
@@ -67,12 +61,12 @@ mod test {
         };
 
         assert_eq!(
-            fence_collection.get_fences_for_path(&Path::new("some/file.ts")),
+            fence_collection.get_fences_for_path(Path::new("some/file.ts")),
             vec![fence_collection.fences_map.get("some/fence.json").unwrap(),],
         );
 
         assert_eq!(
-            fence_collection.get_fences_for_path(&Path::new("some/other/file.ts")),
+            fence_collection.get_fences_for_path(Path::new("some/other/file.ts")),
             vec![
                 fence_collection
                     .fences_map

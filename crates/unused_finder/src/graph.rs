@@ -64,7 +64,7 @@ impl GraphFile {
     pub fn mark_item_as_used(&mut self, item: &ExportKind) -> MarkItemResult {
         self.is_used = true;
         // let item = ExportKind::from(item);
-        if self.unused_exports.remove(&item) {
+        if self.unused_exports.remove(item) {
             return MarkItemResult::MarkedAsUsed;
         }
         if let Some(from) = self.export_from.get(item) {
@@ -81,7 +81,7 @@ pub struct Graph {
     pub files: HashMap<String, Arc<GraphFile>>,
 }
 
-impl<'a> Graph {
+impl Graph {
     pub fn bfs_step(&mut self, entries: Vec<String>) -> Vec<String> {
         let edges = self.get_edges(entries);
         let new_entries = edges

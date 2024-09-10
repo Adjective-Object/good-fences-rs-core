@@ -49,7 +49,7 @@ where
 
             match resolve_with_extension(
                 FileName::Real(source_file_path.into()),
-                &imported_path,
+                imported_path,
                 resolver,
             ) {
                 Ok(ResolvedImport::ProjectLocalImport(resolved)) => {
@@ -77,17 +77,17 @@ pub fn process_import_path_ids(
         |(_, names), resolved| (resolved, names),
     );
 
-    return res.map(|res| {
+    res.map(|res| {
         // on success, update the import_export_info.
         // Otherwise, hide Ok() value and return the error.
         import_export_info.imported_path_ids = res;
-    });
+    })
 }
 
 // `export {default as foo, bar} from './foo'`
 pub fn process_exports_from(
     import_export_info: &mut ImportExportInfo,
-    source_file_path: &String,
+    source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
     let res: Result<HashMap<String, _>, _> = resolve_imports_collection(
@@ -98,17 +98,17 @@ pub fn process_exports_from(
         |(_, names), resolved| (resolved, names),
     );
 
-    return res.map(|res| {
+    res.map(|res| {
         // on success, update the import_export_info.
         // Otherwise, hide Ok() value and return the error.
         import_export_info.export_from_ids = res;
-    });
+    })
 }
 
 // import('./foo')
 pub fn process_async_imported_paths(
     import_export_info: &mut ImportExportInfo,
-    source_file_path: &String,
+    source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
     let res: Result<HashSet<String>, _> = resolve_imports_collection(
@@ -119,17 +119,17 @@ pub fn process_async_imported_paths(
         |_, resolved| resolved,
     );
 
-    return res.map(|res| {
+    res.map(|res| {
         // on success, update the import_export_info.
         // Otherwise, hide Ok() value and return the error.
         import_export_info.imported_paths = res;
-    });
+    })
 }
 
 // import './foo'
 pub fn process_executed_paths(
     import_export_info: &mut ImportExportInfo,
-    source_file_path: &String,
+    source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
     let res: Result<HashSet<String>, _> = resolve_imports_collection(
@@ -140,17 +140,17 @@ pub fn process_executed_paths(
         |_, resolved| resolved,
     );
 
-    return res.map(|res| {
+    res.map(|res| {
         // on success, update the import_export_info.
         // Otherwise, hide Ok() value and return the error.
         import_export_info.executed_paths = res;
-    });
+    })
 }
 
 // require('foo')
 pub fn process_require_paths(
     import_export_info: &mut ImportExportInfo,
-    source_file_path: &String,
+    source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
     let res: Result<HashMap<String, _>, _> = resolve_imports_collection(
@@ -161,11 +161,11 @@ pub fn process_require_paths(
         |(_, names), resolved| (resolved, names),
     );
 
-    return res.map(|res| {
+    res.map(|res| {
         // on success, update the import_export_info.
         // Otherwise, hide Ok() value and return the error.
         import_export_info.export_from_ids = res;
-    });
+    })
 }
 
 pub fn retrieve_files(
@@ -185,16 +185,13 @@ pub fn retrieve_files(
             children.iter_mut().for_each(|dir_entry_result| {
                 if let Ok(dir_entry) = dir_entry_result {
                     if dir_entry.file_name() == "package.json" {
-                        match std::fs::read_to_string(dir_entry.path()) {
-                            Ok(text) => {
-                                let pkg_json: serde_json::Value =
-                                    serde_json::from_str(&text).unwrap();
-                                let name = pkg_json["name"].as_str();
-                                if let Some(name) = name {
-                                    *dir_state = name.to_string();
-                                }
+                        if let Ok(text) = std::fs::read_to_string(dir_entry.path()) {
+                            let pkg_json: serde_json::Value =
+                                serde_json::from_str(&text).unwrap();
+                            let name = pkg_json["name"].as_str();
+                            if let Some(name) = name {
+                                *dir_state = name.to_string();
                             }
-                            Err(_) => {} // invalid package.json file
                         }
                     }
                 }
@@ -205,40 +202,31 @@ pub fn retrieve_files(
             });
 
             children.iter_mut().for_each(|child_result| {
-                match child_result {
-                    Ok(dir_entry) => {
-                        match dir_entry.file_name.to_str() {
-                            Some(file_name) => {
-                                if dir_entry.file_type.is_dir() {
-                                    return;
-                                }
-                                // Source file [.ts, .tsx, .js, .jsx]
-                                let joined = &dir_entry.parent_path.join(file_name);
-                                let slashed = joined.to_slash().unwrap();
-                                let visitor_result = get_import_export_paths_map(
-                                    slashed.to_string(),
-                                    skipped_items.clone(),
-                                );
-                                match visitor_result {
-                                    Ok(import_export_info) => {
-                                        dir_entry.client_state =
-                                            WalkedFile::SourceFile(UnusedFinderSourceFile {
-                                                package_name: dir_state.clone(),
-                                                import_export_info,
-                                                source_file_path: dir_entry
-                                                    .path()
-                                                    .to_slash()
-                                                    .unwrap()
-                                                    .to_string(),
-                                            });
-                                    }
-                                    Err(_) => {}
-                                }
-                            }
-                            None => return,
+                if let Ok(dir_entry) = child_result {
+                    if let Some(file_name) = dir_entry.file_name.to_str() {
+                        if dir_entry.file_type.is_dir() {
+                            return;
+                        }
+                        // Source file [.ts, .tsx, .js, .jsx]
+                        let joined = &dir_entry.parent_path.join(file_name);
+                        let slashed = joined.to_slash().unwrap();
+                        let visitor_result = get_import_export_paths_map(
+                            slashed.to_string(),
+                            skipped_items.clone(),
+                        );
+                        if let Ok(import_export_info) = visitor_result {
+                            dir_entry.client_state =
+                                WalkedFile::SourceFile(Box::new(UnusedFinderSourceFile {
+                                    package_name: dir_state.clone(),
+                                    import_export_info,
+                                    source_file_path: dir_entry
+                                        .path()
+                                        .to_slash()
+                                        .unwrap()
+                                        .to_string(),
+                                }));
                         }
                     }
-                    Err(_) => {}
                 }
             });
         },
@@ -246,7 +234,7 @@ pub fn retrieve_files(
     walk_dir
         .into_iter()
         .filter_map(|entry| match entry {
-            Ok(e) => return Some(e.client_state),
+            Ok(e) => Some(e.client_state),
             Err(_) => None,
         })
         .collect()
@@ -273,7 +261,7 @@ fn should_retain_dir_entry(
         }
         _ => return false,
     }
-    return dir_entry.file_type().is_dir();
+    dir_entry.file_type().is_dir()
 }
 
 fn is_js_ts_file(s: &str) -> bool {

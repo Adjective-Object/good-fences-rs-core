@@ -18,11 +18,11 @@ impl JsUnusedFinder {
         let finder = UnusedFinder::new(config);
         match finder {
             Ok(finder) => {
-                return Ok(Self {
+                Ok(Self {
                     unused_finder: finder,
                 })
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e.into()),
         }
     }
 

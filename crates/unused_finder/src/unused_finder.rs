@@ -115,7 +115,7 @@ impl UnusedFinder {
             entry_packages,
             skipped_dirs,
             skipped_items,
-            resolver: resolver,
+            resolver,
             graph,
             file_path_exported_items_map,
             // These fields are empty because they are populated by
@@ -215,9 +215,7 @@ impl UnusedFinder {
         let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
 
         let ok = UnusedFinderReport {
-            unused_files: reported_unused_files
-                .iter()
-                .map(|(p, _)| p.to_string())
+            unused_files: reported_unused_files.keys().map(|p| p.to_string())
                 .collect(),
             unused_files_items,
         };
@@ -258,15 +256,13 @@ impl UnusedFinder {
         let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
 
         let mut ok = UnusedFinderReport {
-            unused_files: reported_unused_files
-                .iter()
-                .map(|(p, _)| p.to_string())
+            unused_files: reported_unused_files.keys().map(|p| p.to_string())
                 .collect(),
             unused_files_items,
         };
         let files: HashSet<String> = HashSet::from_iter(files_to_check);
         ok.unused_files_items.retain(|key, _| files.contains(key));
-        return Ok(ok);
+        Ok(ok)
     }
 
     fn get_unused_items_file(
@@ -290,7 +286,7 @@ impl UnusedFinder {
                                 .filter(|exported| {
                                     unused_exports
                                         .iter()
-                                        .any(|unused| unused.to_string() == exported.id.to_string())
+                                        .any(|unused| unused.to_string() == exported.id)
                                 })
                                 .collect();
                             return Some((file_path.to_string(), unused_exports));
@@ -332,7 +328,7 @@ impl UnusedFinder {
     }
 
     // Reads files from disk and updates information within `self.graph` for specified paths in `files_to_check`
-    fn refresh_files_to_check(&mut self, files_to_check: &Vec<String>) {
+    fn refresh_files_to_check(&mut self, files_to_check: &[String]) {
         let results = files_to_check
             .iter()
             .map(|f| -> Result<Option<String>> {
@@ -352,15 +348,15 @@ impl UnusedFinder {
                 // Check file exists in graph
                 let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
                 current_graph_file.import_export_info = ok; // Update import_export_info within self.graph
-                return match process_import_export_info(
+                match process_import_export_info(
                     // Process import/export info to use resolver.
                     &mut current_graph_file.import_export_info,
-                    &f,
+                    f,
                     &self.resolver,
                 ) {
                     Ok(_) => Ok(Some(current_graph_file.file_path.clone())),
                     Err(e) => Err(e.context(format!("Error processing file: {:?}", f))),
-                };
+                }
             })
             .collect::<Vec<_>>();
 

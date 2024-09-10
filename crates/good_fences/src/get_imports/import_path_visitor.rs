@@ -19,6 +19,12 @@ pub struct ImportPathVisitor {
     require_identifiers: HashSet<Id>,
 }
 
+impl Default for ImportPathVisitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImportPathVisitor {
     pub fn new() -> Self {
         Self {
@@ -65,7 +71,7 @@ impl Visit for ImportPathVisitor {
 
     fn visit_binding_ident(&mut self, binding: &BindingIdent) {
         binding.visit_children_with(self);
-        if binding.sym.to_string() == "require".to_string() {
+        if binding.sym == *"require" {
             self.require_identifiers.insert(binding.id.to_id());
         }
     }
@@ -89,14 +95,9 @@ impl Visit for ImportPathVisitor {
         }
         if let Callee::Expr(callee) = &expr.callee {
             if let Some(ident) = callee.as_ident() {
-                if ident.sym.to_string() == "require" {
-                    if !self.require_identifiers.contains(&ident.to_id()) {
-                        match extract_argument_value(expr) {
-                            Some(import_path) => {
-                                self.require_paths.insert(import_path);
-                            }
-                            None => return,
-                        }
+                if ident.sym == "require" && !self.require_identifiers.contains(&ident.to_id()) {
+                    if let Some(import_path) = extract_argument_value(expr) {
+                        self.require_paths.insert(import_path);
                     }
                 }
             }
@@ -144,7 +145,7 @@ fn append_imported_names(spec: &ImportSpecifier, imported_names: &mut HashSet<St
 fn extract_argument_value(expr: &CallExpr) -> Option<String> {
     let import_path = match expr.args.is_empty() {
         true => return None,
-        false => expr.args.get(0),
+        false => expr.args.first(),
     };
     if let Some(path) = import_path {
         if let Some(path_lit) = path.expr.as_lit() {

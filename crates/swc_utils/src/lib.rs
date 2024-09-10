@@ -21,7 +21,7 @@ pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) 
         StringInput::from(fm),
         comments,
     );
-    return lexer;
+    lexer
 }
 
 pub fn parse_ecma_src<TName, TBody>(name_str: TName, body: TBody) -> (Arc<SourceMap>, Module)
@@ -29,7 +29,7 @@ where
     TName: Into<String>,
     TBody: ToString,
 {
-    return parse_ecma_src_comments(name_str, body, None);
+    parse_ecma_src_comments(name_str, body, None)
 }
 
 pub fn parse_ecma_src_comments<TName, TBody>(
@@ -50,13 +50,13 @@ where
     let mut parser: Parser<Capturing<Lexer<'_>>> = Parser::new_from(capturing);
     let module = parser.parse_typescript_module().unwrap();
 
-    return (cm, module);
+    (cm, module)
 }
 
 pub fn print_ast(cm: &Arc<SourceMap>, module: &Module, print_args: PrintArgs<'_>) -> String {
     let compiler = swc::Compiler::new(cm.clone());
     let out_str = compiler.print(module, print_args).unwrap();
-    return out_str.code;
+    out_str.code
 }
 
 pub fn normalise_src(src: &str, print_args: PrintArgs) -> String {
@@ -78,7 +78,7 @@ pub fn normalise_src(src: &str, print_args: PrintArgs) -> String {
     let compiler = swc::Compiler::new(cm);
     let out_str = compiler.print(&parsed, pargs).unwrap();
 
-    return out_str.code;
+    out_str.code
 }
 
 #[cfg(test)]

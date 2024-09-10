@@ -39,6 +39,12 @@ macro_rules! test_tmpdir(
     };
 );
 
+impl Default for TmpDir {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TmpDir {
     pub fn new() -> TmpDir {
         TmpDir {
@@ -50,7 +56,7 @@ impl TmpDir {
         let root = tempfile::tempdir().unwrap();
         let out = TmpDir { tmp_root: root };
         out.write_batch(content).unwrap();
-        return out;
+        out
     }
 
     pub fn write_batch(&self, content: &HashMap<String, &str>) -> Result<(), Error> {

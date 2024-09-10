@@ -24,7 +24,7 @@ pub fn resolve_with_extension(
     imported_path: &str,
     resolver: &dyn Resolve,
 ) -> anyhow::Result<ResolvedImport> {
-    if is_resource_file(&imported_path.to_string()) {
+    if is_resource_file(imported_path) {
         return Ok(ResolvedImport::ResourceFileImport);
     }
     // canonicalize() adds "\\\\?\\" for windows to guarantee we remove cwd from the final resolved path
@@ -33,7 +33,7 @@ pub fn resolve_with_extension(
         .to_slash()
         .unwrap()
         .to_string();
-    let resolved = match resolver.resolve(&base, &imported_path) {
+    let resolved = match resolver.resolve(&base, imported_path) {
         Ok(r) => r,
         Err(e) => {
             if let Some(source) = e.source() {
@@ -74,7 +74,7 @@ pub fn resolve_with_extension(
     Ok(ResolvedImport::NodeModulesImport(imported_path.into()))
 }
 
-fn is_resource_file(resolved: &String) -> bool {
+fn is_resource_file(resolved: &str) -> bool {
     ASSET_EXTENSION
         .iter()
         .any(|ext| resolved.ends_with(&format!(".{}", ext)))
@@ -105,13 +105,10 @@ pub fn resolve_ts_import<'a>(
     // short circuit when importing non-ts resource files.
     let buf = PathBuf::from(import_specifier.clone());
     let ext = buf.extension();
-    match ext {
-        Some(ext) => {
-            if ext != "tsx" && ext != "ts" {
-                return Ok(ResolvedImport::ResourceFileImport);
-            }
+    if let Some(ext) = ext {
+        if ext != "tsx" && ext != "ts" {
+            return Ok(ResolvedImport::ResourceFileImport);
         }
-        None => {}
     }
 
     if import_specifier.starts_with(".") {
@@ -130,7 +127,7 @@ pub fn resolve_ts_import<'a>(
         for segment in import_specifier_path.ancestors() {
             // match on starless stub
             let stub_to_check_option = segment.to_str();
-            if !stub_to_check_option.is_some() {
+            if stub_to_check_option.is_none() {
                 return Err("accumulated specifier was empty.".to_owned());
             }
             let stub_to_check = stub_to_check_option.unwrap();
@@ -178,9 +175,9 @@ pub fn resolve_ts_import<'a>(
     }
 
     // import specifier is not from the resolver. Use it here.
-    return Ok(ResolvedImport::NodeModulesImport(
+    Ok(ResolvedImport::NodeModulesImport(
         import_specifier.to_owned(),
-    ));
+    ))
 }
 
 fn switch_specifier_prefix(

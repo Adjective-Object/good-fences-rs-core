@@ -149,20 +149,20 @@ impl ExportsCollector {
                     // export { foo } from 'foo'
                     if let ModuleExportName::Ident(ident) = &named.orig {
                         // export { default as foo } from 'foo'
-                        if ident.sym.to_string() == "default" {
+                        if ident.sym == "default" {
                             return Some(ImportedItem::Default);
                         }
                         // export { foo } from 'foo'
                         if !self
                             .skipped_items
                             .iter()
-                            .any(|skipped| skipped.is_match(&ident.sym.to_string()))
+                            .any(|skipped| skipped.is_match(ident.sym.as_ref()))
                         {
                             return Some(ImportedItem::Named(ident.sym.to_string()));
                         }
                     }
                 }
-                return None;
+                None
             })
             .collect();
         if let Some(entry) = self.export_from_ids.get_mut(&source.value.to_string()) {
@@ -181,43 +181,26 @@ impl ExportsCollector {
      */
     fn handle_export_named_specifiers(
         &mut self,
-        specs: &Vec<ExportSpecifier>,
+        specs: &[ExportSpecifier],
         allow_unused: bool,
         span: Span,
     ) {
-        specs.iter().for_each(|specifier| match specifier {
-            ExportSpecifier::Named(named) => {
-                // Handles `export { foo as bar }`
-                if let Some(exported) = &named.exported {
-                    if let ModuleExportName::Ident(id) = exported {
-                        let sym = id.sym.to_string();
-                        // export { foo as default }
-                        if sym == "default" {
-                            self.exported_ids.insert(ExportedItemMetadata {
-                                export_kind: ExportKind::Default,
-                                span,
-                                allow_unused,
-                            });
-                        } else {
-                            if !self
-                                .skipped_items
-                                .iter()
-                                .any(|skipped| skipped.is_match(&sym))
-                            {
-                                self.exported_ids.insert(ExportedItemMetadata {
-                                    export_kind: ExportKind::Named(id.sym.to_string()),
-                                    span,
-                                    allow_unused,
-                                });
-                            }
-                        }
-                    }
-                } else if let ModuleExportName::Ident(id) = &named.orig {
-                    // handles `export { foo }`
-                    if !self
+        specs.iter().for_each(|specifier| if let ExportSpecifier::Named(named) = specifier {
+            // Handles `export { foo as bar }`
+            if let Some(exported) = &named.exported {
+                if let ModuleExportName::Ident(id) = exported {
+                    let sym = id.sym.to_string();
+                    // export { foo as default }
+                    if sym == "default" {
+                        self.exported_ids.insert(ExportedItemMetadata {
+                            export_kind: ExportKind::Default,
+                            span,
+                            allow_unused,
+                        });
+                    } else if !self
                         .skipped_items
                         .iter()
-                        .any(|skipped| skipped.is_match(&id.sym.to_string()))
+                        .any(|skipped| skipped.is_match(&sym))
                     {
                         self.exported_ids.insert(ExportedItemMetadata {
                             export_kind: ExportKind::Named(id.sym.to_string()),
@@ -226,8 +209,20 @@ impl ExportsCollector {
                         });
                     }
                 }
+            } else if let ModuleExportName::Ident(id) = &named.orig {
+                // handles `export { foo }`
+                if !self
+                    .skipped_items
+                    .iter()
+                    .any(|skipped| skipped.is_match(id.sym.as_ref()))
+                {
+                    self.exported_ids.insert(ExportedItemMetadata {
+                        export_kind: ExportKind::Named(id.sym.to_string()),
+                        span,
+                        allow_unused,
+                    });
+                }
             }
-            _ => {}
         });
     }
 
@@ -278,7 +273,7 @@ impl Visit for ExportsCollector {
                 if !self
                     .skipped_items
                     .iter()
-                    .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
+                    .any(|skipped| skipped.is_match(decl.ident.sym.as_ref()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
                         export_kind: ExportKind::Named(decl.ident.sym.to_string()),
@@ -292,7 +287,7 @@ impl Visit for ExportsCollector {
                 if !self
                     .skipped_items
                     .iter()
-                    .any(|skipped| skipped.is_match(&decl.ident.sym.to_string()))
+                    .any(|skipped| skipped.is_match(decl.ident.sym.as_ref()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
                         export_kind: ExportKind::Named(decl.ident.sym.to_string()),
@@ -308,7 +303,7 @@ impl Visit for ExportsCollector {
                         if !self
                             .skipped_items
                             .iter()
-                            .any(|skipped| skipped.is_match(&ident.sym.to_string()))
+                            .any(|skipped| skipped.is_match(ident.sym.as_ref()))
                         {
                             self.exported_ids.insert(ExportedItemMetadata {
                                 export_kind: ExportKind::Named(ident.sym.to_string()),
@@ -324,7 +319,7 @@ impl Visit for ExportsCollector {
                 if !self
                     .skipped_items
                     .iter()
-                    .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
+                    .any(|skipped| skipped.is_match(decl.id.sym.as_ref()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
                         export_kind: ExportKind::Named(decl.id.sym.to_string()),
@@ -338,7 +333,7 @@ impl Visit for ExportsCollector {
                 if !self
                     .skipped_items
                     .iter()
-                    .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
+                    .any(|skipped| skipped.is_match(decl.id.sym.as_ref()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
                         export_kind: ExportKind::Named(decl.id.sym.to_string()),
@@ -352,7 +347,7 @@ impl Visit for ExportsCollector {
                 if !self
                     .skipped_items
                     .iter()
-                    .any(|skipped| skipped.is_match(&decl.id.sym.to_string()))
+                    .any(|skipped| skipped.is_match(decl.id.sym.as_ref()))
                 {
                     self.exported_ids.insert(ExportedItemMetadata {
                         export_kind: ExportKind::Named(decl.id.sym.to_string()),
@@ -403,7 +398,7 @@ impl Visit for ExportsCollector {
     // const p = foo('./path')
     fn visit_binding_ident(&mut self, binding: &BindingIdent) {
         binding.visit_children_with(self);
-        if binding.sym.to_string() == "require".to_string() {
+        if binding.sym == *"require" {
             self.require_identifiers.insert(binding.id.to_id());
         }
     }
@@ -432,14 +427,9 @@ impl Visit for ExportsCollector {
         }
         if let Callee::Expr(callee) = &expr.callee {
             if let Some(ident) = callee.as_ident() {
-                if ident.sym.to_string() == "require" {
-                    if !self.require_identifiers.contains(&ident.to_id()) {
-                        match extract_argument_value(expr) {
-                            Some(import_path) => {
-                                self.require_paths.insert(import_path);
-                            }
-                            None => return,
-                        }
+                if ident.sym == "require" && !self.require_identifiers.contains(&ident.to_id()) {
+                    if let Some(import_path) = extract_argument_value(expr) {
+                        self.require_paths.insert(import_path);
                     }
                 }
             }
@@ -474,7 +464,7 @@ impl Visit for ExportsCollector {
                                             if sym_str == "default" {
                                                 // import { default as foo } from 'foo'
                                                 if !self.skipped_items.iter().any(|s| {
-                                                    s.is_match(&named.local.sym.to_string())
+                                                    s.is_match(named.local.sym.as_ref())
                                                 }) {
                                                     return Some(ExportKind::Default);
                                                 }
@@ -490,7 +480,7 @@ impl Visit for ExportsCollector {
                                         }
                                         ModuleExportName::Str(s) => {
                                             if !self.skipped_items.iter().any(|skipped| {
-                                                skipped.is_match(&s.value.to_string())
+                                                skipped.is_match(s.value.as_ref())
                                             }) {
                                                 return Some(ExportKind::Named(
                                                     s.value.to_string(),
@@ -503,7 +493,7 @@ impl Visit for ExportsCollector {
                                 None => {
                                     // import { foo } from './foo'
                                     if !self.skipped_items.iter().any(|skipped| {
-                                        skipped.is_match(&named.local.sym.to_string())
+                                        skipped.is_match(named.local.sym.as_ref())
                                     }) {
                                         return Some(ExportKind::Named(
                                             named.local.sym.to_string(),
@@ -515,11 +505,11 @@ impl Visit for ExportsCollector {
                         }
                         ImportSpecifier::Default(_) => {
                             // import foo from 'foo'
-                            return Some(ExportKind::Default);
+                            Some(ExportKind::Default)
                         }
                         ImportSpecifier::Namespace(_) => {
                             // import * as foo from 'foo'
-                            return Some(ExportKind::Namespace);
+                            Some(ExportKind::Namespace)
                         }
                     }
                 })
@@ -532,7 +522,7 @@ impl Visit for ExportsCollector {
         } else {
             self.imported_ids_path_name.insert(
                 src,
-                HashSet::from_iter(specifiers.iter().map(|s| ImportedItem::from(s))),
+                HashSet::from_iter(specifiers.iter().map(ImportedItem::from)),
             );
         }
     }
@@ -541,7 +531,7 @@ impl Visit for ExportsCollector {
 fn extract_argument_value(expr: &CallExpr) -> Option<String> {
     let import_path = match expr.args.is_empty() {
         true => return None,
-        false => expr.args.get(0),
+        false => expr.args.first(),
     };
     if let Some(path) = import_path {
         if let Some(path_lit) = path.expr.as_lit() {

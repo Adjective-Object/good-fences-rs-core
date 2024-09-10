@@ -133,13 +133,13 @@ impl ContextData for ProcessedTsconfig {
                 )
             })?;
 
-        let as_buf = PathBuf::from(base_url);
+        let as_buf = base_url;
         let for_swc = ProcessedTsconfigPaths {
             paths: pattern_paths,
             base_url_filename: FileName::Real(as_buf.clone()),
             base_url: as_buf,
         };
 
-        return Ok(Some(ProcessedTsconfig::HasPaths(for_swc)));
+        Ok(Some(ProcessedTsconfig::HasPaths(for_swc)))
     }
 }

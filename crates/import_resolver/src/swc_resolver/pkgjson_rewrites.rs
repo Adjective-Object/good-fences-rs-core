@@ -93,7 +93,7 @@ impl BrowserCache {
             }
         }
 
-        return Ok(Some(bucket));
+        Ok(Some(bucket))
     }
 }
 
@@ -131,10 +131,10 @@ impl PackageJsonRewriteData {
             None
         };
 
-        return Ok(Self {
+        Ok(Self {
             browser_cache,
             exports: exports_rewrite,
-        });
+        })
     }
 
     // Rewrite a path using the browser field if applicable
@@ -153,6 +153,6 @@ impl PackageJsonRewriteData {
             }
         }
 
-        return Ok(abs_path);
+        Ok(abs_path)
     }
 }

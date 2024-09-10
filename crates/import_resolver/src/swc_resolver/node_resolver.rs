@@ -66,7 +66,7 @@ pub(crate) fn is_core_module(s: &str) -> bool {
     NODE_BUILTINS.contains(&s)
 }
 
-static DEFAULT_EXPORT_CONDITIONS: &'static [&str] = &[
+static DEFAULT_EXPORT_CONDITIONS: &[&str] = &[
     // TODO: make this configurable and drop "source"
     "source", "default", "import", "require",
 ];
@@ -275,7 +275,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         };
 
         // Probe the FS or the cache for a package.json file at that path
-        let pkg_cache_entry = self.pkg_json_cache.check_dir(&pkg_dir).with_context(|| {
+        let pkg_cache_entry = self.pkg_json_cache.check_dir(pkg_dir).with_context(|| {
             format!(
                 "failed to get package.json for directory {:#?}",
                 pkg_dir.display(),
@@ -296,7 +296,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         if let Some(exports_map) = resolution_data.exports.as_ref() {
             if let Some(rewritten) = exports_map.rewrite_relative_export(
                 ".",
-                DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
+                DEFAULT_EXPORT_CONDITIONS.iter().copied(),
                 &mut out,
             )? {
                 match rewritten.rewritten_export {
@@ -350,8 +350,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
     }
 
     /// Resolve by walking up node_modules folders.
-    fn resolve_node_modules<'a>(
-        &'a self,
+    fn resolve_node_modules(
+        &self,
         // the path to the node_modules directory
         base_dir: &Path,
         // the import target to resolve
@@ -366,7 +366,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
         let mut iter = self
             .node_modules_cache
-            .probe_path_iter(&self.monorepo_root, &abs_base);
+            .probe_path_iter(self.monorepo_root, &abs_base);
 
         loop {
             // loop through the node_modules direcotires
@@ -429,7 +429,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                             let mut out = String::new();
                             let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
                                 &rel_import,
-                                DEFAULT_EXPORT_CONDITIONS.into_iter().copied(),
+                                DEFAULT_EXPORT_CONDITIONS.iter().copied(),
                                 &mut out,
                             )?;
                             if let Some(rewritten_to) = rewritten_to {
