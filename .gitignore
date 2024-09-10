@@ -11,6 +11,10 @@ node_modules
 index.js
 index.d.ts
 good-fences-violations.json
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+.pnp.*
 
 # Previous accidentally committed files
 token

@@ -1,7 +1,7 @@
 extern crate serde_json;
 extern crate unused_finder;
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::{env, fs, path::Path};
 
@@ -9,6 +9,11 @@ use std::{env, fs, path::Path};
 struct CliArgs {
     #[arg(short, long, default_value = None)]
     config_path: Option<String>,
+    #[arg(short, long)]
+    // If this flag is set, ignore all other options and
+    // try to stack dump the parent process. Used internally
+    // for dumping stacks
+    rstack: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &'static str = "unused-finder.json";
@@ -38,10 +43,47 @@ fn start_deadlock_detector() {
     });
 }
 
-fn main() {
-    start_deadlock_detector();
+fn start_stackdump_timer() {
+    // only for #[cfg]
+    use std::thread;
+    use std::time::Duration;
+    use std::process::Command;
 
+    // Create a background thread which checks for deadlocks every 10s
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(5));
+
+        let exe = env::current_exe().unwrap();
+        let trace = rstack_self::trace(Command::new(exe).arg("--rstack")).unwrap();
+
+        println!("\n\n\n\n\n\n\n\n\n\n\n\nThread dump contains {} threads:", trace.threads().len());
+        for thread in trace.threads(){
+            println!("Thread {}", thread.id());
+            for (i, frame) in thread.frames().iter().enumerate() {
+                print!("  {:>4}:", i);
+                for symbol in frame.symbols() {
+                    print!("      {} {}:{}",
+                        symbol.name().unwrap_or("<unknown_symbol>"),
+                        symbol.file().map(|p| p.to_string_lossy().to_string()).unwrap_or("<unknown_file>".to_string()),
+                        symbol.line().map(|l|l.to_string()).unwrap_or("<??>".to_string()),
+                    );
+                    println!();
+                }
+            }
+        }
+    });
+}
+
+fn main() -> Result<()> {
     let args = CliArgs::parse();
+    if args.rstack {
+        let _ = rstack_self::child();
+        return Ok(());
+    } 
+
+    start_deadlock_detector();
+    start_stackdump_timer();
+
     let config_path = args.config_path.unwrap_or_else(|| {
         println!("No config file path provided, using default config file path");
         DEFAULT_CONFIG_PATH.to_string()
@@ -52,8 +94,7 @@ fn main() {
     // read and parse the config file
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
     let mut config: unused_finder::FindUnusedItemsConfig = serde_json::from_str(&config_str)
-        .with_context(|| format!("Parsing unused-finder config {config_path}"))
-        .unwrap();
+        .with_context(|| format!("Parsing unused-finder config {config_path}"))?;
 
     // move the the working directory of the config path
     let config_dir = Path::new(&config_path)
@@ -63,8 +104,7 @@ fn main() {
     config.ts_config_path = config_dir
         .join("tsconfig.json")
         .to_str()
-        .with_context(|| format!("Failed to coerce unprintable directory to a string!"))
-        .unwrap()
+        .with_context(|| format!("Failed to coerce unprintable directory to a string!"))?
         .to_string();
 
     println!("working in {}..", config_dir.display());
@@ -72,9 +112,9 @@ fn main() {
         .expect("Failed to change working directory to config file directory");
 
     let start_time = std::time::Instant::now();
-    let result = unused_finder::find_unused_items(config).unwrap();
+    let result = unused_finder::find_unused_items(config)?;
     let delta = start_time.elapsed();
     println!("result ({}ms):\n{result}", delta.as_millis());
 
-    return ();
+    return Ok(());
 }

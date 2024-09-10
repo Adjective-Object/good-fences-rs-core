@@ -8,8 +8,12 @@ edition = "2021"
 crate-type = ["lib"]
 
 [dependencies]
-napi = { version = "2.16.6", default-features = false, features = ["napi4"] }
+napi = {optional = true, workspace = true}
 anyhow.workspace = true
 
 [build-dependencies]
 napi-build = "2.0.1"
+
+[features]
+default = []
+napi = ["dep:napi"]

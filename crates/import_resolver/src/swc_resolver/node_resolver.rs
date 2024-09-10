@@ -416,10 +416,11 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
             let target_file_path = match cached_entry_value {
                 Some(pkg_with_rewrite) => {
-                    let cached_data = pkg_with_rewrite.try_get_cached_or_init(|pkg| {
+                    // check for rewrite data
+                    let cached_rewrite_data = pkg_with_rewrite.try_get_cached_or_init(|pkg| {
                         PackageJsonRewriteData::create(self, &nm_pkg_path, pkg)
                     })?;
-                    match *cached_data {
+                    match *cached_rewrite_data {
                         PackageJsonRewriteData {
                             exports: Some(ref rewrite_data),
                             ..

@@ -15,3 +15,4 @@ unused_finder = { path = "../unused_finder" }
 anyhow.workspace = true
 parking_lot.workspace = true
 serde_json.workspace = true
+rstack-self = {version = "0.3.0", features = ["dw"], default-features = false }

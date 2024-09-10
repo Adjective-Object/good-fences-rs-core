@@ -29,7 +29,7 @@ napi-derive.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-js_err = { path = "../js_err" }
+js_err = { path = "../js_err", features=["napi"] }
 
 unused_finder = { path = "../unused_finder", features = ["napi"] }
 import_resolver = { path = "../import_resolver" }

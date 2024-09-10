@@ -39,7 +39,7 @@ impl UnusedFinder {
     pub fn new(config: FindUnusedItemsConfig) -> anyhow::Result<Self, JsErr> {
         let FindUnusedItemsConfig {
             report_exported_items: _,
-            paths_to_read,
+            root_paths,
             ts_config_path,
             skipped_dirs,
             skipped_items,
@@ -76,7 +76,7 @@ impl UnusedFinder {
         };
         let skipped_items = Arc::new(skipped_items);
         let mut flattened_walk_file_data =
-            walk_src_files(&paths_to_read, &skipped_dirs, &skipped_items);
+            walk_src_files(&root_paths, &skipped_dirs, &skipped_items);
 
         let mut files: Vec<GraphFile> = flattened_walk_file_data
             .par_iter_mut()
@@ -131,7 +131,7 @@ impl UnusedFinder {
     pub fn refresh_file_list(&mut self) {
         // Get a vector with all SourceFile
         let mut flattened_walk_file_data = walk_src_files(
-            &self.config.paths_to_read,
+            &self.config.root_paths,
             &self.skipped_dirs,
             &self.skipped_items,
         );

@@ -34,8 +34,9 @@ pub struct FindUnusedItemsConfig {
     // Trace exported symbols that are not imported anywhere in the project
     #[serde(default)]
     pub report_exported_items: bool,
-    // Paths to read as source files
-    pub paths_to_read: Vec<String>,
+    // Root paths to walk as source files
+    #[serde(alias="pathsToRead")]
+    pub root_paths: Vec<String>,
     // Path to the root tsconfig.paths.json file used to resolve ts imports between projects.
     // Note: this should be removed and replaced with normal node resolution.
     pub ts_config_path: String,
@@ -143,11 +144,11 @@ pub fn create_report_map_from_flattened_files(
 }
 
 pub fn walk_src_files(
-    paths_to_read: &Vec<String>,
+    root_paths: &Vec<String>,
     skipped_dirs: &Arc<Vec<glob::Pattern>>,
     skipped_items: &Arc<Vec<regex::Regex>>,
 ) -> Vec<UnusedFinderSourceFile> {
-    let flattened_walk_file_data: Vec<UnusedFinderSourceFile> = paths_to_read
+    let flattened_walk_file_data: Vec<UnusedFinderSourceFile> = root_paths
         .par_iter()
         .map(|path| {
             let mut walked_files =
@@ -173,7 +174,7 @@ pub fn find_unused_items(
 ) -> Result<UnusedFinderReport, js_err::JsErr> {
     let FindUnusedItemsConfig {
         report_exported_items,
-        paths_to_read,
+        root_paths,
         ts_config_path,
         skipped_dirs,
         skipped_items,
@@ -200,7 +201,7 @@ pub fn find_unused_items(
     let skipped_items = Arc::new(skipped_items);
     // Walk on all files and retrieve the WalkFileData from them
     let mut flattened_walk_file_data: Vec<UnusedFinderSourceFile> =
-        walk_src_files(&paths_to_read, &skipped_dirs, &skipped_items);
+        walk_src_files(&root_paths, &skipped_dirs, &skipped_items);
 
     let _total_files = flattened_walk_file_data.len();
     let root_dir: PathBuf = {
@@ -400,7 +401,7 @@ file2 is partially unused (2 unused exports):
     #[test]
     fn test_error_in_glob() {
         let result = find_unused_items(FindUnusedItemsConfig {
-            paths_to_read: vec!["tests/unused_finder".to_string()],
+            root_paths: vec!["tests/unused_finder".to_string()],
             ts_config_path: "tests/unused_finder/tsconfig.json".to_string(),
             skipped_dirs: vec![".....///invalidpath****".to_string()],
             skipped_items: vec!["[A-Z].*".to_string(), "something".to_string()],
@@ -416,7 +417,7 @@ file2 is partially unused (2 unused exports):
     #[test]
     fn test_error_in_regex() {
         let result = find_unused_items(FindUnusedItemsConfig {
-            paths_to_read: vec!["tests/unused_finder".to_string()],
+            root_paths: vec!["tests/unused_finder".to_string()],
             ts_config_path: "tests/unused_finder/tsconfig.json".to_string(),
             skipped_items: vec!["[A-Z.*".to_string(), "something".to_string()],
             ..Default::default()
