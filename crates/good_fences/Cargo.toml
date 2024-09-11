@@ -12,7 +12,6 @@ anyhow.workspace = true
 jwalk.workspace = true
 lazy_static = "1.4.0"
 serde_derive = "1.0.117"
-serde_bytes = "0.11.5"
 void = "1.0.2"
 relative-path = { workspace = true }
 regex = { workspace = true }

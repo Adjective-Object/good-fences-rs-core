@@ -13,9 +13,8 @@ use swc_ecma_loader::{
     TargetEnv,
 };
 
-mod combined_resolver;
+pub mod combined_resolver;
 mod common;
-mod context_data;
 mod node_resolver;
 mod package;
 mod pkgjson_exports;

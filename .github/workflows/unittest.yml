@@ -28,6 +28,13 @@ jobs:
         run: yarn install && yarn build
       - name: cargo test
         run: cargo test --release
+      - name: Run cargo-udeps 
+        uses: aig787/cargo-udeps-action@v1
+        with:
+          version: 'latest'
+          args: '--all-targets'
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features
       - name: run napi tests
         run: yarn test
       - name: upload-artifacts

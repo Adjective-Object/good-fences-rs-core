@@ -1,6 +1,3 @@
-// So we can parameterize the ContextDataCaches on the filename of the context file, constantly
-#![feature(adt_const_params)]
-#![feature(unsized_const_params)]
 // For paths processing in tsconfig
 #![feature(iterator_try_collect)]
 

@@ -1,4 +1,4 @@
-use super::context_data::ContextData;
+use ftree_cache::context_data::ContextData;
 use anyhow::{anyhow, ensure, Context, Result};
 use path_clean::PathClean;
 use serde::Deserialize;

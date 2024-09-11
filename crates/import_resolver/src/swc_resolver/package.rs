@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use swc_common::collections::AHashMap;
 
-use super::context_data::ContextData;
+use ftree_cache::context_data::ContextData;
 
 // Either a json string or a boolean
 #[derive(Debug, Deserialize, Clone)]

@@ -749,6 +749,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ftree_cache"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "dashmap 6.0.1",
+ "hashbrown 0.14.5",
+ "parking_lot",
+ "serde",
+ "serde_derive",
+ "swc_common",
+ "tracing",
+]
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -817,7 +831,6 @@ dependencies = [
  "regex",
  "relative-path",
  "serde",
- "serde_bytes",
  "serde_derive",
  "serde_json",
  "swc_core",
@@ -942,22 +955,19 @@ dependencies = [
  "anyhow",
  "copy_from_str",
  "dashmap 6.0.1",
- "glob",
+ "ftree_cache",
  "hashbrown 0.14.5",
  "lazy_static",
  "ouroboros",
  "parking_lot",
  "path-clean 0.1.0",
  "path-slash",
- "path_utils",
  "pathdiff",
  "pretty_assertions",
  "relative-path",
  "serde",
- "serde_bytes",
  "serde_derive",
  "serde_json",
- "swc",
  "swc_common",
  "swc_core",
  "swc_ecma_loader",
@@ -1121,12 +1131,6 @@ checksum = "718e8fae447df0c7e1ba7f5189829e63fd536945c8988d61444c19039f16b670"
 dependencies = [
  "hashbrown 0.13.2",
 ]
-
-[[package]]
-name = "maplit"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "matchers"
@@ -1877,15 +1881,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc76f558e0cbb2a839d37354c575f1dc3fdc6546b5be373ba43d95f231bf7c12"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde_bytes"
-version = "0.11.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "387cc504cb06bb40a96c8e04e951fe01854cf6bc921053c954e4a606d9675c6a"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -3477,12 +3472,10 @@ name = "unused_finder"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "clap",
  "glob",
  "import_resolver",
  "js_err",
  "jwalk",
- "maplit",
  "napi",
  "napi-derive",
  "path-slash",

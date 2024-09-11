@@ -1,4 +1,4 @@
-use super::context_data::FileContextCache;
+use ftree_cache::context_data::FileContextCache;
 use anyhow::{bail, Context, Result};
 use std::path::{Component, Path};
 use swc_common::FileName;

@@ -8,10 +8,8 @@ use super::package::{Browser, PackageJson};
 use super::pkgjson_exports::ExportedPath;
 use super::pkgjson_rewrites::PackageJsonRewriteData;
 use super::util::to_absolute_path;
-use super::{
-    context_data::{FileContextCache, WithCache},
-    util,
-};
+use ftree_cache::context_data::{FileContextCache, WithCache};
+use super::util;
 use anyhow::{bail, Context, Error, Result};
 use path_clean::PathClean;
 use pathdiff::diff_paths;
