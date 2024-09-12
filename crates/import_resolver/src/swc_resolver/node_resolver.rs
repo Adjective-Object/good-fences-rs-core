@@ -7,10 +7,10 @@ use super::common::AHashMap;
 use super::package::{Browser, PackageJson};
 use super::pkgjson_exports::ExportedPath;
 use super::pkgjson_rewrites::PackageJsonRewriteData;
-use super::util::to_absolute_path;
-use ftree_cache::context_data::{FileContextCache, WithCache};
 use super::util;
+use super::util::to_absolute_path;
 use anyhow::{bail, Context, Error, Result};
+use ftree_cache::context_data::{FileContextCache, WithCache};
 use path_clean::PathClean;
 use pathdiff::diff_paths;
 use std::{
@@ -398,8 +398,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             let nm_pkg_path = nm_dir_path.join(NODE_MODULES).join(package_name);
 
             // Get the cached derived data + pkgjson entry for this path.
-            let cached_entry: dashmap::mapref::one::Ref<
-                PathBuf,
+            let cached_entry: ftree_cache::context_data::CtxRef<
                 Option<WithCache<PackageJson, Option<PackageJsonRewriteData>>>,
             > = self
                 .pkg_json_cache

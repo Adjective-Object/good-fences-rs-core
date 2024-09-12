@@ -56,6 +56,12 @@ impl CombinedResolverCaches {
     }
 }
 
+impl Default for CombinedResolverCaches {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Resolver that combines the tsconfig and node_modules resolvers,
 // preferring resolution from the tsconfig resolver when possible
 pub struct CombinedResolver<'a> {

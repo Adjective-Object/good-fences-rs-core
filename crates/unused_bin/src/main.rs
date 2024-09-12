@@ -9,11 +9,17 @@ use std::{env, fs, path::Path};
 struct CliArgs {
     #[arg(short, long, default_value = None)]
     config_path: Option<String>,
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = false)]
     // If this flag is set, ignore all other options and
     // try to stack dump the parent process. Used internally
     // for dumping stacks
-    rstack: bool,
+    rstack: std::primitive::bool,
+    // If this flag is set, run a timer to dump stacks every 5s
+    #[arg(short = 'd', long, default_value_t = false)]
+    dump_stacks: std::primitive::bool,
+    // If this flag is set, run the parking_lot deadlock detector
+    #[arg(short = 'D', long, default_value_t = true)]
+    deadlock_detector: std::primitive::bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "unused-finder.json";
@@ -45,27 +51,43 @@ fn start_deadlock_detector() {
 
 fn start_stackdump_timer() {
     // only for #[cfg]
+    use std::process::Command;
     use std::thread;
     use std::time::Duration;
-    use std::process::Command;
 
     // Create a background thread which checks for deadlocks every 10s
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(5));
 
         let exe = env::current_exe().unwrap();
-        let trace = rstack_self::trace(Command::new(exe).arg("--rstack")).unwrap();
+        let trace = match rstack_self::trace(Command::new(exe).arg("--rstack")) {
+            Ok(x) => x,
+            Err(e) => {
+                println!("failed to spawn rtrace sub-process: {e}");
+                return;
+            }
+        };
 
-        println!("\n\n\n\n\n\n\n\n\n\n\n\nThread dump contains {} threads:", trace.threads().len());
-        for thread in trace.threads(){
+        println!(
+            "\n\n\n\n\n\n\n\n\n\n\n\nThread dump contains {} threads:",
+            trace.threads().len()
+        );
+        for thread in trace.threads() {
             println!("Thread {}", thread.id());
             for (i, frame) in thread.frames().iter().enumerate() {
                 print!("  {:>4}:", i);
                 for symbol in frame.symbols() {
-                    print!("      {} {}:{}",
+                    print!(
+                        "      {} {}:{}",
                         symbol.name().unwrap_or("<unknown_symbol>"),
-                        symbol.file().map(|p| p.to_string_lossy().to_string()).unwrap_or("<unknown_file>".to_string()),
-                        symbol.line().map(|l|l.to_string()).unwrap_or("<??>".to_string()),
+                        symbol
+                            .file()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or("<unknown_file>".to_string()),
+                        symbol
+                            .line()
+                            .map(|l| l.to_string())
+                            .unwrap_or("<??>".to_string()),
                     );
                     println!();
                 }
@@ -79,10 +101,14 @@ fn main() -> Result<()> {
     if args.rstack {
         let _ = rstack_self::child();
         return Ok(());
-    } 
+    }
 
-    start_deadlock_detector();
-    start_stackdump_timer();
+    if args.deadlock_detector {
+        start_deadlock_detector();
+    }
+    if args.dump_stacks {
+        start_stackdump_timer();
+    }
 
     let config_path = args.config_path.unwrap_or_else(|| {
         println!("No config file path provided, using default config file path");
