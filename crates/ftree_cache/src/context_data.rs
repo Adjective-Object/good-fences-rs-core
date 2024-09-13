@@ -170,38 +170,53 @@ pub struct FileContextCache<
     args: TArgs,
 }
 
-struct DeadlockDebugDroppable {
+struct TimerCanceller {
     cancel_sender: mpsc::Sender<()>,
+}
+
+impl TimerCanceller {
+    pub fn cancel(&self) {
+        if let Err(e) = self.cancel_sender.send(()) {
+            println!("failed to signal release of DeadlockDebugDroppable! {e}")
+        }
+    }
+}
+
+fn run_with_timer(timeout: Duration, msg: String) -> TimerCanceller {
+    let allocation_trace = Backtrace::capture();
+    let (cancel_sender, cancel_receiver) = mpsc::channel();
+
+    thread::spawn(move || {
+        thread::sleep(timeout);
+        match cancel_receiver.try_recv() {
+            Ok(_) => {} // noop, the object has already been dropped
+            Err(_) => println!(
+                // no message sent before timeout. Warn about deadlock
+                "{msg} timed out after {} ms \
+                Allocation site:\n{allocation_trace}",
+                timeout.as_millis()
+            ),
+        }
+    });
+
+    return TimerCanceller{cancel_sender};
+}
+
+struct DeadlockDebugDroppable {
+    deadlock_warning: TimerCanceller
 }
 
 impl DeadlockDebugDroppable {
     fn new(timeout: Duration, name: String) -> Self {
-        let (cancel_sender, cancel_receiver) = mpsc::channel();
-
-        let allocation_trace = Backtrace::capture();
-        thread::spawn(move || {
-            thread::sleep(timeout);
-            match cancel_receiver.try_recv() {
-                Ok(_) => {} // noop, the object has already been dropped
-                Err(_) => {
-                    println!(
-                        "DebugDeadlockDroppable {name} was not dropped after {}ms. \
-                        Allocation site:\n{allocation_trace}",
-                        timeout.as_millis()
-                    )
-                } // no message sent before timeout. Kill.
-            }
-        });
-
-        Self { cancel_sender }
+        Self {
+            deadlock_warning: run_with_timer(timeout, format!("release {name}",)),
+        }
     }
 }
 
 impl Drop for DeadlockDebugDroppable {
     fn drop(&mut self) {
-        if let Err(e) = self.cancel_sender.send(()) {
-            println!("failed to release DeadlockDebugDroppable! {e}")
-        }
+        self.deadlock_warning.cancel()
     }
 }
 
@@ -222,6 +237,15 @@ impl<TRef: Deref, const REFERENCE_TIMEOUT_MS: u64> DeadlockDebugRef<TRef, REFERE
                 name,
             ),
         }
+    }
+
+    fn create<TInitFn: FnOnce() -> TRef>(name: String, f: TInitFn) -> Self {
+        // Run a potentially deadlocking function, with a timer in parallel to log if it
+        // over-ran the timer.
+        let deadlock_warning = run_with_timer(REFERENCE_TIMEOUT_MS, format!("lock {name}"))
+        let reference = f();
+        deadlock_warning.cancel();
+        Self::wrap(reference, name)
     }
 }
 
