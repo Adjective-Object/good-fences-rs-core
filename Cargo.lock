@@ -615,6 +615,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
+name = "deadlock_ref"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "dashmap 6.0.1",
+ "hashbrown 0.14.5",
+ "parking_lot",
+ "serde",
+ "serde_derive",
+ "swc_common",
+ "tracing",
+]
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -754,6 +768,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "dashmap 6.0.1",
+ "deadlock_ref",
  "hashbrown 0.14.5",
  "parking_lot",
  "serde",
