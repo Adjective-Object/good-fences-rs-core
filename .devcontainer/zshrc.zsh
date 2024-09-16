@@ -14,4 +14,4 @@ antigen apply
 
 # Set up Ctrl + Backspace and Ctrl + Del so you can move around and backspace faster (try it!)
 bindkey '^H' backward-kill-word
-bindkey -M emacs '^[[3;5~' kill-word
+bindkey '5~' kill-word

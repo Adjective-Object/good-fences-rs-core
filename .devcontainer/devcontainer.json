@@ -4,29 +4,40 @@
   "build": {
     "dockerfile": "./Dockerfile",
     "args": {
-      "USERNAME": "vscode"
+      "USERNAME": "ubuntu"
     }
   },
-  "remoteUser": "vscode",
+  // In wsl, we want the acting user to match the user we are launching Docker from,
+  // which is typically 'ubuntu' in the default WSL configuration.
+  //
+  // This is because mounted volumes from Linux retain their original file permissions.
+  // If the acting user is not the same as the user in the container, the container
+  // may not have permission to write to the mounted volume, or may mangle the permissions
+  // of mounted files.
+  //
+  // See https://github.com/microsoft/vscode-dev-containers/issues/108
+  "remoteUser": "ubuntu",
   // see https://github.com/microsoft/vscode-remote-release/issues/1333#issuecomment-528234042
-  "workspaceMount": "",
-  "runArgs": [
-    "--init",
-    "--volume=${localWorkspaceFolder}:/workspaces/ori:Z"
-  ],
   "settings": {
-    "terminal.integrated.shell.linux": "/bin/zsh"
+    "terminal.integrated.profiles.linux": {
+      "zsh": {
+        "path": "/usr/bin/zsh"
+      }
+    },
+    "terminal.integrated.defaultProfile.linux": "zsh"
   },
-  "workspaceFolder": "/workspaces/ori",
-  "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/good-fences-rs-core,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspaces/good-fences-rs-core",
+  // "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
   "extensions": [
-    "rust-lang.rust-analyzer"
+    "rust-lang.rust-analyzer",
+    "vadimcn.vscode-lldb"
   ],
   "remoteEnv": {
-    "VM_REPO_PATH": "/workspaces/ori"
+    "VM_REPO_PATH": "/workspaces/good-fences-rs-core"
   },
   "forwardPorts": [
     3000,
-    30001
+    3001
   ]
 }

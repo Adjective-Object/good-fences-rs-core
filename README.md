@@ -125,4 +125,15 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
 ```
 
 
-
+# Development
+## Dev-Containers on WSL
+Development from windows happens in a devcontainer
+1. Install WSL2 (and restart your computer)
+    - `wsl --install` from any terminal window
+2. Install [Docker Engine](https://docs.docker.com/engine/install/) (and restart your computer)
+3. Install workspace recommended plugins (including the Dev Containers plugin)
+4. Build the container with `Ctrl+P > Dev Containers: Rebuild and Reopen in Container`
+    - If installation stalls on `docker inspect --type image ubuntu:24.10`, you may need to feth the base image manually
+    - Run `docker inspect --type image ubuntu:24.10`
+    - If it fails with `Error response from daemon: No such image: ubuntu`, then run `docker pull ubuntu:24.10`
+5. Develop in the container
