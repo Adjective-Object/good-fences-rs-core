@@ -31,7 +31,8 @@
   // "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
   "extensions": [
     "rust-lang.rust-analyzer",
-    "vadimcn.vscode-lldb"
+    "vadimcn.vscode-lldb",
+    "tamasfe.even-better-toml"
   ],
   "remoteEnv": {
     "VM_REPO_PATH": "/workspaces/good-fences-rs-core"
