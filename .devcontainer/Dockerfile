@@ -46,7 +46,7 @@ USER ${USERNAME}
 RUN mkdir -p ${HOME}/.antigen
 RUN curl -L https://git.io/antigen > ${HOME}/.antigen/antigen.zsh
 COPY zshrc.zsh ${HOME}/.zshrc
-RUN sudo chown ${USERNAME} ${HOME}/.zshrc
+RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.zshrc
 # configure antigen
 RUN zsh -c "source ${HOME}/.antigen/antigen.zsh; antigen use oh-my-zsh &&\
     antigen bundle git &&\
