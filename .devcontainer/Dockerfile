@@ -41,7 +41,7 @@ RUN apt install -y libdw-dev
 
 # Start acting as the container user to avoid permissions issues
 USER ${USERNAME}
-RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cache
+RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cache -R
 
 # setup zsh for the user
 RUN mkdir -p ${HOME}/.antigen
