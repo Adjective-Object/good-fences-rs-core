@@ -88,12 +88,11 @@ impl<TRef: Deref, const REFERENCE_TIMEOUT_MS: u64> DeadlockDebugRef<TRef, REFERE
     ) -> Result<Self, Err> {
         // Run a potentially deadlocking function, with a timer in parallel to log if it
         // over-ran the timer.
-        let reference = f()?;
         let deadlock_warning = run_with_timer(
             Duration::from_millis(REFERENCE_TIMEOUT_MS),
             format!("lock {name}"),
         );
-        let to_ret = Self::wrap(reference, name);
+        let to_ret = Self::wrap(f()?, name);
         deadlock_warning.cancel();
         Ok(to_ret)
     }

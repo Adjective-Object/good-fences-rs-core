@@ -1,6 +1,12 @@
 {
     "rust-analyzer.checkOnSave": true,
     "rust-analyzer.check.command": "clippy",
+    // runs rust-analyzer against a separate target directory than the normal rust compiler.
+    // this is a workaround for the following issue: https://github.com/rust-lang/rust-analyzer/issues/17482
+    "rust-analyzer.cargo.targetDir": "./rust-analyzer-target",
     "editor.formatOnSave": true,
-    "files.autoSaveWorkspaceFilesOnly": true
+    "files.autoSaveWorkspaceFilesOnly": true,
+    "lldb.cargo": "/home/ubuntu/.cargo/bin/cargo",
+    "terminal.integrated.shellIntegration.enabled": true,
+    "terminal.integrated.shellIntegration.decorationsEnabled": "never",
 }

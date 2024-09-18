@@ -15,3 +15,6 @@ antigen apply
 # Set up Ctrl + Backspace and Ctrl + Del so you can move around and backspace faster (try it!)
 bindkey '^H' backward-kill-word
 bindkey '5~' kill-word
+
+export HISTFILE="/cache/.zsh_history"
+export CARGO_HOME="/cache/cargo/"

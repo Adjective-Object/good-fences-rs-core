@@ -27,6 +27,10 @@
     "terminal.integrated.defaultProfile.linux": "zsh"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/good-fences-rs-core,type=bind,consistency=delegated",
+  "mounts": [
+    "source=/home/blacktop-linux/client-web,target=/workspaces/client-web,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached"
+  ],
   "workspaceFolder": "/workspaces/good-fences-rs-core",
   // "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
   "extensions": [

@@ -7,7 +7,7 @@ use std::{env, fs, path::Path};
 
 #[derive(Parser, Debug)]
 struct CliArgs {
-    #[arg(short, long, default_value = None)]
+    #[arg(short, long, default_value = None, alias = "config")]
     config_path: Option<String>,
     #[arg(short, long, default_value_t = false)]
     // If this flag is set, ignore all other options and

@@ -398,75 +398,79 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             let nm_pkg_path = nm_dir_path.join(NODE_MODULES).join(package_name);
 
             // Get the cached derived data + pkgjson entry for this path.
-            let cached_entry: ftree_cache::context_data::CtxRef<
-                Option<WithCache<PackageJson, Option<PackageJsonRewriteData>>>,
-            > = self
-                .pkg_json_cache
-                .check_dir(&nm_pkg_path)
-                .with_context(|| {
-                    format!(
-                        "failed to read package.json for directory {:#?}",
-                        nm_pkg_path.display(),
-                    )
-                })?;
-            let cached_entry_value = cached_entry.value();
-
-            let target_file_path = match cached_entry_value {
-                Some(pkg_with_rewrite) => {
-                    // check for rewrite data
-                    let cached_rewrite_data = pkg_with_rewrite.try_get_cached_or_init(|pkg| {
-                        PackageJsonRewriteData::create(self, &nm_pkg_path, pkg)
+            let target_file_path: PathBuf = {
+                // scope to drop the lock on cached_entry
+                let cached_entry: ftree_cache::context_data::CtxRef<
+                    Option<WithCache<PackageJson, Option<PackageJsonRewriteData>>>,
+                > = self
+                    .pkg_json_cache
+                    .check_dir(&nm_pkg_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to read package.json for directory {:#?}",
+                            nm_pkg_path.display(),
+                        )
                     })?;
-                    match *cached_rewrite_data {
-                        PackageJsonRewriteData {
-                            exports: Some(ref rewrite_data),
-                            ..
-                        } => {
-                            // if there is a rewrite data, rewrite the path against it.
-                            let mut out = String::new();
-                            let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
-                                &rel_import,
-                                DEFAULT_EXPORT_CONDITIONS.iter().copied(),
-                                &mut out,
-                            )?;
-                            if let Some(rewritten_to) = rewritten_to {
-                                match rewritten_to.rewritten_export {
-                                    ExportedPath::Exported(exported_rel_path) => nm_dir_path
-                                        .join(NODE_MODULES)
-                                        .join(package_name)
-                                        .join(exported_rel_path),
-                                    // tried to import a file that is explicitly marked private
-                                    ExportedPath::Private => {
-                                        return Err(anyhow::anyhow!(
+                let cached_entry_value = cached_entry.value();
+
+                match cached_entry_value {
+                    Some(pkg_with_rewrite) => {
+                        // check for rewrite data
+                        let cached_rewrite_data =
+                            pkg_with_rewrite.try_get_cached_or_init(|pkg| {
+                                PackageJsonRewriteData::create(self, &nm_pkg_path, pkg)
+                            })?;
+                        match *cached_rewrite_data {
+                            PackageJsonRewriteData {
+                                exports: Some(ref rewrite_data),
+                                ..
+                            } => {
+                                // if there is a rewrite data, rewrite the path against it.
+                                let mut out = String::new();
+                                let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
+                                    &rel_import,
+                                    DEFAULT_EXPORT_CONDITIONS.iter().copied(),
+                                    &mut out,
+                                )?;
+                                if let Some(rewritten_to) = rewritten_to {
+                                    match rewritten_to.rewritten_export {
+                                        ExportedPath::Exported(exported_rel_path) => nm_dir_path
+                                            .join(NODE_MODULES)
+                                            .join(package_name)
+                                            .join(exported_rel_path),
+                                        // tried to import a file that is explicitly marked private
+                                        ExportedPath::Private => {
+                                            return Err(anyhow::anyhow!(
                                             "Import '{target}' is marked as private by export '{}' in {}",
                                             rewritten_to.export_kind,
                                             nm_pkg_path.join(PACKAGE).display(),
                                         ));
+                                        }
                                     }
-                                }
-                            } else {
-                                // no matched rewrite, so just use node_modules/imported/path
-                                tracing::debug!(
+                                } else {
+                                    // no matched rewrite, so just use node_modules/imported/path
+                                    tracing::debug!(
                                     "no matched rewrite in {:#?} for {rel_import:#?}. Rewrites: {rewrite_data:#?}",
+                                    nm_pkg_path.display()
+                                );
+                                    nm_dir_path.join(NODE_MODULES).join(target)
+                                }
+                            }
+                            _ => {
+                                // no rewrite data, so just use node_modules/imported/path
+                                tracing::debug!(
+                                    "no rewrite data in ${:#?} for {rel_import:#?}",
                                     nm_pkg_path.display()
                                 );
                                 nm_dir_path.join(NODE_MODULES).join(target)
                             }
                         }
-                        _ => {
-                            // no rewrite data, so just use node_modules/imported/path
-                            tracing::debug!(
-                                "no rewrite data in ${:#?} for {rel_import:#?}",
-                                nm_pkg_path.display()
-                            );
-                            nm_dir_path.join(NODE_MODULES).join(target)
-                        }
                     }
-                }
-                None => {
-                    tracing::debug!("no package.json found in: {:#?}", nm_pkg_path);
-                    // TODO: fall through to default resolution
-                    nm_dir_path.join(NODE_MODULES).join(target)
+                    None => {
+                        tracing::debug!("no package.json found in: {:#?}", nm_pkg_path);
+                        // TODO: fall through to default resolution
+                        nm_dir_path.join(NODE_MODULES).join(target)
+                    }
                 }
             };
 

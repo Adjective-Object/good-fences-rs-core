@@ -13,7 +13,7 @@ RUN apt-get install -y \
 # Update new packages
 RUN apt-get update
 
-ARG USERNAME=vscode
+ARG USERNAME=ubuntu
 ARG HOME=/home/${USERNAME}
 ARG USER_UID=1010
 ARG USER_GID=$USER_UID
@@ -41,6 +41,7 @@ RUN apt install -y libdw-dev
 
 # Start acting as the container user to avoid permissions issues
 USER ${USERNAME}
+RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cache
 
 # setup zsh for the user
 RUN mkdir -p ${HOME}/.antigen
@@ -55,9 +56,11 @@ RUN zsh -c "source ${HOME}/.antigen/antigen.zsh; antigen use oh-my-zsh &&\
     antigen bundle lein &&\
     antigen bundle command-not-found &&\
     antigen bundle zsh-users/zsh-syntax-highlighting &&\
-    antigen theme robbyrussell &&\
+    antigen theme awesomepanda &&\
     antigen apply"
 
 # Get Rust
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
-RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.zshrc
+RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cargo -R
+RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.zprofile
+RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.profile
