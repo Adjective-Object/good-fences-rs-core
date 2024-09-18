@@ -4,8 +4,8 @@
 //! See https://github.com/swc-project/swc/blob/f988b66e1fd921266a8abf6fe9bb997b6878e949/crates/swc_ecma_loader/src/resolvers/node.rs
 
 use super::common::AHashMap;
+use super::exported_path::ExportedPathRef;
 use super::package::{Browser, PackageJson};
-use super::pkgjson_exports::ExportedPath;
 use super::pkgjson_rewrites::PackageJsonRewriteData;
 use super::util;
 use super::util::to_absolute_path;
@@ -298,18 +298,23 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 &mut out,
             )? {
                 match rewritten.rewritten_export {
-                    ExportedPath::Exported(exported_rel_path) => {
+                    ExportedPathRef::Exported(exported_rel_path) => {
                         let path = pkg_dir.join(exported_rel_path);
                         // there was a resolved export, try to resolve it
                         return self
                             .resolve_as_file(&path)
                             .or_else(|_| self.resolve_as_directory(&path, false));
                     }
-                    ExportedPath::Private => {
+                    ExportedPathRef::Private => {
                         return Err(anyhow::anyhow!(
                             "Index export is marked as private by export '{}' in {}",
                             rewritten.export_kind,
                             pkg_path.display(),
+                        ));
+                    }
+                    ExportedPathRef::Unrecognized => {
+                        return Err(anyhow::anyhow!(
+                            "Index export had an unrecognized format and will be treated as private during resolution",
                         ));
                     }
                 }
@@ -434,17 +439,24 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                                 )?;
                                 if let Some(rewritten_to) = rewritten_to {
                                     match rewritten_to.rewritten_export {
-                                        ExportedPath::Exported(exported_rel_path) => nm_dir_path
+                                        ExportedPathRef::Exported(exported_rel_path) => nm_dir_path
                                             .join(NODE_MODULES)
                                             .join(package_name)
                                             .join(exported_rel_path),
                                         // tried to import a file that is explicitly marked private
-                                        ExportedPath::Private => {
+                                        ExportedPathRef::Private => {
                                             return Err(anyhow::anyhow!(
-                                            "Import '{target}' is marked as private by export '{}' in {}",
-                                            rewritten_to.export_kind,
-                                            nm_pkg_path.join(PACKAGE).display(),
-                                        ));
+                                                "Import '{target}' is marked as private by export '{}' in {}",
+                                                rewritten_to.export_kind,
+                                                nm_pkg_path.join(PACKAGE).display(),
+                                            ));
+                                        }
+                                        ExportedPathRef::Unrecognized => {
+                                            return Err(anyhow::anyhow!(
+                                                "Import '{target}' matched export '{}' in {}, which has an unrecognized export format. It will be treated as private",
+                                                rewritten_to.export_kind,
+                                                nm_pkg_path.join(PACKAGE).display(),
+                                            ));
                                         }
                                     }
                                 } else {

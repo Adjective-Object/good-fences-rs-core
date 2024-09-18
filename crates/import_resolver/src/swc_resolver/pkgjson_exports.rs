@@ -6,7 +6,10 @@ use hashbrown::Equivalent;
 use path_clean::PathClean;
 use path_slash::PathBufExt;
 
-use super::package::PackageJsonExports;
+use super::{
+    exported_path::{ExportedPath, ExportedPathRef},
+    package::PackageJsonExports,
+};
 
 // Pair path, export-condfition of form ('package-name/imported-path', 'import')
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -28,21 +31,21 @@ impl Equivalent<ExportKey> for (&str, &str) {
 pub struct PackageExportRewriteData {
     // Pre-computed export map for static exports
     // Map is of form ('package-name/imported-path', 'import') => "/absolute/path/to/exported"
-    static_exports: hashbrown::HashMap<ExportKey, Option<String>>,
+    static_exports: hashbrown::HashMap<ExportKey, ExportedPath>,
 
     // Dynamic directory exports
     // Map of form:
     // {
     //  <export_condition> => [("./local-import/", "./remapped-path/"), ..(contd.)]
     // }
-    directory_exports: hashbrown::HashMap<String, Vec<(String, Option<String>)>>,
+    directory_exports: hashbrown::HashMap<String, Vec<(String, ExportedPath)>>,
 
     // Star exports
     // Map of form:
     // {
     //  <export_condition> => [("./local-import/*-foo", "./cjs/remapped-*"), ..(contd.)]
     // }
-    star_exports: hashbrown::HashMap<String, Vec<(String, Option<String>)>>,
+    star_exports: hashbrown::HashMap<String, Vec<(String, ExportedPath)>>,
 }
 
 fn clean_path(p: &str) -> String {
@@ -77,9 +80,9 @@ fn clean_path_avoid_alloc<'a>(
             // escaped chars
             '\\' => true,
             // possible part of '/.' or '..'
-            '.' => i > 0 && (bytes[i-1] == b'.' || bytes[i-1] == b'/'),
+            '.' => i > 0 && (bytes[i - 1] == b'.' || bytes[i - 1] == b'/'),
             // consecutive slashes or './'
-            '/' => i > 0 && (bytes[i-1] == b'.' || bytes[i-1] == b'/'),
+            '/' => i > 0 && (bytes[i - 1] == b'.' || bytes[i - 1] == b'/'),
             _ => false,
         };
 
@@ -201,29 +204,9 @@ fn rewrite_dir_export(
     out.push_str(&clean_relative_import[directory_pattern.len()..]);
 }
 
-pub enum ExportedPath<'a> {
-    Exported(&'a str),
-    Private,
-}
-
-impl<'a> From<&'a str> for ExportedPath<'a> {
-    fn from(s: &'a str) -> Self {
-        ExportedPath::Exported(s)
-    }
-}
-
-impl<'a> From<Option<&'a str>> for ExportedPath<'a> {
-    fn from(s: Option<&'a str>) -> Self {
-        match s {
-            Some(s) => ExportedPath::Exported(s),
-            None => ExportedPath::Private,
-        }
-    }
-}
-
 pub struct MatchedExport<'a> {
     // the rewritten path, if any. If None, then this path is not exported.
-    pub rewritten_export: ExportedPath<'a>,
+    pub rewritten_export: ExportedPathRef<'a>,
     // export condition that was matched against, if any.
     //
     // Borrowed from the input list of requested export conditions
@@ -231,7 +214,7 @@ pub struct MatchedExport<'a> {
 }
 
 impl<'a> MatchedExport<'a> {
-    fn with_kind(rewritten_export: ExportedPath<'a>, export_kind: ExportCondition<'a>) -> Self {
+    fn with_kind(rewritten_export: ExportedPathRef<'a>, export_kind: ExportCondition<'a>) -> Self {
         Self {
             rewritten_export,
             export_kind,
@@ -265,7 +248,7 @@ impl PackageExportRewriteData {
             let export_key = ExportKey(clean_relative_import.to_string(), export_condition.into());
             if let Some(matched) = self.static_exports.get(&export_key) {
                 return Ok(Some(MatchedExport::with_kind(
-                    matched.as_ref().map(|v| v as &str).into(),
+                    matched.as_ref().into(),
                     export_condition.into(),
                 )));
             }
@@ -275,7 +258,7 @@ impl PackageExportRewriteData {
         let directory_match = resolve_export_condition(
             &self.directory_exports,
             requested_export_conditions.clone(),
-            |x: &Vec<(String, Option<String>)>| {
+            |x: &Vec<(String, ExportedPath)>| {
                 x.iter()
                     .filter_map(|(directory_pattern, directory_export)| {
                         if clean_relative_import.starts_with(directory_pattern) {
@@ -291,7 +274,7 @@ impl PackageExportRewriteData {
             return Ok(Some(MatchedExport::with_kind(
                 directory_export
                     .as_ref()
-                    .map(|v| {
+                    .map_export(|v| {
                         rewrite_dir_export(clean_relative_import, directory_pattern, v, out);
                         out as &str
                     })
@@ -304,7 +287,7 @@ impl PackageExportRewriteData {
         let star_match = resolve_export_condition(
             &self.star_exports,
             requested_export_conditions.clone(),
-            |x: &Vec<(String, Option<String>)>| {
+            |x: &Vec<(String, ExportedPath)>| {
                 x.iter()
                     .filter_map(|(star_pattern, star_export)| {
                         match_star_pattern(star_pattern, clean_relative_import)
@@ -319,7 +302,7 @@ impl PackageExportRewriteData {
                 // do nothing
                 target
                     .as_ref()
-                    .map(|v| {
+                    .map_export(|v| {
                         rewrite_star_export(star_match, v, out);
                         out as &str
                     })
@@ -355,6 +338,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                             )
                         },
                     )
+                    .map(|(key, target)| (key, target.into()))
                     .collect();
 
                 Ok(PackageExportRewriteData {
@@ -382,7 +366,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                                 .or_insert_with(Vec::new)
                                 .push((
                                     clean_path(export_path),
-                                    export_target.as_ref().map(|e| clean_path(e)),
+                                    export_target.map_export(|e| clean_path(&e)),
                                 ));
                         }
                     } else if export_path_star_ct > 1 {
@@ -400,7 +384,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                                 .or_insert_with(Vec::new)
                                 .push((
                                     clean_path(export_path),
-                                    export_target.as_ref().map(|e| clean_path(e)),
+                                    export_target.map_export(|e| clean_path(e)),
                                 ));
                         }
                     } else {
@@ -408,7 +392,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                         for (export_condition, export_target) in conditional_exports.iter() {
                             resolution_data.static_exports.insert(
                                 ExportKey(clean_path(export_path), export_condition.clone()),
-                                export_target.as_ref().map(|e| clean_path(e)),
+                                export_target.map_export(|e| clean_path(e)),
                             );
                         }
                     }

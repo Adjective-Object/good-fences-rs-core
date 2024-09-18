@@ -2,6 +2,8 @@ use ftree_cache::context_data::ContextData;
 use serde::Deserialize;
 use swc_common::collections::AHashMap;
 
+use super::exported_path::ExportedPath;
+
 // Either a json string or a boolean
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
@@ -32,6 +34,7 @@ pub struct PackageJson {
     #[serde(default)]
     pub exports: Option<PackageJsonExports>,
 }
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum PackageJsonExports {
@@ -59,23 +62,7 @@ pub enum PackageJsonExports {
     //     "default": "./lib/util.js"
     //   }
     // }
-    Multiple(AHashMap<String, AHashMap<String, Option<String>>>),
-}
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum ExportedPath {
-    Exported(String),
-    #[serde(deserialize_with = "deserialize_ignore_any")]
-    NotExported,
-    // fallback option, see https://github.com/serde-rs/serde/issues/2057#issuecomment-879440712
-    //
-    // Some packages use non-standard extensions to the "exports" field
-    // that are not supported.
-    //
-    // Rather than completely failing to parse the exports field, we ignore the exported
-    // paths here.
-    #[serde(deserialize_with = "deserialize_ignore_any")]
-    Unrecognized,
+    Multiple(AHashMap<String, AHashMap<String, ExportedPath>>),
 }
 
 impl ContextData for PackageJson {

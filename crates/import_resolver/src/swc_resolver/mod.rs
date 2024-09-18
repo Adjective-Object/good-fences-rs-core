@@ -15,6 +15,7 @@ use swc_ecma_loader::{
 
 pub mod combined_resolver;
 mod common;
+mod exported_path;
 mod node_resolver;
 mod package;
 mod pkgjson_exports;
