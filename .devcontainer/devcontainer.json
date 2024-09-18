@@ -28,7 +28,13 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/good-fences-rs-core,type=bind,consistency=delegated",
   "mounts": [
-    "source=${localWorkspaceFolder}/../client-web,target=/workspaces/client-web,type=bind,consistency=cached",
+    // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.
+    // Don't commit it, though!
+    // "source=${localWorkspaceFolder}/../client-web,target=/workspaces/client-web,type=bind,consistency=cached",
+    // expose the user's ssh credentials to the dev container
+    "source=${localEnv:HOME}/.ssh,target=/home/ubuntu/.ssh,type=bind,consistency=cached",
+    // map the .persist directory to /cache so it can be persisted between container rebuilds.
+    // This persists zsh history as well as downloaded cargo crate sources.
     "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached"
   ],
   "workspaceFolder": "/workspaces/good-fences-rs-core",
