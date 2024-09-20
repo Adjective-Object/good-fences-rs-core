@@ -6,6 +6,7 @@ RUN apt-get update
 # Get Ubuntu packages
 RUN apt-get install -y \
     build-essential \
+    gdb \
     pkg-config \
     curl git zsh \
     vim

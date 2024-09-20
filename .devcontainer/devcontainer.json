@@ -40,9 +40,10 @@
   "workspaceFolder": "/workspaces/good-fences-rs-core",
   // "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
   "extensions": [
+    "ms-vscode.cpptools",
     "rust-lang.rust-analyzer",
-    "vadimcn.vscode-lldb",
-    "tamasfe.even-better-toml"
+    "tamasfe.even-better-toml",
+    "vadimcn.vscode-lldb"
   ],
   "remoteEnv": {
     "VM_REPO_PATH": "/workspaces/good-fences-rs-core"
