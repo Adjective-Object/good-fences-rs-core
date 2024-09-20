@@ -16,7 +16,7 @@ pub enum ExportedPath {
 }
 
 impl ExportedPath {
-    pub fn as_ref<'a>(&'a self) -> ExportedPathRef<'a> {
+    pub fn as_ref(&'_ self) -> ExportedPathRef<'_> {
         match self {
             ExportedPath::Exported(s) => ExportedPathRef::Exported(s),
             ExportedPath::Private => ExportedPathRef::Private,
@@ -26,7 +26,7 @@ impl ExportedPath {
 
     pub fn map_export(&self, f: impl FnOnce(&str) -> String) -> Self {
         match self {
-            ExportedPath::Exported(s) => ExportedPath::Exported(f(&s)),
+            ExportedPath::Exported(s) => ExportedPath::Exported(f(s)),
             ExportedPath::Private => ExportedPath::Private,
             ExportedPath::Unrecognized => ExportedPath::Unrecognized,
         }

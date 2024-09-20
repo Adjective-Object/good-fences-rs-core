@@ -248,7 +248,7 @@ impl PackageExportRewriteData {
             let export_key = ExportKey(clean_relative_import.to_string(), export_condition.into());
             if let Some(matched) = self.static_exports.get(&export_key) {
                 return Ok(Some(MatchedExport::with_kind(
-                    matched.as_ref().into(),
+                    matched.as_ref(),
                     export_condition.into(),
                 )));
             }
@@ -272,13 +272,10 @@ impl PackageExportRewriteData {
         );
         if let Some(((directory_pattern, directory_export), export_condition)) = directory_match {
             return Ok(Some(MatchedExport::with_kind(
-                directory_export
-                    .as_ref()
-                    .map_export(|v| {
-                        rewrite_dir_export(clean_relative_import, directory_pattern, v, out);
-                        out as &str
-                    })
-                    .into(),
+                directory_export.as_ref().map_export(|v| {
+                    rewrite_dir_export(clean_relative_import, directory_pattern, v, out);
+                    out as &str
+                }),
                 export_condition,
             )));
         }
@@ -300,13 +297,10 @@ impl PackageExportRewriteData {
             return Ok(Some(MatchedExport::with_kind(
                 // if we have a star match, rewrite the path and store it in `out`. Otherwise,
                 // do nothing
-                target
-                    .as_ref()
-                    .map_export(|v| {
-                        rewrite_star_export(star_match, v, out);
-                        out as &str
-                    })
-                    .into(),
+                target.as_ref().map_export(|v| {
+                    rewrite_star_export(star_match, v, out);
+                    out as &str
+                }),
                 export_condition,
             )));
         }
@@ -366,7 +360,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                                 .or_insert_with(Vec::new)
                                 .push((
                                     clean_path(export_path),
-                                    export_target.map_export(|e| clean_path(&e)),
+                                    export_target.map_export(clean_path),
                                 ));
                         }
                     } else if export_path_star_ct > 1 {
@@ -384,7 +378,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                                 .or_insert_with(Vec::new)
                                 .push((
                                     clean_path(export_path),
-                                    export_target.map_export(|e| clean_path(e)),
+                                    export_target.map_export(clean_path),
                                 ));
                         }
                     } else {
@@ -392,7 +386,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                         for (export_condition, export_target) in conditional_exports.iter() {
                             resolution_data.static_exports.insert(
                                 ExportKey(clean_path(export_path), export_condition.clone()),
-                                export_target.map_export(|e| clean_path(e)),
+                                export_target.map_export(clean_path),
                             );
                         }
                     }
