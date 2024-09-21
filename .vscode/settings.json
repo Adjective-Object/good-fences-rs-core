@@ -22,6 +22,5 @@
     "editor.formatOnSave": true,
     "files.autoSaveWorkspaceFilesOnly": true,
     "lldb.cargo": "/home/ubuntu/.cargo/bin/cargo",
-    "terminal.integrated.shellIntegration.enabled": true,
     "terminal.integrated.shellIntegration.decorationsEnabled": "never",
 }

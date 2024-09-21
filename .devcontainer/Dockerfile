@@ -3,6 +3,16 @@ FROM ubuntu:24.10
 # Update default packages
 RUN apt-get update
 
+# Set locale before any packages are installed,
+# since packages are influenced by the current locale on installation
+#
+# This is necessary to get zsh to work well.
+#  See: https://github.com/ohmyzsh/ohmyzsh/wiki/FAQ#i-see-duplicate-typed-characters-after-i-complete-a-command
+RUN apt-get install -y language-pack-en
+RUN echo LC_CTYPE=\"en_US.UTF-8\" "\n" \
+    LC_ALL=\"en_US.UTF-8\" "\n" \
+    LANG=\"en_US.UTF-8\" "\n" > /etc/default/locale
+
 # Get Ubuntu packages
 RUN apt-get install -y \
     build-essential \
@@ -49,18 +59,21 @@ RUN mkdir -p ${HOME}/.antigen
 RUN curl -L https://git.io/antigen > ${HOME}/.antigen/antigen.zsh
 COPY zshrc.zsh ${HOME}/.zshrc
 RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.zshrc
-# configure antigen
-RUN zsh -c "source ${HOME}/.antigen/antigen.zsh; antigen use oh-my-zsh &&\
-    antigen bundle git &&\
-    antigen bundle heroku &&\
-    antigen bundle pip &&\
-    antigen bundle lein &&\
-    antigen bundle command-not-found &&\
-    antigen bundle zsh-users/zsh-syntax-highlighting &&\
-    antigen theme awesomepanda &&\
-    antigen apply"
+# run zsh to install antigen plugins for the first time
+RUN zsh ${HOME}/.zshrc
 
-# Get Rust
+# Setup cargo directories as symlinks into the /cache volume
+RUN sudo mkdir -p \
+    /cache/cargo-registry \
+    /cache/cargo-too
+RUN sudo chown ${USERNAME}:${USERNAME} /cache -R
+RUN mkdir -p \
+    /home/${USERNAME}/.cargo/registry \
+    /home/${USERNAME}/.cargo/toolchains
+RUN sudo ln -s /cache/cargo-registry /home/${USERNAME}/.cargo/registry
+RUN sudo ln -s /cache/cargo-toolchains /home/${USERNAME}/.cargo/toolchains 
+
+# Install rust
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cargo -R
 RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.zprofile
