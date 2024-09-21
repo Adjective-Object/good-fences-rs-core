@@ -10,6 +10,16 @@ RUN echo LC_CTYPE=\"en_US.UTF-8\" "\n" \
     LC_ALL=\"en_US.UTF-8\" "\n" \
     LANG=\"en_US.UTF-8\" "\n" > /etc/default/locale
 
+# Set locale before any packages are installed,
+# since packages are influenced by the current locale on installation
+#
+# This is necessary to get zsh to work well.
+#  See: https://github.com/ohmyzsh/ohmyzsh/wiki/FAQ#i-see-duplicate-typed-characters-after-i-complete-a-command
+RUN apt-get install -y language-pack-en
+RUN echo LC_CTYPE=\"en_US.UTF-8\" "\n" \
+    LC_ALL=\"en_US.UTF-8\" "\n" \
+    LANG=\"en_US.UTF-8\" "\n" > /etc/default/locale
+
 # Get Ubuntu packages
 RUN apt-get update && apt-get install -y \
     build-essential \
