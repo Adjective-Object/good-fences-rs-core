@@ -85,7 +85,11 @@ pub fn resolve_ts_import<'a>(
     initial_path: &RelativePath,
     raw_import_specifier: &'a str,
 ) -> anyhow::Result<ResolvedImport, String> {
-    // println!("resole import! {:?}, {:?}", initial_path, import_specifier);
+    tracing::debug!(
+        "resolve_ts_import! {:?}, {:?}",
+        initial_path,
+        raw_import_specifier
+    );
 
     // this is a directory import, so we want to add index.ts to the end of the file
     let import_specifier: String = if raw_import_specifier.ends_with('/') {

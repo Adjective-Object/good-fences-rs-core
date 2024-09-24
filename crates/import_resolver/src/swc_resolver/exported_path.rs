@@ -53,6 +53,7 @@ impl PartialEq for ExportedPath {
         match (self, other) {
             (ExportedPath::Exported(a), ExportedPath::Exported(b)) => a == b,
             (ExportedPath::Private, ExportedPath::Private) => true,
+            (ExportedPath::Unrecognized, ExportedPath::Unrecognized) => true,
             _ => false,
         }
     }

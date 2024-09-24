@@ -15,6 +15,7 @@ struct CliArgs {
     // for dumping stacks
     rstack: std::primitive::bool,
     // If this flag is set, run a timer to dump stacks every 5s
+    #[cfg(feature = "rstack")]
     #[arg(short = 'd', long, default_value_t = false)]
     dump_stacks: std::primitive::bool,
     // If this flag is set, run the parking_lot deadlock detector
@@ -49,6 +50,7 @@ fn start_deadlock_detector() {
     });
 }
 
+#[cfg(feature = "rstack")]
 fn start_stackdump_timer() {
     // only for #[cfg]
     use std::process::Command;
@@ -98,6 +100,7 @@ fn start_stackdump_timer() {
 
 fn main() -> Result<()> {
     let args = CliArgs::parse();
+    #[cfg(feature = "rstack")]
     if args.rstack {
         let _ = rstack_self::child();
         return Ok(());
@@ -106,6 +109,7 @@ fn main() -> Result<()> {
     if args.deadlock_detector {
         start_deadlock_detector();
     }
+    #[cfg(feature = "rstack")]
     if args.dump_stacks {
         start_stackdump_timer();
     }

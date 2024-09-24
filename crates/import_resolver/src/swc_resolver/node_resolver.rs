@@ -115,25 +115,18 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
     fn wrap(&self, path: Option<PathBuf>) -> Result<FileName, Error> {
         if let Some(path) = path {
             if self.preserve_symlinks {
-                return Ok(FileName::Real(path.clean()));
+                Ok(FileName::Real(path.clean()))
             } else {
-                return Ok(FileName::Real(path.canonicalize()?));
+                Ok(FileName::Real(path.canonicalize()?))
             }
+        } else {
+            Err(anyhow::anyhow!("file not found"))
         }
-        bail!("index not found")
     }
 
     /// Resolve a path as a file. If `path` refers to a file, it is returned;
     /// otherwise the `path` + each extension is tried.
     pub fn resolve_as_file(&self, path: &Path) -> Result<Option<PathBuf>, Error> {
-        if path
-            .to_str()
-            .unwrap_or("")
-            .contains("getReadWriteRecipientViewStateFromEmailAddress")
-        {
-            println!("node-resolver resolve_as_file: {:?}", path);
-        }
-
         let _tracing = if cfg!(debug_assertions) {
             Some(
                 tracing::span!(
@@ -216,19 +209,6 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         path: &Path,
         allow_package_entry: bool,
     ) -> Result<Option<PathBuf>, Error> {
-        let _tracing = if cfg!(debug_assertions) {
-            Some(
-                tracing::span!(
-                    Level::ERROR,
-                    "resolve_as_directory",
-                    path = tracing::field::display(path.display())
-                )
-                .entered(),
-            )
-        } else {
-            None
-        };
-
         if cfg!(debug_assertions) {
             trace!("resolve_as_directory({})", path.display());
         }
@@ -593,13 +573,22 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                         .or_else(|_| self.resolve_as_directory(&path, true))
                         .and_then(|p| self.wrap(p))
                 } else {
-                    self.resolve_node_modules(base_dir, target)
+                    let result = self
+                        .resolve_node_modules(base_dir, target)
                         .and_then(|path| {
                             let file_path = path.context("failed to get the node_modules path");
                             let current_directory = current_dir()?;
                             let relative_path = diff_paths(file_path?, current_directory);
                             self.wrap(relative_path)
-                        })
+                        });
+
+                    tracing::debug!(
+                        "in resolve_filename: resolve_node_module({base_dir}, {target}) -> {result:#?}",
+                        base_dir = base_dir.display(),
+                        target = target,
+                        result = result
+                    );
+                    result
                 }
             }
         }

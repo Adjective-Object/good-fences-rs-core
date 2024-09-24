@@ -78,18 +78,26 @@ impl<'a> Resolve for CombinedResolver<'a> {
         };
 
         match self.tsconfig_cache.probe_path(self.root_dir, base_path)? {
-            Some((_, maybe_tsconfig)) => match maybe_tsconfig.value() {
+            Some((path, maybe_tsconfig)) => match maybe_tsconfig.value() {
                 ProcessedTsconfig::HasPaths(ref tsconfig) => {
                     let resolver =
                         TsconfigPathsResolver::new(tsconfig, &self.node_modules_resolver);
+                    tracing::debug!("matched tsconfig {} with \"paths\". resolving against tsconfig resolver (wrapping node_modules)", path.display());
 
                     resolver.resolve(base, module_specifier)
                 }
                 ProcessedTsconfig::NoPaths => {
+                    tracing::debug!("matched tsconfig {} with no \"paths\" entry. resolving against node_modules_resolver", path.display());
                     self.node_modules_resolver.resolve(base, module_specifier)
                 }
             },
-            None => self.node_modules_resolver.resolve(base, module_specifier),
+            None => {
+                tracing::debug!(
+                    "No tsconfig found for {:?}, resolving against node_modules_resolver",
+                    base_path
+                );
+                self.node_modules_resolver.resolve(base, module_specifier)
+            }
         }
     }
 }
@@ -99,7 +107,7 @@ mod test {
     use super::*;
     use pretty_assertions::assert_eq;
     use test_tmpdir::TmpDir;
-    // use tracing_test::traced_test;
+    use tracing_test::traced_test;
 
     fn check_deadlocks() {
         std::thread::spawn(move || loop {
@@ -109,19 +117,19 @@ mod test {
                 continue;
             }
 
-            println!("{} deadlocks detected", deadlocks.len());
+            tracing::debug!("{} deadlocks detected", deadlocks.len());
             for (i, threads) in deadlocks.iter().enumerate() {
-                println!("Deadlock #{}", i);
+                tracing::debug!("Deadlock #{}", i);
                 for t in threads {
-                    println!("Thread Id {:#?}", t.thread_id());
-                    println!("{:#?}", t.backtrace());
+                    tracing::debug!("Thread Id {:#?}", t.thread_id());
+                    tracing::debug!("{:#?}", t.backtrace());
                 }
             }
         });
     }
 
     #[test]
-    // #[traced_test]
+    #[traced_test]
     pub fn test_bypasses_tsconfig() {
         check_deadlocks();
         let tmp = test_tmpdir!(

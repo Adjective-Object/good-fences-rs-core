@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Context, Error, Result};
 use dashmap::DashMap;
-use deadlock_ref::prelude::*;
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::path::{Path, PathBuf};
 use tracing::debug;
+
+#[cfg(feature = "deadlock_ref")]
+use deadlock_ref::prelude::*;
 
 /// Represents some state which is represented by the existence of a path on the filesystem
 ///
@@ -163,9 +165,16 @@ pub struct FileContextCache<
     args: TArgs,
 }
 
+#[cfg(feature = "deadlock_ref")]
 pub type CtxRef<'a, T> = DeadlockDebugRef<dashmap::mapref::one::Ref<'a, PathBuf, T>>;
+#[cfg(feature = "deadlock_ref")]
 pub type CtxOptRef<'a, T> =
     DeadlockDebugRef<dashmap::mapref::one::MappedRef<'a, PathBuf, Option<T>, T>>;
+
+#[cfg(not(feature = "deadlock_ref"))]
+pub type CtxRef<'a, T> = dashmap::mapref::one::Ref<'a, PathBuf, T>;
+#[cfg(not(feature = "deadlock_ref"))]
+pub type CtxOptRef<'a, T> = dashmap::mapref::one::MappedRef<'a, PathBuf, Option<T>, T>;
 
 impl<T: ContextData<()>, const CONTEXT_FNAME: &'static str> FileContextCache<T, CONTEXT_FNAME, ()> {
     pub fn new() -> Self {
@@ -249,13 +258,13 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     // First, checks the cache. If no entry is found, checks the real
     // filesystem for a tsconfig.json file and caches the result.
     pub fn check_dir<'a>(&'a self, base: &Path) -> Result<CtxRef<'a, Option<T>>, Error> {
-        println!("{} check_dir! {}", CONTEXT_FNAME, base.display());
-        DeadlockDebugRef::try_create(
-            format!("{CONTEXT_FNAME}:{}", base.display()),
-            || -> Result<dashmap::mapref::one::Ref<'a, PathBuf, Option<T>>, Error> {
-                let res = self.cache.entry(base.to_owned()).or_try_insert_with(
-                    || -> Result<Option<T>> {
-                        println!(
+        tracing::debug!("{} check_dir! {}", CONTEXT_FNAME, base.display());
+        let mk_ref = || -> Result<dashmap::mapref::one::Ref<'a, PathBuf, Option<T>>, Error> {
+            let res =
+                self.cache
+                    .entry(base.to_owned())
+                    .or_try_insert_with(|| -> Result<Option<T>> {
+                        tracing::debug!(
                             "{} check_dir! - populate - {}",
                             CONTEXT_FNAME,
                             base.display()
@@ -263,18 +272,21 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
                         let x = self.check_dir_os_fs(base).with_context(|| {
                             format!("Failed while checking {:?} for {}", base, CONTEXT_FNAME)
                         })?;
-                        println!(
+                        tracing::debug!(
                             "{} check_dir! - populated! - {}",
                             CONTEXT_FNAME,
                             base.display()
                         );
                         Ok(x)
-                    },
-                )?;
-                // downgrade mutable ref to non-mutable ref
-                return Ok(res.downgrade());
-            },
-        )
+                    })?;
+            // downgrade mutable ref to non-mutable ref
+            return Ok(res.downgrade());
+        };
+
+        #[cfg(feature = "deadlock_ref")]
+        return DeadlockDebugRef::try_create(format!("{CONTEXT_FNAME}:{}", base.display()), mk_ref);
+        #[cfg(not(feature = "deadlock_ref"))]
+        return mk_ref();
     }
 
     fn check_dir_os_fs(&self, base: &Path) -> Result<Option<T>, Error> {
