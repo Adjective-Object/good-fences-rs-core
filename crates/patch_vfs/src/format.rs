@@ -3,9 +3,10 @@ use ouroboros::self_referencing;
 use std::{
     collections::HashMap,
     fmt::{Display, Write},
+    str::FromStr,
 };
 
-struct Patch {
+pub struct Patch {
     // comments on why the patch is necessary
     comment_lines: Vec<String>,
     // md5 of the target file the patch is meant to apply to
@@ -30,8 +31,6 @@ struct SelfOwnedDiffyPatch {
 }
 
 impl SelfOwnedDiffyPatch {
-    const SYNTHETIC_HEADER: &'static str = "--- A\n+++B\n";
-
     pub fn from_hunk_str(hunk_str: &str) -> Result<SelfOwnedDiffyPatch> {
         SelfOwnedDiffyPatch::try_new(
             hunk_str.to_string(),
@@ -41,6 +40,7 @@ impl SelfOwnedDiffyPatch {
         )
     }
 
+    #[cfg(test)]
     pub fn num_hunk_lines(&self) -> usize {
         self.with_patch(|patch| {
             patch
@@ -97,14 +97,23 @@ impl Patch {
         Ok((header_values, comment_lines, ""))
     }
 
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn apply(&self, target_bytes: &str) -> Result<String, diffy::ApplyError> {
+        self.inner_patch
+            .with_patch(|patch: &diffy::Patch<'_, str>| diffy::apply(target_bytes, patch))
+    }
+}
+
+impl FromStr for Patch {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         let (header_props, comment_lines, remainder) = Patch::parse_header(s).unwrap();
         let patch_format_version =
             match header_props.get("patch_format_version").map(String::as_str) {
                 Some("1") | None => "1".to_string(),
                 Some(p) => return Err(anyhow!("unrecognized patch format version {p}")),
             };
-        let target_file_md5 = header_props.get("target_file_md5").map(String::clone);
+        let target_file_md5 = header_props.get("target_file_md5").cloned();
 
         // unidiff requires file names, but the patch sets only contain hunks. Use synthetic files here.
         let inner_patch = SelfOwnedDiffyPatch::from_hunk_str(remainder)?;
@@ -145,6 +154,8 @@ impl Display for Patch {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use pretty_assertions::{assert_eq, assert_str_eq};
 
     use super::Patch;
