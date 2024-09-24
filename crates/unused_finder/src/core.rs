@@ -1,19 +1,3 @@
-use anyhow::Result;
-use import_resolver::swc_resolver::MonorepoResolver;
-use rayon::prelude::*;
-use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    fmt::Display,
-    iter::FromIterator,
-    path::PathBuf,
-    str::FromStr,
-    sync::Arc,
-};
-use swc_core::{
-    ecma::loader::resolve::Resolve,
-    common::source_map::SmallPos
-};
 use crate::import_export_info::ImportExportInfo;
 use crate::utils::{
     process_async_imported_paths, process_executed_paths, process_exports_from,
@@ -24,7 +8,20 @@ use crate::{
     graph::{Graph, GraphFile},
     walked_file::WalkedFile,
 };
+use anyhow::Result;
+use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
+use rayon::prelude::*;
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    fmt::Display,
+    iter::FromIterator,
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
+use swc_core::{common::source_map::SmallPos, ecma::loader::resolve::Resolve};
 
 #[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -34,7 +31,7 @@ pub struct FindUnusedItemsConfig {
     #[serde(default)]
     pub report_exported_items: bool,
     // Root paths to walk as source files
-    #[serde(alias="pathsToRead")]
+    #[serde(alias = "pathsToRead")]
     pub root_paths: Vec<String>,
     // Path to the root tsconfig.paths.json file used to resolve ts imports between projects.
     // Note: this should be removed and replaced with normal node resolution.
@@ -239,9 +236,7 @@ pub fn find_unused_items(
         .map(|file| (file.file_path.clone(), Arc::new(file)))
         .collect();
 
-    let mut graph = Graph {
-        files,
-    };
+    let mut graph = Graph { files };
 
     let entry_files: Vec<String> = flattened_walk_file_data
         .par_iter_mut()
@@ -307,7 +302,9 @@ pub fn find_unused_items(
     };
 
     Ok(UnusedFinderReport {
-        unused_files: reported_unused_files.keys().map(|p| p.to_string())
+        unused_files: reported_unused_files
+            .keys()
+            .map(|p| p.to_string())
             .collect(),
         unused_files_items,
     })

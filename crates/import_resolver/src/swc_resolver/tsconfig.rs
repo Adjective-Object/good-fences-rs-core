@@ -1,5 +1,5 @@
-use ftree_cache::context_data::ContextData;
 use anyhow::{anyhow, ensure, Context, Result};
+use ftree_cache::context_data::ContextData;
 use path_clean::PathClean;
 use serde::Deserialize;
 use std::collections::HashMap;

@@ -32,15 +32,13 @@ pub enum ExternalFences {
     Ignore = 1,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Deserialize, PartialEq, Default)]
 pub enum WalkFileData {
     Fence(Fence),
     SourceFile(SourceFile),
     #[default]
     Nothing,
 }
-
 
 type TagList = HashSet<String>;
 
@@ -419,8 +417,7 @@ mod test {
         assert!(
             !discovered.iter().any(|x| match x {
                 WalkFileData::SourceFile(y) =>
-                    y.source_file_path
-                        == "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts",
+                    y.source_file_path == "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts",
                 _ => false,
             }),
             "Expected to have ignored {:?}, but it did not. Actual: {:?}",

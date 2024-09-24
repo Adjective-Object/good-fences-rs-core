@@ -186,8 +186,7 @@ pub fn retrieve_files(
                 if let Ok(dir_entry) = dir_entry_result {
                     if dir_entry.file_name() == "package.json" {
                         if let Ok(text) = std::fs::read_to_string(dir_entry.path()) {
-                            let pkg_json: serde_json::Value =
-                                serde_json::from_str(&text).unwrap();
+                            let pkg_json: serde_json::Value = serde_json::from_str(&text).unwrap();
                             let name = pkg_json["name"].as_str();
                             if let Some(name) = name {
                                 *dir_state = name.to_string();
@@ -210,10 +209,8 @@ pub fn retrieve_files(
                         // Source file [.ts, .tsx, .js, .jsx]
                         let joined = &dir_entry.parent_path.join(file_name);
                         let slashed = joined.to_slash().unwrap();
-                        let visitor_result = get_import_export_paths_map(
-                            slashed.to_string(),
-                            skipped_items.clone(),
-                        );
+                        let visitor_result =
+                            get_import_export_paths_map(slashed.to_string(), skipped_items.clone());
                         if let Ok(import_export_info) = visitor_result {
                             dir_entry.client_state =
                                 WalkedFile::SourceFile(Box::new(UnusedFinderSourceFile {

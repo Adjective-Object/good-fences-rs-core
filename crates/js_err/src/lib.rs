@@ -1,5 +1,5 @@
 use anyhow::Error;
-use std::{fmt::Display};
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum Status {
@@ -31,32 +31,36 @@ pub enum Status {
 
 impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match &self {
-            Status::Ok => "ok",
-            Status::InvalidArg => "invalid_arg",
-            Status::ObjectExpected => "object_expected",
-            Status::StringExpected => "string_expected",
-            Status::NameExpected => "name_expected",
-            Status::FunctionExpected => "function_expected",
-            Status::NumberExpected => "number_expected",
-            Status::BooleanExpected => "boolean_expected",
-            Status::ArrayExpected => "array_expected",
-            Status::GenericFailure => "generic_failure",
-            Status::PendingException => "pending_exception",
-            Status::Cancelled => "cancelled",
-            Status::EscapeCalledTwice => "escape_called_twice",
-            Status::HandleScopeMismatch => "handle_scope_mismatch",
-            Status::CallbackScopeMismatch => "callback_scope_mismatch",
-            Status::QueueFull => "queue_full",
-            Status::Closing => "closing",
-            Status::BigintExpected => "bigint_expected",
-            Status::DateExpected => "date_expected",
-            Status::ArrayBufferExpected => "array_buffer_expected",
-            Status::DetachableArraybufferExpected => "detachable_arraybuffer_expected",
-            Status::WouldDeadlock => "would_deadlock",
-            Status::NoExternalBuffersAllowed => "no_external_buffers_allowed",
-            Status::Unknown => "unknown",
-        })?;
+        write!(
+            f,
+            "{}",
+            match &self {
+                Status::Ok => "ok",
+                Status::InvalidArg => "invalid_arg",
+                Status::ObjectExpected => "object_expected",
+                Status::StringExpected => "string_expected",
+                Status::NameExpected => "name_expected",
+                Status::FunctionExpected => "function_expected",
+                Status::NumberExpected => "number_expected",
+                Status::BooleanExpected => "boolean_expected",
+                Status::ArrayExpected => "array_expected",
+                Status::GenericFailure => "generic_failure",
+                Status::PendingException => "pending_exception",
+                Status::Cancelled => "cancelled",
+                Status::EscapeCalledTwice => "escape_called_twice",
+                Status::HandleScopeMismatch => "handle_scope_mismatch",
+                Status::CallbackScopeMismatch => "callback_scope_mismatch",
+                Status::QueueFull => "queue_full",
+                Status::Closing => "closing",
+                Status::BigintExpected => "bigint_expected",
+                Status::DateExpected => "date_expected",
+                Status::ArrayBufferExpected => "array_buffer_expected",
+                Status::DetachableArraybufferExpected => "detachable_arraybuffer_expected",
+                Status::WouldDeadlock => "would_deadlock",
+                Status::NoExternalBuffersAllowed => "no_external_buffers_allowed",
+                Status::Unknown => "unknown",
+            }
+        )?;
         Ok(())
     }
 }
@@ -240,7 +244,7 @@ impl Display for JsErr {
 
 impl std::error::Error for JsErr {
     fn cause(&self) -> Option<&dyn std::error::Error> {
-        self.err.source()                        
+        self.err.source()
     }
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.err.source()
@@ -253,7 +257,6 @@ impl From<JsErr> for napi::Error {
         napi::Error::new(val.status.into(), val.err)
     }
 }
-
 
 #[cfg(feature = "napi")]
 impl From<Status> for napi::Status {

@@ -254,10 +254,12 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                         HashSet::from_iter(imported_source_file_fences);
 
                     let exclusive_source_fences: HashSet<&Fence> = source_fences_set
-                        .difference(&imported_source_file_fences_set).copied()
+                        .difference(&imported_source_file_fences_set)
+                        .copied()
                         .collect();
                     let exclusive_target_fences: HashSet<&Fence> = imported_source_file_fences_set
-                        .difference(&source_fences_set).copied()
+                        .difference(&source_fences_set)
+                        .copied()
                         .collect();
 
                     // check allowed imports against tags of the imported source file

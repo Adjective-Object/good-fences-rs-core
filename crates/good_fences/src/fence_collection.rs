@@ -20,7 +20,9 @@ impl FenceCollection {
             if let Some(key_str) = key.to_slash() {
                 let fence_option = self.fences_map.get(key_str.deref());
 
-                if let Some(fence) = fence_option { fences.push(fence) }
+                if let Some(fence) = fence_option {
+                    fences.push(fence)
+                }
             }
         }
         fences

@@ -170,10 +170,8 @@ mod test {
             visit::{FoldWith, VisitWith},
         },
     };
-    
-    use swc_utils::parse_ecma_src;
 
-    
+    use swc_utils::parse_ecma_src;
 
     use super::ImportPathVisitor;
 

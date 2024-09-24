@@ -71,9 +71,7 @@ impl GoodFencesRunner {
             }));
         GoodFencesRunner {
             source_files: source_file_map,
-            fence_collection: FenceCollection {
-                fences_map,
-            },
+            fence_collection: FenceCollection { fences_map },
             tsconfig_paths_json,
         }
     }

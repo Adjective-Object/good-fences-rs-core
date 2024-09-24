@@ -3,9 +3,7 @@ pub fn package_name(import_specifier: &str) -> Option<&str> {
     if import_specifier.is_empty() {
         return None;
     }
-    let idx = import_specifier
-        .find('/')
-        .unwrap_or(import_specifier.len());
+    let idx = import_specifier.find('/').unwrap_or(import_specifier.len());
     let first_slash = &import_specifier[..idx];
 
     if import_specifier.starts_with('@') {

@@ -215,7 +215,9 @@ impl UnusedFinder {
         let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
 
         let ok = UnusedFinderReport {
-            unused_files: reported_unused_files.keys().map(|p| p.to_string())
+            unused_files: reported_unused_files
+                .keys()
+                .map(|p| p.to_string())
                 .collect(),
             unused_files_items,
         };
@@ -256,7 +258,9 @@ impl UnusedFinder {
         let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
 
         let mut ok = UnusedFinderReport {
-            unused_files: reported_unused_files.keys().map(|p| p.to_string())
+            unused_files: reported_unused_files
+                .keys()
+                .map(|p| p.to_string())
                 .collect(),
             unused_files_items,
         };

@@ -165,9 +165,7 @@ pub fn write_violations_as_json(
     ) {
         Ok(_) => {
             let cwd = std::env::current_dir()?.to_string_lossy().to_string();
-            println!(
-                "Violations written to {} at {}", err_file_output_path, cwd,
-            );
+            println!("Violations written to {} at {}", err_file_output_path, cwd,);
         }
         Err(err) => {
             return Err(anyhow::format_err!(

@@ -7,11 +7,9 @@ pub struct UnusedFinderSourceFile {
     pub import_export_info: ImportExportInfo,
 }
 
-#[derive(Debug, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, PartialEq, Default)]
 pub enum WalkedFile {
     SourceFile(Box<UnusedFinderSourceFile>),
     #[default]
     Nothing,
 }
-

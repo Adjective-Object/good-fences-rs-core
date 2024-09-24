@@ -185,22 +185,37 @@ impl ExportsCollector {
         allow_unused: bool,
         span: Span,
     ) {
-        specs.iter().for_each(|specifier| if let ExportSpecifier::Named(named) = specifier {
-            // Handles `export { foo as bar }`
-            if let Some(exported) = &named.exported {
-                if let ModuleExportName::Ident(id) = exported {
-                    let sym = id.sym.to_string();
-                    // export { foo as default }
-                    if sym == "default" {
-                        self.exported_ids.insert(ExportedItemMetadata {
-                            export_kind: ExportKind::Default,
-                            span,
-                            allow_unused,
-                        });
-                    } else if !self
+        specs.iter().for_each(|specifier| {
+            if let ExportSpecifier::Named(named) = specifier {
+                // Handles `export { foo as bar }`
+                if let Some(exported) = &named.exported {
+                    if let ModuleExportName::Ident(id) = exported {
+                        let sym = id.sym.to_string();
+                        // export { foo as default }
+                        if sym == "default" {
+                            self.exported_ids.insert(ExportedItemMetadata {
+                                export_kind: ExportKind::Default,
+                                span,
+                                allow_unused,
+                            });
+                        } else if !self
+                            .skipped_items
+                            .iter()
+                            .any(|skipped| skipped.is_match(&sym))
+                        {
+                            self.exported_ids.insert(ExportedItemMetadata {
+                                export_kind: ExportKind::Named(id.sym.to_string()),
+                                span,
+                                allow_unused,
+                            });
+                        }
+                    }
+                } else if let ModuleExportName::Ident(id) = &named.orig {
+                    // handles `export { foo }`
+                    if !self
                         .skipped_items
                         .iter()
-                        .any(|skipped| skipped.is_match(&sym))
+                        .any(|skipped| skipped.is_match(id.sym.as_ref()))
                     {
                         self.exported_ids.insert(ExportedItemMetadata {
                             export_kind: ExportKind::Named(id.sym.to_string()),
@@ -208,19 +223,6 @@ impl ExportsCollector {
                             allow_unused,
                         });
                     }
-                }
-            } else if let ModuleExportName::Ident(id) = &named.orig {
-                // handles `export { foo }`
-                if !self
-                    .skipped_items
-                    .iter()
-                    .any(|skipped| skipped.is_match(id.sym.as_ref()))
-                {
-                    self.exported_ids.insert(ExportedItemMetadata {
-                        export_kind: ExportKind::Named(id.sym.to_string()),
-                        span,
-                        allow_unused,
-                    });
                 }
             }
         });
@@ -447,73 +449,74 @@ impl Visit for ExportsCollector {
             return;
         }
         // import .. from ..
-        let mut specifiers: Vec<ExportKind> =
-            import
-                .specifiers
-                .iter()
-                .filter_map(|spec| -> Option<ExportKind> {
-                    match spec {
-                        ImportSpecifier::Named(named) => {
-                            match &named.imported {
-                                Some(module_name) => {
-                                    // import { foo as bar } from './foo'
-                                    match module_name {
-                                        ModuleExportName::Ident(ident) => {
-                                            // sym_str = foo in `import { foo as bar } from './foo'`
-                                            let sym_str = ident.sym.to_string();
-                                            if sym_str == "default" {
-                                                // import { default as foo } from 'foo'
-                                                if !self.skipped_items.iter().any(|s| {
-                                                    s.is_match(named.local.sym.as_ref())
-                                                }) {
-                                                    return Some(ExportKind::Default);
-                                                }
-                                            }
+        let mut specifiers: Vec<ExportKind> = import
+            .specifiers
+            .iter()
+            .filter_map(|spec| -> Option<ExportKind> {
+                match spec {
+                    ImportSpecifier::Named(named) => {
+                        match &named.imported {
+                            Some(module_name) => {
+                                // import { foo as bar } from './foo'
+                                match module_name {
+                                    ModuleExportName::Ident(ident) => {
+                                        // sym_str = foo in `import { foo as bar } from './foo'`
+                                        let sym_str = ident.sym.to_string();
+                                        if sym_str == "default" {
+                                            // import { default as foo } from 'foo'
                                             if !self
                                                 .skipped_items
                                                 .iter()
-                                                .any(|skipped| skipped.is_match(&sym_str))
+                                                .any(|s| s.is_match(named.local.sym.as_ref()))
                                             {
-                                                return Some(ExportKind::Named(sym_str));
+                                                return Some(ExportKind::Default);
                                             }
-                                            None
                                         }
-                                        ModuleExportName::Str(s) => {
-                                            if !self.skipped_items.iter().any(|skipped| {
-                                                skipped.is_match(s.value.as_ref())
-                                            }) {
-                                                return Some(ExportKind::Named(
-                                                    s.value.to_string(),
-                                                ));
-                                            }
-                                            None
+                                        if !self
+                                            .skipped_items
+                                            .iter()
+                                            .any(|skipped| skipped.is_match(&sym_str))
+                                        {
+                                            return Some(ExportKind::Named(sym_str));
                                         }
+                                        None
                                     }
-                                }
-                                None => {
-                                    // import { foo } from './foo'
-                                    if !self.skipped_items.iter().any(|skipped| {
-                                        skipped.is_match(named.local.sym.as_ref())
-                                    }) {
-                                        return Some(ExportKind::Named(
-                                            named.local.sym.to_string(),
-                                        ));
+                                    ModuleExportName::Str(s) => {
+                                        if !self
+                                            .skipped_items
+                                            .iter()
+                                            .any(|skipped| skipped.is_match(s.value.as_ref()))
+                                        {
+                                            return Some(ExportKind::Named(s.value.to_string()));
+                                        }
+                                        None
                                     }
-                                    None
                                 }
                             }
-                        }
-                        ImportSpecifier::Default(_) => {
-                            // import foo from 'foo'
-                            Some(ExportKind::Default)
-                        }
-                        ImportSpecifier::Namespace(_) => {
-                            // import * as foo from 'foo'
-                            Some(ExportKind::Namespace)
+                            None => {
+                                // import { foo } from './foo'
+                                if !self
+                                    .skipped_items
+                                    .iter()
+                                    .any(|skipped| skipped.is_match(named.local.sym.as_ref()))
+                                {
+                                    return Some(ExportKind::Named(named.local.sym.to_string()));
+                                }
+                                None
+                            }
                         }
                     }
-                })
-                .collect();
+                    ImportSpecifier::Default(_) => {
+                        // import foo from 'foo'
+                        Some(ExportKind::Default)
+                    }
+                    ImportSpecifier::Namespace(_) => {
+                        // import * as foo from 'foo'
+                        Some(ExportKind::Namespace)
+                    }
+                }
+            })
+            .collect();
 
         if let Some(entry) = self.imported_ids_path_name.get_mut(&src) {
             specifiers.drain(0..).for_each(|s| {
