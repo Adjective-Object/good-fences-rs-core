@@ -560,6 +560,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 if let Some(Component::CurDir | Component::ParentDir) = components.next() {
                     #[cfg(windows)]
                     let path = {
+                        use normpath::BasePath;
                         let base_dir = BasePath::new(base_dir).unwrap();
                         base_dir
                             .join(target.replace('/', "\\"))
