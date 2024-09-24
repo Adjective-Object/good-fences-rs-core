@@ -52,32 +52,6 @@ impl<'tsconfig, R: Resolve> TsconfigPathsResolver<'tsconfig, R> {
                     "Resolved `{}` as `{}` from `{}`",
                     module_specifier, resolved.filename, base
                 );
-
-                let is_base_in_node_modules = if let FileName::Real(v) = base {
-                    v.components().any(|c| match c {
-                        Component::Normal(v) => v == "node_modules",
-                        _ => false,
-                    })
-                } else {
-                    false
-                };
-                let is_target_in_node_modules = if let FileName::Real(v) = &resolved.filename {
-                    v.components().any(|c| match c {
-                        Component::Normal(v) => v == "node_modules",
-                        _ => false,
-                    })
-                } else {
-                    false
-                };
-
-                // If node_modules is in path, we should return module specifier.
-                if !is_base_in_node_modules && is_target_in_node_modules {
-                    return Ok(Resolution {
-                        filename: FileName::Real(module_specifier.into()),
-                        ..resolved
-                    });
-                }
-
                 Ok(resolved)
             }
 
@@ -173,19 +147,14 @@ impl<'tsconfig, R: Resolve> Resolve for TsconfigPathsResolver<'tsconfig, R> {
                         let relative = format!("./{}", replaced);
 
                         let res = self
-                            .invoke_inner_resolver(base, module_specifier)
-                            .or_else(|_| {
-                                self.invoke_inner_resolver(
-                                    &self.tsconfig.base_url_filename,
-                                    &relative,
-                                )
-                            })
+                            .invoke_inner_resolver(&self.tsconfig.base_url_filename, &relative)
                             .or_else(|_| {
                                 self.invoke_inner_resolver(
                                     &self.tsconfig.base_url_filename,
                                     &replaced,
                                 )
-                            });
+                            })
+                            .or_else(|_| self.invoke_inner_resolver(base, module_specifier));
 
                         errors.push(match res {
                             Ok(resolved) => return Ok(resolved),

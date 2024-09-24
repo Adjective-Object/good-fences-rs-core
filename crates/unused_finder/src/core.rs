@@ -403,7 +403,7 @@ file2 is partially unused (2 unused exports):
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message(),
-            "wildcards are either regular `*` or recursive `**`"
+            "Pattern syntax error near position 21: wildcards are either regular `*` or recursive `**`"
         )
     }
 

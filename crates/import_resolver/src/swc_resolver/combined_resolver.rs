@@ -84,7 +84,14 @@ impl<'a> Resolve for CombinedResolver<'a> {
                         TsconfigPathsResolver::new(tsconfig, &self.node_modules_resolver);
                     tracing::debug!("matched tsconfig {} with \"paths\". resolving against tsconfig resolver (wrapping node_modules)", path.display());
 
-                    resolver.resolve(base, module_specifier)
+                    let resolution = resolver.resolve(base, module_specifier)?;
+                    tracing::debug!(
+                        "tsconfig resolved {} to {}",
+                        module_specifier,
+                        resolution.filename,
+                    );
+
+                    Ok(resolution)
                 }
                 ProcessedTsconfig::NoPaths => {
                     tracing::debug!("matched tsconfig {} with no \"paths\" entry. resolving against node_modules_resolver", path.display());
@@ -107,7 +114,7 @@ mod test {
     use super::*;
     use pretty_assertions::assert_eq;
     use test_tmpdir::TmpDir;
-    use tracing_test::traced_test;
+    // use tracing_test::traced_test;
 
     fn check_deadlocks() {
         std::thread::spawn(move || loop {
@@ -129,7 +136,6 @@ mod test {
     }
 
     #[test]
-    #[traced_test]
     pub fn test_bypasses_tsconfig() {
         check_deadlocks();
         let tmp = test_tmpdir!(
@@ -169,136 +175,208 @@ mod test {
                 filename: FileName::Real(
                     tmp.root()
                         .to_owned()
-                        .join("node_modules/to-node-modules/index.ts")
+                        .join("node_modules/to-node-modules/index.js")
                 ),
                 slug: None,
             }
         );
     }
 
-    // #[test]
-    // pub fn test_import_literal() {
-    //     let tmp = test_tmpdir!(
-    //         "tsconfig.json" => r#"{
-    //             "compilerOptions": {
-    //                 "baseUrl": ".",
-    //                 "paths": {
-    //                     "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
-    //                     "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-    //                 }
-    //             }
-    //         }"#,
-    //         "packages/non-glob-specifier/lib/index.ts" => r#"export const something = 1;"#
-    //     );
+    #[test]
+    pub fn test_import_literal() {
+        let tmp = test_tmpdir!(
+            "tsconfig.json" => r#"{
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
+                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
+                    }
+                }
+            }"#,
+            "packages/non-glob-specifier/lib/index.ts" => r#"export const something = 1;"#
+        );
 
-    //     let expected_resolver = &TestResolver::new(
-    //         tmp.root(), // the base path comes from the tsconfig's base_path in tsconfig resolver
-    //         "./packages/non-glob-specifier/lib/index",
-    //     );
-    //     let factory = CombinedTsconfigResolver::new(tmp.root());
-    //     let resolver = factory.resolver(expected_resolver);
-    //     let resolution = resolver
-    //         .resolve(
-    //             &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
-    //             "non-glob-specifier",
-    //         )
-    //         .unwrap();
-    //     expected_resolver.assert(resolution);
-    // }
+        let caches = CombinedResolverCaches::new();
+        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolution = resolver
+            .resolve(
+                &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
+                "non-glob-specifier",
+            )
+            .unwrap();
 
-    // #[test]
-    // pub fn test_import_glob() {
-    //     let tmp = test_tmpdir!(
-    //         "tsconfig.json" => r#"{
-    //             "compilerOptions": {
-    //                 "baseUrl": ".",
-    //                 "paths": {
-    //                     "glob-specifier/lib/*": ["packages/glob-specifier/src/*.ts"],
-    //                     "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-    //                 }
-    //             }
-    //         }"#,
-    //         "packages/glob-specifier/src/something.ts" => r#"export const something = 1;"#
-    //     );
+        assert_eq!(
+            resolution,
+            Resolution {
+                filename: FileName::Real(
+                    tmp.root()
+                        .to_owned()
+                        .join("packages/non-glob-specifier/lib/index.ts")
+                ),
+                slug: None,
+            }
+        );
+    }
 
-    //     let expected_resolver = &TestResolver::new(
-    //         tmp.root(), // the base path comes from the tsconfig's base_path in tsconfig resolver
-    //         "./packages/glob-specifier/src/something.ts",
-    //     );
-    //     let factory = CombinedTsconfigResolver::new(tmp.root());
-    //     let resolver = factory.resolver(expected_resolver);
-    //     let resolution = resolver
-    //         .resolve(
-    //             &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
-    //             "glob-specifier/lib/something",
-    //         )
-    //         .unwrap();
-    //     expected_resolver.assert(resolution);
-    // }
+    #[test]
+    pub fn test_import_glob() {
+        let tmp = test_tmpdir!(
+            "tsconfig.json" => r#"{
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*.ts"],
+                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
+                    }
+                }
+            }"#,
+            "packages/glob-specifier/src/something.ts" => r#"export const something = 1;"#
+        );
 
-    // #[test]
-    // pub fn test_precedence() {
-    //     let tmp = test_tmpdir!(
-    //         "t/tsconfig.json" => r#"{
-    //             "compilerOptions": {
-    //                 "baseUrl": ".",
-    //                 "paths": {
-    //                     "glob-specifier/lib/*": ["override-packages/glob-specifier/src/*"]
-    //                 }
-    //             }
-    //         }"#,
-    //         "tsconfig.json" => r#"{
-    //             "compilerOptions": {
-    //                 "baseUrl": ".",
-    //                 "paths": {
-    //                     "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
-    //                     "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-    //                 }
-    //             }
-    //         }"#
-    //     );
+        let caches = CombinedResolverCaches::new();
+        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolution = resolver
+            .resolve(
+                &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
+                "glob-specifier/lib/something",
+            )
+            .unwrap();
 
-    //     let expected_resolver = &TestResolver::new(
-    //         tmp.root_join("t"),
-    //         "./override-packages/glob-specifier/src/bar",
-    //     );
-    //     let factory = CombinedTsconfigResolver::new(tmp.root());
-    //     let resolver = factory.resolver(expected_resolver);
-    //     let resolution = resolver
-    //         .resolve(
-    //             &FileName::Real(tmp.root_join("t/packages/my/importing/module.ts")),
-    //             "glob-specifier/lib/bar",
-    //         )
-    //         .unwrap();
-    //     expected_resolver.assert(resolution)
-    // }
+        assert_eq!(
+            resolution,
+            Resolution {
+                filename: FileName::Real(
+                    tmp.root()
+                        .to_owned()
+                        .join("packages/glob-specifier/src/something.ts")
+                ),
+                slug: None,
+            }
+        );
+    }
 
-    // #[test]
-    // pub fn test_no_escape_root() {
-    //     let tmp = test_tmpdir!(
-    //         "tsconfig.json" => r#"{
-    //             "compilerOptions": {
-    //                 "baseUrl": ".",
-    //                 "paths": {
-    //                     "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
-    //                     "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-    //                 }
-    //             }
-    //         }"#
-    //     );
+    #[test]
+    pub fn test_precedence() {
+        let tmp = test_tmpdir!(
+            "t/tsconfig.json" => r#"{
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "glob-specifier/lib/*": ["override-packages/glob-specifier/src/*"]
+                    }
+                }
+            }"#,
+            "tsconfig.json" => r#"{
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
+                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
+                    }
+                }
+            }"#,
+            "packages/glob-specifier/src/bar.ts" => r#"export const something = 1;"#,
+            "t/override-packages/glob-specifier/src/bar.ts" => r#"export const something = 2;"#
+        );
 
-    //     let expected_resolver = &TestResolver::new(
-    //         tmp.root_join("root/packages/my/importing/module.ts"),
-    //         "glob-specifier/lib/bar",
-    //     );
-    //     let factory = CombinedTsconfigResolver::new(tmp.root_join("root").as_path());
-    //     let resolver = factory.resolver(expected_resolver);
-    //     let resolution = resolver
-    //         .resolve(
-    //             &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
-    //             "glob-specifier/lib/bar",
-    //         )
-    //         .unwrap();
-    //     expected_resolver.assert(resolution)
-    // }
+        let caches = CombinedResolverCaches::new();
+        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolution = resolver
+            .resolve(
+                &FileName::Real(tmp.root_join("t/packages/my/importing/module.ts")),
+                "glob-specifier/lib/bar",
+            )
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            Resolution {
+                filename: FileName::Real(
+                    tmp.root()
+                        .to_owned()
+                        .join("t/override-packages/glob-specifier/src/bar.ts")
+                ),
+                slug: None,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_tsconfig_beats_node_modules() {
+        let tmp = test_tmpdir!(
+            // this tsconfig.json should match the "in-root" rewrite rule
+            "tsconfig.json" => r#"{
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "in-root/lib/*": ["packages/glob-specifier/src/*"]
+                    }
+                }
+            }"#,
+            "root/node_modules/in-root/lib/bar.ts" => r#"export const something = 1;"#,
+            "packages/glob-specifier/src/bar.ts" => r#"export const something = 2;"#
+        );
+
+        let caches = CombinedResolverCaches::new();
+        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolution = resolver
+            .resolve(
+                &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
+                "in-root/lib/bar.ts",
+            )
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root()
+                        .to_owned()
+                        .join("packages/glob-specifier/src/bar.ts")
+                ),
+                slug: None,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_no_escape_root() {
+        let tmp = test_tmpdir!(
+            // this tsconfig.json should match the "in-root" rewrite rule
+            "tsconfig.json" => r#"{
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "in-root/lib/*": ["packages/glob-specifier/src/*"],
+                    }
+                }
+            }"#,
+            "root/node_modules/in-root/lib/bar.ts" => r#"export const something = 1;"#
+        );
+
+        let caches = CombinedResolverCaches::new();
+        let sub_root = tmp.root_join("root");
+        let resolver = caches.resolver(&sub_root, TargetEnv::Node, Default::default(), false);
+        let resolution = resolver
+            .resolve(
+                &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
+                "in-root/lib/bar.ts",
+            )
+            .unwrap();
+
+        assert_eq!(
+            resolution,
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root()
+                        .to_owned()
+                        .join("root/node_modules/in-root/lib/bar.ts")
+                ),
+                slug: None,
+            }
+        );
+    }
 }

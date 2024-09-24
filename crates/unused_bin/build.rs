@@ -5,5 +5,6 @@ fn main() {
     // println!("cargo::rustc-link-arg=-llzma");
     // println!("cargo::rustc-link-arg=-lunwind");
 
+    #[cfg(feature = "rstack")]
     println!("cargo::rustc-link-arg=-ldw");
 }
