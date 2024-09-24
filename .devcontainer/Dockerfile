@@ -75,3 +75,7 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cargo -R
 RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.zprofile
 RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.profile
+
+# Install cargo-udeps
+RUN sudo apt-get update && sudo apt-get install -y libssl-dev
+RUN bash -c "source ${HOME}/.cargo/env && cargo install cargo-udeps"

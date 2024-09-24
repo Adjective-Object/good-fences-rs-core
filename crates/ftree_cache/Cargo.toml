@@ -11,14 +11,13 @@ crate-type = ["lib"]
 serde_derive = "1.0.117"
 serde.workspace = true
 anyhow = { workspace = true }
-swc_common.workspace = true
 parking_lot.workspace = true
 dashmap = "6.0.1"
 tracing = "0.1.40"
 hashbrown = "0.14.5"
 deadlock_ref = { path = "../deadlock_ref", optional = true }
 
-[[feature]]
+[feature]
 default = []
 # Wraps all outoging references in DeadlockDetection pointers, to detect when loans of cached content
 # outlive a set timeout

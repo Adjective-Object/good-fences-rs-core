@@ -11,7 +11,7 @@ crate-type = ["lib"]
 anyhow = { workspace = true }
 copy_from_str = "1.0.6"
 dashmap = "6.0.1"
-ftree_cache ={ path="../ftree_cache"}
+ftree_cache = { path = "../ftree_cache" }
 hashbrown = "0.14.5"
 lazy_static = "1.4.0"
 ouroboros = "0.18.4"
@@ -33,4 +33,3 @@ thiserror.workspace = true
 tracing = "0.1.40"
 tracing-test.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
-serde_with = "3.9.0"

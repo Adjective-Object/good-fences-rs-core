@@ -10,11 +10,7 @@ crate-type = ["lib"]
 [dependencies]
 serde_derive = "1.0.117"
 serde.workspace = true
-anyhow = { workspace = true }
-swc_common.workspace = true
-parking_lot.workspace = true
 dashmap = { version = "6.0.1", optional = true }
-tracing = "0.1.40"
 hashbrown = "0.14.5"
 
 [features]

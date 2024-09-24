@@ -10,6 +10,7 @@ use std::{
 
 pub struct TmpDir {
     tmp_root: tempfile::TempDir,
+    canonical_root: PathBuf,
 }
 
 #[macro_export]
@@ -47,14 +48,16 @@ impl Default for TmpDir {
 
 impl TmpDir {
     pub fn new() -> TmpDir {
+        let root = tempfile::tempdir().unwrap();
+        let canonical_root = std::fs::canonicalize(&root).unwrap();
         TmpDir {
-            tmp_root: tempfile::tempdir().unwrap(),
+            tmp_root: root,
+            canonical_root,
         }
     }
 
     pub fn new_with_content(content: &HashMap<String, &str>) -> TmpDir {
-        let root = tempfile::tempdir().unwrap();
-        let out = TmpDir { tmp_root: root };
+        let out = Self::new();
         out.write_batch(content).unwrap();
         out
     }
@@ -71,12 +74,11 @@ impl TmpDir {
     }
 
     pub fn root(&self) -> &Path {
-        self.tmp_root.path()
+        &self.canonical_root
     }
 
     pub fn root_join<S: AsRef<str>>(&self, other: S) -> PathBuf {
-        self.tmp_root
-            .path()
+        self.canonical_root
             .to_owned()
             .join(PathBuf::from_slash(other))
     }
