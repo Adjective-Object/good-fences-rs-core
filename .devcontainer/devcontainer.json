@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vscode/master/extensions/configuration-editing/schemas/devContainer.schema.json",
-  "name": "good-fences-rs development container",
+  "name": "${localWorkspaceFolderBasename} devcontainer",
   "build": {
     "dockerfile": "./Dockerfile",
     "args": {
@@ -26,7 +26,7 @@
     },
     "terminal.integrated.defaultProfile.linux": "zsh"
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/good-fences-rs-core,type=bind,consistency=delegated",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=delegated",
   "mounts": [
     // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.
     // Don't commit it, though!
@@ -37,7 +37,7 @@
     // This persists zsh history as well as downloaded cargo crate sources.
     "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached"
   ],
-  "workspaceFolder": "/workspaces/good-fences-rs-core",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   // "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
   "extensions": [
     "ms-vscode.cpptools",
@@ -46,7 +46,7 @@
     "vadimcn.vscode-lldb"
   ],
   "remoteEnv": {
-    "VM_REPO_PATH": "/workspaces/good-fences-rs-core"
+    "VM_REPO_PATH": "/workspaces/${localWorkspaceFolderBasename}"
   },
   "forwardPorts": [
     3000,
