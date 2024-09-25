@@ -33,4 +33,6 @@ thiserror.workspace = true
 tracing = "0.1.40"
 tracing-test.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
+
+[target.'cfg(windows)'.dependencies]
 normpath = "1.3.0"
