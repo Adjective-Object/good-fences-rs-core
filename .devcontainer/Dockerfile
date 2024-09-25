@@ -69,16 +69,10 @@ RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.zshrc
 # run zsh to install antigen plugins for the first time
 RUN zsh ${HOME}/.zshrc
 
-# Setup cargo directories as symlinks into the /cache volume
-RUN sudo mkdir -p \
-    /cache/cargo-registry \
-    /cache/cargo-too
+# Make the mount target directories
+RUN sudo mkdir -p /cache ${HOME}/.cargo/registry
 RUN sudo chown ${USERNAME}:${USERNAME} /cache -R
-RUN mkdir -p \
-    /home/${USERNAME}/.cargo/registry \
-    /home/${USERNAME}/.cargo/toolchains
-RUN sudo ln -s /cache/cargo-registry /home/${USERNAME}/.cargo/registry
-RUN sudo ln -s /cache/cargo-toolchains /home/${USERNAME}/.cargo/toolchains 
+RUN sudo chown ${USERNAME}:${USERNAME} ${HOME}/.cargo -R
 
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
@@ -87,5 +81,5 @@ RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.zprofile
 RUN echo 'source ${HOME}/.cargo/env' >> ${HOME}/.profile
 
 # Install cargo-udeps
-RUN sudo apt-get update && sudo apt-get install -y libssl-dev
-RUN bash -c "source ${HOME}/.cargo/env && cargo install cargo-udeps"
+# RUN sudo apt-get update && sudo apt-get install -y libssl-dev
+# RUN bash -c "source ${HOME}/.cargo/env && cargo install cargo-udeps"
