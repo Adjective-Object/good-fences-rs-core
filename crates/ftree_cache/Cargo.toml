@@ -1,0 +1,24 @@
+[package]
+name = "ftree_cache"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+serde_derive = "1.0.117"
+serde.workspace = true
+anyhow = { workspace = true }
+parking_lot.workspace = true
+dashmap = "6.0.1"
+tracing = "0.1.40"
+hashbrown = "0.14.5"
+deadlock_ref = { path = "../deadlock_ref", optional = true }
+
+[features]
+default = []
+# Wraps all outoging references in DeadlockDetection pointers, to detect when loans of cached content
+# outlive a set timeout
+deadlock_ref = ["dep:deadlock_ref"]

@@ -17,7 +17,13 @@
             "args": [
                 "--config-path=${file}"
             ],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "initCommands": [
+                "settings set target.disable-aslr false"
+            ],
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
         }
     ]
 }

@@ -124,5 +124,23 @@ This takes a list of regular expressions as input values, separated with spaces.
 good-fences src --ignoredDirs ignored1 ignored2 ...
 ```
 
-
-
+# Development
+## Dev-Containers on WSL
+Development from windows happens in a devcontainer
+1. Install WSL2 (and restart your computer)
+    - `wsl --install` from any terminal window
+2. Install [Docker Engine](https://docs.docker.com/engine/install/) (and restart your computer)
+3. Install workspace recommended plugins (including the Dev Containers plugin)
+4. Build the container with `Ctrl+P > Dev Containers: Rebuild and Reopen in Container`
+    - If installation stalls on `docker inspect --type image ubuntu:24.10`, you may need to feth the base image manually
+    - Run `docker inspect --type image ubuntu:24.10`
+    - If it fails with `Error response from daemon: No such image: ubuntu`, then run `docker pull ubuntu:24.10`
+5. Develop in the container
+6. (optional) mount the workspace you are building against.
+   To test `unused-finder` against your repo during development, uncomment the commented-out "mount" in the checked-in `.devcontainer`: 
+   ```json5
+    // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.
+    // Don't commit it, though!
+    // "source=${localWorkspaceFolder}/../client-web,target=/workspaces/client-web,type=bind,consistency=cached",
+    ```
+    The provided example mounts `client-web` as a target repo

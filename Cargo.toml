@@ -1,9 +1,11 @@
+cargo-features = ["codegen-backend"]
+
 [workspace]
 members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-anyhow = "1.0.75"
+anyhow = { version = "1.0.75", features = ["backtrace"] }
 path-clean = "0.1.0"
 path-slash = "0.2.1"
 relative-path = "1.7.2"
@@ -12,7 +14,7 @@ glob = "0.3.0"
 rayon = "1.5.1"
 thiserror = "1.0.52"
 jwalk = "0.5"
-serde = { version = "1.0.117", features = ["rc"] }
+serde = { version = "1.0.117", features = ["rc", "derive"] }
 serde_json = "1.0.59"
 napi = { version = "2.16.6", default-features = false, features = ["napi4"] }
 napi-derive = "2.16.9"
@@ -23,7 +25,13 @@ swc_core = { version = "0.101.3", features = [
     "ecma_loader_lru",
     "ecma_loader_parking_lot",
 ] }
+swc_common = "0.37.4"
 swc_ecma_parser = "0.149.0"
 swc = "0.284.1"
-swc_ecma_loader = "0.44.5"
+swc_ecma_loader = "0.49.1"
 pretty_assertions = "1.4.0"
+tracing-test = "0.2.5"
+parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
+
+[profile.release]
+debug = true

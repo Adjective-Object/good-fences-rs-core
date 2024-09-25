@@ -38,15 +38,11 @@ impl Display for ImportRuleViolation<'_, '_> {
                 if let Some(rule) = export_rule {
                     write!(
                         f,
-                        "Violation: Import of {} at {} violated the fence.json {} with rule {}",
+                        "Violation: Import of {} at {} violated the fence.json {} with rule {} only accessible to {:?}",
                         self.violating_import_specifier,
                         self.violating_file_path,
                         self.violating_fence.fence_path,
-                        format!(
-                            "{} only accessible to {:?}",
-                            rule.modules, rule.accessible_to,
-                        )
-                        .to_string()
+                        rule.modules, rule.accessible_to,
                     )
                 } else {
                     write!(
@@ -106,6 +102,12 @@ pub struct FenceEvaluationResult<'fencelifetime, 'importlifetime> {
     pub unresolved_files: Vec<EvaluateFencesError>,
 }
 
+impl Default for FenceEvaluationResult<'_, '_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FenceEvaluationResult<'_, '_> {
     pub fn new() -> Self {
         Self {
@@ -147,7 +149,7 @@ fn export_rule_applies_to_import_path(
     }
 }
 
-fn is_importer_allowed(accessible_to: &Vec<String>, source_file: &SourceFile) -> bool {
+fn is_importer_allowed(accessible_to: &[String], source_file: &SourceFile) -> bool {
     return accessible_to.iter().any(|accessible_to_tag| {
         accessible_to_tag == "*" || source_file.tags.contains(accessible_to_tag)
     });
@@ -173,7 +175,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     for (import_specifier, _imported_names) in source_file.imports.iter() {
         let importer_rel_path = RelativePath::from_path(&source_file.source_file_path).unwrap();
         let resolved_src_import =
-            resolve_ts_import(tsconfig_paths_json, importer_rel_path, &import_specifier);
+            resolve_ts_import(tsconfig_paths_json, importer_rel_path, import_specifier);
         let resolved_import = match resolved_src_import {
             Ok(resolved_import) => match &resolved_import {
                 ResolvedImport::ProjectLocalImport(import_specifier) => {
@@ -253,11 +255,11 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
 
                     let exclusive_source_fences: HashSet<&Fence> = source_fences_set
                         .difference(&imported_source_file_fences_set)
-                        .map(|x| *x)
+                        .copied()
                         .collect();
                     let exclusive_target_fences: HashSet<&Fence> = imported_source_file_fences_set
                         .difference(&source_fences_set)
-                        .map(|x| *x)
+                        .copied()
                         .collect();
 
                     // check allowed imports against tags of the imported source file
@@ -280,7 +282,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                 violating_file_path: &source_file.source_file_path,
                                 violating_fence: source_fence,
                                 violating_fence_clause: ViolatedFenceClause::ImportAllowList,
-                                violating_import_specifier: &import_specifier,
+                                violating_import_specifier: import_specifier,
                                 violating_imported_name: None,
                             })
                         }
@@ -303,13 +305,13 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                         .unwrap()
                                     })
                                     .collect();
-                            if destination_export_rules.len() == 0 {
+                            if destination_export_rules.is_empty() {
                                 // rule violation: this importer is not on the allow list
                                 violations.push(ImportRuleViolation {
                                     violating_file_path: &source_file.source_file_path,
                                     violating_fence: destination_fence,
                                     violating_fence_clause: ViolatedFenceClause::ExportRule(None),
-                                    violating_import_specifier: &import_specifier,
+                                    violating_import_specifier: import_specifier,
                                     violating_imported_name: None,
                                 })
                             }
@@ -327,9 +329,9 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                         violating_file_path: &source_file.source_file_path,
                                         violating_fence: destination_fence,
                                         violating_fence_clause: ViolatedFenceClause::ExportRule(
-                                            Some(&destination_export_rule),
+                                            Some(destination_export_rule),
                                         ),
-                                        violating_import_specifier: &import_specifier,
+                                        violating_import_specifier: import_specifier,
                                         violating_imported_name: None,
                                     })
                                 }
@@ -355,7 +357,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                     )
                                 })
                                 .collect();
-                            if matching_dependency_clauses.len() == 0 {
+                            if matching_dependency_clauses.is_empty() {
                                 // violation: dependency not on allowlist
                                 violations.push(ImportRuleViolation {
                                     violating_file_path: &source_file.source_file_path,
@@ -363,7 +365,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                     violating_fence_clause: ViolatedFenceClause::DependencyRule(
                                         None,
                                     ),
-                                    violating_import_specifier: &import_specifier,
+                                    violating_import_specifier: import_specifier,
                                     violating_imported_name: None,
                                 })
                             } else {
@@ -383,9 +385,9 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                                 violating_fence: source_fence,
                                                 violating_fence_clause:
                                                     ViolatedFenceClause::DependencyRule(Some(
-                                                        &dependency_clause,
+                                                        dependency_clause,
                                                     )),
-                                                violating_import_specifier: &import_specifier,
+                                                violating_import_specifier: import_specifier,
                                                 violating_imported_name: None,
                                             })
                                         }
@@ -407,10 +409,10 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
         }
     }
 
-    return FenceEvaluationResult {
+    FenceEvaluationResult {
         violations,
         unresolved_files,
-    };
+    }
 }
 
 #[cfg(test)]

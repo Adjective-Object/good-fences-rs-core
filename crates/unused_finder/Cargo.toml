@@ -9,27 +9,25 @@ edition = "2021"
 crate-type = ["lib"]
 
 [dependencies]
-clap = { version = "4.5.13", features = ["derive"] }
-glob = "0.3.1"
-swc_utils = { path = "../swc_utils" }
-import_resolver = { path = "../import_resolver" }
-tsconfig_paths = { path = "../tsconfig_paths" }
-js_err = { path = "../js_err" }
-rayon.workspace = true
-regex.workspace = true
-thiserror.workspace = true
 anyhow.workspace = true
-path-slash.workspace = true
+glob = "0.3.1"
+import_resolver = { path = "../import_resolver" }
+js_err = { path = "../js_err" }
 jwalk.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 napi = { workspace = true, optional = true }
 napi-derive = { workspace = true, optional = true }
-maplit = "1.0.2"
+path-slash.workspace = true
+pretty_assertions.workspace = true
+rayon.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+serde.workspace = true
 swc_core.workspace = true
 swc_ecma_parser.workspace = true
+swc_utils = { path = "../swc_utils" }
 swc.workspace = true
-pretty_assertions.workspace = true
+thiserror.workspace = true
+tsconfig_paths = { path = "../tsconfig_paths" }
 
 [features]
 default = []

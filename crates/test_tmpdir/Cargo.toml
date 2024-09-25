@@ -1,0 +1,9 @@
+[package]
+name = "test_tmpdir"
+version = "0.1.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+path-slash = "0.2.1"
+tempfile = "3.10.1"

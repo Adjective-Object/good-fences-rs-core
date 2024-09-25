@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "Setup devcontainer, add 'exports' aware cacing resolver",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}

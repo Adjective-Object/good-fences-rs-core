@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "ms-vscode-remote.remote-containers",
+        "tamasfe.even-better-toml",
+        "ms-vscode.cpptools"
+    ]
+}

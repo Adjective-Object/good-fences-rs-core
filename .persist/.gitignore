@@ -1,0 +1,6 @@
+*
+!README.md
+!.gitignore
+!cargo-registry/
+cargo-registry/*
+!cargo-registry/README.md

@@ -1,0 +1,18 @@
+[package]
+name = "deadlock_ref"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+serde_derive = "1.0.117"
+serde.workspace = true
+dashmap = { version = "6.0.1", optional = true }
+hashbrown = "0.14.5"
+
+[features]
+default = ["dashmap"]
+dashmap = ["dep:dashmap"]

@@ -13,4 +13,10 @@ path = "src/main.rs"
 clap = { version = "4.5.13", features = ["derive"] }
 unused_finder = { path = "../unused_finder" }
 anyhow.workspace = true
+parking_lot.workspace = true
 serde_json.workspace = true
+rstack-self = { version = "0.3.0", default-features = false, optional = true }
+
+[features]
+default = []
+rstack = ["dep:rstack-self", "rstack-self/dw"]

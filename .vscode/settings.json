@@ -1,0 +1,26 @@
+{
+    "rust-analyzer.checkOnSave": true,
+    "rust-analyzer.check.command": "clippy",
+    // runs rust-analyzer against a separate target directory than the normal rust compiler.
+    // this is a workaround for the following issue: https://github.com/rust-lang/rust-analyzer/issues/17482
+    "rust-analyzer.cargo.targetDir": "./rust-analyzer-target",
+    // prefer using GDB over lldb because lldb's debug visualizations are worse.
+    // See https://github.com/rust-lang/rust/issues/111868
+    "rust-analyzer.debug.engine": "ms-vscode.cpptools",
+    "rust-analyzer.debug.engineSettings": {
+        "cppdbg": {
+            "miDebuggerPath": "${env:HOME}/.cargo/bin/rust-gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": false
+                }
+            ],
+        }
+    },
+    "editor.formatOnSave": true,
+    "files.autoSaveWorkspaceFilesOnly": true,
+    "lldb.cargo": "/home/ubuntu/.cargo/bin/cargo",
+    "terminal.integrated.shellIntegration.decorationsEnabled": "never",
+}

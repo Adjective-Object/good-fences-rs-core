@@ -17,12 +17,10 @@ impl JsUnusedFinder {
     pub fn new(config: FindUnusedItemsConfig) -> napi::Result<Self> {
         let finder = UnusedFinder::new(config);
         match finder {
-            Ok(finder) => {
-                return Ok(Self {
-                    unused_finder: finder,
-                })
-            }
-            Err(e) => return Err(e.into()),
+            Ok(finder) => Ok(Self {
+                unused_finder: finder,
+            }),
+            Err(e) => Err(e.into()),
         }
     }
 

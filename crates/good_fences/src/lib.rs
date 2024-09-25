@@ -25,8 +25,7 @@ pub mod walk_dirs;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
-    let tsconfig_path = opts.project.clone();
-    let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(tsconfig_path)
+    let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(&opts.project)
         .with_context(|| format!("Unable to find --project path {}", &opts.project))
         .unwrap();
 
@@ -36,10 +35,10 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
 
     let ignored_dirs_regexs = create_ignored_dirs_regexes(opts.ignored_dirs);
 
-    let dirs_to_walk = &opts.paths.iter().map(|x| x.as_str()).collect();
+    let dirs_to_walk: Vec<&str> = opts.paths.iter().map(|x| x.as_str()).collect();
     let good_fences_runner = good_fences_runner::GoodFencesRunner::new(
         tsconfig,
-        dirs_to_walk,
+        &dirs_to_walk,
         match opts.ignore_external_fences {
             Some(ief) => ief,
             None => ExternalFences::Include,
@@ -50,21 +49,21 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
     let eval_results = good_fences_runner.find_import_violations();
 
     // Print results and statistics
-    if eval_results.violations.len() != 0 {
+    if !eval_results.violations.is_empty() {
         println!("Violations:");
         eval_results
             .violations
             .iter()
-            .for_each(|v| println!("{}", v.to_string()));
+            .for_each(|v| println!("{}", v));
         println!("Total violations: {}", eval_results.violations.len());
     }
 
-    if eval_results.unresolved_files.len() != 0 {
+    if !eval_results.unresolved_files.is_empty() {
         println!("Unresolved files:",);
         eval_results
             .unresolved_files
             .iter()
-            .for_each(|f| println!("{}", f.to_string()));
+            .for_each(|f| println!("{}", f));
         println!(
             "Total unresolved files: {}",
             eval_results.unresolved_files.len()
@@ -113,8 +112,8 @@ fn create_ignored_dirs_regexes(ignored_dirs: Option<Vec<String>>) -> Vec<regex::
         Some(dirs) => dirs
             .iter()
             .map(|id| {
-                regex::Regex::new(&id.as_str())
-                    .expect(&format!("unable to create regex from --ignoredDirs {}", &id).as_str())
+                regex::Regex::new(id.as_str())
+                    .unwrap_or_else(|_| panic!("unable to create regex from --ignoredDirs {}", &id))
             })
             .collect(),
         None => Vec::new(),
@@ -166,10 +165,7 @@ pub fn write_violations_as_json(
     ) {
         Ok(_) => {
             let cwd = std::env::current_dir()?.to_string_lossy().to_string();
-            println!(
-                "Violations written to {}",
-                format!("{} at {}", err_file_output_path, cwd)
-            );
+            println!("Violations written to {} at {}", err_file_output_path, cwd,);
         }
         Err(err) => {
             return Err(anyhow::format_err!(
@@ -200,7 +196,7 @@ pub struct JsonErrorFile<'a> {
 pub fn find_unused_items(
     config: unused_finder::FindUnusedItemsConfig,
 ) -> napi::Result<unused_finder::UnusedFinderReport> {
-    unused_finder::find_unused_items(config.into()).map_err(|e: js_err::JsErr| e.to_napi())
+    unused_finder::find_unused_items(config).map_err(|e: js_err::JsErr| e.to_napi())
 }
 
 #[napi]
@@ -212,8 +208,8 @@ pub fn find_unused_items_for_open_files(
         Ok(mut ok) => {
             let files: HashSet<String> = HashSet::from_iter(files);
             ok.unused_files_items.retain(|key, _| files.contains(key));
-            return Ok(ok);
+            Ok(ok)
         }
-        Err(e) => return Err(e.to_napi()),
+        Err(e) => Err(e.to_napi()),
     }
 }

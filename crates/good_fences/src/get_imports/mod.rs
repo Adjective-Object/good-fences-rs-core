@@ -16,8 +16,8 @@ pub use import_path_visitor::*;
 
 pub type FileImports = HashMap<String, Option<HashSet<String>>>;
 
-pub fn get_imports_map_from_file<'a, P: AsRef<str>>(
-    file_path: &'a P,
+pub fn get_imports_map_from_file<P: AsRef<str>>(
+    file_path: &P,
 ) -> Result<FileImports, GetImportError> {
     let path_string: &str = file_path.as_ref();
     let cm = Arc::<SourceMap>::default();
@@ -76,7 +76,7 @@ pub fn get_imports_map_from_file<'a, P: AsRef<str>>(
     });
     let imports_map = get_imports_map_from_visitor(visitor);
 
-    return Ok(imports_map);
+    Ok(imports_map)
 }
 
 fn get_imports_map_from_visitor(visitor: ImportPathVisitor) -> FileImports {
@@ -126,7 +126,7 @@ pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) 
         StringInput::from(fm),
         comments,
     );
-    return lexer;
+    lexer
 }
 
 #[cfg(test)]
@@ -170,7 +170,7 @@ mod test {
     #[test]
     fn test_get_imports_from_non_existent_path() {
         let filename = "path/to/nowhere/nothing.ts";
-        let imports = get_imports_map_from_file(&filename).map_err(|e| e);
+        let imports = get_imports_map_from_file(&filename);
         assert!(imports.is_err());
         #[cfg(target_os = "windows")]
         assert_eq!("IO Errors found while trying to parse path/to/nowhere/nothing.ts : [Os { code: 3, kind: NotFound, message: \"The system cannot find the path specified.\" }]".to_string(), imports.unwrap_err().to_string());

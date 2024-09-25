@@ -38,11 +38,11 @@ pub struct DependencyRule {
     pub accessible_to: Vec<String>,
 }
 
-impl Into<DependencyRule> for RawDependencyRule {
-    fn into(self) -> DependencyRule {
+impl From<RawDependencyRule> for DependencyRule {
+    fn from(val: RawDependencyRule) -> Self {
         DependencyRule {
-            dependency: self.dependency,
-            accessible_to: match self.accessible_to {
+            dependency: val.dependency,
+            accessible_to: match val.accessible_to {
                 Some(a) => a,
                 None => vec!["*".to_owned()],
             },
@@ -87,11 +87,11 @@ pub struct ExportRule {
     pub modules: String,
 }
 
-impl Into<ExportRule> for RawExportRule {
-    fn into(self) -> ExportRule {
+impl From<RawExportRule> for ExportRule {
+    fn from(val: RawExportRule) -> Self {
         ExportRule {
-            modules: self.modules,
-            accessible_to: match self.accessible_to {
+            modules: val.modules,
+            accessible_to: match val.accessible_to {
                 Some(a) => a,
                 None => vec!["*".to_owned()],
             },
@@ -149,7 +149,7 @@ impl<'de> Visitor<'de> for StringOrStringArrayVisitor {
             aggregated_strings.push(elem);
         }
 
-        return Ok(aggregated_strings);
+        Ok(aggregated_strings)
     }
 }
 
@@ -208,13 +208,13 @@ where
 }
 
 pub fn parse_fence_str(fence_str: &str, fence_path: &RelativePath) -> Result<Fence, Error> {
-    let fence = serde_json::from_str(&fence_str)
+    let fence = serde_json::from_str(fence_str)
         .with_context(|| format!("failed to parse fence from {:?}", fence_path,))?;
 
-    return Result::Ok(Fence {
+    Result::Ok(Fence {
         fence_path: fence_path.to_string(),
         fence,
-    });
+    })
 }
 
 pub fn parse_fence_file<P: AsRef<RelativePath>>(fence_path: P) -> Result<Fence, Error> {
@@ -226,7 +226,7 @@ pub fn parse_fence_file<P: AsRef<RelativePath>>(fence_path: P) -> Result<Fence, 
 }
 
 impl Fence {
-    pub fn path_relative_to(self: &mut Fence, base_path: &Path) -> () {
+    pub fn path_relative_to(self: &mut Fence, base_path: &Path) {
         println!("relative! {:?}, {:?}", self.fence_path, base_path);
         self.fence_path = pathdiff::diff_paths(self.fence_path.clone(), base_path)
             .unwrap()

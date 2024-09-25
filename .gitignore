@@ -1,16 +1,20 @@
 /target
+/rust-analyzer-target
 
 
 # Added by cargo
 #
 # already existing elements were commented out
 
-#/target
 node_modules
 *.node
 index.js
 index.d.ts
 good-fences-violations.json
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+.pnp.*
 
 # Previous accidentally committed files
 token

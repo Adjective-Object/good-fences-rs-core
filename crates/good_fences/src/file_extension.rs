@@ -10,21 +10,16 @@ pub fn get_extension_from_filename(filename: &str) -> Option<String> {
     }
     //Change it to a canonical file path.
     let path = Path::new(&filename);
-    return match path.extension() {
-        Some(ext) => Some(ext.to_owned().into_string().unwrap()),
-        None => None,
-    };
+    return path
+        .extension()
+        .map(|ext| ext.to_owned().into_string().unwrap());
 }
 
-pub fn no_ext<'a>(s: &'a str) -> &'a str {
+pub fn no_ext(s: &str) -> &str {
     let ext_opt = get_extension_from_filename(s);
     match ext_opt {
-        Some(ext) => {
-            return &s[0..s.len() - ext.len() - 1];
-        }
-        None => {
-            return s;
-        }
+        Some(ext) => &s[0..s.len() - ext.len() - 1],
+        None => s,
     }
 }
 

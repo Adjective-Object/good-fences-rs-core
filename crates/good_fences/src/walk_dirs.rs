@@ -32,17 +32,12 @@ pub enum ExternalFences {
     Ignore = 1,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Default)]
 pub enum WalkFileData {
     Fence(Fence),
     SourceFile(SourceFile),
+    #[default]
     Nothing,
-}
-
-impl Default for WalkFileData {
-    fn default() -> WalkFileData {
-        WalkFileData::Nothing
-    }
 }
 
 type TagList = HashSet<String>;
@@ -54,14 +49,14 @@ lazy_static! {
 }
 
 fn discover_js_ts_src(file_path: &PathBuf, tags: HashSet<String>) -> Result<WalkFileData, Error> {
-    let relative_file_path = as_relative_slash_path(&file_path)?;
+    let relative_file_path = as_relative_slash_path(file_path)?;
     let imports = get_imports_map_from_file(&relative_file_path)
         .map_err(|e| anyhow!("Error getting imports from file {:?}: {}", file_path, e))?;
 
     Ok(WalkFileData::SourceFile(SourceFile {
         source_file_path: relative_file_path.into_string(),
         imports,
-        tags: tags,
+        tags,
     }))
 }
 
@@ -81,27 +76,24 @@ pub fn discover_fences_and_files(
             });
             // Custom filter -- retain only directories and fence.json files
             children.retain(|dir_entry_result| {
-                match dir_entry_result {
-                    Ok(dir_entry) => {
-                        if let Some(slashed) = dir_entry.path().to_slash() {
-                            return !(ignore_external_fences == ExternalFences::Ignore
-                                && slashed.to_string().ends_with("/node_modules"))
-                                && !ignored_dirs.iter().any(|d| d.is_match(&slashed));
-                        }
+                if let Ok(dir_entry) = dir_entry_result {
+                    if let Some(slashed) = dir_entry.path().to_slash() {
+                        return (ignore_external_fences != ExternalFences::Ignore
+                            || !slashed.to_string().ends_with("/node_modules"))
+                            && !ignored_dirs.iter().any(|d| d.is_match(&slashed));
                     }
-                    Err(_) => {}
                 }
                 dir_entry_result
                     .as_ref()
                     .map(|dir_entry| match dir_entry.file_name.to_str() {
                         Some(file_name_str) => {
                             if dir_entry.file_type.is_dir() {
-                                return true;
+                                true
                             } else {
-                                return should_retain_file(file_name_str);
+                                should_retain_file(file_name_str)
                             }
                         }
-                        None => return false,
+                        None => false,
                     })
                     .unwrap_or(false)
             });
@@ -120,11 +112,11 @@ pub fn discover_fences_and_files(
                                     let fence_path = &dir_entry.parent_path.join(file_name);
                                     let parsed_fence: Result<Fence, _> =
                                         as_relative_slash_path(fence_path)
-                                            .and_then(|x| parse_fence_file(x));
+                                            .and_then(parse_fence_file);
                                     let fence = match parsed_fence {
                                         Ok(fence) => fence,
                                         Err(e) => {
-                                            eprintln!("{}", e.to_string());
+                                            eprintln!("{}", e);
                                             continue;
                                         }
                                     };
@@ -195,11 +187,11 @@ pub fn discover_fences_and_files(
         },
     );
 
-    return walk_dir
+    walk_dir
         .into_iter()
         .filter(|e| e.is_ok())
         .map(|ok| ok.unwrap().client_state)
-        .collect();
+        .collect()
 }
 
 #[cfg(test)]
@@ -425,8 +417,7 @@ mod test {
         assert!(
             !discovered.iter().any(|x| match x {
                 WalkFileData::SourceFile(y) =>
-                    *y.source_file_path
-                        == "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts".to_owned(),
+                    y.source_file_path == "tests/walk_dir_simple/subdir/subsubdir/subSubDirFile.ts",
                 _ => false,
             }),
             "Expected to have ignored {:?}, but it did not. Actual: {:?}",
@@ -446,7 +437,7 @@ mod test {
         assert!(
             !discovered.iter().any(|x| match x {
                 WalkFileData::Fence(y) =>
-                    *y.fence_path == "tests/walk_dir_simple/subdir/subsubdir/fence.json".to_owned(),
+                    y.fence_path == "tests/walk_dir_simple/subdir/subsubdir/fence.json",
                 _ => false,
             }),
             "expected ignored files, got {:?}",

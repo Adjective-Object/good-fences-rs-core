@@ -1,22 +1,3 @@
-use anyhow::Result;
-use import_resolver::swc_resolver::create_tsconfig_paths_resolver;
-use rayon::prelude::*;
-use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    fmt::Display,
-    iter::FromIterator,
-    str::FromStr,
-    sync::Arc,
-};
-use swc_core::{
-    common::source_map::SmallPos,
-    ecma::loader::{
-        resolve::Resolve,
-        resolvers::{lru::CachingResolver, node::NodeModulesResolver, tsc::TsConfigResolver},
-    },
-};
-
 use crate::import_export_info::ImportExportInfo;
 use crate::utils::{
     process_async_imported_paths, process_executed_paths, process_exports_from,
@@ -27,17 +8,31 @@ use crate::{
     graph::{Graph, GraphFile},
     walked_file::WalkedFile,
 };
+use anyhow::Result;
+use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
-use tsconfig_paths::TsconfigPathsJson;
+use rayon::prelude::*;
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    fmt::Display,
+    iter::FromIterator,
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
+use swc_core::{common::source_map::SmallPos, ecma::loader::resolve::Resolve};
 
 #[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindUnusedItemsConfig {
     // Trace exported symbols that are not imported anywhere in the project
+    #[serde(default)]
     pub report_exported_items: bool,
-    // Paths to read as source files
-    pub paths_to_read: Vec<String>,
+    // Root paths to walk as source files
+    #[serde(alias = "pathsToRead")]
+    pub root_paths: Vec<String>,
     // Path to the root tsconfig.paths.json file used to resolve ts imports between projects.
     // Note: this should be removed and replaced with normal node resolution.
     pub ts_config_path: String,
@@ -89,14 +84,14 @@ impl Display for UnusedFinderReport {
 
         for file_path in unused_files.iter() {
             match self.unused_files_items.get(file_path) {
-                Some(items) => write!(
+                Some(items) => writeln!(
                     f,
-                    "{} is completely unused ({} item{})\n",
+                    "{} is completely unused ({} item{})",
                     file_path,
                     items.len(),
                     if items.len() > 1 { "s" } else { "" },
                 )?,
-                None => write!(f, "{} is completely unused\n", file_path)?,
+                None => writeln!(f, "{} is completely unused", file_path)?,
             };
         }
 
@@ -104,15 +99,15 @@ impl Display for UnusedFinderReport {
             if unused_files_set.contains(file_path) {
                 continue;
             }
-            write!(
+            writeln!(
                 f,
-                "{} is partially unused ({} unused export{}):\n",
+                "{} is partially unused ({} unused export{}):",
                 file_path,
                 items.len(),
                 if items.len() > 1 { "s" } else { "" },
             )?;
             for item in items.iter() {
-                write!(f, "  - {}\n", item.id)?;
+                writeln!(f, "  - {}", item.id)?;
             }
         }
 
@@ -125,8 +120,7 @@ pub fn create_report_map_from_flattened_files(
 ) -> HashMap<String, Vec<ExportedItemReport>> {
     let file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         flattened_walk_file_data
-            .clone()
-            .par_drain(0..)
+            .par_iter()
             .map(|file| {
                 let ids = file
                     .import_export_info
@@ -145,11 +139,11 @@ pub fn create_report_map_from_flattened_files(
 }
 
 pub fn walk_src_files(
-    paths_to_read: &Vec<String>,
+    root_paths: &Vec<String>,
     skipped_dirs: &Arc<Vec<glob::Pattern>>,
     skipped_items: &Arc<Vec<regex::Regex>>,
 ) -> Vec<UnusedFinderSourceFile> {
-    let flattened_walk_file_data: Vec<UnusedFinderSourceFile> = paths_to_read
+    let flattened_walk_file_data: Vec<UnusedFinderSourceFile> = root_paths
         .par_iter()
         .map(|path| {
             let mut walked_files =
@@ -158,7 +152,8 @@ pub fn walk_src_files(
                 .drain(0..)
                 .filter_map(|walked_file| {
                     if let WalkedFile::SourceFile(w) = walked_file {
-                        return Some(w);
+                        // copy the source file into the result type here.
+                        return Some(*w);
                     }
                     None
                 })
@@ -175,7 +170,7 @@ pub fn find_unused_items(
 ) -> Result<UnusedFinderReport, js_err::JsErr> {
     let FindUnusedItemsConfig {
         report_exported_items,
-        paths_to_read,
+        root_paths,
         ts_config_path,
         skipped_dirs,
         skipped_items,
@@ -184,14 +179,10 @@ pub fn find_unused_items(
         entry_packages,
     } = config;
     let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
-    let tsconfig = match TsconfigPathsJson::from_path(ts_config_path.clone()) {
-        Ok(tsconfig) => tsconfig,
-        Err(e) => panic!("Unable to read tsconfig file {}: {}", ts_config_path, e),
-    };
     let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
     let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
         Ok(v) => Arc::new(v),
-        Err(e) => return Err(JsErr::invalid_arg(e.msg.to_string())),
+        Err(e) => return Err(JsErr::invalid_arg(e)),
     };
 
     let skipped_items: Vec<regex::Regex> = skipped_items
@@ -206,22 +197,27 @@ pub fn find_unused_items(
     let skipped_items = Arc::new(skipped_items);
     // Walk on all files and retrieve the WalkFileData from them
     let mut flattened_walk_file_data: Vec<UnusedFinderSourceFile> =
-        walk_src_files(&paths_to_read, &skipped_dirs, &skipped_items);
+        walk_src_files(&root_paths, &skipped_dirs, &skipped_items);
 
     let _total_files = flattened_walk_file_data.len();
-    let resolver: CachingResolver<TsConfigResolver<NodeModulesResolver>> =
-        create_tsconfig_paths_resolver(&tsconfig);
+    let root_dir: PathBuf = {
+        // scope here to contain the mutability
+        let mut x = PathBuf::from(ts_config_path);
+        x.pop();
+        x
+    };
+    let resolver = MonorepoResolver::new_default_resolver(root_dir);
     let mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>> =
         create_report_map_from_flattened_files(&flattened_walk_file_data);
     let mut files: Vec<GraphFile> = flattened_walk_file_data
         .par_iter_mut()
-        .map(|file| {
+        .map(|file| -> Result<GraphFile> {
             process_import_export_info(
                 &mut file.import_export_info,
                 &file.source_file_path,
                 &resolver,
-            );
-            GraphFile::new(
+            )?;
+            Ok(GraphFile::new(
                 file.source_file_path.clone(),
                 file.import_export_info
                     .exported_ids
@@ -230,19 +226,17 @@ pub fn find_unused_items(
                     .collect(),
                 file.import_export_info.clone(),
                 entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-            )
+            ))
         })
-        .collect();
+        .collect::<Result<Vec<GraphFile>>>()
+        .map_err(JsErr::generic_failure)?;
 
     let files: HashMap<String, Arc<GraphFile>> = files
         .par_drain(0..)
         .map(|file| (file.file_path.clone(), Arc::new(file)))
         .collect();
 
-    let mut graph = Graph {
-        files,
-        ..Default::default()
-    };
+    let mut graph = Graph { files };
 
     let entry_files: Vec<String> = flattened_walk_file_data
         .par_iter_mut()
@@ -262,9 +256,7 @@ pub fn find_unused_items(
             break;
         }
         if i >= MAX_ITERATIONS {
-            return Err(JsErr::generic_failure(
-                "exceeded max iterations".to_string(),
-            ));
+            return Err(JsErr::generic_failure(anyhow!("exceeded max iterations")));
         }
     }
 
@@ -294,7 +286,7 @@ pub fn find_unused_items(
                                 .filter(|exported| {
                                     unused_exports
                                         .iter()
-                                        .any(|unused| unused.to_string() == exported.id.to_string())
+                                        .any(|unused| unused.to_string() == exported.id)
                                 })
                                 .collect();
                             return Some((file_path.to_string(), unused_exports));
@@ -311,8 +303,8 @@ pub fn find_unused_items(
 
     Ok(UnusedFinderReport {
         unused_files: reported_unused_files
-            .iter()
-            .map(|(p, _)| p.to_string())
+            .keys()
+            .map(|p| p.to_string())
             .collect(),
         unused_files_items,
     })
@@ -338,14 +330,16 @@ pub fn read_allow_list() -> Result<Vec<glob::Pattern>> {
 
 pub fn process_import_export_info(
     f: &mut ImportExportInfo,
-    source_file_path: &String,
+    source_file_path: &str,
     resolver: &dyn Resolve,
-) {
-    process_executed_paths(f, source_file_path, resolver);
-    process_async_imported_paths(f, source_file_path, resolver);
-    process_exports_from(f, source_file_path, resolver);
-    process_require_paths(f, source_file_path, resolver);
-    process_import_path_ids(f, source_file_path, resolver);
+) -> Result<()> {
+    process_executed_paths(f, source_file_path, resolver)?;
+    process_async_imported_paths(f, source_file_path, resolver)?;
+    process_exports_from(f, source_file_path, resolver)?;
+    process_require_paths(f, source_file_path, resolver)?;
+    process_import_path_ids(f, source_file_path, resolver)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -400,7 +394,7 @@ file2 is partially unused (2 unused exports):
     #[test]
     fn test_error_in_glob() {
         let result = find_unused_items(FindUnusedItemsConfig {
-            paths_to_read: vec!["tests/unused_finder".to_string()],
+            root_paths: vec!["tests/unused_finder".to_string()],
             ts_config_path: "tests/unused_finder/tsconfig.json".to_string(),
             skipped_dirs: vec![".....///invalidpath****".to_string()],
             skipped_items: vec!["[A-Z].*".to_string(), "something".to_string()],
@@ -409,14 +403,14 @@ file2 is partially unused (2 unused exports):
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().message(),
-            "wildcards are either regular `*` or recursive `**`"
+            "Pattern syntax error near position 21: wildcards are either regular `*` or recursive `**`"
         )
     }
 
     #[test]
     fn test_error_in_regex() {
         let result = find_unused_items(FindUnusedItemsConfig {
-            paths_to_read: vec!["tests/unused_finder".to_string()],
+            root_paths: vec!["tests/unused_finder".to_string()],
             ts_config_path: "tests/unused_finder/tsconfig.json".to_string(),
             skipped_items: vec!["[A-Z.*".to_string(), "something".to_string()],
             ..Default::default()

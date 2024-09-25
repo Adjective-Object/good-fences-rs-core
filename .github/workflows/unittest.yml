@@ -19,6 +19,15 @@ jobs:
         run: yarn install
       - name: Check changefile
         run: yarn check-changefile
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: giraffate/clippy-action@v1
+        with:
+          reporter: 'github-pr-review'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          clippy_flags: -- --all-targets -Dwarnings
   tests-linux:
     runs-on: ubuntu-20.04
     steps:
@@ -28,6 +37,11 @@ jobs:
         run: yarn install && yarn build
       - name: cargo test
         run: cargo test --release
+      - name: Run cargo-udeps 
+        uses: aig787/cargo-udeps-action@v1
+        with:
+          version: 'latest'
+          args: '--all-targets'
       - name: run napi tests
         run: yarn test
       - name: upload-artifacts

@@ -12,7 +12,6 @@ anyhow.workspace = true
 jwalk.workspace = true
 lazy_static = "1.4.0"
 serde_derive = "1.0.117"
-serde_bytes = "0.11.5"
 void = "1.0.2"
 relative-path = { workspace = true }
 regex = { workspace = true }
@@ -29,7 +28,7 @@ napi-derive.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-js_err = { path = "../js_err" }
+js_err = { path = "../js_err", features=["napi"] }
 
 unused_finder = { path = "../unused_finder", features = ["napi"] }
 import_resolver = { path = "../import_resolver" }
