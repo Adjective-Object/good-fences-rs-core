@@ -27,6 +27,7 @@ jobs:
         with:
           reporter: 'github-pr-review'
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          clippy_flags: -- --all-targets -Dwarnings
   tests-linux:
     runs-on: ubuntu-20.04
     steps:
@@ -41,8 +42,6 @@ jobs:
         with:
           version: 'latest'
           args: '--all-targets'
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features
       - name: run napi tests
         run: yarn test
       - name: upload-artifacts
