@@ -1,4 +1,4 @@
-use crate::import_export_info::ImportExportInfo;
+use crate::parse::ImportExportInfo;
 use crate::utils::{
     process_async_imported_paths, process_executed_paths, process_exports_from,
     process_import_path_ids, process_require_paths, retrieve_files,

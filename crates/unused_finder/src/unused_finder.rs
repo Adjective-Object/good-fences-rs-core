@@ -23,8 +23,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct UnusedFinder {
-    pub report: UnusedFinderReport,
-    pub logs: Vec<String>,
+    logs: Vec<String>,
     config: FindUnusedItemsConfig,
     entry_packages: HashSet<String>,
     file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
@@ -121,7 +120,6 @@ impl UnusedFinder {
             // These fields are empty because they are populated by
             // the mutation methods below (refresh_file_list, walk_file_graph, etc)
             entry_files: Default::default(),
-            report: Default::default(),
             logs: Default::default(),
         })
     }
@@ -223,8 +221,6 @@ impl UnusedFinder {
         };
         Ok(ok)
     }
-
-    pub fn find_file_unused_items() {}
 
     pub fn find_unused_items(
         &mut self,

@@ -5,10 +5,7 @@ use std::{
 
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::{
-    import_export_info::ImportExportInfo,
-    node_visitor::{ExportKind, ImportedItem},
-};
+use crate::parse::{ExportKind, ImportExportInfo, ImportedItem};
 
 pub enum MarkItemResult {
     MarkedAsUsed,

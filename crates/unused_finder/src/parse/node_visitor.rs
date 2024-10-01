@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Display,
     iter::FromIterator,
     sync::Arc,
 };
@@ -20,77 +19,7 @@ use swc_core::{
     },
 };
 
-#[derive(Debug, Default, Eq, PartialEq, Clone, Hash)]
-pub struct ExportedItemMetadata {
-    pub export_kind: ExportKind,
-    pub span: Span,
-    pub allow_unused: bool,
-}
-
-impl ExportedItemMetadata {
-    pub fn new(export_type: ExportKind, span: Span, allow_unused: bool) -> Self {
-        Self {
-            export_kind: export_type,
-            span,
-            allow_unused,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum ExportKind {
-    Named(String),
-    Default,
-    Namespace,
-    ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
-}
-
-impl Display for ExportKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExportKind::Named(name) => write!(f, "{}", name),
-            ExportKind::Default => write!(f, "default"),
-            ExportKind::Namespace => write!(f, "*"),
-            ExportKind::ExecutionOnly => write!(f, "import '<path>'"),
-        }
-    }
-}
-
-impl Default for ExportKind {
-    fn default() -> Self {
-        Self::Default
-    }
-}
-
-impl From<&ImportedItem> for ExportKind {
-    fn from(i: &ImportedItem) -> Self {
-        match i {
-            ImportedItem::Named(named) => ExportKind::Named(named.clone()),
-            ImportedItem::Default => ExportKind::Default,
-            ImportedItem::Namespace => ExportKind::Namespace,
-            ImportedItem::ExecutionOnly => ExportKind::ExecutionOnly,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum ImportedItem {
-    Named(String),
-    Default,
-    Namespace,
-    ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
-}
-
-impl From<&ExportKind> for ImportedItem {
-    fn from(e: &ExportKind) -> Self {
-        match e {
-            ExportKind::Named(name) => ImportedItem::Named(name.clone()),
-            ExportKind::Default => ImportedItem::Default,
-            ExportKind::Namespace => ImportedItem::Namespace,
-            ExportKind::ExecutionOnly => ImportedItem::ExecutionOnly,
-        }
-    }
-}
+use super::{ExportKind, ExportedItemMetadata, ImportedItem};
 
 #[derive(Debug)]
 pub struct ExportsCollector {

@@ -10,8 +10,8 @@ use swc_ecma_parser::{Capturing, Parser};
 use anyhow;
 use swc_utils::create_lexer;
 
-use crate::import_export_info::{ExportedItem, ImportExportInfo};
-use crate::node_visitor::ExportsCollector;
+use crate::parse::node_visitor::ExportsCollector;
+use crate::parse::{ExportedItem, ImportExportInfo};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceFileParseError {

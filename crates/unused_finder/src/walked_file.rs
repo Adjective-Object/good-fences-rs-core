@@ -1,4 +1,4 @@
-use crate::import_export_info::ImportExportInfo;
+use crate::parse::ImportExportInfo;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct UnusedFinderSourceFile {
