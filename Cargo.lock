@@ -979,6 +979,7 @@ dependencies = [
  "lazy_static",
  "normpath 1.3.0",
  "ouroboros",
+ "packagejson",
  "parking_lot",
  "path-clean 0.1.0",
  "path-slash",
@@ -1428,6 +1429,19 @@ name = "owo-colors"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caff54706df99d2a78a5a4e3455ff45448d81ef1bb63c22cd14052ca0e993a3f"
+
+[[package]]
+name = "packagejson"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "ftree_cache",
+ "pretty_assertions",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "swc_common",
+]
 
 [[package]]
 name = "parking_lot"
