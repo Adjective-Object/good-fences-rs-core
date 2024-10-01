@@ -1,0 +1,19 @@
+[package]
+name = "packagejson"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+ftree_cache = { path = "../ftree_cache" }
+serde_derive = "1.0.117"
+anyhow = { workspace = true }
+serde_json.workspace = true
+serde.workspace = true
+swc_common.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true

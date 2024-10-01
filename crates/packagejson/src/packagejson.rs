@@ -2,7 +2,7 @@ use ftree_cache::context_data::ContextData;
 use serde::Deserialize;
 use swc_common::collections::AHashMap;
 
-use super::exported_path::ExportedPath;
+use crate::exported_path::ExportedPath;
 
 // Either a json string or a boolean
 #[derive(Debug, Deserialize, Clone)]
@@ -25,6 +25,7 @@ pub type BrowserMap = AHashMap<String, StringOrBool>;
 // Subset of package.json used during file resolution
 #[derive(Debug, Deserialize, Clone)]
 pub struct PackageJson {
+    pub name: Option<String>,
     #[serde(default)]
     pub main: Option<String>,
     #[serde(default)]

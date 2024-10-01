@@ -4,9 +4,9 @@
 //! See https://github.com/swc-project/swc/blob/f988b66e1fd921266a8abf6fe9bb997b6878e949/crates/swc_ecma_loader/src/resolvers/node.rs
 
 use super::node_resolver::CachingNodeModulesResolver;
-use super::package::{Browser, PackageJson, StringOrBool};
 use super::pkgjson_exports::PackageExportRewriteData;
 use anyhow::Result;
+use packagejson::{Browser, PackageJson, StringOrBool};
 use path_clean::PathClean;
 use std::{
     env::current_dir,

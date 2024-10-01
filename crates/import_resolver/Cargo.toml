@@ -21,6 +21,7 @@ path-slash = { workspace = true }
 pathdiff = "0.2.1"
 pretty_assertions.workspace = true
 relative-path = { workspace = true }
+packagejson = { path = "../packagejson" }
 serde_derive = "1.0.117"
 serde_json.workspace = true
 serde.workspace = true
