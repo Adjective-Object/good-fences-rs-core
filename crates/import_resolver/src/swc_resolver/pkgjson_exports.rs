@@ -6,9 +6,9 @@ use hashbrown::Equivalent;
 use path_clean::PathClean;
 use path_slash::PathBufExt;
 
-use super::{
+use packagejson::{
     exported_path::{ExportedPath, ExportedPathRef},
-    package::PackageJsonExports,
+    PackageJsonExports,
 };
 
 // Pair path, export-condfition of form ('package-name/imported-path', 'import')

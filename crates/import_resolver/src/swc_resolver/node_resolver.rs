@@ -4,13 +4,13 @@
 //! See https://github.com/swc-project/swc/blob/f988b66e1fd921266a8abf6fe9bb997b6878e949/crates/swc_ecma_loader/src/resolvers/node.rs
 
 use super::common::AHashMap;
-use super::exported_path::ExportedPathRef;
-use super::package::{Browser, PackageJson};
 use super::pkgjson_rewrites::PackageJsonRewriteData;
 use super::util;
 use super::util::to_absolute_path;
 use anyhow::{bail, Context, Error, Result};
 use ftree_cache::context_data::{FileContextCache, WithCache};
+use packagejson::exported_path::ExportedPathRef;
+use packagejson::{Browser, PackageJson};
 use path_clean::PathClean;
 use pathdiff::diff_paths;
 use std::{
