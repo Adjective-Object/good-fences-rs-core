@@ -10,8 +10,8 @@ use swc_ecma_parser::{Capturing, Parser};
 use anyhow;
 use swc_utils::create_lexer;
 
-use crate::import_export_info::{ExportedItem, ImportExportInfo};
-use crate::node_visitor::ExportsCollector;
+use crate::parse::exports_visitor::ExportsVisitor;
+use crate::parse::{ExportedItem, FileImportExportInfo};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceFileParseError {
@@ -25,10 +25,10 @@ pub enum SourceFileParseError {
     ParserError(String),
 }
 
-pub fn get_import_export_paths_map(
+pub fn get_file_import_export_info(
     file_path: String,
     skipped_items: Arc<Vec<regex::Regex>>,
-) -> anyhow::Result<ImportExportInfo> {
+) -> anyhow::Result<FileImportExportInfo> {
     let path = PathBuf::from(&file_path);
 
     let cm = Arc::<SourceMap>::default();
@@ -78,7 +78,7 @@ pub fn get_import_export_paths_map(
         }
     };
 
-    let mut visitor = ExportsCollector::new(skipped_items, comments);
+    let mut visitor = ExportsVisitor::new(skipped_items, comments);
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {
@@ -90,7 +90,7 @@ pub fn get_import_export_paths_map(
         resolved.visit_with(&mut visitor)
     });
 
-    Ok(ImportExportInfo {
+    Ok(FileImportExportInfo {
         imported_path_ids: visitor.imported_ids_path_name,
         require_paths: visitor.require_paths,
         imported_paths: visitor.imported_paths,

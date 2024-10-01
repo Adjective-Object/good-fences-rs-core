@@ -1,10 +1,9 @@
-use super::node_visitor::{ExportKind, ImportedItem};
-use super::unused_finder_visitor_runner::get_import_export_paths_map;
-use crate::import_export_info::ImportExportInfo;
+use crate::parse::{get_file_import_export_info, ExportKind, FileImportExportInfo, ImportedItem};
 use crate::walked_file::{UnusedFinderSourceFile, WalkedFile};
 use anyhow::{Error, Result};
 use import_resolver::manual_resolver::{resolve_with_extension, ResolvedImport};
 use jwalk::WalkDirGeneric;
+use packagejson::PackageJson;
 use path_slash::PathBufExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -65,7 +64,7 @@ where
 
 // import foo, {bar as something} from './foo'`
 pub fn process_import_path_ids(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -86,7 +85,7 @@ pub fn process_import_path_ids(
 
 // `export {default as foo, bar} from './foo'`
 pub fn process_exports_from(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -107,7 +106,7 @@ pub fn process_exports_from(
 
 // import('./foo')
 pub fn process_async_imported_paths(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -128,7 +127,7 @@ pub fn process_async_imported_paths(
 
 // import './foo'
 pub fn process_executed_paths(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -149,7 +148,7 @@ pub fn process_executed_paths(
 
 // require('foo')
 pub fn process_require_paths(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -173,61 +172,14 @@ pub fn retrieve_files(
     skipped_dirs: Option<Vec<glob::Pattern>>,
     skipped_items: Arc<Vec<regex::Regex>>,
 ) -> Vec<WalkedFile> {
-    let walk_dir = WalkDirGeneric::<(String, WalkedFile)>::new(start_path).process_read_dir(
-        move |dir_state, children: &mut Vec<Result<jwalk::DirEntry<(String, _)>, jwalk::Error>>| {
-            children.iter_mut().for_each(|dir_entry_res| {
-                if let Ok(dir_entry) = dir_entry_res {
-                    if dir_entry.file_name() == "node_modules" || dir_entry.file_name() == "lib" {
-                        dir_entry.read_children_path = None;
-                    }
-                }
-            });
-            children.iter_mut().for_each(|dir_entry_result| {
-                if let Ok(dir_entry) = dir_entry_result {
-                    if dir_entry.file_name() == "package.json" {
-                        if let Ok(text) = std::fs::read_to_string(dir_entry.path()) {
-                            let pkg_json: serde_json::Value = serde_json::from_str(&text).unwrap();
-                            let name = pkg_json["name"].as_str();
-                            if let Some(name) = name {
-                                *dir_state = name.to_string();
-                            }
-                        }
-                    }
-                }
-            });
-            children.retain(|dir_entry_result| match dir_entry_result {
-                Ok(dir_entry) => should_retain_dir_entry(dir_entry, &skipped_dirs),
-                Err(_) => false,
-            });
-
-            children.iter_mut().for_each(|child_result| {
-                if let Ok(dir_entry) = child_result {
-                    if let Some(file_name) = dir_entry.file_name.to_str() {
-                        if dir_entry.file_type.is_dir() {
-                            return;
-                        }
-                        // Source file [.ts, .tsx, .js, .jsx]
-                        let joined = &dir_entry.parent_path.join(file_name);
-                        let slashed = joined.to_slash().unwrap();
-                        let visitor_result =
-                            get_import_export_paths_map(slashed.to_string(), skipped_items.clone());
-                        if let Ok(import_export_info) = visitor_result {
-                            dir_entry.client_state =
-                                WalkedFile::SourceFile(Box::new(UnusedFinderSourceFile {
-                                    package_name: dir_state.clone(),
-                                    import_export_info,
-                                    source_file_path: dir_entry
-                                        .path()
-                                        .to_slash()
-                                        .unwrap()
-                                        .to_string(),
-                                }));
-                        }
-                    }
-                }
-            });
-        },
-    );
+    let visitor = UnusedFinderWalkVisitor::new(skipped_dirs, skipped_items);
+    let walk_dir =
+        WalkDirGeneric::<(String, WalkedFile)>::new(start_path).process_read_dir(
+            move |dir_state,
+                  children: &mut Vec<
+                Result<jwalk::DirEntry<(String, WalkedFile)>, jwalk::Error>,
+            >| { visitor.visit_directory(dir_state, children) },
+        );
     walk_dir
         .into_iter()
         .filter_map(|entry| match entry {
@@ -235,6 +187,97 @@ pub fn retrieve_files(
             Err(_) => None,
         })
         .collect()
+}
+
+// Visitor during a directory walk that collects information about source files
+// for the unused finder
+struct UnusedFinderWalkVisitor {
+    skipped_dirs: Option<Vec<glob::Pattern>>,
+    skipped_items: Arc<Vec<regex::Regex>>,
+}
+
+impl UnusedFinderWalkVisitor {
+    pub fn new(
+        skipped_dirs: Option<Vec<glob::Pattern>>,
+        skipped_items: Arc<Vec<regex::Regex>>,
+    ) -> Self {
+        UnusedFinderWalkVisitor {
+            skipped_dirs,
+            skipped_items,
+        }
+    }
+
+    // callback meant to be called during a file walk of a directory
+    // (e.g. with jwalk's process_read_dir() callback)
+    pub fn visit_directory(
+        &self,
+        current_package_name: &mut String,
+        children: &mut Vec<jwalk::Result<jwalk::DirEntry<(String, WalkedFile)>>>,
+    ) {
+        children.iter_mut().for_each(|dir_entry_res| {
+            if let Ok(dir_entry) = dir_entry_res {
+                if dir_entry.file_name() == "node_modules" || dir_entry.file_name() == "lib" {
+                    dir_entry.read_children_path = None;
+                }
+            }
+        });
+
+        // if there is a package.json file, we can use it to get the package name
+        // This should be done in a separate iteration _before_ visiting the rest of the files
+        // in the folder, because package.json files influence their peer files.
+        if let Some(package_json) = children
+            .iter()
+            .filter_map(|f| match f {
+                Ok(f) => Some(f),
+                Err(_) => None,
+            })
+            .find(|entry| entry.file_name() == "package.json")
+        {
+            let file = std::fs::File::open(package_json.path()).unwrap();
+            let pkg_json: PackageJson = serde_json::from_reader(file).unwrap();
+            if let Some(name) = pkg_json.name {
+                *current_package_name = name.to_string();
+            }
+        }
+
+        children.retain(|dir_entry_result| match dir_entry_result {
+            Ok(dir_entry) => should_retain_dir_entry(dir_entry, &self.skipped_dirs),
+            Err(_) => false,
+        });
+
+        for dir_entry in children {
+            let child = match dir_entry {
+                Ok(ref mut dir_entry) => dir_entry,
+                Err(_) => continue,
+            };
+
+            if child.file_type.is_dir() {
+                continue;
+            }
+
+            let file_name = match child.file_name.to_str() {
+                Some(name) => name,
+                None => continue,
+            };
+
+            // Source file [.ts, .tsx, .js, .jsx]
+            let joined = &child.parent_path.join(file_name);
+            let slashed = joined.to_slash().unwrap();
+            let visitor_result = get_file_import_export_info(
+                slashed.to_string(),
+                // note: this clone() is cloning the Arc<> pointer, not the data the Arc references
+                // See: https://doc.rust-lang.org/std/sync/struct.Arc.html
+                self.skipped_items.clone(),
+            );
+            if let Ok(import_export_info) = visitor_result {
+                child.client_state = WalkedFile::SourceFile(Box::new(UnusedFinderSourceFile {
+                    package_name: current_package_name.clone(),
+                    import_export_info,
+                    source_file_path: child.path().to_slash().unwrap().to_string(),
+                }));
+            }
+        }
+    }
 }
 
 fn should_retain_dir_entry(

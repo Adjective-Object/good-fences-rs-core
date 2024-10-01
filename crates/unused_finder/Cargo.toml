@@ -28,6 +28,7 @@ swc_utils = { path = "../swc_utils" }
 swc.workspace = true
 thiserror.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
+packagejson = { path = "../packagejson" }
 
 [features]
 default = []

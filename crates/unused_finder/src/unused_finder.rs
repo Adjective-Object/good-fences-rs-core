@@ -17,14 +17,13 @@ use crate::{
         walk_src_files, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
     },
     graph::{Graph, GraphFile},
-    unused_finder_visitor_runner::get_import_export_paths_map,
+    parse::get_file_import_export_info,
     walked_file::UnusedFinderSourceFile,
 };
 
 #[derive(Debug)]
 pub struct UnusedFinder {
-    pub report: UnusedFinderReport,
-    pub logs: Vec<String>,
+    logs: Vec<String>,
     config: FindUnusedItemsConfig,
     entry_packages: HashSet<String>,
     file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
@@ -121,7 +120,6 @@ impl UnusedFinder {
             // These fields are empty because they are populated by
             // the mutation methods below (refresh_file_list, walk_file_graph, etc)
             entry_files: Default::default(),
-            report: Default::default(),
             logs: Default::default(),
         })
     }
@@ -223,8 +221,6 @@ impl UnusedFinder {
         };
         Ok(ok)
     }
-
-    pub fn find_file_unused_items() {}
 
     pub fn find_unused_items(
         &mut self,
@@ -338,7 +334,7 @@ impl UnusedFinder {
             .map(|f| -> Result<Option<String>> {
                 // Read/parse file from disk
                 let visitor_result =
-                    get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
+                    get_file_import_export_info(f.to_string(), self.skipped_items.clone());
                 let ok = match visitor_result {
                     Ok(ok) => ok,
                     Err(e) => return Err(anyhow!("Error reading file {}: {:?}", f, e)),
