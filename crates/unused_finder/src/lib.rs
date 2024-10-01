@@ -18,7 +18,6 @@ mod core;
 pub mod graph;
 pub mod parse;
 pub mod unused_finder;
-pub mod unused_finder_visitor_runner;
 mod utils;
 mod walked_file;
 
