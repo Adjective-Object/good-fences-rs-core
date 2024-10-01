@@ -1,9 +1,9 @@
+use super::{ExportKind, ExportedItemMetadata, ImportedItem};
 use std::{
     collections::{HashMap, HashSet},
     iter::FromIterator,
     sync::Arc,
 };
-
 use swc_core::{
     common::{
         comments::{CommentKind, Comments, SingleThreadedComments},
@@ -19,10 +19,9 @@ use swc_core::{
     },
 };
 
-use super::{ExportKind, ExportedItemMetadata, ImportedItem};
-
+// AST visitor that gathers information on file imports and exports from an SWC source tree.
 #[derive(Debug)]
-pub struct ExportsCollector {
+pub struct ExportsVisitor {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
     pub imported_ids_path_name: HashMap<String, HashSet<ImportedItem>>,
     // require('foo') generates ['foo']
@@ -43,7 +42,7 @@ pub struct ExportsCollector {
     pub comments: SingleThreadedComments,
 }
 
-impl ExportsCollector {
+impl ExportsVisitor {
     pub fn new(skipped_items: Arc<Vec<regex::Regex>>, comments: SingleThreadedComments) -> Self {
         Self {
             imported_ids_path_name: HashMap::new(),
@@ -167,7 +166,7 @@ impl ExportsCollector {
     }
 }
 
-impl Visit for ExportsCollector {
+impl Visit for ExportsVisitor {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);

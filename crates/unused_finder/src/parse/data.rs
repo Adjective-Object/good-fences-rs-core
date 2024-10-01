@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
 };
-
 use swc_core::common::Span;
 
 // Represents an import of a module from another module
@@ -79,7 +78,7 @@ impl ExportedItemMetadata {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct ImportExportInfo {
+pub struct FileImportExportInfo {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
     pub imported_path_ids: HashMap<String, HashSet<ImportedItem>>,
     // require('foo') generates ['foo']
@@ -100,7 +99,7 @@ pub struct ExportedItem {
     pub source_file_path: PathBuf,
 }
 
-impl ImportExportInfo {
+impl FileImportExportInfo {
     pub fn new() -> Self {
         Self {
             imported_path_ids: HashMap::new(),
@@ -113,7 +112,7 @@ impl ImportExportInfo {
     }
 }
 
-impl Default for ImportExportInfo {
+impl Default for FileImportExportInfo {
     fn default() -> Self {
         Self::new()
     }

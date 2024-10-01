@@ -1,4 +1,4 @@
-use crate::parse::ImportExportInfo;
+use crate::parse::FileImportExportInfo;
 use crate::utils::{
     process_async_imported_paths, process_executed_paths, process_exports_from,
     process_import_path_ids, process_require_paths, retrieve_files,
@@ -329,7 +329,7 @@ pub fn read_allow_list() -> Result<Vec<glob::Pattern>> {
 }
 
 pub fn process_import_export_info(
-    f: &mut ImportExportInfo,
+    f: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<()> {

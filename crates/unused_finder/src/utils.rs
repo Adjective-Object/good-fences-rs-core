@@ -1,4 +1,4 @@
-use crate::parse::{get_import_export_paths_map, ExportKind, ImportExportInfo, ImportedItem};
+use crate::parse::{get_file_import_export_info, ExportKind, FileImportExportInfo, ImportedItem};
 use crate::walked_file::{UnusedFinderSourceFile, WalkedFile};
 use anyhow::{Error, Result};
 use import_resolver::manual_resolver::{resolve_with_extension, ResolvedImport};
@@ -64,7 +64,7 @@ where
 
 // import foo, {bar as something} from './foo'`
 pub fn process_import_path_ids(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -85,7 +85,7 @@ pub fn process_import_path_ids(
 
 // `export {default as foo, bar} from './foo'`
 pub fn process_exports_from(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -106,7 +106,7 @@ pub fn process_exports_from(
 
 // import('./foo')
 pub fn process_async_imported_paths(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -127,7 +127,7 @@ pub fn process_async_imported_paths(
 
 // import './foo'
 pub fn process_executed_paths(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -148,7 +148,7 @@ pub fn process_executed_paths(
 
 // require('foo')
 pub fn process_require_paths(
-    import_export_info: &mut ImportExportInfo,
+    import_export_info: &mut FileImportExportInfo,
     source_file_path: &str,
     resolver: &dyn Resolve,
 ) -> Result<(), Error> {
@@ -263,7 +263,7 @@ impl UnusedFinderWalkVisitor {
             // Source file [.ts, .tsx, .js, .jsx]
             let joined = &child.parent_path.join(file_name);
             let slashed = joined.to_slash().unwrap();
-            let visitor_result = get_import_export_paths_map(
+            let visitor_result = get_file_import_export_info(
                 slashed.to_string(),
                 // note: this clone() is cloning the Arc<> pointer, not the data the Arc references
                 // See: https://doc.rust-lang.org/std/sync/struct.Arc.html

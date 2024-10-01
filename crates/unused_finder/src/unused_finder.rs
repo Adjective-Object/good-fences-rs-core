@@ -17,7 +17,7 @@ use crate::{
         walk_src_files, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
     },
     graph::{Graph, GraphFile},
-    parse::get_import_export_paths_map,
+    parse::get_file_import_export_info,
     walked_file::UnusedFinderSourceFile,
 };
 
@@ -334,7 +334,7 @@ impl UnusedFinder {
             .map(|f| -> Result<Option<String>> {
                 // Read/parse file from disk
                 let visitor_result =
-                    get_import_export_paths_map(f.to_string(), self.skipped_items.clone());
+                    get_file_import_export_info(f.to_string(), self.skipped_items.clone());
                 let ok = match visitor_result {
                     Ok(ok) => ok,
                     Err(e) => return Err(anyhow!("Error reading file {}: {:?}", f, e)),

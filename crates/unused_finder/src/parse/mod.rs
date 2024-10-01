@@ -1,7 +1,8 @@
 pub mod data;
-pub mod export_collector_tests;
-pub mod node_visitor;
-pub mod visitor_runner;
+pub mod exports_visitor;
+#[cfg(test)]
+pub mod exports_visitor_tests;
+pub mod exports_visitor_runner;
 
 pub use data::*;
-pub use visitor_runner::get_import_export_paths_map;
+pub use exports_visitor_runner::get_file_import_export_info;

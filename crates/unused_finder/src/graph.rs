@@ -5,7 +5,7 @@ use std::{
 
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::parse::{ExportKind, ImportExportInfo, ImportedItem};
+use crate::parse::{ExportKind, FileImportExportInfo, ImportedItem};
 
 pub enum MarkItemResult {
     MarkedAsUsed,
@@ -21,14 +21,14 @@ pub struct GraphFile {
     pub unused_exports: HashSet<ExportKind>,
     //
     pub export_from: HashMap<ExportKind, String>,
-    pub import_export_info: ImportExportInfo,
+    pub import_export_info: FileImportExportInfo,
 }
 
 impl GraphFile {
     pub fn new(
         file_path: String,
         unused_exports: HashSet<ExportKind>,
-        import_export_info: ImportExportInfo,
+        import_export_info: FileImportExportInfo,
         is_used: bool,
     ) -> Self {
         let mut export_from = HashMap::new();
