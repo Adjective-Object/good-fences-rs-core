@@ -1,5 +1,4 @@
-use super::unused_finder_visitor_runner::get_import_export_paths_map;
-use crate::parse::{ExportKind, ImportExportInfo, ImportedItem};
+use crate::parse::{get_import_export_paths_map, ExportKind, ImportExportInfo, ImportedItem};
 use crate::walked_file::{UnusedFinderSourceFile, WalkedFile};
 use anyhow::{Error, Result};
 use import_resolver::manual_resolver::{resolve_with_extension, ResolvedImport};

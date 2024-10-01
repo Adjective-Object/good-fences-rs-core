@@ -17,7 +17,7 @@ use crate::{
         walk_src_files, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
     },
     graph::{Graph, GraphFile},
-    unused_finder_visitor_runner::get_import_export_paths_map,
+    parse::get_import_export_paths_map,
     walked_file::UnusedFinderSourceFile,
 };
 
