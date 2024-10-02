@@ -8,8 +8,10 @@ use path_slash::PathBufExt;
 
 use packagejson::{
     exported_path::{ExportedPath, ExportedPathRef},
-    PackageJsonExports,
+    PackageJsonExport, PackageJsonExports,
 };
+
+use super::common::AHashMap;
 
 // Pair path, export-condfition of form ('package-name/imported-path', 'import')
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -314,86 +316,73 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
     type Error = anyhow::Error;
 
     fn try_from(exports_map: &PackageJsonExports) -> Result<Self> {
-        match exports_map {
-            PackageJsonExports::Single(exports_map) => {
-                // this is a simple export map of form
-                // { "exports": { "import": "./index.ejs", "require": "./index.cjs" } }
-                // with no sub-path exports
-                //
-                // This is equivlaent to a an export map with a single path entry of "."
-
-                let static_exports = exports_map
-                    .iter()
-                    .map(
-                        |(export_kind, export_target)| -> (ExportKey, Option<String>) {
-                            (
-                                ExportKey(".".to_string(), export_kind.clone()),
-                                export_target.as_ref().map(|e| clean_path(e)),
-                            )
-                        },
-                    )
-                    .map(|(key, target)| (key, target.into()))
-                    .collect();
-
-                Ok(PackageExportRewriteData {
-                    static_exports,
-                    ..Default::default()
-                })
+        let mut resolution_data = PackageExportRewriteData::default();
+        for (export_path, exported) in exports_map.iter() {
+            if !export_path.starts_with("./") && export_path != "." {
+                return Err(anyhow!(
+                    "package.json exports fields must either be '.' or start with './'"
+                ));
             }
-            PackageJsonExports::Multiple(exports_map) => {
-                // Iterate through the exports map and build up the export resolution data
-                let mut resolution_data = PackageExportRewriteData::default();
-                for (export_path, conditional_exports) in exports_map.iter() {
-                    if !export_path.starts_with("./") && export_path != "." {
-                        return Err(anyhow!(
-                            "package.json exports fields must either be '.' or start with './'"
-                        ));
-                    }
 
-                    let export_path_star_ct = export_path.chars().filter(|c| *c == '*').count();
-                    if export_path_star_ct == 1 {
-                        // star pattern
-                        for (export_condition, export_target) in conditional_exports.iter() {
-                            resolution_data
-                                .star_exports
-                                .entry_ref(export_condition)
-                                .or_insert_with(Vec::new)
-                                .push((
-                                    clean_path(export_path),
-                                    export_target.map_export(clean_path),
-                                ));
-                        }
-                    } else if export_path_star_ct > 1 {
-                        return Err(anyhow!(
-                            "Invalid star pattern '{}' in package.json exports field: \
-                            Star patterns may contain at most a single star match.",
-                            export_path
-                        ));
-                    } else if export_path.ends_with('/') {
-                        // deprecated node 14.x directory pattern
-                        for (export_condition, export_target) in conditional_exports.iter() {
-                            resolution_data
-                                .star_exports
-                                .entry_ref(export_condition)
-                                .or_insert_with(Vec::new)
-                                .push((
-                                    clean_path(export_path),
-                                    export_target.map_export(clean_path),
-                                ));
-                        }
-                    } else {
-                        // literal export
-                        for (export_condition, export_target) in conditional_exports.iter() {
-                            resolution_data.static_exports.insert(
-                                ExportKey(clean_path(export_path), export_condition.clone()),
-                                export_target.map_export(clean_path),
-                            );
-                        }
-                    }
+            // for simple exports, simulate a conditional exports map with a single entry, "default"
+            // If needed, store it on the stack in my_cond_exp, allowing conditional_exports to be a reference type
+            let my_cond_exp: AHashMap<String, ExportedPath>;
+            let conditional_exports = match exported {
+                PackageJsonExport::Single(export_target) => {
+                    let entry = (
+                        "default".to_string(),
+                        match export_target {
+                            Some(v) => ExportedPath::Exported(v.to_string()),
+                            None => ExportedPath::Private,
+                        },
+                    );
+                    my_cond_exp = AHashMap::from_iter(vec![entry].drain(..));
+                    &my_cond_exp
                 }
+                PackageJsonExport::Conditional(conditional_exports) => conditional_exports,
+            };
 
-                Ok(resolution_data)
+            let export_path_star_ct = export_path.chars().filter(|c| *c == '*').count();
+            if export_path_star_ct == 1 {
+                // star pattern
+                for (export_condition, export_target) in conditional_exports.iter() {
+                    resolution_data
+                        .star_exports
+                        .entry_ref(export_condition)
+                        .or_insert_with(Vec::new)
+                        .push((
+                            clean_path(export_path),
+                            export_target.map_export(clean_path),
+                        ));
+                }
+            } else if export_path_star_ct > 1 {
+                return Err(anyhow!(
+                    "Invalid star pattern '{}' in package.json exports field: \
+                            Star patterns may contain at most a single star match.",
+                    export_path
+                ));
+            } else if export_path.ends_with('/') {
+                // deprecated node 14.x directory pattern
+                for (export_condition, export_target) in conditional_exports.iter() {
+                    resolution_data
+                        .star_exports
+                        .entry_ref(export_condition)
+                        .or_insert_with(Vec::new)
+                        .push((
+                            clean_path(export_path),
+                            export_target.map_export(clean_path),
+                        ));
+                }
+            } else {
+                // literal export
+                for (export_condition, export_target) in conditional_exports.iter() {
+                    resolution_data.static_exports.insert(
+                        ExportKey(clean_path(export_path), export_condition.clone()),
+                        export_target.map_export(clean_path),
+                    );
+                }
             }
         }
+        Ok(resolution_data)
     }
 }

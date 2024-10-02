@@ -48,6 +48,29 @@ impl CombinedResolverCaches {
         };
     }
 
+    pub fn resolver_with_export_conditions<'a>(
+        &'a self,
+        root_dir: &'a Path,
+        target_env: TargetEnv,
+        alias: AHashMap<String, String>,
+        preserve_symlinks: bool,
+        export_conditions: Vec<String>,
+    ) -> CombinedResolver<'a> {
+        return CombinedResolver::<'a> {
+            root_dir,
+            tsconfig_cache: &self.tsconfig_cache,
+            node_modules_resolver: CachingNodeModulesResolver::new_with_export_conditions(
+                target_env,
+                alias,
+                preserve_symlinks,
+                root_dir,
+                &self.package_json_cache,
+                &self.node_modules_cache,
+                export_conditions,
+            ),
+        };
+    }
+
     /// Mark the files files in the given path as dirty
     pub fn mark_dirty_root(&mut self, root: &Path) {
         self.tsconfig_cache.mark_dirty_root(root);
@@ -114,7 +137,6 @@ mod test {
     use super::*;
     use pretty_assertions::assert_eq;
     use test_tmpdir::TmpDir;
-    // use tracing_test::traced_test;
 
     fn check_deadlocks() {
         std::thread::spawn(move || loop {
@@ -374,6 +396,128 @@ mod test {
                     tmp.root()
                         .to_owned()
                         .join("root/node_modules/in-root/lib/bar.ts")
+                ),
+                slug: None,
+            }
+        );
+    }
+
+    #[test]
+    pub fn test_conditional_export_heterogenous() {
+        // Test that the resolver can handle a package.json with a mix of
+        // single and conditional exports
+        let tmp = test_tmpdir!(
+            "node_modules/hetero/package.json" => r#"
+            {
+                "exports": {
+                    ".": {
+                        "import": "./lib/import-target.ts",
+                        "require": "./lib/require-target.ts"
+                    },
+                    "./foo": "./lib/foo.ts"
+                }
+            }
+            "#,
+            "node_modules/hetero/lib/import-target.ts" => r#"export const something = 1;"#,
+            "node_modules/hetero/lib/require-target.ts" => r#"export const something = 2;"#,
+            "node_modules/hetero/lib/foo.ts" => r#"export const something = 3;"#
+        );
+
+        let resolve_with_conditions = |from: &str, to: &str, conditions: Vec<&str>| -> Resolution {
+            let caches = CombinedResolverCaches::new();
+
+            // resolve with import
+            let import_resolver = caches.resolver_with_export_conditions(
+                tmp.root(),
+                TargetEnv::Node,
+                Default::default(),
+                false,
+                conditions.into_iter().map(|s| s.to_string()).collect(),
+            );
+            import_resolver
+                .resolve(&FileName::Real(tmp.root().join(from)), to)
+                .unwrap()
+        };
+
+        // check "resolve" condition
+        assert_eq!(
+            resolve_with_conditions(
+                "root/packages/my/importing/module.ts",
+                "hetero",
+                vec!["require"],
+            ),
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root()
+                        .to_owned()
+                        .join("node_modules/hetero/lib/require-target.ts")
+                ),
+                slug: None,
+            }
+        );
+
+        // check "import" condition
+        assert_eq!(
+            resolve_with_conditions(
+                "root/packages/my/importing/module.ts",
+                "hetero",
+                vec!["import"],
+            ),
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root()
+                        .to_owned()
+                        .join("node_modules/hetero/lib/import-target.ts")
+                ),
+                slug: None,
+            }
+        );
+
+        // check fallback behaviour with multiple conditions
+        assert_eq!(
+            resolve_with_conditions(
+                "packages/my/importing/module.ts",
+                "hetero",
+                vec!["not-present", "require", "import"],
+            ),
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root()
+                        .to_owned()
+                        .join("node_modules/hetero/lib/require-target.ts")
+                ),
+                slug: None,
+            }
+        );
+
+        // check "import" condition and "resolve" condition against a non-conditional export
+        assert_eq!(
+            resolve_with_conditions(
+                "packages/my/importing/module.ts",
+                "hetero/foo",
+                vec!["require"],
+            ),
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root().to_owned().join("node_modules/hetero/lib/foo.ts")
+                ),
+                slug: None,
+            }
+        );
+        assert_eq!(
+            resolve_with_conditions(
+                "packages/my/importing/module.ts",
+                "hetero/foo",
+                vec!["import"],
+            ),
+            Resolution {
+                filename: FileName::Real(
+                    // rewrite should not occur (tsconfig is outside the root dir)
+                    tmp.root().to_owned().join("node_modules/hetero/lib/foo.ts")
                 ),
                 slug: None,
             }
