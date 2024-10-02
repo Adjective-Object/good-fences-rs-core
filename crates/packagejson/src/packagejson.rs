@@ -5,7 +5,7 @@ use swc_common::collections::AHashMap;
 use crate::exported_path::ExportedPath;
 
 // Either a json string or a boolean
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum StringOrBool {
     Str(String),
@@ -13,7 +13,7 @@ pub enum StringOrBool {
 }
 
 // package.json .browser field
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Browser {
     Str(String),
@@ -23,7 +23,7 @@ pub enum Browser {
 pub type BrowserMap = AHashMap<String, StringOrBool>;
 
 // Subset of package.json used during file resolution
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct PackageJson {
     pub name: Option<String>,
     #[serde(default)]
@@ -36,9 +36,11 @@ pub struct PackageJson {
     pub exports: Option<PackageJsonExports>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+pub type PackageJsonExports = AHashMap<String, PackageJsonExport>;
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum PackageJsonExports {
+pub enum PackageJsonExport {
     // An un-nested hashmap of that only maps the index of the module to the path
     //
     // e.g:
@@ -47,7 +49,7 @@ pub enum PackageJsonExports {
     //   "require": "./main.js"
     //   "default": "./main.js"
     // }
-    Single(AHashMap<String, Option<String>>),
+    Single(Option<String>),
     // A nested hashmap that maps multiple import paths into the module:
     //
     // e.g:
@@ -63,7 +65,7 @@ pub enum PackageJsonExports {
     //     "default": "./lib/util.js"
     //   }
     // }
-    Multiple(AHashMap<String, AHashMap<String, ExportedPath>>),
+    Conditional(AHashMap<String, ExportedPath>),
 }
 
 impl ContextData for PackageJson {

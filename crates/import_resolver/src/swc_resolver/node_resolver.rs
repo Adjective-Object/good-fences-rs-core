@@ -65,8 +65,8 @@ pub(crate) fn is_core_module(s: &str) -> bool {
 }
 
 static DEFAULT_EXPORT_CONDITIONS: &[&str] = &[
-    // TODO: make this configurable and drop "source"
-    "source", "default", "import", "require",
+    // TODO: make this configurable
+    "source", "import", "require", "default",
 ];
 
 // Adaptation of NodeModulesResolver from swc that stores
@@ -87,6 +87,9 @@ pub struct CachingNodeModulesResolver<'a> {
 
     // cache of node_modules directories discovered during resolution
     node_modules_cache: &'a NodeModulesCache,
+
+    // List of export conditions to try when resolving exports
+    export_conditions: Vec<String>,
 }
 
 static EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
@@ -101,6 +104,30 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         pkg_json_cache: &'caches PackageJsonCache,
         node_modules_cache: &'caches NodeModulesCache,
     ) -> Self {
+        Self::new_with_export_conditions(
+            target_env,
+            alias,
+            preserve_symlinks,
+            monorepo_root,
+            pkg_json_cache,
+            node_modules_cache,
+            DEFAULT_EXPORT_CONDITIONS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    }
+
+    /// Create a node modules resolver for the target runtime environment.
+    pub fn new_with_export_conditions(
+        target_env: TargetEnv,
+        alias: AHashMap<String, String>,
+        preserve_symlinks: bool,
+        monorepo_root: &'caches Path,
+        pkg_json_cache: &'caches PackageJsonCache,
+        node_modules_cache: &'caches NodeModulesCache,
+        export_conditions: Vec<String>,
+    ) -> Self {
         Self {
             target_env,
             alias,
@@ -109,6 +136,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             ignore_node_modules: false,
             pkg_json_cache,
             node_modules_cache,
+            export_conditions,
         }
     }
 
@@ -274,7 +302,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         if let Some(exports_map) = resolution_data.exports.as_ref() {
             if let Some(rewritten) = exports_map.rewrite_relative_export(
                 ".",
-                DEFAULT_EXPORT_CONDITIONS.iter().copied(),
+                self.export_conditions.iter().map(|s| s.as_str()),
                 &mut out,
             )? {
                 match rewritten.rewritten_export {
@@ -414,7 +442,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                                 let mut out = String::new();
                                 let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
                                     &rel_import,
-                                    DEFAULT_EXPORT_CONDITIONS.iter().copied(),
+                                    self.export_conditions.iter().map(|s| s.as_str()),
                                     &mut out,
                                 )?;
                                 if let Some(rewritten_to) = rewritten_to {
@@ -577,7 +605,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     let result = self
                         .resolve_node_modules(base_dir, target)
                         .and_then(|path| {
-                            let file_path = path.context("failed to get the node_modules path");
+                            let file_path = path.with_context(|| format!("failed find a node_modules path within {} for package {:?} above {}", self.monorepo_root.display(), target, base_dir.display()));
                             let current_directory = current_dir()?;
                             let relative_path = diff_paths(file_path?, current_directory);
                             self.wrap(relative_path)
