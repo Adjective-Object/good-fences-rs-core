@@ -325,7 +325,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
             }
 
             // for simple exports, simulate a conditional exports map with a single entry, "default"
-            // This will be conditionally stored on the stack here, in my_cond_exp while it is being used.
+            // If needed, store it on the stack in my_cond_exp, allowing conditional_exports to be a reference type
             let my_cond_exp: AHashMap<String, ExportedPath>;
             let conditional_exports = match exported {
                 PackageJsonExport::Single(export_target) => {
