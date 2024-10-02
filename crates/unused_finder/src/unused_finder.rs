@@ -1,378 +1,265 @@
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    iter::FromIterator,
-    path::PathBuf,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{collections::HashSet, iter::FromIterator, path::PathBuf, str::FromStr, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
-use rayon::prelude::*;
+use packagejson::{Browser, PackageJsonExport, StringOrBool};
 
 use crate::{
     core::{
         create_report_map_from_flattened_files, process_import_export_info, read_allow_list,
         walk_src_files, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
+        WalkFileResult,
     },
     graph::{Graph, GraphFile},
+    logger::Logger,
     parse::get_file_import_export_info,
     walked_file::UnusedFinderSourceFile,
 };
 
-#[derive(Debug)]
-pub struct UnusedFinder {
-    logs: Vec<String>,
-    config: FindUnusedItemsConfig,
+// the config is designed to be json / javascript serializable,
+// so we also have this struct to hold intermediate values that
+// can be derived from the config
+#[derive(Debug, Clone)]
+struct ProcessedConfig {
     entry_packages: HashSet<String>,
-    file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
     skipped_items: Arc<Vec<regex::Regex>>,
     skipped_dirs: Arc<Vec<glob::Pattern>>,
-    entry_files: Vec<String>,
-    graph: Graph,
+}
+
+impl TryFrom<&FindUnusedItemsConfig> for ProcessedConfig {
+    type Error = JsErr;
+    fn try_from(value: &FindUnusedItemsConfig) -> std::result::Result<Self, Self::Error> {
+        let skipped_items = value
+            .skipped_items
+            .iter()
+            .map(|s| regex::Regex::from_str(s.as_str()))
+            .collect::<Result<Vec<regex::Regex>, _>>()
+            .context("while parsing skipped_items as regexp")
+            .map_err(JsErr::invalid_arg)?;
+
+        let skipped_dirs = value
+            .skipped_dirs
+            .iter()
+            .map(|s| glob::Pattern::new(s))
+            .collect::<Result<Vec<glob::Pattern>, _>>()
+            .context("while parsing skipped_dirs as glob patterns")
+            .map_err(JsErr::invalid_arg)?;
+
+        Ok(ProcessedConfig {
+            entry_packages: value.entry_packages.iter().cloned().collect(),
+            skipped_items: Arc::new(skipped_items),
+            skipped_dirs: Arc::new(skipped_dirs),
+        })
+    }
+}
+
+#[derive(Debug)]
+enum DirtyFiles {
+    All,
+    Some(Vec<String>),
+}
+
+// Holds an in-memory representation of the file tree.
+// That representation can be used used to find unused files and exports
+// within a project
+//
+// To use, create a new UnusedFinder, then call `find_unused` to get the accounting
+// of unused files and exports.
+#[derive(Debug)]
+pub struct UnusedFinder {
+    config: FindUnusedItemsConfig,
+    processed_config: ProcessedConfig,
+
+    // absolute paths of files which have been explicitly marked dirty
+    // since the last time we checked for unused files
+    dirty_files: DirtyFiles,
+    last_walk_result: WalkFileResult,
+
+    // Resolver used to resolve import/export paths during find_unused
     resolver: MonorepoResolver,
 }
 
 impl UnusedFinder {
-    pub fn new(config: FindUnusedItemsConfig) -> anyhow::Result<Self, JsErr> {
-        let FindUnusedItemsConfig {
-            report_exported_items: _,
-            root_paths,
-            ts_config_path,
-            skipped_dirs,
-            skipped_items,
-            files_ignored_imports: _,
-            files_ignored_exports: _,
-            entry_packages,
-        } = config.clone();
+    pub fn new(logger: impl Logger, config: FindUnusedItemsConfig) -> anyhow::Result<Self, JsErr> {
+        let p_config: ProcessedConfig = (&config).try_into().map_err(JsErr::generic_failure)?;
         let root_dir: PathBuf = {
             // scope here to contain the mutability
-            let mut x = PathBuf::from(ts_config_path);
+            // HACK: Use the directory of the tsconfig_paths file as the root of the monorepo
+            let mut x = PathBuf::from(&config.ts_config_path);
             x.pop();
             x
         };
+
         let resolver: MonorepoResolver = MonorepoResolver::new_default_resolver(root_dir);
-        let entry_packages: HashSet<String> = entry_packages.into_iter().collect();
 
-        let skipped_dirs = skipped_dirs.iter().map(|s| glob::Pattern::new(s));
-        let skipped_dirs: Arc<Vec<glob::Pattern>> = match skipped_dirs.into_iter().collect() {
-            Ok(v) => Arc::new(v),
-            Err(e) => {
-                // return None;
-                return Err(JsErr::invalid_arg(e));
-            }
-        };
-
-        let skipped_items = skipped_items
-            .iter()
-            .map(|s| regex::Regex::from_str(s.as_str()));
-        let skipped_items: Vec<regex::Regex> = match skipped_items.into_iter().collect() {
-            Ok(r) => r,
-            Err(e) => {
-                return Err(JsErr::invalid_arg(e));
-            }
-        };
-        let skipped_items = Arc::new(skipped_items);
-        let mut flattened_walk_file_data =
-            walk_src_files(&root_paths, &skipped_dirs, &skipped_items);
-
-        let mut files: Vec<GraphFile> = flattened_walk_file_data
-            .par_iter_mut()
-            .map(|file| -> Result<GraphFile> {
-                process_import_export_info(
-                    &mut file.import_export_info,
-                    &file.source_file_path,
-                    &resolver,
-                )?;
-                Ok(GraphFile::new(
-                    file.source_file_path.clone(),
-                    file.import_export_info
-                        .exported_ids
-                        .iter()
-                        .map(|e| e.metadata.export_kind.clone())
-                        .collect(),
-                    file.import_export_info.clone(),
-                    entry_packages.contains(&file.package_name), // mark files from entry_packages as used
-                ))
-            })
-            .collect::<Result<Vec<GraphFile>>>()
-            .map_err(JsErr::generic_failure)?;
-
-        let files: HashMap<String, Arc<GraphFile>> = files
-            .par_drain(0..)
-            .map(|file| (file.file_path.clone(), Arc::new(file)))
-            .collect();
-
-        let graph = Graph { files };
-
-        let file_path_exported_items_map =
-            create_report_map_from_flattened_files(&flattened_walk_file_data);
+        // perform initial walk on initialization to get an internal representation of source files
+        let walked_files = walk_src_files(
+            logger,
+            &config.root_paths,
+            &p_config.skipped_dirs,
+            &p_config.skipped_items,
+        );
 
         Ok(Self {
             config,
-            entry_packages,
-            skipped_dirs,
-            skipped_items,
+            processed_config: p_config,
+            dirty_files: DirtyFiles::Some(vec![]),
+            last_walk_result: walked_files,
             resolver,
-            graph,
-            file_path_exported_items_map,
-            // These fields are empty because they are populated by
-            // the mutation methods below (refresh_file_list, walk_file_graph, etc)
-            entry_files: Default::default(),
-            logs: Default::default(),
         })
     }
 
-    // Read and parse all files from disk have a fresh in-memory representation of self.entry_files and self.graph information
-
-    pub fn refresh_file_list(&mut self) {
+    // Read and parse all files from disk have a fresh in-memory representation of the file tree
+    pub fn mark_dirty(&mut self, file_paths: Vec<String>) {
         // Get a vector with all SourceFile
-        let mut flattened_walk_file_data = walk_src_files(
-            &self.config.root_paths,
-            &self.skipped_dirs,
-            &self.skipped_items,
-        );
-        let logs = &mut self.logs;
-        // Proccess all information with swc resolver to resolve symbols within tsconfig.paths.json
-        let errs = flattened_walk_file_data
-            .par_iter_mut()
-            .map(|file| {
-                process_import_export_info(
-                    &mut file.import_export_info,
-                    &file.source_file_path,
-                    &self.resolver,
-                )
-            })
-            .filter_map(|e| {
-                if let Err(e) = e {
-                    return Some(e);
+        match self.dirty_files {
+            DirtyFiles::All => {
+                // If we're already marking all files as dirty, don't bother with the rest
+                return;
+            }
+            DirtyFiles::Some(ref mut files) => {
+                // Add the new files to the list of dirty files
+                for file_path in file_paths {
+                    files.push(file_path);
                 }
-                None
-            })
-            .collect::<Vec<_>>();
-        for err in errs {
-            logs.push(format!("Error processing import/export info: {:?}", err));
+            }
         }
-
-        // Refresh graph representation with latest changes from disk
-        self.refresh_graph(&flattened_walk_file_data);
-
-        // Create a record of all files listed as entry points, this will serve during `find_unused_items` as the first `frontier` iteration
-        self.entry_files = flattened_walk_file_data
-            .par_iter()
-            .filter_map(|file| {
-                if self.entry_packages.contains(&file.package_name) {
-                    return Some(file.source_file_path.clone());
-                }
-                None
-            })
-            .collect();
-
-        // Create a report map with all the files
-        self.file_path_exported_items_map =
-            create_report_map_from_flattened_files(&flattened_walk_file_data);
     }
 
-    // Given a Vec<SourceFile> refreshes the in-memory representation of imports/exports of source file graph
-    fn refresh_graph(&mut self, flattened_walk_file_data: &Vec<UnusedFinderSourceFile>) {
-        let files: HashMap<String, Arc<GraphFile>> = flattened_walk_file_data
-            .par_iter()
-            .map(|file| {
-                (
-                    file.source_file_path.to_string(),
-                    Arc::new(GraphFile::new(
-                        file.source_file_path.clone(),
-                        file.import_export_info
-                            .exported_ids
-                            .iter()
-                            .map(|e| e.metadata.export_kind.clone())
-                            .collect(),
-                        file.import_export_info.clone(),
-                        self.entry_packages.clone().contains(&file.package_name), // mark files from entry_packages as used
-                    )),
-                )
-            })
-            .collect();
-
-        self.graph = Graph { files };
+    // Marks all files as dirty, so that the next call to `find_unused` will refresh the entire file tree
+    pub fn mark_all_dirty(&mut self) {
+        self.dirty_files = DirtyFiles::All;
     }
 
-    pub fn find_all_unused_items(&mut self) -> Result<UnusedFinderReport, JsErr> {
-        self.refresh_file_list();
-        // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
-        let file_path_exported_items_map = self.file_path_exported_items_map.clone();
-
-        if let Some(value) = self.walk_file_graph() {
-            return value;
-        }
-
-        let allow_list: Vec<glob::Pattern> = read_allow_list().map_err(JsErr::generic_failure)?;
-
-        let reported_unused_files = self.get_unused_files(allow_list);
-        let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
-
-        let ok = UnusedFinderReport {
-            unused_files: reported_unused_files
-                .keys()
-                .map(|p| p.to_string())
-                .collect(),
-            unused_files_items,
-        };
-        Ok(ok)
-    }
-
-    pub fn find_unused_items(
-        &mut self,
-        files_to_check: Vec<String>,
-    ) -> Result<UnusedFinderReport, JsErr> {
-        self.logs = vec![];
-        self.logs.push(format!("{:?}", &files_to_check));
-        if files_to_check.is_empty() {
-            self.logs.push("Using local representation".to_string());
-        } else if !files_to_check
-            .iter()
-            .any(|file| !self.file_path_exported_items_map.contains_key(file))
-        {
-            self.logs.push("Refreshing all files".to_string());
-            self.refresh_file_list();
-        } else {
-            self.logs.push("Refreshing only some files!".to_string());
-            self.refresh_files_to_check(&files_to_check);
-        }
-
-        // Clone file_path_exported_items_map to avoid borrow checker issues with mutable/immutable references of `self`.
-        let file_path_exported_items_map = self.file_path_exported_items_map.clone();
-
-        if let Some(value) = self.walk_file_graph() {
-            return value;
-        }
-
-        let allow_list: Vec<glob::Pattern> = read_allow_list().map_err(JsErr::generic_failure)?;
-
-        let reported_unused_files = self.get_unused_files(allow_list);
-        let unused_files_items = self.get_unused_items_file(file_path_exported_items_map);
-
-        let mut ok = UnusedFinderReport {
-            unused_files: reported_unused_files
-                .keys()
-                .map(|p| p.to_string())
-                .collect(),
-            unused_files_items,
-        };
-        let files: HashSet<String> = HashSet::from_iter(files_to_check);
-        ok.unused_files_items.retain(|key, _| files.contains(key));
-        Ok(ok)
-    }
-
-    fn get_unused_items_file(
-        &self,
-        mut file_path_exported_items_map: HashMap<String, Vec<ExportedItemReport>>,
-    ) -> HashMap<String, Vec<ExportedItemReport>> {
-        let unused_files_items: HashMap<String, Vec<ExportedItemReport>> = self
-            .graph
-            .files
-            .iter()
-            .filter_map(|(file_path, info)| {
-                if info.is_used {
-                    match file_path_exported_items_map.remove(file_path) {
-                        Some(mut exported_items) => {
-                            let unused_exports = &info.unused_exports;
-                            if unused_exports.is_empty() {
-                                return None;
-                            }
-                            let unused_exports = exported_items
-                                .drain(0..)
-                                .filter(|exported| {
-                                    unused_exports
-                                        .iter()
-                                        .any(|unused| unused.to_string() == exported.id)
-                                })
-                                .collect();
-                            return Some((file_path.to_string(), unused_exports));
+    // Helper method used before taking a snapshot of the file tree for graph computation.
+    // performs either a partial or full refresh of the file tree, depending on the value of `files_to_check`
+    fn update_dirty_files(&mut self, logger: impl Logger) -> Result<(), JsErr> {
+        match &self.dirty_files {
+            DirtyFiles::All => {
+                logger.log("Refreshing all files");
+                self.last_walk_result = walk_src_files(
+                    logger,
+                    &self.config.root_paths,
+                    &self.processed_config.skipped_dirs,
+                    &self.processed_config.skipped_items,
+                );
+            }
+            DirtyFiles::Some(files) => {
+                logger.log("Refreshing only the files that have been marked dirty");
+                for file_path in files {
+                    let visitor_result =
+                        // note: this .clone() clones the Arc<> not the underlying Vec<Regex>
+                        get_file_import_export_info(file_path.clone(), self.processed_config.skipped_items.clone());
+                    let ok = match visitor_result {
+                        Ok(import_export_info) => {
+                            // Store the updated info in the last_walk_result
+                            self.last_walk_result.source_files.insert(
+                                file_path.clone(),
+                                UnusedFinderSourceFile {
+                                    source_file_path: file_path.clone(),
+                                    import_export_info,
+                                },
+                            );
                         }
-                        None => return None,
-                    }
+                        Err(e) => logger.log(format!("Error reading file {}: {:?}", file_path, e)),
+                    };
                 }
-                None
-            })
-            .collect();
-        unused_files_items
+            }
+        }
+        Ok(())
     }
 
-    fn get_unused_files(
-        &self,
-        allow_list: Vec<glob::Pattern>,
-    ) -> BTreeMap<&String, &Arc<GraphFile>> {
-        let reported_unused_files =
-            BTreeMap::from_iter(self.graph.files.iter().filter(|(file_name, graph_file)| {
-                !graph_file.is_used && !allow_list.iter().any(|p| p.matches(file_name))
-            }));
-        reported_unused_files
-    }
+    // Gets a report by performing a graph traversal on the current in-memory state of the repo,
+    // from the last time the file tree was scanned.
+    pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedItems, JsErr> {
+        self.update_dirty_files(logger);
 
-    fn walk_file_graph(&mut self) -> Option<Result<UnusedFinderReport, JsErr>> {
-        let mut frontier = self.entry_files.clone();
+        // Create a new graph with all entries marked as "unused".
+        let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
+        // Start the traversal from the "entry" files.
+        let mut frontier = self.get_entry_files();
+
         for _ in 0..10_000_000 {
-            frontier = self.graph.bfs_step(frontier);
+            frontier = graph.bfs_step(frontier);
             if frontier.is_empty() {
-                break;
+                return Ok(UnusedItems::from_graph(graph));
             }
         }
-        if !frontier.is_empty() {
-            return Some(Err(JsErr::generic_failure(anyhow!(
-                "exceeded max iterations"
-            ))));
-        }
-        None
+        Err(JsErr::generic_failure(anyhow!("exceeded max iterations")))
     }
 
-    // Reads files from disk and updates information within `self.graph` for specified paths in `files_to_check`
-    fn refresh_files_to_check(&mut self, files_to_check: &[String]) {
-        let results = files_to_check
+    fn get_entry_files(&self) -> Vec<String> {
+        self.last_walk_result
+            .packages
             .iter()
-            .map(|f| -> Result<Option<String>> {
-                // Read/parse file from disk
-                let visitor_result =
-                    get_file_import_export_info(f.to_string(), self.skipped_items.clone());
-                let ok = match visitor_result {
-                    Ok(ok) => ok,
-                    Err(e) => return Err(anyhow!("Error reading file {}: {:?}", f, e)),
-                };
+            .filter_map(|(package_name, (packagejson_path, packagejson))| {
+                let mut relative_entries = HashSet::<String>::new()
+                if self.processed_config.entry_packages.contains(package_name) {
+                    // we want to include _all_ entrypoints to the package, regardless of their import condition.
+                    // This means that the frontier set will contain many paths that do not currenlty exist on disk,
+                    // e.g. because they are not yet compiled.
+                    match packagejson.browser {
+                        Some(Browser::Obj(browsermap)) => {
+                            for (_, value) in browsermap {
+                                if let StringOrBool::Str(value) = value {
+                                    relative_entries.insert(value);
+                                }
+                            }
+                        }
+                        Some(Browser::Str(path)) => {
+                            relative_entries.insert(path);
+                        }
+                        _ => {}
+                    }
+                    if let Some(pkg_main) = packagejson.main {
+                        relative_entries.insert(pkg_main);
+                    } 
+                    if let Some(pkg_module) = packagejson.module {
+                        relative_entries.insert(pkg_module);
+                    }
 
-                let current_graph_file = match self.graph.files.get_mut(f) {
-                    Some(current_graph_file) => current_graph_file,
-                    None => return Ok(None),
-                };
+                    if let Some(pkg_exports) = packagejson.exports {
+                        match pkg_exports {
+                            PackageJsonExport::Single(map) => {
+                                for (_, path) in map {
+                                    if let Some(path) = path {
+                                        relative_entries.insert(path);
+                                    }
+                                }
+                            }
+                            PackageJsonExport::Conditional(map) => {
+                                for (_, inner_map) in map {
+                                    for (_export_condition, path) in inner_map {
+                                        if let Some(path) = path {
+                                            relative_entries.insert(path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-                // Check file exists in graph
-                let current_graph_file = Arc::get_mut(current_graph_file).unwrap();
-                current_graph_file.import_export_info = ok; // Update import_export_info within self.graph
-                match process_import_export_info(
-                    // Process import/export info to use resolver.
-                    &mut current_graph_file.import_export_info,
-                    f,
-                    &self.resolver,
-                ) {
-                    Ok(_) => Ok(Some(current_graph_file.file_path.clone())),
-                    Err(e) => Err(e.context(format!("Error processing file: {:?}", f))),
+
+
+                    None
+                } else {
+                    None
                 }
             })
-            .collect::<Vec<_>>();
-
-        // this has to be done in this scope after the above iterator is fully processed,
-        // to avoid borrowing issues with `self.logs`
-        for res in results {
-            match res {
-                Ok(Some(file_path)) => {
-                    self.logs
-                        .push(format!("Refreshed file path: {:?}", file_path));
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    self.logs.push(format!("Error refreshing file: {:?}", err));
-                }
-            }
-        }
+            .collect()
     }
+}
+
+pub struct UnusedItems {
+    graph: Graph,
+    entrypoints: Vec<String>,
+}
+
+impl UnusedItems {
+    pub fn from_graph(graph: Graph) -> Self {
+        Self { graph }
+    }
+
+    pub fn report() -> UnusedFinderReport {}
 }

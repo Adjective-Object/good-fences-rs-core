@@ -5,7 +5,10 @@ use std::{
 
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::parse::{ExportKind, FileImportExportInfo, ImportedItem};
+use crate::{
+    parse::{ExportKind, FileImportExportInfo, ImportedItem},
+    walked_file::UnusedFinderSourceFile,
+};
 
 pub enum MarkItemResult {
     MarkedAsUsed,
@@ -13,10 +16,10 @@ pub enum MarkItemResult {
     ResolveExportFrom(String),
 }
 
+// graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]
 pub struct GraphFile {
     pub is_used: bool,
-    // pub package_name: String,
     pub file_path: String,
     pub unused_exports: HashSet<ExportKind>,
     //
@@ -25,6 +28,21 @@ pub struct GraphFile {
 }
 
 impl GraphFile {
+    pub fn new_from_source_file(file: &UnusedFinderSourceFile) -> Self {
+        Self {
+            is_used: false,
+            file_path: file.source_file_path.clone(),
+            unused_exports: file
+                .import_export_info
+                .exported_ids
+                .iter()
+                .map(|e| e.metadata.export_kind.clone())
+                .collect(),
+            export_from: HashMap::new(),
+            import_export_info: file.import_export_info.clone(),
+        }
+    }
+
     pub fn new(
         file_path: String,
         unused_exports: HashSet<ExportKind>,
@@ -79,6 +97,21 @@ pub struct Graph {
 }
 
 impl Graph {
+    pub fn from_source_files<'a>(
+        source_files: impl Iterator<Item = &'a UnusedFinderSourceFile>,
+    ) -> Self {
+        Graph {
+            files: source_files
+                .map(|source_file| {
+                    (
+                        source_file.source_file_path.to_string(),
+                        Arc::new(GraphFile::new_from_source_file(source_file)),
+                    )
+                })
+                .collect(),
+        }
+    }
+
     pub fn bfs_step(&mut self, entries: Vec<String>) -> Vec<String> {
         let edges = self.get_edges(entries);
         let new_entries = edges

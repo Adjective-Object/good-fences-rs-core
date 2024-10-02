@@ -16,6 +16,7 @@ extern crate pretty_assertions;
 
 mod core;
 pub mod graph;
+mod logger;
 pub mod parse;
 pub mod unused_finder;
 mod utils;
