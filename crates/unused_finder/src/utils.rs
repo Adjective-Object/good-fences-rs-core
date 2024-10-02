@@ -1,9 +1,9 @@
+use crate::logger::Logger;
 use crate::parse::{get_file_import_export_info, ExportKind, FileImportExportInfo, ImportedItem};
 use crate::walked_file::{UnusedFinderSourceFile, WalkedFile};
 use anyhow::{Error, Result};
 use import_resolver::manual_resolver::{resolve_with_extension, ResolvedImport};
 use jwalk::WalkDirGeneric;
-use packagejson::PackageJson;
 use path_slash::PathBufExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -167,24 +167,23 @@ pub fn process_require_paths(
     })
 }
 
-pub fn retrieve_files(
+pub fn jwalk_src_subtree(
+    logger: impl Logger,
     start_path: &str,
     skipped_dirs: Option<Vec<glob::Pattern>>,
     skipped_items: Arc<Vec<regex::Regex>>,
 ) -> Vec<WalkedFile> {
     let visitor = UnusedFinderWalkVisitor::new(skipped_dirs, skipped_items);
-    let walk_dir =
-        WalkDirGeneric::<(String, WalkedFile)>::new(start_path).process_read_dir(
-            move |dir_state,
-                  children: &mut Vec<
-                Result<jwalk::DirEntry<(String, WalkedFile)>, jwalk::Error>,
-            >| { visitor.visit_directory(dir_state, children) },
-        );
+    let walk_dir = WalkDirGeneric::<((), Option<WalkedFile>)>::new(start_path)
+        .process_read_dir(move |dir_state, children| visitor.visit_directory(dir_state, children));
     walk_dir
         .into_iter()
         .filter_map(|entry| match entry {
-            Ok(e) => Some(e.client_state),
-            Err(_) => None,
+            Ok(e) => e.client_state,
+            Err(e) => {
+                logger.log(format!("error during walkdir: {e}"));
+                None
+            }
         })
         .collect()
 }
@@ -211,8 +210,8 @@ impl UnusedFinderWalkVisitor {
     // (e.g. with jwalk's process_read_dir() callback)
     pub fn visit_directory(
         &self,
-        current_package_name: &mut String,
-        children: &mut Vec<jwalk::Result<jwalk::DirEntry<(String, WalkedFile)>>>,
+        _ctx_data: &mut (),
+        children: &mut Vec<jwalk::Result<jwalk::DirEntry<((), Option<WalkedFile>)>>>,
     ) {
         children.iter_mut().for_each(|dir_entry_res| {
             if let Ok(dir_entry) = dir_entry_res {
@@ -221,24 +220,6 @@ impl UnusedFinderWalkVisitor {
                 }
             }
         });
-
-        // if there is a package.json file, we can use it to get the package name
-        // This should be done in a separate iteration _before_ visiting the rest of the files
-        // in the folder, because package.json files influence their peer files.
-        if let Some(package_json) = children
-            .iter()
-            .filter_map(|f| match f {
-                Ok(f) => Some(f),
-                Err(_) => None,
-            })
-            .find(|entry| entry.file_name() == "package.json")
-        {
-            let file = std::fs::File::open(package_json.path()).unwrap();
-            let pkg_json: PackageJson = serde_json::from_reader(file).unwrap();
-            if let Some(name) = pkg_json.name {
-                *current_package_name = name.to_string();
-            }
-        }
 
         children.retain(|dir_entry_result| match dir_entry_result {
             Ok(dir_entry) => should_retain_dir_entry(dir_entry, &self.skipped_dirs),
@@ -270,8 +251,7 @@ impl UnusedFinderWalkVisitor {
                 self.skipped_items.clone(),
             );
             if let Ok(import_export_info) = visitor_result {
-                child.client_state = WalkedFile::SourceFile(Box::new(UnusedFinderSourceFile {
-                    package_name: current_package_name.clone(),
+                child.client_state = Some(WalkedFile::SourceFile(UnusedFinderSourceFile {
                     import_export_info,
                     source_file_path: child.path().to_slash().unwrap().to_string(),
                 }));
@@ -280,8 +260,8 @@ impl UnusedFinderWalkVisitor {
     }
 }
 
-fn should_retain_dir_entry(
-    dir_entry: &jwalk::DirEntry<(String, WalkedFile)>,
+fn should_retain_dir_entry<T: jwalk::ClientState>(
+    dir_entry: &jwalk::DirEntry<T>,
     skip_dirs: &Option<Vec<glob::Pattern>>,
 ) -> bool {
     match dir_entry.path().to_slash() {
