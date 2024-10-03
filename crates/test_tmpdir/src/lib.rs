@@ -27,6 +27,19 @@ macro_rules! map(
 );
 
 #[macro_export]
+macro_rules! map2(
+    { $($key:expr => $value:expr),+ } => {
+        {
+            let mut m = ::std::collections::HashMap::new();
+            $(
+                m.insert($key, $value);
+            )+
+            m
+        }
+    };
+);
+
+#[macro_export]
 macro_rules! test_tmpdir(
     { $($key:expr => $value:expr),+ } => {
         {
