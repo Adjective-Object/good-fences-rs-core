@@ -1,6 +1,6 @@
+use ahashmap::AHashMap;
 use ftree_cache::context_data::ContextData;
 use serde::Deserialize;
-use swc_common::collections::AHashMap;
 
 use crate::exported_path::ExportedPath;
 

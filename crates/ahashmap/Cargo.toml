@@ -1,0 +1,15 @@
+[package]
+name = "ahashmap"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+description = "A hashmap with ahash as the hasher"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+ahash = { version = "0.8.11", optional = true }
+
+[features]
+default = ["ahash"]

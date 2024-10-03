@@ -3,7 +3,7 @@ use core::fmt;
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use hashbrown::Equivalent;
+use hashbrown::{Equivalent, HashMap};
 use path_clean::PathClean;
 use path_slash::PathBufExt;
 
@@ -12,7 +12,8 @@ use packagejson::{
     PackageJsonExport, PackageJsonExports,
 };
 
-use super::common::AHashMap;
+#[macro_use]
+use test_tmpdir;
 
 // Pair path, export-condfition of form ('package-name/imported-path', 'import')
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -392,8 +393,8 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
 
             // for simple exports, simulate a conditional exports map with a single entry, "default"
             // If needed, store it on the stack in my_cond_exp, allowing conditional_exports to be a reference type
-            let my_cond_exp: AHashMap<String, ExportedPath>;
-            let conditional_exports = match exported {
+            let my_cond_exp: ahashmap::AHashMap<String, ExportedPath>;
+            let conditional_exports: &ahashmap::AHashMap<String, ExportedPath> = match exported {
                 PackageJsonExport::Single(export_target) => {
                     let entry = (
                         "default".to_string(),
@@ -402,7 +403,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                             None => ExportedPath::Private,
                         },
                     );
-                    my_cond_exp = AHashMap::from_iter(vec![entry].drain(..));
+                    my_cond_exp = ahashmap::AHashMap::from_iter(vec![entry].drain(..));
                     &my_cond_exp
                 }
                 PackageJsonExport::Conditional(conditional_exports) => conditional_exports,
@@ -455,9 +456,9 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use std::collections::{hash_map::HashMap, BTreeMap};
-
-    use crate::swc_resolver::pkgjson_exports::PackageExportRewriteData;
+    use test_tmpdir::map2;
 
     struct TestCase {
         exports: &'static str,
