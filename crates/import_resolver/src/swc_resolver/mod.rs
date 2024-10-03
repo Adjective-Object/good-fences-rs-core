@@ -17,7 +17,7 @@ pub mod combined_resolver;
 mod common;
 pub mod internal_resolver;
 mod node_resolver;
-mod pkgjson_exports;
+pub mod pkgjson_exports;
 mod pkgjson_rewrites;
 mod tsconfig;
 mod tsconfig_resolver;

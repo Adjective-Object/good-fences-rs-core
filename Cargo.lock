@@ -3541,6 +3541,7 @@ dependencies = [
  "napi",
  "napi-derive",
  "packagejson",
+ "path-clean 0.1.0",
  "path-slash",
  "pretty_assertions",
  "rayon",
