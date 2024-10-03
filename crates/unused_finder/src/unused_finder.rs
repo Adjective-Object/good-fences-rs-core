@@ -1,17 +1,19 @@
-use std::{collections::HashSet, iter::FromIterator, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, str::FromStr, sync::Arc};
 
 use anyhow::{Context, Result};
 use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
-use packagejson::{Browser, PackageJsonExport, StringOrBool};
+use normpath::PathExt;
+use packagejson::{exported_path::ExportedPath, Browser, PackageJsonExport, StringOrBool};
+use path_clean::PathClean;
+use rayon::prelude::*;
 
 use crate::{
     core::{
-        create_report_map_from_flattened_files, process_import_export_info, read_allow_list,
-        walk_src_files, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport,
+        walk_src_files, FindUnusedItemsConfig, UnusedFinderReport,
         WalkFileResult,
     },
-    graph::{Graph, GraphFile},
+    graph::{Graph},
     logger::Logger,
     parse::get_file_import_export_info,
     walked_file::UnusedFinderSourceFile,
@@ -178,7 +180,7 @@ impl UnusedFinder {
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
         // Start the traversal from the "entry" files.
-        let mut frontier = self.get_entry_files();
+        let mut frontier = self.get_entry_files(logger);
 
         for _ in 0..10_000_000 {
             frontier = graph.bfs_step(frontier);
@@ -189,65 +191,75 @@ impl UnusedFinder {
         Err(JsErr::generic_failure(anyhow!("exceeded max iterations")))
     }
 
-    fn get_entry_files(&self) -> Vec<String> {
+    fn get_entry_files(&self, logger: impl Logger) -> Vec<String> {
         self.last_walk_result
             .packages
-            .iter()
-            .filter_map(|(package_name, (packagejson_path, packagejson))| {
-                let mut relative_entries = HashSet::<String>::new()
-                if self.processed_config.entry_packages.contains(package_name) {
-                    // we want to include _all_ entrypoints to the package, regardless of their import condition.
-                    // This means that the frontier set will contain many paths that do not currenlty exist on disk,
-                    // e.g. because they are not yet compiled.
-                    match packagejson.browser {
-                        Some(Browser::Obj(browsermap)) => {
-                            for (_, value) in browsermap {
-                                if let StringOrBool::Str(value) = value {
-                                    relative_entries.insert(value);
-                                }
+            .par_iter()
+            .filter_map(|(package_name, (packagejson_path, packagejson))| -> Option<Vec<String>> {
+                let mut relative_entries = HashSet::<&String>::new();
+                if !self.is_entry_package(package_name) {
+                    return None;
+                }
+                // we want to include _all_ entrypoints to the package, regardless of their import condition.
+                // This means that the frontier set will contain many paths that do not currenlty exist on disk,
+                // e.g. because they are not yet compiled.
+                match packagejson.browser {
+                    Some(Browser::Obj(browsermap)) => {
+                        for (_, value) in browsermap {
+                            if let StringOrBool::Str(ref value) = value {
+                                relative_entries.insert(value);
                             }
                         }
-                        Some(Browser::Str(path)) => {
-                            relative_entries.insert(path);
-                        }
-                        _ => {}
                     }
-                    if let Some(pkg_main) = packagejson.main {
-                        relative_entries.insert(pkg_main);
-                    } 
-                    if let Some(pkg_module) = packagejson.module {
-                        relative_entries.insert(pkg_module);
+                    Some(Browser::Str(ref path)) => {
+                        relative_entries.insert(path);
                     }
+                    _ => {}
+                }
+                if let Some(ref pkg_main) = packagejson.main {
+                    relative_entries.insert(pkg_main);
+                } 
+                if let Some(ref pkg_module) = packagejson.module {
+                    relative_entries.insert(pkg_module);
+                }
 
-                    if let Some(pkg_exports) = packagejson.exports {
-                        match pkg_exports {
-                            PackageJsonExport::Single(map) => {
-                                for (_, path) in map {
-                                    if let Some(path) = path {
-                                        relative_entries.insert(path);
-                                    }
-                                }
-                            }
-                            PackageJsonExport::Conditional(map) => {
-                                for (_, inner_map) in map {
-                                    for (_export_condition, path) in inner_map {
-                                        if let Some(path) = path {
-                                            relative_entries.insert(path);
+                if let Some(ref exports) = packagejson.exports {
+                    for (_, exported) in exports.iter() {
+                        match exported {
+                            PackageJsonExport::Single(Some(relative_path)) => {relative_entries.insert(relative_path);}
+                            PackageJsonExport::Conditional(conditional_map) => {
+                                for (exported_path, conditional_export) in conditional_map.iter() {
+                                    match conditional_export {
+                                        ExportedPath::Exported(relative_path) => {relative_entries.insert(relative_path);}
+                                        ExportedPath::Private => {}
+                                        ExportedPath::Unrecognized => {
+                                            logger.log(format!("package {package_name} contained invalid export for exported-path {exported_path:?}", ))
                                         }
                                     }
                                 }
                             }
+                            _ => {}
                         }
                     }
-
-
-
-                    None
-                } else {
-                    None
                 }
+
+                // get base path of the package from the packagejson's path
+                let mut base_path = PathBuf::from(packagejson_path);
+                base_path.pop();
+                // normalize the output paths
+                let as_paths: Vec<String> = relative_entries.into_iter().map(|rel_path| {
+                    base_path.join(rel_path).clean()
+                }
+                ).collect();
+
+                Some(as_paths)
             })
+            .flatten()
             .collect()
+    }
+
+    fn is_entry_package(&self, package_name: &str) -> bool{
+        return self.processed_config.entry_packages.contains(package_name)
     }
 }
 
