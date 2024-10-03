@@ -29,6 +29,7 @@ swc.workspace = true
 thiserror.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
 packagejson = { path = "../packagejson" }
+path-clean.workspace = true
 
 [features]
 default = []
