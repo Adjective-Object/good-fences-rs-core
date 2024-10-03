@@ -1,3 +1,4 @@
+/// Implements the "exports" map for a package.json file.
 use core::fmt;
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 
@@ -224,6 +225,23 @@ impl<'a> MatchedExport<'a> {
     }
 }
 
+fn reverse_match_star_pattern(star_pattern: &str, path: &str) -> bool {
+    let pattern_segments = star_pattern.split('*').collect::<Vec<&str>>();
+    let mut head: &str = path;
+    for segment in pattern_segments {
+        if segment.is_empty() {
+            continue;
+        }
+
+        if let Some(next_idx) = head.find(segment) {
+            head = &head[next_idx + segment.len()..];
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
 impl PackageExportRewriteData {
     // Rewrites an import path to a new path using only the "exports" field from package.json
     pub fn rewrite_relative_export<'a, TStr: Into<&'a str>>(
@@ -310,6 +328,54 @@ impl PackageExportRewriteData {
         // No matches found
         Ok(None)
     }
+
+    /// Checks if a given package-relative path is exported or not.
+    /// Returns the set of conditions that export that path.
+    pub fn is_file_exported<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
+        let mut clean_dest = String::new();
+        let cleaned_path = clean_path_avoid_alloc(package_relative_path, &mut clean_dest);
+
+        let mut accum: Vec<&str> = Vec::new();
+
+        for (ExportKey(_, condition), exported) in self.static_exports.iter() {
+            if accum.contains(&condition.as_str()) {
+                continue;
+            }
+            if let ExportedPath::Exported(exported_path) = exported {
+                if cleaned_path == exported_path {
+                    accum.push(condition)
+                }
+            }
+        }
+
+        for (condition, exports) in self.directory_exports.iter() {
+            if accum.contains(&condition.as_str()) {
+                continue;
+            }
+            for (_, exported) in exports {
+                if let ExportedPath::Exported(exported_dir_path) = exported {
+                    if cleaned_path.starts_with(exported_dir_path) {
+                        accum.push(condition)
+                    }
+                }
+            }
+        }
+
+        for (condition, exports) in self.star_exports.iter() {
+            if accum.contains(&condition.as_str()) {
+                continue;
+            }
+            for (_, exported) in exports {
+                if let ExportedPath::Exported(exported_star_pattern) = exported {
+                    if reverse_match_star_pattern(exported_star_pattern, cleaned_path) {
+                        accum.push(condition)
+                    }
+                }
+            }
+        }
+
+        accum
+    }
 }
 
 impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
@@ -365,7 +431,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                 // deprecated node 14.x directory pattern
                 for (export_condition, export_target) in conditional_exports.iter() {
                     resolution_data
-                        .star_exports
+                        .directory_exports
                         .entry_ref(export_condition)
                         .or_insert_with(Vec::new)
                         .push((
@@ -384,5 +450,173 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
             }
         }
         Ok(resolution_data)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::{hash_map::HashMap, BTreeMap};
+
+    use crate::swc_resolver::pkgjson_exports::PackageExportRewriteData;
+
+    struct TestCase {
+        exports: &'static str,
+        expected: HashMap<&'static str, Vec<&'static str>>,
+    }
+
+    fn run_test_case(test_case: TestCase) {
+        let exports: packagejson::PackageJsonExports =
+            serde_json::from_str(test_case.exports).unwrap();
+        let parsed_exports = PackageExportRewriteData::try_from(&exports).unwrap();
+        let mut these_results = BTreeMap::<&'static str, Vec<String>>::new();
+        let mut these_expected = BTreeMap::<&'static str, Vec<String>>::new();
+        for (input, output) in test_case.expected {
+            these_results.insert(
+                input,
+                parsed_exports
+                    .is_file_exported(input)
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect(),
+            );
+            these_expected.insert(input, output.iter().map(|x| x.to_string()).collect());
+        }
+
+        let e: String = serde_json::to_string_pretty(&these_expected).unwrap();
+        let r: String = serde_json::to_string_pretty(&these_results).unwrap();
+        pretty_assertions::assert_eq!(e, r)
+    }
+
+    #[test]
+    fn test_unconditional_literal_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    ".": "./index.ts"
+                }"#,
+            expected: map2!(
+                "./index.ts" => vec!["default"],
+                "./index.js" => vec![],
+                "./foo.js" => vec![]
+            ),
+        });
+    }
+
+    #[test]
+    fn test_conditional_literal_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    ".": {
+                        "source": "./index.ts",
+                        "default": "./index.js"
+                    }
+                }"#,
+            expected: map2!(
+                "./index.ts" => vec!["source"],
+                "./index.js" => vec!["default"],
+                "./foo.js" => vec![]
+            ),
+        });
+    }
+
+    #[test]
+    fn test_unconditional_dir_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    "./foo/": "./src/foo/"
+                }"#,
+            expected: map2!(
+                "./src/foo.js" => vec![],
+                "./src/bar/foo/bar.js" => vec![],
+                "./src/foo/bar.js" => vec!["default"],
+                "./src/foo/foo.js" => vec!["default"]
+            ),
+        });
+    }
+
+    #[test]
+    fn test_conditional_dir_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    "./foo/": {
+                        "import": "./src/foo_esm/",
+                        "default": "./src/foo_cjs/"
+                    }
+                }"#,
+            expected: map2!(
+                "./src/foo.js" => vec![],
+                "./src/foo_esm/bar.js" => vec!["import"],
+                "./src/foo_esm/foo.js" => vec!["import"],
+                "./src/foo_cjs/bar.js" => vec!["default"],
+                "./src/foo_cjs/foo.js" => vec!["default"]
+            ),
+        });
+    }
+
+    #[test]
+    fn test_unconditional_single_star_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    "./*dex": "./_*dex.ts"
+                }"#,
+            expected: map2!(
+                "./index.ts" => vec![],
+                "./_index.ts" => vec!["default"],
+                "./_edex.ts" => vec!["default"],
+                "./_eex.ts" => vec![],
+                "./not.js" => vec![]
+            ),
+        })
+    }
+
+    #[test]
+    fn test_conditional_single_star_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    "./*dex": {
+                        "import": "./_*dex.ts",
+                        "default": "./dex_*.ts"
+                    }
+                }"#,
+            expected: map2!(
+                "./index.ts" => vec![],
+                "./_index.ts" => vec!["import"],
+                "./dex_index.ts" => vec!["default"],
+                "./dex_index.js" => vec![],
+                "./_edex.ts" => vec!["import"],
+                "./_eex.ts" => vec![],
+                "./not.js" => vec![]
+            ),
+        })
+    }
+
+    #[test]
+    fn test_unconditional_multi_star_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    "./*dex": "./_*d*.ts"
+                }"#,
+            expected: map2!(
+                "./_indett.ts" => vec!["default"],
+                "./indett.ts" => vec![]
+            ),
+        })
+    }
+
+    #[test]
+    fn test_conditional_multi_star_export() {
+        run_test_case(TestCase {
+            exports: r#"{
+                    "./*dex": {
+                        "source": "./_*d*.ts",
+                        "default": "./_*d*.js"
+                    }
+                }"#,
+            expected: map2!(
+                "./_indett.ts" => vec!["source"],
+                "./indett.ts" => vec![],
+                "./_indett.js" => vec!["default"],
+                "./indett.js" => vec![]
+            ),
+        })
     }
 }
