@@ -31,7 +31,7 @@ impl Equivalent<ExportKey> for (&str, &str) {
 //
 // This holds derived data from the "exports" field in a package.json file, and
 // is computed with PackageExportRewriteData::try_from(PackageJson)
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct PackageExportRewriteData {
     // Pre-computed export map for static exports
     // Map is of form ('package-name/imported-path', 'import') => "/absolute/path/to/exported"
@@ -332,7 +332,7 @@ impl PackageExportRewriteData {
 
     /// Checks if a given package-relative path is exported or not.
     /// Returns the set of conditions that export that path.
-    pub fn is_file_exported<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
+    pub fn is_exported<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
         let mut clean_dest = String::new();
         let cleaned_path = clean_path_avoid_alloc(package_relative_path, &mut clean_dest);
 
@@ -475,7 +475,7 @@ mod test {
             these_results.insert(
                 input,
                 parsed_exports
-                    .is_file_exported(input)
+                    .is_exported(input)
                     .iter()
                     .map(|x| x.to_string())
                     .collect(),

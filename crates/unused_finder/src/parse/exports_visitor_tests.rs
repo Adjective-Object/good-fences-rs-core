@@ -1,9 +1,8 @@
 #[cfg(test)]
 mod test {
-    use std::collections::{HashMap, HashSet};
-    use std::iter::FromIterator;
     use std::sync::Arc;
 
+    use ahashmap::{AHashMap, AHashSet};
     use swc_core::common::comments::{Comments, SingleThreadedComments};
     use swc_core::common::{FileName, SourceFile, SourceMap};
     use swc_core::ecma::visit::VisitWith;
@@ -14,6 +13,7 @@ mod test {
     use swc_utils::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
+    use test_tmpdir::{map, set};
 
     fn create_test_parser<'a>(
         fm: &'a Arc<SourceFile>,
@@ -95,14 +95,14 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::new();
+        let expected_map: AHashSet<ExportKind> = AHashSet::default();
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -152,14 +152,14 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::new();
+        let expected_map: AHashSet<ExportKind> = AHashSet::default();
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -181,14 +181,14 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::new();
+        let expected_map: AHashSet<ExportKind> = AHashSet::default();
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -232,7 +232,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::new();
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = AHashMap::default();
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -296,8 +296,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> =
-            HashSet::from_iter(vec![ExportKind::Named("foo".to_owned())]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("foo".to_owned()));
 
         assert_eq!(
             expected_map,
@@ -305,7 +304,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -415,8 +414,7 @@ mod test {
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
 
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> =
-            HashSet::from_iter(vec![ExportKind::Named("zoo".to_string())]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("zoo".to_string()));
 
         assert_eq!(
             expected_map,
@@ -424,7 +422,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -445,8 +443,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> =
-            HashSet::from_iter(vec![ExportKind::Named("bar".to_owned())]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("bar".to_owned()));
 
         assert_eq!(
             expected_map,
@@ -454,7 +451,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -475,7 +472,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
 
         assert_eq!(
             expected_map,
@@ -483,7 +480,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -506,7 +503,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
 
         assert_eq!(
             expected_map,
@@ -514,7 +511,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -535,7 +532,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
 
         assert_eq!(
             expected_map,
@@ -543,7 +540,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -563,7 +560,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> = HashSet::from_iter(vec![ExportKind::Default]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
 
         assert_eq!(
             expected_map,
@@ -571,7 +568,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -591,8 +588,7 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashSet<ExportKind> =
-            HashSet::from_iter(vec![ExportKind::Named("foo".to_owned())]);
+        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("foo".to_owned()));
 
         assert_eq!(
             expected_map,
@@ -600,7 +596,7 @@ mod test {
                 .exported_ids
                 .drain()
                 .map(|e| e.export_kind)
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
         );
     }
 
@@ -620,10 +616,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!( "foo" =>
+            aset!(ImportedItem::Named("foo".to_owned()))
+        );
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -643,10 +638,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!(
+                "./foo" => aset!(ImportedItem::Default));
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -666,10 +659,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Namespace]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
+            amap!("./foo" => aset!(ImportedItem::Namespace));
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -689,10 +680,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
+            amap!("./foo" => aset!(ImportedItem::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -712,10 +701,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!( "foo" =>
+            aset!(ImportedItem::Named("foo".to_owned()))
+        );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -735,10 +723,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Named("foo".to_owned())]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!( "foo" =>
+            aset!(ImportedItem::Named("foo".to_owned()))
+        );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -758,10 +745,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
+            amap!("./foo" => aset!(ImportedItem::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -786,7 +771,7 @@ mod test {
         module.visit_with(&mut visitor);
 
         assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_string(), "./lazyIndex".to_string()]),
+            aset!("./foo".to_string(), "./lazyIndex".to_string()),
             visitor.imported_paths
         );
     }
@@ -807,13 +792,9 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![
-                ImportedItem::Default,
-                ImportedItem::Named("bar".to_owned()),
-            ]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = map!(
+            "./foo" => aset!(ImportedItem::Default, ImportedItem::Named("bar".to_owned()))
+        );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -833,10 +814,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Namespace]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
+            amap!("./foo" => aset!(ImportedItem::Namespace));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -857,10 +836,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
 
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.require_paths
-        );
+        assert_eq!(aset!("./foo".to_owned()), visitor.require_paths);
     }
 
     #[test]
@@ -880,10 +856,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
 
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.imported_paths
-        );
+        assert_eq!(aset!("./foo".to_owned()), visitor.imported_paths);
     }
 
     #[test]
@@ -903,10 +876,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
 
-        assert_eq!(
-            HashSet::from_iter(vec!["./foo".to_owned()]),
-            visitor.executed_paths
-        );
+        assert_eq!(aset!("./foo".to_owned()), visitor.executed_paths);
     }
 
     #[test]
@@ -928,10 +898,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: HashMap<String, HashSet<ImportedItem>> = HashMap::from([(
-            "./foo".to_owned(),
-            HashSet::from_iter(vec![ImportedItem::Default]),
-        )]);
+        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
+            amap!("./foo" => aset!(ImportedItem::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 }

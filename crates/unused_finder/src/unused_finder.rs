@@ -1,65 +1,24 @@
-use std::{collections::HashSet, path::PathBuf, str::FromStr, sync::Arc};
+use std::path::{Path, PathBuf};
 
+use crate::{
+    cfg::{UnusedItemsConfig, UnusedItemsJSONConfig},
+    graph::Graph,
+    logger::Logger,
+    parse::get_file_import_export_info,
+    walk::{walk_src_files, WalkFileResult},
+    walked_file::{ResolvedSourceFile, WalkedPackage, WalkedSourceFile},
+};
+use ahashmap::AHashMap;
 use anyhow::{Context, Result};
 use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
-use normpath::PathExt;
-use packagejson::{exported_path::ExportedPath, Browser, PackageJsonExport, StringOrBool};
-use path_clean::PathClean;
 use rayon::prelude::*;
-
-use crate::{
-    core::{
-        walk_src_files, FindUnusedItemsConfig, UnusedFinderReport,
-        WalkFileResult,
-    },
-    graph::{Graph},
-    logger::Logger,
-    parse::get_file_import_export_info,
-    walked_file::UnusedFinderSourceFile,
-};
-
-// the config is designed to be json / javascript serializable,
-// so we also have this struct to hold intermediate values that
-// can be derived from the config
-#[derive(Debug, Clone)]
-struct ProcessedConfig {
-    entry_packages: HashSet<String>,
-    skipped_items: Arc<Vec<regex::Regex>>,
-    skipped_dirs: Arc<Vec<glob::Pattern>>,
-}
-
-impl TryFrom<&FindUnusedItemsConfig> for ProcessedConfig {
-    type Error = JsErr;
-    fn try_from(value: &FindUnusedItemsConfig) -> std::result::Result<Self, Self::Error> {
-        let skipped_items = value
-            .skipped_items
-            .iter()
-            .map(|s| regex::Regex::from_str(s.as_str()))
-            .collect::<Result<Vec<regex::Regex>, _>>()
-            .context("while parsing skipped_items as regexp")
-            .map_err(JsErr::invalid_arg)?;
-
-        let skipped_dirs = value
-            .skipped_dirs
-            .iter()
-            .map(|s| glob::Pattern::new(s))
-            .collect::<Result<Vec<glob::Pattern>, _>>()
-            .context("while parsing skipped_dirs as glob patterns")
-            .map_err(JsErr::invalid_arg)?;
-
-        Ok(ProcessedConfig {
-            entry_packages: value.entry_packages.iter().cloned().collect(),
-            skipped_items: Arc::new(skipped_items),
-            skipped_dirs: Arc::new(skipped_dirs),
-        })
-    }
-}
+use swc_core::ecma::loader::resolve::Resolve;
 
 #[derive(Debug)]
 enum DirtyFiles {
     All,
-    Some(Vec<String>),
+    Some(Vec<PathBuf>),
 }
 
 // Holds an in-memory representation of the file tree.
@@ -70,61 +29,127 @@ enum DirtyFiles {
 // of unused files and exports.
 #[derive(Debug)]
 pub struct UnusedFinder {
-    config: FindUnusedItemsConfig,
-    processed_config: ProcessedConfig,
+    config: UnusedItemsConfig,
 
     // absolute paths of files which have been explicitly marked dirty
     // since the last time we checked for unused files
     dirty_files: DirtyFiles,
-    last_walk_result: WalkFileResult,
+    last_walk_result: SourceFiles,
 
     // Resolver used to resolve import/export paths during find_unused
     resolver: MonorepoResolver,
 }
 
-impl UnusedFinder {
-    pub fn new(logger: impl Logger, config: FindUnusedItemsConfig) -> anyhow::Result<Self, JsErr> {
-        let p_config: ProcessedConfig = (&config).try_into().map_err(JsErr::generic_failure)?;
-        let root_dir: PathBuf = {
-            // scope here to contain the mutability
-            // HACK: Use the directory of the tsconfig_paths file as the root of the monorepo
-            let mut x = PathBuf::from(&config.ts_config_path);
-            x.pop();
-            x
-        };
+/// In-memory representation of the file tree, where imports have been resolved
+/// to file-paths.
+#[derive(Debug)]
+struct SourceFiles {
+    // TODO process Walked Source Files into resolved source files?
+    source_files: AHashMap<PathBuf, ResolvedSourceFile>,
+    // Map of package name to package data
+    //
+    // This is keyed primarially on the package name, as that is the most
+    // common way to reference a package.
+    packages: AHashMap<String, WalkedPackage>,
+    // Map of package path to package name, used to look up packages by path
+    // when resolving imports
+    package_names_by_path: AHashMap<PathBuf, String>,
+}
 
-        let resolver: MonorepoResolver = MonorepoResolver::new_default_resolver(root_dir);
+impl SourceFiles {
+    fn try_resolve(
+        walk_result: WalkFileResult,
+        resolver: impl Resolve,
+    ) -> Result<SourceFiles, anyhow::Error> {
+        // Map of source file path to source file data
+        let source_files: AHashMap<PathBuf, ResolvedSourceFile> = walk_result
+            .source_files
+            .into_par_iter()
+            .map(
+                |walked_file| -> anyhow::Result<(PathBuf, ResolvedSourceFile)> {
+                    Ok((
+                        walked_file.source_file_path.clone(),
+                        ResolvedSourceFile {
+                            import_export_info: walked_file
+                                .import_export_info
+                                .try_resolve(&walked_file.source_file_path, &resolver)?,
+                            owning_package: walked_file.owning_package,
+                            source_file_path: walked_file.source_file_path,
+                        },
+                    ))
+                },
+            )
+            .collect::<Result<_>>()?;
+
+        // Map of package name to package data
+        let (packages, package_names_by_path) = walk_result
+            .packages
+            .into_par_iter()
+            .map(|walked_pkg| -> anyhow::Result<((String, WalkedPackage), (PathBuf, String))> {
+                let pkg_name = walked_pkg
+                    .package_json
+                    .name
+                    .as_ref()
+                    .map(|x| x.to_owned())
+                    .ok_or_else(|| anyhow!(
+                        "Encountered anonymous package at path {}. anonymous packages should be ignored during file walk.",
+                        walked_pkg.package_path.display(),
+                    ))?;
+
+                let pkg_path = walked_pkg.package_path.clone();
+                Ok(((pkg_name.clone(), walked_pkg), (pkg_path, pkg_name)))
+            })
+            .collect::<Result<(AHashMap<_, _>, AHashMap<_, _>)>>()?;
+
+        Ok(SourceFiles {
+            source_files,
+            packages,
+            package_names_by_path,
+        })
+    }
+}
+
+impl UnusedFinder {
+    pub fn new_from_json_config(
+        logger: impl Logger,
+        json_config: UnusedItemsJSONConfig,
+    ) -> Result<Self, JsErr> {
+        let config = UnusedItemsConfig::try_from(json_config).map_err(JsErr::invalid_arg)?;
+        Self::new_from_cfg(logger, config).map_err(JsErr::generic_failure)
+    }
+
+    pub fn new_from_cfg(logger: impl Logger, config: UnusedItemsConfig) -> Result<Self, JsErr> {
+        let resolver: MonorepoResolver =
+            MonorepoResolver::new_default_resolver(PathBuf::from(&config.repo_root));
 
         // perform initial walk on initialization to get an internal representation of source files
-        let walked_files = walk_src_files(
-            logger,
-            &config.root_paths,
-            &p_config.skipped_dirs,
-            &p_config.skipped_items,
-        );
+        let resolved_walked_files = Self::walk_and_resolve_all(logger, &config, &resolver)?;
 
         Ok(Self {
             config,
-            processed_config: p_config,
             dirty_files: DirtyFiles::Some(vec![]),
-            last_walk_result: walked_files,
+            last_walk_result: resolved_walked_files,
             resolver,
         })
     }
 
     // Read and parse all files from disk have a fresh in-memory representation of the file tree
-    pub fn mark_dirty(&mut self, file_paths: Vec<String>) {
-        // Get a vector with all SourceFile
-        match self.dirty_files {
-            DirtyFiles::All => {
-                // If we're already marking all files as dirty, don't bother with the rest
-                return;
-            }
-            DirtyFiles::Some(ref mut files) => {
-                // Add the new files to the list of dirty files
-                for file_path in file_paths {
-                    files.push(file_path);
-                }
+    pub fn mark_dirty(&mut self, file_paths: Vec<PathBuf>) {
+        if file_paths.iter().any(|path| {
+            // If any of the files are not in the last_walk_result, mark all files as dirty
+            !self.last_walk_result.source_files.contains_key(path)
+            // If any of the files are packagejson files, mark all files as dirty
+            || self.last_walk_result.package_names_by_path.contains_key(path)
+        }) {
+            self.dirty_files = DirtyFiles::All;
+            return;
+        }
+
+        // Add to the current list of dirty files, if it's not already marked as all dirty
+        if let DirtyFiles::Some(ref mut files) = self.dirty_files {
+            // Add the new files to the list of dirty files
+            for file_path in file_paths {
+                files.push(file_path);
             }
         }
     }
@@ -140,42 +165,95 @@ impl UnusedFinder {
         match &self.dirty_files {
             DirtyFiles::All => {
                 logger.log("Refreshing all files");
-                self.last_walk_result = walk_src_files(
-                    logger,
-                    &self.config.root_paths,
-                    &self.processed_config.skipped_dirs,
-                    &self.processed_config.skipped_items,
-                );
+                // perform initial walk on initialization to get an internal representation of source files
+                self.last_walk_result =
+                    Self::walk_and_resolve_all(logger, &self.config, &self.resolver)?;
             }
             DirtyFiles::Some(files) => {
                 logger.log("Refreshing only the files that have been marked dirty");
-                for file_path in files {
-                    let visitor_result =
-                        // note: this .clone() clones the Arc<> not the underlying Vec<Regex>
-                        get_file_import_export_info(file_path.clone(), self.processed_config.skipped_items.clone());
-                    let ok = match visitor_result {
-                        Ok(import_export_info) => {
-                            // Store the updated info in the last_walk_result
-                            self.last_walk_result.source_files.insert(
-                                file_path.clone(),
-                                UnusedFinderSourceFile {
-                                    source_file_path: file_path.clone(),
-                                    import_export_info,
-                                },
-                            );
-                        }
-                        Err(e) => logger.log(format!("Error reading file {}: {:?}", file_path, e)),
-                    };
+                let scanned_files = files
+                    .par_iter()
+                    .map(|file_path| {
+                        self.update_single_file(file_path, logger)
+                            .map_err(JsErr::generic_failure)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                for (file_path, scanned_file) in files.iter().zip(scanned_files) {
+                    self.last_walk_result
+                        .source_files
+                        // TODO: use entry_ref to update in-place if we migrate to hashbrown,
+                        // instead of cloning the key here
+                        .insert(file_path.clone(), scanned_file);
                 }
             }
         }
         Ok(())
     }
 
+    fn update_single_file(
+        &self,
+        file_path: &Path,
+        logger: impl Logger,
+    ) -> Result<ResolvedSourceFile, JsErr> {
+        let owning_package = match self.last_walk_result.source_files.get(file_path) {
+            Some(existing) => existing.owning_package.clone(),
+            None => {
+                return Err(JsErr::generic_failure(anyhow!(
+                    "Tried to update a file that was not present in the last_walk_result: {}",
+                    file_path.display(),
+                )));
+            }
+        };
+
+        let import_export_info =
+            match get_file_import_export_info(file_path, self.config.skipped_items.clone()) {
+                Ok(import_export_info) => import_export_info,
+                Err(e) => {
+                    logger.log(format!(
+                        "Error reading file {}: {:?}",
+                        file_path.display(),
+                        e
+                    ));
+                    return Err(JsErr::generic_failure(e));
+                }
+            };
+
+        let resolved_source_file = ResolvedSourceFile {
+            owning_package,
+            source_file_path: file_path.to_path_buf(),
+            import_export_info: import_export_info
+                .try_resolve(file_path, &self.resolver)
+                .map_err(JsErr::generic_failure)?,
+        };
+
+        Ok(resolved_source_file)
+    }
+
+    /// Walks and parses all source files in the repo, returning a WalkFileResult
+    /// with
+    fn walk_and_resolve_all(
+        logger: impl Logger,
+        config: &UnusedItemsConfig,
+        resolver: impl Resolve,
+    ) -> Result<SourceFiles, JsErr> {
+        // Note: this silently ignores any errors that occur during the walk
+        let walked_files = walk_src_files(
+            logger,
+            &config.root_paths,
+            &config.skipped_dirs,
+            &config.skipped_items,
+        );
+        // TODO: gracefully handle errors during resolution
+        let resolved =
+            SourceFiles::try_resolve(walked_files, resolver).map_err(JsErr::generic_failure)?;
+        Ok(resolved)
+    }
+
     // Gets a report by performing a graph traversal on the current in-memory state of the repo,
     // from the last time the file tree was scanned.
     pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedItems, JsErr> {
-        self.update_dirty_files(logger);
+        self.update_dirty_files(logger)?;
 
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
@@ -185,93 +263,71 @@ impl UnusedFinder {
         for _ in 0..10_000_000 {
             frontier = graph.bfs_step(frontier);
             if frontier.is_empty() {
-                return Ok(UnusedItems::from_graph(graph));
+                return Ok(UnusedItems::new(graph, self.get_entry_files(logger)));
             }
         }
         Err(JsErr::generic_failure(anyhow!("exceeded max iterations")))
     }
 
-    fn get_entry_files(&self, logger: impl Logger) -> Vec<String> {
+    fn get_entry_files(&self, logger: impl Logger) -> Vec<PathBuf> {
         self.last_walk_result
-            .packages
+            .source_files
             .par_iter()
-            .filter_map(|(package_name, (packagejson_path, packagejson))| -> Option<Vec<String>> {
-                let mut relative_entries = HashSet::<&String>::new();
-                if !self.is_entry_package(package_name) {
-                    return None;
-                }
-                // we want to include _all_ entrypoints to the package, regardless of their import condition.
-                // This means that the frontier set will contain many paths that do not currenlty exist on disk,
-                // e.g. because they are not yet compiled.
-                match packagejson.browser {
-                    Some(Browser::Obj(browsermap)) => {
-                        for (_, value) in browsermap {
-                            if let StringOrBool::Str(ref value) = value {
-                                relative_entries.insert(value);
-                            }
-                        }
+            .filter_map(|(file_path, source_file)| {
+                let owning_package = match source_file.owning_package {
+                    Some(ref owning_package) => owning_package,
+                    None => {
+                        // TODO: should un-rooted scripts be considered entry points?
+                        // This might be the case for e.g. tests or other scripts
+                        logger.log(format!(
+                            "Could not find package for source file {}",
+                            file_path.display(),
+                        ));
+                        return None;
                     }
-                    Some(Browser::Str(ref path)) => {
-                        relative_entries.insert(path);
+                };
+
+                // get the corresponding package of the source file
+                let owning_package = match self.last_walk_result.packages.get(owning_package) {
+                    Some(owning_package) => owning_package,
+                    None => {
+                        logger.log(format!(
+                            "Could not find package for source file {}",
+                            file_path.display(),
+                        ));
+                        return None;
                     }
-                    _ => {}
-                }
-                if let Some(ref pkg_main) = packagejson.main {
-                    relative_entries.insert(pkg_main);
-                } 
-                if let Some(ref pkg_module) = packagejson.module {
-                    relative_entries.insert(pkg_module);
+                };
+
+                // check package "main" and "module" fields if they match this file
+
+                // check if the owning package exports the file. If so, include this file as a package root.
+                if owning_package
+                    .is_abspath_exported(&file_path)
+                    .unwrap_or(false)
+                {
+                    return Some(file_path.clone());
                 }
 
-                if let Some(ref exports) = packagejson.exports {
-                    for (_, exported) in exports.iter() {
-                        match exported {
-                            PackageJsonExport::Single(Some(relative_path)) => {relative_entries.insert(relative_path);}
-                            PackageJsonExport::Conditional(conditional_map) => {
-                                for (exported_path, conditional_export) in conditional_map.iter() {
-                                    match conditional_export {
-                                        ExportedPath::Exported(relative_path) => {relative_entries.insert(relative_path);}
-                                        ExportedPath::Private => {}
-                                        ExportedPath::Unrecognized => {
-                                            logger.log(format!("package {package_name} contained invalid export for exported-path {exported_path:?}", ))
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                // get base path of the package from the packagejson's path
-                let mut base_path = PathBuf::from(packagejson_path);
-                base_path.pop();
-                // normalize the output paths
-                let as_paths: Vec<String> = relative_entries.into_iter().map(|rel_path| {
-                    base_path.join(rel_path).clean()
-                }
-                ).collect();
-
-                Some(as_paths)
+                return None;
             })
-            .flatten()
             .collect()
     }
 
-    fn is_entry_package(&self, package_name: &str) -> bool{
-        return self.processed_config.entry_packages.contains(package_name)
+    fn is_entry_package(&self, package_name: &str) -> bool {
+        return self.config.entry_packages.contains(package_name);
     }
 }
 
 pub struct UnusedItems {
     graph: Graph,
-    entrypoints: Vec<String>,
+    entrypoints: Vec<PathBuf>,
 }
 
 impl UnusedItems {
-    pub fn from_graph(graph: Graph) -> Self {
-        Self { graph }
+    pub fn new(graph: Graph, entrypoints: Vec<PathBuf>) -> Self {
+        Self { graph, entrypoints }
     }
 
-    pub fn report() -> UnusedFinderReport {}
+    // pub fn report() -> UnusedFinderReport {}
 }
