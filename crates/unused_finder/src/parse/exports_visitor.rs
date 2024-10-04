@@ -1,9 +1,6 @@
-use super::{ExportKind, ExportedItemMetadata, ImportedItem};
-use std::{
-    collections::{HashMap, HashSet},
-    iter::FromIterator,
-    sync::Arc,
-};
+use super::{ExportKind, ExportedItem, ExportedItemMetadata, ImportedItem, RawImportExportInfo};
+use ahashmap::{AHashMap, AHashSet, ARandomState};
+use std::{collections::HashSet, iter::FromIterator, sync::Arc};
 use swc_core::{
     common::{
         comments::{CommentKind, Comments, SingleThreadedComments},
@@ -23,21 +20,21 @@ use swc_core::{
 #[derive(Debug)]
 pub struct ExportsVisitor {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    pub imported_ids_path_name: HashMap<String, HashSet<ImportedItem>>,
+    pub imported_ids_path_name: AHashMap<String, AHashSet<ImportedItem>>,
     // require('foo') generates ['foo']
-    pub require_paths: HashSet<String>,
+    pub require_paths: AHashSet<String>,
     // import('./foo') and import './foo' generates ["./foo"]
-    pub imported_paths: HashSet<String>,
+    pub imported_paths: AHashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: HashMap<String, HashSet<ImportedItem>>,
+    pub export_from_ids: AHashMap<String, AHashSet<ImportedItem>>,
     // IDs exported from this file, that were locally declared
-    pub exported_ids: HashSet<ExportedItemMetadata>,
+    pub exported_ids: AHashSet<ExportedItemMetadata>,
     // Side-effect-only imports.
     // import './foo';
-    pub executed_paths: HashSet<String>,
+    pub executed_paths: AHashSet<String>,
     // exported from this file
     // const foo = require('foo') generates ["foo"]
-    require_identifiers: HashSet<Id>,
+    require_identifiers: AHashSet<Id>,
     skipped_items: Arc<Vec<regex::Regex>>,
     pub comments: SingleThreadedComments,
 }
@@ -45,13 +42,13 @@ pub struct ExportsVisitor {
 impl ExportsVisitor {
     pub fn new(skipped_items: Arc<Vec<regex::Regex>>, comments: SingleThreadedComments) -> Self {
         Self {
-            imported_ids_path_name: HashMap::new(),
-            require_paths: HashSet::new(),
-            imported_paths: HashSet::new(),
-            export_from_ids: HashMap::new(),
-            executed_paths: HashSet::new(),
-            require_identifiers: HashSet::new(),
-            exported_ids: HashSet::new(),
+            imported_ids_path_name: AHashMap::with_hasher(ARandomState::new()),
+            require_paths: AHashSet::with_hasher(ARandomState::new()),
+            imported_paths: AHashSet::with_hasher(ARandomState::new()),
+            export_from_ids: AHashMap::with_hasher(ARandomState::new()),
+            executed_paths: AHashSet::with_hasher(ARandomState::new()),
+            require_identifiers: AHashSet::with_hasher(ARandomState::new()),
+            exported_ids: AHashSet::with_hasher(ARandomState::new()),
             skipped_items,
             comments,
         }
@@ -163,6 +160,26 @@ impl ExportsVisitor {
             });
         }
         false
+    }
+}
+
+impl Into<RawImportExportInfo> for ExportsVisitor {
+    fn into(mut self) -> RawImportExportInfo {
+        RawImportExportInfo {
+            imported_path_ids: self.imported_ids_path_name,
+            require_paths: self.require_paths,
+            imported_paths: self.imported_paths,
+            export_from_ids: self.export_from_ids, // TODO replace with Exportself maps
+            exported_ids: self
+                .exported_ids
+                .drain()
+                .map(|metadata| ExportedItem {
+                    metadata,
+                    source_file_path: None,
+                })
+                .collect(),
+            executed_paths: self.executed_paths,
+        }
     }
 }
 

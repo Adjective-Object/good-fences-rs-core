@@ -27,12 +27,51 @@ macro_rules! map(
 );
 
 #[macro_export]
+macro_rules! amap(
+    { $($key:expr => $value:expr),+ } => {
+        {
+            let mut m = ahashmap::AHashMap::default();
+            $(
+                m.insert(String::from($key), $value);
+            )+
+            m
+        }
+    };
+);
+
+#[macro_export]
 macro_rules! map2(
     { $($key:expr => $value:expr),+ } => {
         {
             let mut m = ::std::collections::HashMap::new();
             $(
                 m.insert($key, $value);
+            )+
+            m
+        }
+    };
+);
+
+#[macro_export]
+macro_rules! set(
+    { $($item:expr ),+ } => {
+        {
+            let mut m = ::std::collections::HashSet::new();
+            $(
+                m.insert($item);
+            )+
+            m
+        }
+    };
+);
+
+#[macro_export]
+macro_rules! aset(
+    { $($item:expr ),+ } => {
+        {
+            let mut m = ahashmap::AHashSet::default();
+            $(
+                m.insert($item);
             )+
             m
         }

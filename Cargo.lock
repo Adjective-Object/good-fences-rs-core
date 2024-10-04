@@ -442,6 +442,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fd119d74b830634cea2a0f58bbd0d54540518a14397557951e79340abc28c0"
 
 [[package]]
+name = "const_format"
+version = "0.2.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50c655d81ff1114fb0dcdea9225ea9f0cc712a6f8d189378e82bdf62a473a64b"
+dependencies = [
+ "const_format_proc_macros",
+]
+
+[[package]]
+name = "const_format_proc_macros"
+version = "0.2.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eff1a44b93f47b1bac19a27932f5c591e43d1ba357ee4f61526c8a25603f0eb1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2146,6 +2166,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "stringreader"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913e7b03d63752f6cdd2df77da36749d82669904798fe8944b9ec3d23f159905"
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3543,6 +3569,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0336d538f7abc86d282a4189614dfaa90810dfc2c6f6427eaf88e16311dd225d"
 
 [[package]]
+name = "unicode-xid"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
 name = "unused_bin"
 version = "0.2.0"
 dependencies = [
@@ -3558,7 +3590,9 @@ dependencies = [
 name = "unused_finder"
 version = "0.2.0"
 dependencies = [
+ "ahashmap",
  "anyhow",
+ "const_format",
  "glob",
  "import_resolver",
  "js_err",
@@ -3566,17 +3600,21 @@ dependencies = [
  "napi",
  "napi-derive",
  "packagejson",
+ "packagejson_exports",
  "path-clean 0.1.0",
  "path-slash",
+ "pathdiff",
  "pretty_assertions",
  "rayon",
  "regex",
  "serde",
  "serde_json",
+ "stringreader",
  "swc",
  "swc_core",
  "swc_ecma_parser",
  "swc_utils",
+ "test_tmpdir",
  "thiserror",
  "tsconfig_paths",
 ]

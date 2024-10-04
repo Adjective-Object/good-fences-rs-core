@@ -21,6 +21,14 @@ pub fn package_name(import_specifier: &str) -> Option<&str> {
     }
 }
 
+fn prefix_dotslash(import_specifier: &str) -> String {
+    if import_specifier.starts_with("./") {
+        import_specifier.to_string()
+    } else {
+        format!("./{}", import_specifier)
+    }
+}
+
 // Extracts the package name from a package import specifier
 pub fn split_package_import(import_specifier: &str) -> Option<(&str, String)> {
     match package_name(import_specifier) {
@@ -38,10 +46,7 @@ pub fn split_package_import(import_specifier: &str) -> Option<(&str, String)> {
             } else if rest_str.starts_with("./") {
                 return Some((pkg, rest_str.to_string()));
             } else {
-                let mut s = String::with_capacity(2 + rest_str.len());
-                s.push_str("./");
-                s.push_str(rest_str);
-                return Some((pkg, rest_str.to_string()));
+                return Some((pkg, prefix_dotslash(rest_str)));
             }
         }
         None => None,
