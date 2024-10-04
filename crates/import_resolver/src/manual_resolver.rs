@@ -22,7 +22,7 @@ pub const ASSET_EXTENSION: &[&str] = &["scss", "css", "svg", "png", "json", "gif
 pub fn resolve_with_extension(
     base: FileName,
     imported_path: &str,
-    resolver: &dyn Resolve,
+    resolver: impl Resolve,
 ) -> anyhow::Result<ResolvedImport> {
     if is_resource_file(imported_path) {
         return Ok(ResolvedImport::ResourceFileImport);

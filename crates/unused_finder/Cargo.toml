@@ -29,8 +29,16 @@ swc.workspace = true
 thiserror.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
 packagejson = { path = "../packagejson" }
+packagejson_exports = { path = "../packagejson_exports" }
 path-clean.workspace = true
+pathdiff = "0.2.1"
+const_format = "0.2.33"
+ahashmap = { path = "../ahashmap" }
 
 [features]
 default = []
 napi = ["dep:napi", "dep:napi-derive"]
+
+[dev-dependencies]
+stringreader = "0.1.1"
+test_tmpdir = { path = "../test_tmpdir" }
