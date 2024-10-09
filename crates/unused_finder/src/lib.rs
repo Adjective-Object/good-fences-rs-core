@@ -1,5 +1,4 @@
 #![feature(closure_lifetime_binder)]
-#![feature(inherent_associated_types)]
 
 extern crate import_resolver;
 extern crate serde_json;
@@ -17,18 +16,19 @@ extern crate napi_derive;
 extern crate pretty_assertions;
 
 #[cfg(test)]
-#[macro_use]
 extern crate test_tmpdir;
 
 mod cfg;
-mod core;
-pub mod graph;
-mod logger;
-pub mod parse;
+mod graph;
+pub mod logger;
+mod parse;
 mod report;
-pub mod unused_finder;
+mod unused_finder;
 mod walk;
 mod walked_file;
 
-pub use core::{find_unused_items, ExportedItemReport, FindUnusedItemsConfig, UnusedFinderReport};
-pub use unused_finder::UnusedFinder;
+pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
+pub use parse::data::ResolvedImportExportInfo;
+pub use report::UnusedFinderReport;
+pub use unused_finder::{UnusedFinder, UnusedItemsResult};
+pub use walked_file::{WalkedFile, WalkedPackage, WalkedSourceFile};

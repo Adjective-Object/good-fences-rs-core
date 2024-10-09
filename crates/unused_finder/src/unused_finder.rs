@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    cfg::{UnusedItemsConfig, UnusedItemsJSONConfig},
+    cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
     graph::Graph,
     logger::Logger,
     parse::get_file_import_export_info,
+    report::UnusedFinderReport,
     walk::{walk_src_files, WalkFileResult},
-    walked_file::{ResolvedSourceFile, WalkedPackage, WalkedSourceFile},
+    walked_file::{ResolvedSourceFile, WalkedPackage},
 };
 use ahashmap::AHashMap;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use import_resolver::swc_resolver::MonorepoResolver;
 use js_err::JsErr;
 use rayon::prelude::*;
@@ -29,7 +30,7 @@ enum DirtyFiles {
 // of unused files and exports.
 #[derive(Debug)]
 pub struct UnusedFinder {
-    config: UnusedItemsConfig,
+    config: UnusedFinderConfig,
 
     // absolute paths of files which have been explicitly marked dirty
     // since the last time we checked for unused files
@@ -112,13 +113,13 @@ impl SourceFiles {
 impl UnusedFinder {
     pub fn new_from_json_config(
         logger: impl Logger,
-        json_config: UnusedItemsJSONConfig,
+        json_config: UnusedFinderJSONConfig,
     ) -> Result<Self, JsErr> {
-        let config = UnusedItemsConfig::try_from(json_config).map_err(JsErr::invalid_arg)?;
+        let config = UnusedFinderConfig::try_from(json_config).map_err(JsErr::invalid_arg)?;
         Self::new_from_cfg(logger, config).map_err(JsErr::generic_failure)
     }
 
-    pub fn new_from_cfg(logger: impl Logger, config: UnusedItemsConfig) -> Result<Self, JsErr> {
+    pub fn new_from_cfg(logger: impl Logger, config: UnusedFinderConfig) -> Result<Self, JsErr> {
         let resolver: MonorepoResolver =
             MonorepoResolver::new_default_resolver(PathBuf::from(&config.repo_root));
 
@@ -134,12 +135,17 @@ impl UnusedFinder {
     }
 
     // Read and parse all files from disk have a fresh in-memory representation of the file tree
-    pub fn mark_dirty(&mut self, file_paths: Vec<PathBuf>) {
-        if file_paths.iter().any(|path| {
+    pub fn mark_dirty<I, Item>(&mut self, file_paths: I)
+    where
+        I: IntoIterator<Item = Item, IntoIter: Clone>,
+        Item: AsRef<Path>,
+    {
+        let iterator = file_paths.into_iter();
+        if iterator.clone().any(|path| {
             // If any of the files are not in the last_walk_result, mark all files as dirty
-            !self.last_walk_result.source_files.contains_key(path)
+            !self.last_walk_result.source_files.contains_key(path.as_ref())
             // If any of the files are packagejson files, mark all files as dirty
-            || self.last_walk_result.package_names_by_path.contains_key(path)
+            || self.last_walk_result.package_names_by_path.contains_key(path.as_ref())
         }) {
             self.dirty_files = DirtyFiles::All;
             return;
@@ -148,8 +154,8 @@ impl UnusedFinder {
         // Add to the current list of dirty files, if it's not already marked as all dirty
         if let DirtyFiles::Some(ref mut files) = self.dirty_files {
             // Add the new files to the list of dirty files
-            for file_path in file_paths {
-                files.push(file_path);
+            for file_path in iterator {
+                files.push(file_path.as_ref().to_path_buf());
             }
         }
     }
@@ -188,6 +194,9 @@ impl UnusedFinder {
                 }
             }
         }
+
+        // clear the list of dirty files
+        self.dirty_files = DirtyFiles::Some(vec![]);
         Ok(())
     }
 
@@ -207,7 +216,7 @@ impl UnusedFinder {
         };
 
         let import_export_info =
-            match get_file_import_export_info(file_path, self.config.skipped_items.clone()) {
+            match get_file_import_export_info(file_path, self.config.skipped_symbols.clone()) {
                 Ok(import_export_info) => import_export_info,
                 Err(e) => {
                     logger.log(format!(
@@ -234,7 +243,7 @@ impl UnusedFinder {
     /// with
     fn walk_and_resolve_all(
         logger: impl Logger,
-        config: &UnusedItemsConfig,
+        config: &UnusedFinderConfig,
         resolver: impl Resolve,
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
@@ -242,7 +251,7 @@ impl UnusedFinder {
             logger,
             &config.root_paths,
             &config.skipped_dirs,
-            &config.skipped_items,
+            &config.skipped_symbols,
         );
         // TODO: gracefully handle errors during resolution
         let resolved =
@@ -252,23 +261,22 @@ impl UnusedFinder {
 
     // Gets a report by performing a graph traversal on the current in-memory state of the repo,
     // from the last time the file tree was scanned.
-    pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedItems, JsErr> {
+    pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedItemsResult, JsErr> {
+        // Scan the file-system for changed files
         self.update_dirty_files(logger)?;
 
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
-        // Start the traversal from the "entry" files.
-        let mut frontier = self.get_entry_files(logger);
+        let entry_files = self.get_entry_files(logger);
+        graph
+            .traverse_bfs(entry_files.clone())
+            .map_err(JsErr::generic_failure)?;
 
-        for _ in 0..10_000_000 {
-            frontier = graph.bfs_step(frontier);
-            if frontier.is_empty() {
-                return Ok(UnusedItems::new(graph, self.get_entry_files(logger)));
-            }
-        }
-        Err(JsErr::generic_failure(anyhow!("exceeded max iterations")))
+        Ok(UnusedItemsResult::new(graph, entry_files))
     }
 
+    /// helper package to get the list of initial files for the graph traversal,
+    /// referred to as "entry files"
     fn get_entry_files(&self, logger: impl Logger) -> Vec<PathBuf> {
         self.last_walk_result
             .source_files
@@ -287,6 +295,11 @@ impl UnusedFinder {
                     }
                 };
 
+                // only "entry packages" may export scripts
+                if !self.is_entry_package(owning_package) {
+                    return None;
+                }
+
                 // get the corresponding package of the source file
                 let owning_package = match self.last_walk_result.packages.get(owning_package) {
                     Some(owning_package) => owning_package,
@@ -299,35 +312,39 @@ impl UnusedFinder {
                     }
                 };
 
-                // check package "main" and "module" fields if they match this file
-
                 // check if the owning package exports the file. If so, include this file as a package root.
                 if owning_package
-                    .is_abspath_exported(&file_path)
+                    .is_abspath_exported(file_path)
                     .unwrap_or(false)
                 {
                     return Some(file_path.clone());
                 }
 
-                return None;
+                None
             })
             .collect()
     }
 
     fn is_entry_package(&self, package_name: &str) -> bool {
-        return self.config.entry_packages.contains(package_name);
+        self.config.entry_packages.contains(package_name)
     }
 }
 
-pub struct UnusedItems {
-    graph: Graph,
-    entrypoints: Vec<PathBuf>,
+/// Represents the result of computing something over the graph.
+pub struct UnusedItemsResult {
+    /// The finished, traversed graph, with unused items marked as used / unused.
+    pub graph: Graph,
+    /// The list of initial entrypoints that were used to perform the graph traversal
+    pub entrypoints: Vec<PathBuf>,
 }
 
-impl UnusedItems {
+impl UnusedItemsResult {
     pub fn new(graph: Graph, entrypoints: Vec<PathBuf>) -> Self {
         Self { graph, entrypoints }
     }
 
-    // pub fn report() -> UnusedFinderReport {}
+    /// Gets a report that can be presented to the JS bridge.
+    pub fn get_report(&self) -> UnusedFinderReport {
+        UnusedFinderReport::from(self)
+    }
 }

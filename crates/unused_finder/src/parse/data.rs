@@ -9,75 +9,75 @@ use swc_core::{
 
 /// Represents an import of a module from another module
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum ImportedItem {
+pub enum ImportedSymbol {
+    // Represents a named import
+    // e.,g. import {bar} from 'foo'
     Named(String),
+    // Represents a default import,
+    // e.,g. import 'foo'
     Default,
+    // Represents importing the whole namespace of the module,
+    // e.g. import * from 'foo'
     Namespace,
+    // Represents importing a module without referencing any of its symbols.
+    // e.g. import 'foo'
     ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
 }
 
-impl From<&ExportKind> for ImportedItem {
-    fn from(e: &ExportKind) -> Self {
+impl From<&ExportedSymbol> for ImportedSymbol {
+    fn from(e: &ExportedSymbol) -> Self {
         match e {
-            ExportKind::Named(name) => ImportedItem::Named(name.clone()),
-            ExportKind::Default => ImportedItem::Default,
-            ExportKind::Namespace => ImportedItem::Namespace,
-            ExportKind::ExecutionOnly => ImportedItem::ExecutionOnly,
+            ExportedSymbol::Named(name) => ImportedSymbol::Named(name.clone()),
+            ExportedSymbol::Default => ImportedSymbol::Default,
+            ExportedSymbol::Namespace => ImportedSymbol::Namespace,
+            ExportedSymbol::ExecutionOnly => ImportedSymbol::ExecutionOnly,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum ExportKind {
+pub enum ExportedSymbol {
+    // A named export
     Named(String),
+    // The default export
     Default,
+    // A namespace export
     Namespace,
     ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
 }
 
-impl std::fmt::Display for ExportKind {
+impl std::fmt::Display for ExportedSymbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExportKind::Named(name) => write!(f, "{}", name),
-            ExportKind::Default => write!(f, "default"),
-            ExportKind::Namespace => write!(f, "*"),
-            ExportKind::ExecutionOnly => write!(f, "import '<path>'"),
+            ExportedSymbol::Named(name) => write!(f, "{}", name),
+            ExportedSymbol::Default => write!(f, "default"),
+            ExportedSymbol::Namespace => write!(f, "*"),
+            ExportedSymbol::ExecutionOnly => write!(f, "import '<path>'"),
         }
     }
 }
 
-impl Default for ExportKind {
+impl Default for ExportedSymbol {
     fn default() -> Self {
         Self::Default
     }
 }
 
-impl From<&ImportedItem> for ExportKind {
-    fn from(i: &ImportedItem) -> Self {
+impl From<&ImportedSymbol> for ExportedSymbol {
+    fn from(i: &ImportedSymbol) -> Self {
         match i {
-            ImportedItem::Named(named) => ExportKind::Named(named.clone()),
-            ImportedItem::Default => ExportKind::Default,
-            ImportedItem::Namespace => ExportKind::Namespace,
-            ImportedItem::ExecutionOnly => ExportKind::ExecutionOnly,
+            ImportedSymbol::Named(named) => ExportedSymbol::Named(named.clone()),
+            ImportedSymbol::Default => ExportedSymbol::Default,
+            ImportedSymbol::Namespace => ExportedSymbol::Namespace,
+            ImportedSymbol::ExecutionOnly => ExportedSymbol::ExecutionOnly,
         }
     }
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Clone, Hash)]
-pub struct ExportedItemMetadata {
-    pub export_kind: ExportKind,
+pub struct ExportedSymbolMetadata {
     pub span: Span,
     pub allow_unused: bool,
-}
-
-impl ExportedItemMetadata {
-    pub fn new(export_type: ExportKind, span: Span, allow_unused: bool) -> Self {
-        Self {
-            export_kind: export_type,
-            span,
-            allow_unused,
-        }
-    }
 }
 
 /// Represents the raw import/export information from a file, where import
@@ -85,15 +85,15 @@ impl ExportedItemMetadata {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RawImportExportInfo {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    pub imported_path_ids: AHashMap<String, AHashSet<ImportedItem>>,
+    pub imported_path_ids: AHashMap<String, AHashSet<ImportedSymbol>>,
     // require('foo') generates ['foo']
     pub require_paths: AHashSet<String>,
     // import('./foo') generates ["./foo"]
     pub imported_paths: AHashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: AHashMap<String, AHashSet<ImportedItem>>,
+    pub export_from_ids: AHashMap<String, AHashSet<ImportedSymbol>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
-    pub exported_ids: AHashSet<ExportedItem>,
+    pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // `import './foo'`
     pub executed_paths: AHashSet<String>,
 }
@@ -103,22 +103,22 @@ pub struct RawImportExportInfo {
 #[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct ResolvedImportExportInfo {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    pub imported_path_ids: AHashMap<PathBuf, AHashSet<ImportedItem>>,
+    pub imported_path_ids: AHashMap<PathBuf, AHashSet<ImportedSymbol>>,
     // require('foo') generates ['foo']
     pub require_paths: AHashSet<PathBuf>,
     // import('./foo') generates ["./foo"]
     pub imported_paths: AHashSet<PathBuf>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: AHashMap<PathBuf, AHashSet<ImportedItem>>,
+    pub export_from_ids: AHashMap<PathBuf, AHashSet<ImportedSymbol>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
-    pub exported_ids: AHashSet<ExportedItem>,
+    pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // `import './foo'`
     pub executed_paths: AHashSet<PathBuf>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Default)]
 pub struct ExportedItem {
-    pub metadata: ExportedItemMetadata,
+    pub metadata: ExportedSymbolMetadata,
     pub source_file_path: Option<String>,
 }
 
@@ -129,7 +129,7 @@ impl RawImportExportInfo {
             require_paths: AHashSet::default(),
             imported_paths: AHashSet::default(),
             export_from_ids: AHashMap::default(),
-            exported_ids: AHashSet::default(),
+            exported_ids: AHashMap::default(),
             executed_paths: AHashSet::default(),
         }
     }
@@ -158,7 +158,7 @@ impl RawImportExportInfo {
 
         let from_file = FileName::Real(from_file_path.to_path_buf());
 
-        let resolve_hashmap = |mut map: AHashMap<String, AHashSet<ImportedItem>>| {
+        let resolve_hashmap = |mut map: AHashMap<String, AHashSet<ImportedSymbol>>| {
             let mut accum = AHashMap::with_capacity_and_hasher(map.len(), ARandomState::new());
             for (import_specifier, imported_symbols) in map.drain() {
                 let resolved = resolver.resolve(&from_file, &import_specifier)?;
