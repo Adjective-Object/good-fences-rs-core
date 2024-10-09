@@ -12,6 +12,9 @@ use anyhow::Context;
 use error::EvaluateFencesError;
 use napi_derive::napi;
 use serde::Serialize;
+use unused_finder::{
+    logger::StdioLogger, UnusedFinder, UnusedFinderJSONConfig, UnusedFinderReport,
+};
 use walk_dirs::ExternalFences;
 pub mod error;
 pub mod evaluate_fences;
@@ -192,24 +195,23 @@ pub struct JsonErrorFile<'a> {
  * `cargo test` can't link anything
  */
 
-#[napi]
 pub fn find_unused_items(
-    config: unused_finder::FindUnusedItemsConfig,
-) -> napi::Result<unused_finder::UnusedFinderReport> {
-    unused_finder::find_unused_items(config).map_err(|e: js_err::JsErr| e.to_napi())
+    config: UnusedFinderJSONConfig,
+) -> Result<UnusedFinderReport, js_err::JsErr> {
+    let logger: StdioLogger = StdioLogger::new();
+    let mut unused_finder = UnusedFinder::new_from_json_config(&logger, config)?;
+    let result = unused_finder.find_unused(&logger)?;
+    Ok(result.get_report())
 }
 
 #[napi]
 pub fn find_unused_items_for_open_files(
-    config: unused_finder::FindUnusedItemsConfig,
+    config: unused_finder::UnusedFinderJSONConfig,
     files: Vec<String>,
 ) -> napi::Result<unused_finder::UnusedFinderReport> {
-    match unused_finder::find_unused_items(config) {
-        Ok(mut ok) => {
-            let files: HashSet<String> = HashSet::from_iter(files);
-            ok.unused_files_items.retain(|key, _| files.contains(key));
-            Ok(ok)
-        }
-        Err(e) => Err(e.to_napi()),
-    }
+    let mut result = find_unused_items(config)?;
+    let files: HashSet<String> = HashSet::from_iter(files);
+    result.unused_files.retain(|key| files.contains(key));
+    result.unused_symbols.retain(|key, _| files.contains(key));
+    Ok(result)
 }

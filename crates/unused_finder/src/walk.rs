@@ -78,11 +78,11 @@ struct UnusedFinderWalkVisitor {
     skipped_items: Arc<Vec<regex::Regex>>,
 }
 
-impl UnusedFinderWalkVisitor {
-    type DirState = Option<String>;
-    type FileState = Option<WalkedFile>;
-    type WalkDirEntry = jwalk::DirEntry<(Self::DirState, Self::FileState)>;
+type UnusedFinderDirState = Option<String>;
+type UnusedFinderFileState = Option<WalkedFile>;
+type UnusedFinderWalkDirEntry = jwalk::DirEntry<(UnusedFinderDirState, UnusedFinderFileState)>;
 
+impl UnusedFinderWalkVisitor {
     pub fn new(
         skipped_dirs: Option<Vec<glob::Pattern>>,
         skipped_items: Arc<Vec<regex::Regex>>,
@@ -99,7 +99,7 @@ impl UnusedFinderWalkVisitor {
         &self,
         logger: impl Logger,
         directory_state: &mut Option<String>,
-        children: &mut Vec<jwalk::Result<Self::WalkDirEntry>>,
+        children: &mut Vec<jwalk::Result<UnusedFinderWalkDirEntry>>,
     ) {
         children.iter_mut().for_each(|dir_entry_res| {
             // drop node_modules and lib directories from iteration
