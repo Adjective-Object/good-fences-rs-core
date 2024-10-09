@@ -9,11 +9,11 @@ mod test {
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
 
-    use crate::parse::{ExportKind, ImportedItem};
+    use crate::parse::{ExportedSymbol, ImportedSymbol};
     use swc_utils::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
-    use test_tmpdir::{map, set};
+    use test_tmpdir::{amap, aset};
 
     fn create_test_parser<'a>(
         fm: &'a Arc<SourceFile>,
@@ -45,7 +45,7 @@ mod test {
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
         assert!(
-            visitor.exported_ids.iter().all(|exps| exps.allow_unused),
+            visitor.exported_ids.values().all(|exps| exps.allow_unused),
             "Check for every exported item to be allowed_unused = true failed"
         );
     }
@@ -71,10 +71,9 @@ mod test {
         module.visit_with(&mut visitor);
 
         assert_eq!(visitor.exported_ids.len(), 1);
-        assert!(visitor
-            .exported_ids
-            .iter()
-            .all(|e| e.allow_unused && e.export_kind == ExportKind::Named("bar".to_string())));
+        assert!(visitor.exported_ids.iter().all(
+            |(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Named("bar".to_string())
+        ));
     }
     #[test]
     fn test_allowed_unused_export_default() {
@@ -95,13 +94,13 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = AHashSet::default();
+        let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -130,7 +129,7 @@ mod test {
         assert!(visitor
             .exported_ids
             .iter()
-            .all(|e| e.allow_unused && e.export_kind == ExportKind::Default));
+            .all(|(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Default));
     }
 
     #[test]
@@ -152,13 +151,13 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = AHashSet::default();
+        let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -181,13 +180,13 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = AHashSet::default();
+        let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -211,7 +210,7 @@ mod test {
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
 
-        assert!(visitor.exported_ids.iter().all(|e| e.allow_unused));
+        assert!(visitor.exported_ids.iter().all(|(_, e)| e.allow_unused));
     }
 
     #[test]
@@ -232,7 +231,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = AHashMap::default();
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = AHashMap::default();
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -296,14 +295,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("foo".to_owned()));
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("foo".to_owned()));
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -334,17 +333,15 @@ mod test {
         module.visit_with(&mut visitor);
         assert_eq!(visitor.exported_ids.len(), 2);
         assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|e| e.export_kind == ExportKind::Named("bar".to_owned()) || !e.allow_unused),
+            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
+                == ExportedSymbol::Named("bar".to_owned())
+                || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|e| e.export_kind == ExportKind::Named("zoo".to_owned()) || e.allow_unused),
+            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
+                == ExportedSymbol::Named("zoo".to_owned())
+                || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -375,17 +372,16 @@ mod test {
         module.visit_with(&mut visitor);
         assert_eq!(visitor.exported_ids.len(), 2);
         assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|e| e.export_kind == ExportKind::Named("foo".to_owned()) || !e.allow_unused),
+            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
+                == ExportedSymbol::Named("foo".to_owned())
+                || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
             visitor
                 .exported_ids
                 .iter()
-                .any(|e| e.export_kind == ExportKind::Default || e.allow_unused),
+                .any(|(symbol, e)| *symbol == ExportedSymbol::Default || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -414,14 +410,15 @@ mod test {
         let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
 
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("zoo".to_string()));
+        let expected_map: AHashSet<ExportedSymbol> =
+            aset!(ExportedSymbol::Named("zoo".to_string()));
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -443,14 +440,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("bar".to_owned()));
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("bar".to_owned()));
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -472,14 +469,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -503,14 +500,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -532,14 +529,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -560,14 +557,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Default);
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -588,14 +585,14 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportKind> = set!(ExportKind::Named("foo".to_owned()));
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("foo".to_owned()));
 
         assert_eq!(
             expected_map,
             visitor
                 .exported_ids
                 .drain()
-                .map(|e| e.export_kind)
+                .map(|(k, _)| k)
                 .collect::<AHashSet<_>>()
         );
     }
@@ -616,8 +613,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!( "foo" =>
-            aset!(ImportedItem::Named("foo".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!( "./foo" =>
+            aset!(ImportedSymbol::Named("foo".to_owned()))
         );
         assert_eq!(expected_map, visitor.export_from_ids);
     }
@@ -638,8 +635,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!(
-                "./foo" => aset!(ImportedItem::Default));
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!(
+                "./foo" => aset!(ImportedSymbol::Default));
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -659,8 +656,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
-            amap!("./foo" => aset!(ImportedItem::Namespace));
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
+            amap!("./foo" => aset!(ImportedSymbol::Namespace));
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -680,8 +677,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
-            amap!("./foo" => aset!(ImportedItem::Default));
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
+            amap!("./foo" => aset!(ImportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -701,8 +698,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!( "foo" =>
-            aset!(ImportedItem::Named("foo".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!( "./foo" =>
+            aset!(ImportedSymbol::Named("foo".to_owned()))
         );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
@@ -723,8 +720,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = amap!( "foo" =>
-            aset!(ImportedItem::Named("foo".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!( "./foo" =>
+            aset!(ImportedSymbol::Named("foo".to_owned()))
         );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
@@ -745,8 +742,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
-            amap!("./foo" => aset!(ImportedItem::Default));
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
+            amap!("./foo" => aset!(ImportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -792,8 +789,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> = map!(
-            "./foo" => aset!(ImportedItem::Default, ImportedItem::Named("bar".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!(
+            "./foo" => aset!(ImportedSymbol::Default, ImportedSymbol::Named("bar".to_owned()))
         );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
@@ -814,8 +811,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
-            amap!("./foo" => aset!(ImportedItem::Namespace));
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
+            amap!("./foo" => aset!(ImportedSymbol::Namespace));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -898,8 +895,8 @@ mod test {
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedItem>> =
-            amap!("./foo" => aset!(ImportedItem::Default));
+        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
+            amap!("./foo" => aset!(ImportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 }

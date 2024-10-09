@@ -1,18 +1,17 @@
-use std::{fmt::Display, path::PathBuf};
+use std::{collections::HashMap, fmt::Display};
 
-use ahashmap::{AHashMap, AHashSet};
 use rayon::prelude::*;
 use swc_core::common::source_map::SmallPos;
 
-use crate::walked_file::WalkedSourceFile;
+use crate::UnusedItemsResult;
 
 // Report of a single exported item in a file
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "napi", napi(object))]
-pub struct ExportedItemReport {
+pub struct UnusedSymbolReport {
     pub id: String,
-    pub start: i32,
-    pub end: i32,
+    pub start: u32,
+    pub end: u32,
 }
 
 // Report of unused symbols within a project
@@ -22,7 +21,7 @@ pub struct UnusedFinderReport {
     // files that are completely unused
     pub unused_files: Vec<String>,
     // items that are unused within files
-    pub unused_files_items: AHashMap<String, Vec<ExportedItemReport>>,
+    pub unused_symbols: HashMap<String, Vec<UnusedSymbolReport>>,
 }
 
 impl Display for UnusedFinderReport {
@@ -37,10 +36,10 @@ impl Display for UnusedFinderReport {
             .unused_files
             .iter()
             .map(|x| x.to_string())
-            .collect::<AHashSet<String>>();
+            .collect::<Vec<String>>();
 
         for file_path in unused_files.iter() {
-            match self.unused_files_items.get(file_path) {
+            match self.unused_symbols.get(file_path) {
                 Some(items) => writeln!(
                     f,
                     "{} is completely unused ({} item{})",
@@ -52,7 +51,7 @@ impl Display for UnusedFinderReport {
             };
         }
 
-        for (file_path, items) in self.unused_files_items.iter() {
+        for (file_path, items) in self.unused_symbols.iter() {
             if unused_files_set.contains(file_path) {
                 continue;
             }
@@ -72,25 +71,51 @@ impl Display for UnusedFinderReport {
     }
 }
 
-pub fn create_report_map_from_source_files(
-    flattened_walk_file_data: &Vec<WalkedSourceFile>,
-) -> AHashMap<PathBuf, Vec<ExportedItemReport>> {
-    let file_path_exported_items_map: AHashMap<PathBuf, Vec<ExportedItemReport>> =
-        flattened_walk_file_data
+impl From<&UnusedItemsResult> for UnusedFinderReport {
+    fn from(value: &UnusedItemsResult) -> Self {
+        let unused_files = value
+            .graph
+            .files
             .par_iter()
-            .map(|file| {
-                let ids = file
-                    .import_export_info
-                    .exported_ids
-                    .iter()
-                    .map(|exported_item| ExportedItemReport {
-                        id: exported_item.metadata.export_kind.to_string(),
-                        start: exported_item.metadata.span.lo.to_usize() as i32,
-                        end: exported_item.metadata.span.hi.to_usize() as i32,
-                    })
-                    .collect();
-                (file.source_file_path.clone(), ids)
+            .filter_map(|(file_path, file)| {
+                if file.is_used {
+                    Some(file_path.to_string_lossy().to_string())
+                } else {
+                    None
+                }
             })
-            .collect();
-    file_path_exported_items_map
+            .collect::<Vec<_>>();
+        let unused_symbols = value.graph
+        .files
+        .par_iter()
+        .filter_map(|(file_path, file)| -> Option<(String, Vec<UnusedSymbolReport>)> {
+            if !file.unused_exports.is_empty() {
+                let file_unused_symbols = file.unused_exports.iter().filter_map(
+                    |symbol| -> Option<UnusedSymbolReport> {
+                        let import_export_info = file
+                            .import_export_info.exported_ids
+                            .get(symbol)
+                            .expect("IDs from a graph file must also be contained in the graphfile's ImportExportInfo");
+                        if import_export_info.allow_unused {
+                            return None
+                        }
+                        Some(UnusedSymbolReport{
+                            id: symbol.to_string(),
+                            start: import_export_info.span.lo().to_u32(),
+                            end: import_export_info.span.hi().to_u32(),
+                        })
+                    }
+                ).collect::<Vec<_>>();
+                Some((file_path.to_string_lossy().to_string(), file_unused_symbols))
+            } else {
+                None
+            }
+        })
+        .collect::<HashMap<String, Vec<UnusedSymbolReport>>>();
+
+        UnusedFinderReport {
+            unused_files,
+            unused_symbols,
+        }
+    }
 }

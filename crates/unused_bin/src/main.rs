@@ -3,7 +3,8 @@ extern crate unused_finder;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use std::{env, fs, path::Path};
+use std::{convert::TryInto, env, fs, path::Path};
+use unused_finder::{logger::StdioLogger, UnusedFinderConfig};
 
 #[derive(Parser, Debug)]
 struct CliArgs {
@@ -123,28 +124,27 @@ fn main() -> Result<()> {
 
     // read and parse the config file
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
-    let mut config: unused_finder::FindUnusedItemsConfig = serde_json::from_str(&config_str)
+    let config: unused_finder::UnusedFinderJSONConfig = serde_json::from_str(&config_str)
         .with_context(|| format!("Parsing unused-finder config {config_path}"))?;
+    let parsed_config: UnusedFinderConfig = config.try_into()?;
 
     // move the the working directory of the config path
     let config_dir = Path::new(&config_path)
         .parent()
         .expect("Failed to get parent directory of config file")
         .to_path_buf();
-    config.ts_config_path = config_dir
-        .join("tsconfig.json")
-        .to_str()
-        .with_context(|| "Failed to coerce unprintable directory to a string!".to_string())?
-        .to_string();
 
     println!("working in {}..", config_dir.display());
     env::set_current_dir(&config_dir)
         .expect("Failed to change working directory to config file directory");
 
+    let logger = StdioLogger::new();
     let start_time = std::time::Instant::now();
-    let result = unused_finder::find_unused_items(config)?;
-    let delta = start_time.elapsed();
-    println!("result ({}ms):\n{result}", delta.as_millis());
+    let mut unused_finder = unused_finder::UnusedFinder::new_from_cfg(&logger, parsed_config)?;
+    let result = unused_finder.find_unused(&logger)?;
+    let report = result.get_report();
+    let delta_ms = start_time.elapsed().as_millis();
+    println!("result ({delta_ms}ms):\n{report}");
 
     Ok(())
 }

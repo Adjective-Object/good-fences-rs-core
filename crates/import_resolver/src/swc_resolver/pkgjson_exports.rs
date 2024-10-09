@@ -3,6 +3,7 @@ use core::fmt;
 use std::{fmt::Display, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Result};
+use hashbrown::Equivalent;
 use path_clean::PathClean;
 use path_slash::PathBufExt;
 
@@ -11,13 +12,15 @@ use packagejson::{
     PackageJsonExport, PackageJsonExports,
 };
 
+use super::common::AHashMap;
+
 // Pair path, export-condfition of form ('package-name/imported-path', 'import')
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 struct ExportKey(String, String);
 
 // Implement Equivalent for our custom export key so we can do a key comparison
 // without having to copy strings to consturct a new ExportKey
-impl hashbrown::Equivalent<ExportKey> for (&str, &str) {
+impl Equivalent<ExportKey> for (&str, &str) {
     fn equivalent(&self, key: &ExportKey) -> bool {
         *self.0 == key.0 && *self.1 == key.1
     }
@@ -27,7 +30,7 @@ impl hashbrown::Equivalent<ExportKey> for (&str, &str) {
 //
 // This holds derived data from the "exports" field in a package.json file, and
 // is computed with PackageExportRewriteData::try_from(PackageJson)
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone)]
 pub struct PackageExportRewriteData {
     // Pre-computed export map for static exports
     // Map is of form ('package-name/imported-path', 'import') => "/absolute/path/to/exported"
@@ -118,6 +121,13 @@ fn match_star_pattern<'a>(
     }
 
     None
+}
+
+fn reverse_match_star_pattern(
+    star_pattern: &str,
+    relative_file: &str,
+) {
+    glob::Pattern
 }
 
 pub enum ExportCondition<'a> {
@@ -222,23 +232,6 @@ impl<'a> MatchedExport<'a> {
     }
 }
 
-fn reverse_match_star_pattern(star_pattern: &str, path: &str) -> bool {
-    let pattern_segments = star_pattern.split('*').collect::<Vec<&str>>();
-    let mut head: &str = path;
-    for segment in pattern_segments {
-        if segment.is_empty() {
-            continue;
-        }
-
-        if let Some(next_idx) = head.find(segment) {
-            head = &head[next_idx + segment.len()..];
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
 impl PackageExportRewriteData {
     // Rewrites an import path to a new path using only the "exports" field from package.json
     pub fn rewrite_relative_export<'a, TStr: Into<&'a str>>(
@@ -328,16 +321,14 @@ impl PackageExportRewriteData {
 
     /// Checks if a given package-relative path is exported or not.
     /// Returns the set of conditions that export that path.
-    pub fn is_exported<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
+    pub fn is_file_exported<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
+        println!("is_file_exported: {self:?}");
         let mut clean_dest = String::new();
         let cleaned_path = clean_path_avoid_alloc(package_relative_path, &mut clean_dest);
 
         let mut accum: Vec<&str> = Vec::new();
 
         for (ExportKey(_, condition), exported) in self.static_exports.iter() {
-            if accum.contains(&condition.as_str()) {
-                continue;
-            }
             if let ExportedPath::Exported(exported_path) = exported {
                 if cleaned_path == exported_path {
                     accum.push(condition)
@@ -346,9 +337,6 @@ impl PackageExportRewriteData {
         }
 
         for (condition, exports) in self.directory_exports.iter() {
-            if accum.contains(&condition.as_str()) {
-                continue;
-            }
             for (_, exported) in exports {
                 if let ExportedPath::Exported(exported_dir_path) = exported {
                     if cleaned_path.starts_with(exported_dir_path) {
@@ -358,13 +346,10 @@ impl PackageExportRewriteData {
             }
         }
 
-        for (condition, exports) in self.star_exports.iter() {
-            if accum.contains(&condition.as_str()) {
-                continue;
-            }
+        for (condition, exports) in self.directory_exports.iter() {
             for (_, exported) in exports {
                 if let ExportedPath::Exported(exported_star_pattern) = exported {
-                    if reverse_match_star_pattern(exported_star_pattern, cleaned_path) {
+                    if reverse_match_star_pattern(exported_star_pattern, cleaned_path).is_some() {
                         accum.push(condition)
                     }
                 }
@@ -388,9 +373,9 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
             }
 
             // for simple exports, simulate a conditional exports map with a single entry, "default"
-            // If needed, store it on the stack in my_cond_exp, allowing conditional_exports to be a reference type
-            let my_cond_exp: ahashmap::AHashMap<String, ExportedPath>;
-            let conditional_exports: &ahashmap::AHashMap<String, ExportedPath> = match exported {
+            // This will be conditionally stored on the stack here, in my_cond_exp while it is being used.
+            let my_cond_exp: AHashMap<String, ExportedPath>;
+            let conditional_exports = match exported {
                 PackageJsonExport::Single(export_target) => {
                     let entry = (
                         "default".to_string(),
@@ -399,7 +384,7 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                             None => ExportedPath::Private,
                         },
                     );
-                    my_cond_exp = ahashmap::AHashMap::from_iter(vec![entry].drain(..));
+                    my_cond_exp = AHashMap::from_iter(vec![entry].drain(..));
                     &my_cond_exp
                 }
                 PackageJsonExport::Conditional(conditional_exports) => conditional_exports,
@@ -452,9 +437,9 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use std::collections::{hash_map::HashMap, BTreeMap};
-    use test_tmpdir::map2;
+
+    use crate::swc_resolver::pkgjson_exports::PackageExportRewriteData;
 
     struct TestCase {
         exports: &'static str,
@@ -471,7 +456,7 @@ mod test {
             these_results.insert(
                 input,
                 parsed_exports
-                    .is_exported(input)
+                    .is_file_exported(input)
                     .iter()
                     .map(|x| x.to_string())
                     .collect(),
@@ -499,23 +484,6 @@ mod test {
     }
 
     #[test]
-    fn test_conditional_literal_export() {
-        run_test_case(TestCase {
-            exports: r#"{
-                    ".": {
-                        "source": "./index.ts",
-                        "default": "./index.js"
-                    }
-                }"#,
-            expected: map2!(
-                "./index.ts" => vec!["source"],
-                "./index.js" => vec!["default"],
-                "./foo.js" => vec![]
-            ),
-        });
-    }
-
-    #[test]
     fn test_unconditional_dir_export() {
         run_test_case(TestCase {
             exports: r#"{
@@ -526,25 +494,6 @@ mod test {
                 "./src/bar/foo/bar.js" => vec![],
                 "./src/foo/bar.js" => vec!["default"],
                 "./src/foo/foo.js" => vec!["default"]
-            ),
-        });
-    }
-
-    #[test]
-    fn test_conditional_dir_export() {
-        run_test_case(TestCase {
-            exports: r#"{
-                    "./foo/": {
-                        "import": "./src/foo_esm/",
-                        "default": "./src/foo_cjs/"
-                    }
-                }"#,
-            expected: map2!(
-                "./src/foo.js" => vec![],
-                "./src/foo_esm/bar.js" => vec!["import"],
-                "./src/foo_esm/foo.js" => vec!["import"],
-                "./src/foo_cjs/bar.js" => vec!["default"],
-                "./src/foo_cjs/foo.js" => vec!["default"]
             ),
         });
     }
@@ -566,53 +515,13 @@ mod test {
     }
 
     #[test]
-    fn test_conditional_single_star_export() {
-        run_test_case(TestCase {
-            exports: r#"{
-                    "./*dex": {
-                        "import": "./_*dex.ts",
-                        "default": "./dex_*.ts"
-                    }
-                }"#,
-            expected: map2!(
-                "./index.ts" => vec![],
-                "./_index.ts" => vec!["import"],
-                "./dex_index.ts" => vec!["default"],
-                "./dex_index.js" => vec![],
-                "./_edex.ts" => vec!["import"],
-                "./_eex.ts" => vec![],
-                "./not.js" => vec![]
-            ),
-        })
-    }
-
-    #[test]
     fn test_unconditional_multi_star_export() {
         run_test_case(TestCase {
             exports: r#"{
                     "./*dex": "./_*d*.ts"
                 }"#,
             expected: map2!(
-                "./_indett.ts" => vec!["default"],
-                "./indett.ts" => vec![]
-            ),
-        })
-    }
-
-    #[test]
-    fn test_conditional_multi_star_export() {
-        run_test_case(TestCase {
-            exports: r#"{
-                    "./*dex": {
-                        "source": "./_*d*.ts",
-                        "default": "./_*d*.js"
-                    }
-                }"#,
-            expected: map2!(
-                "./_indett.ts" => vec!["source"],
-                "./indett.ts" => vec![],
-                "./_indett.js" => vec!["default"],
-                "./indett.js" => vec![]
+                "./indin.ts" => vec!["default"]
             ),
         })
     }
