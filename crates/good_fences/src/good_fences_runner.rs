@@ -204,7 +204,7 @@ mod test {
     fn good_fences_integration_test_runner_initialized() {
         let good_fences_runner = GoodFencesRunner::new(
             TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json").unwrap(),
-            &vec!["tests/good_fences_integration/src"],
+            &["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
             &Vec::new(),
         );
@@ -472,7 +472,7 @@ mod test {
     fn good_fences_integration_test_violations() {
         let good_fences_runner = GoodFencesRunner::new(
             TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json").unwrap(),
-            &vec!["tests/good_fences_integration"],
+            &["tests/good_fences_integration"],
             ExternalFences::Ignore,
             &Vec::new(),
         );
@@ -571,7 +571,7 @@ mod test {
     fn good_fences_integration_test_find_undefined_tags() {
         let good_fences_runner = GoodFencesRunner::new(
             TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json").unwrap(),
-            &vec!["tests/good_fences_integration/src"],
+            &["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
             &Vec::new(),
         );
