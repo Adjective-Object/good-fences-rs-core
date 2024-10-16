@@ -27,10 +27,7 @@ pub enum SourceFileParseError {
 }
 
 /// Gets the _unresolved_ import/export info from a file by reading it from disk and parsing it.
-pub fn get_file_import_export_info(
-    file_path: &Path,
-    skipped_items: Arc<Vec<regex::Regex>>,
-) -> anyhow::Result<RawImportExportInfo> {
+pub fn get_file_import_export_info(file_path: &Path) -> anyhow::Result<RawImportExportInfo> {
     let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(file_path) {
         Ok(f) => f,
@@ -76,7 +73,7 @@ pub fn get_file_import_export_info(
         }
     };
 
-    let mut visitor = ExportsVisitor::new(skipped_items, comments);
+    let mut visitor = ExportsVisitor::new(comments);
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {
