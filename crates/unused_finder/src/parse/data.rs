@@ -4,38 +4,10 @@ use ahashmap::{AHashMap, AHashSet, ARandomState};
 use anyhow::Result;
 use swc_core::{
     common::{FileName, Span},
-    ecma::loader::resolve::Resolve,
+    ecma::{ast::ModuleExportName, loader::resolve::Resolve},
 };
 
-/// Represents an import of a module from another module
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub enum ImportedSymbol {
-    // Represents a named import
-    // e.,g. import {bar} from 'foo'
-    Named(String),
-    // Represents a default import,
-    // e.,g. import 'foo'
-    Default,
-    // Represents importing the whole namespace of the module,
-    // e.g. import * from 'foo'
-    Namespace,
-    // Represents importing a module without referencing any of its symbols.
-    // e.g. import 'foo'
-    ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
-}
-
-impl From<&ExportedSymbol> for ImportedSymbol {
-    fn from(e: &ExportedSymbol) -> Self {
-        match e {
-            ExportedSymbol::Named(name) => ImportedSymbol::Named(name.clone()),
-            ExportedSymbol::Default => ImportedSymbol::Default,
-            ExportedSymbol::Namespace => ImportedSymbol::Namespace,
-            ExportedSymbol::ExecutionOnly => ImportedSymbol::ExecutionOnly,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub enum ExportedSymbol {
     // A named export
     Named(String),
@@ -63,13 +35,11 @@ impl Default for ExportedSymbol {
     }
 }
 
-impl From<&ImportedSymbol> for ExportedSymbol {
-    fn from(i: &ImportedSymbol) -> Self {
-        match i {
-            ImportedSymbol::Named(named) => ExportedSymbol::Named(named.clone()),
-            ImportedSymbol::Default => ExportedSymbol::Default,
-            ImportedSymbol::Namespace => ExportedSymbol::Namespace,
-            ImportedSymbol::ExecutionOnly => ExportedSymbol::ExecutionOnly,
+impl From<&ModuleExportName> for ExportedSymbol {
+    fn from(e: &ModuleExportName) -> Self {
+        match e.atom().as_str() {
+            "default" => ExportedSymbol::Default,
+            _ => ExportedSymbol::Named(e.atom().as_str().to_string()),
         }
     }
 }
@@ -80,18 +50,27 @@ pub struct ExportedSymbolMetadata {
     pub allow_unused: bool,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+pub struct ReExportedSymbol {
+    /// The symbol being re-exported from another module
+    pub imported: ExportedSymbol,
+    /// If the symbol is renamed, this field contains the new name.
+    ///  (e.g. the export { _ as foo } from './foo' generates `renamed_to: Some("foo".to_string())`)
+    pub renamed_to: Option<ExportedSymbol>,
+}
+
 /// Represents the raw import/export information from a file, where import
 /// specifiers are not yet resolved to their final paths.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RawImportExportInfo {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    pub imported_path_ids: AHashMap<String, AHashSet<ImportedSymbol>>,
+    pub imported_path_ids: AHashMap<String, AHashSet<ExportedSymbol>>,
     // require('foo') generates ['foo']
     pub require_paths: AHashSet<String>,
     // import('./foo') generates ["./foo"]
     pub imported_paths: AHashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: AHashMap<String, AHashSet<ImportedSymbol>>,
+    pub export_from_ids: AHashMap<String, AHashSet<ReExportedSymbol>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
     pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // `import './foo'`
@@ -103,17 +82,54 @@ pub struct RawImportExportInfo {
 #[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct ResolvedImportExportInfo {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    pub imported_path_ids: AHashMap<PathBuf, AHashSet<ImportedSymbol>>,
+    pub imported_symbols: AHashMap<PathBuf, AHashSet<ExportedSymbol>>,
     // require('foo') generates ['foo']
     pub require_paths: AHashSet<PathBuf>,
     // import('./foo') generates ["./foo"]
     pub imported_paths: AHashSet<PathBuf>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: AHashMap<PathBuf, AHashSet<ImportedSymbol>>,
+    pub export_from_symbols: AHashMap<PathBuf, AHashSet<ReExportedSymbol>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
     pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // `import './foo'`
     pub executed_paths: AHashSet<PathBuf>,
+}
+
+impl ResolvedImportExportInfo {
+    /// Returns an iterator over all the imports originating from this file.
+    pub fn iter_imported_symbols(&self) -> impl Iterator<Item = (&PathBuf, ExportedSymbol)> {
+        let imported_symbols = self
+            .imported_symbols
+            .iter()
+            .flat_map(|(path, symbols)| symbols.iter().map(move |symbol| (path, symbol.clone())));
+
+        let require_imports = self
+            .require_paths
+            .iter()
+            .map(|path| (path, ExportedSymbol::Namespace));
+
+        let imported_paths = self
+            .imported_paths
+            .iter()
+            .map(|path| (path, ExportedSymbol::Namespace));
+
+        let re_exports = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
+            symbols
+                .iter()
+                .map(move |symbol| (path, symbol.imported.clone()))
+        });
+
+        let executed_paths = self
+            .executed_paths
+            .iter()
+            .map(|path| (path, ExportedSymbol::ExecutionOnly));
+
+        imported_symbols
+            .chain(require_imports)
+            .chain(imported_paths)
+            .chain(re_exports)
+            .chain(executed_paths)
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Default)]
@@ -141,6 +157,52 @@ impl Default for RawImportExportInfo {
     }
 }
 
+fn resolve_hashmap<T>(
+    from_file: &FileName,
+    resolver: impl Resolve,
+    mut map: AHashMap<String, T>,
+) -> Result<AHashMap<PathBuf, T>, anyhow::Error> {
+    let mut accum = AHashMap::with_capacity_and_hasher(map.len(), ARandomState::new());
+    for (import_specifier, imported_symbols) in map.drain() {
+        let resolved = resolver.resolve(from_file, &import_specifier)?;
+        match resolved.filename {
+            FileName::Real(resolved_path) => {
+                accum.insert(resolved_path, imported_symbols);
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "resolved to a non-file path?: {:?}",
+                    resolved
+                ));
+            }
+        }
+    }
+    Ok(accum)
+}
+
+fn resolve_hashset(
+    from_file: &FileName,
+    resolver: impl Resolve,
+    mut set: AHashSet<String>,
+) -> Result<AHashSet<PathBuf>, anyhow::Error> {
+    let mut accum = AHashSet::with_capacity_and_hasher(set.len(), ARandomState::new());
+    for import_specifier in set.drain() {
+        let resolved = resolver.resolve(from_file, &import_specifier)?;
+        let resolved_str = match resolved.filename {
+            FileName::Real(path) => path,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "resolved to a non-file path?: {:?}",
+                    resolved
+                ));
+            }
+        };
+        accum.insert(resolved_str);
+    }
+
+    Ok(accum)
+}
+
 impl RawImportExportInfo {
     pub fn try_resolve(
         self,
@@ -158,52 +220,13 @@ impl RawImportExportInfo {
 
         let from_file = FileName::Real(from_file_path.to_path_buf());
 
-        let resolve_hashmap = |mut map: AHashMap<String, AHashSet<ImportedSymbol>>| {
-            let mut accum = AHashMap::with_capacity_and_hasher(map.len(), ARandomState::new());
-            for (import_specifier, imported_symbols) in map.drain() {
-                let resolved = resolver.resolve(&from_file, &import_specifier)?;
-                match resolved.filename {
-                    FileName::Real(resolved_path) => {
-                        accum.insert(resolved_path, imported_symbols);
-                    }
-                    _ => {
-                        return Err(anyhow::anyhow!(
-                            "resolved to a non-file path?: {:?}",
-                            resolved
-                        ));
-                    }
-                }
-            }
-            Ok(accum)
-        };
-
-        let resolve_hashset =
-            |mut set: AHashSet<String>| -> Result<AHashSet<PathBuf>, anyhow::Error> {
-                let mut accum = AHashSet::with_capacity_and_hasher(set.len(), ARandomState::new());
-                for import_specifier in set.drain() {
-                    let resolved = resolver.resolve(&from_file, &import_specifier)?;
-                    let resolved_str = match resolved.filename {
-                        FileName::Real(path) => path,
-                        _ => {
-                            return Err(anyhow::anyhow!(
-                                "resolved to a non-file path?: {:?}",
-                                resolved
-                            ));
-                        }
-                    };
-                    accum.insert(resolved_str);
-                }
-
-                Ok(accum)
-            };
-
         Ok(ResolvedImportExportInfo {
-            imported_path_ids: resolve_hashmap(imported_path_ids)?,
-            require_paths: resolve_hashset(require_paths)?,
-            imported_paths: resolve_hashset(imported_paths)?,
-            export_from_ids: resolve_hashmap(export_from_ids)?,
+            imported_symbols: resolve_hashmap(&from_file, &resolver, imported_path_ids)?,
+            require_paths: resolve_hashset(&from_file, &resolver, require_paths)?,
+            imported_paths: resolve_hashset(&from_file, &resolver, imported_paths)?,
+            export_from_symbols: resolve_hashmap(&from_file, &resolver, export_from_ids)?,
             exported_ids,
-            executed_paths: resolve_hashset(executed_paths)?,
+            executed_paths: resolve_hashset(&from_file, &resolver, executed_paths)?,
         })
     }
 }

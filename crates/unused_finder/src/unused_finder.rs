@@ -7,7 +7,7 @@ use crate::{
     parse::get_file_import_export_info,
     report::UnusedFinderReport,
     walk::{walk_src_files, WalkFileResult},
-    walked_file::{ResolvedSourceFile, WalkedPackage},
+    walked_file::{IgnoreFile, ResolvedSourceFile, WalkedPackage},
 };
 use ahashmap::AHashMap;
 use anyhow::Result;
@@ -55,6 +55,10 @@ struct SourceFiles {
     // Map of package path to package name, used to look up packages by path
     // when resolving imports
     package_names_by_path: AHashMap<PathBuf, String>,
+    // List of "ignore" files discovered during the walk, which denote files that
+    // should be ignored entirely when checking for unused symbols. Those files
+    // are recursively ignored.
+    ignore_files: Vec<IgnoreFile>,
 }
 
 impl SourceFiles {
@@ -106,6 +110,7 @@ impl SourceFiles {
             source_files,
             packages,
             package_names_by_path,
+            ignore_files: walk_result.ignore_files,
         })
     }
 }
@@ -120,6 +125,12 @@ impl UnusedFinder {
     }
 
     pub fn new_from_cfg(logger: impl Logger, config: UnusedFinderConfig) -> Result<Self, JsErr> {
+        if config.repo_root.is_empty() {
+            return Err(JsErr::invalid_arg(anyhow!(
+                "repoRoot must be set in config"
+            )));
+        }
+
         let resolver: MonorepoResolver =
             MonorepoResolver::new_default_resolver(PathBuf::from(&config.repo_root));
 
@@ -176,6 +187,9 @@ impl UnusedFinder {
                     Self::walk_and_resolve_all(logger, &self.config, &self.resolver)?;
             }
             DirtyFiles::Some(files) => {
+                if files.is_empty() {
+                    return Ok(());
+                }
                 logger.log("Refreshing only the files that have been marked dirty");
                 let scanned_files = files
                     .par_iter()
@@ -215,18 +229,17 @@ impl UnusedFinder {
             }
         };
 
-        let import_export_info =
-            match get_file_import_export_info(file_path, self.config.skipped_symbols.clone()) {
-                Ok(import_export_info) => import_export_info,
-                Err(e) => {
-                    logger.log(format!(
-                        "Error reading file {}: {:?}",
-                        file_path.display(),
-                        e
-                    ));
-                    return Err(JsErr::generic_failure(e));
-                }
-            };
+        let import_export_info = match get_file_import_export_info(file_path) {
+            Ok(import_export_info) => import_export_info,
+            Err(e) => {
+                logger.log(format!(
+                    "Error reading file {}: {:?}",
+                    file_path.display(),
+                    e
+                ));
+                return Err(JsErr::generic_failure(e));
+            }
+        };
 
         let resolved_source_file = ResolvedSourceFile {
             owning_package,
@@ -247,12 +260,7 @@ impl UnusedFinder {
         resolver: impl Resolve,
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
-        let walked_files = walk_src_files(
-            logger,
-            &config.root_paths,
-            &config.skipped_dirs,
-            &config.skipped_symbols,
-        );
+        let walked_files = walk_src_files(logger, &config.root_paths, &config.skipped_dirs);
         // TODO: gracefully handle errors during resolution
         let resolved =
             SourceFiles::try_resolve(walked_files, resolver).map_err(JsErr::generic_failure)?;
@@ -261,68 +269,97 @@ impl UnusedFinder {
 
     // Gets a report by performing a graph traversal on the current in-memory state of the repo,
     // from the last time the file tree was scanned.
-    pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedItemsResult, JsErr> {
+    pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedFinderResult, JsErr> {
         // Scan the file-system for changed files
         self.update_dirty_files(logger)?;
+        logger.log(format!("walked files: {:#?}", self.last_walk_result));
 
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
-        let entry_files = self.get_entry_files(logger);
+        // Get the walk roots and perform the graph traversal
+        let walk_roots = self.get_walk_roots(logger);
+        logger.log(format!(
+            "walk_roots: {:?}",
+            walk_roots.iter().map(|x| x.display()).collect::<Vec<_>>()
+        ));
         graph
-            .traverse_bfs(entry_files.clone())
+            .traverse_bfs(logger, walk_roots.clone())
             .map_err(JsErr::generic_failure)?;
 
-        Ok(UnusedItemsResult::new(graph, entry_files))
+        Ok(UnusedFinderResult::new(graph))
     }
 
     /// helper package to get the list of initial files for the graph traversal,
     /// referred to as "entry files"
-    fn get_entry_files(&self, logger: impl Logger) -> Vec<PathBuf> {
+    fn get_walk_roots(&self, logger: impl Logger) -> Vec<PathBuf> {
+        // get all package exports.
         self.last_walk_result
             .source_files
             .par_iter()
             .filter_map(|(file_path, source_file)| {
-                let owning_package = match source_file.owning_package {
-                    Some(ref owning_package) => owning_package,
-                    None => {
-                        // TODO: should un-rooted scripts be considered entry points?
-                        // This might be the case for e.g. tests or other scripts
-                        logger.log(format!(
-                            "Could not find package for source file {}",
-                            file_path.display(),
-                        ));
-                        return None;
-                    }
-                };
-
-                // only "entry packages" may export scripts
-                if !self.is_entry_package(owning_package) {
-                    return None;
+                let export = self.is_entry_package_export(logger, file_path, source_file);
+                logger.log(format!(
+                    "walk_roots:: check path {} : {export}",
+                    file_path.display()
+                ));
+                if export || self.is_file_ignored(file_path) {
+                    Some(file_path.clone())
+                } else {
+                    None
                 }
-
-                // get the corresponding package of the source file
-                let owning_package = match self.last_walk_result.packages.get(owning_package) {
-                    Some(owning_package) => owning_package,
-                    None => {
-                        logger.log(format!(
-                            "Could not find package for source file {}",
-                            file_path.display(),
-                        ));
-                        return None;
-                    }
-                };
-
-                // check if the owning package exports the file. If so, include this file as a package root.
-                if owning_package
-                    .is_abspath_exported(file_path)
-                    .unwrap_or(false)
-                {
-                    return Some(file_path.clone());
-                }
-
-                None
             })
             .collect()
+    }
+
+    /// Helper that checks if a file is an export of an "entry package"
+    fn is_entry_package_export(
+        &self,
+        logger: impl Logger,
+        file_path: &Path,
+        source_file: &ResolvedSourceFile,
+    ) -> bool {
+        let owning_package_name = match source_file.owning_package {
+            Some(ref owning_package) => owning_package,
+            None => {
+                // TODO: should un-rooted scripts be considered entry points?
+                // This might be the case for e.g. tests or other scripts
+                logger.log(format!(
+                    "Could not find package for source file {}",
+                    file_path.display(),
+                ));
+                return false;
+            }
+        };
+
+        // only "entry packages" may export scripts
+        if !self.is_entry_package(owning_package_name) {
+            return false;
+        }
+
+        // get the corresponding package of the source file
+        let owning_package = match self.last_walk_result.packages.get(owning_package_name) {
+            Some(owning_package) => owning_package,
+            None => {
+                logger.log(format!(
+                    "Could not find owning package {owning_package_name:?} for source file {}",
+                    file_path.display(),
+                ));
+                return false;
+            }
+        };
+
+        // check if the owning package exports the file. If so, include this file as a package root.
+        owning_package
+            .is_abspath_exported(file_path)
+            .unwrap_or(false)
+    }
+
+    /// Helper that checks if a file is ignored by any of the ignore files
+    fn is_file_ignored(&self, file_path: &Path) -> bool {
+        self.last_walk_result
+            .ignore_files
+            .iter()
+            .any(|ignore_file| ignore_file.matches_path(file_path))
     }
 
     fn is_entry_package(&self, package_name: &str) -> bool {
@@ -331,16 +368,14 @@ impl UnusedFinder {
 }
 
 /// Represents the result of computing something over the graph.
-pub struct UnusedItemsResult {
+pub struct UnusedFinderResult {
     /// The finished, traversed graph, with unused items marked as used / unused.
     pub graph: Graph,
-    /// The list of initial entrypoints that were used to perform the graph traversal
-    pub entrypoints: Vec<PathBuf>,
 }
 
-impl UnusedItemsResult {
-    pub fn new(graph: Graph, entrypoints: Vec<PathBuf>) -> Self {
-        Self { graph, entrypoints }
+impl UnusedFinderResult {
+    pub fn new(graph: Graph) -> Self {
+        Self { graph }
     }
 
     /// Gets a report that can be presented to the JS bridge.

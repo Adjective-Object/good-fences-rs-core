@@ -1,9 +1,10 @@
 use std::{
     borrow::Borrow,
+    io::{BufRead, Read},
     path::{self, Path, PathBuf},
 };
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use const_format::concatcp;
 use packagejson::PackageJson;
 use packagejson_exports::PackageExportRewriteData;
@@ -123,6 +124,14 @@ impl WalkedPackage {
             return Ok(false);
         }
 
+        let export_info = match &self.export_info {
+            Some(info) => info,
+            None => {
+                // if there is no "exports" field, treat all files in the package as exported
+                return Ok(true);
+            }
+        };
+
         let as_rel_slashed = as_relative_path.to_slash().unwrap();
         let mut package_relative_path = String::with_capacity(as_rel_slashed.len() + 2);
         package_relative_path.push_str("./");
@@ -141,11 +150,71 @@ impl WalkedPackage {
         }
 
         // check against the export info
-        let is_exported = match self.export_info {
-            Some(ref export_info) => !export_info.is_exported(&package_relative_path).is_empty(),
-            None => false,
+        Ok(!export_info.is_exported(&package_relative_path).is_empty())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct IgnoreFile {
+    pub path: PathBuf,
+    pub patterns: Vec<IgnorePattern>,
+}
+
+impl IgnoreFile {
+    pub fn read(path: PathBuf) -> Result<Self> {
+        let f = std::fs::File::open(&path)
+            .with_context(|| format!("Failed to open ignore file at path: {}", path.display()))?;
+        Self::from_reader(path, f)
+    }
+
+    pub fn from_reader(path: PathBuf, r: impl Read) -> Result<Self> {
+        // read as lines
+        let lines = std::io::BufReader::new(r).lines();
+        let mut patterns = Vec::new();
+        for line in lines {
+            let line = line.unwrap();
+            let pattern = IgnorePattern::from_line(&line)?;
+            patterns.push(pattern);
+        }
+
+        Ok(Self {
+            path: path.to_path_buf(),
+            patterns,
+        })
+    }
+
+    pub fn matches_path(&self, path: &Path) -> bool {
+        let relative_path = match pathdiff::diff_paths(path, &self.path) {
+            Some(p) => p,
+            None => return false,
         };
-        Ok(is_exported)
+        let relative_slash = match relative_path.to_slash() {
+            Some(p) => p,
+            None => return false,
+        };
+
+        let mut ignored = false;
+        for pattern in self.patterns.iter() {
+            if pattern.pattern.matches(relative_slash.as_ref()) {
+                ignored = pattern.negated;
+            }
+        }
+
+        ignored
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct IgnorePattern {
+    pub pattern: glob::Pattern,
+    pub negated: bool,
+}
+
+impl IgnorePattern {
+    pub fn from_line(line: &str) -> Result<Self, anyhow::Error> {
+        let negated = line.starts_with('!');
+        let pattern = glob::Pattern::new(if negated { &line[1..] } else { line })?;
+        Ok(Self { pattern, negated })
     }
 }
 
@@ -160,7 +229,8 @@ mod test {
             PathBuf::from_slash("/path/to/package.json"),
             StringReader::new(
                 r#"{
-                "main": "./main.js"
+                "main": "./main.js",
+                "exports": {}
             }"#,
             ),
         )
@@ -177,7 +247,8 @@ mod test {
             PathBuf::from_slash("/path/to/package.json"),
             StringReader::new(
                 r#"{
-                "module": "./esm/module.js"
+                "module": "./esm/module.js",
+                "exports": {}
             }"#,
             ),
         )
@@ -218,4 +289,5 @@ mod test {
 pub enum WalkedFile {
     SourceFile(WalkedSourceFile),
     PackageJson(WalkedPackage),
+    IgnoreFile(IgnoreFile),
 }

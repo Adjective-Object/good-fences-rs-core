@@ -23,6 +23,8 @@ mod graph;
 pub mod logger;
 mod parse;
 mod report;
+#[cfg(test)]
+mod test;
 mod unused_finder;
 mod walk;
 mod walked_file;
@@ -30,5 +32,5 @@ mod walked_file;
 pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
 pub use parse::data::ResolvedImportExportInfo;
 pub use report::UnusedFinderReport;
-pub use unused_finder::{UnusedFinder, UnusedItemsResult};
+pub use unused_finder::{UnusedFinder, UnusedFinderResult};
 pub use walked_file::{WalkedFile, WalkedPackage, WalkedSourceFile};
