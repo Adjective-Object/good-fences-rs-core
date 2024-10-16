@@ -82,6 +82,7 @@ macro_rules! aset(
 macro_rules! test_tmpdir(
     { $($key:expr => $value:expr),+ } => {
         {
+            use test_tmpdir::TmpDir;
             let mut m = ::std::collections::HashMap::new();
             $(
                 m.insert(String::from($key), $value);

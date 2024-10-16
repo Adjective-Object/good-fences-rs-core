@@ -1,34 +1,24 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::PathBuf;
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 
 use crate::{
-    parse::{ExportedSymbol, ImportedSymbol, ResolvedImportExportInfo},
+    logger::Logger,
+    parse::{ExportedSymbol, ResolvedImportExportInfo},
     walked_file::ResolvedSourceFile,
 };
-
-pub enum MarkItemResult {
-    MarkedAsUsed,
-    AlreadyMarked,
-    ResolveExportFrom(PathBuf),
-}
 
 // graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]
 pub struct GraphFile {
-    // If this file is used or not
-    pub is_used: bool,
+    pub is_file_used: bool,
     // The path of this file within the graph
     pub file_path: PathBuf,
     // The unused exports within this file
-    pub unused_exports: AHashSet<ExportedSymbol>,
-    // Map of re-exports from this file
-    pub export_from: AHashMap<ExportedSymbol, PathBuf>,
+    pub unused_named_exports: AHashSet<ExportedSymbol>,
+    // Map of re-exported items to the file that they came from
     // Resolved import/export information w
     pub import_export_info: ResolvedImportExportInfo,
 }
@@ -41,81 +31,67 @@ impl GraphFile {
             .keys()
             .cloned()
             .collect();
-        Self::new(
-            file.source_file_path.clone(),
-            all_exported_symbols,
-            file.import_export_info.clone(),
-            false,
-        )
-    }
-
-    pub fn new(
-        file_path: PathBuf,
-        unused_exports: AHashSet<ExportedSymbol>,
-        import_export_info: ResolvedImportExportInfo,
-        is_used: bool,
-    ) -> Self {
-        let mut export_from = AHashMap::default();
-        import_export_info
-            .export_from_ids
-            .iter()
-            .for_each(|(source_file, items)| {
-                for item in items {
-                    export_from.insert(item.into(), source_file.clone());
-                }
-            });
+        println!(
+            "new_from_source_file: {} {:?}",
+            file.source_file_path.display(),
+            all_exported_symbols
+        );
         Self {
-            is_used,
-            export_from,
-            file_path,
-            unused_exports,
-            import_export_info,
+            is_file_used: false,
+            file_path: file.source_file_path.clone(),
+            unused_named_exports: all_exported_symbols,
+            import_export_info: file.import_export_info.clone(),
         }
-    }
-
-    pub fn resolve_export_from_items(&mut self, files: &mut AHashMap<PathBuf, Arc<GraphFile>>) {
-        self.export_from.iter().for_each(|(item, path)| {
-            if let Some(origin) = files.get_mut(path) {
-                Arc::get_mut(origin).unwrap().mark_item_as_used(item);
-                // origin.mark_item_as_used(item);
-            }
-        });
     }
 
     /// Marks an item within this graph file as used
     ///
     /// If the item is a re-export of an item from another file, the origin file is returned
-    pub fn mark_item_as_used(&mut self, item: &ExportedSymbol) -> MarkItemResult {
-        self.is_used = true;
+    fn mark_symbol_used(&mut self, symbol: &ExportedSymbol) {
+        self.is_file_used = true;
+        println!(
+            "    mark symbol used: {}:{:?}",
+            self.file_path.display(),
+            symbol
+        );
+
         // let item = ExportKind::from(item);
-        if self.unused_exports.remove(item) {
-            return MarkItemResult::MarkedAsUsed;
+        match symbol {
+            ExportedSymbol::Default | ExportedSymbol::Named(_) => {
+                self.unused_named_exports.remove(symbol);
+            }
+            ExportedSymbol::Namespace => {
+                // namespace imports will use _all_ symbols from the imported file
+                self.unused_named_exports.clear();
+            }
+            ExportedSymbol::ExecutionOnly => {
+                // noop, don't mark any names as used
+            }
         }
-        if let Some(from) = self.export_from.get(item) {
-            return MarkItemResult::ResolveExportFrom(from.to_owned());
-        }
-        MarkItemResult::AlreadyMarked
     }
 }
 
 // A 1-way representation of an edge in the import graph
-#[derive(Eq, PartialEq, Hash, Debug, Clone)]
-struct Edge {
+#[derive(Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
+pub struct Edge {
     // The path of the file that is imported
-    to_file: PathBuf,
-    // The item that is imported
-    item: ImportedSymbol,
+    pub file_id: usize,
+    // The symbol that is imported
+    pub symbol: ExportedSymbol,
 }
 
 impl Edge {
-    pub fn new(to_file: PathBuf, item: ImportedSymbol) -> Self {
-        Self { to_file, item }
+    pub fn new(file_id: usize, symbol: ExportedSymbol) -> Self {
+        Self { file_id, symbol }
     }
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct Graph {
-    pub files: AHashMap<PathBuf, Arc<GraphFile>>,
+    pub path_to_id: AHashMap<PathBuf, usize>,
+    pub files: Vec<GraphFile>,
+    // Set of edges we have already traversed
+    pub visited: AHashSet<Edge>,
 }
 
 impl Graph {
@@ -123,128 +99,116 @@ impl Graph {
     pub fn from_source_files<'a>(
         source_files: impl Iterator<Item = &'a ResolvedSourceFile>,
     ) -> Self {
+        let mut path_to_id = AHashMap::default();
+        let files: Vec<GraphFile> = source_files
+            .map(|source_file| {
+                let id = path_to_id.len();
+                path_to_id.insert(source_file.source_file_path.clone(), id);
+                GraphFile::new_from_source_file(source_file)
+            })
+            .collect();
+
         Graph {
-            files: source_files
-                .map(|source_file| {
-                    (
-                        source_file.source_file_path.to_path_buf(),
-                        Arc::new(GraphFile::new_from_source_file(source_file)),
-                    )
-                })
-                .collect(),
+            path_to_id,
+            files,
+            visited: AHashSet::default(),
         }
     }
 
-    pub fn traverse_bfs(&mut self, initial_frontier: Vec<PathBuf>) -> Result<()> {
+    pub fn traverse_bfs(
+        &mut self,
+        logger: impl Logger,
+        initial_frontier: Vec<PathBuf>,
+    ) -> Result<()> {
+        let initial_file_ids = initial_frontier
+            .iter()
+            .filter_map(|path| match self.path_to_id.get(path) {
+                Some(file_id) => Some(*file_id),
+                None => {
+                    logger.log(format!(
+                        "Frontier file not found in graph: {}",
+                        path.to_string_lossy()
+                    ));
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // Create a set of edges to the initial frontier
+        let mut frontier = initial_file_ids
+            .into_iter()
+            .map(|file_id| Edge::new(file_id, ExportedSymbol::Namespace))
+            .collect::<Vec<_>>();
+
         // Traverse the graph until we exhaust the frontier
         const MAX_ITERATIONS: usize = 1_000_000;
-        let mut frontier = initial_frontier.clone();
         for _ in 0..MAX_ITERATIONS {
-            frontier = self.bfs_step(frontier);
+            let next_frontier: Vec<Edge> = self.bfs_step(&frontier);
+            println!("bfs_step: {:?} -> {:?}", frontier, next_frontier);
+            frontier = next_frontier;
             if frontier.is_empty() {
                 return Ok(());
             }
         }
 
         Err(anyhow::anyhow!(
-            "import graph traversal exceeded MAX_ITERATIONS {}",
+            "import graph traversal exceeded MAX_ITERATIONS ({})",
             MAX_ITERATIONS
         ))
     }
 
     /// Perform a single step of the BFS algorithm, returning the list of files that should be visited next
-    pub fn bfs_step(&mut self, entries: Vec<PathBuf>) -> Vec<PathBuf> {
-        let edges = self.get_edges(entries);
-        let new_entries = edges
+    pub fn bfs_step(&mut self, frontier: &[Edge]) -> Vec<Edge> {
+        // get list of unique files that are being visited in this pass
+        let mut from_files = frontier
             .iter()
-            .filter_map(|Edge { to_file, item }| {
-                if self.files.contains_key(to_file) {
-                    return self.mark_used(to_file, item);
-                }
-                None
-            })
-            .flatten()
-            .collect();
-        new_entries
-    }
+            .map(|Edge { file_id, .. }| *file_id)
+            .collect::<Vec<_>>();
+        from_files.sort();
+        from_files.dedup();
 
-    /// Mark a file (and an item in that file) as used, and return the list of files that
-    /// should be visited next
-    ///
-    /// This can happen when a file re-exports a symbol from another file
-    fn mark_used(&mut self, imported: &Path, item: &ImportedSymbol) -> Option<Vec<PathBuf>> {
-        let mut any_used = false;
-        let mut pending_paths: Vec<(PathBuf, &ImportedSymbol)> = Vec::new();
-        let mut resolved = vec![];
-        if let Some(imported_file_rc) = self.files.get_mut(imported) {
-            if let Some(imported_file) = Arc::get_mut(imported_file_rc) {
-                // If `file` was already marked as used
-                any_used = any_used || !imported_file.is_used;
-                // if `item` was already marked as used
-                match imported_file.mark_item_as_used(&item.into()) {
-                    MarkItemResult::MarkedAsUsed => any_used = true,
-                    MarkItemResult::AlreadyMarked => {}
-                    MarkItemResult::ResolveExportFrom(origin) => {
-                        pending_paths.push((origin, item));
-                    }
-                }
-            }
-        }
-        for (imported, item) in pending_paths {
-            if let Some(resolutions) = self.mark_used(&imported, item) {
-                any_used = true;
-                resolved.extend(resolutions);
-            }
-        }
-        if any_used {
-            resolved.push(imported.to_path_buf());
-            return Some(resolved);
-        }
-        None
-    }
-
-    fn get_edges(&self, entries: Vec<PathBuf>) -> AHashSet<Edge> {
-        let edges: AHashSet<Edge> = entries
+        // generate the next frontier in a parallel pass over the files
+        let mut next_frontier_symbols = from_files
             .par_iter()
-            .filter_map(|entry| {
-                if let Some(e) = self.files.get(entry) {
-                    let mut edges: AHashSet<Edge> =
-                        e.import_export_info
-                            .imported_paths
-                            .iter()
-                            .map(|imported| Edge::new(imported.clone(), ImportedSymbol::Namespace))
-                            .chain(e.import_export_info.executed_paths.iter().map(|imported| {
-                                Edge::new(imported.clone(), ImportedSymbol::ExecutionOnly)
-                            }))
-                            .chain(e.import_export_info.require_paths.iter().map(|imported| {
-                                Edge::new(imported.clone(), ImportedSymbol::Namespace)
-                            }))
-                            .collect();
-                    e.import_export_info
-                        .imported_path_ids
-                        .iter()
-                        .for_each(|(path, items)| {
-                            for item in items {
-                                edges.insert(Edge::new(path.clone(), item.clone()));
+            .map(|file_id| {
+                let file = &self.files[*file_id];
+                // if the file was not visited before, add all its imports
+                // to the frontier
+                //
+                // TODO: become more granular here for re-exported symbols
+                let outgoing_edges = file
+                    .import_export_info
+                    .iter_imported_symbols()
+                    .filter_map(|(path, symbol)| {
+                        let edge = match self.path_to_id.get(path) {
+                            Some(id) => Edge::new(*id, ExportedSymbol::from(symbol)),
+                            None => {
+                                return None;
                             }
-                        });
-                    e.import_export_info
-                        .export_from_ids
-                        .iter()
-                        .for_each(|(path, items)| {
-                            for item in items {
-                                edges.insert(Edge::new(path.clone(), item.clone()));
-                            }
-                        });
-                    return Some(edges);
-                }
-                None
+                        };
+
+                        // don't re-traverse edges we have already visited
+                        if self.visited.contains(&edge) {
+                            None
+                        } else {
+                            Some(edge)
+                        }
+                    })
+                    .par_bridge();
+
+                outgoing_edges
             })
             .flatten()
-            .collect();
-        edges
-    }
+            .collect::<Vec<_>>();
 
-    /// Generate a report from the parsed graph.
-    pub fn report() {}
+        // mark all symbols we visited in this pass as visited
+        for edge in frontier.iter() {
+            self.files[edge.file_id].mark_symbol_used(&edge.symbol);
+            self.visited.insert(edge.clone());
+        }
+
+        next_frontier_symbols.sort();
+        next_frontier_symbols.dedup();
+        next_frontier_symbols
+    }
 }

@@ -9,7 +9,7 @@ mod test {
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
 
-    use crate::parse::{ExportedSymbol, ImportedSymbol};
+    use crate::parse::{ReExportedSymbol, ExportedSymbol};
     use swc_utils::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
@@ -42,7 +42,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
         assert!(
             visitor.exported_ids.values().all(|exps| exps.allow_unused),
@@ -67,13 +67,14 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
 
         assert_eq!(visitor.exported_ids.len(), 1);
-        assert!(visitor.exported_ids.iter().all(
-            |(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Named("bar".to_string())
-        ));
+        assert!(visitor
+            .exported_ids
+            .iter()
+            .all(|(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Named("bar".to_string())));
     }
     #[test]
     fn test_allowed_unused_export_default() {
@@ -92,7 +93,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
         let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
@@ -124,7 +125,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
         assert!(visitor
             .exported_ids
@@ -149,7 +150,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
         let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
@@ -178,7 +179,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
         let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
@@ -207,7 +208,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
 
         assert!(visitor.exported_ids.iter().all(|(_, e)| e.allow_unused));
@@ -229,9 +230,9 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = AHashMap::default();
+        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = AHashMap::default();
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -251,7 +252,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
         assert!(visitor.export_from_ids.is_empty());
     }
@@ -272,7 +273,7 @@ mod test {
         let mut parser = create_test_parser(&fm, Some(&comments));
 
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
         module.visit_with(&mut visitor);
 
         assert!(visitor.export_from_ids.is_empty());
@@ -291,7 +292,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -328,20 +329,22 @@ mod test {
 
         let mut parser = create_test_parser(&fm, Some(&comments));
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
 
         module.visit_with(&mut visitor);
         assert_eq!(visitor.exported_ids.len(), 2);
         assert!(
-            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
-                == ExportedSymbol::Named("bar".to_owned())
-                || !e.allow_unused),
+            visitor
+                .exported_ids
+                .iter()
+                .any(|(symbol, e)| *symbol == ExportedSymbol::Named("bar".to_owned()) || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
-            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
-                == ExportedSymbol::Named("zoo".to_owned())
-                || e.allow_unused),
+            visitor
+                .exported_ids
+                .iter()
+                .any(|(symbol, e)| *symbol == ExportedSymbol::Named("zoo".to_owned()) || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -367,14 +370,15 @@ mod test {
 
         let mut parser = create_test_parser(&fm, Some(&comments));
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
 
         module.visit_with(&mut visitor);
         assert_eq!(visitor.exported_ids.len(), 2);
         assert!(
-            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
-                == ExportedSymbol::Named("foo".to_owned())
-                || !e.allow_unused),
+            visitor
+                .exported_ids
+                .iter()
+                .any(|(symbol, e)| *symbol == ExportedSymbol::Named("foo".to_owned()) || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
@@ -407,11 +411,10 @@ mod test {
 
         let mut parser = create_test_parser(&fm, Some(&comments));
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), comments);
+        let mut visitor = ExportsVisitor::new(comments);
 
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> =
-            aset!(ExportedSymbol::Named("zoo".to_string()));
+        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("zoo".to_string()));
 
         assert_eq!(
             expected_map,
@@ -436,7 +439,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -465,7 +468,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -496,7 +499,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -525,7 +528,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -553,7 +556,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -581,7 +584,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -609,12 +612,17 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!( "./foo" =>
-            aset!(ImportedSymbol::Named("foo".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = amap!( "./foo" =>
+            aset!(
+                ReExportedSymbol{
+                    imported: ExportedSymbol::Named("foo".to_owned()),
+                    renamed_to: None,
+                }
+            )
         );
         assert_eq!(expected_map, visitor.export_from_ids);
     }
@@ -631,12 +639,15 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!(
-                "./foo" => aset!(ImportedSymbol::Default));
+        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = amap!(
+        "./foo" => aset!(ReExportedSymbol{
+            imported: ExportedSymbol::Default,
+            renamed_to: Some(ExportedSymbol::Named("foo".to_owned())),
+        }));
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -652,12 +663,14 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
-            amap!("./foo" => aset!(ImportedSymbol::Namespace));
+        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = amap!("./foo" => aset!(ReExportedSymbol{
+            imported: ExportedSymbol::Namespace,
+            renamed_to: None,
+        }));
         assert_eq!(expected_map, visitor.export_from_ids);
     }
 
@@ -673,12 +686,12 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
-            amap!("./foo" => aset!(ImportedSymbol::Default));
+        let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
+            amap!("./foo" => aset!(ExportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -694,12 +707,12 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!( "./foo" =>
-            aset!(ImportedSymbol::Named("foo".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!( "./foo" =>
+            aset!(ExportedSymbol::Named("foo".to_owned()))
         );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
@@ -716,12 +729,12 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!( "./foo" =>
-            aset!(ImportedSymbol::Named("foo".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!( "./foo" =>
+            aset!(ExportedSymbol::Named("foo".to_owned()))
         );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
@@ -738,12 +751,12 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
-            amap!("./foo" => aset!(ImportedSymbol::Default));
+        let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
+            amap!("./foo" => aset!(ExportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -762,7 +775,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -785,12 +798,12 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> = amap!(
-            "./foo" => aset!(ImportedSymbol::Default, ImportedSymbol::Named("bar".to_owned()))
+        let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!(
+            "./foo" => aset!(ExportedSymbol::Default, ExportedSymbol::Named("bar".to_owned()))
         );
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
@@ -807,12 +820,12 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
-            amap!("./foo" => aset!(ImportedSymbol::Namespace));
+        let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
+            amap!("./foo" => aset!(ExportedSymbol::Namespace));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 
@@ -828,7 +841,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -848,7 +861,7 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
@@ -868,35 +881,11 @@ mod test {
         );
 
         let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(std::sync::Arc::new(vec![]), Default::default());
+        let mut visitor = ExportsVisitor::new(Default::default());
 
         let module = parser.parse_typescript_module().unwrap();
         module.visit_with(&mut visitor);
 
         assert_eq!(aset!("./foo".to_owned()), visitor.executed_paths);
-    }
-
-    #[test]
-    fn test_ignored_regex_pattern() {
-        let cm = Arc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Arc::new(FileName::Custom("test.ts".into())),
-            r#"
-            import foo, {Bar} from './foo';
-            "#
-            .to_string(),
-        );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(
-            std::sync::Arc::new(vec![regex::Regex::new("[A-Z].*").unwrap()]),
-            Default::default(),
-        );
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ImportedSymbol>> =
-            amap!("./foo" => aset!(ImportedSymbol::Default));
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
     }
 }

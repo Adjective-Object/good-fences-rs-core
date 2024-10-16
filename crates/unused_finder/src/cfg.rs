@@ -1,8 +1,8 @@
 use ahashmap::AHashSet;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use js_err::JsErr;
 use serde::Deserialize;
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
 ///
@@ -22,10 +22,6 @@ pub struct UnusedFinderJSONConfig {
     pub repo_root: String,
     // Files under matching dirs won't be scanned.
     pub skipped_dirs: Vec<String>,
-    // List of regex. Named symbols in the form of `export { foo }` and similar (excluding `default`) matching a regex in this list will not be recorded as imported/exported symbols.
-    // e.g. skipped_symbols = [".*Props$"] and a file contains a `export type FooProps = ...` statement, FooProps will not be recorded as an exported item.
-    // e.g. skipped_symbols = [".*Props$"] and a file contains a `import { BarProps } from 'bar';` statement, BarProps will not be recorded as an imported item.
-    pub skipped_symbols: Vec<String>,
     pub entry_packages: Vec<String>,
 }
 
@@ -43,20 +39,12 @@ pub struct UnusedFinderConfig {
 
     // Path to the root directory of the repository.
     pub entry_packages: AHashSet<String>,
-    pub skipped_symbols: Arc<Vec<regex::Regex>>,
     pub skipped_dirs: Arc<Vec<glob::Pattern>>,
 }
 
 impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
     type Error = JsErr;
     fn try_from(value: UnusedFinderJSONConfig) -> std::result::Result<Self, Self::Error> {
-        let skipped_symbols = value
-            .skipped_symbols
-            .iter()
-            .map(|s| regex::Regex::from_str(s.as_str()))
-            .collect::<Result<Vec<regex::Regex>, _>>()
-            .map_err(JsErr::invalid_arg)?;
-
         let skipped_dirs = value
             .skipped_dirs
             .iter()
@@ -71,28 +59,9 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             repo_root: value.repo_root,
             // other fields that are processed before use
             entry_packages: value.entry_packages.iter().cloned().collect(),
-            skipped_symbols: Arc::new(skipped_symbols),
             skipped_dirs: Arc::new(skipped_dirs),
         })
     }
-}
-
-// Looks in cwd for a file called `.unusedignore`
-// allowed symbols can be:
-// - specific file paths like `shared/internal/owa-react-hooks/src/useWhyDidYouUpdate.ts`
-// - glob patterns (similar to a `.gitignore` file) `shared/internal/owa-datetime-formatters/**`
-pub fn read_allow_list() -> Result<Vec<glob::Pattern>> {
-    return match std::fs::read_to_string(".unusedignore") {
-        Ok(list) => list
-            .split("\n")
-            .enumerate()
-            .map(|(idx, line)| {
-                glob::Pattern::new(line)
-                    .map_err(|e| anyhow!("line {}: failed to parse pattern: {}", idx, e))
-            })
-            .collect::<Result<Vec<glob::Pattern>, anyhow::Error>>(),
-        Err(e) => Err(anyhow!("failed to read .unusedignore file: {}", e)),
-    };
 }
 
 #[cfg(test)]
@@ -107,7 +76,6 @@ mod test {
             root_paths: vec!["tests/unused_finder".to_string()],
             repo_root: "tests/unused_finder".to_string(),
             skipped_dirs: vec![".....///invalidpath****".to_string()],
-            skipped_symbols: vec!["[A-Z].*".to_string(), "something".to_string()],
             ..Default::default()
         })
         .try_into();
@@ -115,22 +83,6 @@ mod test {
         assert_eq!(
             result.unwrap_err().message(),
             "Pattern syntax error near position 21: wildcards are either regular `*` or recursive `**`"
-        )
-    }
-
-    #[test]
-    fn test_error_in_regex() {
-        let result: Result<UnusedFinderConfig, JsErr> = (UnusedFinderJSONConfig {
-            root_paths: vec!["tests/unused_finder".to_string()],
-            repo_root: "tests/unused_finder".to_string(),
-            skipped_symbols: vec!["[A-Z.*".to_string(), "something".to_string()],
-            ..Default::default()
-        })
-        .try_into();
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().message(),
-            "regex parse error:\n    [A-Z.*\n    ^\nerror: unclosed character class"
         )
     }
 }

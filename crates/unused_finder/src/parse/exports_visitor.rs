@@ -1,6 +1,6 @@
-use super::{ExportedSymbol, ExportedSymbolMetadata, ImportedSymbol, RawImportExportInfo};
+use super::{ExportedSymbol, ExportedSymbolMetadata, RawImportExportInfo, ReExportedSymbol};
 use ahashmap::{AHashMap, AHashSet};
-use std::{collections::HashSet, iter::FromIterator, sync::Arc};
+use std::{collections::HashSet, iter::FromIterator};
 use swc_core::{
     common::{
         comments::{CommentKind, Comments, SingleThreadedComments},
@@ -20,13 +20,13 @@ use swc_core::{
 #[derive(Debug)]
 pub struct ExportsVisitor {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    pub imported_ids_path_name: AHashMap<String, AHashSet<ImportedSymbol>>,
+    pub imported_ids_path_name: AHashMap<String, AHashSet<ExportedSymbol>>,
     // require('foo') generates ['foo']
     pub require_paths: AHashSet<String>,
     // import('./foo') and import './foo' generates ["./foo"]
     pub imported_paths: AHashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: AHashMap<String, AHashSet<ImportedSymbol>>,
+    pub export_from_ids: AHashMap<String, AHashSet<ReExportedSymbol>>,
     // IDs exported from this file, that were locally declared
     pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // Side-effect-only imports.
@@ -35,12 +35,11 @@ pub struct ExportsVisitor {
     // exported from this file
     // const foo = require('foo') generates ["foo"]
     require_identifiers: AHashSet<Id>,
-    skipped_items: Arc<Vec<regex::Regex>>,
     pub comments: SingleThreadedComments,
 }
 
 impl ExportsVisitor {
-    pub fn new(skipped_items: Arc<Vec<regex::Regex>>, comments: SingleThreadedComments) -> Self {
+    pub fn new(comments: SingleThreadedComments) -> Self {
         Self {
             imported_ids_path_name: AHashMap::default(),
             require_paths: AHashSet::default(),
@@ -49,7 +48,6 @@ impl ExportsVisitor {
             executed_paths: AHashSet::default(),
             require_identifiers: AHashSet::default(),
             exported_ids: AHashMap::default(),
-            skipped_items,
             comments,
         }
     }
@@ -62,32 +60,32 @@ impl ExportsVisitor {
      * - `export { foo } from 'foo'`
      */
     fn handle_export_from_specifiers(&mut self, export: &NamedExport, source: &Str) {
-        let mut specifiers: Vec<ImportedSymbol> = export
+        let mut specifiers: Vec<ReExportedSymbol> = export
             .specifiers
             .iter()
-            .filter_map(|spec| -> Option<ImportedSymbol> {
-                if spec.is_namespace() {
-                    // export * as foo from 'foo;
-                    return Some(ImportedSymbol::Namespace);
-                }
-                if let Some(named) = spec.as_named() {
-                    // export { foo } from 'foo'
-                    if let ModuleExportName::Ident(ident) = &named.orig {
-                        // export { default as foo } from 'foo'
-                        if ident.sym == "default" {
-                            return Some(ImportedSymbol::Default);
-                        }
-                        // export { foo } from 'foo'
-                        if !self
-                            .skipped_items
-                            .iter()
-                            .any(|skipped| skipped.is_match(ident.sym.as_ref()))
-                        {
-                            return Some(ImportedSymbol::Named(ident.sym.to_string()));
+            .map(|spec| -> ReExportedSymbol {
+                match spec {
+                    ExportSpecifier::Namespace(spec) => ReExportedSymbol {
+                        imported: ExportedSymbol::Namespace,
+                        renamed_to: Some(ExportedSymbol::from(&spec.name)),
+                    },
+                    ExportSpecifier::Default(spec) => ReExportedSymbol {
+                        imported: ExportedSymbol::Default,
+                        renamed_to: Some(ExportedSymbol::Named(spec.exported.to_string())),
+                    },
+                    ExportSpecifier::Named(spec) => {
+                        let imported_name = spec.orig.atom().to_string();
+                        let imported = if imported_name == "default" {
+                            ExportedSymbol::Default
+                        } else {
+                            ExportedSymbol::Named(imported_name)
+                        };
+                        ReExportedSymbol {
+                            imported,
+                            renamed_to: spec.exported.as_ref().map(ExportedSymbol::from),
                         }
                     }
                 }
-                None
             })
             .collect();
         if let Some(entry) = self.export_from_ids.get_mut(&source.value.to_string()) {
@@ -122,11 +120,7 @@ impl ExportsVisitor {
                                 ExportedSymbol::Default,
                                 ExportedSymbolMetadata { span, allow_unused },
                             );
-                        } else if !self
-                            .skipped_items
-                            .iter()
-                            .any(|skipped| skipped.is_match(&sym))
-                        {
+                        } else {
                             self.exported_ids.insert(
                                 ExportedSymbol::Named(id.sym.to_string()),
                                 ExportedSymbolMetadata { span, allow_unused },
@@ -135,16 +129,10 @@ impl ExportsVisitor {
                     }
                 } else if let ModuleExportName::Ident(id) = &named.orig {
                     // handles `export { foo }`
-                    if !self
-                        .skipped_items
-                        .iter()
-                        .any(|skipped| skipped.is_match(id.sym.as_ref()))
-                    {
-                        self.exported_ids.insert(
-                            ExportedSymbol::Named(id.sym.to_string()),
-                            ExportedSymbolMetadata { span, allow_unused },
-                        );
-                    }
+                    self.exported_ids.insert(
+                        ExportedSymbol::Named(id.sym.to_string()),
+                        ExportedSymbolMetadata { span, allow_unused },
+                    );
                 }
             }
         });
@@ -160,15 +148,15 @@ impl ExportsVisitor {
     }
 }
 
-impl Into<RawImportExportInfo> for ExportsVisitor {
-    fn into(self) -> RawImportExportInfo {
-        RawImportExportInfo {
-            imported_path_ids: self.imported_ids_path_name,
-            require_paths: self.require_paths,
-            imported_paths: self.imported_paths,
-            export_from_ids: self.export_from_ids, // TODO replace with Exportself maps
-            exported_ids: self.exported_ids,
-            executed_paths: self.executed_paths,
+impl From<ExportsVisitor> for RawImportExportInfo {
+    fn from(x: ExportsVisitor) -> Self {
+        Self {
+            imported_path_ids: x.imported_ids_path_name,
+            require_paths: x.require_paths,
+            imported_paths: x.imported_paths,
+            export_from_ids: x.export_from_ids, // TODO replace with Exportx maps
+            exported_ids: x.exported_ids,
+            executed_paths: x.executed_paths,
         }
     }
 }
@@ -211,103 +199,67 @@ impl Visit for ExportsVisitor {
         match &export.decl {
             Decl::Class(decl) => {
                 // export class Foo {}
-                if !self
-                    .skipped_items
-                    .iter()
-                    .any(|skipped| skipped.is_match(decl.ident.sym.as_ref()))
-                {
-                    self.exported_ids.insert(
-                        ExportedSymbol::Named(decl.ident.sym.to_string()),
-                        ExportedSymbolMetadata {
-                            span: export.span(),
-                            allow_unused,
-                        },
-                    );
-                }
+                self.exported_ids.insert(
+                    ExportedSymbol::Named(decl.ident.sym.to_string()),
+                    ExportedSymbolMetadata {
+                        span: export.span(),
+                        allow_unused,
+                    },
+                );
             }
             Decl::Fn(decl) => {
                 // export function foo() {}
-                if !self
-                    .skipped_items
-                    .iter()
-                    .any(|skipped| skipped.is_match(decl.ident.sym.as_ref()))
-                {
-                    self.exported_ids.insert(
-                        ExportedSymbol::Named(decl.ident.sym.to_string()),
-                        ExportedSymbolMetadata {
-                            span: export.span(),
-                            allow_unused,
-                        },
-                    );
-                }
+                self.exported_ids.insert(
+                    ExportedSymbol::Named(decl.ident.sym.to_string()),
+                    ExportedSymbolMetadata {
+                        span: export.span(),
+                        allow_unused,
+                    },
+                );
             }
             Decl::Var(decl) => {
                 // export const foo = 1;
                 if let Some(d) = decl.decls.first() {
                     if let Pat::Ident(ident) = &d.name {
-                        if !self
-                            .skipped_items
-                            .iter()
-                            .any(|skipped| skipped.is_match(ident.sym.as_ref()))
-                        {
-                            self.exported_ids.insert(
-                                ExportedSymbol::Named(ident.sym.to_string()),
-                                ExportedSymbolMetadata {
-                                    span: export.span(),
-                                    allow_unused,
-                                },
-                            );
-                        }
+                        self.exported_ids.insert(
+                            ExportedSymbol::Named(ident.sym.to_string()),
+                            ExportedSymbolMetadata {
+                                span: export.span(),
+                                allow_unused,
+                            },
+                        );
                     }
                 }
             }
             Decl::TsInterface(decl) => {
                 // export interface Foo {}
-                if !self
-                    .skipped_items
-                    .iter()
-                    .any(|skipped| skipped.is_match(decl.id.sym.as_ref()))
-                {
-                    self.exported_ids.insert(
-                        ExportedSymbol::Named(decl.id.sym.to_string()),
-                        ExportedSymbolMetadata {
-                            span: export.span(),
-                            allow_unused,
-                        },
-                    );
-                }
+                self.exported_ids.insert(
+                    ExportedSymbol::Named(decl.id.sym.to_string()),
+                    ExportedSymbolMetadata {
+                        span: export.span(),
+                        allow_unused,
+                    },
+                );
             }
             Decl::TsTypeAlias(decl) => {
                 // export type foo = string
-                if !self
-                    .skipped_items
-                    .iter()
-                    .any(|skipped| skipped.is_match(decl.id.sym.as_ref()))
-                {
-                    self.exported_ids.insert(
-                        ExportedSymbol::Named(decl.id.sym.to_string()),
-                        ExportedSymbolMetadata {
-                            span: export.span(),
-                            allow_unused,
-                        },
-                    );
-                }
+                self.exported_ids.insert(
+                    ExportedSymbol::Named(decl.id.sym.to_string()),
+                    ExportedSymbolMetadata {
+                        span: export.span(),
+                        allow_unused,
+                    },
+                );
             }
             Decl::TsEnum(decl) => {
                 // export enum Foo { foo, bar }
-                if !self
-                    .skipped_items
-                    .iter()
-                    .any(|skipped| skipped.is_match(decl.id.sym.as_ref()))
-                {
-                    self.exported_ids.insert(
-                        ExportedSymbol::Named(decl.id.sym.to_string()),
-                        ExportedSymbolMetadata {
-                            span: export.span(),
-                            allow_unused,
-                        },
-                    );
-                }
+                self.exported_ids.insert(
+                    ExportedSymbol::Named(decl.id.sym.to_string()),
+                    ExportedSymbolMetadata {
+                        span: export.span(),
+                        allow_unused,
+                    },
+                );
             }
             Decl::TsModule(_decl) => {
                 // if let Some(module_name) = decl.id.as_str() {
@@ -325,8 +277,13 @@ impl Visit for ExportsVisitor {
         if self.has_disable_export_comment(export.span_lo()) {
             return;
         }
-        self.export_from_ids
-            .insert(source, HashSet::from_iter(vec![ImportedSymbol::Namespace]));
+        self.export_from_ids.insert(
+            source,
+            HashSet::from_iter([ReExportedSymbol {
+                imported: ExportedSymbol::Namespace,
+                renamed_to: None,
+            }]),
+        );
     }
 
     // export {foo} from './foo';
@@ -403,7 +360,7 @@ impl Visit for ExportsVisitor {
         let mut specifiers: Vec<ExportedSymbol> = import
             .specifiers
             .iter()
-            .filter_map(|spec| -> Option<ExportedSymbol> {
+            .map(|spec| -> ExportedSymbol {
                 match spec {
                     ImportSpecifier::Named(named) => {
                         match &named.imported {
@@ -415,59 +372,28 @@ impl Visit for ExportsVisitor {
                                         let sym_str = ident.sym.to_string();
                                         if sym_str == "default" {
                                             // import { default as foo } from 'foo'
-                                            if !self
-                                                .skipped_items
-                                                .iter()
-                                                .any(|s| s.is_match(named.local.sym.as_ref()))
-                                            {
-                                                return Some(ExportedSymbol::Default);
-                                            }
+                                            return ExportedSymbol::Default;
                                         }
-                                        if !self
-                                            .skipped_items
-                                            .iter()
-                                            .any(|skipped| skipped.is_match(&sym_str))
-                                        {
-                                            return Some(ExportedSymbol::Named(sym_str));
-                                        }
-                                        None
+                                        ExportedSymbol::Named(sym_str)
                                     }
                                     ModuleExportName::Str(s) => {
-                                        if !self
-                                            .skipped_items
-                                            .iter()
-                                            .any(|skipped| skipped.is_match(s.value.as_ref()))
-                                        {
-                                            return Some(ExportedSymbol::Named(
-                                                s.value.to_string(),
-                                            ));
-                                        }
-                                        None
+                                        ExportedSymbol::Named(s.value.to_string())
                                     }
                                 }
                             }
                             None => {
                                 // import { foo } from './foo'
-                                if !self
-                                    .skipped_items
-                                    .iter()
-                                    .any(|skipped| skipped.is_match(named.local.sym.as_ref()))
-                                {
-                                    return Some(ExportedSymbol::Named(
-                                        named.local.sym.to_string(),
-                                    ));
-                                }
-                                None
+                                ExportedSymbol::Named(named.local.sym.to_string())
                             }
                         }
                     }
                     ImportSpecifier::Default(_) => {
                         // import foo from 'foo'
-                        Some(ExportedSymbol::Default)
+                        ExportedSymbol::Default
                     }
                     ImportSpecifier::Namespace(_) => {
                         // import * as foo from 'foo'
-                        Some(ExportedSymbol::Namespace)
+                        ExportedSymbol::Namespace
                     }
                 }
             })
@@ -475,13 +401,11 @@ impl Visit for ExportsVisitor {
 
         if let Some(entry) = self.imported_ids_path_name.get_mut(&src) {
             specifiers.drain(0..).for_each(|s| {
-                entry.insert(ImportedSymbol::from(&s));
+                entry.insert(s);
             });
         } else {
-            self.imported_ids_path_name.insert(
-                src,
-                HashSet::from_iter(specifiers.iter().map(ImportedSymbol::from)),
-            );
+            self.imported_ids_path_name
+                .insert(src, HashSet::from_iter(specifiers));
         }
     }
 }

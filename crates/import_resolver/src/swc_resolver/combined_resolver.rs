@@ -136,7 +136,6 @@ impl<'a> Resolve for CombinedResolver<'a> {
 mod test {
     use super::*;
     use pretty_assertions::assert_eq;
-    use test_tmpdir::TmpDir;
 
     fn check_deadlocks() {
         std::thread::spawn(move || loop {
