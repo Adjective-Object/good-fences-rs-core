@@ -3,15 +3,41 @@ use std::{collections::HashMap, fmt::Display};
 use rayon::prelude::*;
 use swc_core::common::source_map::SmallPos;
 
-use crate::UnusedFinderResult;
+use crate::{graph::UsedTag, parse::ExportedSymbol, UnusedFinderResult};
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 
 // Report of a single exported item in a file
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "napi", napi(object))]
-pub struct UnusedSymbolReport {
+pub struct SymbolReport {
     pub id: String,
     pub start: u32,
     pub end: u32,
+    pub tags: Vec<UsedTagEnum>,
+}
+
+/// Napi-compatible representation of a tag as an enum
+#[derive(Debug, PartialEq)]
+// string_enum implies derive(Clone, Copy), so we have to avoid the duplicate
+// derivation here, as it will lead to conflicting implementations
+#[cfg_attr(not(feature = "napi"), derive(Clone, Copy))]
+#[cfg_attr(feature = "napi", napi(string_enum))]
+pub enum UsedTagEnum {
+    Entry,
+    Ignored,
+}
+impl From<UsedTag> for Vec<UsedTagEnum> {
+    fn from(flags: UsedTag) -> Self {
+        let mut result = Vec::new();
+        if flags.contains(UsedTag::FROM_ENTRY) {
+            result.push(UsedTagEnum::Entry);
+        }
+        if flags.contains(UsedTag::FROM_IGNORED) {
+            result.push(UsedTagEnum::Ignored);
+        }
+        result
+    }
 }
 
 // Report of unused symbols within a project
@@ -23,7 +49,7 @@ pub struct UnusedFinderReport {
     // items that are unused within files
     // note that this intentionally uses the std HashMap type to guarantee napi
     // compatibility
-    pub unused_symbols: HashMap<String, Vec<UnusedSymbolReport>>,
+    pub unused_symbols: HashMap<String, Vec<SymbolReport>>,
 }
 
 impl Display for UnusedFinderReport {
@@ -80,7 +106,10 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
             .files
             .par_iter()
             .filter_map(|file| {
-                if file.is_file_used {
+                if file.file_tags.contains(UsedTag::FROM_ENTRY)
+                    || file.file_tags.contains(UsedTag::FROM_TEST)
+                    || file.file_tags.contains(UsedTag::FROM_IGNORED)
+                {
                     None
                 } else {
                     Some(file.file_path.to_string_lossy().to_string())
@@ -89,34 +118,58 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
             .collect();
         unused_files.sort();
 
-        let unused_symbols: HashMap<String, Vec<UnusedSymbolReport>> = value.graph
-        .files
-        .par_iter()
-        .filter_map(|graph_file| -> Option<(String, Vec<UnusedSymbolReport>)> {
-            if graph_file.unused_named_exports.is_empty() {
-                return None;
-            }
+        let unused_symbols: HashMap<String, Vec<SymbolReport>> = value
+            .graph
+            .files
+            .par_iter()
+            .filter_map(|graph_file| -> Option<(String, Vec<SymbolReport>)> {
+                // Find all used symbols in the file
+                let unused_symbols = graph_file
+                    .import_export_info
+                    .iter_exported_symbols()
+                    .filter_map(
+                        |(_, symbol): (_, &ExportedSymbol)| -> Option<SymbolReport> {
+                            let symbol_bitflags: UsedTag = graph_file
+                                .symbol_tags
+                                .get(symbol)
+                                .copied()
+                                .unwrap_or_default();
+                            let ast_symbol =
+                                match graph_file.import_export_info.exported_ids.get(symbol) {
+                                    Some(ast_symbol) => ast_symbol,
+                                    None => {
+                                        //TODO: remove
+                                        println!("symbol not found in export map: {:?}", symbol);
+                                        return None;
+                                    }
+                                };
 
-            let file_unused_symbols = graph_file.unused_named_exports.iter().filter_map(
-                |symbol| -> Option<UnusedSymbolReport> {
-                    let import_export_info = graph_file
-                        .import_export_info.exported_ids
-                        .get(symbol)
-                        .expect("IDs from a graph file must also be contained in the graphfile's ImportExportInfo");
-                    if import_export_info.allow_unused {
-                        return None
-                    }
-                    Some(UnusedSymbolReport{
-                        id: symbol.to_string(),
-                        start: import_export_info.span.lo().to_u32(),
-                        end: import_export_info.span.hi().to_u32(),
-                    })
+                            if symbol_bitflags.contains(UsedTag::FROM_ENTRY) {
+                                // don't return used symbols
+                                return None;
+                            }
+
+                            Some(SymbolReport {
+                                id: symbol.to_string(),
+                                start: ast_symbol.span.lo().to_u32(),
+                                end: ast_symbol.span.hi().to_u32(),
+                                // for symbols that are not used by entrypoints, return the bitflags where they _are_ used
+                                tags: symbol_bitflags.into(),
+                            })
+                        },
+                    )
+                    .collect::<Vec<_>>();
+
+                if unused_symbols.is_empty() {
+                    return None;
                 }
-            ).collect::<Vec<_>>();
 
-            Some((graph_file.file_path.to_string_lossy().to_string(), file_unused_symbols))
-        })
-        .collect::<HashMap<String, Vec<UnusedSymbolReport>>>();
+                Some((
+                    graph_file.file_path.to_string_lossy().to_string(),
+                    unused_symbols,
+                ))
+            })
+            .collect::<HashMap<String, Vec<SymbolReport>>>();
 
         UnusedFinderReport {
             unused_files,

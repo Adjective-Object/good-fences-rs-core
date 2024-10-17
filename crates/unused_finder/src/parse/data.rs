@@ -96,6 +96,29 @@ pub struct ResolvedImportExportInfo {
 }
 
 impl ResolvedImportExportInfo {
+    pub fn num_exported_symbols(&self) -> usize {
+        self.exported_ids.len() + self.export_from_symbols.len()
+    }
+
+    /// Returns an iterator over all the imports originating from this file.
+    pub fn iter_exported_symbols(&self) -> impl Iterator<Item = (Option<&Path>, &ExportedSymbol)> {
+        let export_from_symbols = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
+            symbols.iter().map(|symbol| {
+                (
+                    Some(path.as_path()),
+                    symbol
+                        .renamed_to
+                        .as_ref()
+                        .unwrap_or_else(|| &symbol.imported),
+                )
+            })
+        });
+
+        let exported_ids = self.exported_ids.iter().map(|(symbol, _)| (None, symbol));
+
+        exported_ids.chain(export_from_symbols)
+    }
+
     /// Returns an iterator over all the imports originating from this file.
     pub fn iter_imported_symbols(&self) -> impl Iterator<Item = (&PathBuf, ExportedSymbol)> {
         let imported_symbols = self

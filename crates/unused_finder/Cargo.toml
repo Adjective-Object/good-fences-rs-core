@@ -34,6 +34,7 @@ path-clean.workspace = true
 pathdiff = "0.2.1"
 const_format = "0.2.33"
 ahashmap = { path = "../ahashmap" }
+bitflags = "2.6.0"
 
 [features]
 default = []

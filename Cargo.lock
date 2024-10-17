@@ -3592,6 +3592,7 @@ version = "0.2.0"
 dependencies = [
  "ahashmap",
  "anyhow",
+ "bitflags",
  "const_format",
  "glob",
  "import_resolver",

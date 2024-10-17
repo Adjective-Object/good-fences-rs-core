@@ -5,18 +5,20 @@ use path_slash::PathBufExt;
 use test_tmpdir::{map, test_tmpdir};
 
 use crate::{
-    logger, report::UnusedSymbolReport, UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
+    graph::UsedTag, logger, report::SymbolReport, UnusedFinder, UnusedFinderConfig,
+    UnusedFinderReport,
 };
 
 fn set(paths: &[&str]) -> AHashSet<String> {
     paths.iter().map(|x| x.to_string()).collect()
 }
 
-fn unused_symbol(id: &str) -> UnusedSymbolReport {
-    UnusedSymbolReport {
+fn symbol(id: &str, tags: UsedTag) -> SymbolReport {
+    SymbolReport {
         id: id.to_string(),
         start: 0,
         end: 0,
+        tags: tags.into(),
     }
 }
 
@@ -58,6 +60,7 @@ fn run_unused_test(
     let logger = logger::StdioLogger::new();
     let mut finder = UnusedFinder::new_from_cfg(&logger, config).unwrap();
     let result = finder.find_unused(&logger).unwrap();
+
     let report = result.get_report();
 
     // build map of actual symbol locations
@@ -240,7 +243,58 @@ fn test_partially_unused_file() {
             unused_files: vec![],
             unused_symbols: map!(
                 "<root>/packages/root/imported-1.js" => vec![
-                    unused_symbol("b"),
+                    symbol("b", UsedTag::default()),
+                ]
+            ),
+        },
+    );
+}
+
+#[test]
+fn test_unusedignore_file() {
+    let tmpdir = test_tmpdir!(
+        "packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "packages/root/main.js" => r#""#,
+        "packages/root/ignored-unused.js" => r#"
+            export const a = 1;
+            export const b = 2;
+        "#,
+        "packages/root/ignored-exception.js" => r#"
+            export const exception = 1;
+        "#,
+        "packages/root/unused.js" => r#"
+            export const a = 1;
+            export const b = 2;
+        "#,
+        "packages/root/.unusedignore" => r#"
+ignored-*.js
+!ignored-exception.js
+        "#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
+            entry_packages: set(&["entrypoint"]),
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            unused_files: ["<root>/packages/root/unused.js"]
+                .iter()
+                .map(|x| x.to_string())
+                .collect(),
+            unused_symbols: map!(
+                "<root>/packages/root/unused.js" => vec![
+                    symbol("a", UsedTag::default()),
+                    symbol("b", UsedTag::default()),
+                ],
+                "<root>/packages/root/ignored-exception.js" => vec![
+                    symbol("exception", UsedTag::default()),
                 ]
             ),
         },
