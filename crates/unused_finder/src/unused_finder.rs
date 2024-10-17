@@ -2,12 +2,13 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
-    graph::Graph,
+    graph::{Graph, UsedTag},
+    ignore_file::IgnoreFile,
     logger::Logger,
-    parse::get_file_import_export_info,
+    parse::{get_file_import_export_info, ExportedSymbol},
     report::UnusedFinderReport,
     walk::{walk_src_files, WalkFileResult},
-    walked_file::{IgnoreFile, ResolvedSourceFile, WalkedPackage},
+    walked_file::{ResolvedSourceFile, WalkedPackage},
 };
 use ahashmap::AHashMap;
 use anyhow::Result;
@@ -277,21 +278,30 @@ impl UnusedFinder {
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
         // Get the walk roots and perform the graph traversal
-        let walk_roots = self.get_walk_roots(logger);
-        logger.log(format!(
-            "walk_roots: {:?}",
-            walk_roots.iter().map(|x| x.display()).collect::<Vec<_>>()
-        ));
         graph
-            .traverse_bfs(logger, walk_roots.clone())
+            .traverse_bfs(
+                logger,
+                self.get_entrypoints(logger),
+                vec![],
+                UsedTag::FROM_ENTRY,
+            )
+            .map_err(JsErr::generic_failure)?;
+
+        graph
+            .traverse_bfs(
+                logger,
+                self.get_ignored_files(),
+                self.get_ignored_symbols(),
+                UsedTag::FROM_ENTRY,
+            )
             .map_err(JsErr::generic_failure)?;
 
         Ok(UnusedFinderResult::new(graph))
     }
 
-    /// helper package to get the list of initial files for the graph traversal,
-    /// referred to as "entry files"
-    fn get_walk_roots(&self, logger: impl Logger) -> Vec<PathBuf> {
+    /// helper to get the list of files that are "entrypoints" to the used
+    /// symbol graph (ignored files)
+    fn get_entrypoints(&self, logger: impl Logger) -> Vec<PathBuf> {
         // get all package exports.
         self.last_walk_result
             .source_files
@@ -354,12 +364,50 @@ impl UnusedFinder {
             .unwrap_or(false)
     }
 
+    fn get_ignored_files(&self) -> Vec<PathBuf> {
+        // TODO: this is n^2, which is bad! Could build a treemap of ignore files?
+        self.last_walk_result
+            .source_files
+            .par_iter()
+            .filter_map(|(file_path, _)| {
+                if self.is_file_ignored(file_path) {
+                    Some(file_path.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn get_ignored_symbols(&self) -> Vec<(PathBuf, Vec<ExportedSymbol>)> {
+        self.last_walk_result
+            .source_files
+            .par_iter()
+            .map(|(path_buf, file)| (path_buf.clone(), Self::get_file_ignored_symbols(file)))
+            .collect()
+    }
+
     /// Helper that checks if a file is ignored by any of the ignore files
     fn is_file_ignored(&self, file_path: &Path) -> bool {
         self.last_walk_result
             .ignore_files
             .iter()
             .any(|ignore_file| ignore_file.matches_path(file_path))
+    }
+
+    /// Helper that checks if a file is ignored by any of the ignore files
+    fn get_file_ignored_symbols(file: &ResolvedSourceFile) -> Vec<ExportedSymbol> {
+        file.import_export_info
+            .exported_ids
+            .iter()
+            .filter_map(|(symbol, metadata)| {
+                if metadata.allow_unused {
+                    Some(symbol.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn is_entry_package(&self, package_name: &str) -> bool {

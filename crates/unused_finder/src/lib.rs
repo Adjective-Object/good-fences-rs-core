@@ -1,5 +1,3 @@
-#![feature(closure_lifetime_binder)]
-
 extern crate import_resolver;
 extern crate serde_json;
 extern crate tsconfig_paths;
@@ -20,6 +18,7 @@ extern crate test_tmpdir;
 
 mod cfg;
 mod graph;
+mod ignore_file;
 pub mod logger;
 mod parse;
 mod report;
@@ -33,4 +32,4 @@ pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
 pub use parse::data::ResolvedImportExportInfo;
 pub use report::UnusedFinderReport;
 pub use unused_finder::{UnusedFinder, UnusedFinderResult};
-pub use walked_file::{WalkedFile, WalkedPackage, WalkedSourceFile};
+pub use walked_file::WalkedFile;

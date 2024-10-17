@@ -1,6 +1,7 @@
+use crate::ignore_file::IgnoreFile;
 use crate::logger::{Logger, StdioLogger};
 use crate::parse::get_file_import_export_info;
-use crate::walked_file::{IgnoreFile, WalkedFile, WalkedPackage, WalkedSourceFile};
+use crate::walked_file::{WalkedFile, WalkedPackage, WalkedSourceFile};
 use jwalk::WalkDirGeneric;
 use path_slash::PathBufExt;
 use rayon::prelude::*;
