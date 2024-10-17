@@ -21,14 +21,14 @@ pub struct WalkFileResult {
 /// Walks the root paths of a project and returns a list of source files and packages
 pub fn walk_src_files(
     logger: impl Logger,
-    root_paths: &Vec<String>,
+    root_paths: &[String],
     skipped_dirs: &Arc<Vec<glob::Pattern>>,
 ) -> WalkFileResult {
     // run the parallel walk
     let visited = root_paths
+        // NOTE: Don't use par_iter here
         .par_iter()
-        .map(|path| jwalk_src_subtree(logger, path, skipped_dirs.to_vec()))
-        .flatten()
+        .flat_map(|path| jwalk_src_subtree(logger, path, skipped_dirs.to_vec()))
         .collect::<Vec<WalkedFile>>();
 
     // partition the results
