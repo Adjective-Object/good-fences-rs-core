@@ -109,12 +109,12 @@ impl ResolvedImportExportInfo {
                     symbol
                         .renamed_to
                         .as_ref()
-                        .unwrap_or_else(|| &symbol.imported),
+                        .unwrap_or(&symbol.imported),
                 )
             })
         });
 
-        let exported_ids = self.exported_ids.iter().map(|(symbol, _)| (None, symbol));
+        let exported_ids = self.exported_ids.keys().map(|symbol| (None, symbol));
 
         exported_ids.chain(export_from_symbols)
     }
