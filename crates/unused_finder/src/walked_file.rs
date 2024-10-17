@@ -1,6 +1,5 @@
 use std::{
     borrow::Borrow,
-    io::{BufRead, Read},
     path::{self, Path, PathBuf},
 };
 
@@ -11,7 +10,10 @@ use packagejson_exports::PackageExportRewriteData;
 use path_clean::PathClean;
 use path_slash::PathBufExt;
 
-use crate::parse::{RawImportExportInfo, ResolvedImportExportInfo};
+use crate::{
+    ignore_file::IgnoreFile,
+    parse::{RawImportExportInfo, ResolvedImportExportInfo},
+};
 
 /// Source file discovered during the source walk
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -151,70 +153,6 @@ impl WalkedPackage {
 
         // check against the export info
         Ok(!export_info.is_exported(&package_relative_path).is_empty())
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct IgnoreFile {
-    pub path: PathBuf,
-    pub patterns: Vec<IgnorePattern>,
-}
-
-impl IgnoreFile {
-    pub fn read(path: PathBuf) -> Result<Self> {
-        let f = std::fs::File::open(&path)
-            .with_context(|| format!("Failed to open ignore file at path: {}", path.display()))?;
-        Self::from_reader(path, f)
-    }
-
-    pub fn from_reader(path: PathBuf, r: impl Read) -> Result<Self> {
-        // read as lines
-        let lines = std::io::BufReader::new(r).lines();
-        let mut patterns = Vec::new();
-        for line in lines {
-            let line = line.unwrap();
-            let pattern = IgnorePattern::from_line(&line)?;
-            patterns.push(pattern);
-        }
-
-        Ok(Self {
-            path: path.to_path_buf(),
-            patterns,
-        })
-    }
-
-    pub fn matches_path(&self, path: &Path) -> bool {
-        let relative_path = match pathdiff::diff_paths(path, &self.path) {
-            Some(p) => p,
-            None => return false,
-        };
-        let relative_slash = match relative_path.to_slash() {
-            Some(p) => p,
-            None => return false,
-        };
-
-        let mut ignored = false;
-        for pattern in self.patterns.iter() {
-            if pattern.pattern.matches(relative_slash.as_ref()) {
-                ignored = pattern.negated;
-            }
-        }
-
-        ignored
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct IgnorePattern {
-    pub pattern: glob::Pattern,
-    pub negated: bool,
-}
-
-impl IgnorePattern {
-    pub fn from_line(line: &str) -> Result<Self, anyhow::Error> {
-        let negated = line.starts_with('!');
-        let pattern = glob::Pattern::new(if negated { &line[1..] } else { line })?;
-        Ok(Self { pattern, negated })
     }
 }
 
