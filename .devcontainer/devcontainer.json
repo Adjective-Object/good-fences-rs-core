@@ -38,6 +38,11 @@
     "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached",
     "source=${localWorkspaceFolder}/.persist/cargo-registry,target=/home/ubuntu/.cargo/registry,type=bind,consistency=cached"
   ],
+  "capAdd": [
+    // required for e.g. perf monitoring
+    "PERFMON",
+    "SYS_PTRACE"
+  ],
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   // "postStartCommand": "/bin/bash .devcontainer/config_fetch.sh",
   "extensions": [
