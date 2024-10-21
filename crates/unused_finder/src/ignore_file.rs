@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     io::{BufRead, Read},
     path::{Path, PathBuf},
 };
@@ -6,10 +7,26 @@ use std::{
 use anyhow::{Context, Result};
 use path_slash::PathBufExt;
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct IgnoreFile {
     pub path: PathBuf,
     pub patterns: Vec<IgnorePattern>,
+}
+
+impl Debug for IgnoreFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IgnoreFile")
+            .field("path", &self.path)
+            .field(
+                "patterns",
+                &self
+                    .patterns
+                    .iter()
+                    .map(|p| p.pattern.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 impl IgnoreFile {
@@ -39,7 +56,7 @@ impl IgnoreFile {
         })
     }
 
-    pub fn matches_path(&self, path: &Path) -> bool {
+    pub fn is_ignored(&self, path: &Path) -> bool {
         let relative_path = match pathdiff::diff_paths(path, &self.path) {
             Some(p) => p,
             None => return false,
@@ -52,11 +69,11 @@ impl IgnoreFile {
         let mut ignored = false;
         for pattern in self.patterns.iter() {
             if pattern.pattern.matches(relative_slash.as_ref()) {
-                ignored = pattern.negated;
+                ignored = !pattern.negated;
             }
         }
 
-        !ignored
+        ignored
     }
 }
 
@@ -75,13 +92,24 @@ impl IgnorePattern {
         match trimmed_line.bytes().next().map(|b| b as char) {
             None | Some('#') => Ok(None),
             Some('!') => Ok(Some(IgnorePattern {
-                pattern: glob::Pattern::new(&trimmed_line[1..])?,
+                pattern: Self::glob_line(&trimmed_line[1..])?,
                 negated: true,
             })),
             _ => Ok(Some(IgnorePattern {
-                pattern: glob::Pattern::new(trimmed_line)?,
+                pattern: Self::glob_line(trimmed_line)?,
                 negated: false,
             })),
+        }
+    }
+
+    fn glob_line(line: &str) -> Result<glob::Pattern, anyhow::Error> {
+        if line.ends_with('/') {
+            // support trailing slashes for recursibe globs
+            Ok(glob::Pattern::new(&format!("{}**", line))
+                .with_context(|| format!("Failed to parse glob pattern: {}", line))?)
+        } else {
+            glob::Pattern::new(line)
+                .with_context(|| format!("Failed to parse glob pattern: {}", line))
         }
     }
 }
@@ -115,18 +143,57 @@ mod test {
     }
 
     #[test]
+    fn test_folder_pattern() {
+        let ignore_file = ignore_file(
+            "path/to/.unusedignore",
+            r#"
+                    foo/
+                    "#,
+        );
+
+        // check behaviour
+        assert!(ignore_file.is_ignored(&PathBuf::from_slash("path/to/foo/file.js")));
+    }
+
+    #[test]
+    fn test_recursive_wildcards() {
+        let ignore_file = ignore_file(
+            "path/to/.unusedignore",
+            r#"
+                    foo/**
+                    "#,
+        );
+
+        // check behaviour
+        assert!(ignore_file.is_ignored(&PathBuf::from_slash("path/to/foo/deep/nested/file.js")));
+    }
+
+    #[test]
+    fn test_nomatch_non_specified() {
+        let ignore_file = ignore_file(
+            "path/to/.unusedignore",
+            r#"
+                    foo.ts
+                    "#,
+        );
+
+        // check behaviour
+        assert!(!ignore_file.is_ignored(&PathBuf::from_slash("path/to/bar.ts")));
+    }
+
+    #[test]
     fn test_positive_pattern() {
         let ignore_file = ignore_file(
             "path/to/.unusedignore",
             r#"
                     foo/file.js
-                    bar/
+                    bar/*
                     "#,
         );
 
         // check behaviour
-        assert!(ignore_file.matches_path(&PathBuf::from_slash("path/to/foo/file.js")));
-        assert!(ignore_file.matches_path(&PathBuf::from_slash("path/to/bar/anything.js")));
+        assert!(ignore_file.is_ignored(&PathBuf::from_slash("path/to/foo/file.js")));
+        assert!(ignore_file.is_ignored(&PathBuf::from_slash("path/to/bar/anything.js")));
     }
 
     #[test]
@@ -134,13 +201,13 @@ mod test {
         let ignore_file = ignore_file(
             "path/to/.unusedignore",
             r#"
-                    bar/
+                    bar/*
                     !bar/*.nomatch
                     "#,
         );
 
         // check behaviour
-        assert!(ignore_file.matches_path(&PathBuf::from_slash("path/to/bar/anything.js")));
-        assert!(!ignore_file.matches_path(&PathBuf::from_slash("path/to/bar/anything.nomatch")));
+        assert!(ignore_file.is_ignored(&PathBuf::from_slash("path/to/bar/anything.js")));
+        assert!(!ignore_file.is_ignored(&PathBuf::from_slash("path/to/bar/anything.nomatch")));
     }
 }
