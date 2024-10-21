@@ -1,2 +1,14 @@
 [toolchain]
 channel = "nightly-2024-10-20"
+components = [
+    # default components
+    "cargo",
+    "clippy",
+    "rust-docs",
+    "rust-std",
+    "rustc",
+    "rustfmt",
+    # Also include cranelift codegen backend for faster compilation in development
+    # See: https://lwn.net/Articles/964735/
+    "rustc-codegen-cranelift",
+]
