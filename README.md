@@ -144,3 +144,23 @@ Development from windows happens in a devcontainer
     // "source=${localWorkspaceFolder}/../client-web,target=/workspaces/client-web,type=bind,consistency=cached",
     ```
     The provided example mounts `client-web` as a target repo
+
+## Flamegraphs and profiling
+For profiling, you can use [`samply`](https://github.com/mstange/samply)
+```sh
+# This isn't installed by default in the dev container because it has to be built from source,
+# which takes a long time
+#
+# Must be built with --locked dependencies
+# See: https://github.com/mstange/samply/issues/341
+cargo install samply --locked
+```
+
+To profile a test, first build the test binary
+```sh
+# This will print the path of the test binary
+cargo test -p unused_finder --no-run
+
+# Then, run samply on the test binary binary
+samply record target/debug/deps/unused_finder-3aa70b00191bd4df
+```
