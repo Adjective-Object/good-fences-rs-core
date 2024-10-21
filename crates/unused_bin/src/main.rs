@@ -126,7 +126,16 @@ fn main() -> Result<()> {
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
     let config: unused_finder::UnusedFinderJSONConfig = serde_json::from_str(&config_str)
         .with_context(|| format!("Parsing unused-finder config {config_path}"))?;
-    let parsed_config: UnusedFinderConfig = config.try_into()?;
+    let mut parsed_config: UnusedFinderConfig = config.try_into()?;
+    // HACK: if the repo_root is not an absolute path, make it relative to the config file
+    if !Path::new(&parsed_config.repo_root).is_absolute() {
+        parsed_config.repo_root = Path::new(&config_path)
+            .parent()
+            .expect("Failed to get parent directory of config file")
+            .join(&parsed_config.repo_root)
+            .to_string_lossy()
+            .to_string();
+    }
 
     // move the the working directory of the config path
     let config_dir = Path::new(&config_path)
