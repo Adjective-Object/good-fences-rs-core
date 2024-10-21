@@ -40,6 +40,20 @@ macro_rules! amap(
 );
 
 #[macro_export]
+macro_rules! bmap(
+    { $($key:expr => $value:expr),* } => {
+        {
+            use std::collections::BTreeMap;
+            let mut m = BTreeMap::default();
+            $(
+                m.insert(String::from($key), $value);
+            )*
+            m
+        }
+    };
+);
+
+#[macro_export]
 macro_rules! map2(
     { $($key:expr => $value:expr),+ } => {
         {

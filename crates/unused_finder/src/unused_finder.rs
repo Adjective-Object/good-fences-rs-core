@@ -309,7 +309,7 @@ impl UnusedFinder {
             .filter_map(|(file_path, source_file)| {
                 let export = self.is_entry_package_export(logger, file_path, source_file);
                 logger.log(format!(
-                    "walk_roots:: check path {} : {export}",
+                    "entrypoints:: check path {} : {export}",
                     file_path.display()
                 ));
                 if export || self.is_file_ignored(file_path) {
@@ -366,13 +366,17 @@ impl UnusedFinder {
 
     fn get_ignored_files(&self) -> Vec<PathBuf> {
         // TODO: this is n^2, which is bad! Could build a treemap of ignore files?
+        println!("{:#?}", self.last_walk_result.source_files);
+        println!("{:#?}", self.last_walk_result.ignore_files);
         self.last_walk_result
             .source_files
             .par_iter()
             .filter_map(|(file_path, _)| {
                 if self.is_file_ignored(file_path) {
+                    println!("ignoring file: {}", file_path.display());
                     Some(file_path.clone())
                 } else {
+                    println!("NOT ignoring file: {}", file_path.display());
                     None
                 }
             })
@@ -392,7 +396,7 @@ impl UnusedFinder {
         self.last_walk_result
             .ignore_files
             .iter()
-            .any(|ignore_file| ignore_file.matches_path(file_path))
+            .any(|ignore_file| ignore_file.is_ignored(file_path))
     }
 
     /// Helper that checks if a file is ignored by any of the ignore files

@@ -215,7 +215,7 @@ impl Graph {
         const MAX_ITERATIONS: usize = 1_000_000;
         for _ in 0..MAX_ITERATIONS {
             let next_frontier: Vec<Edge> = self.bfs_step(&frontier, tag);
-            println!("bfs_step: {:?} -> {:?}", frontier, next_frontier);
+            println!("bfs_step ({}): {:?} -> {:?}", tag, frontier, next_frontier);
             frontier = next_frontier;
             if frontier.is_empty() {
                 return Ok(());

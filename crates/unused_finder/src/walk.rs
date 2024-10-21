@@ -57,6 +57,7 @@ pub fn jwalk_src_subtree(
 ) -> Vec<WalkedFile> {
     let visitor = UnusedFinderWalkVisitor::new(skipped_dirs);
     let walk_dir = WalkDirGeneric::<(Option<String>, Option<WalkedFile>)>::new(start_path)
+        .skip_hidden(false)
         .process_read_dir(move |dir_state, children| {
             visitor.visit_directory(&StdioLogger {}, dir_state, children)
         });
