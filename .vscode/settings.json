@@ -21,6 +21,12 @@
     },
     "editor.formatOnSave": true,
     "files.autoSaveWorkspaceFilesOnly": true,
-    "lldb.cargo": "/home/ubuntu/.cargo/bin/cargo",
+    "lldb.cargo": "/home/vscode/.cargo/bin/cargo",
     "terminal.integrated.shellIntegration.decorationsEnabled": "never",
+    "rust-analyzer.runnables.extraEnv": {
+        "CARGO": "/home/vscode/.cargo/bin/cargo",
+        "RUSTC": "/home/vscode/.cargo/bin/rustc",
+        "PATH": "/home/vscode/.cargo/bin:/usr/local/share/nvm/versions/node/v20.10.0/bin:/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/vscode/.local/bin:/usr/local/go/bin"
+    },
+    "debug.allowBreakpointsEverywhere": true
 }
