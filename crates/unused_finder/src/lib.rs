@@ -32,4 +32,3 @@ pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
 pub use parse::data::ResolvedImportExportInfo;
 pub use report::UnusedFinderReport;
 pub use unused_finder::{UnusedFinder, UnusedFinderResult};
-pub use walked_file::WalkedFile;
