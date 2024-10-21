@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::BTreeMap, fmt::Display};
 
 use rayon::prelude::*;
 use swc_core::common::source_map::SmallPos;
@@ -8,7 +8,7 @@ use crate::{graph::UsedTag, parse::ExportedSymbol, UnusedFinderResult};
 use napi_derive::napi;
 
 // Report of a single exported item in a file
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
 #[cfg_attr(feature = "napi", napi(object))]
 pub struct SymbolReport {
     pub id: String,
@@ -18,7 +18,7 @@ pub struct SymbolReport {
 }
 
 /// Napi-compatible representation of a tag as an enum
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Ord, PartialOrd, Eq)]
 // string_enum implies derive(Clone, Copy), so we have to avoid the duplicate
 // derivation here, as it will lead to conflicting implementations
 #[cfg_attr(not(feature = "napi"), derive(Clone, Copy))]
@@ -47,9 +47,9 @@ pub struct UnusedFinderReport {
     // files that are completely unused
     pub unused_files: Vec<String>,
     // items that are unused within files
-    // note that this intentionally uses the std HashMap type to guarantee napi
+    // note that this intentionally uses a std HashMap type to guarantee napi
     // compatibility
-    pub unused_symbols: HashMap<String, Vec<SymbolReport>>,
+    pub unused_symbols: BTreeMap<String, Vec<SymbolReport>>,
 }
 
 impl Display for UnusedFinderReport {
@@ -118,7 +118,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
             .collect();
         unused_files.sort();
 
-        let unused_symbols: HashMap<String, Vec<SymbolReport>> = value
+        let unused_symbols: BTreeMap<String, Vec<SymbolReport>> = value
             .graph
             .files
             .par_iter()
@@ -169,7 +169,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                     unused_symbols,
                 ))
             })
-            .collect::<HashMap<String, Vec<SymbolReport>>>();
+            .collect::<BTreeMap<String, Vec<SymbolReport>>>();
 
         UnusedFinderReport {
             unused_files,

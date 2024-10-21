@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use ahashmap::AHashSet;
 use path_slash::PathBufExt;
-use test_tmpdir::{map, test_tmpdir};
+use test_tmpdir::{bmap, test_tmpdir};
 
 use crate::{
     graph::UsedTag, logger, report::SymbolReport, UnusedFinder, UnusedFinderConfig,
@@ -41,7 +41,11 @@ fn normalize_test_report(
         unused_symbols: result
             .unused_symbols
             .into_iter()
-            .map(|(k, v)| (k.replace(tmpdir.root().to_str().unwrap(), "<root>"), v))
+            .map(|(k, v)| {
+                let mut s_v = v.clone();
+                s_v.sort();
+                (k.replace(tmpdir.root().to_str().unwrap(), "<root>"), s_v)
+            })
             .collect(),
     }
 }
@@ -150,7 +154,7 @@ fn test_package_exports_walk_roots() {
             .iter()
             .map(|x| x.to_string())
             .collect(),
-            unused_symbols: HashMap::default(),
+            unused_symbols: bmap!(),
         },
     );
 }
@@ -177,7 +181,7 @@ fn test_root_export_symbols_used() {
         },
         UnusedFinderReport {
             unused_files: vec![],
-            unused_symbols: HashMap::default(),
+            unused_symbols: bmap!(),
         },
     );
 }
@@ -210,7 +214,7 @@ fn test_transitive_re_export() {
         },
         UnusedFinderReport {
             unused_files: vec![],
-            unused_symbols: HashMap::default(),
+            unused_symbols: bmap!(),
         },
     );
 }
@@ -241,7 +245,7 @@ fn test_partially_unused_file() {
         },
         UnusedFinderReport {
             unused_files: vec![],
-            unused_symbols: map!(
+            unused_symbols: bmap!(
                 "<root>/packages/root/imported-1.js" => vec![
                     symbol("b", UsedTag::default()),
                 ]
@@ -284,11 +288,14 @@ ignored-*.js
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: ["<root>/packages/root/unused.js"]
-                .iter()
-                .map(|x| x.to_string())
-                .collect(),
-            unused_symbols: map!(
+            unused_files: [
+                "<root>/packages/root/ignored-exception.js",
+                "<root>/packages/root/unused.js",
+            ]
+            .iter()
+            .map(|x| x.to_string())
+            .collect(),
+            unused_symbols: bmap!(
                 "<root>/packages/root/unused.js" => vec![
                     symbol("a", UsedTag::default()),
                     symbol("b", UsedTag::default()),
