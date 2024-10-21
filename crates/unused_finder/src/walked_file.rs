@@ -10,31 +10,16 @@ use packagejson_exports::PackageExportRewriteData;
 use path_clean::PathClean;
 use path_slash::PathBufExt;
 
-use crate::{
-    ignore_file::IgnoreFile,
-    parse::{RawImportExportInfo, ResolvedImportExportInfo},
-};
+use crate::{parse::RawImportExportInfo, ResolvedImportExportInfo};
 
 /// Source file discovered during the source walk
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct WalkedSourceFile {
-    /// Name of the package that this source file belongs to, as of the last walk
     pub owning_package: Option<String>,
     /// The full path of this source file
     pub source_file_path: PathBuf,
     /// The imports and exports parsed from this source file
     pub import_export_info: RawImportExportInfo,
-}
-
-/// Source file discovered during the source walk
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct ResolvedSourceFile {
-    /// Name of the package that this source file belongs to, as of the last walk
-    pub owning_package: Option<String>,
-    /// The full path of this source file
-    pub source_file_path: PathBuf,
-    /// The imports and
-    pub import_export_info: ResolvedImportExportInfo,
 }
 
 /// package.json file discovered during the source walk
@@ -223,9 +208,13 @@ mod test {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum WalkedFile {
-    SourceFile(WalkedSourceFile),
-    PackageJson(WalkedPackage),
-    IgnoreFile(IgnoreFile),
+/// Source file discovered during the source walk
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ResolvedSourceFile {
+    /// Name of the package that this source file belongs to, as of the last walk
+    pub owning_package: Option<String>,
+    /// The full path of this source file
+    pub source_file_path: PathBuf,
+    /// The imports and
+    pub import_export_info: ResolvedImportExportInfo,
 }

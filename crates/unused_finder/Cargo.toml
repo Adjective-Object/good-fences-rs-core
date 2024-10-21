@@ -13,7 +13,6 @@ anyhow.workspace = true
 glob = "0.3.1"
 import_resolver = { path = "../import_resolver" }
 js_err = { path = "../js_err" }
-jwalk.workspace = true
 napi = { workspace = true, optional = true }
 napi-derive = { workspace = true, optional = true }
 path-slash.workspace = true
@@ -35,6 +34,7 @@ pathdiff = "0.2.1"
 const_format = "0.2.33"
 ahashmap = { path = "../ahashmap" }
 bitflags = "2.6.0"
+ignore = "0.4.23"
 
 [features]
 default = []
