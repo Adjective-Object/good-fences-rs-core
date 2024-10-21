@@ -17,6 +17,10 @@ mod rustchash {
     pub type AHashMap<K, V> = HashMap<K, V, ARandomState>;
 
     pub type AHashSet<V> = HashSet<V, ARandomState>;
+
+    pub mod hash_map {
+        pub use std::collections::hash_map::Entry;
+    }
 }
 
 #[cfg(feature = "ahash")]
@@ -28,4 +32,8 @@ mod ahash {
     pub type AHashMap<K, V> = HashMap<K, V, ARandomState>;
 
     pub type AHashSet<V> = HashSet<V, ARandomState>;
+
+    pub mod hash_map {
+        pub use std::collections::hash_map::Entry;
+    }
 }
