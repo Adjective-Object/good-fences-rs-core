@@ -35,3 +35,7 @@ parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
 
 [profile.release]
 debug = true
+
+[profile.dev]
+debug = true
+codegen-backend = "cranelift"
