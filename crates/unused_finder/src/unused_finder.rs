@@ -7,8 +7,8 @@ use crate::{
     logger::Logger,
     parse::{get_file_import_export_info, ExportedSymbol},
     report::UnusedFinderReport,
-    walk::{walk_src_files, WalkFileResult},
-    walked_file::{ResolvedSourceFile, WalkedPackage},
+    walk::{walk_src_files, RepoPackages, WalkFileResult},
+    walked_file::ResolvedSourceFile,
 };
 use ahashmap::AHashMap;
 use anyhow::Result;
@@ -46,16 +46,11 @@ pub struct UnusedFinder {
 /// to file-paths.
 #[derive(Debug)]
 struct SourceFiles {
+    // The packages discovered during the walk, with some additional metadata
+    // in order to allow looking up by either path or package name.
+    packages: RepoPackages,
     // TODO process Walked Source Files into resolved source files?
     source_files: AHashMap<PathBuf, ResolvedSourceFile>,
-    // Map of package name to package data
-    //
-    // This is keyed primarially on the package name, as that is the most
-    // common way to reference a package.
-    packages: AHashMap<String, WalkedPackage>,
-    // Map of package path to package name, used to look up packages by path
-    // when resolving imports
-    package_names_by_path: AHashMap<PathBuf, String>,
     // List of "ignore" files discovered during the walk, which denote files that
     // should be ignored entirely when checking for unused symbols. Those files
     // are recursively ignored.
@@ -87,30 +82,9 @@ impl SourceFiles {
             )
             .collect::<Result<_>>()?;
 
-        // Map of package name to package data
-        let (packages, package_names_by_path) = walk_result
-            .packages
-            .into_par_iter()
-            .map(|walked_pkg| -> anyhow::Result<((String, WalkedPackage), (PathBuf, String))> {
-                let pkg_name = walked_pkg
-                    .package_json
-                    .name
-                    .as_ref()
-                    .map(|x| x.to_owned())
-                    .ok_or_else(|| anyhow!(
-                        "Encountered anonymous package at path {}. anonymous packages should be ignored during file walk.",
-                        walked_pkg.package_path.display(),
-                    ))?;
-
-                let pkg_path = walked_pkg.package_path.clone();
-                Ok(((pkg_name.clone(), walked_pkg), (pkg_path, pkg_name)))
-            })
-            .collect::<Result<(AHashMap<_, _>, AHashMap<_, _>)>>()?;
-
         Ok(SourceFiles {
             source_files,
-            packages,
-            package_names_by_path,
+            packages: walk_result.packages,
             ignore_files: walk_result.ignore_files,
         })
     }
@@ -157,7 +131,7 @@ impl UnusedFinder {
             // If any of the files are not in the last_walk_result, mark all files as dirty
             !self.last_walk_result.source_files.contains_key(path.as_ref())
             // If any of the files are packagejson files, mark all files as dirty
-            || self.last_walk_result.package_names_by_path.contains_key(path.as_ref())
+            || self.last_walk_result.packages.contains_path(path.as_ref())
         }) {
             self.dirty_files = DirtyFiles::All;
             return;
@@ -261,7 +235,8 @@ impl UnusedFinder {
         resolver: impl Resolve,
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
-        let walked_files = walk_src_files(logger, &config.root_paths, &config.skipped_dirs);
+        let walked_files = walk_src_files(logger, &config.root_paths, &config.skip)
+            .map_err(JsErr::generic_failure)?;
         // TODO: gracefully handle errors during resolution
         let resolved =
             SourceFiles::try_resolve(walked_files, resolver).map_err(JsErr::generic_failure)?;
@@ -347,7 +322,11 @@ impl UnusedFinder {
         }
 
         // get the corresponding package of the source file
-        let owning_package = match self.last_walk_result.packages.get(owning_package_name) {
+        let owning_package = match self
+            .last_walk_result
+            .packages
+            .get_by_name(owning_package_name)
+        {
             Some(owning_package) => owning_package,
             None => {
                 logger.log(format!(
