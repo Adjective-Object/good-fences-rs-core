@@ -119,7 +119,10 @@ where
         unsafe_map_unwrap_locked_option(readonly_lock)
     }
 
-    pub fn try_get_cached_or_init<'a, TFn>(&'a self, f: TFn) -> Result<WCMappedReadGuard<TDerived>>
+    pub fn try_get_cached_or_init<'a, TFn>(
+        &'a self,
+        f: TFn,
+    ) -> Result<WCMappedReadGuard<'a, TDerived>>
     where
         TFn: Fn(&'a TVal) -> Result<TDerived>,
     {
