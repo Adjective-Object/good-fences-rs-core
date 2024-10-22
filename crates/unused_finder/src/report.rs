@@ -138,8 +138,6 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                                 match graph_file.import_export_info.exported_ids.get(symbol) {
                                     Some(ast_symbol) => ast_symbol,
                                     None => {
-                                        //TODO: remove
-                                        println!("symbol not found in export map: {:?}", symbol);
                                         return None;
                                     }
                                 };

@@ -69,25 +69,12 @@ impl GraphFile {
     ///
     /// If the item is a re-export of an item from another file, the origin file is returned
     fn tag_symbol(&mut self, symbol: &ExportedSymbol, tag: UsedTag) {
-        println!(
-            "    mark symbol {}: {}:{:?}",
-            tag,
-            self.file_path.display(),
-            symbol
-        );
-
         // let item = ExportKind::from(item);
         match symbol {
             ExportedSymbol::Default | ExportedSymbol::Named(_) => {
                 tag_named_or_default_symbol(&mut self.symbol_tags, symbol, tag);
             }
             ExportedSymbol::Namespace => {
-                println!(
-                    "    mark namespace: {:?}",
-                    self.import_export_info
-                        .iter_exported_symbols()
-                        .collect::<Vec<_>>(),
-                );
                 // namespace imports will use _all_ named symbols from the imported file
                 for (reexported_from, symbol) in self.import_export_info.iter_exported_symbols() {
                     match (reexported_from, symbol) {
@@ -215,7 +202,6 @@ impl Graph {
         const MAX_ITERATIONS: usize = 1_000_000;
         for _ in 0..MAX_ITERATIONS {
             let next_frontier: Vec<Edge> = self.bfs_step(&frontier, tag);
-            println!("bfs_step ({}): {:?} -> {:?}", tag, frontier, next_frontier);
             frontier = next_frontier;
             if frontier.is_empty() {
                 return Ok(());
