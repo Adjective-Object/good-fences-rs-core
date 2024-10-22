@@ -345,17 +345,13 @@ impl UnusedFinder {
 
     fn get_ignored_files(&self) -> Vec<PathBuf> {
         // TODO: this is n^2, which is bad! Could build a treemap of ignore files?
-        println!("{:#?}", self.last_walk_result.source_files);
-        println!("{:#?}", self.last_walk_result.ignore_files);
         self.last_walk_result
             .source_files
             .par_iter()
             .filter_map(|(file_path, _)| {
                 if self.is_file_ignored(file_path) {
-                    println!("ignoring file: {}", file_path.display());
                     Some(file_path.clone())
                 } else {
-                    println!("NOT ignoring file: {}", file_path.display());
                     None
                 }
             })

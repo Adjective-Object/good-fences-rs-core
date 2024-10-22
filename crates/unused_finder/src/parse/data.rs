@@ -106,10 +106,7 @@ impl ResolvedImportExportInfo {
             symbols.iter().map(|symbol| {
                 (
                     Some(path.as_path()),
-                    symbol
-                        .renamed_to
-                        .as_ref()
-                        .unwrap_or(&symbol.imported),
+                    symbol.renamed_to.as_ref().unwrap_or(&symbol.imported),
                 )
             })
         });
