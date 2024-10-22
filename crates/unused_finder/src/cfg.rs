@@ -17,9 +17,11 @@ pub struct UnusedFinderJSONConfig {
     #[serde(alias = "pathsToRead")]
     pub root_paths: Vec<String>,
     // Path to the root directory of the repository.
+    #[serde(default)]
     pub repo_root: String,
-    // Files under matching dirs won't be scanned.
-    pub skipped_dirs: Vec<String>,
+    // Files under matching dirs won't be scanned during the file walk
+    #[serde(default)]
+    pub skip: Vec<String>,
     pub entry_packages: Vec<String>,
 }
 
@@ -55,7 +57,7 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             repo_root: value.repo_root,
             // other fields that are processed before use
             entry_packages: value.entry_packages.iter().cloned().collect(),
-            skip: value.skipped_dirs,
+            skip: value.skip,
         })
     }
 }
