@@ -9,6 +9,7 @@ use packagejson::PackageJson;
 
 /// A resolver which will only resolve internal modules, using the inner resolver.
 /// Other modules are marked as External.
+#[derive(Debug)]
 pub struct InternalOnlyResolver<R> {
     // set of packages to consider "internal"
     internal_packages: HashSet<String>,
