@@ -19,7 +19,7 @@ pub struct UnusedFinderJSONConfig {
     // Path to the root directory of the repository.
     #[serde(default)]
     pub repo_root: String,
-    // Files under matching dirs won't be scanned during the file walk
+    // Matching files and directories won't be scanned during the file walk
     #[serde(default)]
     pub skip: Vec<String>,
     pub entry_packages: Vec<String>,
