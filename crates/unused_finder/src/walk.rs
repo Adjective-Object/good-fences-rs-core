@@ -178,9 +178,18 @@ pub fn walk_src_files(
             }
         }
 
-        let ignore_file =
-            IgnoreFile::read(repo_root_path.as_ref().to_path_buf().join(".unusedignore"))?;
-        tx.send(Ok(WalkedFile::IgnoreFile(ignore_file))).unwrap();
+        match IgnoreFile::read(repo_root_path.as_ref().to_path_buf().join(".unusedignore")) {
+            Ok(ignore_file) => tx.send(Ok(WalkedFile::IgnoreFile(ignore_file))).unwrap(),
+            Err(e) => {
+                // check if the error was file not found.
+                // if it was, ignore it, otherwise, send the error to the collector
+                if e.downcast_ref::<std::io::Error>()
+                    .map_or(false, |e| e.kind() != std::io::ErrorKind::NotFound)
+                {
+                    tx.send(Err(e)).unwrap();
+                }
+            }
+        }
 
         // drop the sender to signal the collector thread to stop
         drop(tx);
@@ -424,5 +433,36 @@ mod test {
             .iter()
             .any(|x| x.path == tmpdir.root()));
         assert_eq!(walk_result.ignore_files.len(), 3);
+    }
+
+    #[test]
+    fn test_discovers_root_no_unusedignore() {
+        let tmpdir = test_tmpdir!(
+            "packages/.unusedignore" => r#"
+                *.pkgs-ignored.ts
+            "#,
+            "shared/.unusedignore" => r#"
+                *.shared-ignored.ts
+            "#
+        );
+
+        let test_logger = StdioLogger {};
+        let walk_result = walk_src_files(
+            &test_logger,
+            &[tmpdir.root().join("packages"), tmpdir.root().join("shared")],
+            tmpdir.root(),
+            &["*.ignored.ts"],
+        );
+
+        let walk_result = walk_result.unwrap();
+        assert!(walk_result
+            .ignore_files
+            .iter()
+            .any(|x| x.path == tmpdir.root().join("packages")),);
+        assert!(walk_result
+            .ignore_files
+            .iter()
+            .any(|x| x.path == tmpdir.root().join("shared")),);
+        assert_eq!(walk_result.ignore_files.len(), 2);
     }
 }
