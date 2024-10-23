@@ -140,7 +140,7 @@ pub fn walk_src_files(
     logger: impl Logger,
     root_paths: &[impl AsRef<Path> + Debug],
     repo_root_path: impl AsRef<Path>,
-    ingnored_filenames: &[impl AsRef<str> + Debug],
+    ignored_filenames: &[impl AsRef<str> + Debug],
 ) -> Result<WalkedFiles, anyhow::Error> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<WalkedFile, anyhow::Error>>();
     let mut all_walked_files: Vec<WalkedFile> = Vec::new();
@@ -166,7 +166,7 @@ pub fn walk_src_files(
 
         // Parallel walk of each root path in sequence
         for root_path in root_paths {
-            match build_walk(root_path, ingnored_filenames) {
+            match build_walk(root_path, ignored_filenames) {
                 Ok(walk) => collect_walk(walk, &tx),
                 Err(e) => {
                     return Err(anyhow!(format!(
