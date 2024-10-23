@@ -184,7 +184,7 @@ impl Graph {
                         ),
                         None => {
                             logger.log(format!(
-                                "Frontier file not found in graph: {}",
+                                "Frontier symbol's file not found in graph: {}",
                                 path.to_string_lossy()
                             ));
                             None
