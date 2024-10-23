@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use import_resolver::swc_resolver::{
     combined_resolver::CombinedResolverCaches,
     internal_resolver::InternalOnlyResolver,
-    node_resolver::{NodeModulesResolverOptions, DEFAULT_EXTENSIONS},
+    node_resolver::{NodeModulesResolverOptions, DEFAULT_EXPORT_CODITIONS, DEFAULT_EXTENSIONS},
     MonorepoResolver,
 };
 use js_err::JsErr;
@@ -120,10 +120,9 @@ impl SourceFiles {
 fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl Resolve {
     let mut caches = CombinedResolverCaches::new();
     // pre-populate the packagejson cache with the loaded package json files
+    let pkg_caches = caches.package_json_cache();
     for package in packages.packages.iter() {
-        caches
-            .package_json_cache()
-            .prepopulate(&package.package_path, package.package_json.clone());
+        pkg_caches.prepopulate(&package.package_path, package.package_json.clone());
     }
 
     // TODO: rewrite the monorepo resolver to use an abstract filesystem that supports caching I/O
@@ -132,11 +131,19 @@ fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl Res
 
     // create a new monorepo resolver
     let mut resolver_options = NodeModulesResolverOptions::default_for_env(TargetEnv::Browser);
+    // include assets during resolution
+    let ext_iter = DEFAULT_EXTENSIONS.iter().chain([".svg", ".bmp"].iter());
     // also include d.* extensions during resolution (e.g. "d.ts")
-    resolver_options.extensions = DEFAULT_EXTENSIONS
-        .iter()
+    resolver_options.extensions = ext_iter
+        .clone()
         .map(|x| x.to_string())
-        .chain(DEFAULT_EXTENSIONS.iter().map(|x| format!("{}{}", "d.", x)))
+        .chain(ext_iter.map(|x| format!("{}{}", "d.", x)))
+        .collect::<Vec<String>>();
+    // also include "source" import conditions during resolution
+    resolver_options.export_conditions = ["source"]
+        .iter()
+        .chain(DEFAULT_EXPORT_CODITIONS)
+        .map(|x| x.to_string())
         .collect::<Vec<String>>();
 
     let monorepo_resolver = MonorepoResolver::new_for_caches(root_dir, caches, resolver_options);
