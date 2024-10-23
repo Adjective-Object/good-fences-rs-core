@@ -7,14 +7,17 @@ use crate::{
     logger::Logger,
     parse::{get_file_import_export_info, ExportedSymbol},
     report::UnusedFinderReport,
-    walk::{walk_src_files, RepoPackages, WalkFileResult},
+    walk::{walk_src_files, RepoPackages, WalkedFiles},
     walked_file::ResolvedSourceFile,
 };
 use ahashmap::AHashMap;
-use anyhow::Result;
-use import_resolver::swc_resolver::MonorepoResolver;
+use anyhow::{Context, Result};
+use import_resolver::swc_resolver::{
+    combined_resolver::CombinedResolverCaches, internal_resolver::InternalOnlyResolver,
+    MonorepoResolver,
+};
 use js_err::JsErr;
-use rayon::prelude::*;
+use rayon::{iter::Either, prelude::*};
 use swc_core::ecma::loader::resolve::Resolve;
 
 #[derive(Debug)]
@@ -37,9 +40,6 @@ pub struct UnusedFinder {
     // since the last time we checked for unused files
     dirty_files: DirtyFiles,
     last_walk_result: SourceFiles,
-
-    // Resolver used to resolve import/export paths during find_unused
-    resolver: MonorepoResolver,
 }
 
 /// In-memory representation of the file tree, where imports have been resolved
@@ -59,28 +59,53 @@ struct SourceFiles {
 
 impl SourceFiles {
     fn try_resolve(
-        walk_result: WalkFileResult,
+        walk_result: WalkedFiles,
         resolver: impl Resolve,
     ) -> Result<SourceFiles, anyhow::Error> {
         // Map of source file path to source file data
-        let source_files: AHashMap<PathBuf, ResolvedSourceFile> = walk_result
-            .source_files
-            .into_par_iter()
-            .map(
-                |walked_file| -> anyhow::Result<(PathBuf, ResolvedSourceFile)> {
-                    Ok((
-                        walked_file.source_file_path.clone(),
-                        ResolvedSourceFile {
-                            import_export_info: walked_file
-                                .import_export_info
-                                .try_resolve(&walked_file.source_file_path, &resolver)?,
-                            owning_package: walked_file.owning_package,
-                            source_file_path: walked_file.source_file_path,
-                        },
-                    ))
-                },
-            )
-            .collect::<Result<_>>()?;
+        let (source_files, errors): (AHashMap<PathBuf, ResolvedSourceFile>, Vec<anyhow::Error>) =
+            walk_result
+                .source_files
+                .into_par_iter()
+                .map(
+                    |walked_file| -> anyhow::Result<(PathBuf, ResolvedSourceFile)> {
+                        Ok((
+                            walked_file.source_file_path.clone(),
+                            ResolvedSourceFile {
+                                import_export_info: walked_file
+                                    .import_export_info
+                                    .try_resolve(&walked_file.source_file_path, &resolver)
+                                    .with_context(|| {
+                                        format!(
+                                            "trying to resolve imports for file {}",
+                                            walked_file.source_file_path.display()
+                                        )
+                                    })?,
+                                owning_package: walked_file.owning_package,
+                                source_file_path: walked_file.source_file_path,
+                            },
+                        ))
+                    },
+                )
+                .partition_map::<AHashMap<PathBuf, ResolvedSourceFile>, _, _, _, _>(|r| match r {
+                    Ok(x) => Either::Left(x),
+                    Err(e) => Either::Right(e),
+                });
+
+        if !errors.is_empty() {
+            if errors.len() == 1 {
+                return Err(errors.into_iter().next().unwrap());
+            } else {
+                return Err(anyhow!(
+                    "Multiple errors occurred during resolution:\n{}",
+                    errors
+                        .into_iter()
+                        .map(|x| format!("{:#?}", x))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
+        }
 
         Ok(SourceFiles {
             source_files,
@@ -88,6 +113,27 @@ impl SourceFiles {
             ignore_files: walk_result.ignore_files,
         })
     }
+}
+
+fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl Resolve {
+    let mut caches = CombinedResolverCaches::new();
+    // pre-populate the packagejson cache with the loaded package json files
+    for package in packages.packages.iter() {
+        caches
+            .package_json_cache()
+            .prepopulate(&package.package_path, package.package_json.clone());
+    }
+
+    // TODO: rewrite the monorepo resolver to use an abstract filesystem that supports caching I/O
+    // then, use that to prepopulate the locations of files on disk. That will short-circuit the
+    // resolver going to disk.
+
+    let monorepo_resolver = MonorepoResolver::new_default_for_caches(root_dir, caches);
+    // create a new resolver that uses the source files to resolve imports
+    let walked_files_resolver =
+        InternalOnlyResolver::new_with_package_names(monorepo_resolver, packages.iter_names());
+
+    walked_files_resolver
 }
 
 impl UnusedFinder {
@@ -106,17 +152,13 @@ impl UnusedFinder {
             )));
         }
 
-        let resolver: MonorepoResolver =
-            MonorepoResolver::new_default_resolver(PathBuf::from(&config.repo_root));
-
         // perform initial walk on initialization to get an internal representation of source files
-        let resolved_walked_files = Self::walk_and_resolve_all(logger, &config, &resolver)?;
+        let resolved_walked_files = Self::walk_and_resolve_all(logger, &config)?;
 
         Ok(Self {
             config,
             dirty_files: DirtyFiles::Some(vec![]),
             last_walk_result: resolved_walked_files,
-            resolver,
         })
     }
 
@@ -158,8 +200,7 @@ impl UnusedFinder {
             DirtyFiles::All => {
                 logger.log("Refreshing all files");
                 // perform initial walk on initialization to get an internal representation of source files
-                self.last_walk_result =
-                    Self::walk_and_resolve_all(logger, &self.config, &self.resolver)?;
+                self.last_walk_result = Self::walk_and_resolve_all(logger, &self.config)?;
             }
             DirtyFiles::Some(files) => {
                 if files.is_empty() {
@@ -216,11 +257,16 @@ impl UnusedFinder {
             }
         };
 
+        let resolver = resolver_for_packages(
+            PathBuf::from(self.config.repo_root.clone()),
+            &self.last_walk_result.packages,
+        );
+
         let resolved_source_file = ResolvedSourceFile {
             owning_package,
             source_file_path: file_path.to_path_buf(),
             import_export_info: import_export_info
-                .try_resolve(file_path, &self.resolver)
+                .try_resolve(file_path, resolver)
                 .map_err(JsErr::generic_failure)?,
         };
 
@@ -232,11 +278,14 @@ impl UnusedFinder {
     fn walk_and_resolve_all(
         logger: impl Logger,
         config: &UnusedFinderConfig,
-        resolver: impl Resolve,
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
         let walked_files = walk_src_files(logger, &config.root_paths, &config.skip)
             .map_err(JsErr::generic_failure)?;
+
+        let resolver =
+            resolver_for_packages(PathBuf::from(&config.repo_root), &walked_files.packages);
+
         // TODO: gracefully handle errors during resolution
         let resolved =
             SourceFiles::try_resolve(walked_files, resolver).map_err(JsErr::generic_failure)?;

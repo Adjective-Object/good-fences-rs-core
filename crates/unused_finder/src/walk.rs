@@ -118,10 +118,14 @@ impl RepoPackages {
     pub fn contains_path(&self, path: impl AsRef<Path>) -> bool {
         self.packages_by_path.contains_key(path.as_ref())
     }
+
+    pub fn iter_names(&self) -> impl Iterator<Item = &String> {
+        self.packages_by_name.keys()
+    }
 }
 
 #[derive(Debug)]
-pub struct WalkFileResult {
+pub struct WalkedFiles {
     // hashmap of walked packages,
     // fomatted by package name -> WalkedPackage
     pub packages: RepoPackages,
@@ -136,7 +140,7 @@ pub fn walk_src_files(
     logger: impl Logger,
     root_paths: &[impl AsRef<Path> + Debug],
     ingnored_filenames: &[impl AsRef<str> + Debug],
-) -> Result<WalkFileResult, anyhow::Error> {
+) -> Result<WalkedFiles, anyhow::Error> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<WalkedFile, anyhow::Error>>();
     let mut all_walked_files: Vec<WalkedFile> = Vec::new();
     // create a mutable reference to all_walked_files, so we can
@@ -274,7 +278,7 @@ fn collect_walk(
 
 fn collect_results(
     walked_files: impl Iterator<Item = WalkedFile>,
-) -> (WalkFileResult, Vec<anyhow::Error>) {
+) -> (WalkedFiles, Vec<anyhow::Error>) {
     // partition the results
     let mut packages = RepoPackages::new();
     let mut source_files: Vec<(PathBuf, RawImportExportInfo)> = Vec::new();
@@ -310,7 +314,7 @@ fn collect_results(
         )
         .partition_map(split_errs);
 
-    let result = WalkFileResult {
+    let result = WalkedFiles {
         packages,
         source_files,
         ignore_files,
