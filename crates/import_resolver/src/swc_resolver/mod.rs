@@ -50,6 +50,33 @@ impl MonorepoResolver {
         .build()
     }
 
+    pub fn new_for_caches(
+        root_dir: PathBuf,
+        caches: CombinedResolverCaches,
+        target_env: TargetEnv,
+        alias: AHashMap<String, String>,
+        preserve_symlinks: bool,
+    ) -> Self {
+        MonorepoResolverBuilder {
+            root_dir,
+            caches,
+            resolver_builder: |caches, root_dir| {
+                caches.resolver(root_dir, target_env, alias, preserve_symlinks)
+            },
+        }
+        .build()
+    }
+
+    pub fn new_default_for_caches(root_dir: PathBuf, caches: CombinedResolverCaches) -> Self {
+        MonorepoResolver::new_for_caches(
+            root_dir,
+            caches,
+            TargetEnv::Browser,
+            AHashMap::default(),
+            true,
+        )
+    }
+
     pub fn new_default_resolver(root_dir: PathBuf) -> Self {
         MonorepoResolver::new_resolver(root_dir, TargetEnv::Browser, AHashMap::default(), true)
     }
