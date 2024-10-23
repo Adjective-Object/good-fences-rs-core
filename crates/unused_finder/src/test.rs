@@ -1,6 +1,5 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use ahashmap::AHashSet;
 use path_slash::PathBufExt;
 use test_tmpdir::{bmap, test_tmpdir};
 
@@ -8,10 +7,6 @@ use crate::{
     graph::UsedTag, logger, report::SymbolReport, UnusedFinder, UnusedFinderConfig,
     UnusedFinderReport,
 };
-
-fn set(paths: &[&str]) -> AHashSet<String> {
-    paths.iter().map(|x| x.to_string()).collect()
-}
 
 fn symbol(id: &str, tags: UsedTag) -> SymbolReport {
     SymbolReport {
@@ -142,7 +137,7 @@ fn test_package_exports_walk_roots() {
         &tmpdir,
         UnusedFinderConfig {
             root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
-            entry_packages: set(&["with-exports"]),
+            entry_packages: vec!["with-exports"].try_into().unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
@@ -176,7 +171,7 @@ fn test_root_export_symbols_used() {
         &tmpdir,
         UnusedFinderConfig {
             root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
-            entry_packages: set(&["entrypoint"]),
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
@@ -209,7 +204,7 @@ fn test_transitive_re_export() {
         &tmpdir,
         UnusedFinderConfig {
             root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
-            entry_packages: set(&["entrypoint"]),
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
@@ -240,7 +235,7 @@ fn test_partially_unused_file() {
         &tmpdir,
         UnusedFinderConfig {
             root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
-            entry_packages: set(&["entrypoint"]),
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
@@ -284,7 +279,7 @@ ignored-*.js
         &tmpdir,
         UnusedFinderConfig {
             root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
-            entry_packages: set(&["entrypoint"]),
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
