@@ -64,11 +64,6 @@ pub(crate) fn is_core_module(s: &str) -> bool {
     NODE_BUILTINS.contains(&s)
 }
 
-static DEFAULT_EXPORT_CONDITIONS: &[&str] = &[
-    // TODO: make this configurable
-    "source", "import", "require", "default",
-];
-
 // Adaptation of NodeModulesResolver from swc that stores
 // intermediate data in shared caches instead of going to disk
 // for every resolution.
@@ -90,53 +85,58 @@ pub struct CachingNodeModulesResolver<'a> {
 
     // List of export conditions to try when resolving exports
     export_conditions: Vec<String>,
+
+    // list of extensions to use when resolving files
+    extensions: Vec<String>,
 }
 
-static EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
+pub const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
+pub const DEFAULT_EXPORT_CODITIONS: &[&str] = &["import", "require", "default"];
+
+pub struct NodeModulesResolverOptions {
+    pub target_env: TargetEnv,
+    pub alias: AHashMap<String, String>,
+    pub preserve_symlinks: bool,
+    pub ignore_node_modules: bool,
+    pub extensions: Vec<String>,
+    pub export_conditions: Vec<String>,
+}
+
+impl NodeModulesResolverOptions {
+    pub fn default_for_env(target_env: TargetEnv) -> Self {
+        Self {
+            target_env,
+            alias: AHashMap::default(),
+            preserve_symlinks: false,
+            ignore_node_modules: false,
+            extensions: DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+            export_conditions: DEFAULT_EXPORT_CODITIONS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
+}
 
 impl<'caches> CachingNodeModulesResolver<'caches> {
     /// Create a node modules resolver for the target runtime environment.
     pub fn new(
-        target_env: TargetEnv,
-        alias: AHashMap<String, String>,
-        preserve_symlinks: bool,
         monorepo_root: &'caches Path,
         pkg_json_cache: &'caches PackageJsonCache,
         node_modules_cache: &'caches NodeModulesCache,
-    ) -> Self {
-        Self::new_with_export_conditions(
-            target_env,
-            alias,
-            preserve_symlinks,
-            monorepo_root,
-            pkg_json_cache,
-            node_modules_cache,
-            DEFAULT_EXPORT_CONDITIONS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        )
-    }
-
-    /// Create a node modules resolver for the target runtime environment.
-    pub fn new_with_export_conditions(
-        target_env: TargetEnv,
-        alias: AHashMap<String, String>,
-        preserve_symlinks: bool,
-        monorepo_root: &'caches Path,
-        pkg_json_cache: &'caches PackageJsonCache,
-        node_modules_cache: &'caches NodeModulesCache,
-        export_conditions: Vec<String>,
+        options: NodeModulesResolverOptions,
     ) -> Self {
         Self {
-            target_env,
-            alias,
-            preserve_symlinks,
             monorepo_root,
-            ignore_node_modules: false,
             pkg_json_cache,
             node_modules_cache,
-            export_conditions,
+            // unpack options
+            target_env: options.target_env,
+            alias: options.alias,
+            preserve_symlinks: options.preserve_symlinks,
+            ignore_node_modules: options.ignore_node_modules,
+            extensions: options.extensions,
+            export_conditions: options.export_conditions,
         }
     }
 
@@ -194,7 +194,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         if let Some(name) = path.file_name() {
             let mut ext_path = path.to_path_buf();
             let name = name.to_string_lossy();
-            for ext in EXTENSIONS {
+            for ext in self.extensions.iter() {
                 ext_path.set_file_name(format!("{}.{}", name, ext));
                 if ext_path.is_file() {
                     return Ok(Some(ext_path));
@@ -250,7 +250,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         }
 
         // Try to resolve to an index file.
-        for ext in EXTENSIONS {
+        for ext in self.extensions.iter() {
             let ext_path = path.join(format!("index.{}", ext));
             if ext_path.is_file() {
                 return Ok(Some(ext_path));
@@ -380,7 +380,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             .probe_path_iter(self.monorepo_root, &abs_base);
 
         loop {
-            // loop through the node_modules direcotires
+            // loop through the node_modules directories
             let (nm_dir_path, nm_dir_entry) = match iter.next() {
                 Some(Ok((path, entry))) => (path, entry),
                 Some(Err(e)) => return Err(e),
