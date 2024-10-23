@@ -378,11 +378,6 @@ impl UnusedFinder {
             }
         };
 
-        // only "entry packages" may export scripts
-        if !self.is_entry_package(owning_package_name) {
-            return false;
-        }
-
         // get the corresponding package of the source file
         let owning_package = match self
             .last_walk_result
@@ -398,6 +393,15 @@ impl UnusedFinder {
                 return false;
             }
         };
+
+        // only "entry packages" may export scripts
+        if !self
+            .config
+            .entry_packages
+            .matches(&owning_package.package_path, owning_package_name)
+        {
+            return false;
+        }
 
         // check if the owning package exports the file. If so, include this file as a package root.
         owning_package
@@ -449,10 +453,6 @@ impl UnusedFinder {
                 }
             })
             .collect()
-    }
-
-    fn is_entry_package(&self, package_name: &str) -> bool {
-        self.config.entry_packages.contains(package_name)
     }
 }
 
