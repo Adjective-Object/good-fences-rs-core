@@ -1,4 +1,3 @@
-extern crate serde_json;
 extern crate unused_finder;
 
 use anyhow::{Context, Result};
@@ -124,7 +123,7 @@ fn main() -> Result<()> {
 
     // read and parse the config file
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
-    let config: unused_finder::UnusedFinderJSONConfig = serde_json::from_str(&config_str)
+    let config: unused_finder::UnusedFinderJSONConfig = serde_hjson::from_str(&config_str)
         .with_context(|| format!("Parsing unused-finder config {config_path}"))?;
     let mut parsed_config: UnusedFinderConfig = config.try_into()?;
     // HACK: if the repo_root is not an absolute path, make it relative to the config file
