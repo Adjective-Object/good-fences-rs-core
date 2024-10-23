@@ -139,6 +139,7 @@ pub struct WalkedFiles {
 pub fn walk_src_files(
     logger: impl Logger,
     root_paths: &[impl AsRef<Path> + Debug],
+    repo_root_path: impl AsRef<Path>,
     ingnored_filenames: &[impl AsRef<str> + Debug],
 ) -> Result<WalkedFiles, anyhow::Error> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<WalkedFile, anyhow::Error>>();
@@ -176,6 +177,10 @@ pub fn walk_src_files(
                 }
             }
         }
+
+        let ignore_file =
+            IgnoreFile::read(repo_root_path.as_ref().to_path_buf().join(".unusedignore"))?;
+        tx.send(Ok(WalkedFile::IgnoreFile(ignore_file))).unwrap();
 
         // drop the sender to signal the collector thread to stop
         drop(tx);
@@ -373,5 +378,51 @@ fn split_errs<A, B>(x: Result<A, B>) -> Either<A, B> {
     match x {
         Ok(file) => Either::Left(file),
         Err(e) => Either::Right(e),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::logger::StdioLogger;
+
+    use super::*;
+    use test_tmpdir::test_tmpdir;
+
+    #[test]
+    fn test_discovers_root_unusedignore() {
+        let tmpdir = test_tmpdir!(
+            ".unusedignore" => r#"
+                src/ignored.js
+            "#,
+            "packages/.unusedignore" => r#"
+                *.pkgs-ignored.ts
+            "#,
+            "shared/.unusedignore" => r#"
+                *.shared-ignored.ts
+            "#
+        );
+
+        let test_logger = StdioLogger {};
+        let walk_result = walk_src_files(
+            &test_logger,
+            &[tmpdir.root().join("packages"), tmpdir.root().join("shared")],
+            tmpdir.root(),
+            &["*.ignored.ts"],
+        );
+
+        let walk_result = walk_result.unwrap();
+        assert!(walk_result
+            .ignore_files
+            .iter()
+            .any(|x| x.path == tmpdir.root().join("packages")),);
+        assert!(walk_result
+            .ignore_files
+            .iter()
+            .any(|x| x.path == tmpdir.root().join("shared")),);
+        assert!(walk_result
+            .ignore_files
+            .iter()
+            .any(|x| x.path == tmpdir.root()));
+        assert_eq!(walk_result.ignore_files.len(), 3);
     }
 }
