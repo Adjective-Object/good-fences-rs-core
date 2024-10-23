@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Error};
 use std::path::Path;
-use swc_common::{collections::AHashMap, FileName};
+use swc_common::FileName;
 use swc_core::ecma::loader::resolve::Resolution;
-use swc_ecma_loader::{resolve::Resolve, TargetEnv};
+use swc_ecma_loader::resolve::Resolve;
 
 use super::{
-    node_resolver::{CachingNodeModulesResolver, NodeModulesCache, PackageJsonCache},
+    node_resolver::{
+        CachingNodeModulesResolver, NodeModulesCache, NodeModulesResolverOptions, PackageJsonCache,
+    },
     tsconfig::ProcessedTsconfig,
     tsconfig_resolver::{TsconfigCache, TsconfigPathsResolver},
 };
@@ -30,43 +32,16 @@ impl CombinedResolverCaches {
     pub fn resolver<'a>(
         &'a self,
         root_dir: &'a Path,
-        target_env: TargetEnv,
-        alias: AHashMap<String, String>,
-        preserve_symlinks: bool,
+        options: NodeModulesResolverOptions,
     ) -> CombinedResolver<'a> {
         CombinedResolver::<'a> {
             root_dir,
             tsconfig_cache: &self.tsconfig_cache,
             node_modules_resolver: CachingNodeModulesResolver::new(
-                target_env,
-                alias,
-                preserve_symlinks,
                 root_dir,
                 &self.package_json_cache,
                 &self.node_modules_cache,
-            ),
-        }
-    }
-
-    pub fn resolver_with_export_conditions<'a>(
-        &'a self,
-        root_dir: &'a Path,
-        target_env: TargetEnv,
-        alias: AHashMap<String, String>,
-        preserve_symlinks: bool,
-        export_conditions: Vec<String>,
-    ) -> CombinedResolver<'a> {
-        CombinedResolver::<'a> {
-            root_dir,
-            tsconfig_cache: &self.tsconfig_cache,
-            node_modules_resolver: CachingNodeModulesResolver::new_with_export_conditions(
-                target_env,
-                alias,
-                preserve_symlinks,
-                root_dir,
-                &self.package_json_cache,
-                &self.node_modules_cache,
-                export_conditions,
+                options,
             ),
         }
     }
@@ -141,6 +116,7 @@ impl<'a> Resolve for CombinedResolver<'a> {
 mod test {
     use super::*;
     use pretty_assertions::assert_eq;
+    use swc_ecma_loader::TargetEnv;
 
     fn check_deadlocks() {
         std::thread::spawn(move || loop {
@@ -182,7 +158,10 @@ mod test {
         );
 
         let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolver = caches.resolver(
+            tmp.root(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+        );
 
         let resolution = resolver
             .resolve(
@@ -224,7 +203,10 @@ mod test {
         );
 
         let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolver = caches.resolver(
+            tmp.root(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+        );
         let resolution = resolver
             .resolve(
                 &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
@@ -261,7 +243,10 @@ mod test {
         );
 
         let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolver = caches.resolver(
+            tmp.root(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+        );
         let resolution = resolver
             .resolve(
                 &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
@@ -307,7 +292,10 @@ mod test {
         );
 
         let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolver = caches.resolver(
+            tmp.root(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+        );
         let resolution = resolver
             .resolve(
                 &FileName::Real(tmp.root_join("t/packages/my/importing/module.ts")),
@@ -345,7 +333,10 @@ mod test {
         );
 
         let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(tmp.root(), TargetEnv::Node, Default::default(), false);
+        let resolver = caches.resolver(
+            tmp.root(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+        );
         let resolution = resolver
             .resolve(
                 &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
@@ -384,7 +375,10 @@ mod test {
 
         let caches = CombinedResolverCaches::new();
         let sub_root = tmp.root_join("root");
-        let resolver = caches.resolver(&sub_root, TargetEnv::Node, Default::default(), false);
+        let resolver = caches.resolver(
+            &sub_root,
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+        );
         let resolution = resolver
             .resolve(
                 &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
@@ -431,13 +425,9 @@ mod test {
             let caches = CombinedResolverCaches::new();
 
             // resolve with import
-            let import_resolver = caches.resolver_with_export_conditions(
-                tmp.root(),
-                TargetEnv::Node,
-                Default::default(),
-                false,
-                conditions.into_iter().map(|s| s.to_string()).collect(),
-            );
+            let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+            options.export_conditions = conditions.into_iter().map(|s| s.to_string()).collect();
+            let import_resolver = caches.resolver(tmp.root(), options);
             import_resolver
                 .resolve(&FileName::Real(tmp.root().join(from)), to)
                 .unwrap()
