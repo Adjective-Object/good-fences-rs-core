@@ -254,7 +254,11 @@ impl std::error::Error for JsErr {
 #[cfg(feature = "napi")]
 impl From<JsErr> for napi::Error {
     fn from(val: JsErr) -> Self {
-        napi::Error::new(val.status.into(), val.err)
+        if let Some(annyhow_err) = val.err.downcast_ref::<anyhow::Error>() {
+            napi::Error::new(val.status.into(), format!("{:#}", annyhow_err))
+        } else {
+            napi::Error::new(val.status.into(), val.err)
+        }
     }
 }
 
