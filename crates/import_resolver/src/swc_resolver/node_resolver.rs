@@ -373,7 +373,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             return Ok(None);
         }
 
-        let abs_base = to_absolute_path(base_dir)?;
+        let abs_base = to_absolute_path(self.monorepo_root, base_dir)?;
 
         let mut iter = self
             .node_modules_cache
@@ -619,9 +619,9 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 } else {
                     let result = self
                         .resolve_node_modules(base_dir, target)
-                        .and_then(|path| {
-                            let current_directory = current_dir()?;
+                        .and_then(|path: Option<PathBuf>| {
                             let file_path = path.with_context(|| format!("failed find a node_modules path within {} for package {:?} above {}", self.monorepo_root.display(), target, base_dir.display()))?;
+                            let current_directory = current_dir()?;
                             let relative_path = diff_paths(&file_path, &current_directory);
                             self.wrap(relative_path).with_context(|| {
                                 format!(
@@ -654,7 +654,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                             PackageJsonRewriteData::create(self, pkg_path, pkgjson)
                         })?;
 
-                        let as_abspath = to_absolute_path(path)?;
+                        let as_abspath = to_absolute_path(self.monorepo_root, path)?;
                         let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
                         return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
                             format!(
