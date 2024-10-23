@@ -308,7 +308,6 @@ impl UnusedFinder {
     pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedFinderResult, JsErr> {
         // Scan the file-system for changed files
         self.update_dirty_files(logger)?;
-        logger.log(format!("walked files: {:#?}", self.last_walk_result));
 
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
@@ -343,10 +342,6 @@ impl UnusedFinder {
             .par_iter()
             .filter_map(|(file_path, source_file)| {
                 let export = self.is_entry_package_export(logger, file_path, source_file);
-                logger.log(format!(
-                    "entrypoints:: check path {} : {export}",
-                    file_path.display()
-                ));
                 if export || self.is_file_ignored(file_path) {
                     Some(file_path.clone())
                 } else {
