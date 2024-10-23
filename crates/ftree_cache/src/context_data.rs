@@ -147,7 +147,7 @@ where
         f: TFn,
     ) -> Result<WCMappedReadGuard<'a, TDerived>>
     where
-        TFn: Fn(&'a TVal) -> Result<TDerived>,
+        TFn: FnOnce(&'a TVal) -> Result<TDerived>,
     {
         // most of the time, we expect this to already be initialized, so try to read it first
         {
