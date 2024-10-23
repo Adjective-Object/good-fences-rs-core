@@ -48,14 +48,14 @@ pub struct UnusedFinder {
 /// to file-paths.
 #[derive(Debug)]
 struct SourceFiles {
-    // The packages discovered during the walk, with some additional metadata
-    // in order to allow looking up by either path or package name.
+    /// The packages discovered during the walk, with some additional metadata
+    /// in order to allow looking up by either path or package name.
     packages: RepoPackages,
-    // TODO process Walked Source Files into resolved source files?
+    /// Map of source file paths to the resolved source files
     source_files: AHashMap<PathBuf, ResolvedSourceFile>,
-    // List of "ignore" files discovered during the walk, which denote files that
-    // should be ignored entirely when checking for unused symbols. Those files
-    // are recursively ignored.
+    /// List of "ignore" files discovered during the walk, which denote files that
+    /// should be ignored entirely when checking for unused symbols. Those files
+    /// are recursively ignored.
     ignore_files: Vec<IgnoreFile>,
 }
 
@@ -298,8 +298,9 @@ impl UnusedFinder {
         config: &UnusedFinderConfig,
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
-        let walked_files = walk_src_files(logger, &config.root_paths, &config.skip)
-            .map_err(JsErr::generic_failure)?;
+        let walked_files =
+            walk_src_files(logger, &config.root_paths, &config.repo_root, &config.skip)
+                .map_err(JsErr::generic_failure)?;
 
         let resolver =
             resolver_for_packages(PathBuf::from(&config.repo_root), &walked_files.packages);
