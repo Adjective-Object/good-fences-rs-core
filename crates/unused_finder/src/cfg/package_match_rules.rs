@@ -35,7 +35,6 @@ impl PackageMatchRules {
                 path_string = package_path.to_string_lossy().into_owned();
                 &path_string
             });
-            println!("{pattern}, {path_string_ref:?}");
             if pattern.matches(path_string_ref) {
                 return true;
             }
