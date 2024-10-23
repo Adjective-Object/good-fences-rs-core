@@ -13,12 +13,14 @@ use crate::{
 use ahashmap::AHashMap;
 use anyhow::{Context, Result};
 use import_resolver::swc_resolver::{
-    combined_resolver::CombinedResolverCaches, internal_resolver::InternalOnlyResolver,
+    combined_resolver::CombinedResolverCaches,
+    internal_resolver::InternalOnlyResolver,
+    node_resolver::{NodeModulesResolverOptions, DEFAULT_EXTENSIONS},
     MonorepoResolver,
 };
 use js_err::JsErr;
 use rayon::{iter::Either, prelude::*};
-use swc_core::ecma::loader::resolve::Resolve;
+use swc_core::ecma::loader::{resolve::Resolve, TargetEnv};
 
 #[derive(Debug)]
 enum DirtyFiles {
@@ -128,7 +130,16 @@ fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl Res
     // then, use that to prepopulate the locations of files on disk. That will short-circuit the
     // resolver going to disk.
 
-    let monorepo_resolver = MonorepoResolver::new_default_for_caches(root_dir, caches);
+    // create a new monorepo resolver
+    let mut resolver_options = NodeModulesResolverOptions::default_for_env(TargetEnv::Browser);
+    // also include d.* extensions during resolution (e.g. "d.ts")
+    resolver_options.extensions = DEFAULT_EXTENSIONS
+        .iter()
+        .map(|x| x.to_string())
+        .chain(DEFAULT_EXTENSIONS.iter().map(|x| format!("{}{}", "d.", x)))
+        .collect::<Vec<String>>();
+
+    let monorepo_resolver = MonorepoResolver::new_for_caches(root_dir, caches, resolver_options);
     // create a new resolver that uses the source files to resolve imports
     let walked_files_resolver =
         InternalOnlyResolver::new_with_package_names(monorepo_resolver, packages.iter_names());

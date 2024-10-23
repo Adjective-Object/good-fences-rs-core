@@ -1,22 +1,19 @@
 use anyhow::Error;
 use combined_resolver::{CombinedResolver, CombinedResolverCaches};
-use common::AHashMap;
 use core::fmt;
+use node_resolver::NodeModulesResolverOptions;
 use ouroboros::self_referencing;
 use std::{
     fmt::{Debug, Formatter},
     path::PathBuf,
 };
 use swc_common::FileName;
-use swc_ecma_loader::{
-    resolve::{Resolution, Resolve},
-    TargetEnv,
-};
+use swc_ecma_loader::resolve::{Resolution, Resolve};
 
 pub mod combined_resolver;
 mod common;
 pub mod internal_resolver;
-mod node_resolver;
+pub mod node_resolver;
 mod pkgjson_rewrites;
 mod tsconfig;
 mod tsconfig_resolver;
@@ -34,51 +31,21 @@ pub struct MonorepoResolver {
 }
 
 impl MonorepoResolver {
-    pub fn new_resolver(
-        root_dir: PathBuf,
-        target_env: TargetEnv,
-        alias: AHashMap<String, String>,
-        preserve_symlinks: bool,
-    ) -> Self {
-        MonorepoResolverBuilder {
-            root_dir,
-            caches: CombinedResolverCaches::new(),
-            resolver_builder: |caches, root_dir| {
-                caches.resolver(root_dir, target_env, alias, preserve_symlinks)
-            },
-        }
-        .build()
+    pub fn new_resolver(root_dir: PathBuf, options: NodeModulesResolverOptions) -> Self {
+        Self::new_for_caches(root_dir, CombinedResolverCaches::new(), options)
     }
 
     pub fn new_for_caches(
         root_dir: PathBuf,
         caches: CombinedResolverCaches,
-        target_env: TargetEnv,
-        alias: AHashMap<String, String>,
-        preserve_symlinks: bool,
+        options: NodeModulesResolverOptions,
     ) -> Self {
         MonorepoResolverBuilder {
             root_dir,
             caches,
-            resolver_builder: |caches, root_dir| {
-                caches.resolver(root_dir, target_env, alias, preserve_symlinks)
-            },
+            resolver_builder: |caches, root_dir| caches.resolver(root_dir, options),
         }
         .build()
-    }
-
-    pub fn new_default_for_caches(root_dir: PathBuf, caches: CombinedResolverCaches) -> Self {
-        MonorepoResolver::new_for_caches(
-            root_dir,
-            caches,
-            TargetEnv::Browser,
-            AHashMap::default(),
-            true,
-        )
-    }
-
-    pub fn new_default_resolver(root_dir: PathBuf) -> Self {
-        MonorepoResolver::new_resolver(root_dir, TargetEnv::Browser, AHashMap::default(), true)
     }
 }
 
