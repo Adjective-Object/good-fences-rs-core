@@ -37,6 +37,13 @@ impl ContextData for () {
     }
 }
 
+/// Type that wraps an inner type, and stores a cache alongside the data.
+///
+/// The cache is initialized with the default value of the cached type, and may be updated
+/// by calling `get_cached_mut()`.
+///
+/// This is for data that requires a mutable cache stored alongside it, e.g. for
+/// caching lazily-computed resolutions into a package.
 #[derive(Debug)]
 pub struct WithCache<TVal: ContextData<TArgs>, TCached: Default, TArgs: Copy = ()> {
     _phantom_targs: std::marker::PhantomData<TArgs>,
@@ -60,6 +67,22 @@ where
             inner,
             cached: RwLock::new(TCached::default()),
         }))
+    }
+}
+
+/// Convenience implementation that allows automatically wrapping the inner value with
+/// a cache that is initialized with the default value of the cached type.
+impl<TVal, TCached, TArgs: Copy> From<TVal> for WithCache<TVal, TCached, TArgs>
+where
+    TVal: ContextData<TArgs>,
+    TCached: Default,
+{
+    fn from(value: TVal) -> Self {
+        Self {
+            _phantom_targs: Default::default(),
+            inner: value,
+            cached: RwLock::new(Default::default()),
+        }
     }
 }
 
@@ -179,6 +202,7 @@ pub type CtxRef<'a, T> = dashmap::mapref::one::Ref<'a, PathBuf, T>;
 #[cfg(not(feature = "deadlock_ref"))]
 pub type CtxOptRef<'a, T> = dashmap::mapref::one::MappedRef<'a, PathBuf, Option<T>, T>;
 
+/// convenience implementation that allows constructing a FileContextCache that has no arguments
 impl<T: ContextData<()>, const CONTEXT_FNAME: &'static str> FileContextCache<T, CONTEXT_FNAME, ()> {
     pub fn new() -> Self {
         Self {
@@ -200,6 +224,11 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     FileContextCache<T, CONTEXT_FNAME, TArgs>
 {
     const MAX_PROBE_DEPTH: i64 = 1000;
+
+    /// Prepopulates a sub-path of the cache with a given value
+    pub fn prepopulate(&self, path: &Path, data: impl Into<T>) {
+        self.cache.insert(path.to_owned(), Some(data.into()));
+    }
 
     /// Checks the given path for a context file (e.g. a package.json file or a tsconfig.json file)
     ///
@@ -283,7 +312,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
                         Ok(x)
                     })?;
             // downgrade mutable ref to non-mutable ref
-            return Ok(res.downgrade());
+            Ok(res.downgrade())
         };
 
         #[cfg(feature = "deadlock_ref")]
