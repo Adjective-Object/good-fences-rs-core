@@ -94,5 +94,14 @@ mod test {
             split_package_import("@react/react-dom/server"),
             Some(("@react/react-dom", "./server".to_string()))
         );
+        assert_eq!(
+            split_package_import(
+                "owa-webpush-serviceworker/lib/polyfill/xmlhttprequest/XMLHttpRequestPolyfill"
+            ),
+            Some((
+                "owa-webpush-serviceworker",
+                "./lib/polyfill/xmlhttprequest/XMLHttpRequestPolyfill".to_string()
+            ))
+        );
     }
 }
