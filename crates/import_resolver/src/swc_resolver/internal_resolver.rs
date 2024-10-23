@@ -25,6 +25,20 @@ impl<R> InternalOnlyResolver<R> {
         }
     }
 
+    pub fn new_with_package_names(
+        inner_resolver: R,
+        package_names: impl Iterator<Item = impl AsRef<str>>,
+    ) -> Self {
+        let mut internal_packages = HashSet::new();
+        for name in package_names {
+            internal_packages.insert(name.as_ref().to_string());
+        }
+        InternalOnlyResolver {
+            internal_packages,
+            inner_resolver,
+        }
+    }
+
     pub fn add_package(&mut self, package: &PackageJson) {
         if let Some(name) = &package.name {
             self.internal_packages.insert(name.clone());

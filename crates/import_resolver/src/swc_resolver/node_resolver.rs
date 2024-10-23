@@ -537,7 +537,12 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 .resolve_as_file(path)
                 .or_else(|_| self.resolve_as_directory(path, false))
             {
-                if let Ok(file) = self.wrap(file) {
+                if let Ok(file) = self.wrap(file).with_context(|| {
+                    format!(
+                        "failed to resolve relative module specifier {:#?} from {:#?}",
+                        module_specifier, base,
+                    )
+                }) {
                     return Ok(file);
                 }
             }
@@ -581,7 +586,12 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 let path = PathBuf::from(target_path);
                 self.resolve_as_file(&path)
                     .or_else(|_| self.resolve_as_directory(&path, true))
-                    .and_then(|p| self.wrap(p))
+                    .and_then(|p| self.wrap(p).with_context(|| {
+                        format!(
+                            "failed to resolve absolute target path {:#?}",
+                            module_specifier,
+                        )
+                    }))
             } else {
                 let mut components = target_path.components();
 
@@ -600,15 +610,26 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     let path = base_dir.join(target);
                     self.resolve_as_file(&path)
                         .or_else(|_| self.resolve_as_directory(&path, true))
-                        .and_then(|p| self.wrap(p))
+                        .and_then(|p| self.wrap(p).with_context(|| {
+                            format!(
+                                "failed to resolve non-absolute target path {}",
+                                path.display(),
+                            )
+                        }))
                 } else {
                     let result = self
                         .resolve_node_modules(base_dir, target)
                         .and_then(|path| {
-                            let file_path = path.with_context(|| format!("failed find a node_modules path within {} for package {:?} above {}", self.monorepo_root.display(), target, base_dir.display()));
                             let current_directory = current_dir()?;
-                            let relative_path = diff_paths(file_path?, current_directory);
-                            self.wrap(relative_path)
+                            let file_path = path.with_context(|| format!("failed find a node_modules path within {} for package {:?} above {}", self.monorepo_root.display(), target, base_dir.display()))?;
+                            let relative_path = diff_paths(&file_path, &current_directory);
+                            self.wrap(relative_path).with_context(|| {
+                                format!(
+                                    "failed to diff node_modules path {} against {}",
+                                    file_path.display(),
+                                    current_directory.display(),
+                                )
+                            })
                         });
 
                     tracing::debug!(
@@ -635,7 +656,12 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
                         let as_abspath = to_absolute_path(path)?;
                         let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
-                        return self.wrap(Some(rewrite.to_path_buf()));
+                        return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
+                            format!(
+                                "failed to rewrite browser path {:#?} for {:#?}",
+                                path, module_specifier,
+                            )
+                        });
                     }
                 }
             }
@@ -646,7 +672,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
     }
 }
 
-impl<'a> Resolve for CachingNodeModulesResolver<'a> {
+impl Resolve for CachingNodeModulesResolver<'_> {
     fn resolve(&self, base: &FileName, module_specifier: &str) -> Result<Resolution, Error> {
         self.resolve_filename(base, module_specifier)
             .map(|filename| Resolution {

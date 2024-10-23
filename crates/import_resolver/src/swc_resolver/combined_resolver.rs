@@ -34,7 +34,7 @@ impl CombinedResolverCaches {
         alias: AHashMap<String, String>,
         preserve_symlinks: bool,
     ) -> CombinedResolver<'a> {
-        return CombinedResolver::<'a> {
+        CombinedResolver::<'a> {
             root_dir,
             tsconfig_cache: &self.tsconfig_cache,
             node_modules_resolver: CachingNodeModulesResolver::new(
@@ -45,7 +45,7 @@ impl CombinedResolverCaches {
                 &self.package_json_cache,
                 &self.node_modules_cache,
             ),
-        };
+        }
     }
 
     pub fn resolver_with_export_conditions<'a>(
@@ -56,7 +56,7 @@ impl CombinedResolverCaches {
         preserve_symlinks: bool,
         export_conditions: Vec<String>,
     ) -> CombinedResolver<'a> {
-        return CombinedResolver::<'a> {
+        CombinedResolver::<'a> {
             root_dir,
             tsconfig_cache: &self.tsconfig_cache,
             node_modules_resolver: CachingNodeModulesResolver::new_with_export_conditions(
@@ -68,7 +68,7 @@ impl CombinedResolverCaches {
                 &self.node_modules_cache,
                 export_conditions,
             ),
-        };
+        }
     }
 
     /// Mark the files files in the given path as dirty
@@ -76,6 +76,11 @@ impl CombinedResolverCaches {
         self.tsconfig_cache.mark_dirty_root(root);
         self.node_modules_cache.mark_dirty_root(root);
         self.package_json_cache.mark_dirty_root(root);
+    }
+
+    // pre-populate a package json cache with a package.json file
+    pub fn package_json_cache(&mut self) -> &mut PackageJsonCache {
+        &mut self.package_json_cache
     }
 }
 
