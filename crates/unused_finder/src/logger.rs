@@ -4,15 +4,20 @@ pub trait Logger: Send + Sync + Copy {
     fn log(&self, message: impl Into<String>);
 }
 
-pub struct StdioLogger {}
+pub struct StdioLogger {
+    zero_time: std::time::Instant,
+}
 impl Logger for &StdioLogger {
     fn log(&self, message: impl Into<String>) {
-        println!("{}", message.into());
+        let delta_time = std::time::Instant::now().duration_since(self.zero_time);
+        println!("[{:.04}] {}", delta_time.as_secs_f64(), message.into());
     }
 }
 impl StdioLogger {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            zero_time: std::time::Instant::now(),
+        }
     }
 }
 impl Default for StdioLogger {
