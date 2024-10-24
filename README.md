@@ -164,3 +164,11 @@ cargo test -p unused_finder --no-run
 # Then, run samply on the test binary binary
 samply record target/debug/deps/unused_finder-3aa70b00191bd4df
 ```
+
+### Note: Working in WSL
+The devcontainer is configured to allow perf events, but the host system must also be configured to allow perf events. On windows, devcontainers will probably be running under wsl. This means opening up wsl, and running the following:
+```sh
+# from within WSL
+echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
+```
+Then, close and restart your devcontainers
