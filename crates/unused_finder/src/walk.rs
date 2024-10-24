@@ -166,7 +166,7 @@ pub fn walk_src_files(
 
         // Parallel walk of each root path in sequence
         for root_path in root_paths {
-            match build_walk(root_path, ignored_filenames) {
+            match build_walk(logger, root_path, ignored_filenames) {
                 Ok(walk) => collect_walk(walk, &tx),
                 Err(e) => {
                     return Err(anyhow!(format!(
@@ -217,6 +217,7 @@ pub fn walk_src_files(
 pub const DEFAULT_OVERRIDE_PATTERNS: &[&str] = &["!node_modules", "!lib", "!target"];
 
 fn build_walk(
+    logger: impl Logger,
     root_path: impl AsRef<Path>,
     ingnored_filenames: &[impl AsRef<str>],
 ) -> Result<ignore::WalkParallel, anyhow::Error> {
@@ -253,13 +254,24 @@ fn build_walk(
         .context("Failed to build overrides")?;
 
     // build the walker
-    let mut walk_builder = ignore::WalkBuilder::new(root_path);
+    let mut walk_builder = ignore::WalkBuilder::new(root_path.as_ref());
 
     // configure the builder;
     walk_builder.standard_filters(false).hidden(true);
     if !overrides.is_empty() {
         walk_builder.overrides(overrides);
     }
+
+    // build the walk. Note that we do work in the walker thread's callbacks, so we
+    // actually want more than the normal number of threads to be available.
+    let available_threads: usize = std::thread::available_parallelism()
+        .map(|x| x.into())
+        .unwrap_or(0);
+    logger.log(format!(
+        "Walking {root_path} using {available_threads} threads..",
+        root_path = root_path.as_ref().display(),
+    ));
+    walk_builder.threads(available_threads);
 
     Ok(walk_builder.build_parallel())
 }
