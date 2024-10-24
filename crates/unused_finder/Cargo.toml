@@ -35,6 +35,7 @@ const_format = "0.2.33"
 ahashmap = { path = "../ahashmap" }
 bitflags = "2.6.0"
 ignore = "0.4.23"
+abspath = { version = "0.2.0", path = "../abspath" }
 
 [features]
 default = []

@@ -13,6 +13,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "abspath"
+version = "0.2.0"
+dependencies = [
+ "path-clean 0.1.0",
+ "thiserror",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1037,6 +1045,7 @@ dependencies = [
 name = "import_resolver"
 version = "0.2.0"
 dependencies = [
+ "abspath",
  "anyhow",
  "copy_from_str",
  "dashmap 6.0.1",
@@ -3660,6 +3669,7 @@ dependencies = [
 name = "unused_finder"
 version = "0.2.0"
 dependencies = [
+ "abspath",
  "ahashmap",
  "anyhow",
  "bitflags",
