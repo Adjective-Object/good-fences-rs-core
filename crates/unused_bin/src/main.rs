@@ -3,7 +3,10 @@ extern crate unused_finder;
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::{convert::TryInto, env, fs, path::Path};
-use unused_finder::{logger::StdioLogger, UnusedFinderConfig};
+use unused_finder::{
+    logger::{Logger, StdioLogger},
+    UnusedFinderConfig,
+};
 
 #[derive(Parser, Debug)]
 struct CliArgs {
@@ -99,6 +102,8 @@ fn start_stackdump_timer() {
 }
 
 fn main() -> Result<()> {
+    let logger = &StdioLogger::new();
+
     let args = CliArgs::parse();
     #[cfg(feature = "rstack")]
     if args.rstack {
@@ -115,11 +120,11 @@ fn main() -> Result<()> {
     }
 
     let config_path = args.config_path.unwrap_or_else(|| {
-        println!("No config file path provided, using default config file path");
+        logger.log("No config file path provided, using default config file path");
         DEFAULT_CONFIG_PATH.to_string()
     });
 
-    println!("reading config from path {config_path}");
+    logger.log(format!("reading config from path {config_path}"));
 
     // read and parse the config file
     let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
@@ -142,17 +147,15 @@ fn main() -> Result<()> {
         .expect("Failed to get parent directory of config file")
         .to_path_buf();
 
-    println!("working in {}..", config_dir.display());
+    logger.log(format!("working in {}..", config_dir.display()));
     env::set_current_dir(&config_dir)
         .expect("Failed to change working directory to config file directory");
 
-    let logger = StdioLogger::new();
-    let start_time = std::time::Instant::now();
-    let mut unused_finder = unused_finder::UnusedFinder::new_from_cfg(&logger, parsed_config)?;
-    let result = unused_finder.find_unused(&logger)?;
+    let mut unused_finder = unused_finder::UnusedFinder::new_from_cfg(logger, parsed_config)?;
+    let result = unused_finder.find_unused(logger)?;
     let report = result.get_report();
-    let delta_ms = start_time.elapsed().as_millis();
-    println!("result ({delta_ms}ms):\n{report}");
+    logger.log(format!("result:\n{report}"));
 
+    logger.log("done!");
     Ok(())
 }

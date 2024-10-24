@@ -423,7 +423,7 @@ mod test {
             "#
         );
 
-        let test_logger = StdioLogger {};
+        let test_logger = StdioLogger::new();
         let walk_result = walk_src_files(
             &test_logger,
             &[tmpdir.root().join("packages"), tmpdir.root().join("shared")],
@@ -458,7 +458,7 @@ mod test {
             "#
         );
 
-        let test_logger = StdioLogger {};
+        let test_logger = StdioLogger::new();
         let walk_result = walk_src_files(
             &test_logger,
             &[tmpdir.root().join("packages"), tmpdir.root().join("shared")],
