@@ -6,7 +6,7 @@
 use super::common::AHashMap;
 use super::pkgjson_rewrites::PackageJsonRewriteData;
 use super::util;
-use super::util::to_absolute_path;
+use abspath::join_abspath;
 use anyhow::{bail, Context, Error, Result};
 use ftree_cache::context_data::{FileContextCache, WithCache};
 use packagejson::exported_path::ExportedPathRef;
@@ -373,7 +373,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             return Ok(None);
         }
 
-        let abs_base = to_absolute_path(self.monorepo_root, base_dir)?;
+        let abs_base = join_abspath(self.monorepo_root, base_dir)?;
 
         let mut iter = self
             .node_modules_cache
@@ -654,7 +654,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                             PackageJsonRewriteData::create(self, pkg_path, pkgjson)
                         })?;
 
-                        let as_abspath = to_absolute_path(self.monorepo_root, path)?;
+                        let as_abspath = join_abspath(self.monorepo_root, path)?;
                         let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
                         return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
                             format!(
