@@ -306,8 +306,13 @@ impl UnusedFinder {
             resolver_for_packages(PathBuf::from(&config.repo_root), &walked_files.packages);
 
         // TODO: gracefully handle errors during resolution
+        logger.log(format!(
+            "Resolving {} files...",
+            walked_files.source_files.len()
+        ));
         let resolved =
             SourceFiles::try_resolve(walked_files, resolver).map_err(JsErr::generic_failure)?;
+        logger.log("Done resolving files");
         Ok(resolved)
     }
 
@@ -320,6 +325,11 @@ impl UnusedFinder {
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
         // Get the walk roots and perform the graph traversal
+        logger.log(format!(
+            "Starting {} graph traversal with {} entrypoints",
+            UsedTag::FROM_ENTRY,
+            self.get_entrypoints(logger).len()
+        ));
         graph
             .traverse_bfs(
                 logger,
@@ -329,12 +339,17 @@ impl UnusedFinder {
             )
             .map_err(JsErr::generic_failure)?;
 
+        logger.log(format!(
+            "Starting {} graph traversal with {} entrypoints",
+            UsedTag::FROM_IGNORED,
+            self.get_entrypoints(logger).len()
+        ));
         graph
             .traverse_bfs(
                 logger,
                 self.get_ignored_files(),
                 self.get_ignored_symbols(),
-                UsedTag::FROM_ENTRY,
+                UsedTag::FROM_IGNORED,
             )
             .map_err(JsErr::generic_failure)?;
 
