@@ -166,12 +166,13 @@ pub fn walk_src_files(
 
         // Parallel walk of each root path in sequence
         for root_path in root_paths {
-            match build_walk(logger, root_path, ignored_filenames) {
+            let abs_root_path = abspath::join_abspath(&repo_root_path, root_path)?;
+            match build_walk(logger, &abs_root_path, ignored_filenames) {
                 Ok(walk) => collect_walk(walk, &tx),
                 Err(e) => {
                     return Err(anyhow!(format!(
                         "Error constructing walk over {}: {}",
-                        root_path.as_ref().display(),
+                        &abs_root_path.display(),
                         e
                     )));
                 }
