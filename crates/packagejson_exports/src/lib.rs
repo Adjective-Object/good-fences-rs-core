@@ -328,7 +328,7 @@ impl PackageExportRewriteData {
 
     /// Checks if a given package-relative path is exported or not.
     /// Returns the set of conditions that export that path.
-    pub fn is_exported<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
+    pub fn get_exported_conditions<'a>(&'a self, package_relative_path: &str) -> Vec<&'a str> {
         let mut clean_dest = String::new();
         let cleaned_path = clean_path_avoid_alloc(package_relative_path, &mut clean_dest);
 
@@ -372,6 +372,43 @@ impl PackageExportRewriteData {
         }
 
         accum
+    }
+
+    /// Checks if a given package-relative path is exported or not.
+    /// Returns the set of conditions that export that path.
+    pub fn is_exported(&self, package_relative_path: &str) -> bool {
+        let mut clean_dest = String::new();
+        let cleaned_path = clean_path_avoid_alloc(package_relative_path, &mut clean_dest);
+
+        for (_, exported) in self.static_exports.iter() {
+            if let ExportedPath::Exported(exported_path) = exported {
+                if cleaned_path == exported_path {
+                    return true;
+                }
+            }
+        }
+
+        for (_, exports) in self.directory_exports.iter() {
+            for (_, exported) in exports {
+                if let ExportedPath::Exported(exported_dir_path) = exported {
+                    if cleaned_path.starts_with(exported_dir_path) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        for (_, exports) in self.star_exports.iter() {
+            for (_, exported) in exports {
+                if let ExportedPath::Exported(exported_star_pattern) = exported {
+                    if reverse_match_star_pattern(exported_star_pattern, cleaned_path) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
@@ -468,14 +505,13 @@ mod test {
         let mut these_results = BTreeMap::<&'static str, Vec<String>>::new();
         let mut these_expected = BTreeMap::<&'static str, Vec<String>>::new();
         for (input, output) in test_case.expected {
-            these_results.insert(
-                input,
-                parsed_exports
-                    .is_exported(input)
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect(),
-            );
+            let conditions: Vec<_> = parsed_exports
+                .get_exported_conditions(input)
+                .iter()
+                .map(|x| x.to_string())
+                .collect();
+            assert_eq!(conditions.is_empty(), parsed_exports.is_exported(input));
+            these_results.insert(input, conditions);
             these_expected.insert(input, output.iter().map(|x| x.to_string()).collect());
         }
 
