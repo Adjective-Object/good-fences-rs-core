@@ -1,13 +1,10 @@
 [toolchain]
-channel = "nightly-2024-10-20"
+channel = "nightly-2024-10-25"
+profile = "default"
 components = [
-    # default components
-    "cargo",
-    "clippy",
-    "rust-docs",
-    "rust-std",
-    "rustc",
-    "rustfmt",
+    # Include rust-analyzer, because we want to use the version of rust-analyzer
+    # that matches the project
+    "rust-analyzer",
     # Also include cranelift codegen backend for faster compilation in development
     # See: https://lwn.net/Articles/964735/
     "rustc-codegen-cranelift",
