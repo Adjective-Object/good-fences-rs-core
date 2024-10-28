@@ -1,0 +1,10 @@
+[package]
+name = "repo-root"
+version = "0.2.0-beta.1"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+license = "Apache-2.0"
+description = """
+Walks up from a directory to find the root of a git repo
+"""
+edition = "2018"
+

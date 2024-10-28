@@ -1,0 +1,15 @@
+[package]
+name = "repo-health"
+version = "0.0.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+license = "Apache-2.0"
+description = """
+Crate for introspective tests on this repo
+"""
+edition = "2018"
+
+[dependencies]
+dockerfile-parser = "0.8.0"
+regex.workspace = true
+repo-root = {path="../repo-root"}
+toml = "0.8.19"
