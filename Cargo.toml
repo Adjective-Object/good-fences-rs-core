@@ -51,4 +51,8 @@ lto = true
 
 [profile.dev]
 debug = true
-codegen-backend = "cranelift"
+# codegen-backend = "cranelift"
+
+[profile.test]
+debug = true
+# separate profile from 'dev' so it won't use the cranelift backend

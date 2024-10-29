@@ -1,0 +1,23 @@
+command script import "./lldb/util.py"
+# required to unpack the util module into the current scope, becasue llvm
+# doesn't let you use dots in summary format functions
+script globals().update({"util_"+k:util.__dict__[k] for k in util.__dict__ if "__" not in k})
+
+type summary add --summary-string "${var.vec.buf.inner.ptr.pointer.pointer%s}" alloc::string::String
+type summary add --summary-string "OsStr:${var.inner.inner.buf.inner.ptr.pointer.pointer%s})" std::ffi::os_str::OsString
+type summary add --summary-string "PathBuf:${var.inner%s})" std::path::PathBuf
+type summary add --summary-string "Path:${var.inner%s})" std::path::Path
+type summary add --summary-string "TempDir:${var.path%S})" tempfile::TempDir
+type summary add --summary-string "Boxed:${var.data_ptr%S})" -x "alloc::boxed::Box\<.*"
+type summary add --summary-string "Vec<${script.var:util_templ1}>:${var.len%d}" -x "alloc::vec::Vec\<.*"
+type summary add --summary-string "HashSet<${script.var:util_templ1}>::${var.base.map.table.table.items%d}" -x "std::collections::hash::set::HashSet\<.*"
+type summary add --summary-string "HashBrownSet<${script.var:util_templ1}>:${var.map.table.table.items%d}" -x "hashbrown::set::HashSet\<.*"
+type summary add --summary-string "HashMap<${script.var:util_templ2}>:${var.base.table.table.items%d}" -x "std::collections::hash::map::HashMap\<.*"
+type summary add --summary-string "HashBrownMap<${script.var:util_templ2}>:${var.table.table.items%d}" -x "hashbrown::map::HashMap\<.*"
+
+command script import "./lldb/vec.py"
+type synthetic add --python-class vec.StdVecSyntheticProvider --recognizer-function vec.is_std_vec
+
+command script import "./lldb/hashmap.py"
+type synthetic add --python-class hashmap.StdHashMapSyntheticProvider --recognizer-function hashmap.is_std_hashmap
+type synthetic add --python-class hashmap.StdHashSetSyntheticProvider --recognizer-function hashmap.is_std_hashset
