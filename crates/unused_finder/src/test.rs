@@ -302,3 +302,33 @@ ignored-*.js
         },
     );
 }
+
+#[test]
+fn test_non_root_root_path() {
+    /// Tests that the package traversal works when there is a non-root "root" path.
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "search_root/packages/root/main.js" => r#"
+        export * from "./other";
+        "#,
+        "search_root/packages/root/other.js" => r#""#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            unused_files: vec![],
+            unused_symbols: bmap![],
+        },
+    );
+}
