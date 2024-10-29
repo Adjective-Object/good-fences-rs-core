@@ -1,0 +1,17 @@
+[package]
+name = "js_err_napi"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+description = "Napi implementation for `js_err`"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+napi.workspace = true
+js_err = { path = "../js_err" }
+anyhow.workspace = true
+
+[build-dependencies]
+napi-build = "2.0.1"

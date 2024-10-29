@@ -1,7 +1,7 @@
 use anyhow::Error;
 use std::fmt::Display;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Status {
     Ok,
     InvalidArg,
@@ -227,12 +227,15 @@ impl JsErr {
     }
 
     pub fn message(&self) -> String {
-        format!("{}", self.err)
+        if let Some(anyhow_err) = self.err.downcast_ref::<anyhow::Error>() {
+            format!("{:#}", anyhow_err)
+        } else {
+            format!("{}", self.err)
+        }
     }
 
-    #[cfg(feature = "napi")]
-    pub fn to_napi(self) -> napi::Error {
-        self.into()
+    pub fn status(&self) -> Status {
+        self.status
     }
 }
 
@@ -248,48 +251,5 @@ impl std::error::Error for JsErr {
     }
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.err.source()
-    }
-}
-
-#[cfg(feature = "napi")]
-impl From<JsErr> for napi::Error {
-    fn from(val: JsErr) -> Self {
-        if let Some(annyhow_err) = val.err.downcast_ref::<anyhow::Error>() {
-            napi::Error::new(val.status.into(), format!("{:#}", annyhow_err))
-        } else {
-            napi::Error::new(val.status.into(), val.err)
-        }
-    }
-}
-
-#[cfg(feature = "napi")]
-impl From<Status> for napi::Status {
-    fn from(val: Status) -> Self {
-        match val {
-            Status::Ok => napi::Status::Ok,
-            Status::InvalidArg => napi::Status::InvalidArg,
-            Status::ObjectExpected => napi::Status::ObjectExpected,
-            Status::StringExpected => napi::Status::StringExpected,
-            Status::NameExpected => napi::Status::NameExpected,
-            Status::FunctionExpected => napi::Status::FunctionExpected,
-            Status::NumberExpected => napi::Status::NumberExpected,
-            Status::BooleanExpected => napi::Status::BooleanExpected,
-            Status::ArrayExpected => napi::Status::ArrayExpected,
-            Status::GenericFailure => napi::Status::GenericFailure,
-            Status::PendingException => napi::Status::PendingException,
-            Status::Cancelled => napi::Status::Cancelled,
-            Status::EscapeCalledTwice => napi::Status::EscapeCalledTwice,
-            Status::HandleScopeMismatch => napi::Status::HandleScopeMismatch,
-            Status::CallbackScopeMismatch => napi::Status::CallbackScopeMismatch,
-            Status::QueueFull => napi::Status::QueueFull,
-            Status::Closing => napi::Status::Closing,
-            Status::BigintExpected => napi::Status::BigintExpected,
-            Status::DateExpected => napi::Status::DateExpected,
-            Status::ArrayBufferExpected => napi::Status::ArrayBufferExpected,
-            Status::DetachableArraybufferExpected => napi::Status::DetachableArraybufferExpected,
-            Status::WouldDeadlock => napi::Status::WouldDeadlock,
-            Status::NoExternalBuffersAllowed => napi::Status::NoExternalBuffersAllowed,
-            Status::Unknown => napi::Status::Unknown,
-        }
     }
 }
