@@ -137,7 +137,7 @@ impl WalkedPackage {
         }
 
         // check against the export info
-        Ok(!export_info.is_exported(&package_relative_path))
+        Ok(export_info.is_exported(&package_relative_path))
     }
 }
 
