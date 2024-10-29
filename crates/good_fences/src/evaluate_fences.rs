@@ -150,9 +150,9 @@ fn export_rule_applies_to_import_path(
 }
 
 fn is_importer_allowed(accessible_to: &[String], source_file: &SourceFile) -> bool {
-    return accessible_to.iter().any(|accessible_to_tag| {
+    accessible_to.iter().any(|accessible_to_tag| {
         accessible_to_tag == "*" || source_file.tags.contains(accessible_to_tag)
-    });
+    })
 }
 
 pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
