@@ -510,7 +510,7 @@ mod test {
                 .iter()
                 .map(|x| x.to_string())
                 .collect();
-            assert_eq!(conditions.is_empty(), parsed_exports.is_exported(input));
+            assert_eq!(!conditions.is_empty(), parsed_exports.is_exported(input));
             these_results.insert(input, conditions);
             these_expected.insert(input, output.iter().map(|x| x.to_string()).collect());
         }
