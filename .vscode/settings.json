@@ -7,4 +7,16 @@
     "files.autoSaveWorkspaceFilesOnly": true,
     "rust-analyzer.cargo.targetDir": "./rust-analyzer-target",
     "rust-analyzer.server.path": "/home/ubuntu/.cargo/bin/rust-analyzer",
+    // Disabled because napi's macro design requires aggregating macro state
+    // over multiple invocations, but rust-analyzer lazily expands macros as-needed.
+    //
+    // This is a bug in napi which they won't fix. (It looks like the original author
+    // of napi didn't even write the derive macro?)
+    //
+    // See: https://github.com/napi-rs/napi-rs/issues/2322
+    "rust-analyzer.procMacro.ignored": {
+        "napi-derive": [
+            "napi"
+        ]
+    }
 }
