@@ -228,7 +228,7 @@ impl UnusedFinder {
                 let scanned_files = files
                     .par_iter()
                     .map(|file_path| {
-                        self.update_single_file(file_path, logger)
+                        self.update_single_file(file_path, logger.clone())
                             .map_err(JsErr::generic_failure)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -299,7 +299,7 @@ impl UnusedFinder {
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
         let walked_files =
-            walk_src_files(logger, &config.root_paths, &config.repo_root, &config.skip)
+            walk_src_files(&logger, &config.root_paths, &config.repo_root, &config.skip)
                 .map_err(JsErr::generic_failure)?;
 
         let resolver =
@@ -320,7 +320,7 @@ impl UnusedFinder {
     // from the last time the file tree was scanned.
     pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedFinderResult, JsErr> {
         // Scan the file-system for changed files
-        self.update_dirty_files(logger)?;
+        self.update_dirty_files(&logger)?;
 
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
@@ -328,12 +328,12 @@ impl UnusedFinder {
         logger.log(format!(
             "Starting {} graph traversal with {} entrypoints",
             UsedTag::FROM_ENTRY,
-            self.get_entrypoints(logger).len()
+            self.get_entrypoints(&logger).len()
         ));
         graph
             .traverse_bfs(
-                logger,
-                self.get_entrypoints(logger),
+                &logger,
+                self.get_entrypoints(&logger),
                 vec![],
                 UsedTag::FROM_ENTRY,
             )
@@ -342,7 +342,7 @@ impl UnusedFinder {
         logger.log(format!(
             "Starting {} graph traversal with {} entrypoints",
             UsedTag::FROM_IGNORED,
-            self.get_entrypoints(logger).len()
+            self.get_entrypoints(&logger).len()
         ));
         graph
             .traverse_bfs(
@@ -364,7 +364,7 @@ impl UnusedFinder {
             .source_files
             .par_iter()
             .filter_map(|(file_path, source_file)| {
-                let export = self.is_entry_package_export(logger, file_path, source_file);
+                let export = self.is_entry_package_export(&logger, file_path, source_file);
                 if export || self.is_file_ignored(file_path) {
                     Some(file_path.clone())
                 } else {

@@ -5,10 +5,6 @@ extern crate tsconfig_paths;
 #[macro_use]
 extern crate anyhow;
 
-#[cfg(feature = "napi")]
-#[macro_use]
-extern crate napi_derive;
-
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
@@ -30,5 +26,17 @@ mod walked_file;
 
 pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
 pub use parse::data::ResolvedImportExportInfo;
-pub use report::UnusedFinderReport;
+pub use report::{SymbolReport, UnusedFinderReport, UsedTagEnum};
 pub use unused_finder::{UnusedFinder, UnusedFinderResult};
+
+pub fn find_unused_items(
+    logger: impl logger::Logger,
+    config: UnusedFinderJSONConfig,
+) -> Result<UnusedFinderReport, js_err::JsErr> {
+    let mut finder = UnusedFinder::new_from_json_config(&logger, config)
+        .map_err(js_err::JsErr::generic_failure)?;
+    let result = finder
+        .find_unused(&logger)
+        .map_err(js_err::JsErr::generic_failure)?;
+    Ok(result.get_report())
+}

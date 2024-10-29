@@ -1,15 +1,13 @@
 use std::{collections::BTreeMap, fmt::Display};
 
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use swc_core::common::source_map::SmallPos;
 
 use crate::{graph::UsedTag, parse::ExportedSymbol, UnusedFinderResult};
-#[cfg(feature = "napi")]
-use napi_derive::napi;
 
 // Report of a single exported item in a file
-#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
-#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
 pub struct SymbolReport {
     pub id: String,
     pub start: u32,
@@ -17,12 +15,8 @@ pub struct SymbolReport {
     pub tags: Vec<UsedTagEnum>,
 }
 
-/// Napi-compatible representation of a tag as an enum
-#[derive(Debug, PartialEq, Ord, PartialOrd, Eq)]
-// string_enum implies derive(Clone, Copy), so we have to avoid the duplicate
-// derivation here, as it will lead to conflicting implementations
-#[cfg_attr(not(feature = "napi"), derive(Clone, Copy))]
-#[cfg_attr(feature = "napi", napi(string_enum))]
+#[derive(Debug, PartialEq, Ord, PartialOrd, Eq, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum UsedTagEnum {
     Entry,
     Ignored,
@@ -41,8 +35,7 @@ impl From<UsedTag> for Vec<UsedTagEnum> {
 }
 
 // Report of unused symbols within a project
-#[derive(Debug, Clone, Default, PartialEq)]
-#[cfg_attr(feature = "napi", napi(object))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct UnusedFinderReport {
     // files that are completely unused
     pub unused_files: Vec<String>,
