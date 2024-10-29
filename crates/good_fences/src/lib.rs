@@ -23,8 +23,9 @@ pub mod fence_collection;
 pub mod file_extension;
 pub mod get_imports;
 pub mod good_fences_runner;
-pub mod js_unused_finder;
 pub mod walk_dirs;
+
+pub use unused_finder_napi::*;
 
 #[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
@@ -202,16 +203,4 @@ pub fn find_unused_items(
     let mut unused_finder = UnusedFinder::new_from_json_config(&logger, config)?;
     let result = unused_finder.find_unused(&logger)?;
     Ok(result.get_report())
-}
-
-#[napi]
-pub fn find_unused_items_for_open_files(
-    config: unused_finder::UnusedFinderJSONConfig,
-    files: Vec<String>,
-) -> napi::Result<unused_finder::UnusedFinderReport> {
-    let mut result = find_unused_items(config)?;
-    let files: HashSet<String> = HashSet::from_iter(files);
-    result.unused_files.retain(|key| files.contains(key));
-    result.unused_symbols.retain(|key, _| files.contains(key));
-    Ok(result)
 }

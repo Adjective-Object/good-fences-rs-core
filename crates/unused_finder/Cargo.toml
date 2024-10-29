@@ -13,8 +13,6 @@ anyhow.workspace = true
 glob = "0.3.1"
 import_resolver = { path = "../import_resolver" }
 js_err = { path = "../js_err" }
-napi = { workspace = true, optional = true }
-napi-derive = { workspace = true, optional = true }
 path-slash.workspace = true
 pretty_assertions.workspace = true
 rayon.workspace = true
@@ -36,10 +34,6 @@ ahashmap = { path = "../ahashmap" }
 bitflags = "2.6.0"
 ignore = "0.4.23"
 abspath = { version = "0.2.0", path = "../abspath" }
-
-[features]
-default = []
-napi = ["dep:napi", "dep:napi-derive"]
 
 [dev-dependencies]
 stringreader = "0.1.1"

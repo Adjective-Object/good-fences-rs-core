@@ -6,7 +6,7 @@
     "editor.formatOnSave": true,
     "files.autoSaveWorkspaceFilesOnly": true,
     "rust-analyzer.cargo.targetDir": "./rust-analyzer-target",
-    "rust-analyzer.server.path": "/home/ubuntu/.cargo/bin/rust-analyzer",
+    "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer",
     // Disabled because napi's macro design requires aggregating macro state
     // over multiple invocations, but rust-analyzer lazily expands macros as-needed.
     //

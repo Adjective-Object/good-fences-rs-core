@@ -58,9 +58,8 @@ pub enum ConfigError {
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
 ///
-/// This struct is used to serialize the UnusedFinderConfig struct to JSON
-/// with serde, or to recieve the config to JS via napi.
-#[cfg_attr(feature = "napi", napi(object))]
+/// This struct is used to deserialize the UnusedFinderConfig struct
+/// from a config file to with serde / over the debug bridge for napi
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnusedFinderJSONConfig {

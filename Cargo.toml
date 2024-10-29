@@ -16,7 +16,10 @@ thiserror = "1.0.52"
 jwalk = "0.5"
 serde = { version = "1.0.117", features = ["rc", "derive"] }
 serde_json = "1.0.59"
-napi = { version = "2.16.6", default-features = false, features = ["napi4"] }
+napi = { version = "2.16.6", default-features = false, features = [
+    "compat-mode",
+    "napi9",
+] }
 napi-derive = "2.16.9"
 swc_core = { version = "0.101.3", features = [
     "ecma_plugin_transform",

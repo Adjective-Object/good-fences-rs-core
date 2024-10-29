@@ -151,6 +151,7 @@ pub fn walk_src_files(
     // safely borrow &Logger, because the scope guarantees the threads
     // will be joined after the scope ends.
     std::thread::scope(|scope| -> Result<(), anyhow::Error> {
+        let logger_clone = logger.clone();
         let collector_thread = scope.spawn(move || {
             for file in rx {
                 match file {
@@ -158,7 +159,7 @@ pub fn walk_src_files(
                         all_walked_ref.push(file);
                     }
                     Err(e) => {
-                        logger.log(format!("Error during walk: {:?}", e));
+                        logger_clone.log(format!("Error during walk: {:?}", e));
                     }
                 }
             }
@@ -167,7 +168,7 @@ pub fn walk_src_files(
         // Parallel walk of each root path in sequence
         for root_path in root_paths {
             let abs_root_path = abspath::join_abspath(&repo_root_path, root_path)?;
-            match build_walk(logger, &abs_root_path, ignored_filenames) {
+            match build_walk(&logger, &abs_root_path, ignored_filenames) {
                 Ok(walk) => collect_walk(walk, &tx),
                 Err(e) => {
                     return Err(anyhow!(format!(

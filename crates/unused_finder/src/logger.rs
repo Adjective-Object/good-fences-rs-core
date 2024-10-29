@@ -1,7 +1,13 @@
 use std::sync::Mutex;
 
-pub trait Logger: Send + Sync + Copy {
+pub trait Logger: Send + Sync + Clone {
     fn log(&self, message: impl Into<String>);
+}
+
+impl<T: Logger> Logger for &T {
+    fn log(&self, message: impl Into<String>) {
+        (*self).log(message);
+    }
 }
 
 pub struct StdioLogger {

@@ -946,6 +946,7 @@ dependencies = [
  "thiserror",
  "tsconfig_paths",
  "unused_finder",
+ "unused_finder_napi",
  "void",
 ]
 
@@ -3846,8 +3847,6 @@ dependencies = [
  "ignore",
  "import_resolver",
  "js_err",
- "napi",
- "napi-derive",
  "packagejson",
  "packagejson_exports",
  "path-clean 0.1.0",
@@ -3866,6 +3865,20 @@ dependencies = [
  "test_tmpdir",
  "thiserror",
  "tsconfig_paths",
+]
+
+[[package]]
+name = "unused_finder_napi"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "js_err",
+ "js_err_napi",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "serde",
+ "unused_finder",
 ]
 
 [[package]]
