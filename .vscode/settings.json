@@ -10,7 +10,26 @@
     "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer",
     "rust-analyzer.runnables.command": "/home/vscode/.cargo/bin/cargo",
     "lldb.cargo": "/home/vscode/.cargo/bin/cargo",
+    "lldb.launch.initCommands": [
+        // Load custom formatters
+        "command source '${workspaceFolder}/lldb/custom-formatters.lldb'",
+        // disable ASLR
+        "settings set target.disable-aslr true",
+    ],
     "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.debug.engineSettings": {
+        "lldb": {
+            "launch": {
+                "terminal": "external",
+                "initCommands": [
+                    // Load custom formatters
+                    "command source '${workspaceFolder}/lldb/custom-formatters.lldb'",
+                    // disable ASLR
+                    "settings set target.disable-aslr true",
+                ]
+            },
+        }
+    },
     // Disabled because napi's macro design requires aggregating macro state
     // over multiple invocations, but rust-analyzer lazily expands macros as-needed.
     //
