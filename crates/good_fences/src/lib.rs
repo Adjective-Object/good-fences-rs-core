@@ -1,5 +1,3 @@
-use std::{collections::HashSet, iter::FromIterator};
-
 extern crate import_resolver;
 extern crate js_err;
 extern crate serde;
@@ -12,9 +10,6 @@ use anyhow::Context;
 use error::EvaluateFencesError;
 use napi_derive::napi;
 use serde::Serialize;
-use unused_finder::{
-    logger::StdioLogger, UnusedFinder, UnusedFinderJSONConfig, UnusedFinderReport,
-};
 use walk_dirs::ExternalFences;
 pub mod error;
 pub mod evaluate_fences;
@@ -184,23 +179,4 @@ pub fn write_violations_as_json(
 pub struct JsonErrorFile<'a> {
     pub violations: Vec<evaluate_fences::ImportRuleViolation<'a, 'a>>,
     pub evaluation_errors: Vec<String>,
-}
-
-/**
- * Members of the node-facing API are kept in
- * this separate module so that the remainder of
- * the crate can be compiled into a test binary
- *
- * References to symbols from the node api require
- * linking to a real instance of node, which means that
- * `cargo test` can't link anything
- */
-
-pub fn find_unused_items(
-    config: UnusedFinderJSONConfig,
-) -> Result<UnusedFinderReport, js_err::JsErr> {
-    let logger: StdioLogger = StdioLogger::new();
-    let mut unused_finder = UnusedFinder::new_from_json_config(&logger, config)?;
-    let result = unused_finder.find_unused(&logger)?;
-    Ok(result.get_report())
 }
