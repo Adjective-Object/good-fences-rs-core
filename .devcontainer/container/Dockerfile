@@ -67,12 +67,14 @@ RUN bash -c 'source $HOME/.profile; rustup toolchain install nightly-2024-10-25-
 # terminal history through rebuilds
 ENV XDG_DATA_HOME="/cache/xdg-home"
 
-# Configure fish
-COPY config.fish ${HOME}/fish/config.fish
 # Setup fisher (a fish plugin manager)
 RUN fish -c 'curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/1f0dc2b4970da160605638cb0f157079660d6e04/functions/fisher.fish | source && fisher install jorgebucaran/fisher'
 # Install a theme I like with the plugin manager
 RUN fish -c 'fisher install IlanCosman/tide@v5'
+# Install a fenv for syncing state with other shells
+RUN fish -c 'fisher install IlanCosman/tide@v5'
+# Configure fish
+COPY config.fish ${HOME}/fish/config.fish
 # Configure the theme
 RUN fish -c 'echo "121121y" | tide configure'
 
