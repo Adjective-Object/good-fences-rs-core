@@ -147,7 +147,7 @@ mod test {
             0,
             GlobInterp::Path,
             glob::PatternError {
-                pos: 4,
+                pos: 2,
                 msg: "wildcards are either regular `*` or recursive `**`",
             },
         )]));
@@ -207,7 +207,7 @@ mod test {
                 3,
                 GlobInterp::Path,
                 glob::PatternError {
-                    pos: 8,
+                    pos: 6,
                     msg: "wildcards are either regular `*` or recursive `**`",
                 },
             ),

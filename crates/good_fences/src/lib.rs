@@ -1,16 +1,6 @@
-extern crate import_resolver;
-extern crate js_err;
-extern crate serde;
-extern crate serde_json;
-extern crate swc_utils;
-extern crate tsconfig_paths;
-extern crate unused_finder;
-
 use anyhow::Context;
 use error::EvaluateFencesError;
-use napi_derive::napi;
 use serde::Serialize;
-use walk_dirs::ExternalFences;
 pub mod error;
 pub mod evaluate_fences;
 pub mod fence;
@@ -20,9 +10,8 @@ pub mod get_imports;
 pub mod good_fences_runner;
 pub mod walk_dirs;
 
-pub use unused_finder_napi::*;
+pub use walk_dirs::ExternalFences;
 
-#[napi]
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
     let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(&opts.project)
         .with_context(|| format!("Unable to find --project path {}", &opts.project))
@@ -119,7 +108,6 @@ fn create_ignored_dirs_regexes(ignored_dirs: Option<Vec<String>>) -> Vec<regex::
     }
 }
 
-#[napi(object)]
 pub struct GoodFencesOptions {
     pub paths: Vec<String>,
     pub project: String,
@@ -130,13 +118,11 @@ pub struct GoodFencesOptions {
 }
 
 #[derive(Eq, Debug, PartialEq)]
-#[napi]
 pub enum GoodFencesResultType {
     FileNotResolved = 0,
     Violation = 1,
 }
 
-#[napi]
 pub struct GoodFencesResult {
     pub result_type: GoodFencesResultType,
     pub message: String,

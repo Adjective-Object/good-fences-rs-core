@@ -927,7 +927,6 @@ dependencies = [
  "jwalk",
  "lazy_static",
  "napi",
- "napi-build",
  "napi-derive",
  "path-clean 0.1.0",
  "path-slash",
@@ -945,9 +944,21 @@ dependencies = [
  "text-diff",
  "thiserror",
  "tsconfig_paths",
- "unused_finder",
- "unused_finder_napi",
  "void",
+]
+
+[[package]]
+name = "good_fences_napi"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "good_fences",
+ "js_err",
+ "js_err_napi",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "serde",
 ]
 
 [[package]]
@@ -1403,6 +1414,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "427802e8ec3a734331fec1035594a210ce1ff4dc5bc1950530920ab717964ea3"
 dependencies = [
  "libloading",
+]
+
+[[package]]
+name = "napi_root"
+version = "0.2.0"
+dependencies = [
+ "good_fences_napi",
+ "js_err",
+ "js_err_napi",
+ "napi",
+ "napi-build",
+ "unused_finder_napi",
 ]
 
 [[package]]
