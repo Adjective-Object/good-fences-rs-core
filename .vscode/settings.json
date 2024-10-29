@@ -6,7 +6,11 @@
     "editor.formatOnSave": true,
     "files.autoSaveWorkspaceFilesOnly": true,
     "rust-analyzer.cargo.targetDir": "./rust-analyzer-target",
+    // only for using on codespaces, not for use in devcontainer
     "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer",
+    "rust-analyzer.runnables.command": "/home/vscode/.cargo/bin/cargo",
+    "lldb.cargo": "/home/vscode/.cargo/bin/cargo",
+    "rust-analyzer.check.command": "clippy",
     // Disabled because napi's macro design requires aggregating macro state
     // over multiple invocations, but rust-analyzer lazily expands macros as-needed.
     //

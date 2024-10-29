@@ -1,0 +1,22 @@
+
+[package]
+name = "good_fences_napi"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2018"
+description = "Napi implementation for `good_fences`"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+napi.workspace = true
+js_err = { path = "../js_err" }
+anyhow.workspace = true
+napi-derive.workspace = true
+good_fences = { version = "0.2.0", path = "../good_fences" }
+serde.workspace = true
+js_err_napi = { version = "0.2.0", path = "../js_err_napi" }
+
+[build-dependencies]
+napi-build = "2.0.1"

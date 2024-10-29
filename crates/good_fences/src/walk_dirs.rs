@@ -7,7 +7,6 @@ use path_utils::as_relative_slash_path;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-extern crate pathdiff;
 
 fn should_retain_file(s: &str) -> bool {
     s == "fence.json"
@@ -25,8 +24,7 @@ pub struct SourceFile {
     pub imports: HashMap<String, Option<HashSet<String>>>,
 }
 
-#[derive(Eq, Debug, PartialEq)]
-#[napi_derive::napi]
+#[derive(Eq, Debug, PartialEq, Copy, Clone)]
 pub enum ExternalFences {
     Include = 0,
     Ignore = 1,

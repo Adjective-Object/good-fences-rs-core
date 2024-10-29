@@ -305,7 +305,7 @@ ignored-*.js
 
 #[test]
 fn test_non_root_root_path() {
-    /// Tests that the package traversal works when there is a non-root "root" path.
+    // Tests that the package traversal works when there is a non-root "root" path.
     let tmpdir = test_tmpdir!(
         "search_root/packages/root/package.json" => r#"{
             "name": "entrypoint",

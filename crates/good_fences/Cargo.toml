@@ -30,13 +30,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 js_err = { path = "../js_err" }
 
-unused_finder = { path = "../unused_finder" }
 import_resolver = { path = "../import_resolver" }
 path_utils = { path = "../path_utils" }
 tsconfig_paths = { path = "../tsconfig_paths" }
 swc_utils = { path = "../swc_utils" }
-unused_finder_napi = { version = "0.2.0", path = "../unused_finder_napi" }
-
-
-[build-dependencies]
-napi-build = "2.0.1"
