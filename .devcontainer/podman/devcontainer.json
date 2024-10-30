@@ -1,14 +1,6 @@
 {
     "$schema": "https://raw.githubusercontent.com/devcontainers/spec/refs/heads/main/schemas/devContainer.base.schema.json",
     "name": "${localWorkspaceFolderBasename} (podman)",
-    "runArgs": [
-        // This container is meant to support podman, through the `podman-docker`
-        // compatibility layer. For various reasons I don't 100% understand,
-        // these labels are required in order to allow the container user
-        // to access the various container mounts.
-        "--userns=keep-id",
-        "--security-opt=label=disable"
-    ],
     "build": {
         "dockerfile": "../default/container/Dockerfile",
         "args": {
@@ -66,5 +58,14 @@
     "forwardPorts": [
         3000,
         3001
+    ],
+    "runArgs": [
+        // This container is meant to support podman, through the `podman-docker`
+        // compatibility layer. For various reasons I don't 100% understand,
+        // these labels are required in order to allow the container user
+        // to access the various container mounts.
+        "--userns=keep-id",
+        "--security-opt=label=disable",
+        "--security-opt seccomp=unconfined"
     ]
 }

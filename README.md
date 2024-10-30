@@ -125,18 +125,38 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
 ```
 
 # Development
-## Dev-Containers on WSL
-Development from windows happens in a devcontainer
-1. Install WSL2 (and restart your computer)
-    - `wsl --install` from any terminal window
-2. Install [Docker Engine](https://docs.docker.com/engine/install/) (and restart your computer)
-3. Install workspace recommended plugins (including the Dev Containers plugin)
-4. Build the container with `Ctrl+P > Dev Containers: Rebuild and Reopen in Container`
+
+## Setting up the Development Environment
+1. Install a container engine:
+    The repo uses a devcontainer, which is like a lightweight virtual machine that contains a pre-configured development environment.
+    
+    It is intended to support both Docker and podman, which are two different container engines. This is kind of arbitrary, and I might choose to revert it in the future if it presents issues.
+
+    On windows, install Docker-Desktop
+    On linux, you can install either `docker` or podman (via `podman-docker`)
+
+2. Set up your local config
+    The devcontainer expects several user directories to be configured. If you do not have these already, you will have to create them, or comment out the bind mounts in the devcontainer.
+
+    - `$HOME/.gitconfig` -- This is mounted to make your git configuration available in the container.  
+        It should already exist if you've ever run `git config --user.name` or `git config --user.email`
+    - `$HOME/.ssh` -- This is mounted so the container can access your SSH keys to push/pull from the git remote.  
+        This should already exist if you have ever configured an SSH key via `ssh-keygen`, which is the normal way to clone a git repo.
+
+    Note that if you are developing in WSL, you should create these files _in wsl_, not within your windows filesystem.
+3. Install recommended extensions
+    Install the recommended extensions from this repo.
+    
+    `Ctrl+Shift+P > Extensions: Show Recommended Extensions`, then install all recommended extensions from the left navbar that opens up.
+4. Build and open in the devcontainer
+
+    `Ctrl+Shift+P > Rebuild and Reopen In Container`
+    Select the development container based on your container engine (podman or docker)
+
     - If installation stalls on `docker inspect --type image ubuntu:24.10`, you may need to feth the base image manually
     - Run `docker inspect --type image ubuntu:24.10`
     - If it fails with `Error response from daemon: No such image: ubuntu`, then run `docker pull ubuntu:24.10`
-5. Develop in the container
-6. (optional) mount the workspace you are building against.
+5. (optional) mount additional projects into the dev container
    To test `unused-finder` against your repo during development, uncomment the commented-out "mount" in the checked-in `.devcontainer`: 
    ```json5
     // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.
