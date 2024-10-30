@@ -7,9 +7,9 @@
     "files.autoSaveWorkspaceFilesOnly": true,
     "rust-analyzer.cargo.targetDir": "./rust-analyzer-target",
     // only for using on codespaces, not for use in devcontainer
-    "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer",
-    "rust-analyzer.runnables.command": "/home/vscode/.cargo/bin/cargo",
-    "lldb.cargo": "/home/vscode/.cargo/bin/cargo",
+    // "rust-analyzer.server.path": "/home/vscode/.cargo/bin/rust-analyzer",
+    // "rust-analyzer.runnables.command": "/home/vscode/.cargo/bin/cargo",
+    // "lldb.cargo": "/home/vscode/.cargo/bin/cargo",
     "lldb.launch.initCommands": [
         // Load custom formatters
         "command source '${workspaceFolder}/lldb/custom-formatters.lldb'",
