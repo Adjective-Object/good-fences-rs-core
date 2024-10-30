@@ -1,0 +1,70 @@
+{
+    "$schema": "https://raw.githubusercontent.com/devcontainers/spec/refs/heads/main/schemas/devContainer.base.schema.json",
+    "name": "${localWorkspaceFolderBasename} (podman)",
+    "runArgs": [
+        // This container is meant to support podman, through the `podman-docker`
+        // compatibility layer. For various reasons I don't 100% understand,
+        // these labels are required in order to allow the container user
+        // to access the various container mounts.
+        "--userns=keep-id",
+        "--security-opt=label=disable"
+    ],
+    "build": {
+        "dockerfile": "../default/container/Dockerfile",
+        "args": {
+            "USERNAME": "ubuntu",
+            // In a dev container, we want the acting user's UID to match the user we are launching
+            // docker/podman from. This is typically 1000 on for a single-user linux system, or within
+            // WSL
+            //
+            // This is because mounted volumes from Linux retain their original file permissions,
+            // including the UID.
+            //
+            // If the acting user does not have the same UID as the user in the container, the container
+            // may not have permission to write to the mounted volume, or may mangle the permissions
+            // of mounted files.
+            //
+            // See https://github.com/microsoft/vscode-dev-containers/issues/108
+            "USER_UID": "${localEnv:KDE_SESSION_UID:1000}"
+        }
+    },
+    "remoteUser": "ubuntu",
+    // see https://github.com/microsoft/vscode-remote-release/issues/1333#issuecomment-528234042
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=delegated",
+    "mounts": [
+        // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.
+        // Don't commit it, though!
+        // "source=${localWorkspaceFolder}/../client-web,target=/workspaces/client-web,type=bind,consistency=cached",
+        // expose the user's ssh credentials to the dev container
+        "source=${localEnv:HOME}/.ssh,target=/home/ubuntu/.ssh,type=bind,consistency=cached",
+        // Do the same for the user's git config
+        "source=${localEnv:HOME}/.gitconfig,target=/home/ubuntu/.gitconfig,type=bind,consistency=cached",
+        // map the .persist directory to /cache so it can be persisted between container rebuilds.
+        // This persists shell history as well as downloaded cargo crate sources.
+        "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached",
+        "source=${localWorkspaceFolder}/.persist/cargo-registry,target=/home/ubuntu/.cargo/registry,type=bind,consistency=cached"
+    ],
+    "capAdd": [
+        // required for e.g. perf monitoring
+        "PERFMON",
+        "SYS_PTRACE"
+    ],
+    "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "tamasfe.even-better-toml",
+                "vadimcn.vscode-lldb",
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
+    "remoteEnv": {
+        "VM_REPO_PATH": "/workspaces/${localWorkspaceFolderBasename}"
+    },
+    "forwardPorts": [
+        3000,
+        3001
+    ]
+}
