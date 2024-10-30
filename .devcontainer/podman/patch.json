@@ -1,0 +1,9 @@
+{
+    "name": "${localWorkspaceFolderBasename} (podman)",
+    "build.dockerfile": "../default/container/Dockerfile",
+    "runArgs": [
+        "--userns=keep-id",
+        "--security-opt=label=disable",
+        "--security-opt seccomp=unconfined"
+    ]
+}

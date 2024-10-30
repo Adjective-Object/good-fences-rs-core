@@ -2000,8 +2000,11 @@ name = "repo-health"
 version = "0.0.0"
 dependencies = [
  "dockerfile-parser",
+ "path-slash",
+ "pretty_assertions",
  "regex",
  "repo-root",
+ "serde-hjson",
  "toml",
 ]
 
