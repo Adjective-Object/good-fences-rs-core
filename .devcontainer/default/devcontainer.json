@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/devcontainers/spec/refs/heads/main/schemas/devContainer.base.schema.json",
-  "name": "${localWorkspaceFolderBasename} devcontainer",
+  "name": "${localWorkspaceFolderBasename} (docker)",
   "build": {
     "dockerfile": "./container/Dockerfile",
     "args": {
@@ -22,14 +22,6 @@
   },
   "remoteUser": "ubuntu",
   // see https://github.com/microsoft/vscode-remote-release/issues/1333#issuecomment-528234042
-  "runArgs": [
-    // This container is meant to support podman as well as docker, through
-    // the `podman-docker` compatibility layer. For various reasons I don't
-    // 100% understand, these labels are required in order to allow the
-    // container to access the various container mounts.
-    "--userns=keep-id",
-    "--security-opt=label=disable"
-  ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=delegated",
   "mounts": [
     // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.
