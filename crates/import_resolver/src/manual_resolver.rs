@@ -220,8 +220,7 @@ fn path_buf_from_tsconfig(
         builder.push(specifier_from_tsconfig_paths);
         PathBuf::from(RelativePathBuf::from(builder.to_string()).as_str()).clean()
     } else {
-        PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
-            .clean()
+        PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str()).clean()
     }
 }
 

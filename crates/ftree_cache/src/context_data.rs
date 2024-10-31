@@ -389,13 +389,7 @@ where
     }
 }
 
-impl<
-        'context_cache,
-        'base_path,
-        TContext,
-        TArgs: Copy,
-        const CONTEXT_FNAME: &'static str,
-    > Iterator
+impl<'context_cache, 'base_path, TContext, TArgs: Copy, const CONTEXT_FNAME: &'static str> Iterator
     for ProbePathIterator<'context_cache, '_, 'base_path, TContext, CONTEXT_FNAME, TArgs>
 where
     TContext: ContextData<TArgs>,
