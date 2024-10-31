@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y nodejs
 
 # Preload yarn with corepack
 RUN corepack enable
-RUN corepack prepare yarn@stable --activate
+RUN corepack prepare yarn@4.4.-0 --activate
 
 
 ARG USERNAME=ubuntu
