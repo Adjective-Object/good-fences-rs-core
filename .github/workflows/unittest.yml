@@ -20,7 +20,6 @@ jobs:
       - name: Check changefile
         run: yarn check-changefile
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: giraffate/clippy-action@v1
