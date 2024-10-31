@@ -86,7 +86,7 @@ pub struct SymbolReport {
     pub id: String,
     pub start: u32,
     pub end: u32,
-    pub tags: Vec<UsedTagEnum>,
+    pub tags: Option<Vec<UsedTagEnum>>,
 }
 
 impl From<unused_finder::SymbolReport> for SymbolReport {
@@ -95,7 +95,9 @@ impl From<unused_finder::SymbolReport> for SymbolReport {
             id: val.id,
             start: val.start,
             end: val.end,
-            tags: val.tags.into_iter().map(Into::into).collect(),
+            tags: val
+                .tags
+                .map(|tags| tags.into_iter().map(Into::into).collect()),
         }
     }
 }
