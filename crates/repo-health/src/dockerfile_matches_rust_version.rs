@@ -39,7 +39,7 @@ fn test_dockerfile_rust_version_matches_root_toml() {
         .collect::<Vec<&str>>();
     intended_components.sort();
 
-    let dockerfile_path = repo_root.join(".devcontainer/container/Dockerfile");
+    let dockerfile_path = repo_root.join(".devcontainer/default/container/Dockerfile");
     let dockerfile_reader = std::fs::File::open(dockerfile_path).unwrap();
     let parsed_dockerfile: Dockerfile = Dockerfile::from_reader(&dockerfile_reader).unwrap();
 

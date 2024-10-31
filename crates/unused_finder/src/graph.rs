@@ -1,5 +1,5 @@
-use core::fmt;
-use std::{fmt::Display, path::PathBuf};
+use core::{fmt, option::Option::None};
+use std::{collections::HashSet, fmt::Display, path::PathBuf};
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -30,10 +30,10 @@ impl Display for UsedTag {
         let mut tags = Vec::new();
         if self.contains(Self::FROM_ENTRY) {
             tags.push("entry");
-        }
+        };
         if self.contains(Self::FROM_IGNORED) {
             tags.push("ignored");
-        }
+        };
         write!(f, "{}", tags.join("+"))
     }
 }
@@ -80,7 +80,7 @@ impl GraphFile {
                     match (reexported_from, symbol) {
                         (_, ExportedSymbol::Default | ExportedSymbol::Named(_)) => {
                             // mark as used
-                            tag_named_or_default_symbol(&mut self.symbol_tags, symbol, tag);
+                            tag_named_or_default_symbol(&mut self.symbol_tags, &symbol, tag);
                         }
                         _ => {
                             // TODO: somehow handle re-exports of namespaces
@@ -125,8 +125,6 @@ impl Edge {
 pub struct Graph {
     pub path_to_id: AHashMap<PathBuf, usize>,
     pub files: Vec<GraphFile>,
-    // Set of edges we have already traversed
-    pub visited: AHashSet<Edge>,
 }
 
 impl Graph {
@@ -143,11 +141,7 @@ impl Graph {
             })
             .collect();
 
-        Graph {
-            path_to_id,
-            files,
-            visited: AHashSet::default(),
-        }
+        Graph { path_to_id, files }
     }
 
     pub fn traverse_bfs(
@@ -194,6 +188,12 @@ impl Graph {
             )
             .flatten();
 
+        const SYMBOLS_PER_FILE_HINT: usize = 4;
+        let mut visited = AHashSet::with_capacity_and_hasher(
+            self.files.len() * SYMBOLS_PER_FILE_HINT,
+            Default::default(),
+        );
+
         let mut frontier = initial_file_edges
             .chain(initial_symbol_edges)
             .collect::<Vec<_>>();
@@ -201,7 +201,7 @@ impl Graph {
         // Traverse the graph until we exhaust the frontier
         const MAX_ITERATIONS: usize = 1_000_000;
         for _ in 0..MAX_ITERATIONS {
-            let next_frontier: Vec<Edge> = self.bfs_step(&frontier, tag);
+            let next_frontier: Vec<Edge> = self.bfs_step(&mut visited, &frontier, tag);
             frontier = next_frontier;
             if frontier.is_empty() {
                 return Ok(());
@@ -215,7 +215,12 @@ impl Graph {
     }
 
     /// Perform a single step of the BFS algorithm, returning the list of files that should be visited next
-    pub fn bfs_step(&mut self, frontier: &[Edge], tag: UsedTag) -> Vec<Edge> {
+    fn bfs_step(
+        &mut self,
+        visited: &mut AHashSet<Edge>,
+        frontier: &[Edge],
+        tag: UsedTag,
+    ) -> Vec<Edge> {
         // get list of unique files that are being visited in this pass
         let mut from_files = frontier
             .iter()
@@ -224,8 +229,18 @@ impl Graph {
         from_files.sort();
         from_files.dedup();
 
+        // mark all symbols we visited in this pass as visited
+        for edge in frontier.iter() {
+            self.files[edge.file_id].tag_symbol(&edge.symbol, tag);
+            visited.insert(edge.clone());
+        }
+        // mark all files we visited in this pass as visited
+        for file in from_files.iter() {
+            self.files[*file].file_tags |= tag;
+        }
+
         // generate the next frontier in a parallel pass over the files
-        let mut next_frontier_symbols = from_files
+        let next_frontier_symbols = from_files
             .par_iter()
             .map(|file_id| {
                 let file = &self.files[*file_id];
@@ -245,7 +260,7 @@ impl Graph {
                         };
 
                         // don't re-traverse edges we have already visited
-                        if self.visited.contains(&edge) {
+                        if visited.contains(&edge) {
                             None
                         } else {
                             Some(edge)
@@ -256,20 +271,8 @@ impl Graph {
                 outgoing_edges
             })
             .flatten()
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
 
-        // mark all symbols we visited in this pass as visited
-        for edge in frontier.iter() {
-            self.files[edge.file_id].tag_symbol(&edge.symbol, tag);
-            self.visited.insert(edge.clone());
-        }
-        // mark all files we visited in this pass as visited
-        for file in from_files {
-            self.files[file].file_tags |= tag;
-        }
-
-        next_frontier_symbols.sort();
-        next_frontier_symbols.dedup();
-        next_frontier_symbols
+        next_frontier_symbols.into_iter().collect()
     }
 }
