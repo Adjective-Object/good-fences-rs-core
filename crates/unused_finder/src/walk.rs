@@ -11,7 +11,6 @@ use rayon::iter::Either;
 use rayon::prelude::*;
 use std::ffi::OsStr;
 use std::fmt::Debug;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
@@ -357,11 +356,11 @@ fn collect_results(
 fn visit_entry(entry: DirEntry) -> Result<Option<WalkedFile>, anyhow::Error> {
     let dir_path = entry.path();
     let file_name = entry.file_name();
-    if equals_os_str(file_name, "package.json") {
+    if file_name == "package.json" {
         WalkedPackage::from_path(dir_path)
             .with_context(|| "Failed to walk package.json")
             .map(|package| Some(WalkedFile::PackageJson(package)))
-    } else if equals_os_str(file_name, ".unusedignore") {
+    } else if file_name == ".unusedignore" {
         let ignore_file = IgnoreFile::read(dir_path.to_path_buf())?;
         Ok(Some(WalkedFile::IgnoreFile(ignore_file)))
     } else if is_js_ts_file(file_name) {
@@ -391,10 +390,6 @@ fn is_js_ts_file(s: &OsStr) -> bool {
         }
     }
     false
-}
-
-fn equals_os_str(s: &OsStr, t: &str) -> bool {
-    s.as_bytes().eq(t.as_bytes())
 }
 
 fn split_errs<A, B>(x: Result<A, B>) -> Either<A, B> {
