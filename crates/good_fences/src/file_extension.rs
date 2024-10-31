@@ -10,8 +10,7 @@ pub fn get_extension_from_filename(filename: &str) -> Option<String> {
     }
     //Change it to a canonical file path.
     let path = Path::new(&filename);
-    path
-        .extension()
+    path.extension()
         .map(|ext| ext.to_owned().into_string().unwrap())
 }
 

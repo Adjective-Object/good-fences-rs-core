@@ -9,7 +9,7 @@ mod test {
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
 
-    use crate::parse::{ReExportedSymbol, ExportedSymbol};
+    use crate::parse::{ExportedSymbol, ReExportedSymbol};
     use swc_utils::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
@@ -71,10 +71,9 @@ mod test {
         module.visit_with(&mut visitor);
 
         assert_eq!(visitor.exported_ids.len(), 1);
-        assert!(visitor
-            .exported_ids
-            .iter()
-            .all(|(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Named("bar".to_string())));
+        assert!(visitor.exported_ids.iter().all(
+            |(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Named("bar".to_string())
+        ));
     }
     #[test]
     fn test_allowed_unused_export_default() {
@@ -334,17 +333,15 @@ mod test {
         module.visit_with(&mut visitor);
         assert_eq!(visitor.exported_ids.len(), 2);
         assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|(symbol, e)| *symbol == ExportedSymbol::Named("bar".to_owned()) || !e.allow_unused),
+            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
+                == ExportedSymbol::Named("bar".to_owned())
+                || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|(symbol, e)| *symbol == ExportedSymbol::Named("zoo".to_owned()) || e.allow_unused),
+            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
+                == ExportedSymbol::Named("zoo".to_owned())
+                || e.allow_unused),
             "`zoo` export should be allowed unused"
         );
     }
@@ -375,10 +372,9 @@ mod test {
         module.visit_with(&mut visitor);
         assert_eq!(visitor.exported_ids.len(), 2);
         assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|(symbol, e)| *symbol == ExportedSymbol::Named("foo".to_owned()) || !e.allow_unused),
+            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
+                == ExportedSymbol::Named("foo".to_owned())
+                || !e.allow_unused),
             "`bar` export should not be allowed unused"
         );
         assert!(
@@ -414,7 +410,8 @@ mod test {
         let mut visitor = ExportsVisitor::new(comments);
 
         module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("zoo".to_string()));
+        let expected_map: AHashSet<ExportedSymbol> =
+            aset!(ExportedSymbol::Named("zoo".to_string()));
 
         assert_eq!(
             expected_map,
