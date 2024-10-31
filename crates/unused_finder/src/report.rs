@@ -1,3 +1,4 @@
+use core::option::Option::None;
 use std::{collections::BTreeMap, fmt::Display};
 
 use rayon::prelude::*;
@@ -12,7 +13,7 @@ pub struct SymbolReport {
     pub id: String,
     pub start: u32,
     pub end: u32,
-    pub tags: Vec<UsedTagEnum>,
+    pub tags: Option<Vec<UsedTagEnum>>,
 }
 
 #[derive(Debug, PartialEq, Ord, PartialOrd, Eq, Clone, Copy, Serialize, Deserialize)]
@@ -21,8 +22,12 @@ pub enum UsedTagEnum {
     Entry,
     Ignored,
 }
-impl From<UsedTag> for Vec<UsedTagEnum> {
+impl From<UsedTag> for Option<Vec<UsedTagEnum>> {
     fn from(flags: UsedTag) -> Self {
+        if flags.is_empty() {
+            return None;
+        }
+
         let mut result = Vec::new();
         if flags.contains(UsedTag::FROM_ENTRY) {
             result.push(UsedTagEnum::Entry);
@@ -30,7 +35,8 @@ impl From<UsedTag> for Vec<UsedTagEnum> {
         if flags.contains(UsedTag::FROM_IGNORED) {
             result.push(UsedTagEnum::Ignored);
         }
-        result
+
+        Some(result)
     }
 }
 
