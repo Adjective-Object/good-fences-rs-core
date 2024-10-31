@@ -84,7 +84,7 @@ impl<'a> ExportedPathRef<'a> {
     }
 }
 
-impl<'a> Default for ExportedPathRef<'a> {
+impl Default for ExportedPathRef<'_> {
     fn default() -> Self {
         Self::Unrecognized
     }
@@ -99,7 +99,7 @@ impl<'a> From<Option<&'a str>> for ExportedPathRef<'a> {
     }
 }
 
-impl<'a> PartialEq for ExportedPathRef<'a> {
+impl PartialEq for ExportedPathRef<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (ExportedPathRef::Exported(a), ExportedPathRef::Exported(b)) => a == b,

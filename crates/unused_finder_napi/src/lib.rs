@@ -49,14 +49,14 @@ pub struct UnusedFinderJSONConfig {
     pub entry_packages: Vec<String>,
 }
 
-impl Into<unused_finder::UnusedFinderJSONConfig> for UnusedFinderJSONConfig {
-    fn into(self) -> unused_finder::UnusedFinderJSONConfig {
+impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
+    fn from(val: UnusedFinderJSONConfig) -> Self {
         unused_finder::UnusedFinderJSONConfig {
-            repo_root: self.repo_root,
-            root_paths: self.root_paths,
-            skip: self.skip,
-            report_exported_symbols: self.report_exported_symbols,
-            entry_packages: self.entry_packages,
+            repo_root: val.repo_root,
+            root_paths: val.root_paths,
+            skip: val.skip,
+            report_exported_symbols: val.report_exported_symbols,
+            entry_packages: val.entry_packages,
         }
     }
 }
@@ -70,9 +70,9 @@ pub enum UsedTagEnum {
     Ignored,
 }
 
-impl Into<UsedTagEnum> for unused_finder::UsedTagEnum {
-    fn into(self) -> UsedTagEnum {
-        match self {
+impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
+    fn from(val: unused_finder::UsedTagEnum) -> Self {
+        match val {
             unused_finder::UsedTagEnum::Entry => UsedTagEnum::Entry,
             unused_finder::UsedTagEnum::Ignored => UsedTagEnum::Ignored,
         }
@@ -89,13 +89,13 @@ pub struct SymbolReport {
     pub tags: Vec<UsedTagEnum>,
 }
 
-impl Into<SymbolReport> for unused_finder::SymbolReport {
-    fn into(self) -> SymbolReport {
+impl From<unused_finder::SymbolReport> for SymbolReport {
+    fn from(val: unused_finder::SymbolReport) -> Self {
         SymbolReport {
-            id: self.id,
-            start: self.start,
-            end: self.end,
-            tags: self.tags.into_iter().map(Into::into).collect(),
+            id: val.id,
+            start: val.start,
+            end: val.end,
+            tags: val.tags.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -112,11 +112,11 @@ pub struct UnusedFinderReport {
     pub unused_symbols: HashMap<String, Vec<SymbolReport>>,
 }
 
-impl Into<UnusedFinderReport> for unused_finder::UnusedFinderReport {
-    fn into(self) -> UnusedFinderReport {
+impl From<unused_finder::UnusedFinderReport> for UnusedFinderReport {
+    fn from(val: unused_finder::UnusedFinderReport) -> Self {
         UnusedFinderReport {
-            unused_files: self.unused_files,
-            unused_symbols: self
+            unused_files: val.unused_files,
+            unused_symbols: val
                 .unused_symbols
                 .into_iter()
                 .map(|(k, v)| (k, v.into_iter().map(Into::into).collect()))
@@ -178,9 +178,9 @@ pub struct UnusedFinder {
 impl UnusedFinder {
     #[napi(constructor)]
     pub fn new(console: JsObject, config: UnusedFinderJSONConfig) -> Self {
-        return Self {
+        Self {
             inner: Self::new_inner(console, config),
-        };
+        }
     }
 
     fn new_inner(

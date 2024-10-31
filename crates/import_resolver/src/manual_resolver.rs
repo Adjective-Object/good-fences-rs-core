@@ -218,10 +218,10 @@ fn path_buf_from_tsconfig(
         let mut builder: RelativePathBuf = RelativePathBuf::new();
         builder.push(base_url);
         builder.push(specifier_from_tsconfig_paths);
-        return PathBuf::from(RelativePathBuf::from(builder.to_string()).as_str()).clean();
+        PathBuf::from(RelativePathBuf::from(builder.to_string()).as_str()).clean()
     } else {
-        return PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
-            .clean();
+        PathBuf::from(RelativePathBuf::from(specifier_from_tsconfig_paths).as_str())
+            .clean()
     }
 }
 

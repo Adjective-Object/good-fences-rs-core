@@ -10,15 +10,15 @@ pub struct GoodFencesOptions {
     pub ignored_dirs: Option<Vec<String>>,
 }
 
-impl Into<good_fences::GoodFencesOptions> for GoodFencesOptions {
-    fn into(self) -> good_fences::GoodFencesOptions {
+impl From<GoodFencesOptions> for good_fences::GoodFencesOptions {
+    fn from(val: GoodFencesOptions) -> Self {
         good_fences::GoodFencesOptions {
-            paths: self.paths,
-            project: self.project,
-            base_url: self.base_url,
-            err_output_path: self.err_output_path,
-            ignore_external_fences: self.ignore_external_fences.map(Into::into),
-            ignored_dirs: self.ignored_dirs,
+            paths: val.paths,
+            project: val.project,
+            base_url: val.base_url,
+            err_output_path: val.err_output_path,
+            ignore_external_fences: val.ignore_external_fences.map(Into::into),
+            ignored_dirs: val.ignored_dirs,
         }
     }
 }
@@ -30,9 +30,9 @@ pub enum ExternalFences {
     Ignore = 1,
 }
 
-impl Into<good_fences::ExternalFences> for ExternalFences {
-    fn into(self) -> good_fences::ExternalFences {
-        match self {
+impl From<ExternalFences> for good_fences::ExternalFences {
+    fn from(val: ExternalFences) -> Self {
+        match val {
             ExternalFences::Include => good_fences::ExternalFences::Include,
             ExternalFences::Ignore => good_fences::ExternalFences::Ignore,
         }
@@ -49,15 +49,15 @@ pub struct GoodFencesResult {
     pub detailed_message: String,
 }
 
-impl Into<GoodFencesResult> for good_fences::GoodFencesResult {
-    fn into(self) -> GoodFencesResult {
+impl From<good_fences::GoodFencesResult> for GoodFencesResult {
+    fn from(val: good_fences::GoodFencesResult) -> Self {
         GoodFencesResult {
-            result_type: self.result_type.into(),
-            message: self.message,
-            source_file: self.source_file,
-            raw_import: self.raw_import,
-            fence_path: self.fence_path,
-            detailed_message: self.detailed_message,
+            result_type: val.result_type.into(),
+            message: val.message,
+            source_file: val.source_file,
+            raw_import: val.raw_import,
+            fence_path: val.fence_path,
+            detailed_message: val.detailed_message,
         }
     }
 }
@@ -69,9 +69,9 @@ pub enum GoodFencesResultType {
     Violation = 1,
 }
 
-impl Into<GoodFencesResultType> for good_fences::GoodFencesResultType {
-    fn into(self) -> GoodFencesResultType {
-        match self {
+impl From<good_fences::GoodFencesResultType> for GoodFencesResultType {
+    fn from(val: good_fences::GoodFencesResultType) -> Self {
+        match val {
             good_fences::GoodFencesResultType::FileNotResolved => {
                 GoodFencesResultType::FileNotResolved
             }

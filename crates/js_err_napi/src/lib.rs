@@ -1,5 +1,3 @@
-use std::convert::Into;
-
 extern crate js_err;
 extern crate napi;
 
@@ -53,8 +51,8 @@ impl<T> ToNapi<napi::Result<T>> for Result<T, JsErr> {
 }
 
 pub struct NapiJsErr(JsErr);
-impl Into<napi::Error> for NapiJsErr {
-    fn into(self) -> napi::Error {
-        self.0.into_napi()
+impl From<NapiJsErr> for napi::Error {
+    fn from(val: NapiJsErr) -> Self {
+        val.0.into_napi()
     }
 }

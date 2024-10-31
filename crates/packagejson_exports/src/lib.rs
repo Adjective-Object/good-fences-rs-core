@@ -50,7 +50,7 @@ pub struct PackageExportRewriteData {
 
 fn clean_path(p: &str) -> String {
     let mut store_str = String::new();
-    return String::from(clean_path_avoid_alloc(p, &mut store_str));
+    String::from(clean_path_avoid_alloc(p, &mut store_str))
 }
 
 // Cleans a path, removing any unnecessary characters and normalizing it
@@ -131,7 +131,7 @@ impl<'a> From<&'a str> for ExportCondition<'a> {
             return ExportCondition::Default;
         }
 
-        return ExportCondition::Condition(s);
+        ExportCondition::Condition(s)
     }
 }
 
