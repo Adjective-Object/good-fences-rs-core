@@ -325,30 +325,29 @@ impl UnusedFinder {
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
         // Get the walk roots and perform the graph traversal
+        let entrypoints = self.get_entrypoints(&logger);
         logger.log(format!(
             "Starting {} graph traversal with {} entrypoints",
             UsedTag::FROM_ENTRY,
-            self.get_entrypoints(&logger).len()
+            entrypoints.len()
         ));
         graph
-            .traverse_bfs(
-                &logger,
-                self.get_entrypoints(&logger),
-                vec![],
-                UsedTag::FROM_ENTRY,
-            )
+            .traverse_bfs(&logger, entrypoints, vec![], UsedTag::FROM_ENTRY)
             .map_err(JsErr::generic_failure)?;
 
+        let ignored_entrypoints = self.get_ignored_files();
+        let ignored_symbols = self.get_ignored_symbols();
         logger.log(format!(
-            "Starting {} graph traversal with {} entrypoints",
+            "Starting {} graph traversal with {} entrypoints and {} symbols",
             UsedTag::FROM_IGNORED,
-            self.get_entrypoints(&logger).len()
+            ignored_entrypoints.len(),
+            ignored_symbols.len()
         ));
         graph
             .traverse_bfs(
                 logger,
-                self.get_ignored_files(),
-                self.get_ignored_symbols(),
+                ignored_entrypoints,
+                ignored_symbols,
                 UsedTag::FROM_IGNORED,
             )
             .map_err(JsErr::generic_failure)?;

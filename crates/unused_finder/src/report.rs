@@ -135,7 +135,10 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                                     }
                                 };
 
-                            if symbol_bitflags.contains(UsedTag::FROM_ENTRY) {
+                            if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
+                                || symbol_bitflags.contains(UsedTag::FROM_TEST)
+                                || symbol_bitflags.contains(UsedTag::FROM_IGNORED)
+                            {
                                 // don't return used symbols
                                 return None;
                             }
