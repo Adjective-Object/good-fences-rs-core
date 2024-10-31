@@ -26,8 +26,8 @@ pub enum SourceFileParseError {
 }
 
 /// Gets the _unresolved_ import/export info from a file by reading it from disk and parsing it.
-pub fn get_file_import_export_info<'a>(
-    file_path: &'a Path,
+pub fn get_file_import_export_info(
+    file_path: &Path,
 ) -> Result<RawImportExportInfo, SourceFileParseError> {
     let cm = Arc::<SourceMap>::default();
     let fm = match cm.load_file(file_path) {

@@ -73,7 +73,7 @@ pub struct CombinedResolver<'a> {
     node_modules_resolver: CachingNodeModulesResolver<'a>,
 }
 
-impl<'a> Resolve for CombinedResolver<'a> {
+impl Resolve for CombinedResolver<'_> {
     fn resolve(&self, base: &FileName, module_specifier: &str) -> Result<Resolution, Error> {
         let base_path = match base {
             FileName::Real(path) => path,

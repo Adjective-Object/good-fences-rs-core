@@ -105,7 +105,7 @@ where
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        return self.inner_ref.deref();
+        self.inner_ref.deref()
     }
 }
 
@@ -144,7 +144,7 @@ impl<'a, K: Eq + Hash, V> MappingRef<V> for dashmap::mapref::one::Ref<'a, K, V> 
     }
 }
 
-impl<'a, K: Eq + Hash, V> DeadlockDebugRef<dashmap::mapref::one::Ref<'a, K, V>> {
+impl<K: Eq + Hash, V> DeadlockDebugRef<dashmap::mapref::one::Ref<'_, K, V>> {
     pub fn key(&self) -> &K {
         self.inner_ref.key()
     }
@@ -213,7 +213,7 @@ impl<'a, K: Eq + Hash, V, T2> MappingRef<T2> for dashmap::mapref::one::MappedRef
 }
 
 #[cfg(feature = "dashmap")]
-impl<'a, K: Eq + Hash, V, T2> DeadlockDebugRef<dashmap::mapref::one::MappedRef<'a, K, V, T2>> {
+impl<K: Eq + Hash, V, T2> DeadlockDebugRef<dashmap::mapref::one::MappedRef<'_, K, V, T2>> {
     pub fn key(&self) -> &K {
         self.inner_ref.key()
     }

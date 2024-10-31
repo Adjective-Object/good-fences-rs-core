@@ -80,7 +80,7 @@ impl GraphFile {
                     match (reexported_from, symbol) {
                         (_, ExportedSymbol::Default | ExportedSymbol::Named(_)) => {
                             // mark as used
-                            tag_named_or_default_symbol(&mut self.symbol_tags, &symbol, tag);
+                            tag_named_or_default_symbol(&mut self.symbol_tags, symbol, tag);
                         }
                         _ => {
                             // TODO: somehow handle re-exports of namespaces
