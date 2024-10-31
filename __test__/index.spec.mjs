@@ -1,6 +1,6 @@
+// @ts-check
 import test from 'ava'
-
-import {goodFences, GoodFencesResultType} from '../index.js'
+import { goodFences, GoodFencesResultType, findUnusedItems } from '../index.js';
 
 test('run crates/good_fences/tests/good_fences_integration through napi', (t) => {
   const result = goodFences({
@@ -30,4 +30,3 @@ test('run crates/good_fences/tests/good_fences_integration through napi ignoring
   t.is(result.filter(r => r.resultType !== GoodFencesResultType.Violation).length, 1);
   t.is(result.filter(r => r.resultType === GoodFencesResultType.Violation).length, 1);
 })
-

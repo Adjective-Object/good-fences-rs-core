@@ -1,4 +1,5 @@
 #! /usr/bin/env node
+// @ts-check
 
 /**
  * `./index` is generated via `napi build` or `yarn build` along with `.node`
@@ -7,14 +8,14 @@
 const { goodFences, GoodFencesResultType } = require('./index');
 const { program } = require('commander');
 
- 
+
 program
-   .option('-p, --project <string> ', 'tsconfig.json file path, defaults to `./tsconfig.json`', './tsconfig.paths.json')
-   .option('-o, --output <string>', 'path to write found violations')
-   .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument", '.')
-   .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
-   .option('--ignoredDirs [pathRegexs...]', 'Directories matching given regular expressions are excluded from fence evaluation (e.g. `--ignoreDirs lib` will not evaluate source files in all dirs named `lib`', [])
-   .arguments('<path> [morePaths...]', 'Dirs to look for fence and source files')
+    .option('-p, --project <string> ', 'tsconfig.json file path, defaults to `./tsconfig.json`', './tsconfig.paths.json')
+    .option('-o, --output <string>', 'path to write found violations')
+    .option('--baseUrl <string>', "Overrides `compilerOptions.baseUrl` property read from '--project' argument", '.')
+    .option('--ignoreExternalFences', 'Ignore external fences (e.g. those in `node_modules`)', false)
+    .option('--ignoredDirs [pathRegexs...]', 'Directories matching given regular expressions are excluded from fence evaluation (e.g. `--ignoreDirs lib` will not evaluate source files in all dirs named `lib`', [])
+    .arguments('<path> [morePaths...]')
 program.parse(process.argv);
 
 const options = program.opts();
