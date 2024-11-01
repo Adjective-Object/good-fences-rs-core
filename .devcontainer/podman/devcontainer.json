@@ -65,7 +65,6 @@
         // these labels are required in order to allow the container user
         // to access the various container mounts.
         "--userns=keep-id",
-        "--security-opt=label=disable",
-        "--security-opt seccomp=unconfined"
+        "--security-opt=label=disable"
     ]
 }
