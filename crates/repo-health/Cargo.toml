@@ -8,7 +8,7 @@ Crate for introspective tests on this repo
 """
 edition = "2018"
 
-[dependencies]
+[dev-dependencies]
 dockerfile-parser = "0.8.0"
 path-slash.workspace = true
 pretty_assertions.workspace = true

@@ -489,12 +489,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "copy_from_str"
-version = "1.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8aa7e06968e9b7227285969ca783dec693823f141023c74e0cf45c82fa06ef40"
-
-[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -923,11 +917,8 @@ dependencies = [
  "anyhow",
  "glob",
  "import_resolver",
- "js_err",
  "jwalk",
  "lazy_static",
- "napi",
- "napi-derive",
  "path-clean 0.1.0",
  "path-slash",
  "path_utils",
@@ -953,8 +944,6 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "good_fences",
- "js_err",
- "js_err_napi",
  "napi",
  "napi-build",
  "napi-derive",
@@ -1088,7 +1077,6 @@ version = "0.2.0"
 dependencies = [
  "abspath",
  "anyhow",
- "copy_from_str",
  "dashmap 6.0.1",
  "ftree_cache",
  "hashbrown 0.14.5",
@@ -1601,9 +1589,7 @@ dependencies = [
  "packagejson",
  "path-clean 0.1.0",
  "path-slash",
- "pathdiff",
  "pretty_assertions",
- "relative-path",
  "serde_json",
  "test_tmpdir",
 ]

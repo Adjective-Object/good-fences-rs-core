@@ -12,12 +12,10 @@ hashbrown = "0.14.5"
 ahashmap = { path = "../ahashmap" }
 path-clean = { workspace = true }
 path-slash = { workspace = true }
-pathdiff = "0.2.1"
-relative-path = { workspace = true }
 packagejson = { path = "../packagejson" }
 anyhow.workspace = true
-test_tmpdir = { path = "../test_tmpdir" }
 
 [dev-dependencies]
 pretty_assertions.workspace = true
 serde_json.workspace = true
+test_tmpdir = { path = "../test_tmpdir" }
