@@ -47,6 +47,14 @@ pub struct UnusedFinderJSONConfig {
     /// 2. If the item contains any of "~)('!*", it is treated as a name-glob, and evaluated as a glob against the names of packages.
     /// 3. Otherwise, the item is treated as the name of an individual package, and matched literally.
     pub entry_packages: Vec<String>,
+
+    /// List of glob patterns to mark as "tests".
+    /// These files will be marked as used, and all of their transitive
+    /// dependencies will also be marked as used
+    ///
+    /// glob patterns are matched against the relative file path from the
+    /// root of the repository
+    pub test_files: Option<Vec<String>>,
 }
 
 impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
@@ -57,6 +65,7 @@ impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
             skip: val.skip,
             report_exported_symbols: val.report_exported_symbols,
             entry_packages: val.entry_packages,
+            test_files: val.test_files.unwrap_or_default(),
         }
     }
 }
@@ -68,6 +77,8 @@ pub enum UsedTagEnum {
     Entry,
     #[serde(rename = "ignored")]
     Ignored,
+    #[serde(rename = "test")]
+    Test,
 }
 
 impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
@@ -75,6 +86,7 @@ impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
         match val {
             unused_finder::UsedTagEnum::Entry => UsedTagEnum::Entry,
             unused_finder::UsedTagEnum::Ignored => UsedTagEnum::Ignored,
+            unused_finder::UsedTagEnum::Test => UsedTagEnum::Test,
         }
     }
 }
@@ -86,7 +98,6 @@ pub struct SymbolReport {
     pub id: String,
     pub start: u32,
     pub end: u32,
-    pub tags: Option<Vec<UsedTagEnum>>,
 }
 
 impl From<unused_finder::SymbolReport> for SymbolReport {
@@ -95,9 +106,22 @@ impl From<unused_finder::SymbolReport> for SymbolReport {
             id: val.id,
             start: val.start,
             end: val.end,
-            tags: val
-                .tags
-                .map(|tags| tags.into_iter().map(Into::into).collect()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
+#[napi(object)]
+pub struct SymbolReportWithTags {
+    pub symbol: SymbolReport,
+    pub tags: Vec<UsedTagEnum>,
+}
+
+impl From<unused_finder::SymbolReportWithTags> for SymbolReportWithTags {
+    fn from(val: unused_finder::SymbolReportWithTags) -> Self {
+        SymbolReportWithTags {
+            symbol: val.symbol.into(),
+            tags: val.tags.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -112,6 +136,8 @@ pub struct UnusedFinderReport {
     // note that this intentionally uses a std HashMap type to guarantee napi
     // compatibility
     pub unused_symbols: HashMap<String, Vec<SymbolReport>>,
+    pub extra_file_tags: HashMap<String, Vec<UsedTagEnum>>,
+    pub extra_symbol_tags: HashMap<String, Vec<SymbolReportWithTags>>,
 }
 
 impl From<unused_finder::UnusedFinderReport> for UnusedFinderReport {
@@ -120,6 +146,16 @@ impl From<unused_finder::UnusedFinderReport> for UnusedFinderReport {
             unused_files: val.unused_files,
             unused_symbols: val
                 .unused_symbols
+                .into_iter()
+                .map(|(k, v)| (k, v.into_iter().map(Into::into).collect()))
+                .collect(),
+            extra_file_tags: val
+                .extra_file_tags
+                .into_iter()
+                .map(|(k, v)| (k, v.into_iter().map(Into::into).collect()))
+                .collect(),
+            extra_symbol_tags: val
+                .extra_symbol_tags
                 .into_iter()
                 .map(|(k, v)| (k, v.into_iter().map(Into::into).collect()))
                 .collect(),

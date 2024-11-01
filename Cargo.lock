@@ -3872,6 +3872,7 @@ dependencies = [
  "glob",
  "ignore",
  "import_resolver",
+ "itertools 0.13.0",
  "js_err",
  "packagejson",
  "packagejson_exports",

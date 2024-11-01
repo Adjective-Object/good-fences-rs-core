@@ -1,3 +1,4 @@
+use core::option::Option::None;
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -341,31 +342,45 @@ impl UnusedFinder {
             "Starting {} graph traversal with {} entrypoints and {} symbols",
             UsedTag::FROM_IGNORED,
             ignored_entrypoints.len(),
-            ignored_symbols.len()
+            Self::count_symbols(&ignored_symbols)
         ));
         graph
             .traverse_bfs(
-                logger,
+                &logger,
                 ignored_entrypoints,
                 ignored_symbols,
                 UsedTag::FROM_IGNORED,
             )
             .map_err(JsErr::generic_failure)?;
 
+        let test_entrypoints = self.get_test_files();
+        logger.log(format!(
+            "Starting {} graph traversal with {} entrypoints",
+            UsedTag::FROM_TEST,
+            test_entrypoints.len(),
+        ));
+        graph
+            .traverse_bfs(&logger, test_entrypoints, vec![], UsedTag::FROM_TEST)
+            .map_err(JsErr::generic_failure)?;
+
         Ok(UnusedFinderResult::new(graph))
+    }
+
+    fn count_symbols<T, U>(symbols: &[(T, Vec<U>)]) -> usize {
+        symbols.iter().map(|(_, symbols)| symbols.len()).sum()
     }
 
     /// helper to get the list of files that are "entrypoints" to the used
     /// symbol graph (ignored files)
-    fn get_entrypoints(&self, logger: impl Logger) -> Vec<PathBuf> {
+    fn get_entrypoints(&self, logger: impl Logger) -> Vec<&Path> {
         // get all package exports.
         self.last_walk_result
             .source_files
             .par_iter()
-            .filter_map(|(file_path, source_file)| {
+            .filter_map(|(file_path, source_file)| -> Option<&Path> {
                 let export = self.is_entry_package_export(&logger, file_path, source_file);
                 if export || self.is_file_ignored(file_path) {
-                    Some(file_path.clone())
+                    Some(file_path)
                 } else {
                     None
                 }
@@ -424,14 +439,14 @@ impl UnusedFinder {
             .unwrap_or(false)
     }
 
-    fn get_ignored_files(&self) -> Vec<PathBuf> {
+    fn get_ignored_files(&self) -> Vec<&Path> {
         // TODO: this is n^2, which is bad! Could build a treemap of ignore files?
         self.last_walk_result
             .source_files
             .par_iter()
-            .filter_map(|(file_path, _)| {
+            .filter_map(|(file_path, _)| -> Option<&Path> {
                 if self.is_file_ignored(file_path) {
-                    Some(file_path.clone())
+                    Some(file_path)
                 } else {
                     None
                 }
@@ -439,11 +454,35 @@ impl UnusedFinder {
             .collect()
     }
 
-    fn get_ignored_symbols(&self) -> Vec<(PathBuf, Vec<ExportedSymbol>)> {
+    fn get_ignored_symbols(&self) -> Vec<(&Path, Vec<ExportedSymbol>)> {
         self.last_walk_result
             .source_files
             .par_iter()
-            .map(|(path_buf, file)| (path_buf.clone(), Self::get_file_ignored_symbols(file)))
+            .filter_map(|(path_buf, file)| -> Option<(&Path, Vec<ExportedSymbol>)> {
+                let ignored_symbols = Self::get_file_ignored_symbols(file);
+                if ignored_symbols.is_empty() {
+                    None
+                } else {
+                    Some((path_buf, ignored_symbols))
+                }
+            })
+            .collect()
+    }
+
+    fn get_test_files(&self) -> Vec<&Path> {
+        self.last_walk_result
+            .source_files
+            .par_iter()
+            .filter_map(|(path, _)| -> Option<&Path> {
+                for test_glob in &self.config.test_files {
+                    let relative = path.strip_prefix(&self.config.repo_root).unwrap_or(path);
+                    if test_glob.matches_path(relative) {
+                        return Some(path);
+                    }
+                }
+
+                None
+            })
             .collect()
     }
 
