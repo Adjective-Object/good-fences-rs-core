@@ -34,7 +34,6 @@ tsconfig_paths = { path = "../tsconfig_paths" }
 abspath = { path = "../abspath" }
 
 [dev-dependencies]
-tracing-test.workspace = true
 test_tmpdir = { path = "../test_tmpdir" }
 pretty_assertions.workspace = true
 
