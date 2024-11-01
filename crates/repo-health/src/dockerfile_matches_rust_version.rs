@@ -1,4 +1,5 @@
 use dockerfile_parser::{Dockerfile, RunInstruction, ShellOrExecExpr};
+use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 
 #[test]
@@ -70,7 +71,7 @@ fn test_dockerfile_rust_version_matches_root_toml() {
     let rust_channel_re = regex::Regex::new(r#"rustup toolchain install ([^\s'"]+)"#).unwrap();
     let rust_channel = rust_channel_re
         .captures(&rustup_install)
-        .expect("should be able to find toolchai nversion")
+        .expect("should be able to find toolchain version")
         .get(1)
         .unwrap()
         .as_str();
@@ -96,4 +97,37 @@ fn test_dockerfile_rust_version_matches_root_toml() {
         .collect::<Vec<&str>>();
     components.sort();
     assert_eq!(components, intended_components);
+
+    // now check where the rustup default is set
+    let rustup_default: String = parsed_dockerfile
+        .instructions
+        .iter()
+        .find_map(|instruction| {
+            if let dockerfile_parser::Instruction::Run(RunInstruction {
+                expr: ShellOrExecExpr::Shell(shell_expr),
+                ..
+            }) = instruction
+            {
+                let expr_string = format!("{}", shell_expr);
+                if expr_string.contains("rustup default") {
+                    Some(expr_string)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .expect("rustup default call should exist in dockerfile");
+    println!("rustup_default: {}", rustup_default);
+
+    // get rust version
+    let rust_default_channel_re = regex::Regex::new(r#"rustup default ([^\s'"]+)"#).unwrap();
+    let rust_default_channel = rust_default_channel_re
+        .captures(&rustup_default)
+        .expect("should be able to find default version")
+        .get(1)
+        .unwrap()
+        .as_str();
+    assert_eq!(rust_channel, rust_default_channel)
 }

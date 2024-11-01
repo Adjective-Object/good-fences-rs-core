@@ -25,8 +25,7 @@ RUN apt-get update && apt-get install -y nodejs
 
 # Preload yarn with corepack
 RUN corepack enable
-RUN corepack prepare yarn@4.4.-0 --activate
-
+RUN corepack prepare yarn@4.4.0 --activate
 
 ARG USERNAME=ubuntu
 ARG HOME=/home/${USERNAME}
@@ -46,7 +45,7 @@ RUN mkdir -p \
     /cache/cargo-registry \
     /cache/cargo-toolchains \
     /cache/xdg-home
-RUN chown ${USERNAME}:${USERNAME} /cache
+RUN chown -R ${USERNAME}:${USERNAME} /cache
 
 # Start acting as the container user to avoid permissions issues
 USER ${USERNAME}
@@ -62,6 +61,12 @@ RUN bash -c 'source $HOME/.profile; rustup toolchain install nightly-2024-10-25-
     --profile=default\
     --component=rust-analyzer\
     --component=rustc-codegen-cranelift'
+RUN bash -c 'source $HOME/.profile; rustup default nightly-2024-10-25-x86_64-unknown-linux-gnu'
+
+# Install rust tooling used in the project
+RUN sudo apt-get update && sudo apt-get install libssl-dev
+RUN bash -c 'source $HOME/.profile; cargo install cargo-udeps'
+RUN bash -c 'source $HOME/.profile; cargo install samply --locked'
 
 # Reconfigure xdg_home into a shared volume so fish will persist
 # terminal history through rebuilds
