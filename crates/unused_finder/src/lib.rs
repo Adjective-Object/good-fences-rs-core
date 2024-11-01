@@ -18,6 +18,7 @@ mod ignore_file;
 pub mod logger;
 mod parse;
 mod report;
+mod tag;
 #[cfg(test)]
 mod test;
 mod unused_finder;
@@ -26,7 +27,8 @@ mod walked_file;
 
 pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
 pub use parse::data::ResolvedImportExportInfo;
-pub use report::{SymbolReport, UnusedFinderReport, UsedTagEnum};
+pub use report::{SymbolReport, SymbolReportWithTags, UnusedFinderReport};
+pub use tag::UsedTagEnum;
 pub use unused_finder::{UnusedFinder, UnusedFinderResult};
 
 pub fn find_unused_items(

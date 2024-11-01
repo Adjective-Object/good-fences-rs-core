@@ -1,9 +1,20 @@
+<<<<<<< HEAD
 use core::{fmt, option::Option::None};
 use std::{
     collections::HashSet,
     fmt::Display,
     path::{Path, PathBuf},
 };
+||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
+use core::{fmt, option::Option::None};
+use std::{collections::HashSet, fmt::Display, path::PathBuf};
+=======
+use core::option::Option::None;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
+>>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -31,6 +42,7 @@ bitflags::bitflags! {
     }
 }
 
+<<<<<<< HEAD
 impl Display for UsedTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tags = Vec::new();
@@ -47,6 +59,22 @@ impl Display for UsedTag {
     }
 }
 
+||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
+impl Display for UsedTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut tags = Vec::new();
+        if self.contains(Self::FROM_ENTRY) {
+            tags.push("entry");
+        };
+        if self.contains(Self::FROM_IGNORED) {
+            tags.push("ignored");
+        };
+        write!(f, "{}", tags.join("+"))
+    }
+}
+
+=======
+>>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
 // graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]
 pub struct GraphFile {
@@ -168,13 +196,13 @@ impl Graph {
     pub fn traverse_bfs(
         &mut self,
         logger: impl Logger,
-        initial_frontier_files: Vec<PathBuf>,
-        initial_frontier_symbols: Vec<(PathBuf, Vec<ExportedSymbol>)>,
+        initial_frontier_files: Vec<&Path>,
+        initial_frontier_symbols: Vec<(&Path, Vec<ExportedSymbol>)>,
         tag: UsedTag,
     ) -> Result<()> {
         let initial_file_edges = initial_frontier_files
             .into_iter()
-            .filter_map(|path| match self.path_to_id.get(&path) {
+            .filter_map(|path| match self.path_to_id.get(path) {
                 Some(file_id) => Some(*file_id),
                 None => {
                     logger.log(format!(
@@ -189,8 +217,8 @@ impl Graph {
         let initial_symbol_edges = initial_frontier_symbols
             .into_iter()
             .filter_map(
-                |(path, symbols): (PathBuf, Vec<ExportedSymbol>)| -> Option<Vec<Edge>> {
-                    match self.path_to_id.get(&path).cloned() {
+                |(path, symbols): (&Path, Vec<ExportedSymbol>)| -> Option<Vec<Edge>> {
+                    match self.path_to_id.get(path).cloned() {
                         Some(file_id) => Some(
                             symbols
                                 .into_iter()
