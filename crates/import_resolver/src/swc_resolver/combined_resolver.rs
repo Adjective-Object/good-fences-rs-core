@@ -114,9 +114,12 @@ impl Resolve for CombinedResolver<'_> {
 
 #[cfg(test)]
 mod test {
+    extern crate pretty_assertions;
+
     use super::*;
     use pretty_assertions::assert_eq;
     use swc_ecma_loader::TargetEnv;
+    use test_tmpdir::test_tmpdir;
 
     fn check_deadlocks() {
         std::thread::spawn(move || loop {
