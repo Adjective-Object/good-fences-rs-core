@@ -18,7 +18,7 @@ serde = { version = "1.0.117", features = ["rc", "derive"] }
 serde_json = "1.0.59"
 napi = { version = "2.16.6", default-features = false, features = [
     "compat-mode",
-    "napi9",
+    "napi4",
 ] }
 napi-derive = "2.16.9"
 swc_core = { version = "0.101.3", features = [
