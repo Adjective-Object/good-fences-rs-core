@@ -26,7 +26,7 @@
     "beachball": "^2.36.0"
   },
   "engines": {
-    "node": ">= 10"
+    "node": ">= 20"
   },
   "scripts": {
     "change": "beachball change -c .beachball.js",
