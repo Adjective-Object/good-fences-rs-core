@@ -65,8 +65,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: napi build
+      - name: napi build --target x86_64-apple-darwin
         run: yarn install && yarn build
+      - name: cat napi generated index file
+        run: cat ./index.js
       - name: run napi tests
         run: yarn test
       - name: cargo test
