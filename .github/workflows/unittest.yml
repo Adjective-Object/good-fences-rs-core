@@ -65,12 +65,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: cargo test
-        run: cargo test --release
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
         run: yarn test
+      - name: cargo test
+        run: cargo test --release
       - name: upload artifacts
         uses: actions/upload-artifact@v3
         with:
