@@ -10,6 +10,7 @@ pub mod get_imports;
 pub mod good_fences_runner;
 pub mod walk_dirs;
 
+use core::option::Option::None;
 pub use walk_dirs::ExternalFences;
 
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
