@@ -3,7 +3,7 @@ import test from 'ava'
 import * as good_fences from '../index.js';
 
 console.log("imported good_fences:", good_fences, { showHidden: true, depth: 4 });
-const { goodFences, GoodFencesResultType, findUnusedItems } = good_fences;
+const { findUnusedItems, goodFences, GoodFencesResultType } = good_fences;
 
 test('run crates/good_fences/tests/good_fences_integration through napi', (t) => {
   const result = goodFences({
