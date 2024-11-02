@@ -7,7 +7,7 @@ edition = "2018"
 description = "Napi implementation for `unused_finder`"
 
 [lib]
-crate-type = ["lib"]
+crate-type = ["cdylib", "lib", "staticlib"]
 
 [dependencies]
 napi.workspace = true

@@ -6,7 +6,7 @@ edition = "2021"
 description = "Napi implementation for `js_err`"
 
 [lib]
-crate-type = ["lib"]
+crate-type = ["cdylib", "lib", "staticlib"]
 
 [dependencies]
 napi.workspace = true
