@@ -39,7 +39,7 @@ fn normalize_test_report(
             .map(|(k, v)| {
                 let mut s_v = v.clone();
                 s_v.sort();
-                (k.replace(tmpdir.root().to_str().unwrap(), "<root>"), s_v)
+                (normalize_path(tmpdir, &k), s_v)
             })
             .collect(),
     }
