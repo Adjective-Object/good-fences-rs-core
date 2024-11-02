@@ -45,12 +45,14 @@ jobs:
         run: yarn test
       - name: upload-artifacts
         uses: actions/upload-artifact@v3
+        if: needs.pr-check.outputs.number != 'null'
         with:
           name: linux-napi
           path: ./*.node
           if-no-files-found: error
       - name: upload js files
         uses: actions/upload-artifact@v3
+        if: needs.pr-check.outputs.number != 'null'
         with:
           name: js-files
           if-no-files-found: error
@@ -75,6 +77,7 @@ jobs:
         run: cargo test --release
       - name: upload artifacts
         uses: actions/upload-artifact@v3
+        if: needs.pr-check.outputs.number != 'null'
         with:
           name: macos-napi
           path: ./*.node
@@ -92,6 +95,7 @@ jobs:
         run: cargo test --release
       - name: upload artifacts
         uses: actions/upload-artifact@v3
+        if: needs.pr-check.outputs.number != 'null'
         with:
           name: macos-arm-napi
           path: ./*.node
@@ -112,6 +116,7 @@ jobs:
         run: cargo test --release
       - name: upload artifacts
         uses: actions/upload-artifact@v3
+        if: needs.pr-check.outputs.number != 'null'
         with:
           name: windows-napi
           path: ./*.node
