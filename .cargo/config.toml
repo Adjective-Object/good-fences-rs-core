@@ -1,0 +1,9 @@
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+[target.aarch64-unknown-linux-gnu]
+# Note: This assumes we only ever cross-compile for aarch64-unknown-linux-gnu from a linux machine
+# with aarch64-linux-gnu-gcc installed (via gcc-aarch64-linux-gnu on ubuntu)
+#
+# If this changes in the future, this config will need to be moved to the devcontainer config.toml,
+# and duplicated into the github actions CI scripts.
+rustflags = ["-C", "linker=aarch64-linux-gnu-gcc"]
