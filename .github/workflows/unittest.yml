@@ -63,13 +63,13 @@ jobs:
           - host: windows-latest
             target: aarch64-pc-windows-msvc
             test: false
-    name: ${{ matrix.settings.target }}
+    name: ${{ matrix.settings.target }} on ${{ matrix.settings.host }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
       - name: napi build
-        run: yarn install && yarn build
+        run: yarn install && yarn build --target ${{ matrix.settings.target }} && find . -name "*.node"
       - name: run napi tests
         if: ${{ matrix.settings.test }}
         run: yarn test
