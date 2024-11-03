@@ -75,7 +75,7 @@ jobs:
         uses: actions/upload-artifact@v3
         if: needs.pr-check.outputs.number != 'null'
         with:
-          name: bindings-${{target}}
+          name: bindings-${{ matrix.settings.target }}
           path: ./*.node
           if-no-files-found: error
       - name: upload js files
