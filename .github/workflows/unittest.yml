@@ -1,4 +1,4 @@
-name: run unit tests
+name: build/test
 on:
   pull_request:
     branches: [main]
