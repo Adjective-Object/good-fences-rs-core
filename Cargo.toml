@@ -44,7 +44,7 @@ thiserror = "1.0.52"
 # Build with debug info, but split it into separate pdb files we don't need to distribute
 debug = true
 split-debuginfo = "packed"
-# optimises for speed oveer size
+# optimises for speed over size
 opt-level = "s"
 # run link-time optimisation for release builds.
 # This will make the final binary take longer to build, but can result in faster, samller  code.
