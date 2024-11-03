@@ -44,7 +44,7 @@ jobs:
             test: true
           - host: ubuntu-20.04
             target: aarch64-unknown-linux-gnu
-            packages: gcc-aarch64-linux-gnu 
+            packages: gcc-aarch64-linux-gnu
             test: false
           # This is the latest macos that github provides a non-enterprise-tier x86
           # runner for 
@@ -71,6 +71,16 @@ jobs:
         with:
           toolchain: nightly-2024-10-25
           targets: ${{ matrix.settings.target }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cargo-cache
+            target/
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
       - name: run package install script
         shell: bash
         run: |
@@ -80,6 +90,8 @@ jobs:
           fi
       - name: napi build
         run: yarn install && yarn build --target ${{ matrix.settings.target }}
+        env:
+          CARGO_TERM_VERBOSE: true
       - name: debug print machine info
         run: |
           find . -name "*.node";
