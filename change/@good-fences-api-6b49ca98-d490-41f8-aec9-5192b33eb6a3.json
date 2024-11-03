@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "add CODEOWNERS file",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}
