@@ -9,7 +9,7 @@ description = "A hashmap with ahash as the hasher"
 crate-type = ["lib"]
 
 [dependencies]
-ahash = { version = "0.8.11", optional = true }
+ahash = { version = "0.8.11", optional = true , default-features = false }
 
 [features]
 default = ["ahash"]

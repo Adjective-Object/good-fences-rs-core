@@ -1,5 +1,5 @@
 [package]
-name = "swc_utils"
+name = "normalize_src"
 version = "0.2.0"
 authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
 edition = "2018"
@@ -9,9 +9,9 @@ crate-type = ["lib"]
 
 [dependencies]
 swc_common.workspace = true
-swc_ecma_parser.workspace = true
 swc_ecma_ast.workspace = true
 swc_compiler_base.workspace = true
+swc_utils_parse = { path = "../swc_utils_parse" }
 
 [dev-dependencies]
 pretty_assertions.workspace = true

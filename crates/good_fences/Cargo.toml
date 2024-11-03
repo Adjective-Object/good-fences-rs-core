@@ -34,5 +34,5 @@ swc_ecma_visit.workspace = true
 swc_ecma_transforms.workspace = true
 
 [dev-dependencies]
-swc_utils = { path = "../swc_utils" }
+swc_utils_parse = { path = "../swc_utils_parse" }
 text-diff = "0.4.0"

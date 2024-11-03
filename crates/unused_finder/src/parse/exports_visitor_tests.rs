@@ -9,7 +9,7 @@ mod test {
     use swc_ecma_visit::VisitWith;
 
     use crate::parse::{ExportedSymbol, ReExportedSymbol};
-    use swc_utils::create_lexer;
+    use swc_utils_parse::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
     use test_tmpdir::{amap, aset};

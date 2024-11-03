@@ -9,7 +9,7 @@ use swc_ecma_parser::{Capturing, Parser};
 use swc_ecma_transforms::resolver;
 use swc_ecma_visit::{Fold, VisitWith};
 
-use swc_utils::create_lexer;
+use swc_utils_parse::create_lexer;
 
 use crate::parse::exports_visitor::ExportsVisitor;
 use crate::parse::RawImportExportInfo;

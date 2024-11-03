@@ -777,7 +777,7 @@ dependencies = [
  "swc_ecma_parser",
  "swc_ecma_transforms",
  "swc_ecma_visit",
- "swc_utils",
+ "swc_utils_parse",
  "text-diff",
  "thiserror",
  "tsconfig_paths",
@@ -1140,6 +1140,17 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
+
+[[package]]
+name = "normalize_src"
+version = "0.2.0"
+dependencies = [
+ "pretty_assertions",
+ "swc_common",
+ "swc_compiler_base",
+ "swc_ecma_ast",
+ "swc_utils_parse",
+]
 
 [[package]]
 name = "normpath"
@@ -2337,12 +2348,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "swc_utils"
+name = "swc_utils_parse"
 version = "0.2.0"
 dependencies = [
- "pretty_assertions",
  "swc_common",
- "swc_compiler_base",
  "swc_ecma_ast",
  "swc_ecma_parser",
 ]
@@ -2656,7 +2665,6 @@ dependencies = [
  "pathdiff",
  "pretty_assertions",
  "rayon",
- "regex",
  "serde",
  "serde_json",
  "stringreader",
@@ -2666,7 +2674,7 @@ dependencies = [
  "swc_ecma_parser",
  "swc_ecma_transforms",
  "swc_ecma_visit",
- "swc_utils",
+ "swc_utils_parse",
  "test_tmpdir",
  "thiserror",
  "tsconfig_paths",

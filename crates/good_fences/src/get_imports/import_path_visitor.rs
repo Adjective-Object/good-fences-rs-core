@@ -165,7 +165,7 @@ mod test {
     use swc_ecma_transforms::resolver;
     use swc_ecma_visit::{FoldWith, VisitWith};
 
-    use swc_utils::parse_ecma_src;
+    use swc_utils_parse::parse_ecma_src;
 
     use super::ImportPathVisitor;
 
