@@ -76,9 +76,9 @@ jobs:
       - name: napi build
         run: yarn install && yarn build --target ${{ matrix.settings.target }}
       - name: debug print machine info
-        run: >
-          find . -name "*.node"
-          uname -a
+        run: |
+          find . -name "*.node";
+          uname -a;
       - name: run napi tests
         if: ${{ matrix.settings.test }}
         run: yarn test
