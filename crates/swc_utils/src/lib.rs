@@ -77,6 +77,7 @@ pub fn normalise_src(src: &str, print_args: PrintArgs) -> String {
 #[cfg(test)]
 mod test {
     use crate::normalise_src;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_normalise_src() {
