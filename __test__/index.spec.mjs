@@ -1,9 +1,8 @@
 // @ts-check
-import test from 'ava'
-import * as good_fences from '../index.js';
-
-console.log("imported good_fences:", good_fences, { showHidden: true, depth: 4 });
-const { findUnusedItems, goodFences, GoodFencesResultType } = good_fences;
+import test from 'ava';
+import { findUnusedItems, goodFences, GoodFencesResultType } from '../index.js';
+console.log("findUnusedItems:", findUnusedItems);
+console.log("goodFences:", goodFences);
 
 test('run crates/good_fences/tests/good_fences_integration through napi', (t) => {
   const result = goodFences({
