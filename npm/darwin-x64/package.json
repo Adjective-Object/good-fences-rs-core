@@ -1,11 +1,6 @@
 {
   "name": "@good-fences/api-darwin-x64",
-  "version": "0.1.6",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Adjective-Object/good-fences-rs-core",
-    "directory": "npm/darwin-x64"
-  },
+  "version": "0.16.0",
   "os": [
     "darwin"
   ],
@@ -19,5 +14,9 @@
   "license": "MIT",
   "engines": {
     "node": ">= 10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adjective-Object/good-fences-rs-core"
   }
 }

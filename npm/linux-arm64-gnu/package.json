@@ -1,15 +1,15 @@
 {
-  "name": "@good-fences/api-darwin-arm64",
+  "name": "@good-fences/api-linux-arm64-gnu",
   "version": "0.16.0",
   "os": [
-    "darwin"
+    "linux"
   ],
   "cpu": [
     "arm64"
   ],
-  "main": "@good-fences.darwin-arm64.node",
+  "main": "@good-fences.linux-arm64-gnu.node",
   "files": [
-    "@good-fences.darwin-arm64.node"
+    "@good-fences.linux-arm64-gnu.node"
   ],
   "license": "MIT",
   "engines": {
@@ -18,5 +18,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Adjective-Object/good-fences-rs-core"
-  }
+  },
+  "libc": [
+    "glibc"
+  ]
 }

@@ -1,11 +1,6 @@
 {
   "name": "@good-fences/api-linux-x64-gnu",
-  "version": "0.1.6",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Adjective-Object/good-fences-rs-core",
-    "directory": "npm/linux-x64-gnu"
-  },
+  "version": "0.16.0",
   "os": [
     "linux"
   ],
@@ -19,6 +14,10 @@
   "license": "MIT",
   "engines": {
     "node": ">= 10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adjective-Object/good-fences-rs-core"
   },
   "libc": [
     "glibc"
