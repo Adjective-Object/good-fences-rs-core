@@ -11,6 +11,3 @@ crate-type = ["lib"]
 swc_common.workspace = true
 swc_ecma_parser.workspace = true
 swc_ecma_ast.workspace = true
-
-[dev-dependencies]
-pretty_assertions.workspace = true
