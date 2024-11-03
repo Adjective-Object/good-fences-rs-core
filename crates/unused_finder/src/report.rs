@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use swc_core::common::source_map::SmallPos;
+use swc_common::source_map::SmallPos;
 
 use crate::{graph::UsedTag, parse::ExportedSymbol, UnusedFinderResult};
 

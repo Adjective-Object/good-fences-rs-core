@@ -1,20 +1,16 @@
 use super::{ExportedSymbol, ExportedSymbolMetadata, RawImportExportInfo, ReExportedSymbol};
 use ahashmap::{AHashMap, AHashSet};
 use std::{collections::HashSet, iter::FromIterator};
-use swc_core::{
-    common::{
-        comments::{CommentKind, Comments, SingleThreadedComments},
-        BytePos, Span, Spanned,
-    },
-    ecma::{
-        ast::{
-            BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
-            ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit,
-            ModuleExportName, NamedExport, Pat, Str, TsImportEqualsDecl,
-        },
-        visit::{Visit, VisitWith},
-    },
+use swc_common::{
+    comments::{CommentKind, Comments, SingleThreadedComments},
+    BytePos, Span, Spanned,
 };
+use swc_ecma_ast::{
+    BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
+    ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
+    NamedExport, Pat, Str, TsImportEqualsDecl,
+};
+use swc_ecma_visit::{Visit, VisitWith};
 
 // AST visitor that gathers information on file imports and exports from an SWC source tree.
 #[derive(Debug)]

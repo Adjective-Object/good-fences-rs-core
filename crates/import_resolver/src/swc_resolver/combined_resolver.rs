@@ -1,8 +1,7 @@
 use anyhow::{anyhow, Error};
 use std::path::Path;
 use swc_common::FileName;
-use swc_core::ecma::loader::resolve::Resolution;
-use swc_ecma_loader::resolve::Resolve;
+use swc_ecma_loader::resolve::{Resolution, Resolve};
 
 use super::{
     node_resolver::{

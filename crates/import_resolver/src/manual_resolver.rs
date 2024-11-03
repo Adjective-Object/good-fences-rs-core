@@ -5,8 +5,8 @@ use serde::Deserialize;
 use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::string::String;
-use swc_core::common::FileName;
-use swc_core::ecma::loader::resolve::Resolve;
+use swc_common::FileName;
+use swc_ecma_loader::resolve::Resolve;
 use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]

@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
-use swc_core::common::comments::Comments;
-use swc_core::common::errors::Handler;
-use swc_core::common::{Globals, Mark, GLOBALS};
-use swc_core::common::{SourceFile, SourceMap};
-use swc_core::ecma::transforms::base::resolver;
-use swc_core::ecma::visit::{FoldWith, VisitWith};
+use swc_common::comments::Comments;
+use swc_common::errors::Handler;
+use swc_common::sync::Lrc;
+use swc_common::{Globals, Mark, GLOBALS};
+use swc_common::{SourceFile, SourceMap};
 use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, Parser, TsSyntax};
+use swc_ecma_transforms::resolver;
+use swc_ecma_visit::{FoldWith, VisitWith};
 mod import_path_visitor;
 use crate::error::GetImportError;
 
@@ -20,7 +20,7 @@ pub fn get_imports_map_from_file<P: AsRef<str>>(
     file_path: &P,
 ) -> Result<FileImports, GetImportError> {
     let path_string: &str = file_path.as_ref();
-    let cm = Arc::<SourceMap>::default();
+    let cm = Lrc::<SourceMap>::default();
     let fm = match cm.load_file(Path::new(path_string)) {
         Ok(f) => f,
         Err(e) => {

@@ -20,7 +20,7 @@ use import_resolver::swc_resolver::{
 };
 use js_err::JsErr;
 use rayon::{iter::Either, prelude::*};
-use swc_core::ecma::loader::{resolve::Resolve, TargetEnv};
+use swc_ecma_loader::{resolve::Resolve, TargetEnv};
 
 #[derive(Debug)]
 enum DirtyFiles {
@@ -62,7 +62,7 @@ struct SourceFiles {
 impl SourceFiles {
     fn try_resolve(
         walk_result: WalkedFiles,
-        resolver: impl Resolve,
+        resolver: impl Resolve + Sync,
     ) -> Result<SourceFiles, anyhow::Error> {
         // Map of source file path to source file data
         let (source_files, errors): (AHashMap<PathBuf, ResolvedSourceFile>, Vec<anyhow::Error>) =

@@ -1,12 +1,13 @@
 use std::path::Path;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
-use swc_core::common::comments::SingleThreadedComments;
-use swc_core::common::errors::Handler;
-use swc_core::common::{Globals, Mark, SourceMap, GLOBALS};
-use swc_core::ecma::transforms::base::resolver;
-use swc_core::ecma::visit::{Fold, VisitWith};
+use swc_common::comments::SingleThreadedComments;
+use swc_common::errors::Handler;
+use swc_common::sync::Lrc;
+use swc_common::{Globals, Mark, SourceMap, GLOBALS};
 use swc_ecma_parser::{Capturing, Parser};
+use swc_ecma_transforms::resolver;
+use swc_ecma_visit::{Fold, VisitWith};
 
 use swc_utils::create_lexer;
 
@@ -29,7 +30,7 @@ pub enum SourceFileParseError {
 pub fn get_file_import_export_info(
     file_path: &Path,
 ) -> Result<RawImportExportInfo, SourceFileParseError> {
-    let cm = Arc::<SourceMap>::default();
+    let cm = Lrc::<SourceMap>::default();
     let fm = match cm.load_file(file_path) {
         Ok(f) => f,
         Err(e) => return Err(SourceFileParseError::LoadFile(file_path.to_path_buf(), e)),
