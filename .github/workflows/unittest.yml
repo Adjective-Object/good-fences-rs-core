@@ -14,7 +14,7 @@ jobs:
       - name: check gclib version
         run: ldd --version
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: cargo fmt --check
         run: cargo fmt --check
       - name: install dependencies
@@ -67,7 +67,7 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: napi build
         run: yarn install && yarn build
       - name: run napi tests
