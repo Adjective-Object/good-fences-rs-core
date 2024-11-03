@@ -6,8 +6,10 @@ on:
   workflow_dispatch:
 jobs:
   checks:
+    strategy:
+      fail-fast: false
     runs-on: ubuntu-20.04
-    name: 'Run checks'
+    name: 'health checks'
     steps:
       - name: check gclib version
         run: ldd --version
