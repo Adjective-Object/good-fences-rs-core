@@ -68,6 +68,11 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2024-10-25
+          targets: ${{ matrix.settings.target }}
       - name: napi build
         run: yarn install && yarn build --target ${{ matrix.settings.target }}
       - name: debug print machine info
