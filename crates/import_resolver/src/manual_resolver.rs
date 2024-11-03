@@ -226,7 +226,6 @@ fn path_buf_from_tsconfig(
 
 #[cfg(test)]
 mod test {
-    extern crate lazy_static;
     extern crate relative_path;
     use super::{resolve_ts_import, ResolvedImport, TsconfigPathsJson};
     use lazy_static::lazy_static;

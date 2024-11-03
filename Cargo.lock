@@ -512,8 +512,6 @@ version = "0.2.0"
 dependencies = [
  "dashmap 6.0.1",
  "hashbrown",
- "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -691,8 +689,6 @@ dependencies = [
  "deadlock_ref",
  "hashbrown",
  "parking_lot",
- "serde",
- "serde_derive",
  "tracing",
 ]
 
@@ -899,7 +895,6 @@ dependencies = [
  "serde_json",
  "swc_common",
  "swc_ecma_loader",
- "swc_ecma_parser",
  "test_tmpdir",
  "thiserror",
  "tracing",

@@ -12,7 +12,6 @@ anyhow = { workspace = true }
 dashmap = "6.0.1"
 ftree_cache = { path = "../ftree_cache" }
 hashbrown = "0.14.5"
-lazy_static = "1.4.0"
 ouroboros = "0.18.4"
 parking_lot.workspace = true
 path-clean = { workspace = true }
@@ -26,7 +25,6 @@ serde_json.workspace = true
 serde.workspace = true
 swc_common.workspace = true
 swc_ecma_loader.workspace = true
-swc_ecma_parser.workspace = true
 thiserror.workspace = true
 tracing = "0.1.40"
 tsconfig_paths = { path = "../tsconfig_paths" }
@@ -35,6 +33,7 @@ abspath = { path = "../abspath" }
 [dev-dependencies]
 test_tmpdir = { path = "../test_tmpdir" }
 pretty_assertions.workspace = true
+lazy_static = "1.4.0"
 
 [target.'cfg(windows)'.dependencies]
 normpath = "1.3.0"
