@@ -25,7 +25,6 @@ serde_derive = "1.0.117"
 serde_json.workspace = true
 serde.workspace = true
 swc_common.workspace = true
-swc_core.workspace = true
 swc_ecma_loader.workspace = true
 swc_ecma_parser.workspace = true
 thiserror.workspace = true

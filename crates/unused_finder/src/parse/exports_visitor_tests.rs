@@ -3,11 +3,11 @@ mod test {
     use std::sync::Arc;
 
     use ahashmap::{AHashMap, AHashSet};
-    use swc_core::common::comments::{Comments, SingleThreadedComments};
-    use swc_core::common::{FileName, SourceFile, SourceMap};
-    use swc_core::ecma::visit::VisitWith;
+    use swc_common::comments::{Comments, SingleThreadedComments};
+    use swc_common::{FileName, SourceFile, SourceMap};
     use swc_ecma_parser::lexer::Lexer;
     use swc_ecma_parser::{Capturing, Parser};
+    use swc_ecma_visit::VisitWith;
 
     use crate::parse::{ExportedSymbol, ReExportedSymbol};
     use swc_utils::create_lexer;

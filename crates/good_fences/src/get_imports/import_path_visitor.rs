@@ -3,13 +3,11 @@ use std::{
     iter::FromIterator,
 };
 
-use swc_core::ecma::{
-    ast::{
-        BindingIdent, CallExpr, Callee, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
-        NamedExport, TsImportEqualsDecl,
-    },
-    visit::{Visit, VisitWith},
+use swc_ecma_ast::{
+    BindingIdent, CallExpr, Callee, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
+    NamedExport, TsImportEqualsDecl,
 };
+use swc_ecma_visit::{Visit, VisitWith};
 
 #[derive(Debug)]
 pub struct ImportPathVisitor {
@@ -163,13 +161,9 @@ fn extract_argument_value(expr: &CallExpr) -> Option<String> {
 #[cfg(test)]
 mod test {
     use std::collections::{HashMap, HashSet};
-    use swc_core::{
-        common::{Globals, Mark, GLOBALS},
-        ecma::{
-            transforms::base::resolver,
-            visit::{FoldWith, VisitWith},
-        },
-    };
+    use swc_common::{Globals, Mark, GLOBALS};
+    use swc_ecma_transforms::resolver;
+    use swc_ecma_visit::{FoldWith, VisitWith};
 
     use swc_utils::parse_ecma_src;
 

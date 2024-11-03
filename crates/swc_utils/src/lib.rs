@@ -1,11 +1,8 @@
-extern crate swc;
-extern crate swc_core;
-extern crate swc_ecma_parser;
-use std::sync::Arc;
-use swc::PrintArgs;
-use swc_core::common::comments::{Comments, SingleThreadedComments};
-use swc_core::common::{FileName, SourceFile, SourceMap};
-use swc_core::ecma::ast::Module;
+use swc_common::comments::{Comments, SingleThreadedComments};
+use swc_common::sync::Lrc;
+use swc_common::{FileName, SourceFile, SourceMap};
+use swc_compiler_base::PrintArgs;
+use swc_ecma_ast::Module;
 use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, Parser, TsSyntax};
 
@@ -24,7 +21,7 @@ pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) 
     lexer
 }
 
-pub fn parse_ecma_src<TName, TBody>(name_str: TName, body: TBody) -> (Arc<SourceMap>, Module)
+pub fn parse_ecma_src<TName, TBody>(name_str: TName, body: TBody) -> (Lrc<SourceMap>, Module)
 where
     TName: Into<String>,
     TBody: ToString,
@@ -36,13 +33,13 @@ pub fn parse_ecma_src_comments<TName, TBody>(
     name_str: TName,
     body: TBody,
     comments: Option<&dyn Comments>,
-) -> (Arc<SourceMap>, Module)
+) -> (Lrc<SourceMap>, Module)
 where
     TName: Into<String>,
     TBody: ToString,
 {
-    let cm = Arc::<SourceMap>::default();
-    let fname: Arc<FileName> = Arc::new(FileName::Custom(name_str.into()));
+    let cm = Lrc::<SourceMap>::default();
+    let fname: Lrc<FileName> = Lrc::new(FileName::Custom(name_str.into()));
     let fm = cm.new_source_file(fname, body.to_string());
 
     let lexer: Lexer<'_> = create_lexer(&fm, comments);
@@ -53,9 +50,8 @@ where
     (cm, module)
 }
 
-pub fn print_ast(cm: &Arc<SourceMap>, module: &Module, print_args: PrintArgs<'_>) -> String {
-    let compiler = swc::Compiler::new(cm.clone());
-    let out_str = compiler.print(module, print_args).unwrap();
+pub fn ast_to_str(cm: &Lrc<SourceMap>, module: &Module, print_args: PrintArgs<'_>) -> String {
+    let out_str = swc_compiler_base::print(cm.clone(), module, print_args).unwrap();
     out_str.code
 }
 
@@ -75,10 +71,7 @@ pub fn normalise_src(src: &str, print_args: PrintArgs) -> String {
     }
 
     let (cm, parsed) = parse_ecma_src_comments("test.ts", src, pargs.comments);
-    let compiler = swc::Compiler::new(cm);
-    let out_str = compiler.print(&parsed, pargs).unwrap();
-
-    out_str.code
+    ast_to_str(&cm, &parsed, pargs)
 }
 
 #[cfg(test)]

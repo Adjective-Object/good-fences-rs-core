@@ -2,10 +2,9 @@ use std::path::{Path, PathBuf};
 
 use ahashmap::{AHashMap, AHashSet, ARandomState};
 use anyhow::Result;
-use swc_core::{
-    common::{FileName, Span},
-    ecma::{ast::ModuleExportName, loader::resolve::Resolve},
-};
+use swc_common::{FileName, Span};
+use swc_ecma_ast::ModuleExportName;
+use swc_ecma_loader::resolve::Resolve;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub enum ExportedSymbol {

@@ -8,7 +8,8 @@ edition = "2018"
 crate-type = ["lib"]
 
 [dependencies]
-swc_core.workspace = true
+swc_common.workspace = true
 swc_ecma_parser.workspace = true
-swc.workspace = true
 pretty_assertions.workspace = true
+swc_ecma_ast.workspace = true
+swc_compiler_base.workspace = true

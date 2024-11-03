@@ -6,21 +6,25 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
-path-clean = "0.1.0"
-path-slash = "0.2.1"
-relative-path = "1.7.2"
-regex = "1"
 glob = "0.3.0"
-rayon = "1.5.1"
-thiserror = "1.0.52"
 jwalk = "0.5"
-serde = { version = "1.0.117", features = ["rc", "derive"] }
-serde_json = "1.0.59"
 napi = { version = "2.16.6", default-features = false, features = [
     "compat-mode",
     "napi4",
 ] }
 napi-derive = "2.16.9"
+parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
+path-clean = "0.1.0"
+path-slash = "0.2.1"
+pretty_assertions = "1.4.0"
+rayon = "1.5.1"
+regex = "1"
+relative-path = "1.7.2"
+serde = { version = "1.0.117", features = ["rc", "derive"] }
+serde_json = "1.0.59"
+swc = "0.284.1"
+swc_common = "0.37.4"
+swc_compiler_base = "0.18.1"
 swc_core = { version = "0.101.3", features = [
     "ecma_plugin_transform",
     "ecma_loader_node",
@@ -28,13 +32,13 @@ swc_core = { version = "0.101.3", features = [
     "ecma_loader_lru",
     "ecma_loader_parking_lot",
 ] }
-swc_common = "0.37.4"
-swc_ecma_parser = "0.149.0"
-swc = "0.284.1"
+swc_ecma_ast = "0.118.2"
 swc_ecma_loader = "0.49.1"
-pretty_assertions = "1.4.0"
-tracing-test = "0.2.5"
-parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
+swc_ecma_parser = "0.149.0"
+swc_ecma_transforms = "0.238.0"
+swc_ecma_visit = "0.104.6"
+thiserror = "1.0.52"
+
 
 [profile.release]
 # Build with debug info, but split it into separate pdb files we don't need to distribute
