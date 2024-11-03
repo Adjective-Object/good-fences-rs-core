@@ -15,7 +15,6 @@ import_resolver = { path = "../import_resolver" }
 js_err = { path = "../js_err" }
 path-slash.workspace = true
 rayon.workspace = true
-regex.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 swc_common.workspace = true
@@ -24,7 +23,7 @@ swc_ecma_loader.workspace = true
 swc_ecma_parser.workspace = true
 swc_ecma_visit.workspace = true
 swc_ecma_transforms.workspace = true
-swc_utils = { path = "../swc_utils" }
+swc_utils_parse = { path = "../swc_utils_parse" }
 thiserror.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
 packagejson = { path = "../packagejson" }

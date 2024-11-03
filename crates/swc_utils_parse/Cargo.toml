@@ -1,0 +1,16 @@
+[package]
+name = "swc_utils_parse"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+swc_common.workspace = true
+swc_ecma_parser.workspace = true
+swc_ecma_ast.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
