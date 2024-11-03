@@ -48,7 +48,10 @@ jobs:
           - host: ubuntu-20.04
             target: armv7-unknown-linux-gnueabihf
             test: false
-          - host: macos-latest
+          # This is the latest macos that github provides a non-enterprise-tier x86
+          # runner for 
+          # See: https://github.com/actions/runner-images?tab=readme-ov-file#available-images
+          - host: macos-13 
             target: x86_64-apple-darwin
             test: true
           - host: macos-latest
