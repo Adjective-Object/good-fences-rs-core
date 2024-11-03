@@ -71,6 +71,8 @@ jobs:
         run: yarn install && yarn build
       - name: cat napi generated index file
         run: cat ./index.js
+      - name: find built files
+        run: find . -name "*.node"
       - name: run napi tests
         run: yarn test
       - name: cargo test
