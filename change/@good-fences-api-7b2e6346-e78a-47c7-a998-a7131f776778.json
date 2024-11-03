@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "remove unused armv7-unknown-linux-gnueabihf from publish pipeline",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}
