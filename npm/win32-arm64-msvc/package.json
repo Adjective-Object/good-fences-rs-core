@@ -1,15 +1,15 @@
 {
-  "name": "@good-fences/api-darwin-arm64",
+  "name": "@good-fences/api-win32-arm64-msvc",
   "version": "0.16.0",
   "os": [
-    "darwin"
+    "win32"
   ],
   "cpu": [
     "arm64"
   ],
-  "main": "@good-fences.darwin-arm64.node",
+  "main": "@good-fences.win32-arm64-msvc.node",
   "files": [
-    "@good-fences.darwin-arm64.node"
+    "@good-fences.win32-arm64-msvc.node"
   ],
   "license": "MIT",
   "engines": {
