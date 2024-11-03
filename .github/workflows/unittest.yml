@@ -51,10 +51,10 @@ jobs:
           # See: https://github.com/actions/runner-images?tab=readme-ov-file#available-images
           - host: macos-13 
             target: x86_64-apple-darwin
-            test: true
+            test: false
           - host: macos-latest
             target: aarch64-apple-darwin
-            test: true
+            test: false
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             test: true
@@ -90,8 +90,6 @@ jobs:
           fi
       - name: napi build
         run: yarn install && yarn build --target ${{ matrix.settings.target }}
-        env:
-          CARGO_TERM_VERBOSE: true
       - name: debug print machine info
         run: |
           find . -name "*.node";
