@@ -8,8 +8,6 @@ edition = "2021"
 crate-type = ["lib"]
 
 [dependencies]
-serde_derive = "1.0.117"
-serde.workspace = true
 anyhow = { workspace = true }
 parking_lot.workspace = true
 dashmap = "6.0.1"
