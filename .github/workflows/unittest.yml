@@ -5,7 +5,7 @@ on:
   workflow_call:
   workflow_dispatch:
 jobs:
-  run-checks:
+  checks:
     runs-on: ubuntu-20.04
     name: 'Run checks'
     steps:
@@ -27,99 +27,63 @@ jobs:
           reporter: 'github-pr-review'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           clippy_flags: -- --all-targets -Dwarnings
-  tests-linux:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: napi build
-        run: yarn install && yarn build
-      - name: cargo test
-        run: cargo test --release
       - name: Run cargo-udeps 
         uses: aig787/cargo-udeps-action@v1
         with:
           version: 'latest'
           args: '--all-targets'
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-20.04
+            target: x86_64-unknown-linux-gnu
+            test: true
+          - host: ubuntu-20.04
+            target: aarch64-unknown-linux-gnu
+            test: false
+          - host: ubuntu-20.04
+            target: armv7-unknown-linux-gnueabihf
+            test: false
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            test: true
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            test: false
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            test: true
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+            test: false
+    name: ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+      - name: napi build
+        run: yarn install && yarn build
       - name: run napi tests
+        if: ${{ matrix.settings.test }}
         run: yarn test
+      - name: cargo test
+        if: ${{ matrix.settings.test }}
+        run: cargo test --release
       - name: upload-artifacts
         uses: actions/upload-artifact@v3
         if: needs.pr-check.outputs.number != 'null'
         with:
-          name: linux-napi
+          name: bindings-${{target}}
           path: ./*.node
           if-no-files-found: error
       - name: upload js files
+        if: needs.pr-check.outputs.number != 'null' && ${{ matrix.settings.target }} == 'linux-x64-gnu'
         uses: actions/upload-artifact@v3
-        if: needs.pr-check.outputs.number != 'null'
         with:
           name: js-files
           if-no-files-found: error
           path: |
             index.js
             index.d.ts
-  tests-macos:
-    runs-on: macos-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: napi build --target x86_64-apple-darwin
-        run: yarn install && yarn build
-      - name: cat napi generated index file
-        run: cat ./index.js
-      - name: find built files
-        run: find . -name "*.node"
-      - name: run napi tests
-        run: yarn test
-      - name: cargo test
-        run: cargo test --release
-      - name: upload artifacts
-        uses: actions/upload-artifact@v3
-        if: needs.pr-check.outputs.number != 'null'
-        with:
-          name: macos-napi
-          path: ./*.node
-          if-no-files-found: error
-  tests-macos-arm:
-    runs-on: macos-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - name: add rust target
-        run: rustup target add aarch64-apple-darwin
-      - name: napi build
-        run: yarn install && yarn build --target aarch64-apple-darwin
-      - name: cargo test
-        run: cargo test --release
-      - name: upload artifacts
-        uses: actions/upload-artifact@v3
-        if: needs.pr-check.outputs.number != 'null'
-        with:
-          name: macos-arm-napi
-          path: ./*.node
-          if-no-files-found: error
-  tests-win:
-    runs-on: windows-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: napi build
-        run: yarn install && yarn build
-      - name: run napi tests
-        run: yarn test
-      - name: cargo test
-        run: cargo test --release
-      - name: upload artifacts
-        uses: actions/upload-artifact@v3
-        if: needs.pr-check.outputs.number != 'null'
-        with:
-          name: windows-napi
-          path: ./*.node
-          if-no-files-found: error

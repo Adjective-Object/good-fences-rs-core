@@ -19,22 +19,35 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.BEACHBALL_PUSH_PAT }}
-      - name: pull win artifacts
+
+      - name: pull x86_64-unknown-linux-gnu
         uses: actions/download-artifact@v3
         with:
-          name: windows-napi
-      - name: pull linux artifacts
+          name: bindings-x86_64-unknown-linux-gnu
+      - name: pull aarch64-unknown-linux-gnu
         uses: actions/download-artifact@v3
         with:
-          name: linux-napi
-      - name: pull macos artifacts
+          name: bindings-aarch64-unknown-linux-gnu
+      - name: pull armv7-unknown-linux-gnueabihf
         uses: actions/download-artifact@v3
         with:
-          name: macos-napi
-      - name: pull macos apple-sillicon artifacts
+          name: bindings-armv7-unknown-linux-gnueabihf
+      - name: pull x86_64-apple-darwin
         uses: actions/download-artifact@v3
         with:
-          name: macos-arm-napi
+          name: bindings-x86_64-apple-darwin
+      - name: pull aarch64-apple-darwin
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-aarch64-apple-darwin
+      - name: pull x86_64-pc-windows-msvc
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-x86_64-pc-windows-msvc
+      - name: pull aarch64-pc-windows-msvc
+        uses: actions/download-artifact@v3
+        with:
+          name: bindings-aarch64-pc-windows-msvc
       - name: pull js files
         uses: actions/download-artifact@v3
         with:
