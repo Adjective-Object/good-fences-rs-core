@@ -42,8 +42,8 @@ __metadata:
     beachball: "npm:^2.36.0"
     commander: "npm:^9.4.1"
   bin:
-    good-fences: ./good-fences.js
-    unused: ./unused.js
+    good-fences: good-fences.js
+    unused: unused.js
   languageName: unknown
   linkType: soft
 
