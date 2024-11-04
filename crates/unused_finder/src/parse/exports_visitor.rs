@@ -136,7 +136,6 @@ impl ExportsVisitor {
         span: Span,
     ) {
         specs.iter().for_each(|specifier| {
-            println!("specifier: {:?}", specifier);
             if let ExportSpecifier::Named(named) = specifier {
                 let is_type_only: bool = parent_is_type_only || named.is_type_only;
                 // Handles `export { foo as bar }`

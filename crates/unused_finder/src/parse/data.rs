@@ -127,32 +127,57 @@ impl ResolvedImportExportInfo {
     }
 
     /// Returns an iterator over all the imports originating from this file.
-    pub fn iter_imported_symbols(&self) -> impl Iterator<Item = (&PathBuf, ExportedSymbol)> {
+    pub fn iter_exported_symbols_meta(
+        &self,
+    ) -> impl Iterator<Item = (Option<&Path>, (&ExportedSymbol, &ExportedSymbolMetadata))> {
+        let export_from_symbols = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
+            symbols.iter().map(|(symbol, meta)| {
+                (
+                    Some(path.as_path()),
+                    (symbol.renamed_to.as_ref().unwrap_or(&symbol.imported), meta),
+                )
+            })
+        });
+
+        let exported_ids = self.exported_ids.iter().map(|symbol| (None, symbol));
+
+        exported_ids.chain(export_from_symbols)
+    }
+
+    // Global static Namespace here allows for retyrnung a reference to it
+    // in the iter_imported_symbols_meta
+    const NAMESPACE: ExportedSymbol = ExportedSymbol::Namespace;
+    const EXECUTION_ONLY: ExportedSymbol = ExportedSymbol::ExecutionOnly;
+
+    /// Returns an iterator over all the imports originating from this file.
+    pub fn iter_imported_symbols_meta(
+        &self,
+    ) -> impl Iterator<Item = (&PathBuf, &ExportedSymbol, Option<&ExportedSymbolMetadata>)> {
         let imported_symbols = self
             .imported_symbols
             .iter()
-            .flat_map(|(path, symbols)| symbols.iter().map(move |symbol| (path, symbol.clone())));
+            .flat_map(|(path, symbols)| symbols.iter().map(move |symbol| (path, symbol, None)));
 
         let require_imports = self
             .require_paths
             .iter()
-            .map(|path| (path, ExportedSymbol::Namespace));
+            .map(|path| (path, &Self::NAMESPACE, None));
 
         let imported_paths = self
             .imported_paths
             .iter()
-            .map(|path| (path, ExportedSymbol::Namespace));
+            .map(|path| (path, &Self::NAMESPACE, None));
 
         let re_exports = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
             symbols
                 .iter()
-                .map(move |(symbol, _meta)| (path, symbol.imported.clone()))
+                .map(move |(symbol, meta)| (path, &symbol.imported, Some(meta)))
         });
 
         let executed_paths = self
             .executed_paths
             .iter()
-            .map(|path| (path, ExportedSymbol::ExecutionOnly));
+            .map(|path| (path, &Self::EXECUTION_ONLY, None));
 
         imported_symbols
             .chain(require_imports)

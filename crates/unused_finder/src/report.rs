@@ -148,6 +148,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                             if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
                                 || symbol_bitflags.contains(UsedTag::FROM_TEST)
                                 || symbol_bitflags.contains(UsedTag::FROM_IGNORED)
+                                || symbol_bitflags.contains(UsedTag::TYPE_ONLY)
                             {
                                 // don't return used symbols
                                 return None;

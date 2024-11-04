@@ -345,12 +345,33 @@ impl UnusedFinder {
         ));
         graph
             .traverse_bfs(
-                logger,
+                &logger,
                 ignored_entrypoints,
                 ignored_symbols,
                 UsedTag::FROM_IGNORED,
             )
             .map_err(JsErr::generic_failure)?;
+
+        // mark all typeonly symbols
+        if self.config.allow_unused_types {
+            for (path, source_file) in self.last_walk_result.source_files.iter() {
+                for (_original_path, (symbol, metadata)) in
+                    source_file.import_export_info.iter_exported_symbols_meta()
+                {
+                    // println!("checking symbol: {}:{}", path.display(), symbol);
+                    if metadata.is_type_only {
+                        // println!("marking typeonly symbol: {}:{}", path.display(), symbol);
+                        // By using the file's own path here instead of the iterators' reported path, we are marking
+                        // re-exported symbols as used within the file, that re-exports them, NOT within the file they
+                        // originate from
+                        //
+                        // This is because we want to report errors when a typeonly re-export's concrete implementation
+                        // is never used.
+                        graph.mark_symbol(path, symbol, UsedTag::TYPE_ONLY);
+                    }
+                }
+            }
+        }
 
         Ok(UnusedFinderResult::new(graph))
     }
