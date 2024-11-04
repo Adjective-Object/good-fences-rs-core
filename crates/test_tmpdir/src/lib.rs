@@ -40,6 +40,19 @@ macro_rules! amap(
 );
 
 #[macro_export]
+macro_rules! amap2(
+    { $($key:expr => $value:expr),+ } => {
+        {
+            let mut m = ahashmap::AHashMap::default();
+            $(
+                m.insert($key, $value);
+            )+
+            m
+        }
+    };
+);
+
+#[macro_export]
 macro_rules! bmap(
     { $($key:expr => $value:expr),* } => {
         {
