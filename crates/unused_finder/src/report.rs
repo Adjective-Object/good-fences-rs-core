@@ -21,6 +21,7 @@ pub struct SymbolReport {
 pub enum UsedTagEnum {
     Entry,
     Ignored,
+    TypeOnly,
 }
 impl From<UsedTag> for Option<Vec<UsedTagEnum>> {
     fn from(flags: UsedTag) -> Self {
@@ -34,6 +35,9 @@ impl From<UsedTag> for Option<Vec<UsedTagEnum>> {
         }
         if flags.contains(UsedTag::FROM_IGNORED) {
             result.push(UsedTagEnum::Ignored);
+        }
+        if flags.contains(UsedTag::TYPE_ONLY) {
+            result.push(UsedTagEnum::TypeOnly);
         }
 
         Some(result)

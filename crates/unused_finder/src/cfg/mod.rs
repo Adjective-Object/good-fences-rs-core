@@ -80,6 +80,11 @@ pub struct UnusedFinderJSONConfig {
     /// If true, individual exported symbols are also tracked
     #[serde(default)]
     pub report_exported_symbols: bool,
+    /// If true, type-only exports will not be reported as used.
+    /// However, the transitive dependencies of unused types will still be
+    /// reported as unused.
+    #[serde(default)]
+    pub allow_unused_types: bool,
     /// List of packages that should be considered "entry" packages
     /// All transitive imports from the exposed exports of these packages
     /// will be considered used
@@ -96,6 +101,10 @@ pub struct UnusedFinderJSONConfig {
 pub struct UnusedFinderConfig {
     /// If true, the finder should report exported symbols that are not used anywhere in the project
     pub report_exported_symbols: bool,
+    /// If true, type-only exports will not be reported as used.
+    /// However, the transitive dependencies of unused types will still be
+    /// reported as unused.
+    pub allow_unused_types: bool,
 
     /// Path to the root directory of the repository
     pub repo_root: String,
@@ -119,6 +128,7 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
         Ok(UnusedFinderConfig {
             // raw fields that are copied from the JSON config
             report_exported_symbols: value.report_exported_symbols,
+            allow_unused_types: value.allow_unused_types,
             root_paths: value.root_paths,
             repo_root: value.repo_root,
             // other fields that are processed before use

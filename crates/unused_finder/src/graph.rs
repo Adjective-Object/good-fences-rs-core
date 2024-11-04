@@ -22,6 +22,8 @@ bitflags::bitflags! {
         /// True if this file or symbol was used recursively by an
         /// ignored symbol or file.
         const FROM_IGNORED = 0x04;
+        // True if this symbol is a type-only symbol
+        const TYPE_ONLY = 0x08;
     }
 }
 
@@ -34,6 +36,9 @@ impl Display for UsedTag {
         if self.contains(Self::FROM_IGNORED) {
             tags.push("ignored");
         };
+        if self.contains(Self::TYPE_ONLY) {
+            tags.push("type-only");
+        }
         write!(f, "{}", tags.join("+"))
     }
 }
