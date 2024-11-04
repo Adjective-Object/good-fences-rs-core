@@ -1,5 +1,9 @@
 use core::{fmt, option::Option::None};
-use std::{collections::HashSet, fmt::Display, path::PathBuf};
+use std::{
+    collections::HashSet,
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -22,6 +26,8 @@ bitflags::bitflags! {
         /// True if this file or symbol was used recursively by an
         /// ignored symbol or file.
         const FROM_IGNORED = 0x04;
+        // True if this symbol is a type-only symbol
+        const TYPE_ONLY = 0x08;
     }
 }
 
@@ -34,6 +40,9 @@ impl Display for UsedTag {
         if self.contains(Self::FROM_IGNORED) {
             tags.push("ignored");
         };
+        if self.contains(Self::TYPE_ONLY) {
+            tags.push("type-only");
+        }
         write!(f, "{}", tags.join("+"))
     }
 }
@@ -144,6 +153,18 @@ impl Graph {
         Graph { path_to_id, files }
     }
 
+    pub fn mark_symbol(&mut self, path: &Path, symbol: &ExportedSymbol, tag: UsedTag) {
+        let file_id = match self.path_to_id.get(path) {
+            Some(id) => *id,
+            None => {
+                return;
+            }
+        };
+
+        let file = &mut self.files[file_id];
+        file.tag_symbol(symbol, tag);
+    }
+
     pub fn traverse_bfs(
         &mut self,
         logger: impl Logger,
@@ -250,10 +271,21 @@ impl Graph {
                 // TODO: become more granular here for re-exported symbols
                 let outgoing_edges = file
                     .import_export_info
-                    .iter_imported_symbols()
-                    .filter_map(|(path, symbol)| {
+                    .iter_imported_symbols_meta()
+                    .filter_map(|(path, symbol, meta)| {
+                        // don't traverse type-only re-exports of symbols when marking items.
+                        //
+                        // This is so that we don't mark a symbol as used if it is only used as a type.
+                        // TODO: should this be a TraversalMode that the graph is parameterized on? e.g.
+                        // track USED_ENTRY and USED_ENTRY_AS_TYPE as separate tags?
+                        if let Some(meta) = meta {
+                            if meta.is_type_only {
+                                return None;
+                            }
+                        }
+
                         let edge = match self.path_to_id.get(path) {
-                            Some(id) => Edge::new(*id, symbol),
+                            Some(id) => Edge::new(*id, symbol.clone()),
                             None => {
                                 return None;
                             }

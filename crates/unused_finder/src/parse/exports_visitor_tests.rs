@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod test {
+
     use ahashmap::{AHashMap, AHashSet};
     use swc_common::comments::{Comments, SingleThreadedComments};
     use swc_common::sync::Lrc;
@@ -12,7 +13,7 @@ mod test {
     use swc_utils_parse::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
-    use test_tmpdir::{amap, aset};
+    use test_tmpdir::{amap, amap2, aset};
 
     fn create_test_parser<'a>(
         fm: &'a Lrc<SourceFile>,
@@ -24,293 +25,303 @@ mod test {
         Parser::new_from(capturing)
     }
 
-    #[test]
-    fn test_allowed_unused_export_named() {
+    fn visit(src: &str) -> ExportsVisitor {
         let cm = Lrc::<SourceMap>::default();
         let comments = SingleThreadedComments::default();
         let fm = cm.new_source_file(
             Lrc::new(FileName::Custom("test.ts".into())),
+            src.to_string(),
+        );
+
+        let mut parser = create_test_parser(&fm, Some(&comments));
+        let module = parser.parse_typescript_module().unwrap();
+        let mut visitor = ExportsVisitor::new(comments);
+        module.visit_with(&mut visitor);
+
+        visitor
+    }
+
+    #[derive(PartialEq, Debug)]
+    struct TestMeta {
+        pub allow_unused: bool,
+        pub is_typeonly: bool,
+    }
+
+    fn exported_ids(visitor: &ExportsVisitor) -> AHashMap<ExportedSymbol, TestMeta> {
+        visitor
+            .exported_ids
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    TestMeta {
+                        allow_unused: v.allow_unused,
+                        is_typeonly: v.is_type_only,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn re_exported_ids(
+        visitor: &ExportsVisitor,
+    ) -> AHashMap<String, AHashMap<ReExportedSymbol, TestMeta>> {
+        visitor
+            .export_from_ids
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    v.iter()
+                        .map(|(re_exported, meta)| {
+                            (
+                                re_exported.clone(),
+                                TestMeta {
+                                    allow_unused: meta.allow_unused,
+                                    is_typeonly: meta.is_type_only,
+                                },
+                            )
+                        })
+                        .collect::<AHashMap<ReExportedSymbol, TestMeta>>(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_allowed_unused_export_named() {
+        let visitor = visit(
             r#"
                 const foo = 1;
                 // @ALLOW-UNUSED-EXPORT
                 export { foo }
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        assert!(
-            visitor.exported_ids.values().all(|exps| exps.allow_unused),
-            "Check for every exported item to be allowed_unused = true failed"
+        assert_eq!(
+            amap2!(
+                "foo".into() => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
         );
     }
 
     #[test]
     fn test_allowed_unused_export_named_as_bar() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 const foo = 1;
                 // @ALLOW-UNUSED-EXPORT
                 export { foo as bar }
-                "#
-            .to_string(),
+                "#,
         );
 
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-
-        assert_eq!(visitor.exported_ids.len(), 1);
-        assert!(visitor.exported_ids.iter().all(
-            |(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Named("bar".to_string())
-        ));
+        assert_eq!(
+            amap2!(
+                "bar".into() => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        );
     }
     #[test]
     fn test_allowed_unused_export_default() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 const foo = 1;
                 // @ALLOW-UNUSED-EXPORT
                 export default foo;
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allowed_unused_export_kind_as_default() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 interface Foo {
                     bar: boolean;
                 }
                 // @ALLOW-UNUSED-EXPORT
                 export type { Foo as default };
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        assert!(visitor
-            .exported_ids
-            .iter()
-            .all(|(symbol, e)| e.allow_unused && *symbol == ExportedSymbol::Default));
+        assert_eq!(
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: true
+                }
+            ),
+            exported_ids(&visitor)
+        );
     }
 
     #[test]
     fn test_allowed_unused_export_default_execution() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 function foo() { return 1; }
                 // @ALLOW-UNUSED-EXPORT
                 export default foo();
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
         );
     }
 
     #[test]
     fn test_allowed_unused_export_default_class() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export default class Foo {}
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = AHashSet::default();
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allowed_unused_export_const() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export const foo = 1;
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-
-        assert!(visitor.exported_ids.iter().all(|(_, e)| e.allow_unused));
+        assert_eq!(
+            amap2!(
+                "foo".into() => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allowed_unused_export_from() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export { foo } from './foo';
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = AHashMap::default();
-        assert_eq!(expected_map, visitor.export_from_ids);
+        assert_eq!(
+            amap!(
+                "./foo" => amap2!(
+                    ReExportedSymbol {
+                        imported: ExportedSymbol::Named("foo".to_owned()),
+                        renamed_to: None,
+                    } => TestMeta {
+                        allow_unused: true,
+                        is_typeonly: false
+                    }
+                )
+            ),
+            re_exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allowed_unused_export_default_from() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export { default as foo } from './foo';
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-        assert!(visitor.export_from_ids.is_empty());
+        assert_eq!(
+            amap!(
+                "./foo" => amap2!(
+                    ReExportedSymbol {
+                        imported: ExportedSymbol::Default,
+                        renamed_to: Some(ExportedSymbol::Named("foo".to_owned())),
+                    } => TestMeta {
+                        allow_unused: true,
+                        is_typeonly: false
+                    }
+                )
+            ),
+            re_exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allowed_unused_export_star_from() {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export * from './foo';
-                "#
-            .to_string(),
+                "#,
         );
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-        module.visit_with(&mut visitor);
-
-        assert!(visitor.export_from_ids.is_empty());
+        assert_eq!(
+            amap!(
+                "./foo" => amap2!(
+                    ReExportedSymbol {
+                        imported: ExportedSymbol::Namespace,
+                        renamed_to: None,
+                    } => TestMeta {
+                        allow_unused: true,
+                        is_typeonly: false
+                    }
+                )
+            ),
+            re_exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_named() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             const foo = 1;
             export { foo }
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("foo".to_owned()));
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                "foo".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allow_unused_export_and_collect_not_marked_export() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             // some comment
             const foo = 1;
@@ -319,37 +330,26 @@ mod test {
             // another comment
             // @ALLOW-UNUSED-EXPORT this are some docs
             export const zoo = 2;
-            "#
-            .to_string(),
+            "#,
         );
-
-        let comments = SingleThreadedComments::default();
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-
-        module.visit_with(&mut visitor);
-        assert_eq!(visitor.exported_ids.len(), 2);
-        assert!(
-            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
-                == ExportedSymbol::Named("bar".to_owned())
-                || !e.allow_unused),
-            "`bar` export should not be allowed unused"
-        );
-        assert!(
-            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
-                == ExportedSymbol::Named("zoo".to_owned())
-                || e.allow_unused),
-            "`zoo` export should be allowed unused"
-        );
+        assert_eq!(
+            amap2!(
+                "bar".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                },
+                "zoo".into() => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allow_unused_export_and_collect_not_marked_export_default() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             // some comment
             const foo = 1;
@@ -358,38 +358,26 @@ mod test {
             // another comment
             // @ALLOW-UNUSED-EXPORT this are some docs
             export const zoo = 2;
-            "#
-            .to_string(),
+            "#,
         );
-
-        let comments = SingleThreadedComments::default();
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-
-        module.visit_with(&mut visitor);
-        assert_eq!(visitor.exported_ids.len(), 2);
-        assert!(
-            visitor.exported_ids.iter().any(|(symbol, e)| *symbol
-                == ExportedSymbol::Named("foo".to_owned())
-                || !e.allow_unused),
-            "`bar` export should not be allowed unused"
-        );
-        assert!(
-            visitor
-                .exported_ids
-                .iter()
-                .any(|(symbol, e)| *symbol == ExportedSymbol::Default || e.allow_unused),
-            "`zoo` export should be allowed unused"
-        );
+        assert_eq!(
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                },
+                "zoo".into() => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_allow_unused_export_default_and_collect_not_marked_named_export() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             // some comment
             const foo = 1;
@@ -398,294 +386,230 @@ mod test {
             
             // another comment
             export const zoo = 2;
-            "#
-            .to_string(),
+            "#,
         );
-
-        let comments = SingleThreadedComments::default();
-
-        let mut parser = create_test_parser(&fm, Some(&comments));
-        let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
-
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> =
-            aset!(ExportedSymbol::Named("zoo".to_string()));
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: true,
+                    is_typeonly: false
+                },
+                "zoo".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_named_as_bar() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             const foo = 1;
             export { foo as bar }
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("bar".to_owned()));
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                "bar".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_default() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             const foo = 1;
             export default foo;
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_kind_as_default() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             interface Foo {
                 bar: boolean;
             }
             export type { Foo as default };
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: true
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_default_execution() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             function foo() { return 1; }
             export default foo();
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_default_class() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             export default class Foo {}
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Default);
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
-        );
+            amap2!(
+                ExportedSymbol::Default => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_const() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             export const foo = 1;
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashSet<ExportedSymbol> = aset!(ExportedSymbol::Named("foo".to_owned()));
-
         assert_eq!(
-            expected_map,
-            visitor
-                .exported_ids
-                .drain()
-                .map(|(k, _)| k)
-                .collect::<AHashSet<_>>()
+            amap2!(
+                "foo".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
+    }
+
+    #[test]
+    fn test_export_const_multi() {
+        let visitor = visit(
+            r#"
+            export const foo = 1, bar = 2;
+            "#,
         );
+        assert_eq!(
+            amap2!(
+                "foo".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                },
+
+                "bar".into() => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            ),
+            exported_ids(&visitor)
+        )
     }
 
     #[test]
     fn test_export_from() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             export { foo } from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = amap!( "./foo" =>
-            aset!(
+        let expected_map: AHashMap<String, AHashMap<ReExportedSymbol, TestMeta>> = amap!(
+            "./foo" => amap2!(
                 ReExportedSymbol{
                     imported: ExportedSymbol::Named("foo".to_owned()),
                     renamed_to: None,
+                } => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
                 }
             )
         );
-        assert_eq!(expected_map, visitor.export_from_ids);
+        assert_eq!(expected_map, re_exported_ids(&visitor));
     }
 
     #[test]
     fn test_export_default_from() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             export { default as foo } from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = amap!(
-        "./foo" => aset!(ReExportedSymbol{
-            imported: ExportedSymbol::Default,
-            renamed_to: Some(ExportedSymbol::Named("foo".to_owned())),
-        }));
-        assert_eq!(expected_map, visitor.export_from_ids);
+        let expected_map: AHashMap<String, AHashMap<ReExportedSymbol, TestMeta>> = amap!(
+            "./foo" => amap2!(
+                ReExportedSymbol{
+                    imported: ExportedSymbol::Default,
+                    renamed_to: Some(ExportedSymbol::Named("foo".to_owned())),
+                } => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            )
+        );
+        assert_eq!(expected_map, re_exported_ids(&visitor));
     }
 
     #[test]
     fn test_export_star_from() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             export * from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
-        let expected_map: AHashMap<String, AHashSet<ReExportedSymbol>> = amap!("./foo" => aset!(ReExportedSymbol{
-            imported: ExportedSymbol::Namespace,
-            renamed_to: None,
-        }));
-        assert_eq!(expected_map, visitor.export_from_ids);
+        let expected_map: AHashMap<String, AHashMap<ReExportedSymbol, TestMeta>> = amap!(
+            "./foo" => amap2!(
+                ReExportedSymbol{
+                    imported: ExportedSymbol::Namespace,
+                    renamed_to: None,
+                } => TestMeta {
+                    allow_unused: false,
+                    is_typeonly: false
+                }
+            )
+        );
+        assert_eq!(expected_map, re_exported_ids(&visitor));
     }
 
     #[test]
     fn test_import_default() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import foo from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
             amap!("./foo" => aset!(ExportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
@@ -693,20 +617,11 @@ mod test {
 
     #[test]
     fn test_import_specifier() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import {foo} from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!( "./foo" =>
             aset!(ExportedSymbol::Named("foo".to_owned()))
         );
@@ -715,20 +630,11 @@ mod test {
 
     #[test]
     fn test_import_specifier_with_alias() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import {foo as bar} from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!( "./foo" =>
             aset!(ExportedSymbol::Named("foo".to_owned()))
         );
@@ -737,20 +643,11 @@ mod test {
 
     #[test]
     fn test_import_default_with_alias() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import {default as foo} from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
             amap!("./foo" => aset!(ExportedSymbol::Default));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
@@ -758,23 +655,14 @@ mod test {
 
     #[test]
     fn test_import_call() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             const lazyModule = new LazyModule(() => import(/* webpackChunkName: "mailStore" */ './foo'));
             export const lazyModule = new LazyModule(
                 () => import(/* webpackChunkName: "SxSStore" */ './lazyIndex')
             );
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
 
         assert_eq!(
             aset!("./foo".to_string(), "./lazyIndex".to_string()),
@@ -784,20 +672,11 @@ mod test {
 
     #[test]
     fn test_import_default_and_specifier() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import foo, {bar} from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!(
             "./foo" => aset!(ExportedSymbol::Default, ExportedSymbol::Named("bar".to_owned()))
         );
@@ -806,20 +685,11 @@ mod test {
 
     #[test]
     fn test_import_star() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import * as foo from './foo';
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
             amap!("./foo" => aset!(ExportedSymbol::Namespace));
         assert_eq!(expected_map, visitor.imported_ids_path_name);
@@ -827,60 +697,33 @@ mod test {
 
     #[test]
     fn test_require() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             const foo = require('./foo');
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
 
         assert_eq!(aset!("./foo".to_owned()), visitor.require_paths);
     }
 
     #[test]
     fn test_import_equals() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import foo = require('./foo')
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
 
         assert_eq!(aset!("./foo".to_owned()), visitor.imported_paths);
     }
 
     #[test]
     fn test_import_statement() {
-        let cm = Lrc::<SourceMap>::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
+        let visitor = visit(
             r#"
             import './foo'
-            "#
-            .to_string(),
+            "#,
         );
-
-        let mut parser = create_test_parser(&fm, None);
-        let mut visitor = ExportsVisitor::new(Default::default());
-
-        let module = parser.parse_typescript_module().unwrap();
-        module.visit_with(&mut visitor);
 
         assert_eq!(aset!("./foo".to_owned()), visitor.executed_paths);
     }

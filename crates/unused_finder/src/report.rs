@@ -21,6 +21,7 @@ pub struct SymbolReport {
 pub enum UsedTagEnum {
     Entry,
     Ignored,
+    TypeOnly,
 }
 impl From<UsedTag> for Option<Vec<UsedTagEnum>> {
     fn from(flags: UsedTag) -> Self {
@@ -34,6 +35,9 @@ impl From<UsedTag> for Option<Vec<UsedTagEnum>> {
         }
         if flags.contains(UsedTag::FROM_IGNORED) {
             result.push(UsedTagEnum::Ignored);
+        }
+        if flags.contains(UsedTag::TYPE_ONLY) {
+            result.push(UsedTagEnum::TypeOnly);
         }
 
         Some(result)
@@ -144,6 +148,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                             if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
                                 || symbol_bitflags.contains(UsedTag::FROM_TEST)
                                 || symbol_bitflags.contains(UsedTag::FROM_IGNORED)
+                                || symbol_bitflags.contains(UsedTag::TYPE_ONLY)
                             {
                                 // don't return used symbols
                                 return None;

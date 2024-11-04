@@ -17,6 +17,15 @@ pub enum ExportedSymbol {
     ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
 }
 
+impl From<&str> for ExportedSymbol {
+    fn from(s: &str) -> Self {
+        match s {
+            "default" => ExportedSymbol::Default,
+            _ => ExportedSymbol::Named(s.to_string()),
+        }
+    }
+}
+
 impl std::fmt::Display for ExportedSymbol {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -47,6 +56,8 @@ impl From<&ModuleExportName> for ExportedSymbol {
 pub struct ExportedSymbolMetadata {
     pub span: Span,
     pub allow_unused: bool,
+    // if this symbol is a typeonly export / import
+    pub is_type_only: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
@@ -69,7 +80,7 @@ pub struct RawImportExportInfo {
     // import('./foo') generates ["./foo"]
     pub imported_paths: AHashSet<String>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_ids: AHashMap<String, AHashSet<ReExportedSymbol>>,
+    pub export_from_ids: AHashMap<String, AHashMap<ReExportedSymbol, ExportedSymbolMetadata>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
     pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // `import './foo'`
@@ -87,7 +98,7 @@ pub struct ResolvedImportExportInfo {
     // import('./foo') generates ["./foo"]
     pub imported_paths: AHashSet<PathBuf>,
     // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
-    pub export_from_symbols: AHashMap<PathBuf, AHashSet<ReExportedSymbol>>,
+    pub export_from_symbols: AHashMap<PathBuf, AHashMap<ReExportedSymbol, ExportedSymbolMetadata>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
     pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
     // `import './foo'`
@@ -102,7 +113,7 @@ impl ResolvedImportExportInfo {
     /// Returns an iterator over all the imports originating from this file.
     pub fn iter_exported_symbols(&self) -> impl Iterator<Item = (Option<&Path>, &ExportedSymbol)> {
         let export_from_symbols = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
-            symbols.iter().map(|symbol| {
+            symbols.iter().map(|(symbol, _meta)| {
                 (
                     Some(path.as_path()),
                     symbol.renamed_to.as_ref().unwrap_or(&symbol.imported),
@@ -116,32 +127,57 @@ impl ResolvedImportExportInfo {
     }
 
     /// Returns an iterator over all the imports originating from this file.
-    pub fn iter_imported_symbols(&self) -> impl Iterator<Item = (&PathBuf, ExportedSymbol)> {
+    pub fn iter_exported_symbols_meta(
+        &self,
+    ) -> impl Iterator<Item = (Option<&Path>, (&ExportedSymbol, &ExportedSymbolMetadata))> {
+        let export_from_symbols = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
+            symbols.iter().map(|(symbol, meta)| {
+                (
+                    Some(path.as_path()),
+                    (symbol.renamed_to.as_ref().unwrap_or(&symbol.imported), meta),
+                )
+            })
+        });
+
+        let exported_ids = self.exported_ids.iter().map(|symbol| (None, symbol));
+
+        exported_ids.chain(export_from_symbols)
+    }
+
+    // Global static Namespace here allows for retyrnung a reference to it
+    // in the iter_imported_symbols_meta
+    const NAMESPACE: ExportedSymbol = ExportedSymbol::Namespace;
+    const EXECUTION_ONLY: ExportedSymbol = ExportedSymbol::ExecutionOnly;
+
+    /// Returns an iterator over all the imports originating from this file.
+    pub fn iter_imported_symbols_meta(
+        &self,
+    ) -> impl Iterator<Item = (&PathBuf, &ExportedSymbol, Option<&ExportedSymbolMetadata>)> {
         let imported_symbols = self
             .imported_symbols
             .iter()
-            .flat_map(|(path, symbols)| symbols.iter().map(move |symbol| (path, symbol.clone())));
+            .flat_map(|(path, symbols)| symbols.iter().map(move |symbol| (path, symbol, None)));
 
         let require_imports = self
             .require_paths
             .iter()
-            .map(|path| (path, ExportedSymbol::Namespace));
+            .map(|path| (path, &Self::NAMESPACE, None));
 
         let imported_paths = self
             .imported_paths
             .iter()
-            .map(|path| (path, ExportedSymbol::Namespace));
+            .map(|path| (path, &Self::NAMESPACE, None));
 
         let re_exports = self.export_from_symbols.iter().flat_map(|(path, symbols)| {
             symbols
                 .iter()
-                .map(move |symbol| (path, symbol.imported.clone()))
+                .map(move |(symbol, meta)| (path, &symbol.imported, Some(meta)))
         });
 
         let executed_paths = self
             .executed_paths
             .iter()
-            .map(|path| (path, ExportedSymbol::ExecutionOnly));
+            .map(|path| (path, &Self::EXECUTION_ONLY, None));
 
         imported_symbols
             .chain(require_imports)

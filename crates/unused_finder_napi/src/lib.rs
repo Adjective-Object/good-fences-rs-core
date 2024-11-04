@@ -38,6 +38,8 @@ pub struct UnusedFinderJSONConfig {
     /// If true, individual exported symbols are also tracked
     #[serde(default)]
     pub report_exported_symbols: bool,
+    #[serde(default)]
+    pub allow_unused_types: bool,
     /// List of packages that should be considered "entry" packages
     /// All transitive imports from the exposed exports of these packages
     /// will be considered used
@@ -57,6 +59,7 @@ impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
             skip: val.skip,
             report_exported_symbols: val.report_exported_symbols,
             entry_packages: val.entry_packages,
+            allow_unused_types: val.allow_unused_types,
         }
     }
 }
@@ -68,6 +71,8 @@ pub enum UsedTagEnum {
     Entry,
     #[serde(rename = "ignored")]
     Ignored,
+    #[serde(rename = "type-only")]
+    TypeOnly,
 }
 
 impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
@@ -75,6 +80,7 @@ impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
         match val {
             unused_finder::UsedTagEnum::Entry => UsedTagEnum::Entry,
             unused_finder::UsedTagEnum::Ignored => UsedTagEnum::Ignored,
+            unused_finder::UsedTagEnum::TypeOnly => UsedTagEnum::TypeOnly,
         }
     }
 }
