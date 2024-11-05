@@ -1,5 +1,5 @@
 {
-  "type": "major",
+  "type": "minor",
   "comment": "Rebuild graph traversal for better maintainability, recursive ignore tracking",
   "packageName": "@good-fences/api",
   "email": "mhuan13@gmail.com",
