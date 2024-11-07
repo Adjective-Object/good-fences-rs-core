@@ -2,6 +2,107 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Thu, 07 Nov 2024 18:37:07 GMT",
+      "version": "0.17.0",
+      "tag": "@good-fences/api_v0.17.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "68997073fcc7bb63d4bdf2c10b6754e70fd41ed8",
+            "comment": "unused_finder: permit type-only exports"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "49048a64ec7ca5c2e1aa0a610fde1e8de5227cd2",
+            "comment": "Rebuild graph traversal for better maintainability, recursive ignore tracking"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "4e61efede5b51f6e2dc43de9662244794aca3bc5",
+            "comment": "Setup devcontainer, add 'exports' aware cacing resolver"
+          }
+        ],
+        "patch": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "719690f504a2e0c7cc9cd80993a89a9090efaf62",
+            "comment": "unittest.yml: remove redundant repo clone in health checks"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "da4a089e6b6f33da5d04845c4f609b00bc3bfbc7",
+            "comment": "partial refactor of unused_finder to move parsing-related utilities to a submodule"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "77b740daf52e23cda2cd8077534ca64d0e2fcab7",
+            "comment": "add CODEOWNERS file"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "b6e99886620d2431fe7245c7ab72cbcc33a30679",
+            "comment": "run npm pkg fix"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "9145d9795d57655d46b28a7a8fbb5136460d414c",
+            "comment": "remove unused armv7-unknown-linux-gnueabihf from publish pipeline"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "d561e55cb8bc1abd86addabf85a55ddeda534a65",
+            "comment": "extract packagejson from import_resolver"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "b327d6ecbfd996464ebd4a6399748c07505b95f8",
+            "comment": "update scripts/pre-pr.sh to run beachball"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "922ddcdc319f87776fc493fc55017e8e4cdb1500",
+            "comment": "ahashmap+test_tmpdir: add amap2 for creating AHashMap with non-String keys"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "a6214443df271840bc69672035c27f6f5c3e5cc6",
+            "comment": "reduce compilation times by breaking up swc_utils"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "9be2200d76d66691f40c06af5f3567807c2cf7b0",
+            "comment": "cancel old CI jobs when new PR revisions are pushed"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "a8fbf511a6c28eeb6d99753dc36b5e7af40794d1",
+            "comment": "support heterogenous export maps in packagejson files"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "692ef269162ad58d5600ea604f793731d7b7bea3",
+            "comment": "Add internal utility to check if a file is exported from a package"
+          }
+        ]
+      }
+    },
+    {
       "date": "Tue, 20 Aug 2024 15:59:23 GMT",
       "version": "0.16.0",
       "tag": "@good-fences/api_v0.16.0",

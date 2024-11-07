@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "support heterogenous export maps in packagejson files",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "patch"
-}

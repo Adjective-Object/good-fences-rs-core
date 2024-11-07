@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "update scripts/pre-pr.sh to run beachball",
-  "packageName": "@good-fences/api",
-  "email": "Maxwell.HuangHobbs@microsoft.com",
-  "dependentChangeType": "patch"
-}

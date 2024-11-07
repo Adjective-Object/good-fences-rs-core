@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "reduce compilation times by breaking up swc_utils",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "patch"
-}

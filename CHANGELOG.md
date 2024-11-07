@@ -1,8 +1,33 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 20 Aug 2024 15:59:23 GMT and should not be manually modified.
+This log was last generated on Thu, 07 Nov 2024 18:37:07 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.17.0
+
+Thu, 07 Nov 2024 18:37:07 GMT
+
+### Minor changes
+
+- unused_finder: permit type-only exports (Maxwell.HuangHobbs@microsoft.com)
+- Rebuild graph traversal for better maintainability, recursive ignore tracking (mhuan13@gmail.com)
+- Setup devcontainer, add 'exports' aware cacing resolver (mhuan13@gmail.com)
+
+### Patches
+
+- unittest.yml: remove redundant repo clone in health checks (Maxwell.HuangHobbs@microsoft.com)
+- partial refactor of unused_finder to move parsing-related utilities to a submodule (Maxwell.HuangHobbs@microsoft.com)
+- add CODEOWNERS file (mhuan13@gmail.com)
+- run npm pkg fix (Maxwell.HuangHobbs@microsoft.com)
+- remove unused armv7-unknown-linux-gnueabihf from publish pipeline (mhuan13@gmail.com)
+- extract packagejson from import_resolver (Maxwell.HuangHobbs@microsoft.com)
+- update scripts/pre-pr.sh to run beachball (Maxwell.HuangHobbs@microsoft.com)
+- ahashmap+test_tmpdir: add amap2 for creating AHashMap with non-String keys (Maxwell.HuangHobbs@microsoft.com)
+- reduce compilation times by breaking up swc_utils (mhuan13@gmail.com)
+- cancel old CI jobs when new PR revisions are pushed (Maxwell.HuangHobbs@microsoft.com)
+- support heterogenous export maps in packagejson files (mhuan13@gmail.com)
+- Add internal utility to check if a file is exported from a package (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.16.0
 
