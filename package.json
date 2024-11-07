@@ -35,9 +35,9 @@
     "node": ">= 10"
   },
   "scripts": {
-    "change": "beachball change -c .beachball.js",
-    "check-changefile": "beachball check -c .beachball.js",
-    "beachball-publish": "beachball publish -c .beachball.js -y",
+    "change": "beachball change",
+    "check-changefile": "beachball check",
+    "beachball-publish": "beachball publish -y",
     "artifacts": "napi artifacts",
     "build": "napi build --cargo-name napi_root --platform --release",
     "build:debug": "napi build --cargo-name napi_root --platform",

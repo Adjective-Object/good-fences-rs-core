@@ -1,0 +1,11 @@
+{
+  "branch": "origin/main",
+  "access": "public",
+  "scope": [
+    "!npm/**"
+  ],
+  "ignorePatterns": [
+    "npm/**"
+  ],
+  "depth": 10
+}
