@@ -56,24 +56,36 @@ jobs:
           mkdir artifacts
           cp *.node artifacts
           yarn artifacts
+      - name: check changes
+        run: |
+          git remote set-url origin https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
+
+          # Generate changes from beachball, including package.json version bump
+          yarn beachball bump
+
+          # Check if that contains changefiles
+          git diff --exit-code -- ./change 
+          echo "OUTPUT_STATUS=$?" >> "$GITHUB_OUTPUT"
+        shell: bash
       - name: Publish
+        if: ${{ steps.check_changes.outputs.OUTPUT_STATUS == 1 }}
         run: |
           git config user.email "mhuan13@gmail.com"
           git config user.name "$GITHUB_ACTOR"
-          git remote set-url origin https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
-          # Generate changes from beachball, including package.json version bump
-          yarn beachball bump
-          # sync new package verson to napi-managedp pakcages (ignored by napi)
+
+          # sync new package verson to napi-managed packages (ignored by beachball)
           yarn napi version -c package.json
+
           # Commit changes and tag with a version
           PACKAGE_VERSION=$(node -e "console.log(require('./package.json').version)")
           git commit -am "v$PACKAGE_VERSION"
+
           # Push updated branch to git main branch
           git tag "v$PACKAGE_VERSION"
           git push origin main --tags
+
           # Publish all packages 
           yarn npm publish --tag "v$PACKAGE_VERSION" --access public --tolerate-republish
-        shell: bash
         env:
           YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.BEACHBALL_PUSH_PAT }}

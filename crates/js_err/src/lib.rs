@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Status {
+    // ok
     Ok,
     InvalidArg,
     ObjectExpected,
