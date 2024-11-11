@@ -136,19 +136,25 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
     On linux, you can install either `docker` or podman (via `podman-docker`)
 
 2. Set up your local config
-    The devcontainer expects several user directories to be configured. If you do not have these already, you will have to create them, or comment out the bind mounts in the devcontainer.
+    The devcontainer mounts some local directories from your machine into the container. If you do not have these already, you will have to create them, or comment out the bind mounts in the devcontainer.
 
-    - `$HOME/.gitconfig` -- This is mounted to make your git configuration available in the container.  
-        It should already exist if you've ever run `git config --user.name` or `git config --user.email`
     - `$HOME/.ssh` -- This is mounted so the container can access your SSH keys to push/pull from the git remote.  
         This should already exist if you have ever configured an SSH key via `ssh-keygen`, which is the normal way to clone a git repo.
 
     Note that if you are developing in WSL, you should create these files _in wsl_, not within your windows filesystem.
-3. Install recommended extensions
+3. Configure your local user identity
+    From within the repo, configure your local git identity:
+    ```
+    ❯ git config --local user.name "Your Name Here"
+    ❯ git config --local user.email "your@e.mail"
+    ```
+
+    Note that you have to do this locally within the repo, so it will be persisted into the devcontainer when the repo is mounted.
+4. Install recommended extensions
     Install the recommended extensions from this repo.
     
     `Ctrl+Shift+P > Extensions: Show Recommended Extensions`, then install all recommended extensions from the left navbar that opens up.
-4. Build and open in the devcontainer
+5. Build and open in the devcontainer
 
     `Ctrl+Shift+P > Rebuild and Reopen In Container`
     Select the development container based on your container engine (podman or docker)
@@ -156,7 +162,7 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
     - If installation stalls on `docker inspect --type image ubuntu:24.10`, you may need to feth the base image manually
     - Run `docker inspect --type image ubuntu:24.10`
     - If it fails with `Error response from daemon: No such image: ubuntu`, then run `docker pull ubuntu:24.10`
-5. (optional) mount additional projects into the dev container
+6. (optional) mount additional projects into the dev container
    To test `unused-finder` against your repo during development, uncomment the commented-out "mount" in the checked-in `.devcontainer`: 
    ```json5
     // This mounts client-web checked out next to this repo for testing, left checked-in here for convenience.

@@ -1,0 +1,24 @@
+[alias]
+    lol = log --oneline --graph
+    lola = log --oneline --graph --all
+    st = status
+    co = checkout
+    c = commit
+    cp = cherry-pick
+    a = add
+    b = branch
+    br = branch
+    f = fetch
+[pager]
+    branch = false
+
+# Configure mergiraf as the default merge-driver
+[merge "mergiraf"]
+    name = mergiraf
+    driver = mergiraf merge --git %O %A %B -s %S -x %X -y %Y -p %P
+[core]
+    attributesfile = ~/.gitattributes
+
+# Configure difft as the default diff tool
+[diff]
+    external = difft
