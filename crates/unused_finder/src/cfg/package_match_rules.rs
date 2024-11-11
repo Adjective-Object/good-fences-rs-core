@@ -44,6 +44,12 @@ impl PackageMatchRules {
     }
 }
 
+impl PackageMatchRules {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+}
+
 impl<T: AsRef<str> + ToString> TryFrom<Vec<T>> for PackageMatchRules {
     type Error = ConfigError;
     fn try_from(value: Vec<T>) -> Result<Self, Self::Error> {

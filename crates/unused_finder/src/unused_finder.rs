@@ -352,6 +352,16 @@ impl UnusedFinder {
             )
             .map_err(JsErr::generic_failure)?;
 
+        let test_entrypoints = self.get_test_files();
+        logger.log(format!(
+            "Starting {} graph traversal with {} entrypoints",
+            UsedTag::FROM_TEST,
+            test_entrypoints.len(),
+        ));
+        graph
+            .traverse_bfs(&logger, test_entrypoints, vec![], UsedTag::FROM_TEST)
+            .map_err(JsErr::generic_failure)?;
+
         // mark all typeonly symbols
         if self.config.allow_unused_types {
             for (path, source_file) in self.last_walk_result.source_files.iter() {
@@ -443,6 +453,26 @@ impl UnusedFinder {
         owning_package
             .is_abspath_exported(file_path)
             .unwrap_or(false)
+    }
+
+    fn get_test_files(&self) -> Vec<PathBuf> {
+        // get the list of files that match the test file patterns
+        self.last_walk_result
+            .source_files
+            .par_iter()
+            .filter_map(|(file_path, _)| {
+                if self
+                    .config
+                    .test_file_patterns
+                    .iter()
+                    .any(|pattern| pattern.matches_path(file_path))
+                {
+                    Some(file_path.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn get_ignored_files(&self) -> Vec<PathBuf> {
