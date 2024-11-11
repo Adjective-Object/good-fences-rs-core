@@ -49,6 +49,13 @@ pub struct UnusedFinderJSONConfig {
     /// 2. If the item contains any of "~)('!*", it is treated as a name-glob, and evaluated as a glob against the names of packages.
     /// 3. Otherwise, the item is treated as the name of an individual package, and matched literally.
     pub entry_packages: Vec<String>,
+    /// List of globs that will be matched against files in the repository
+    ///
+    /// Matches are made against the relative file paths from the repo root.
+    /// A matching file will be tagged as a "test" file, and will be excluded
+    /// from the list of unused files
+    #[serde(default)]
+    pub test_file_patterns: Vec<String>,
 }
 
 impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
@@ -60,6 +67,7 @@ impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
             report_exported_symbols: val.report_exported_symbols,
             entry_packages: val.entry_packages,
             allow_unused_types: val.allow_unused_types,
+            test_file_patterns: val.test_file_patterns,
         }
     }
 }

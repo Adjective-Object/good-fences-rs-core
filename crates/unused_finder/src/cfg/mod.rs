@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use package_match_rules::PackageMatchRules;
 use serde::Deserialize;
 
-mod package_match_rules;
+pub mod package_match_rules;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ErrList<E>(Vec<E>);
@@ -89,11 +89,25 @@ pub struct UnusedFinderJSONConfig {
     /// All transitive imports from the exposed exports of these packages
     /// will be considered used
     ///
+    /// Note that the only files that are considered roots are the ones
+    /// that are _explicitly exported_, either as an entry in the package's "exports" config,
+    /// or as a main/module export
+    ///
     /// Items are parsed in one of three ways:
-    /// 1. If the item starts with "./", it is treated as a path glob, and evaluated against the paths of package folders, relative to the repo root.
-    /// 2. If the item contains any of "~)('!*", it is treated as a name-glob, and evaluated as a glob against the names of packages.
-    /// 3. Otherwise, the item is treated as the name of an individual package, and matched literally.
+    /// 1. If the item starts with "./", it is treated as a path glob, and evaluated
+    ///    against the paths of package folders, relative to the repo root.
+    /// 2. If the item contains any of "~)('!*", it is treated as a name-glob, and evaluated
+    ///    as a glob against the names of packages.
+    /// 3. Otherwise, the item is treated as the name of an individual package, and matched
+    ///    literally.
     pub entry_packages: Vec<String>,
+    /// List of globs that will be matched against files in the repository
+    ///
+    /// Matches are made against the relative file paths from the repo root.
+    /// A matching file will be tagged as a "test" file, and will be excluded
+    /// from the list of unused files
+    #[serde(default)]
+    pub test_file_patterns: Vec<String>,
 }
 
 /// Configuration for the unused symbols finder
@@ -115,6 +129,13 @@ pub struct UnusedFinderConfig {
     /// packages we should consider as "entry" packages
     pub entry_packages: PackageMatchRules,
 
+    /// List of globs that will be matched against files in the repository
+    ///
+    /// Matches are made against the relative file paths from the repo root.
+    /// A matching file will be tagged as a "test" file, and will be excluded
+    /// from the list of unused files
+    pub test_file_patterns: Vec<glob::Pattern>,
+
     /// Globs of individual files & directories to skip during the file walk.
     ///
     /// Some internal directories are always skipped.
@@ -133,6 +154,14 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             repo_root: value.repo_root,
             // other fields that are processed before use
             entry_packages: value.entry_packages.try_into()?,
+            test_file_patterns: value
+                .test_file_patterns
+                .iter()
+                .map(|p| glob::Pattern::new(p))
+                .collect::<Result<_, _>>()
+                .map_err(|e| {
+                    ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(0, GlobInterp::Path, e)]))
+                })?,
             skip: value.skip,
         })
     }

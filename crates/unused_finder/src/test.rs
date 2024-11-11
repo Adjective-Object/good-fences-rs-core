@@ -1,11 +1,11 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use path_slash::PathBufExt;
 use test_tmpdir::{bmap, test_tmpdir};
 
 use crate::{
-    graph::UsedTag, logger, report::SymbolReport, UnusedFinder, UnusedFinderConfig,
-    UnusedFinderReport,
+    cfg::package_match_rules::PackageMatchRules, graph::UsedTag, logger, report::SymbolReport,
+    UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
 };
 
 fn symbol(id: &str, tags: UsedTag) -> SymbolReport {
@@ -406,6 +406,47 @@ fn test_typeonly_interface_allowed() {
         UnusedFinderReport {
             unused_files: vec![],
             unused_symbols: bmap![],
+        },
+    );
+}
+
+#[test]
+fn test_testfiles_ignored() {
+    // Tests that test files are ignored
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/__tests__/myTests.test.js" => r#"
+            import { myFunction } from "../test-helpers/test-helpers";
+        "#,
+        "search_root/packages/test-helpers/package.json" => r#"{
+            "name": "test-helpers",
+            "exports": {
+                "." : {
+                    "source": "./test-helpers.js"
+                }
+            }
+        }"#,
+        "search_root/packages/test-helpers/test-helpers.js" => r#"
+            export function myFunction() {}
+        "#,
+        "search_root/packages/test-helpers/unused-helpers.js" => r#"
+            export function myFunction() {}
+        "#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: PackageMatchRules::empty(),
+            test_file_patterns: vec![glob::Pattern::from_str("**/__tests__/**").unwrap()],
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            unused_files: vec!["<root>/search_root/packages/test-helpers/unused-helpers.js".into()],
+            unused_symbols: bmap![
+                "<root>/search_root/packages/test-helpers/unused-helpers.js" => vec![symbol("myFunction", UsedTag::default())]
+            ],
         },
     );
 }
