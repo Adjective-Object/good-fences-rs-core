@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "unused_finder: track test files, return tagged symbols",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}
