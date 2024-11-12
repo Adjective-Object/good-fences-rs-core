@@ -1,20 +1,5 @@
-<<<<<<< HEAD
-use core::{fmt, option::Option::None};
-use std::{
-    collections::HashSet,
-    fmt::Display,
-    path::{Path, PathBuf},
-};
-||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
-use core::{fmt, option::Option::None};
-use std::{collections::HashSet, fmt::Display, path::PathBuf};
-=======
 use core::option::Option::None;
-use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
-};
->>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
+use std::{collections::HashSet, path::Path, path::PathBuf};
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -23,58 +8,10 @@ use rayon::prelude::*;
 use crate::{
     logger::Logger,
     parse::{ExportedSymbol, ResolvedImportExportInfo},
+    tag::UsedTag,
     walked_file::ResolvedSourceFile,
 };
 
-bitflags::bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
-    pub struct UsedTag: u8 {
-        /// True if this file or symbol was used recursively by an
-        /// "entry package" (a package that was passed as an entry point).
-        const FROM_ENTRY = 0x01;
-        /// True if this file or symbol was used recursively by a test file.
-        const FROM_TEST = 0x02;
-        /// True if this file or symbol was used recursively by an
-        /// ignored symbol or file.
-        const FROM_IGNORED = 0x04;
-        // True if this symbol is a type-only symbol
-        const TYPE_ONLY = 0x08;
-    }
-}
-
-<<<<<<< HEAD
-impl Display for UsedTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut tags = Vec::new();
-        if self.contains(Self::FROM_ENTRY) {
-            tags.push("entry");
-        };
-        if self.contains(Self::FROM_IGNORED) {
-            tags.push("ignored");
-        };
-        if self.contains(Self::TYPE_ONLY) {
-            tags.push("type-only");
-        }
-        write!(f, "{}", tags.join("+"))
-    }
-}
-
-||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
-impl Display for UsedTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut tags = Vec::new();
-        if self.contains(Self::FROM_ENTRY) {
-            tags.push("entry");
-        };
-        if self.contains(Self::FROM_IGNORED) {
-            tags.push("ignored");
-        };
-        write!(f, "{}", tags.join("+"))
-    }
-}
-
-=======
->>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
 // graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]
 pub struct GraphFile {

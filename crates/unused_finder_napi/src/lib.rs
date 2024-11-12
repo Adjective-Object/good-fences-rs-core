@@ -74,7 +74,6 @@ impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
             report_exported_symbols: val.report_exported_symbols,
             entry_packages: val.entry_packages,
             allow_unused_types: val.allow_unused_types,
-            test_file_patterns: val.test_file_patterns,
             test_files: val.test_files.unwrap_or_default(),
         }
     }

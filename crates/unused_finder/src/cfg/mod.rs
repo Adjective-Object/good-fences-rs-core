@@ -103,31 +103,13 @@ pub struct UnusedFinderJSONConfig {
     /// 3. Otherwise, the item is treated as the name of an individual package, and matched
     ///    literally.
     pub entry_packages: Vec<String>,
-    /// List of globs that will be matched against files in the repository
-,
-    ///
-,
-    /// Matches are made against the relative file paths from the repo root.
-,
-    /// A matching file will be tagged as a "test" file, and will be excluded
-,
-    /// from the list of unused files
-,
-    #[serde(default)],
-    pub test_file_patterns: Vec<String>,
     /// List of glob patterns to mark as "tests".
-,
     /// These files will be marked as used, and all of their transitive
-,
     /// dependencies will also be marked as used
-,
     ///
-,
     /// glob patterns are matched against the relative file path from the
-,
     /// root of the repository
-,
-    #[serde(default)],
+    #[serde(default)]
     pub test_files: Vec<String>,
 }
 
@@ -155,16 +137,13 @@ pub struct UnusedFinderConfig {
     /// Matches are made against the relative file paths from the repo root.
     /// A matching file will be tagged as a "test" file, and will be excluded
     /// from the list of unused files
-    pub test_file_patterns: Vec<glob::Pattern>,
+    pub test_files: Vec<glob::Pattern>,
 
     /// Globs of individual files & directories to skip during the file walk.
     ///
     /// Some internal directories are always skipped.
     /// See [crate::walk::DEFAULT_SKIPPED_DIRS] for more details.
     pub skip: Vec<String>,
-
-    /// List of glob patterns of test files
-    pub test_files: Vec<glob::Pattern>,
 }
 
 impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
@@ -189,16 +168,8 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             repo_root: value.repo_root,
             // other fields that are processed before use
             entry_packages: value.entry_packages.try_into()?,
-            test_file_patterns: value
-                .test_file_patterns
-                .iter()
-                .map(|p| glob::Pattern::new(p))
-                .collect::<Result<_, _>>()
-                .map_err(|e| {
-                    ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(0, GlobInterp::Path, e)]))
-                })?,
-            skip: value.skip,
             test_files: test_globs,
+            skip: value.skip,
         })
     }
 }

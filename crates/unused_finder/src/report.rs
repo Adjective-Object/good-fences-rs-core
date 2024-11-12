@@ -5,16 +5,16 @@ use core::{
 use std::fmt::Display;
 
 use ahashmap::AHashMap;
-use itertools::Either;
+use debug_print::debug_println;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use swc_common::source_map::SmallPos;
 
 use crate::{
-    graph::{Graph, GraphFile, UsedTag},
+    graph::{Graph, GraphFile},
     parse::ExportedSymbol,
-    tag::UsedTagEnum,
-    UnusedFinderResult,
+    tag::UsedTag,
+    UnusedFinderResult, UsedTagEnum,
 };
 
 // Report of a single exported item in a file
@@ -25,58 +25,16 @@ pub struct SymbolReport {
     pub end: u32,
 }
 
-<<<<<<< HEAD
-#[derive(Debug, PartialEq, Ord, PartialOrd, Eq, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UsedTagEnum {
-    Entry,
-    Ignored,
-    TypeOnly,
-||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
-#[derive(Debug, PartialEq, Ord, PartialOrd, Eq, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UsedTagEnum {
-    Entry,
-    Ignored,
-=======
 #[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
 pub struct SymbolReportWithTags {
     pub symbol: SymbolReport,
     pub tags: Vec<UsedTagEnum>,
->>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
 }
 
-<<<<<<< HEAD
-        let mut result = Vec::new();
-        if flags.contains(UsedTag::FROM_ENTRY) {
-            result.push(UsedTagEnum::Entry);
-        }
-        if flags.contains(UsedTag::FROM_IGNORED) {
-            result.push(UsedTagEnum::Ignored);
-        }
-        if flags.contains(UsedTag::TYPE_ONLY) {
-            result.push(UsedTagEnum::TypeOnly);
-        }
-
-        Some(result)
-    }
-||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
-        let mut result = Vec::new();
-        if flags.contains(UsedTag::FROM_ENTRY) {
-            result.push(UsedTagEnum::Entry);
-        }
-        if flags.contains(UsedTag::FROM_IGNORED) {
-            result.push(UsedTagEnum::Ignored);
-        }
-
-        Some(result)
-    }
-=======
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct FileInfo {
     tags: Vec<UsedTagEnum>,
     symbols: AHashMap<String, Vec<SymbolReport>>,
->>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
 }
 
 // Report of unused symbols within a project
@@ -170,77 +128,65 @@ fn extract_symbols<T: Send + Sync>(
         .collect::<AHashMap<String, Vec<T>>>()
 }
 
+fn is_used(tags: &UsedTag) -> bool {
+    tags.contains(UsedTag::FROM_ENTRY)
+        || tags.contains(UsedTag::FROM_IGNORED)
+        || tags.contains(UsedTag::FROM_TEST)
+        || tags.contains(UsedTag::TYPE_ONLY)
+}
+fn include_extra(tags: &UsedTag) -> bool {
+    !tags.is_empty() && *tags != UsedTag::FROM_ENTRY
+}
+
 impl From<&UnusedFinderResult> for UnusedFinderReport {
     fn from(value: &UnusedFinderResult) -> Self {
-        let (mut unused_files, extra_file_tags): (Vec<String>, AHashMap<String, Vec<UsedTagEnum>>) =
-            value
-                .graph
-                .files
-                .par_iter()
-                .filter(|file| {
-                    !file.file_tags.contains(UsedTag::FROM_ENTRY)
-                        && !file.file_tags.contains(UsedTag::FROM_TEST)
-                        && !file.file_tags.contains(UsedTag::FROM_IGNORED)
-                })
-                .partition_map(|file| {
-                    if !file.file_tags.contains(UsedTag::FROM_ENTRY) {
-                        Either::Left(file.file_path.to_string_lossy().to_string())
-                    } else {
-                        Either::Right((
-                            file.file_path.to_string_lossy().to_string(),
-                            file.file_tags.into(),
-                        ))
-                    }
-                });
+        let mut unused_files: Vec<String> = value
+            .graph
+            .files
+            .par_iter()
+            .filter_map(|file| {
+                if is_used(&file.file_tags) {
+                    return None;
+                }
+                Some(file.file_path.to_string_lossy().to_string())
+            })
+            .collect();
         unused_files.sort();
+        let extra_file_tags = value
+            .graph
+            .files
+            .par_iter()
+            .filter_map(|file| {
+                if !include_extra(&file.file_tags) {
+                    None
+                } else {
+                    Some((
+                        file.file_path.to_string_lossy().to_string(),
+                        file.file_tags.into(),
+                    ))
+                }
+            })
+            .collect();
 
         let unused_symbols =
             extract_symbols(&value.graph, |file, symbol_name| -> Option<SymbolReport> {
                 let default: UsedTag = Default::default();
                 let symbol_bitflags: &UsedTag =
                     file.symbol_tags.get(symbol_name).unwrap_or(&default);
-                println!(
-                    "visit symbol {}:{}  ({})",
-                    file.file_path.display(),
-                    symbol_name,
-                    symbol_bitflags
-                );
 
-                if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
-                    || symbol_bitflags.contains(UsedTag::FROM_TEST)
-                    || symbol_bitflags.contains(UsedTag::FROM_IGNORED)
-                {
+                if is_used(symbol_bitflags) {
                     // don't return used symbols
                     return None;
                 }
 
                 let ast_symbol = file.import_export_info.exported_ids.get(symbol_name)?;
 
-<<<<<<< HEAD
-                            if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
-                                || symbol_bitflags.contains(UsedTag::FROM_TEST)
-                                || symbol_bitflags.contains(UsedTag::FROM_IGNORED)
-                                || symbol_bitflags.contains(UsedTag::TYPE_ONLY)
-                            {
-                                // don't return used symbols
-                                return None;
-                            }
-||||||| parent of 1b97a00 (unused_finder: track test files, return tagged symbols)
-                            if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
-                                || symbol_bitflags.contains(UsedTag::FROM_TEST)
-                                || symbol_bitflags.contains(UsedTag::FROM_IGNORED)
-                            {
-                                // don't return used symbols
-                                return None;
-                            }
-=======
                 Some(SymbolReport {
                     id: symbol_name.to_string(),
                     start: ast_symbol.span.lo().to_u32(),
                     end: ast_symbol.span.hi().to_u32(),
                 })
             });
->>>>>>> 1b97a00 (unused_finder: track test files, return tagged symbols)
 
         let extra_symbol_tags = extract_symbols(
             &value.graph,
@@ -248,17 +194,14 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                 let default: UsedTag = Default::default();
                 let symbol_bitflags: &UsedTag =
                     file.symbol_tags.get(symbol_name).unwrap_or(&default);
-                println!(
+                debug_println!(
                     "visit symbol {}:{}  ({})",
                     file.file_path.display(),
                     symbol_name,
                     symbol_bitflags
                 );
 
-                if symbol_bitflags.contains(UsedTag::FROM_ENTRY)
-                    || !symbol_bitflags.contains(UsedTag::FROM_TEST)
-                        && !symbol_bitflags.contains(UsedTag::FROM_IGNORED)
-                {
+                if !include_extra(symbol_bitflags) {
                     // don't return symbols that are used or symbols that are truly unused
                     return None;
                 }
