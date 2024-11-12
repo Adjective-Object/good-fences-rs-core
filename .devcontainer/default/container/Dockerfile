@@ -67,6 +67,17 @@ RUN bash -c 'source $HOME/.profile; rustup default nightly-2024-10-25-x86_64-unk
 RUN sudo apt-get update && sudo apt-get install libssl-dev
 RUN bash -c 'source $HOME/.profile; cargo install cargo-udeps'
 RUN bash -c 'source $HOME/.profile; cargo install samply --locked'
+RUN bash -c 'source $HOME/.profile; cargo install difftastic'
+
+# Set up mergiraf for syntax-aware merging
+RUN mkdir -p ${HOME}/bin
+RUN curl -v https://codeberg.org/mergiraf/mergiraf/releases/download/v0.2.0/mergiraf_x86_64-unknown-linux-gnu.tar.gz > ${HOME}/mergiraf.tar.gz
+RUN tar -xvf ${HOME}/mergiraf.tar.gz -C ${HOME}/bin
+RUN rm ${HOME}/mergiraf.tar.gz
+
+# Configure mergiraf and difftastic
+COPY .gitattributes ${HOME}/.gitattributes
+COPY .gitconfig ${HOME}/.gitconfig
 
 # Reconfigure xdg_home into a shared volume so fish will persist
 # terminal history through rebuilds
@@ -82,14 +93,3 @@ RUN fish -c 'fisher install IlanCosman/tide@v5'
 COPY config.fish ${HOME}/fish/config.fish
 # Configure the theme
 RUN fish -c 'echo "121121y" | tide configure'
-
-# Setup custom tooling from the internet
-RUN mkdir -p ${HOME}/bin ${HOME}/download
-RUN curl -v https://codeberg.org/mergiraf/mergiraf/releases/download/v0.2.0/mergiraf_x86_64-unknown-linux-gnu.tar.gz > ${HOME}/download/mergiraf.tar.gz
-RUN tar -xvf ${HOME}/download/mergiraf.tar.gz -C ${HOME}/bin
-RUN curl -v "https://objects.githubusercontent.com/github-production-release-asset-2e65be/162276894/01818357-4929-46ac-961c-be0ba9659ba7?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=releaseassetproduction%2F20241111%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20241111T204545Z&X-Amz-Expires=300&X-Amz-Signature=31e14b3466ccad6bede0475a444963dd97f4ea12083ae4ea928f07b6082688d6&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3Ddifft-x86_64-unknown-linux-gnu.tar.gz&response-content-type=application%2Foctet-stream" > ${HOME}/download/difft.tar.gz
-RUN tar -xvf ${HOME}/download/difft.tar.gz -C ${HOME}/bin
-
-# Configure mergiraf
-COPY .gitattributes ${HOME}/.gitattributes
-COPY .gitconfig ${HOME}/.gitconfig
