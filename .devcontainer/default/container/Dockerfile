@@ -67,6 +67,17 @@ RUN bash -c 'source $HOME/.profile; rustup default nightly-2024-10-25-x86_64-unk
 RUN sudo apt-get update && sudo apt-get install libssl-dev
 RUN bash -c 'source $HOME/.profile; cargo install cargo-udeps'
 RUN bash -c 'source $HOME/.profile; cargo install samply --locked'
+RUN bash -c 'source $HOME/.profile; cargo install difftastic'
+
+# Set up mergiraf for syntax-aware merging
+RUN mkdir -p ${HOME}/bin
+RUN curl -v https://codeberg.org/mergiraf/mergiraf/releases/download/v0.2.0/mergiraf_x86_64-unknown-linux-gnu.tar.gz > ${HOME}/mergiraf.tar.gz
+RUN tar -xvf ${HOME}/mergiraf.tar.gz -C ${HOME}/bin
+RUN rm ${HOME}/mergiraf.tar.gz
+
+# Configure mergiraf and difftastic
+COPY .gitattributes ${HOME}/.gitattributes
+COPY .gitconfig ${HOME}/.gitconfig
 
 # Reconfigure xdg_home into a shared volume so fish will persist
 # terminal history through rebuilds
@@ -82,4 +93,3 @@ RUN fish -c 'fisher install IlanCosman/tide@v5'
 COPY config.fish ${HOME}/fish/config.fish
 # Configure the theme
 RUN fish -c 'echo "121121y" | tide configure'
-

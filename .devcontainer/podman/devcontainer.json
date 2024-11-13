@@ -29,8 +29,6 @@
         // "source=${localWorkspaceFolder}/../client-web,target=/workspaces/client-web,type=bind,consistency=cached",
         // expose the user's ssh credentials to the dev container
         "source=${localEnv:HOME}/.ssh,target=/home/ubuntu/.ssh,type=bind,consistency=cached",
-        // Do the same for the user's git config
-        "source=${localEnv:HOME}/.gitconfig,target=/home/ubuntu/.gitconfig,type=bind,consistency=cached",
         // map the .persist directory to /cache so it can be persisted between container rebuilds.
         // This persists shell history as well as downloaded cargo crate sources.
         "source=${localWorkspaceFolder}/.persist,target=/cache,type=bind,consistency=cached",
