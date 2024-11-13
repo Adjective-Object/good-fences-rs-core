@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 use package_match_rules::PackageMatchRules;
 use rayon::iter::Either;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 pub mod package_match_rules;
@@ -62,7 +63,7 @@ pub enum ConfigError {
 ///
 /// This struct is used to deserialize the UnusedFinderConfig struct
 /// from a config file to with serde / over the debug bridge for napi
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnusedFinderJSONConfig {
     /// Path to the root directory of the repository.

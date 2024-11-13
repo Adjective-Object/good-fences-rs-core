@@ -38,6 +38,7 @@ swc_ecma_parser = "0.149.0"
 swc_ecma_transforms = "0.238.0"
 swc_ecma_visit = "0.104.6"
 thiserror = "1.0.52"
+schemars = "0.8.21"
 
 
 [profile.release]

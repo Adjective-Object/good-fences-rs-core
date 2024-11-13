@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UnusedFinderJSONConfig",
+  "description": "A JSON serializable proxy for the UnusedFinderConfig struct\n\nThis struct is used to deserialize the UnusedFinderConfig struct from a config file to with serde / over the debug bridge for napi",
+  "type": "object",
+  "required": [
+    "entryPackages",
+    "rootPaths"
+  ],
+  "properties": {
+    "allowUnusedTypes": {
+      "description": "If true, type-only exports will not be reported as used. However, the transitive dependencies of unused types will still be reported as unused.",
+      "default": false,
+      "type": "boolean"
+    },
+    "entryPackages": {
+      "description": "List of packages that should be considered \"entry\" packages All transitive imports from the exposed exports of these packages will be considered used\n\nNote that the only files that are considered roots are the ones that are _explicitly exported_, either as an entry in the package's \"exports\" config, or as a main/module export\n\nItems are parsed in one of three ways: 1. If the item starts with \"./\", it is treated as a path glob, and evaluated against the paths of package folders, relative to the repo root. 2. If the item contains any of \"~)('!*\", it is treated as a name-glob, and evaluated as a glob against the names of packages. 3. Otherwise, the item is treated as the name of an individual package, and matched literally.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "repoRoot": {
+      "description": "Path to the root directory of the repository.",
+      "default": "",
+      "type": "string"
+    },
+    "reportExportedSymbols": {
+      "description": "If true, individual exported symbols are also tracked",
+      "default": false,
+      "type": "boolean"
+    },
+    "rootPaths": {
+      "description": "Root paths to walk as source files\n\nThese can be either absolute paths, or paths relative to the repo root",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skip": {
+      "description": "A List of globs. Matching files and directories won't be scanned during the file walk\n\nMatches are made against the names of the individual directories, NOT the full directory paths",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "testFiles": {
+      "description": "List of glob patterns to mark as \"tests\". These files will be marked as used, and all of their transitive dependencies will also be marked as used\n\nglob patterns are matched against the relative file path from the root of the repository",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

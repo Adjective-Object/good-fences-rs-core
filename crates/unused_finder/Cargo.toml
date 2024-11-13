@@ -37,6 +37,7 @@ ignore = "0.4.23"
 abspath = { version = "0.2.0", path = "../abspath" }
 itertools = "0.13.0"
 debug_print = "1.0.0"
+schemars.workspace = true
 
 [dev-dependencies]
 stringreader = "0.1.1"
