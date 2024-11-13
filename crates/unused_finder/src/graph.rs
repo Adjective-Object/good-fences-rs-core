@@ -1,9 +1,5 @@
-use core::{fmt, option::Option::None};
-use std::{
-    collections::HashSet,
-    fmt::Display,
-    path::{Path, PathBuf},
-};
+use core::option::Option::None;
+use std::{collections::HashSet, path::Path, path::PathBuf};
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -12,40 +8,9 @@ use rayon::prelude::*;
 use crate::{
     logger::Logger,
     parse::{ExportedSymbol, ResolvedImportExportInfo},
+    tag::UsedTag,
     walked_file::ResolvedSourceFile,
 };
-
-bitflags::bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
-    pub struct UsedTag: u8 {
-        /// True if this file or symbol was used recursively by an
-        /// "entry package" (a package that was passed as an entry point).
-        const FROM_ENTRY = 0x01;
-        /// True if this file or symbol was used recursively by a test file.
-        const FROM_TEST = 0x02;
-        /// True if this file or symbol was used recursively by an
-        /// ignored symbol or file.
-        const FROM_IGNORED = 0x04;
-        // True if this symbol is a type-only symbol
-        const TYPE_ONLY = 0x08;
-    }
-}
-
-impl Display for UsedTag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut tags = Vec::new();
-        if self.contains(Self::FROM_ENTRY) {
-            tags.push("entry");
-        };
-        if self.contains(Self::FROM_IGNORED) {
-            tags.push("ignored");
-        };
-        if self.contains(Self::TYPE_ONLY) {
-            tags.push("type-only");
-        }
-        write!(f, "{}", tags.join("+"))
-    }
-}
 
 // graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]
@@ -168,13 +133,13 @@ impl Graph {
     pub fn traverse_bfs(
         &mut self,
         logger: impl Logger,
-        initial_frontier_files: Vec<PathBuf>,
-        initial_frontier_symbols: Vec<(PathBuf, Vec<ExportedSymbol>)>,
+        initial_frontier_files: Vec<&Path>,
+        initial_frontier_symbols: Vec<(&Path, Vec<ExportedSymbol>)>,
         tag: UsedTag,
     ) -> Result<()> {
         let initial_file_edges = initial_frontier_files
             .into_iter()
-            .filter_map(|path| match self.path_to_id.get(&path) {
+            .filter_map(|path| match self.path_to_id.get(path) {
                 Some(file_id) => Some(*file_id),
                 None => {
                     logger.log(format!(
@@ -189,8 +154,8 @@ impl Graph {
         let initial_symbol_edges = initial_frontier_symbols
             .into_iter()
             .filter_map(
-                |(path, symbols): (PathBuf, Vec<ExportedSymbol>)| -> Option<Vec<Edge>> {
-                    match self.path_to_id.get(&path).cloned() {
+                |(path, symbols): (&Path, Vec<ExportedSymbol>)| -> Option<Vec<Edge>> {
+                    match self.path_to_id.get(path).cloned() {
                         Some(file_id) => Some(
                             symbols
                                 .into_iter()

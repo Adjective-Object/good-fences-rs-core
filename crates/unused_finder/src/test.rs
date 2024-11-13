@@ -1,18 +1,25 @@
+use core::result::Result;
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use path_slash::PathBufExt;
-use test_tmpdir::{bmap, test_tmpdir};
+use test_tmpdir::{amap, test_tmpdir};
 
 use crate::{
-    cfg::package_match_rules::PackageMatchRules, graph::UsedTag, logger, report::SymbolReport,
-    UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
+    cfg::package_match_rules::PackageMatchRules, logger, report::SymbolReport, tag::UsedTag,
+    SymbolReportWithTags, UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
 };
 
-fn symbol(id: &str, tags: UsedTag) -> SymbolReport {
+fn symbol(id: &str) -> SymbolReport {
     SymbolReport {
         id: id.to_string(),
         start: 0,
         end: 0,
+    }
+}
+
+fn tagged_symbol(id: &str, tags: UsedTag) -> SymbolReportWithTags {
+    SymbolReportWithTags {
+        symbol: symbol(id),
         tags: tags.into(),
     }
 }
@@ -35,6 +42,20 @@ fn normalize_test_report(
             .collect(),
         unused_symbols: result
             .unused_symbols
+            .into_iter()
+            .map(|(k, v)| {
+                let mut s_v = v.clone();
+                s_v.sort();
+                (normalize_path(tmpdir, &k), s_v)
+            })
+            .collect(),
+        extra_file_tags: result
+            .extra_file_tags
+            .into_iter()
+            .map(|(k, v)| (normalize_path(tmpdir, &k), v))
+            .collect(),
+        extra_symbol_tags: result
+            .extra_symbol_tags
             .into_iter()
             .map(|(k, v)| {
                 let mut s_v = v.clone();
@@ -86,6 +107,27 @@ fn run_unused_test(
                 .insert(item.id.clone(), (item.start, item.end));
         }
     }
+    for (file_path, symbols) in report.extra_symbol_tags.iter() {
+        let content_bytes = std::fs::read(file_path).unwrap();
+        for tagged_symbol in symbols.iter() {
+            let symbol = &tagged_symbol.symbol;
+            // check that the bytes in the slice match the expected symbol
+            let symbol_bytes = &content_bytes[(symbol.start - 1) as usize..symbol.end as usize];
+            let symbol_str = String::from_utf8(symbol_bytes.to_vec()).unwrap();
+            if !symbol_str.contains(&symbol.id) {
+                panic!(
+                    "Symbol {} with range {}:{} has incorrect offsets. Actual range contents: {:?}",
+                    symbol.id, symbol.start, symbol.end, symbol_str
+                );
+            }
+
+            // store the location of the symbol
+            actual_symbol_ranges
+                .entry(normalize_path(tmpdir, file_path))
+                .or_default()
+                .insert(symbol.id.clone(), (symbol.start, symbol.end));
+        }
+    }
 
     // for each of the symbols in the expected map, if the offsets are zero,
     // replace them with the actual offsets from the actual map
@@ -100,6 +142,19 @@ fn run_unused_test(
                 {
                     item.start = *start;
                     item.end = *end;
+                }
+            }
+        }
+    }
+    for (file_path, items) in expected.extra_symbol_tags.iter_mut() {
+        for item in items.iter_mut() {
+            if item.symbol.start == 0 && item.symbol.end == 0 {
+                if let Some((start, end)) = actual_symbol_ranges
+                    .get(file_path)
+                    .and_then(|m| m.get(&item.symbol.id))
+                {
+                    item.symbol.start = *start;
+                    item.symbol.end = *end;
                 }
             }
         }
@@ -149,7 +204,7 @@ fn test_package_exports_walk_roots() {
             .iter()
             .map(|x| x.to_string())
             .collect(),
-            unused_symbols: bmap!(),
+            ..Default::default()
         },
     );
 }
@@ -175,8 +230,7 @@ fn test_root_export_symbols_used() {
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: vec![],
-            unused_symbols: bmap!(),
+            ..Default::default()
         },
     );
 }
@@ -208,8 +262,7 @@ fn test_transitive_re_export() {
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: vec![],
-            unused_symbols: bmap!(),
+            ..Default::default()
         },
     );
 }
@@ -240,11 +293,12 @@ fn test_partially_unused_file() {
         },
         UnusedFinderReport {
             unused_files: vec![],
-            unused_symbols: bmap!(
+            unused_symbols: amap!(
                 "<root>/packages/root/imported-1.js" => vec![
-                    symbol("b", UsedTag::default()),
+                    symbol("b"),
                 ]
             ),
+            ..Default::default()
         },
     );
 }
@@ -290,13 +344,22 @@ ignored-*.js
             .iter()
             .map(|x| x.to_string())
             .collect(),
-            unused_symbols: bmap!(
+            unused_symbols: amap!(
                 "<root>/packages/root/unused.js" => vec![
-                    symbol("a", UsedTag::default()),
-                    symbol("b", UsedTag::default()),
+                    symbol("a"),
+                    symbol("b"),
                 ],
                 "<root>/packages/root/ignored-exception.js" => vec![
-                    symbol("exception", UsedTag::default()),
+                    symbol("exception"),
+                ]
+            ),
+            extra_file_tags: amap!(
+                "<root>/packages/root/ignored-unused.js" => UsedTag::FROM_IGNORED.into()
+            ),
+            extra_symbol_tags: amap!(
+                "<root>/packages/root/ignored-unused.js" => vec![
+                    tagged_symbol("a", UsedTag::FROM_IGNORED),
+                    tagged_symbol("b", UsedTag::FROM_IGNORED),
                 ]
             ),
         },
@@ -327,27 +390,20 @@ fn test_non_root_root_path() {
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: vec![],
-            unused_symbols: bmap![],
+            ..Default::default()
         },
     );
 }
 
 #[test]
-fn test_indirect_typeonly_export() {
-    // Tests that the package traversal works when there is a non-root "root" path.
+fn test_test_pattern() {
+    // Tests tagging "test" files
     let tmpdir = test_tmpdir!(
-        "search_root/packages/root/package.json" => r#"{
-            "name": "entrypoint",
-            "main": "./main.js",
-            "exports": {}
-        }"#,
-        "search_root/packages/root/main.js" => r#"
-            export type { ReExportedAsTypeOnly } from "./other";
+        "search_root/packages/utils/testUtils.js" => r#"
+            export const testSymbol = "testSymbol";
         "#,
-        "search_root/packages/root/other.js" => r#"
-            export class ReExportedAsTypeOnly {}
-            export class NotReExported {}
+        "search_root/packages/__tests__/myTest.js" => r#"
+            import * as utils from "../utils/testUtils";
         "#
     );
 
@@ -356,41 +412,37 @@ fn test_indirect_typeonly_export() {
         UnusedFinderConfig {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
-            entry_packages: vec!["entrypoint"].try_into().unwrap(),
-            allow_unused_types: true,
+            test_files: vec!["**/__tests__/*Test.js"]
+                .into_iter()
+                .map(glob::Pattern::new)
+                .collect::<Result<Vec<glob::Pattern>, glob::PatternError>>()
+                .unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: vec!["<root>/search_root/packages/root/other.js".to_string()],
-            unused_symbols: bmap![
-                "<root>/search_root/packages/root/other.js" => vec![
-                    symbol("NotReExported", UsedTag::default()),
-                    symbol("ReExportedAsTypeOnly", UsedTag::default()),
+            extra_file_tags: amap!(
+                "<root>/search_root/packages/__tests__/myTest.js" => UsedTag::FROM_TEST.into(),
+                "<root>/search_root/packages/utils/testUtils.js" => UsedTag::FROM_TEST.into()
+            ),
+            extra_symbol_tags: amap!(
+                "<root>/search_root/packages/utils/testUtils.js" => vec![
+                    tagged_symbol("testSymbol", UsedTag::FROM_TEST),
                 ]
-            ],
+            ),
+            ..Default::default()
         },
     );
 }
 
 #[test]
-fn test_typeonly_interface_allowed() {
-    // Tests that the package traversal works when there is a non-root "root" path.
+fn test_relative_test_pattern() {
+    // Tests tagging "test" files with relative patterns
     let tmpdir = test_tmpdir!(
-        "search_root/packages/root/package.json" => r#"{
-            "name": "entrypoint",
-            "main": "./main.js",
-            "exports": {}
-        }"#,
-        "search_root/packages/root/main.js" => r#"
-            export { ReExported } from "./other";
+        "search_root/packages/test-utils/testUtils.js" => r#"
+            export const testSymbol = "testSymbol";
         "#,
-        "search_root/packages/root/other.js" => r#"
-            // This should be allowed because it is a typeonly export
-            export interface MyInterface {
-                getFoo: () => string;
-            }
-
-            export class ReExported<T extends MyInterface> {}
+        "search_root/tests/myTest.js" => r#"
+            import * as utils from "../packages/test-utils/testUtils";
         "#
     );
 
@@ -399,13 +451,24 @@ fn test_typeonly_interface_allowed() {
         UnusedFinderConfig {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
-            entry_packages: vec!["entrypoint"].try_into().unwrap(),
-            allow_unused_types: true,
+            test_files: vec!["search_root/tests/**"]
+                .into_iter()
+                .map(glob::Pattern::new)
+                .collect::<Result<Vec<glob::Pattern>, glob::PatternError>>()
+                .unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: vec![],
-            unused_symbols: bmap![],
+            extra_file_tags: amap!(
+                "<root>/search_root/tests/myTest.js" => UsedTag::FROM_TEST.into(),
+                "<root>/search_root/packages/test-utils/testUtils.js" => UsedTag::FROM_TEST.into()
+            ),
+            extra_symbol_tags: amap!(
+                "<root>/search_root/packages/test-utils/testUtils.js" => vec![
+                    tagged_symbol("testSymbol", UsedTag::FROM_TEST),
+                ]
+            ),
+            ..Default::default()
         },
     );
 }
@@ -439,14 +502,101 @@ fn test_testfiles_ignored() {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
             entry_packages: PackageMatchRules::empty(),
-            test_file_patterns: vec![glob::Pattern::from_str("**/__tests__/**").unwrap()],
+            test_files: vec![glob::Pattern::from_str("**/__tests__/**").unwrap()],
             ..Default::default()
         },
         UnusedFinderReport {
             unused_files: vec!["<root>/search_root/packages/test-helpers/unused-helpers.js".into()],
-            unused_symbols: bmap![
-                "<root>/search_root/packages/test-helpers/unused-helpers.js" => vec![symbol("myFunction", UsedTag::default())]
+            unused_symbols: amap![
+                "<root>/search_root/packages/test-helpers/unused-helpers.js" => vec![symbol("myFunction")]
             ],
+            extra_file_tags: amap![
+                "<root>/search_root/packages/test-helpers/test-helpers.js" => UsedTag::FROM_TEST.into(),
+                "<root>/search_root/packages/__tests__/myTests.test.js" => UsedTag::FROM_TEST.into()
+            ],
+            extra_symbol_tags: amap![
+                "<root>/search_root/packages/test-helpers/test-helpers.js" => vec![tagged_symbol("myFunction", UsedTag::FROM_TEST)]
+            ],
+        },
+    );
+}
+
+#[test]
+fn test_indirect_typeonly_export() {
+    // Tests typeonly exports do not propogate as "used"
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "search_root/packages/root/main.js" => r#"
+            export type { ReExportedAsTypeOnly } from "./other";
+        "#,
+        "search_root/packages/root/other.js" => r#"
+            export class ReExportedAsTypeOnly {}
+            export class NotReExported {}
+        "#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
+            allow_unused_types: true,
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            unused_files: vec!["<root>/search_root/packages/root/other.js".to_string()],
+            unused_symbols: amap![
+                "<root>/search_root/packages/root/other.js" => vec![
+                    symbol("NotReExported"),
+                    symbol("ReExportedAsTypeOnly"),
+                ]
+            ],
+            ..Default::default()
+        },
+    );
+}
+
+#[test]
+fn test_typeonly_interface_allowed() {
+    // Tests that interfaces are considered typeonly exports
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "search_root/packages/root/main.js" => r#"
+            export { ReExported } from "./other";
+        "#,
+        "search_root/packages/root/other.js" => r#"
+            // This should be allowed because it is a typeonly export
+            export interface MyInterface {
+                getFoo: () => string;
+            }
+
+            export class ReExported<T extends MyInterface> {}
+        "#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
+            allow_unused_types: true,
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            extra_symbol_tags: amap![
+                "<root>/search_root/packages/root/other.js" => vec![tagged_symbol("MyInterface", UsedTag::TYPE_ONLY)]
+            ],
+            ..Default::default()
         },
     );
 }

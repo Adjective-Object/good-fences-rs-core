@@ -1,12 +1,14 @@
+use core::option::Option::None;
 use std::path::{Path, PathBuf};
 
 use crate::{
     cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
-    graph::{Graph, UsedTag},
+    graph::Graph,
     ignore_file::IgnoreFile,
     logger::Logger,
     parse::{get_file_import_export_info, ExportedSymbol},
     report::UnusedFinderReport,
+    tag::UsedTag,
     walk::{walk_src_files, RepoPackages, WalkedFiles},
     walked_file::ResolvedSourceFile,
 };
@@ -341,7 +343,7 @@ impl UnusedFinder {
             "Starting {} graph traversal with {} entrypoints and {} symbols",
             UsedTag::FROM_IGNORED,
             ignored_entrypoints.len(),
-            ignored_symbols.len()
+            Self::count_symbols(&ignored_symbols)
         ));
         graph
             .traverse_bfs(
@@ -386,17 +388,21 @@ impl UnusedFinder {
         Ok(UnusedFinderResult::new(graph))
     }
 
+    fn count_symbols<T, U>(symbols: &[(T, Vec<U>)]) -> usize {
+        symbols.iter().map(|(_, symbols)| symbols.len()).sum()
+    }
+
     /// helper to get the list of files that are "entrypoints" to the used
     /// symbol graph (ignored files)
-    fn get_entrypoints(&self, logger: impl Logger) -> Vec<PathBuf> {
+    fn get_entrypoints(&self, logger: impl Logger) -> Vec<&Path> {
         // get all package exports.
         self.last_walk_result
             .source_files
             .par_iter()
-            .filter_map(|(file_path, source_file)| {
+            .filter_map(|(file_path, source_file)| -> Option<&Path> {
                 let export = self.is_entry_package_export(&logger, file_path, source_file);
-                if export || self.is_file_ignored(file_path) {
-                    Some(file_path.clone())
+                if export {
+                    Some(file_path)
                 } else {
                     None
                 }
@@ -455,34 +461,14 @@ impl UnusedFinder {
             .unwrap_or(false)
     }
 
-    fn get_test_files(&self) -> Vec<PathBuf> {
-        // get the list of files that match the test file patterns
-        self.last_walk_result
-            .source_files
-            .par_iter()
-            .filter_map(|(file_path, _)| {
-                if self
-                    .config
-                    .test_file_patterns
-                    .iter()
-                    .any(|pattern| pattern.matches_path(file_path))
-                {
-                    Some(file_path.clone())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    fn get_ignored_files(&self) -> Vec<PathBuf> {
+    fn get_ignored_files(&self) -> Vec<&Path> {
         // TODO: this is n^2, which is bad! Could build a treemap of ignore files?
         self.last_walk_result
             .source_files
             .par_iter()
-            .filter_map(|(file_path, _)| {
+            .filter_map(|(file_path, _)| -> Option<&Path> {
                 if self.is_file_ignored(file_path) {
-                    Some(file_path.clone())
+                    Some(file_path)
                 } else {
                     None
                 }
@@ -490,11 +476,35 @@ impl UnusedFinder {
             .collect()
     }
 
-    fn get_ignored_symbols(&self) -> Vec<(PathBuf, Vec<ExportedSymbol>)> {
+    fn get_ignored_symbols(&self) -> Vec<(&Path, Vec<ExportedSymbol>)> {
         self.last_walk_result
             .source_files
             .par_iter()
-            .map(|(path_buf, file)| (path_buf.clone(), Self::get_file_ignored_symbols(file)))
+            .filter_map(|(path_buf, file)| -> Option<(&Path, Vec<ExportedSymbol>)> {
+                let ignored_symbols = Self::get_file_ignored_symbols(file);
+                if ignored_symbols.is_empty() {
+                    None
+                } else {
+                    Some((path_buf, ignored_symbols))
+                }
+            })
+            .collect()
+    }
+
+    fn get_test_files(&self) -> Vec<&Path> {
+        self.last_walk_result
+            .source_files
+            .par_iter()
+            .filter_map(|(path, _)| -> Option<&Path> {
+                for test_glob in &self.config.test_files {
+                    let relative = path.strip_prefix(&self.config.repo_root).unwrap_or(path);
+                    if test_glob.matches_path(relative) {
+                        return Some(path);
+                    }
+                }
+
+                None
+            })
             .collect()
     }
 

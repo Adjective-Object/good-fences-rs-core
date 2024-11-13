@@ -1,6 +1,8 @@
 use std::fmt::{Display, Formatter};
 
+use itertools::Itertools;
 use package_match_rules::PackageMatchRules;
+use rayon::iter::Either;
 use serde::Deserialize;
 
 pub mod package_match_rules;
@@ -101,13 +103,14 @@ pub struct UnusedFinderJSONConfig {
     /// 3. Otherwise, the item is treated as the name of an individual package, and matched
     ///    literally.
     pub entry_packages: Vec<String>,
-    /// List of globs that will be matched against files in the repository
+    /// List of glob patterns to mark as "tests".
+    /// These files will be marked as used, and all of their transitive
+    /// dependencies will also be marked as used
     ///
-    /// Matches are made against the relative file paths from the repo root.
-    /// A matching file will be tagged as a "test" file, and will be excluded
-    /// from the list of unused files
+    /// glob patterns are matched against the relative file path from the
+    /// root of the repository
     #[serde(default)]
-    pub test_file_patterns: Vec<String>,
+    pub test_files: Vec<String>,
 }
 
 /// Configuration for the unused symbols finder
@@ -134,7 +137,7 @@ pub struct UnusedFinderConfig {
     /// Matches are made against the relative file paths from the repo root.
     /// A matching file will be tagged as a "test" file, and will be excluded
     /// from the list of unused files
-    pub test_file_patterns: Vec<glob::Pattern>,
+    pub test_files: Vec<glob::Pattern>,
 
     /// Globs of individual files & directories to skip during the file walk.
     ///
@@ -146,6 +149,17 @@ pub struct UnusedFinderConfig {
 impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
     type Error = ConfigError;
     fn try_from(value: UnusedFinderJSONConfig) -> std::result::Result<Self, Self::Error> {
+        let (test_globs, test_glob_errs): (Vec<glob::Pattern>, Vec<_>) = value
+            .test_files
+            .iter()
+            .partition_map(|pat| match glob::Pattern::new(pat) {
+                Ok(pat) => Either::Left(pat),
+                Err(err) => Either::Right(PatErr(0, GlobInterp::Path, err)),
+            });
+        if !test_glob_errs.is_empty() {
+            return Err(ConfigError::InvalidGlobPatterns(ErrList(test_glob_errs)));
+        }
+
         Ok(UnusedFinderConfig {
             // raw fields that are copied from the JSON config
             report_exported_symbols: value.report_exported_symbols,
@@ -154,14 +168,7 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             repo_root: value.repo_root,
             // other fields that are processed before use
             entry_packages: value.entry_packages.try_into()?,
-            test_file_patterns: value
-                .test_file_patterns
-                .iter()
-                .map(|p| glob::Pattern::new(p))
-                .collect::<Result<_, _>>()
-                .map_err(|e| {
-                    ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(0, GlobInterp::Path, e)]))
-                })?,
+            test_files: test_globs,
             skip: value.skip,
         })
     }
