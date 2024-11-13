@@ -4,6 +4,9 @@ on:
     branches:
       - main
   workflow_dispatch:
+concurrency:
+  group: publish-${{ github.workflow }}
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
