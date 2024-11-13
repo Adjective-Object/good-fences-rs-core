@@ -149,7 +149,8 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
     ❯ git config --local user.email "your@e.mail"
     ```
 
-    Note that you have to do this locally within the repo, so it will be persisted into the devcontainer when the repo is mounted.
+    Note that you have to do this from within the repo's folder so it will be persisted into the devcontainer when the repo's folder is mounted as a volume.
+    If you are in WSL, you need to do this within the repo's out folder in WSL
 4. Install recommended extensions
     Install the recommended extensions from this repo.
     
