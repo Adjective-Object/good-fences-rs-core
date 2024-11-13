@@ -42,6 +42,7 @@ jobs:
           - host: ubuntu-20.04
             target: x86_64-unknown-linux-gnu
             test: true
+            js-files: true
           - host: ubuntu-20.04
             target: aarch64-unknown-linux-gnu
             packages: gcc-aarch64-linux-gnu
@@ -99,17 +100,19 @@ jobs:
         run: yarn test
       - name: cargo test
         if: ${{ matrix.settings.test }}
-        run: cargo test --release
+        run: cargo test --release --tests
       - name: upload-artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        # only run when this subworkflow is called from CI (e.g. not a PR)
         if: needs.pr-check.outputs.number != 'null'
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ./*.node
           if-no-files-found: error
       - name: upload js files
-        if: needs.pr-check.outputs.number != 'null' && ${{ matrix.settings.target }} == 'linux-x64-gnu'
-        uses: actions/upload-artifact@v3
+        # only run when this subworkflow is called from CI (e.g. not a PR)
+        if: ${{ matrix.settings.js-files }}
+        uses: actions/upload-artifact@v4
         with:
           name: js-files
           if-no-files-found: error
