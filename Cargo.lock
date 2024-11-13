@@ -1664,15 +1664,10 @@ version = "0.2.0-beta.1"
 name = "repo-schemas"
 version = "0.0.0"
 dependencies = [
- "dockerfile-parser",
  "path-slash",
- "pretty_assertions",
- "regex",
  "repo-root",
  "schemars",
- "serde-hjson",
  "serde_json",
- "toml",
  "unused_finder",
 ]
 
