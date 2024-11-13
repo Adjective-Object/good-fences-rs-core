@@ -1,0 +1,16 @@
+[package]
+name = "repo-schemas"
+version = "0.0.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+license = "Apache-2.0"
+description = """
+Crate for introspective tests on this repo's schemas
+"""
+edition = "2018"
+
+[dev-dependencies]
+path-slash.workspace = true
+repo-root = { path = "../repo-root" }
+schemars.workspace = true
+serde_json.workspace = true
+unused_finder = { version = "0.2.0", path = "../unused_finder" }
