@@ -59,19 +59,22 @@ jobs:
           mkdir artifacts
           cp *.node artifacts
           yarn artifacts
-      - name: check changes
+      - name: Check changes
+        id: check_changes
         run: |
           git remote set-url origin https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
 
           # Generate changes from beachball, including package.json version bump
-          yarn beachball bump
-
-          # Check if that contains changefiles
-          git diff --exit-code -- ./change 
-          echo "OUTPUT_STATUS=$?" >> "$GITHUB_OUTPUT"
+          if yarn beachball bump | grep "Removing change files:"; then
+            echo "changes!"
+            echo "HAS_CHANGES=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no changes!"
+            echo "HAS_CHANGES=false" >> "$GITHUB_OUTPUT"
+          fi
         shell: bash
       - name: Publish
-        if: ${{ steps.check_changes.outputs.OUTPUT_STATUS == 1 }}
+        if: ${{ steps.check_changes.outputs.HAS_CHANGES == 'true' }}
         run: |
           git config user.email "mhuan13@gmail.com"
           git config user.name "$GITHUB_ACTOR"
