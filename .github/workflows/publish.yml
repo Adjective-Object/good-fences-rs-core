@@ -91,7 +91,7 @@ jobs:
           git push origin main --tags
 
           # Publish all packages 
-          yarn npm publish --tag "v$PACKAGE_VERSION" --access public --tolerate-republish
+          yarn npm publish --tag "latest" --access public --tolerate-republish
         env:
           YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.BEACHBALL_PUSH_PAT }}
