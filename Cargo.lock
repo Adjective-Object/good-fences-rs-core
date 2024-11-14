@@ -1068,11 +1068,8 @@ dependencies = [
 name = "logger_console"
 version = "0.2.0"
 dependencies = [
- "js_err_napi",
  "logger",
  "napi",
- "napi-derive",
- "serde",
 ]
 
 [[package]]
