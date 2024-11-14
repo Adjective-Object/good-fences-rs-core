@@ -1,5 +1,4 @@
 use crate::ignore_file::IgnoreFile;
-use crate::logger::Logger;
 use crate::parse::exports_visitor_runner::SourceFileParseError;
 use crate::parse::{get_file_import_export_info, RawImportExportInfo};
 use crate::walked_file::{WalkedPackage, WalkedSourceFile};
@@ -7,6 +6,7 @@ use ahashmap::AHashMap;
 use anyhow::Context;
 use ignore::overrides::OverrideBuilder;
 use ignore::DirEntry;
+use logger::Logger;
 use rayon::iter::Either;
 use rayon::prelude::*;
 use std::ffi::OsStr;
@@ -401,7 +401,7 @@ fn split_errs<A, B>(x: Result<A, B>) -> Either<A, B> {
 
 #[cfg(test)]
 mod test {
-    use crate::logger::StdioLogger;
+    use logger::StdioLogger;
 
     use super::*;
     use test_tmpdir::test_tmpdir;

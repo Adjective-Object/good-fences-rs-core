@@ -15,7 +15,6 @@ extern crate test_tmpdir;
 mod cfg;
 mod graph;
 mod ignore_file;
-pub mod logger;
 mod parse;
 mod report;
 mod tag;

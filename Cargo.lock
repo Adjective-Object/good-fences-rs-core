@@ -1058,6 +1058,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
+name = "logger"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
+name = "logger_console"
+version = "0.2.0"
+dependencies = [
+ "logger",
+ "napi",
+]
+
+[[package]]
 name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2706,6 +2721,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
+ "logger",
  "parking_lot",
  "rstack-self",
  "serde-hjson",
@@ -2727,6 +2743,7 @@ dependencies = [
  "import_resolver",
  "itertools 0.13.0",
  "js_err",
+ "logger",
  "packagejson",
  "packagejson_exports",
  "path-clean",
@@ -2757,6 +2774,8 @@ dependencies = [
  "anyhow",
  "js_err",
  "js_err_napi",
+ "logger",
+ "logger_console",
  "napi",
  "napi-build",
  "napi-derive",

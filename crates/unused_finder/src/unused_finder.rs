@@ -5,7 +5,6 @@ use crate::{
     cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
     graph::Graph,
     ignore_file::IgnoreFile,
-    logger::Logger,
     parse::{get_file_import_export_info, ExportedSymbol},
     report::UnusedFinderReport,
     tag::UsedTag,
@@ -21,6 +20,7 @@ use import_resolver::swc_resolver::{
     MonorepoResolver,
 };
 use js_err::JsErr;
+use logger::Logger;
 use rayon::{iter::Either, prelude::*};
 use swc_ecma_loader::{resolve::Resolve, TargetEnv};
 
