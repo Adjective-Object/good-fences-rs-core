@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 
+use anyhow::anyhow;
+
 pub trait Logger: Send + Sync + Clone {
     fn log(&self, message: impl Into<String>);
 }

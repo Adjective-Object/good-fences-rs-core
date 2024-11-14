@@ -17,6 +17,8 @@ napi-derive.workspace = true
 unused_finder = { version = "0.2.0", path = "../unused_finder" }
 serde.workspace = true
 js_err_napi = { version = "0.2.0", path = "../js_err_napi" }
+logger_console = { version = "0.2.0", path = "../logger_console" }
+logger = { version = "0.2.0", path = "../logger" }
 
 [build-dependencies]
 napi-build = "2.0.1"

@@ -1,17 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use js_err_napi::ToNapi;
-use napi::{
-    threadsafe_function::{
-        ErrorStrategy::{self},
-        ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
-    },
-    JsFunction, JsObject, Result, Status,
-};
+use napi::{JsObject, Result};
 
+use logger_console::ConsoleLogger;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
-use unused_finder::logger::Logger;
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
 ///
@@ -171,44 +165,6 @@ impl From<unused_finder::UnusedFinderReport> for UnusedFinderReport {
                 .into_iter()
                 .map(|(k, v)| (k, v.into_iter().map(Into::into).collect()))
                 .collect(),
-        }
-    }
-}
-
-#[derive(Clone)]
-struct ConsoleLogger {
-    logfn: Arc<ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>>,
-}
-
-impl ConsoleLogger {
-    fn new(console: JsObject) -> Result<Self> {
-        let logfn = console.get_named_property::<JsFunction>("log")?;
-        Ok(Self {
-            logfn: Arc::new(logfn.create_threadsafe_function(
-                // allow queueing console responses?
-                100,
-                |ctx: ThreadSafeCallContext<String>| {
-                    let js_str = ctx.env.create_string(&ctx.value)?;
-                    // return as an argv array
-                    Ok(vec![js_str])
-                },
-            )?),
-        })
-    }
-}
-
-impl Logger for ConsoleLogger {
-    fn log(&self, message: impl Into<String>) {
-        let message_string: String = message.into();
-        let status = self
-            .logfn
-            .call(Ok(message_string), ThreadsafeFunctionCallMode::Blocking);
-        match status {
-            Status::Ok => {}
-            _ => {
-                eprintln!();
-                panic!("Error calling console.log from Rust. Unexpected threadsafe function call mode {}", status);
-            }
         }
     }
 }

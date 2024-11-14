@@ -6,11 +6,11 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use crate::{
-    logger::Logger,
     parse::{ExportedSymbol, ResolvedImportExportInfo},
     tag::UsedTag,
     walked_file::ResolvedSourceFile,
 };
+use logger::Logger;
 
 // graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]

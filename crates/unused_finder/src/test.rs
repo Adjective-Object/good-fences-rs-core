@@ -5,7 +5,7 @@ use path_slash::PathBufExt;
 use test_tmpdir::{amap, test_tmpdir};
 
 use crate::{
-    cfg::package_match_rules::PackageMatchRules, logger, report::SymbolReport, tag::UsedTag,
+    cfg::package_match_rules::PackageMatchRules, report::SymbolReport, tag::UsedTag,
     SymbolReportWithTags, UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
 };
 

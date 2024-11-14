@@ -22,16 +22,8 @@ regex = "1"
 relative-path = "1.7.2"
 serde = { version = "1.0.117", features = ["rc", "derive"] }
 serde_json = "1.0.59"
-swc = "0.284.1"
 swc_common = "0.37.4"
 swc_compiler_base = "0.18.1"
-swc_core = { version = "0.101.3", features = [
-    "ecma_plugin_transform",
-    "ecma_loader_node",
-    "ecma_loader_tsc",
-    "ecma_loader_lru",
-    "ecma_loader_parking_lot",
-] }
 swc_ecma_ast = "0.118.2"
 swc_ecma_loader = "0.49.1"
 swc_ecma_parser = "0.149.0"

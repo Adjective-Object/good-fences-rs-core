@@ -2,11 +2,9 @@ extern crate unused_finder;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use logger::{Logger, StdioLogger};
 use std::{convert::TryInto, env, fs, path::Path};
-use unused_finder::{
-    logger::{Logger, StdioLogger},
-    UnusedFinderConfig,
-};
+use unused_finder::UnusedFinderConfig;
 
 #[derive(Parser, Debug)]
 struct CliArgs {
