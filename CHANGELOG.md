@@ -1,8 +1,18 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Thu, 07 Nov 2024 18:37:07 GMT and should not be manually modified.
+This log was last generated on Thu, 14 Nov 2024 16:54:38 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.18.0
+
+Thu, 14 Nov 2024 16:54:38 GMT
+
+### Minor changes
+
+- Add support for usage from test files (mhuan13@gmail.com)
+- unused_finder: return tagged symbols (mhuan13@gmail.com)
+- Expose a jsonschema file for the unused finder config (mhuan13@gmail.com)
 
 ## 0.17.0
 

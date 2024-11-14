@@ -1,7 +1,0 @@
-{
-  "type": "minor",
-  "comment": "unused_finder: return tagged symbols",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "patch"
-}

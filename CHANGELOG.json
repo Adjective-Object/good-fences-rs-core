@@ -2,6 +2,47 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Thu, 14 Nov 2024 16:54:38 GMT",
+      "version": "0.18.0",
+      "tag": "@good-fences/api_v0.18.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "9b19dd7721cf74f69ed05d080c278b3001cf6d0a",
+            "comment": "Add support for usage from test files"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "f2ee1e7123d1895a7370eed524c507253687f981",
+            "comment": "unused_finder: return tagged symbols"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "6bddb68fff2115ac17e9beb797a28313be85ba65",
+            "comment": "Expose a jsonschema file for the unused finder config"
+          }
+        ],
+        "none": [
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "a0f4bdcad9e242364f603aebaf3a649599d38d25",
+            "comment": "Add mergiraf as default merge driver, difft as default diff visualizer"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "6bddb68fff2115ac17e9beb797a28313be85ba65",
+            "comment": "enforce jsonschema for unused-config.json"
+          }
+        ]
+      }
+    },
+    {
       "date": "Thu, 07 Nov 2024 18:37:07 GMT",
       "version": "0.17.0",
       "tag": "@good-fences/api_v0.17.0",

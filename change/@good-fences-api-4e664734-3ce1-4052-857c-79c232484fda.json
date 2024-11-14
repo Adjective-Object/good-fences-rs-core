@@ -1,7 +1,0 @@
-{
-  "type": "minor",
-  "comment": "Expose a jsonschema file for the unused finder config",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "patch"
-}

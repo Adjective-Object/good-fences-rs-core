@@ -1,7 +1,0 @@
-{
-  "type": "none",
-  "comment": "Add mergiraf as default merge driver, difft as default diff visualizer",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "none"
-}

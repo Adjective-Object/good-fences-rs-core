@@ -1,7 +1,0 @@
-{
-  "type": "minor",
-  "comment": "Add support for usage from test files",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "patch"
-}
