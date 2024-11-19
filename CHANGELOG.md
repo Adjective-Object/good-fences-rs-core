@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Thu, 14 Nov 2024 16:54:38 GMT and should not be manually modified.
+This log was last generated on Tue, 19 Nov 2024 23:53:48 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.18.1
+
+Tue, 19 Nov 2024 23:53:48 GMT
+
+### Patches
+
+- Remove duplicate 'testPathPatterns' config property on the napi interface (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.18.0
 

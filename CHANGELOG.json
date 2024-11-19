@@ -2,6 +2,35 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Tue, 19 Nov 2024 23:53:48 GMT",
+      "version": "0.18.1",
+      "tag": "@good-fences/api_v0.18.1",
+      "comments": {
+        "none": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "8e5bf47a67d4cb6172ec014b1323544cf754caea",
+            "comment": "refactor logger from unused_finder into own package"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "9b4dcffb4e20c0448bb41a3dfe25cd9a2bd6fb0d",
+            "comment": "adjust publish flow to tag as latest"
+          }
+        ],
+        "patch": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "a7299f546b5900b4ccf6bfc34abda5d7aff0e969",
+            "comment": "Remove duplicate 'testPathPatterns' config property on the napi interface"
+          }
+        ]
+      }
+    },
+    {
       "date": "Thu, 14 Nov 2024 16:54:38 GMT",
       "version": "0.18.0",
       "tag": "@good-fences/api_v0.18.0",

@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "Remove duplicate 'testPathPatterns' config property on the napi interface",
-  "packageName": "@good-fences/api",
-  "email": "Maxwell.HuangHobbs@microsoft.com",
-  "dependentChangeType": "patch"
-}
