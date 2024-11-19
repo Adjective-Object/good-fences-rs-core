@@ -63,13 +63,16 @@ jobs:
         id: check_changes
         run: |
           git remote set-url origin https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git
+          OLD_PACKAGE_VERSION=$(node -e "console.log(require('./package.json').version)")
 
           # Generate changes from beachball, including package.json version bump
-          if yarn beachball bump | grep "Removing change files:"; then
-            echo "changes!"
+          yarn beachball bump
+
+          # check for changes
+          PACKAGE_VERSION=$(node -e "console.log(require('./package.json').version)")
+          if [ "$OLD_PACKAGE_VERSION" != "$PACKAGE_VERSION" ]; then
             echo "HAS_CHANGES=true" >> "$GITHUB_OUTPUT"
           else
-            echo "no changes!"
             echo "HAS_CHANGES=false" >> "$GITHUB_OUTPUT"
           fi
         shell: bash
@@ -89,6 +92,10 @@ jobs:
           # Push updated branch to git main branch
           git tag "v$PACKAGE_VERSION"
           git push origin main --tags
+
+          # Required to do github releasing from napi & prep `optionalDependencies` in package.json
+          # for final publish
+          yarn prepublishOnly
 
           # Publish all packages 
           yarn npm publish --tag "latest" --access public --tolerate-republish

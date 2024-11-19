@@ -1,4 +1,5 @@
 target
+Cargo.toml
 Cargo.lock
 .cargo
 .github
@@ -13,3 +14,14 @@ __test__
 renovate.json
 token
 *.stackdump
+.devcontainer
+crates
+rust-analyzer-target
+target
+scripts
+lldb
+.vscode
+.persist
+.beachballrc.json
+CODEOWNERS
+change

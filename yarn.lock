@@ -33,6 +33,48 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@good-fences/api-darwin-arm64@workspace:npm/darwin-arm64":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-darwin-arm64@workspace:npm/darwin-arm64"
+  languageName: unknown
+  linkType: soft
+
+"@good-fences/api-darwin-x64@workspace:npm/darwin-x64":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-darwin-x64@workspace:npm/darwin-x64"
+  languageName: unknown
+  linkType: soft
+
+"@good-fences/api-linux-arm-gnueabihf@workspace:npm/linux-arm-gnueabihf":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-linux-arm-gnueabihf@workspace:npm/linux-arm-gnueabihf"
+  languageName: unknown
+  linkType: soft
+
+"@good-fences/api-linux-arm64-gnu@workspace:npm/linux-arm64-gnu":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-linux-arm64-gnu@workspace:npm/linux-arm64-gnu"
+  languageName: unknown
+  linkType: soft
+
+"@good-fences/api-linux-x64-gnu@workspace:npm/linux-x64-gnu":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-linux-x64-gnu@workspace:npm/linux-x64-gnu"
+  languageName: unknown
+  linkType: soft
+
+"@good-fences/api-win32-arm64-msvc@workspace:npm/win32-arm64-msvc":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-win32-arm64-msvc@workspace:npm/win32-arm64-msvc"
+  languageName: unknown
+  linkType: soft
+
+"@good-fences/api-win32-x64-msvc@workspace:npm/win32-x64-msvc":
+  version: 0.0.0-use.local
+  resolution: "@good-fences/api-win32-x64-msvc@workspace:npm/win32-x64-msvc"
+  languageName: unknown
+  linkType: soft
+
 "@good-fences/api@workspace:.":
   version: 0.0.0-use.local
   resolution: "@good-fences/api@workspace:."
