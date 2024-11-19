@@ -100,6 +100,7 @@ jobs:
           # Publish all packages 
           yarn npm publish --tag "latest" --access public --tolerate-republish
         env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.BEACHBALL_PUSH_PAT }}
           GITHUB_ACTOR: autobot
