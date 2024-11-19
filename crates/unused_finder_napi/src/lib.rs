@@ -5,18 +5,15 @@ use napi::{JsObject, Result};
 
 use logger_console::ConsoleLogger;
 use napi_derive::napi;
-use serde::{Deserialize, Serialize};
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
 ///
 /// This struct is used to deserialize the UnusedFinderConfig struct
 /// from a config file to with serde / over the debug bridge for napi
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Default, Clone)]
 #[napi(object)]
 pub struct UnusedFinderJSONConfig {
     /// Path to the root directory of the repository.
-    #[serde(default)]
     pub repo_root: String,
     /// Root paths to walk as source files
     ///
@@ -27,13 +24,10 @@ pub struct UnusedFinderJSONConfig {
     ///
     /// Matches are made against the names of the individual directories,
     /// NOT the full directory paths
-    #[serde(default)]
-    pub skip: Vec<String>,
+    pub skip: Option<Vec<String>>,
     /// If true, individual exported symbols are also tracked
-    #[serde(default)]
-    pub report_exported_symbols: bool,
-    #[serde(default)]
-    pub allow_unused_types: bool,
+    pub report_exported_symbols: Option<bool>,
+    pub allow_unused_types: Option<bool>,
     /// List of packages that should be considered "entry" packages
     /// All transitive imports from the exposed exports of these packages
     /// will be considered used
@@ -43,13 +37,6 @@ pub struct UnusedFinderJSONConfig {
     /// 2. If the item contains any of "~)('!*", it is treated as a name-glob, and evaluated as a glob against the names of packages.
     /// 3. Otherwise, the item is treated as the name of an individual package, and matched literally.
     pub entry_packages: Vec<String>,
-    /// List of globs that will be matched against files in the repository
-    ///
-    /// Matches are made against the relative file paths from the repo root.
-    /// A matching file will be tagged as a "test" file, and will be excluded
-    /// from the list of unused files
-    #[serde(default)]
-    pub test_file_patterns: Vec<String>,
     /// List of glob patterns to mark as "tests".
     /// These files will be marked as used, and all of their transitive
     /// dependencies will also be marked as used
@@ -64,25 +51,21 @@ impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
         unused_finder::UnusedFinderJSONConfig {
             repo_root: val.repo_root,
             root_paths: val.root_paths,
-            skip: val.skip,
-            report_exported_symbols: val.report_exported_symbols,
+            skip: val.skip.unwrap_or_default(),
+            report_exported_symbols: val.report_exported_symbols.unwrap_or_default(),
             entry_packages: val.entry_packages,
-            allow_unused_types: val.allow_unused_types,
+            allow_unused_types: val.allow_unused_types.unwrap_or_default(),
             test_files: val.test_files.unwrap_or_default(),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Ord, PartialOrd, Eq)]
 #[napi(string_enum)]
 pub enum UsedTagEnum {
-    #[serde(rename = "entry")]
     Entry,
-    #[serde(rename = "ignored")]
     Ignored,
-    #[serde(rename = "type-only")]
     TypeOnly,
-    #[serde(rename = "test")]
     Test,
 }
 
@@ -98,7 +81,7 @@ impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
 }
 
 // Report of a single exported item in a file
-#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
 #[napi(object)]
 pub struct SymbolReport {
     pub id: String,
@@ -116,7 +99,7 @@ impl From<unused_finder::SymbolReport> for SymbolReport {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
 #[napi(object)]
 pub struct SymbolReportWithTags {
     pub symbol: SymbolReport,
@@ -133,7 +116,7 @@ impl From<unused_finder::SymbolReportWithTags> for SymbolReportWithTags {
 }
 
 // Report of unused symbols within a project
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 #[napi]
 pub struct UnusedFinderReport {
     // files that are completely unused
