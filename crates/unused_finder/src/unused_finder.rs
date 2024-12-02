@@ -158,14 +158,17 @@ fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl Res
 
 impl UnusedFinder {
     pub fn new_from_json_config(
-        logger: impl Logger,
+        logger: impl Logger + Sync,
         json_config: UnusedFinderJSONConfig,
     ) -> Result<Self, JsErr> {
         let config = UnusedFinderConfig::try_from(json_config).map_err(JsErr::invalid_arg)?;
         Self::new_from_cfg(logger, config).map_err(JsErr::generic_failure)
     }
 
-    pub fn new_from_cfg(logger: impl Logger, config: UnusedFinderConfig) -> Result<Self, JsErr> {
+    pub fn new_from_cfg(
+        logger: impl Logger + Sync,
+        config: UnusedFinderConfig,
+    ) -> Result<Self, JsErr> {
         if config.repo_root.is_empty() {
             return Err(JsErr::invalid_arg(anyhow!(
                 "repoRoot must be set in config"
@@ -215,7 +218,7 @@ impl UnusedFinder {
 
     // Helper method used before taking a snapshot of the file tree for graph computation.
     // performs either a partial or full refresh of the file tree, depending on the value of `files_to_check`
-    fn update_dirty_files(&mut self, logger: impl Logger) -> Result<(), JsErr> {
+    fn update_dirty_files(&mut self, logger: impl Logger + Sync) -> Result<(), JsErr> {
         match &self.dirty_files {
             DirtyFiles::All => {
                 logger.log("Refreshing all files");
@@ -230,7 +233,7 @@ impl UnusedFinder {
                 let scanned_files = files
                     .par_iter()
                     .map(|file_path| {
-                        self.update_single_file(file_path, logger.clone())
+                        self.update_single_file(file_path, &logger)
                             .map_err(JsErr::generic_failure)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -296,7 +299,7 @@ impl UnusedFinder {
     /// Walks and parses all source files in the repo, returning a WalkFileResult
     /// with
     fn walk_and_resolve_all(
-        logger: impl Logger,
+        logger: impl Logger + Sync,
         config: &UnusedFinderConfig,
     ) -> Result<SourceFiles, JsErr> {
         // Note: this silently ignores any errors that occur during the walk
@@ -320,7 +323,7 @@ impl UnusedFinder {
 
     // Gets a report by performing a graph traversal on the current in-memory state of the repo,
     // from the last time the file tree was scanned.
-    pub fn find_unused(&mut self, logger: impl Logger) -> Result<UnusedFinderResult, JsErr> {
+    pub fn find_unused(&mut self, logger: impl Logger + Sync) -> Result<UnusedFinderResult, JsErr> {
         // Scan the file-system for changed files
         self.update_dirty_files(&logger)?;
 
@@ -394,7 +397,7 @@ impl UnusedFinder {
 
     /// helper to get the list of files that are "entrypoints" to the used
     /// symbol graph (ignored files)
-    fn get_entrypoints(&self, logger: impl Logger) -> Vec<&Path> {
+    fn get_entrypoints(&self, logger: impl Logger + Sync) -> Vec<&Path> {
         // get all package exports.
         self.last_walk_result
             .source_files

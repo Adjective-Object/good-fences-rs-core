@@ -136,7 +136,7 @@ pub struct WalkedFiles {
 
 /// Walks the root paths of a project and returns a list of source files and packages
 pub fn walk_src_files(
-    logger: impl Logger,
+    logger: impl Logger + Sync,
     root_paths: &[impl AsRef<Path> + Debug],
     repo_root_path: impl AsRef<Path>,
     ignored_filenames: &[impl AsRef<str> + Debug],
@@ -150,15 +150,14 @@ pub fn walk_src_files(
     // safely borrow &Logger, because the scope guarantees the threads
     // will be joined after the scope ends.
     std::thread::scope(|scope| -> Result<(), anyhow::Error> {
-        let logger_clone = logger.clone();
-        let collector_thread = scope.spawn(move || {
+        let collector_thread = scope.spawn(|| {
             for file in rx {
                 match file {
                     Ok(file) => {
                         all_walked_ref.push(file);
                     }
                     Err(e) => {
-                        logger_clone.log(format!("Error during walk: {:?}", e));
+                        logger.log(format!("Error during walk: {:?}", e));
                     }
                 }
             }

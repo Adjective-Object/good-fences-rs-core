@@ -31,7 +31,7 @@ pub use tag::UsedTagEnum;
 pub use unused_finder::{UnusedFinder, UnusedFinderResult};
 
 pub fn find_unused_items(
-    logger: impl logger::Logger,
+    logger: impl logger::Logger + Sync,
     config: UnusedFinderJSONConfig,
 ) -> Result<UnusedFinderReport, js_err::JsErr> {
     let mut finder = UnusedFinder::new_from_json_config(&logger, config)
