@@ -18,11 +18,9 @@ logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
 swc_atoms = "0.6.7"
 swc_common.workspace = true
 swc_ecma_ast.workspace = true
-swc_ecma_parser.workspace = true
-swc_ecma_transforms.workspace = true
 swc_ecma_visit.workspace = true
-swc_utils_parse = { path = "../swc_utils_parse" }
 thiserror.workspace = true
 
 [dev-dependencies]
+swc_utils_parse = { path = "../swc_utils_parse" }
 pretty_assertions.workspace = true
