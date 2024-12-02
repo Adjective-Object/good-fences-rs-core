@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 19 Nov 2024 23:53:48 GMT and should not be manually modified.
+This log was last generated on Mon, 02 Dec 2024 19:40:25 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.18.2
+
+Mon, 02 Dec 2024 19:40:25 GMT
+
+### Patches
+
+- remove unbuilt linux-arm-gnueabihf package (mhuan13@gmail.com)
 
 ## 0.18.1
 
