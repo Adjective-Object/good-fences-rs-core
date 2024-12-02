@@ -4,7 +4,7 @@ use ahashmap::{AHashMap, AHashSet};
 use logger_srcfile::SrcFileLogger;
 use swc_atoms::Atom;
 use swc_common::{Span, Spanned};
-use swc_ecma_ast::{AssignPat, Module};
+use swc_ecma_ast::AssignPat;
 use swc_ecma_visit::{Visit, VisitWith};
 
 // unique identifier of a variable declaration within a file
@@ -48,11 +48,8 @@ pub struct VariableScope {
     /// Variables declared within the current scope, sorted by name
     local_symbols: AHashMap<swc_atoms::Atom, (HoistingLevel, VarID)>,
 
-    // Names in this scope that are "hoisted"
-    // This is type 1/3 hoisting from here, where a name is considered pre-declared for
-    // the entire scope, even if it is declared later in the source.
-    //
-    // https://developer.mozilla.org/en-US/docs/Glossary/Hoisting
+    // Names in this scope that escape, e.g. they are used in this scope,
+    // but are not declared in this scope.
     escaped_symbols: AHashSet<swc_atoms::Atom>,
 }
 
@@ -142,7 +139,7 @@ impl Default for VariableScope {
 }
 
 /// Visitor that builds a VariableScope from a source file.
-struct VariableScopeVisitor<'a, TLogger: SrcFileLogger> {
+pub struct VariableScopeVisitor<'a, TLogger: SrcFileLogger> {
     logger: &'a TLogger,
     node: &'a mut VariableScope,
 }
@@ -336,15 +333,17 @@ where
     }
 }
 
-pub fn find_escaping_names<TLogger>(file_logger: TLogger, ast_node: Module) -> VariableScope
+pub fn find_names<TLogger, TNode>(file_logger: &TLogger, ast_node: &TNode) -> VariableScope
 where
     TLogger: SrcFileLogger,
+    TNode: for<'a> VisitWith<VariableScopeVisitor<'a, TLogger>>,
 {
     let mut child_scope = VariableScope::new();
-    let mut child_visitor = VariableScopeVisitor::new(&file_logger, &mut child_scope);
+    let mut child_visitor = VariableScopeVisitor::new(file_logger, &mut child_scope);
     // run the visitor
     ast_node.visit_with(&mut child_visitor);
-    // get the resulting root scope
+
+    // return the scope
     child_scope
 }
 
@@ -359,7 +358,7 @@ mod test {
         let logger = logger::StdioLogger::new();
         let file_logger = logger_srcfile::WrapFileLogger::new(&sourcemap, &logger);
 
-        find_escaping_names(file_logger, parsed_module)
+        find_names(&file_logger, &parsed_module)
     }
 
     #[derive(Default)]
@@ -568,6 +567,30 @@ mod test {
             "#,
             ExpectedScope {
                 local_symbols: vec!["rebound"],
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn export_star_statement() {
+        run_test(
+            r#"
+            export * from 'module';
+            "#,
+            ExpectedScope {
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn export_named_from_doesnt_declare_local() {
+        run_test(
+            r#"
+            export {example} from 'module';
+            "#,
+            ExpectedScope {
                 ..Default::default()
             },
         )
