@@ -2,8 +2,14 @@ use std::sync::Mutex;
 
 use anyhow::anyhow;
 
-pub trait Logger: Send + Sync + Clone {
+pub trait Logger: Clone {
     fn log(&self, message: impl Into<String>);
+    fn warn(&self, message: impl Into<String>) {
+        self.log(format!("WARN: {}", message.into()));
+    }
+    fn error(&self, message: impl Into<String>) {
+        self.log(format!("ERROR: {}", message.into()));
+    }
 }
 
 impl<T: Logger> Logger for &T {
