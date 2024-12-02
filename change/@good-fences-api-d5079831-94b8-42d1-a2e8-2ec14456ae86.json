@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "remove unbuilt linux-arm-gnueabihf package",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}
