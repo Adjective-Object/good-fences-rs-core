@@ -1,0 +1,26 @@
+[package]
+name = "ast-name-tracker"
+version = "0.2.0-beta.1"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+license = "Apache-2.0"
+description = """
+Tracks name references among nodes in an AST
+"""
+edition = "2018"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+ahashmap = { version = "0.2.0", path = "../ahashmap" }
+logger = { version = "0.2.0", path = "../logger" }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
+swc_atoms = "0.6.7"
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+swc_ecma_visit.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+swc_utils_parse = { path = "../swc_utils_parse" }
+pretty_assertions.workspace = true
