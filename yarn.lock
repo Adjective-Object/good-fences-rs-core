@@ -45,12 +45,6 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@good-fences/api-linux-arm-gnueabihf@workspace:npm/linux-arm-gnueabihf":
-  version: 0.0.0-use.local
-  resolution: "@good-fences/api-linux-arm-gnueabihf@workspace:npm/linux-arm-gnueabihf"
-  languageName: unknown
-  linkType: soft
-
 "@good-fences/api-linux-arm64-gnu@workspace:npm/linux-arm64-gnu":
   version: 0.0.0-use.local
   resolution: "@good-fences/api-linux-arm64-gnu@workspace:npm/linux-arm64-gnu"
