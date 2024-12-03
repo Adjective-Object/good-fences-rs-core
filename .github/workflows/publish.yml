@@ -60,8 +60,8 @@ jobs:
           yarn artifacts
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20.x"
+          registry-url: "https://registry.npmjs.org"
       - name: Check changes
         id: check_changes
         run: |
@@ -82,6 +82,8 @@ jobs:
       - name: Publish
         if: ${{ steps.check_changes.outputs.HAS_CHANGES == 'true' }}
         run: |
+          set -exo pipefail
+
           git config user.email "mhuan13@gmail.com"
           git config user.name "$GITHUB_ACTOR"
 
@@ -99,6 +101,9 @@ jobs:
           # Required to do github releasing from napi & prep `optionalDependencies` in package.json
           # for final publish
           yarn prepublishOnly
+
+          # show the content about to be published
+          tree
 
           # Publish all packages 
           yarn npm publish --tag "latest" --access public --tolerate-republish
