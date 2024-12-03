@@ -1,5 +1,5 @@
 [package]
-name = "ast-segment-tracker"
+name = "ast-segmenter"
 version = "0.2.0-beta.1"
 authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
 license = "Apache-2.0"
@@ -23,3 +23,5 @@ swc_ecma_transforms.workspace = true
 swc_ecma_visit.workspace = true
 swc_utils_parse = { path = "../swc_utils_parse" }
 thiserror.workspace = true
+ast-name-tracker = { path = "../ast_name_tracker" }
+roaring = "0.10.7"
