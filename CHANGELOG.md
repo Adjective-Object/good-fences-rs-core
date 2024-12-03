@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Mon, 02 Dec 2024 19:40:25 GMT and should not be manually modified.
+This log was last generated on Tue, 03 Dec 2024 19:39:43 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.18.3
+
+Tue, 03 Dec 2024 19:39:43 GMT
+
+### Patches
+
+- add some debug settings to publish pipeline (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.18.2
 

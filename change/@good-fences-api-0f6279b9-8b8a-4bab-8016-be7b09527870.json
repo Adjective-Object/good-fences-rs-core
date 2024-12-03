@@ -1,7 +1,0 @@
-{
-  "type": "none",
-  "comment": "ast_name_tracker: track external references in ESM snippets",
-  "packageName": "@good-fences/api",
-  "email": "Maxwell.HuangHobbs@microsoft.com",
-  "dependentChangeType": "none"
-}

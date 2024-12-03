@@ -2,6 +2,29 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Tue, 03 Dec 2024 19:39:43 GMT",
+      "version": "0.18.3",
+      "tag": "@good-fences/api_v0.18.3",
+      "comments": {
+        "none": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "599271a0cf2d196dd80a9e5886ae54d59b573bde",
+            "comment": "ast_name_tracker: track external references in ESM snippets"
+          }
+        ],
+        "patch": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "7e2c5ad3af7966cef343f91efed0b90ea20f781a",
+            "comment": "add some debug settings to publish pipeline"
+          }
+        ]
+      }
+    },
+    {
       "date": "Mon, 02 Dec 2024 19:40:25 GMT",
       "version": "0.18.2",
       "tag": "@good-fences/api_v0.18.2",
