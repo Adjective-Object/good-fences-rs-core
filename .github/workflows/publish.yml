@@ -98,15 +98,9 @@ jobs:
           git tag "v$PACKAGE_VERSION"
           git push origin main --tags
 
-          # Required to do github releasing from napi & prep `optionalDependencies` in package.json
-          # for final publish
-          yarn prepublishOnly
-
-          # show the content about to be published
-          tree
-
-          # Publish all packages 
-          yarn npm publish --tag "latest" --access public --tolerate-republish
+          # dependency packages are published via "npm prepublishOnly"
+          # which runs the napi-rs cli under the hood.
+          npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

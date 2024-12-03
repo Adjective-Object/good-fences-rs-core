@@ -6,6 +6,7 @@
   "napi": {
     "name": "@good-fences",
     "triples": {
+      "defaults": false,
       "additional": [
         "aarch64-apple-darwin",
         "aarch64-pc-windows-msvc",
