@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "avoid duplicate publishing in napi prepublish from default platforms",
-  "packageName": "@good-fences/api",
-  "email": "Maxwell.HuangHobbs@microsoft.com",
-  "dependentChangeType": "patch"
-}

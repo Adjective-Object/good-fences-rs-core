@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 03 Dec 2024 19:39:43 GMT and should not be manually modified.
+This log was last generated on Tue, 03 Dec 2024 21:05:49 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.18.4
+
+Tue, 03 Dec 2024 21:05:49 GMT
+
+### Patches
+
+- avoid duplicate publishing in napi prepublish from default platforms (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.18.3
 

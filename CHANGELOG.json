@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Tue, 03 Dec 2024 21:05:49 GMT",
+      "version": "0.18.4",
+      "tag": "@good-fences/api_v0.18.4",
+      "comments": {
+        "patch": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "dbc4ee04f782394eb63675d738b3c6f35b8ccb6f",
+            "comment": "avoid duplicate publishing in napi prepublish from default platforms"
+          }
+        ]
+      }
+    },
+    {
       "date": "Tue, 03 Dec 2024 19:39:43 GMT",
       "version": "0.18.3",
       "tag": "@good-fences/api_v0.18.3",
