@@ -19,184 +19,139 @@ pub mod visitor;
 //     segment_type: ParsedSegment,
 // }
 
-// // Parsed information about a segment, depending on how the segment
-// // has been classified
-// enum ParsedSegment {
-//     /// This segment is a single import/export statement
-//     ///
-//     /// Note: to keep this cleanly disjoint from NormalSegment,
-//     /// `export const ...` should be expanded into separate
-//     /// virtual segments for the declaration and the export.
-//     ImportExportStatment(StaticImportType),
-//     /// This segment is the declaration of a single lazy module
-//     LazyModuleDecl(LazyModule),
-//     /// This segment is the declaration of a LazyComponent or LazyFunction,
-//     /// extracting a module from a lazy module
-//     LazyModuleReference(LazyModuleReference),
-//     /// "normal" code is all code which is not a specially recognized segment
-//     /// type
-//     ///
-//     /// e.g. function declarztions, side-effects, the initializing
-//     /// expressions of variables, etc.
-//     NormalSegment(NormalSegment),
-// }
+// Parsed information about a segment, depending on how the segment
+// has been classified
+enum SegmentKind {
+    /// This segment is a single import/export statement
+    ///
+    /// Note: to keep this cleanly disjoint from NormalSegment,
+    /// `export const ...` should be expanded into separate
+    /// virtual segments for the declaration and the export.
+    ImportExportStatment(StaticImportType),
+    /// This segment is the declaration of a single lazy module
+    LazyModuleDecl(LazyModule),
+    /// This segment is the declaration of a LazyComponent or LazyFunction,
+    /// extracting a module from a lazy module
+    LazyModuleReference(LazyModuleReference),
+    /// "normal" code is all code which is not a specially recognized segment
+    /// type
+    ///
+    /// e.g. function declarztions, side-effects, the initializing
+    /// expressions of variables, etc.
+    NormalSegment(NormalSegment),
+}
 
-// enum ImportKind {
-//     ImportStatement,
-//     ImportExpr,
-//     RequireExpr,
-// }
+enum ImportKind {
+    ImportStatement,
+    ImportExpr,
+    RequireExpr,
+}
 
-// impl ParsedSegment {
-//     // checks if this segment has effects
-//     fn has_own_effects(&self) -> bool {
-//         match self {
-//             ParsedSegment::NormalSegment(NormalSegment { has_own_effects, .. }) => *has_own_effects,
-//             _ => false,
-//         }
-//     }
+// A segment that contains "normal" code
+// e.g. any non-specially recognized code
+struct NormalSegment {
+    has_own_effects: bool,
+    imports: NormalSegmentImportInfo,
+}
 
-//     // Gets "external" module references from this segment
-//     // e.g. imports, requires, etc.
-//     fn module_references(&self) -> impl Iter<(ImportKind, String)> {
-//         match self {
-//             ParsedSegment::ImportExportStatment(static_import_export) => match segment {
-//                 StaticImportType::EffectOnly(path) => {
-//                     [(ImportKind::ImportStatement, path.as_str())].iter()
-//                 }
-//                 StaticImportType::
-//             },
-//             ParsedSegment::NormalSegment(NormalSegment { imports, .. }) => {
-//                 imports
-//                     .lazy_imports
-//                     .iter()
-//                     .map(|import| (ImportKind::ImportExpr, import.module_specifier.as_str()))
-//                     .chain(imports.requires.iter().map(|require| {
-//                         (ImportKind::RequireExpr, require.module_specifier.as_str())
-//                     }))
-//             }
-//             _ => [].iter(),
-//         }
-//     }
-//     // gets any "exported" symbols from this segment,
-//     // e.g. names exposed from the module that this segment originates from
-//     //
-//     // This will only be true for export segments
-//     fn exported_symbols(&self) -> impl Iter<&str> {
-//         match self {
-//             ParsedSegment::ImportExportStatment(StaticImportType::ExportSymbols(symbols)) => {
-//                 symbols.iter().map(|sym| sym.local_name.as_str())
-//             },
-//             _ => [].iter(),
-//         }
-//     }
-// }
+// The target of an export, either a symbol or a namespace
+pub enum ExportTarget {
+    // An individual symbol that is exported
+    Symbol(ExportedSymbol),
+    // A namespace export
+    Namespace,
+    // an effect-only import of another file
+    // in case of `import './foo';` this executes code in file but imports no symbols
+    EffectOnly,
+}
 
-// // A segment that contains "normal" code
-// // e.g. any non-specially recognized code
-// struct NormalSegment {
-//     has_own_effects: bool,
-//     imports: NormalSegmentImportInfo,
-// }
+// A named or default symbol that is exported from or imported into a file
+pub enum ExportedSymbol {
+    // The name of the symbol in the exporting file
+    Named(String),
+    // The default export
+    Default,
+}
 
-// // The target of an export, either a symbol or a namespace
-// pub enum ExportTarget {
-//     // An individual symbol that is exported
-//     Symbol(ExportedSymbol),
-//     // A namespace export
-//     Namespace,
-//     // an effect-only import of another file
-//     // in case of `import './foo';` this executes code in file but imports no symbols
-//     EffectOnly,
-// }
+/// Represents a local symbol that is being exported to another file
+pub struct ExportLocal {
+    local_name: String,
+    exported_as: ExportTarget,
+}
 
-// // A named or default symbol that is exported from or imported into a file
-// pub enum ExportedSymbol {
-//     // The name of the symbol in the exporting file
-//     Named(String),
-//     // The default export
-//     Default,
-// }
+/// Represents a local symbol that is being imported from another file
+pub struct ImportedLocal {
+    local_name: String,
+    imported_as: ExportTarget,
+}
 
-// /// Represents a local symbol that is being exported to another file
-// pub struct ExportLocal {
-//     local_name: String,
-//     exported_as: ExportTarget,
-// }
+pub struct ReExportedSymbol {
+    imported_as: ExportedSymbol,
+    exported_as: ExportedSymbol,
+}
 
-// /// Represents a local symbol that is being imported from another file
-// pub struct ImportedLocal {
-//     local_name: String,
-//     imported_as: ExportTarget,
-// }
+/// This represents the imports and exports of a segment from "normal" code
+/// e.g. function declarztions, side-effects, the initializing
+/// expressions of variables, etc.
+///
+/// Because all static imports are covered by the other variants of the
+/// SegmentType enum, this should only ever contain dynamic dynamic imports
+/// to other files
+struct NormalSegmentImportInfo {
+    /// Import expressions within the segment
+    lazy_imports: Vec<ModuleImport>,
 
-// pub struct ReExportedSymbol {
-//     imported_as: ExportedSymbol,
-//     exported_as: ExportedSymbol,
-// }
+    /// Require expressions referenced anywhere within the segment
+    requires: Vec<ModuleImport>,
+}
 
-// /// This represents the imports and exports of a segment from "normal" code
-// /// e.g. function declarztions, side-effects, the initializing
-// /// expressions of variables, etc.
-// ///
-// /// Because all static imports are covered by the other variants of the
-// /// SegmentType enum, this should only ever contain dynamic dynamic imports
-// /// to other files
-// struct NormalSegmentImportInfo {
-//     /// Import expressions within the segment
-//     lazy_imports: Vec<ModuleImport>,
+struct LazyModule {
+    /// The local name of the lazy module
+    local_name: String,
+    /// The import specifier for the module
+    import: String,
+}
 
-//     /// Require expressions referenced anywhere within the segment
-//     requires: Vec<ModuleImport>,
-// }
+struct LazyModuleReference {
+    /// The local name of the lazy module
+    local_name: String,
+    /// The member of the lazy module that is being extracted
+    lazy_module_member: String,
+}
 
-// struct LazyModule {
-//     /// The local name of the lazy module
-//     local_name: String,
-//     /// The import specifier for the module
-//     import: String,
-// }
+/// Enum representing how an individual segment imports/exports symbols
+/// form another module
+enum StaticImportType {
+    // If this is an exporting segment, this is the list of names
+    // that the segment exports
+    ExportSymbols(Vec<ExportLocal>),
 
-// struct LazyModuleReference {
-//     /// The local name of the lazy module
-//     local_name: String,
-//     /// The member of the lazy module that is being extracted
-//     lazy_module_member: String,
-// }
+    // If this is an importing segment, this is the list of names
+    // that the segment imports
+    ImportSymbols(String, Vec<ImportedLocal>),
 
-// /// Enum representing how an individual segment imports/exports symbols
-// /// form another module
-// enum StaticImportType {
-//     // If this is an exporting segment, this is the list of names
-//     // that the segment exports
-//     ExportSymbols(Vec<ExportLocal>),
+    // If this is an export from statement, this is the list of names
+    // that the segment exports from another file
+    ReExportSymbols(String, ReExportedSymbol),
 
-//     // If this is an importing segment, this is the list of names
-//     // that the segment imports
-//     ImportSymbols(String, Vec<ImportedLocal>),
+    // If this is an import statment, this is the path of the file that
+    // is imported
+    EffectOnly(String),
+}
 
-//     // If this is an export from statement, this is the list of names
-//     // that the segment exports from another file
-//     ReExportSymbols(String, ReExportedSymbol),
-
-//     // If this is an import statment, this is the path of the file that
-//     // is imported
-//     EffectOnly(String),
-// }
-
-// /// Enum representing how an individual segment imports/exports symbols
-// /// form another module
-// struct ModuleImport {
-//     /// The specifie for the module that is being imported
-//     /// e.g. './helpers' or 'lodash-es'
-//     module_specifier: String,
-//     /// The names that are being imported from the module
-//     ///
-//     /// This is nonstandard for module-style imports like
-//     /// import('foo') or require('foo'), and is only
-//     /// supported by the import statemnt
-//     extracted_names: Option<Vec<String>>,
-// }
+/// Enum representing how an individual segment imports/exports symbols
+/// form another module
+struct ModuleImport {
+    /// The specifie for the module that is being imported
+    /// e.g. './helpers' or 'lodash-es'
+    module_specifier: String,
+    /// The names that are being imported from the module
+    ///
+    /// This is nonstandard for module-style imports like
+    /// import('foo') or require('foo'), and is only
+    /// supported by the import statemnt
+    extracted_names: Option<Vec<String>>,
+}
 
 // /// A module, after segmentation.
 // ///
