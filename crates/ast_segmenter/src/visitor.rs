@@ -1,7 +1,8 @@
+use ahashmap::{AHashMap, AHashSet};
 use logger_srcfile::SrcFileLogger;
 use swc_common::Spanned;
 
-use crate::Segment;
+use crate::{ExportedSymbol, Segment};
 
 struct Visitor {
     segments: Vec<Segment>,
@@ -110,24 +111,79 @@ impl Dependencies2D {
     }
 }
 
-struct RawModuleSegments {
+struct ModuleSegments {
     // The raw segments from this module (source file)
-    segments: Vec<RawSourceSegment>,
+    segments: Vec<ModuleSegment>,
     // The name-based dependencies between this module's segments
     name_dependencies: Dependencies2D,
     // The effect-based dependencies between this module's segments
     effect_dependencies: Dependencies2D,
 }
 
-struct SourceSegment {
+struct ModuleSegment {
+    // The raw source code of them segment
     ast_node: swc_ecma_ast::ModuleItem,
-    names: Vec<String>,
+    // External names that this segment references, but is not defined within this module
+    // (e.g. runtime globals)
+    escaped_names: Vec<swc_atoms::Atom>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ExportedSymbol {
+    // A named export
+    Named(String),
+    // The default export
+    Default,
+    // A namespace export
+    Namespace,
+    ExecutionOnly, // in case of `import './foo';` this executes code in file but imports nothing
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+pub struct ReExportedSymbol {
+    /// The symbol being re-exported from another module
+    pub imported: ExportedSymbol,
+    /// If the symbol is renamed, this field contains the new name.
+    ///  (e.g. the export { _ as foo } from './foo' generates `renamed_to: Some("foo".to_string())`)
+    pub renamed_to: Option<ExportedSymbol>,
+}
+
+/// Represents the raw import/export information from a file, where import
+/// specifiers are not yet resolved to their final paths.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct RawImportExportInfo {
+    // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
+    pub imported_path_ids: AHashMap<String, AHashSet<ExportedSymbol>>,
+    // require('foo') generates ['foo']
+    pub require_paths: AHashSet<String>,
+    // import('./foo') generates ["./foo"]
+    pub imported_paths: AHashSet<String>,
+    // `export {default as foo, bar} from './foo'` generates { "./foo": ["default", "bar"] }
+    pub export_from_ids: AHashMap<String, AHashMap<ReExportedSymbol, ExportedSymbolMetadata>>,
+    // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
+    pub exported_ids: AHashMap<ExportedSymbol, ExportedSymbolMetadata>,
+    // `import './foo'`
+    pub executed_paths: AHashSet<String>,
+}
+
+/// Enum representing how an individual segment imports/exports symbols
+/// form another module
+struct ModuleImport {
+    /// The specifie for the module that is being imported
+    /// e.g. './helpers' or 'lodash-es'
+    module_specifier: String,
+    /// The names that are being imported from the module
+    ///
+    /// This is nonstandard for module-style imports like
+    /// import('foo') or require('foo'), and is only
+    /// supported by the import statemnt
+    extracted_names: Option<Vec<String>>,
 }
 
 fn segment_module(
     file_logger: &impl SrcFileLogger,
     module: &swc_ecma_ast::Module,
-) -> RawModuleSegments {
+) -> ModuleSegments {
     for module_item in module.body.iter() {
         match module_item {
             swc_ecma_ast::ModuleItem::Stmt(stmt) => {
