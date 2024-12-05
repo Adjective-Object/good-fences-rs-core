@@ -39,6 +39,7 @@ itertools = "0.13.0"
 debug_print = "1.0.0"
 schemars.workspace = true
 logger = { version = "0.2.0", path = "../logger" }
+mutli_err = { version = "0.2.0", path = "../multi_err" }
 
 [dev-dependencies]
 stringreader = "0.1.1"

@@ -71,26 +71,25 @@ impl SourceFiles {
             walk_result
                 .source_files
                 .into_par_iter()
-                .map(
-                    |walked_file| -> anyhow::Result<(PathBuf, ResolvedSourceFile)> {
-                        Ok((
-                            walked_file.source_file_path.clone(),
-                            ResolvedSourceFile {
-                                import_export_info: walked_file
-                                    .import_export_info
-                                    .try_resolve(&walked_file.source_file_path, &resolver)
-                                    .with_context(|| {
-                                        format!(
-                                            "trying to resolve imports for file {}",
-                                            walked_file.source_file_path.display()
-                                        )
-                                    })?,
-                                owning_package: walked_file.owning_package,
-                                source_file_path: walked_file.source_file_path,
-                            },
-                        ))
-                    },
-                )
+                .map(|walked_file| -> Result<(PathBuf, ResolvedSourceFile)> {
+                    Ok((
+                        walked_file.source_file_path.clone(),
+                        ResolvedSourceFile {
+                            import_export_info: walked_file
+                                .import_export_info
+                                .try_resolve(&walked_file.source_file_path, &resolver)
+                                .into_anyhow()
+                                .with_context(|| {
+                                    format!(
+                                        "trying to resolve imports for file {}",
+                                        walked_file.source_file_path.display()
+                                    )
+                                })?,
+                            owning_package: walked_file.owning_package,
+                            source_file_path: walked_file.source_file_path,
+                        },
+                    ))
+                })
                 .partition_map::<AHashMap<PathBuf, ResolvedSourceFile>, _, _, _, _>(|r| match r {
                     Ok(x) => Either::Left(x),
                     Err(e) => Either::Right(e),
@@ -290,6 +289,7 @@ impl UnusedFinder {
             source_file_path: file_path.to_path_buf(),
             import_export_info: import_export_info
                 .try_resolve(file_path, resolver)
+                .into_anyhow()
                 .map_err(JsErr::generic_failure)?,
         };
 
