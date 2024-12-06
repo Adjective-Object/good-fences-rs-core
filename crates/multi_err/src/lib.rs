@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::Display;
 
 pub struct MultiErr<TErr> {
     errs: Vec<TErr>,
@@ -68,21 +68,25 @@ impl<T> From<MultiErr<T>> for Vec<T> {
         other.errs
     }
 }
-impl<T: Debug> MultiErr<T> {
+impl<T: Display> MultiErr<T> {
     fn into_anyhow(self) -> anyhow::Error {
+        if self.errs.len() == 1 {
+            return anyhow::anyhow!("{:#}", self.errs[0]);
+        }
+
         anyhow::anyhow!(
-            "{} errors: {}",
+            "{} errors:\n  {}",
             self.errs.len(),
             self.errs
                 .iter()
                 .enumerate()
-                .map(|(i, e)| format!("{}: {:?}", i, e))
+                .map(|(i, e)| format!("{}: {:#}", i + 1, e))
                 .collect::<Vec<String>>()
-                .join(", ")
+                .join("\n  ")
         )
     }
 }
-impl<T: Debug> From<MultiErr<T>> for anyhow::Error {
+impl<T: Display> From<MultiErr<T>> for anyhow::Error {
     fn from(other: MultiErr<T>) -> Self {
         other.into_anyhow()
     }
@@ -98,7 +102,7 @@ impl<TRes, TErr> MultiResult<TRes, TErr> {
     }
 }
 
-impl<TRes, TErr: Debug> MultiResult<TRes, TErr> {
+impl<TRes, TErr: Display> MultiResult<TRes, TErr> {
     // converts this mutli error into a result
     pub fn into_anyhow(self) -> Result<TRes, anyhow::Error> {
         if self.1.errs.is_empty() {
@@ -113,5 +117,56 @@ impl<TRes, TErr> From<MultiResult<TRes, TErr>> for Result<TRes, MultiErr<TErr>> 
     fn from(multi_result: MultiResult<TRes, TErr>) -> Self {
         let (val, multi_errs) = (multi_result.0, multi_result.1);
         multi_errs.into_result().map(|_| val)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use anyhow::anyhow;
+    use pretty_assertions::assert_eq;
+
+    use crate::MultiErr;
+
+    #[test]
+    fn test_into_anyhow_display_single() {
+        let mut multi_err = MultiErr::new();
+        let e = anyhow!("this is the error").context("this is the context");
+        multi_err.add_single(e);
+
+        let as_str = format!("{:#}", multi_err.into_anyhow());
+        assert_eq!(as_str, "this is the context: this is the error");
+    }
+
+    #[test]
+    fn test_into_anyhow_display_multi() {
+        let mut multi_err = MultiErr::new();
+        multi_err.add_single(anyhow!("this is the first error").context("this is the context"));
+        multi_err.add_single(anyhow!("this is the second error"));
+
+        let as_str = format!("{:#}", multi_err.into_anyhow());
+        assert_eq!(
+            as_str,
+            "2 errors:
+  1: this is the context: this is the first error
+  2: this is the second error"
+        )
+    }
+
+    #[test]
+    fn test_into_anyhow_display_multi_conext_chain() {
+        let mut multi_err = MultiErr::new();
+        multi_err.add_single(anyhow!("this is the first error").context("this is the context"));
+        multi_err.add_single(anyhow!("this is the second error"));
+
+        let as_str = format!(
+            "{:#}",
+            multi_err.into_anyhow().context("this is the outer context")
+        );
+        assert_eq!(
+            as_str,
+            "this is the outer context: 2 errors:
+  1: this is the context: this is the first error
+  2: this is the second error"
+        )
     }
 }

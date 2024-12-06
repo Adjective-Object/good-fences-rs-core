@@ -1132,6 +1132,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "logger",
+ "pretty_assertions",
  "swc_common",
 ]
 

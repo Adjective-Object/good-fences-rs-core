@@ -12,3 +12,6 @@ crate-type = ["lib"]
 anyhow.workspace = true
 logger = { path = "../logger" }
 swc_common.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
