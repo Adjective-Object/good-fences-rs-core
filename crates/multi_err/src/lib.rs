@@ -113,6 +113,13 @@ impl<TRes, TErr: Display> MultiResult<TRes, TErr> {
     }
 }
 
+impl<TRes, TErr, ErrColl: Into<MultiErr<TErr>>> From<(TRes, ErrColl)> for MultiResult<TRes, TErr> {
+    fn from(res_tuple: (TRes, ErrColl)) -> Self {
+        let err = ;
+        MultiResult::with_errs(val, res_tuple.1.into())
+    }
+}
+
 impl<TRes, TErr> From<MultiResult<TRes, TErr>> for Result<TRes, MultiErr<TErr>> {
     fn from(multi_result: MultiResult<TRes, TErr>) -> Self {
         let (val, multi_errs) = (multi_result.0, multi_result.1);

@@ -612,7 +612,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                         .or_else(|_| self.resolve_as_directory(&path, true))
                         .and_then(|p| self.wrap(p).with_context(|| {
                             format!(
-                                "failed to resolve non-absolute target path {}",
+                                "failed to resolve non-absolute target path {} (resolved as {})",
+                                target,
                                 path.display(),
                             )
                         }))
