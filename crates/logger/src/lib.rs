@@ -12,6 +12,18 @@ pub trait Logger: Clone {
     }
 }
 
+#[macro_export]
+#[cfg(debug_assertions)]
+macro_rules! debug_logf {
+    ($logger:expr, $fmt:expr $(, $arg:expr)*) => {
+            $logger.log(format!($fmt $(, $arg)*));
+    };
+}
+#[cfg(not(debug_assertions))]
+macro_rules! debug_logf {
+    ($logger:expr, $fmt:expr $(, $arg:expr)*) => {};
+}
+
 impl<T: Logger> Logger for &T {
     fn log(&self, message: impl Into<String>) {
         (*self).log(message);

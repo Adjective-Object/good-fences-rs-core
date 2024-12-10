@@ -1,5 +1,9 @@
 use core::option::Option::None;
-use std::{collections::HashSet, path::Path, path::PathBuf};
+use std::{
+    collections::HashSet,
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
@@ -10,7 +14,7 @@ use crate::{
     tag::UsedTag,
     walked_file::ResolvedSourceFile,
 };
-use logger::Logger;
+use logger::{debug_logf, Logger};
 
 // graph node used to represent a file during the "used file" walk
 #[derive(Debug, Clone, Default)]
@@ -46,7 +50,10 @@ impl GraphFile {
         // let item = ExportKind::from(item);
         match symbol {
             ExportedSymbol::Default | ExportedSymbol::Named(_) => {
-                tag_named_or_default_symbol(&mut self.symbol_tags, symbol, tag);
+                let tags: UsedTag = self.symbol_tags.get(symbol).copied().unwrap_or_default();
+                if !tags.contains(tag) {
+                    self.symbol_tags.insert(symbol.clone(), tag);
+                }
             }
             ExportedSymbol::Namespace => {
                 // namespace imports will use _all_ named symbols from the imported file
@@ -69,17 +76,6 @@ impl GraphFile {
     }
 }
 
-fn tag_named_or_default_symbol(
-    symbol_tags: &mut AHashMap<ExportedSymbol, UsedTag>,
-    symbol: &ExportedSymbol,
-    tag: UsedTag,
-) {
-    let tags = symbol_tags.get(symbol).copied().unwrap_or_default();
-    if !tags.contains(tag) {
-        symbol_tags.insert(symbol.clone(), tag);
-    }
-}
-
 // A 1-way representation of an edge in the import graph
 #[derive(Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct Edge {
@@ -87,6 +83,12 @@ pub struct Edge {
     pub file_id: usize,
     // The symbol that is imported
     pub symbol: ExportedSymbol,
+}
+
+impl Display for Edge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{:?}", self.file_id, self.symbol)
+    }
 }
 
 impl Edge {
@@ -137,6 +139,38 @@ impl Graph {
         initial_frontier_symbols: Vec<(&Path, Vec<ExportedSymbol>)>,
         tag: UsedTag,
     ) -> Result<()> {
+        debug_logf!(
+            logger,
+            "initial_frontier_files ({}:{}):\n  {}",
+            tag,
+            initial_frontier_files.len(),
+            initial_frontier_files
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+
+        debug_logf!(
+            logger,
+            "initial_frontier_symbols ({}:{}):\n  {}",
+            tag,
+            initial_frontier_symbols.len(),
+            initial_frontier_symbols
+                .iter()
+                .map(|(path, symbols)| (format!(
+                    "{}:{}",
+                    path.display(),
+                    symbols
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+
         let initial_file_edges = initial_frontier_files
             .into_iter()
             .filter_map(|path| match self.path_to_id.get(path) {
@@ -183,6 +217,18 @@ impl Graph {
         let mut frontier = initial_file_edges
             .chain(initial_symbol_edges)
             .collect::<Vec<_>>();
+
+        debug_logf!(
+            logger,
+            "initial frontier ({}:{}): {}",
+            tag,
+            frontier.len(),
+            frontier
+                .iter()
+                .map(|p| format!("{}:{}", self.files[p.file_id].file_path.display(), p.symbol))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
 
         // Traverse the graph until we exhaust the frontier
         const MAX_ITERATIONS: usize = 1_000_000;

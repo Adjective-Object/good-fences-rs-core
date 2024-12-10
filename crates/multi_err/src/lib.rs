@@ -114,9 +114,8 @@ impl<TRes, TErr: Display> MultiResult<TRes, TErr> {
 }
 
 impl<TRes, TErr, ErrColl: Into<MultiErr<TErr>>> From<(TRes, ErrColl)> for MultiResult<TRes, TErr> {
-    fn from(res_tuple: (TRes, ErrColl)) -> Self {
-        let err = ;
-        MultiResult::with_errs(val, res_tuple.1.into())
+    fn from((val, err): (TRes, ErrColl)) -> Self {
+        MultiResult::with_errs(val, err.into())
     }
 }
 
