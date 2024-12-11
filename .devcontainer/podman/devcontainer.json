@@ -63,6 +63,17 @@
         // these labels are required in order to allow the container user
         // to access the various container mounts.
         "--userns=keep-id",
-        "--security-opt=label=disable"
+        "--security-opt=label=disable",
+        // This is a workaround to allow using the container when
+        // offline.
+        //
+        // Note that this actually degrades network peformance for the container,
+        // so it should be removed once the fix for pasta/podman is eventually
+        // implemented.
+        // See: https://github.com/containers/podman/issues/23566
+        //
+        // Note that this requires the host system to have slirp4netns installed
+        // on fedora you can do this via `dnf install slirp4netns`
+        "--network=slirp4netns"
     ]
 }
