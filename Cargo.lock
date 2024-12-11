@@ -1127,6 +1127,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mutli_err"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "napi"
 version = "2.16.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
