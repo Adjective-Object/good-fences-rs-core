@@ -1,7 +1,0 @@
-{
-  "type": "none",
-  "comment": "multi_err: new crate for combining errors",
-  "packageName": "@good-fences/api",
-  "email": "mhuan13@gmail.com",
-  "dependentChangeType": "none"
-}
