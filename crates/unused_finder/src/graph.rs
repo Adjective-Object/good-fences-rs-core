@@ -57,11 +57,11 @@ impl GraphFile {
                 for (reexported_from, symbol) in self.import_export_info.iter_exported_symbols() {
                     match (reexported_from, symbol) {
                         (_, ExportedSymbol::Default | ExportedSymbol::Named(_)) => {
-                            // mark as used
-                            tag_named_or_default_symbol(&mut self.symbol_tags, symbol, tag);
+                            let old_tag = self.symbol_tags.entry(symbol.clone()).or_default();
+                            *old_tag = old_tag.union(tag);
                         }
                         _ => {
-                            // TODO: somehow handle re-exports of namespaces
+                            // TODO: somehow handle re-exports of namespaces?
                         }
                     }
                 }

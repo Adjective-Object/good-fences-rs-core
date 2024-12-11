@@ -2769,6 +2769,7 @@ dependencies = [
  "itertools 0.13.0",
  "js_err",
  "logger",
+ "multi_err",
  "packagejson",
  "packagejson_exports",
  "path-clean",
