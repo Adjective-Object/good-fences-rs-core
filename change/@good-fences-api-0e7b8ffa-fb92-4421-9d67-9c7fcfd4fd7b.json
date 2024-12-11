@@ -1,0 +1,7 @@
+{
+  "type": "none",
+  "comment": ".vscode: add missing rust-analyzer extension",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "none"
+}
