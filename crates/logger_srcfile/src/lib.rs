@@ -1,23 +1,19 @@
+use std::fmt::Display;
+
 use logger::Logger;
 use swc_common::{Loc, SourceMap, Span};
 
 pub trait SrcLogger: Logger {
-    fn src_warn(&self, loc: &Loc, message: impl Into<String>) {
+    fn src_warn(&self, loc: &Loc, message: impl Display) {
         self.warn(format!(
             "{}:{}:{} :: {}",
-            loc.file.name,
-            loc.line,
-            loc.col_display,
-            message.into()
+            loc.file.name, loc.line, loc.col_display, message,
         ));
     }
-    fn src_error(&self, loc: &Loc, message: impl Into<String>) {
+    fn src_error(&self, loc: &Loc, message: impl Display) {
         self.error(format!(
             "{}:{}:{} :: {}",
-            loc.file.name,
-            loc.line,
-            loc.col_display,
-            message.into()
+            loc.file.name, loc.line, loc.col_display, message,
         ));
     }
 }
@@ -27,24 +23,18 @@ pub trait HasSourceMap {
 }
 
 pub trait SrcFileLogger: Logger + HasSourceMap {
-    fn src_warn(&self, location: &Span, message: impl Into<String>) {
+    fn src_warn(&self, location: &Span, message: impl Display) {
         let loc = self.source_map().lookup_char_pos(location.lo);
         self.warn(format!(
             "{}:{}:{} :: {}",
-            loc.file.name,
-            loc.line,
-            loc.col_display,
-            message.into()
+            loc.file.name, loc.line, loc.col_display, message,
         ));
     }
-    fn src_error(&self, location: &Span, message: impl Into<String>) {
+    fn src_error(&self, location: &Span, message: impl Display) {
         let loc = self.source_map().lookup_char_pos(location.lo);
         self.error(format!(
             "{}:{}:{} :: {}",
-            loc.file.name,
-            loc.line,
-            loc.col_display,
-            message.into()
+            loc.file.name, loc.line, loc.col_display, message,
         ));
     }
 }
@@ -63,13 +53,13 @@ impl<'a, TLogger: Logger> WrapFileLogger<'a, TLogger> {
     }
 }
 impl<TLogger: Logger> Logger for WrapFileLogger<'_, TLogger> {
-    fn log(&self, message: impl Into<String>) {
+    fn log(&self, message: impl Display) {
         self.inner_logger.log(message);
     }
-    fn error(&self, message: impl Into<String>) {
+    fn error(&self, message: impl Display) {
         self.inner_logger.error(message);
     }
-    fn warn(&self, message: impl Into<String>) {
+    fn warn(&self, message: impl Display) {
         self.inner_logger.warn(message);
     }
 }

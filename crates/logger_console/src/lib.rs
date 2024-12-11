@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use napi::{
     threadsafe_function::{
@@ -33,8 +33,8 @@ impl ConsoleLogger {
 }
 
 impl Logger for ConsoleLogger {
-    fn log(&self, message: impl Into<String>) {
-        let message_string: String = message.into();
+    fn log(&self, message: impl Display) {
+        let message_string: String = format!("{}", message);
         let status = self
             .logfn
             .call(Ok(message_string), ThreadsafeFunctionCallMode::Blocking);

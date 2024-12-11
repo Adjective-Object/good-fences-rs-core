@@ -5,7 +5,6 @@ use core::{
 use std::fmt::Display;
 
 use ahashmap::AHashMap;
-use debug_print::debug_println;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use swc_common::source_map::SmallPos;
@@ -194,13 +193,6 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                 let default: UsedTag = Default::default();
                 let symbol_bitflags: &UsedTag =
                     file.symbol_tags.get(symbol_name).unwrap_or(&default);
-                debug_println!(
-                    "visit symbol {}:{}  ({})",
-                    file.file_path.display(),
-                    symbol_name,
-                    symbol_bitflags
-                );
-
                 if !include_extra(symbol_bitflags) {
                     // don't return symbols that are used or symbols that are truly unused
                     return None;
