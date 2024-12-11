@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "unused_finder: ensure tagging passes don't overwrite each other",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}

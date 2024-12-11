@@ -73,15 +73,14 @@ impl GraphFile {
     }
 }
 
+// tags an individual named or default tag on this symbol's symbol map
 fn tag_named_or_default_symbol(
     symbol_tags: &mut AHashMap<ExportedSymbol, UsedTag>,
     symbol: &ExportedSymbol,
     tag: UsedTag,
 ) {
-    let tags = symbol_tags.get(symbol).copied().unwrap_or_default();
-    if !tags.contains(tag) {
-        symbol_tags.insert(symbol.clone(), tag);
-    }
+    let old_tag = symbol_tags.entry(symbol.clone()).or_default();
+    *old_tag = old_tag.union(tag);
 }
 
 // A 1-way representation of an edge in the import graph
@@ -138,6 +137,12 @@ impl Graph {
 
         let file = &mut self.files[file_id];
         file.tag_symbol(symbol, tag);
+    }
+
+    pub fn get_symbol_tags(&self, path: &Path, symbol: &ExportedSymbol) -> Option<&UsedTag> {
+        let file_id = self.path_to_id.get(path)?;
+        let file = &self.files[*file_id];
+        file.symbol_tags.get(symbol).clone()
     }
 
     pub fn traverse_bfs(
@@ -325,5 +330,41 @@ impl Graph {
             .collect::<HashSet<_>>();
 
         next_frontier_symbols.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use test_tmpdir::amap2;
+
+    use super::*;
+    #[test]
+    fn test_tag_union() {
+        let path = PathBuf::from("/test/a.ts");
+        let a_sym = ExportedSymbol::Named("a".to_string());
+
+        let src_files = vec![ResolvedSourceFile {
+            owning_package: None,
+            source_file_path: path.clone(),
+            import_export_info: ResolvedImportExportInfo {
+                exported_ids: amap2![
+                    a_sym.clone() => Default::default()
+                ],
+                ..Default::default()
+            },
+        }];
+
+        let mut graph = Graph::from_source_files(src_files.iter());
+        graph.mark_symbol(&path, &a_sym, UsedTag::FROM_ENTRY);
+        graph.mark_symbol(&path, &a_sym, UsedTag::FROM_IGNORED);
+
+        // check the value is the union
+        let tags = graph.get_symbol_tags(&path, &a_sym);
+        assert_eq!(
+            tags.unwrap().clone(),
+            UsedTag::empty()
+                .union(UsedTag::FROM_ENTRY)
+                .union(UsedTag::FROM_IGNORED)
+        )
     }
 }
