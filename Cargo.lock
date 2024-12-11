@@ -159,6 +159,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ast-segmenter"
+version = "0.2.0-beta.1"
+dependencies = [
+ "ahashmap",
+ "ast-name-tracker",
+ "logger",
+ "logger_srcfile",
+ "roaring",
+ "swc_atoms",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_ecma_parser",
+ "swc_ecma_transforms",
+ "swc_ecma_visit",
+ "swc_utils_parse",
+ "thiserror",
+]
+
+[[package]]
 name = "ast_node"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,6 +288,18 @@ checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 dependencies = [
  "allocator-api2",
 ]
+
+[[package]]
+name = "bytemuck"
+version = "1.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b37c88a63ffd85d15b406896cc343916d7cf57838a847b3a6f2ca5d39a5695a"
+
+[[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
@@ -1710,6 +1741,16 @@ dependencies = [
  "schemars",
  "serde_json",
  "unused_finder",
+]
+
+[[package]]
+name = "roaring"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81dc953b2244ddd5e7860cb0bb2a790494b898ef321d4aff8e260efab60cc88"
+dependencies = [
+ "bytemuck",
+ "byteorder",
 ]
 
 [[package]]
