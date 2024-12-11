@@ -1,23 +1,55 @@
+use std::fmt::Display;
+
 use ahashmap::{AHashMap, AHashSet};
 use logger_srcfile::SrcFileLogger;
 use swc_atoms::Atom;
 use swc_common::{Span, Spanned};
-use swc_ecma_ast::{AssignPat, Module};
+use swc_ecma_ast::AssignPat;
 use swc_ecma_visit::{Visit, VisitWith};
 
 // unique identifier of a variable declaration within a file
 #[derive(Clone, Copy)]
 pub struct VarID(pub Span);
 
+// Hoisting level that a symbol is declared at.
+// See: https://developer.mozilla.org/en-US/docs/Glossary/Hoisting
+//
+// TODO: differentiate var hoisting here. We treat `var` hoisting as identically to
+// `let/const` hoisting.
+#[derive(Clone, Copy, Debug)]
+pub enum HoistingLevel {
+    // The value and its effects are usable in scope before it is declared.
+    // This is only true for `import` declarations
+    //
+    // This is type 1+4 hoisting from the MDN article linked above.
+    ImportHoisting,
+    // The value and its effects can be hoisted to the top of the scope.
+    // without any side effects.
+    //
+    // This is only true for `function` declarations (note: not function expressions)
+    // This is type 1 hoisting from the MDN article linked above.
+    FunctionHoisting,
+    // Neither the value nor the effects are hoisted, but the name declaration is hoisted
+    // to the top of its declared scope.
+    LetConstHoisting,
+}
+
+impl Display for HoistingLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HoistingLevel::ImportHoisting => write!(f, "hoist:import"),
+            HoistingLevel::FunctionHoisting => write!(f, "hoist:function"),
+            HoistingLevel::LetConstHoisting => write!(f, "hoist:let/const"),
+        }
+    }
+}
+
 pub struct VariableScope {
     /// Variables declared within the current scope, sorted by name
-    local_symbols: AHashMap<swc_atoms::Atom, VarID>,
+    local_symbols: AHashMap<swc_atoms::Atom, (HoistingLevel, VarID)>,
 
-    // Names in this scope that are "hoisted"
-    // This is type 1/3 hoisting from here, where a name is considered pre-declared for
-    // the entire scope, even if it is declared later in the source.
-    //
-    // https://developer.mozilla.org/en-US/docs/Glossary/Hoisting
+    // Names in this scope that escape, e.g. they are used in this scope,
+    // but are not declared in this scope.
     escaped_symbols: AHashSet<swc_atoms::Atom>,
 }
 
@@ -35,14 +67,18 @@ impl VariableScope {
         }
     }
 
-    fn declare_local(&mut self, ident: &swc_ecma_ast::Ident) -> Result<(), VariableScopeError> {
+    fn declare_local(
+        &mut self,
+        ident: &swc_ecma_ast::Ident,
+        hoisting_level: HoistingLevel,
+    ) -> Result<(), VariableScopeError> {
         match self.local_symbols.entry(ident.sym.clone()) {
             ahashmap::hash_map::Entry::Occupied(_) => {
                 // Should you warn here about a name collision within the scope?
                 Err(VariableScopeError::DuplicateDeclaration(ident.sym.clone()))
             }
             ahashmap::hash_map::Entry::Vacant(entry) => {
-                entry.insert(VarID(ident.span));
+                entry.insert((hoisting_level, VarID(ident.span)));
                 // println!(
                 //     "unregister removed_symbol? {} -> {}",
                 //     ident.sym,
@@ -99,7 +135,7 @@ impl Default for VariableScope {
 }
 
 /// Visitor that builds a VariableScope from a source file.
-struct VariableScopeVisitor<'a, TLogger: SrcFileLogger> {
+pub struct VariableScopeVisitor<'a, TLogger: SrcFileLogger> {
     logger: &'a TLogger,
     node: &'a mut VariableScope,
 }
@@ -121,7 +157,7 @@ where
     fn visit_binding_pattern(&mut self, pattern: &swc_ecma_ast::Pat) {
         match pattern {
             swc_ecma_ast::Pat::Ident(ident) => {
-                self.declare_local(ident);
+                self.declare_local(ident, HoistingLevel::LetConstHoisting);
             }
             swc_ecma_ast::Pat::Array(array_pat) => {
                 // This .iter().flatten() iterates only over the Some() elements.
@@ -139,7 +175,7 @@ where
                         swc_ecma_ast::ObjectPatProp::Assign(assign_prop) => {
                             // little used "destructure with default" syntax:
                             // let { a = defaultValue } = destructured_object;
-                            self.declare_local(&assign_prop.key.id)
+                            self.declare_local(&assign_prop.key.id, HoistingLevel::LetConstHoisting)
                         }
                         swc_ecma_ast::ObjectPatProp::Rest(rest) => {
                             self.visit_binding_pattern(&rest.arg);
@@ -168,8 +204,8 @@ where
         }
     }
 
-    fn declare_local(&mut self, ident: &swc_ecma_ast::Ident) {
-        if let Err(e) = self.node.declare_local(ident) {
+    fn declare_local(&mut self, ident: &swc_ecma_ast::Ident, hoisting_level: HoistingLevel) {
+        if let Err(e) = self.node.declare_local(ident, hoisting_level) {
             self.logger.src_error(&ident.span, format!("{}", e));
         }
     }
@@ -221,7 +257,7 @@ where
                 }
                 swc_ecma_ast::ParamOrTsParamProp::TsParamProp(m) => match &m.param {
                     swc_ecma_ast::TsParamPropParam::Ident(ident) => {
-                        child_visitor.declare_local(ident);
+                        child_visitor.declare_local(ident, HoistingLevel::LetConstHoisting);
                     }
                     swc_ecma_ast::TsParamPropParam::Assign(assign) => {
                         // the right side of the pattern is already visited in the above loop
@@ -237,7 +273,7 @@ where
     }
 
     fn visit_fn_decl(&mut self, node: &swc_ecma_ast::FnDecl) {
-        self.declare_local(&node.ident);
+        self.declare_local(&node.ident, HoistingLevel::FunctionHoisting);
         // Create a new scope for the child
         let mut child_scope = VariableScope::new();
         let mut child_visitor = VariableScopeVisitor::new(self.logger, &mut child_scope);
@@ -280,28 +316,30 @@ where
         for spec in &node.specifiers {
             match spec {
                 swc_ecma_ast::ImportSpecifier::Named(named_spec) => {
-                    self.declare_local(&named_spec.local);
+                    self.declare_local(&named_spec.local, HoistingLevel::ImportHoisting);
                 }
                 swc_ecma_ast::ImportSpecifier::Default(default_spec) => {
-                    self.declare_local(&default_spec.local);
+                    self.declare_local(&default_spec.local, HoistingLevel::ImportHoisting);
                 }
                 swc_ecma_ast::ImportSpecifier::Namespace(namespace_spec) => {
-                    self.declare_local(&namespace_spec.local);
+                    self.declare_local(&namespace_spec.local, HoistingLevel::ImportHoisting);
                 }
             }
         }
     }
 }
 
-pub fn find_escaping_names<TLogger>(file_logger: TLogger, ast_node: Module) -> VariableScope
+pub fn find_names<TLogger, TNode>(file_logger: &TLogger, ast_node: &TNode) -> VariableScope
 where
     TLogger: SrcFileLogger,
+    TNode: for<'a> VisitWith<VariableScopeVisitor<'a, TLogger>>,
 {
     let mut child_scope = VariableScope::new();
-    let mut child_visitor = VariableScopeVisitor::new(&file_logger, &mut child_scope);
+    let mut child_visitor = VariableScopeVisitor::new(file_logger, &mut child_scope);
     // run the visitor
     ast_node.visit_with(&mut child_visitor);
-    // get the resulting root scope
+
+    // return the scope
     child_scope
 }
 
@@ -316,7 +354,7 @@ mod test {
         let logger = logger::StdioLogger::new();
         let file_logger = logger_srcfile::WrapFileLogger::new(&sourcemap, &logger);
 
-        find_escaping_names(file_logger, parsed_module)
+        find_names(&file_logger, &parsed_module)
     }
 
     #[derive(Default)]
@@ -525,6 +563,30 @@ mod test {
             "#,
             ExpectedScope {
                 local_symbols: vec!["rebound"],
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn export_star_statement() {
+        run_test(
+            r#"
+            export * from 'module';
+            "#,
+            ExpectedScope {
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn export_named_from_doesnt_declare_local() {
+        run_test(
+            r#"
+            export {example} from 'module';
+            "#,
+            ExpectedScope {
                 ..Default::default()
             },
         )
