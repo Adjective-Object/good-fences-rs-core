@@ -1,0 +1,7 @@
+{
+  "type": "minor",
+  "comment": "logger: add debug_logf macro for debug logger",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}
