@@ -3,6 +3,7 @@
     "build.dockerfile": "../default/container/Dockerfile",
     "runArgs": [
         "--userns=keep-id",
-        "--security-opt=label=disable"
+        "--security-opt=label=disable",
+        "--network=slirp4netns"
     ]
 }
