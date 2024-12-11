@@ -1,0 +1,7 @@
+{
+  "type": "none",
+  "comment": "js_err: allow Into<Error> instead of just Error",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "none"
+}

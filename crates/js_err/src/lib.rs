@@ -80,151 +80,92 @@ pub struct JsErr {
 
 impl JsErr {
     pub fn new(status: Status, err: Error) -> Self {
-        Self { status, err }
-    }
-    pub fn ok(err: Error) -> Self {
-        Self {
-            status: Status::Ok,
-            err,
+        if err.is::<JsErr>() {
+            // unwrap is safe because we know the error is a JsErr
+            //
+            // We do this as a weird hoop jump with if { cast } instead of
+            // if let Ok(downcasted) = .. because .downcast takes ownership
+            // of the error, but we need it in the `else` branch.
+            let js_err = err.downcast::<JsErr>().unwrap();
+            Self {
+                status: js_err.status,
+                err: js_err.err,
+            }
+        } else {
+            Self { status, err }
         }
     }
-    pub fn invalid_arg<P: Into<Error>>(err: P) -> Self {
-        Self {
-            status: Status::InvalidArg,
-            err: err.into(),
-        }
+    pub fn ok(err: impl Into<Error>) -> Self {
+        Self::new(Status::Ok, err.into())
     }
-    pub fn object_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::ObjectExpected,
-            err: err.into(),
-        }
+    pub fn invalid_arg(err: impl Into<Error>) -> Self {
+        Self::new(Status::InvalidArg, err.into())
     }
-    pub fn string_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::StringExpected,
-            err: err.into(),
-        }
+    pub fn object_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::ObjectExpected, err.into())
     }
-    pub fn name_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::NameExpected,
-            err: err.into(),
-        }
+    pub fn string_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::StringExpected, err.into())
     }
-    pub fn function_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::FunctionExpected,
-            err: err.into(),
-        }
+    pub fn name_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::NameExpected, err.into())
     }
-    pub fn number_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::NumberExpected,
-            err: err.into(),
-        }
+    pub fn function_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::FunctionExpected, err.into())
     }
-    pub fn boolean_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::BooleanExpected,
-            err: err.into(),
-        }
+    pub fn number_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::NumberExpected, err.into())
     }
-    pub fn array_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::ArrayExpected,
-            err: err.into(),
-        }
+    pub fn boolean_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::BooleanExpected, err.into())
     }
-    pub fn generic_failure<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::GenericFailure,
-            err: err.into(),
-        }
+    pub fn array_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::ArrayExpected, err.into())
     }
-    pub fn pending_exception<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::PendingException,
-            err: err.into(),
-        }
+    pub fn generic_failure(err: impl Into<Error>) -> Self {
+        Self::new(Status::GenericFailure, err.into())
     }
-    pub fn cancelled<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::Cancelled,
-            err: err.into(),
-        }
+    pub fn pending_exception(err: impl Into<Error>) -> Self {
+        Self::new(Status::PendingException, err.into())
     }
-    pub fn escape_called_twice<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::EscapeCalledTwice,
-            err: err.into(),
-        }
+    pub fn cancelled(err: impl Into<Error>) -> Self {
+        Self::new(Status::Cancelled, err.into())
     }
-    pub fn handle_scope_mismatch<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::HandleScopeMismatch,
-            err: err.into(),
-        }
+    pub fn escape_called_twice(err: impl Into<Error>) -> Self {
+        Self::new(Status::EscapeCalledTwice, err.into())
     }
-    pub fn callback_scope_mismatch<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::CallbackScopeMismatch,
-            err: err.into(),
-        }
+    pub fn handle_scope_mismatch(err: impl Into<Error>) -> Self {
+        Self::new(Status::HandleScopeMismatch, err.into())
     }
-    pub fn queue_full<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::QueueFull,
-            err: err.into(),
-        }
+    pub fn callback_scope_mismatch(err: impl Into<Error>) -> Self {
+        Self::new(Status::CallbackScopeMismatch, err.into())
     }
-    pub fn closing<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::Closing,
-            err: err.into(),
-        }
+    pub fn queue_full(err: impl Into<Error>) -> Self {
+        Self::new(Status::QueueFull, err.into())
     }
-    pub fn bigint_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::BigintExpected,
-            err: err.into(),
-        }
+    pub fn closing(err: impl Into<Error>) -> Self {
+        Self::new(Status::Closing, err.into())
     }
-    pub fn date_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::DateExpected,
-            err: err.into(),
-        }
+    pub fn bigint_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::BigintExpected, err.into())
     }
-    pub fn array_buffer_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::ArrayBufferExpected,
-            err: err.into(),
-        }
+    pub fn date_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::DateExpected, err.into())
     }
-    pub fn detachable_arraybuffer_expected<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::DetachableArraybufferExpected,
-            err: err.into(),
-        }
+    pub fn array_buffer_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::ArrayBufferExpected, err.into())
     }
-    pub fn would_deadlock<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::WouldDeadlock,
-            err: err.into(),
-        }
+    pub fn detachable_arraybuffer_expected(err: impl Into<Error>) -> Self {
+        Self::new(Status::DetachableArraybufferExpected, err.into())
     }
-    pub fn no_external_buffers_allowed<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::NoExternalBuffersAllowed,
-            err: err.into(),
-        }
+    pub fn would_deadlock(err: impl Into<Error>) -> Self {
+        Self::new(Status::WouldDeadlock, err.into())
     }
-    pub fn unknown<P: Into<anyhow::Error>>(err: P) -> Self {
-        Self {
-            status: Status::Unknown,
-            err: err.into(),
-        }
+    pub fn no_external_buffers_allowed(err: impl Into<Error>) -> Self {
+        Self::new(Status::NoExternalBuffersAllowed, err.into())
+    }
+    pub fn unknown(err: impl Into<Error>) -> Self {
+        Self::new(Status::Unknown, err.into())
     }
 
     pub fn message(&self) -> String {
