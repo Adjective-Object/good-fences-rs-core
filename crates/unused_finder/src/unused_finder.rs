@@ -20,7 +20,7 @@ use import_resolver::swc_resolver::{
     MonorepoResolver,
 };
 use js_err::JsErr;
-use logger::Logger;
+use logger::{debug_logf, Logger};
 use rayon::{iter::Either, prelude::*};
 use swc_ecma_loader::{resolve::Resolve, TargetEnv};
 
@@ -104,7 +104,7 @@ impl SourceFiles {
                     "Multiple errors occurred during resolution:\n{}",
                     errors
                         .into_iter()
-                        .map(|x| format!("{:#?}", x))
+                        .map(|x| format!("{:#}", x))
                         .collect::<Vec<_>>()
                         .join("\n")
                 ));
@@ -329,6 +329,10 @@ impl UnusedFinder {
 
         // Create a new graph with all entries marked as "unused".
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
+
+        // print the entry packages config
+        debug_logf!(logger, "Entry packages: {:#?}", self.config.entry_packages);
+
         // Get the walk roots and perform the graph traversal
         let entrypoints = self.get_entrypoints(&logger);
         logger.log(format!(
@@ -449,11 +453,16 @@ impl UnusedFinder {
             }
         };
 
+        let relative_package_path = owning_package
+            .package_path
+            .strip_prefix(&self.config.repo_root)
+            .expect("absolue paths of packages within the repo should be relative");
+
         // only "entry packages" may export scripts
         if !self
             .config
             .entry_packages
-            .matches(&owning_package.package_path, owning_package_name)
+            .matches(relative_package_path, owning_package_name)
         {
             return false;
         }
