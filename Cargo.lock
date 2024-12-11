@@ -1127,7 +1127,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mutli_err"
+name = "multi_err"
 version = "0.2.0"
 dependencies = [
  "anyhow",
