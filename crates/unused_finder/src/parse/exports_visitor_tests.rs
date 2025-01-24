@@ -727,4 +727,27 @@ mod test {
 
         assert_eq!(aset!("./foo".to_owned()), visitor.executed_paths);
     }
+
+    #[test]
+    fn test_realworld_example() {
+        let visitor = visit(
+            r#"
+            export const updateWorkplaceSuggestionForDay = mutatorAction();
+
+            export const { getWorkplaceSuggestionForDay, setWorkplaceSuggestionForDay } = createAccessors();            "#,
+        );
+
+        assert_eq!(
+            aset!(
+                ExportedSymbol::Named("updateWorkplaceSuggestionForDay".to_owned()),
+                ExportedSymbol::Named("getWorkplaceSuggestionForDay".to_owned()),
+                ExportedSymbol::Named("setWorkplaceSuggestionForDay".to_owned())
+            ),
+            visitor
+                .exported_ids
+                .keys()
+                .cloned()
+                .collect::<AHashSet<_>>()
+        );
+    }
 }
