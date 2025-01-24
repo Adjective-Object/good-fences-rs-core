@@ -28,6 +28,10 @@ pub enum VariableScopeError {
 }
 
 impl VariableScope {
+    fn get_locals() -> &AHashMap<swc_atoms::Atom, VarID> {
+        self.local_symbols
+    }
+
     fn new() -> Self {
         Self {
             local_symbols: AHashMap::default(),

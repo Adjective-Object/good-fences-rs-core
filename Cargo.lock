@@ -2769,6 +2769,7 @@ dependencies = [
  "abspath",
  "ahashmap",
  "anyhow",
+ "ast-name-tracker",
  "bitflags",
  "const_format",
  "debug_print",

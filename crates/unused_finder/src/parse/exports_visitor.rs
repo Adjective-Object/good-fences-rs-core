@@ -11,6 +11,10 @@ use swc_ecma_ast::{
     NamedExport, Pat, Str, TsImportEqualsDecl, TsModuleName,
 };
 use swc_ecma_visit::{Visit, VisitWith};
+use ast_name_tracker::{
+    VariableScopeVisitor,
+    VariableScope,
+};
 
 // AST visitor that gathers information on file imports and exports from an SWC source tree.
 #[derive(Debug)]
@@ -250,9 +254,14 @@ impl Visit for ExportsVisitor {
             Decl::Var(decl) => decl
                 .decls
                 .iter()
-                .map(|d| match &d.name {
-                    Pat::Ident(ident) => ident.sym.to_string(),
-                    _ => "".to_string(),
+                .map(|d| {
+                    let logger = logger::StdioLogger::new();
+                    let mut child_scope = VariableScope::new();
+                    let mut child_visitor =
+                        VariableScopeVisitor::new(&logger, &mut child_scope);
+                    child_visitor.visit_binding_pattern(&d.name);
+
+                    child_scope.
                 })
                 .collect(),
             Decl::TsInterface(decl) => {
