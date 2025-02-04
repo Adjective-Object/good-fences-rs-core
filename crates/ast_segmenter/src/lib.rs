@@ -49,12 +49,14 @@ enum ImportKind {
 
 // A segment that contains "normal" code
 // e.g. any non-specially recognized code
+#[derive(Clone)]
 struct NormalSegment {
     has_own_effects: bool,
     imports: NormalSegmentImportInfo,
 }
 
 // The target of an export, either a symbol or a namespace
+#[derive(Clone)]
 pub enum ExportTarget {
     // An individual symbol that is exported
     Symbol(ExportedSymbol),
@@ -66,6 +68,7 @@ pub enum ExportTarget {
 }
 
 // A named or default symbol that is exported from or imported into a file
+#[derive(Clone)]
 pub enum ExportedSymbol {
     // The name of the symbol in the exporting file
     Named(String),
@@ -97,6 +100,7 @@ pub struct ReExportedSymbol {
 /// Because all static imports are covered by the other variants of the
 /// SegmentType enum, this should only ever contain dynamic dynamic imports
 /// to other files
+#[derive(Clone)]
 struct NormalSegmentImportInfo {
     /// Import expressions within the segment
     lazy_imports: Vec<ModuleImport>,
@@ -141,6 +145,7 @@ enum StaticImportType {
 
 /// Enum representing how an individual segment imports/exports symbols
 /// form another module
+#[derive(Clone)]
 struct ModuleImport {
     /// The specifie for the module that is being imported
     /// e.g. './helpers' or 'lodash-es'

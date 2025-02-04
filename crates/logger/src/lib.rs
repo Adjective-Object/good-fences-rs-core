@@ -1,14 +1,14 @@
-use std::sync::Mutex;
+use std::{fmt::Display, sync::Mutex};
 
 use anyhow::anyhow;
 
 pub trait Logger: Clone {
-    fn log(&self, message: impl Into<String>);
-    fn warn(&self, message: impl Into<String>) {
-        self.log(format!("WARN: {}", message.into()));
+    fn log(&self, message: impl Display);
+    fn warn(&self, message: impl Display) {
+        self.log(format!("WARN: {}", message));
     }
-    fn error(&self, message: impl Into<String>) {
-        self.log(format!("ERROR: {}", message.into()));
+    fn error(&self, message: impl Display) {
+        self.log(format!("ERROR: {}", message));
     }
 }
 
@@ -25,18 +25,19 @@ macro_rules! debug_logf {
 }
 
 impl<T: Logger> Logger for &T {
-    fn log(&self, message: impl Into<String>) {
+    fn log(&self, message: impl Display) {
         (*self).log(message);
     }
 }
 
+#[derive(Clone)]
 pub struct StdioLogger {
     zero_time: std::time::Instant,
 }
-impl Logger for &StdioLogger {
-    fn log(&self, message: impl Into<String>) {
+impl Logger for StdioLogger {
+    fn log(&self, message: impl Display) {
         let delta_time = std::time::Instant::now().duration_since(self.zero_time);
-        println!("[{:.04}] {}", delta_time.as_secs_f64(), message.into());
+        println!("[{:.04}] {}", delta_time.as_secs_f64(), message);
     }
 }
 impl StdioLogger {
@@ -57,11 +58,11 @@ pub struct VecLogger {
 }
 
 impl Logger for &VecLogger {
-    fn log(&self, message: impl Into<String>) {
+    fn log(&self, message: impl Display) {
         self.logs
             .lock()
             .expect("locking the logger array should not fail!")
-            .push(message.into());
+            .push(message.to_string());
     }
 }
 impl VecLogger {

@@ -60,11 +60,11 @@ pub enum VariableScopeError {
 }
 
 impl VariableScope {
-    fn get_locals() -> &AHashMap<swc_atoms::Atom, VarID> {
-        self.local_symbols
+    pub fn get_locals(&self) -> impl Iterator<Item = &swc_atoms::Atom> {
+        self.local_symbols.keys()
     }
 
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             local_symbols: AHashMap::default(),
             escaped_symbols: AHashSet::default(),
@@ -225,14 +225,10 @@ impl<TLogger> Visit for VariableScopeVisitor<'_, TLogger>
 where
     TLogger: SrcFileLogger,
 {
-    fn visit_var_decl(&mut self, node: &swc_ecma_ast::VarDecl) {
-        for decl in &node.decls {
-            self.visit_binding_pattern(&decl.name);
-        }
-        for decl in &node.decls {
-            if let Some(init) = &decl.init {
-                init.visit_with(self);
-            }
+    fn visit_var_declarator(&mut self, node: &swc_ecma_ast::VarDeclarator) {
+        self.visit_binding_pattern(&node.name);
+        if let Some(init) = &node.init {
+            init.visit_with(self);
         }
     }
 
@@ -356,7 +352,7 @@ mod test {
         let (sourcemap, parsed_module) = swc_utils_parse::parse_ecma_src("test.ts", src_str);
 
         let logger = logger::StdioLogger::new();
-        let file_logger = logger_srcfile::WrapFileLogger::new(&sourcemap, &logger);
+        let file_logger = logger_srcfile::WrapFileLogger::new(sourcemap, &logger);
 
         find_names(&file_logger, &parsed_module)
     }

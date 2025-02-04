@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use logger::StdioLogger;
+use logger_srcfile::WrapFileLogger;
 use swc_common::comments::SingleThreadedComments;
 use swc_common::errors::Handler;
 use swc_common::sync::Lrc;
@@ -75,7 +77,9 @@ pub fn get_file_import_export_info(
         }
     };
 
-    let mut visitor = ExportsVisitor::new(comments);
+    let stdio_logger = StdioLogger::new();
+    let logger = WrapFileLogger::new(cm.as_ref(), &stdio_logger);
+    let mut visitor = ExportsVisitor::new(logger, comments);
 
     let globals = Globals::new();
     GLOBALS.set(&globals, || {

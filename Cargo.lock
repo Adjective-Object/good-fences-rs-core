@@ -2820,6 +2820,7 @@ dependencies = [
  "itertools 0.13.0",
  "js_err",
  "logger",
+ "logger_srcfile",
  "mutli_err",
  "packagejson",
  "packagejson_exports",

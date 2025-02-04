@@ -50,28 +50,28 @@ fn module_item_to_segment(
                     // with statements are deprecated and unsupported
                     // See: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/with
                     file_logger.src_error(
-                        module_item.span_lo(),
+                        &module_item.span(),
                         StatementToSegmentError::WithStatmentUnsupported,
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Return(_) => {
                     file_logger.src_error(
-                        module_item.span_lo(),
+                        &module_item.span(),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(RETURN),
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Break(_) => {
                     file_logger.src_error(
-                        module_item.span_lo(),
+                        &module_item.span(),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(BREAK),
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Continue(_) => {
                     file_logger.src_error(
-                        module_item.span_lo(),
+                        &module_item.span(),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(CONTINUE),
                     );
                     None
@@ -128,7 +128,7 @@ struct ModuleSegment {
     escaped_names: Vec<swc_atoms::Atom>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone)]
 pub enum ExportedSymbol {
     // A named export
     Named(String),
