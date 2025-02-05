@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y openssl libssl3 libssl-dev
-      - name: Run cargo-udepscargo
+      - name: Run cargo-udeps
         uses: aig787/cargo-udeps-action@v1
         with:
           version: "latest"
