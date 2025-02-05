@@ -308,6 +308,51 @@ where
         self.mark_all_escaped(child_scope.escaped_symbols);
     }
 
+    fn visit_for_in_stmt(&mut self, node: &swc_ecma_ast::ForInStmt) {
+        // Create a new scope for the child
+        let mut child_scope = VariableScope::new();
+        let mut child_visitor = VariableScopeVisitor::new(self.logger, &mut child_scope);
+        // visit the child scope
+        node.visit_children_with(&mut child_visitor);
+        self.mark_all_escaped(child_scope.escaped_symbols);
+    }
+
+    fn visit_for_of_stmt(&mut self, node: &swc_ecma_ast::ForOfStmt) {
+        // Create a new scope for the child
+        let mut child_scope = VariableScope::new();
+        let mut child_visitor = VariableScopeVisitor::new(self.logger, &mut child_scope);
+        // visit the child scope
+        node.visit_children_with(&mut child_visitor);
+        self.mark_all_escaped(child_scope.escaped_symbols);
+    }
+
+    fn visit_for_stmt(&mut self, node: &swc_ecma_ast::ForStmt) {
+        // Create a new scope for the child
+        let mut child_scope = VariableScope::new();
+        let mut child_visitor = VariableScopeVisitor::new(self.logger, &mut child_scope);
+        // visit the child scope
+        node.visit_children_with(&mut child_visitor);
+        self.mark_all_escaped(child_scope.escaped_symbols);
+    }
+
+    fn visit_while_stmt(&mut self, node: &swc_ecma_ast::WhileStmt) {
+        // Create a new scope for the child
+        let mut child_scope = VariableScope::new();
+        let mut child_visitor = VariableScopeVisitor::new(self.logger, &mut child_scope);
+        // visit the child scope
+        node.visit_children_with(&mut child_visitor);
+        self.mark_all_escaped(child_scope.escaped_symbols);
+    }
+
+    fn visit_do_while_stmt(&mut self, node: &swc_ecma_ast::DoWhileStmt) {
+        // Create a new scope for the child
+        let mut child_scope = VariableScope::new();
+        let mut child_visitor = VariableScopeVisitor::new(self.logger, &mut child_scope);
+        // visit the child scope
+        node.visit_children_with(&mut child_visitor);
+        self.mark_all_escaped(child_scope.escaped_symbols);
+    }
+
     fn visit_ident_name(&mut self, node: &swc_ecma_ast::IdentName) {
         self.node.use_symbol(&node.sym);
     }
@@ -585,6 +630,24 @@ mod test {
         run_test(
             r#"
             export {example} from 'module';
+            "#,
+            ExpectedScope {
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn duplicate_declare_for_loop() {
+        run_test(
+            r#"
+            for (const foo in bar) {
+
+            }
+
+            for (const foo in bar) {
+
+            }
             "#,
             ExpectedScope {
                 ..Default::default()
