@@ -622,6 +622,7 @@ impl UnusedFinderResult {
 
     pub fn write_dot_graph(
         &self,
+        logger: impl Logger,
         filter_glob_str: Option<&str>,
         writer: &mut dyn std::io::Write,
     ) -> Result<(), JsErr> {
@@ -631,6 +632,8 @@ impl UnusedFinderResult {
             .transpose()
             .map_err(JsErr::invalid_arg)?;
 
+        logger.debug(format!("filter_glob: {:?}", filter_glob_str));
+
         // find the graph files that match the filter
         let filtered_file_ids = self
             .graph
@@ -639,7 +642,7 @@ impl UnusedFinderResult {
             .enumerate()
             .filter_map(|(i, graph_file)| match filter_glob {
                 Some(ref filter_glob) => {
-                    if filter_glob.matches(&graph_file.file_path.display().to_string()) {
+                    if filter_glob.matches_path(&graph_file.file_path) {
                         Some(i)
                     } else {
                         None
@@ -650,11 +653,11 @@ impl UnusedFinderResult {
             .collect::<Vec<_>>();
         // expand the filter upwards and downwards to include all files that import or are imported by the filtered files
         let mut up_frontier = filtered_file_ids.clone();
-        let mut visited = HashSet::<usize>::new();
+        let mut up_visited: HashSet<usize> = HashSet::<usize>::new();
         // expand upwards, this is n^2 time! bad times.
         while !up_frontier.is_empty() {
             up_frontier.iter().for_each(|x| {
-                visited.insert(*x);
+                up_visited.insert(*x);
             });
             let next_frontier: Vec<usize> = self
                 .graph
@@ -662,7 +665,7 @@ impl UnusedFinderResult {
                 .par_iter()
                 .enumerate()
                 .filter_map(|(file_id, graph_file)| -> Option<usize> {
-                    if visited.contains(&file_id) {
+                    if up_visited.contains(&file_id) {
                         return None;
                     }
 
@@ -673,7 +676,7 @@ impl UnusedFinderResult {
                         .filter_map(|(imported_file, _, _)| {
                             self.graph.path_to_id.get(imported_file)
                         })
-                        .any(|idx| visited.contains(idx));
+                        .any(|idx| up_visited.contains(idx));
 
                     if should_include {
                         Some(file_id)
@@ -685,10 +688,11 @@ impl UnusedFinderResult {
             up_frontier = next_frontier;
         }
         // now expand downwards, this is less expensive
+        let mut down_visited: HashSet<usize> = HashSet::<usize>::new();
         let mut down_frontier = filtered_file_ids.clone();
         while !down_frontier.is_empty() {
             down_frontier.iter().for_each(|x| {
-                visited.insert(*x);
+                down_visited.insert(*x);
             });
             let next_frontier = down_frontier
                 .par_iter()
@@ -700,7 +704,7 @@ impl UnusedFinderResult {
                         .map(|(imported_file, _, _)| self.graph.path_to_id.get(imported_file))
                         .filter_map(|x| {
                             if let Some(idx) = x {
-                                if !visited.contains(idx) {
+                                if !down_visited.contains(idx) {
                                     return Some(*idx);
                                 }
                             }
@@ -715,11 +719,29 @@ impl UnusedFinderResult {
             down_frontier = next_frontier;
         }
 
-        println!("up_frontier had {:#?} nodes", up_frontier.len());
-        println!("down_frontier had {:#?} nodes", down_frontier.len());
+        logger.debug(format!(
+            "filtered_file_ids has {} nodes",
+            filtered_file_ids.len()
+        ));
+        logger.debug(format!("up_frontier had {} nodes", up_frontier.len()));
+        logger.debug(format!("down_frontier had {} nodes", down_frontier.len()));
+
+        let filtered_graph_files = self
+            .graph
+            .path_to_id
+            .iter()
+            .filter_map(|(_path, id)| {
+                if up_visited.contains(id) || down_visited.contains(id) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         // write each of the files as subgraphs
-        for graph_file in self.graph.files.iter() {
+        for graph_file_id in filtered_graph_files.iter() {
+            let graph_file = &self.graph.files[*graph_file_id];
             writeln!(
                 writer,
                 r#"subgraph {cluster_id} {{
@@ -761,11 +783,21 @@ impl UnusedFinderResult {
         }
 
         // write add graph edges
-        for graph_file in self.graph.files.iter() {
+        for graph_file_id in filtered_graph_files.iter() {
+            let graph_file = &self.graph.files[*graph_file_id];
             // write the edges for import _ stmts
             for (imported_file_path, imported_symbols) in
                 graph_file.import_export_info.imported_symbols.iter()
             {
+                match self.graph.path_to_id.get(imported_file_path) {
+                    None => continue,
+                    Some(x) => {
+                        if !filtered_file_ids.contains(x) {
+                            continue;
+                        }
+                    }
+                };
+
                 let mut imported_symbols = imported_symbols.iter().collect::<Vec<_>>();
                 imported_symbols.sort();
 
@@ -791,6 +823,15 @@ impl UnusedFinderResult {
 
             // write the edges for require() calls
             for imported_file_path in graph_file.import_export_info.require_paths.iter() {
+                match self.graph.path_to_id.get(imported_file_path) {
+                    None => continue,
+                    Some(x) => {
+                        if !filtered_file_ids.contains(x) {
+                            continue;
+                        }
+                    }
+                };
+
                 // write the edge
                 self.graph
                     .get_file_by_path(imported_file_path)
@@ -808,6 +849,15 @@ impl UnusedFinderResult {
 
             // write the edges for import() calls
             for imported_file_path in graph_file.import_export_info.imported_paths.iter() {
+                match self.graph.path_to_id.get(imported_file_path) {
+                    None => continue,
+                    Some(x) => {
+                        if !filtered_file_ids.contains(x) {
+                            continue;
+                        }
+                    }
+                };
+
                 // write the edge
                 self.graph
                     .get_file_by_path(imported_file_path)

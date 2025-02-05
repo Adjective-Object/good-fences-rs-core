@@ -170,7 +170,7 @@ fn main() -> Result<()> {
             println!("Generating graph.dot file...");
             let file = std::fs::File::create("graph.dot").expect("Failed to create graph.dot");
             let mut stream = std::io::BufWriter::new(file);
-            result.write_dot_graph(filter.as_ref().map(|x| x.as_str()), &mut stream)?;
+            result.write_dot_graph(logger, filter.as_ref().map(|x| x.as_str()), &mut stream)?;
             stream.flush().expect("Failed to flush graph.dot");
             println!("Done!");
         }

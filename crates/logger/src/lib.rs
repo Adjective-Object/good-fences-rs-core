@@ -4,6 +4,11 @@ use anyhow::anyhow;
 
 pub trait Logger: Clone {
     fn log(&self, message: impl Display);
+    fn debug(&self, message: impl Display) {
+        if cfg!(debug_assertions) {
+            self.log(format!("DEBUG: {}", message));
+        }
+    }
     fn warn(&self, message: impl Display) {
         self.log(format!("WARN: {}", message));
     }

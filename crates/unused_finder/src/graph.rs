@@ -142,8 +142,7 @@ impl Graph {
         initial_frontier_symbols: Vec<(&Path, Vec<ExportedSymbol>)>,
         tag: UsedTag,
     ) -> Result<()> {
-        debug_logf!(
-            logger,
+        logger.debug(format!(
             "initial_frontier_files ({}:{}):\n  {}",
             tag,
             initial_frontier_files.len(),
@@ -151,11 +150,10 @@ impl Graph {
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
-                .join("\n  ")
-        );
+                .join("\n  "),
+        ));
 
-        debug_logf!(
-            logger,
+        logger.debug(format!(
             "initial_frontier_symbols ({}:{}):\n  {}",
             tag,
             initial_frontier_symbols.len(),
@@ -172,7 +170,7 @@ impl Graph {
                 )))
                 .collect::<Vec<_>>()
                 .join("\n  ")
-        );
+        ));
 
         let initial_file_edges = initial_frontier_files
             .into_iter()
