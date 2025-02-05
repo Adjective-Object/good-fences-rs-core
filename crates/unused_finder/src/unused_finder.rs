@@ -661,30 +661,27 @@ impl UnusedFinderResult {
                 .files
                 .par_iter()
                 .enumerate()
-                .filter_map(|(file_id, graph_file)| -> Option<Result<usize, JsErr>> {
+                .filter_map(|(file_id, graph_file)| -> Option<usize> {
+                    if visited.contains(&file_id) {
+                        return None;
+                    }
+
                     // check if the file's imports are in the visited set
-                    let x = graph_file
+                    let should_include = graph_file
                         .import_export_info
                         .iter_imported_symbols_meta()
-                        .map(|(imported_file, _, _)| {
-                            self.graph
-                                .path_to_id
-                                .get(imported_file)
-                                .context("imported file must exist in the graph")
-                                .map_err(JsErr::unknown)
+                        .filter_map(|(imported_file, _, _)| {
+                            self.graph.path_to_id.get(imported_file)
                         })
-                        .find(|x| match x {
-                            Err(_e) => true,
-                            Ok(x) => visited.contains(x),
-                        });
+                        .any(|idx| visited.contains(idx));
 
-                    match x {
-                        Some(Err(e)) => Some(Err(e)),
-                        Some(Ok(_x)) => Some(Ok(file_id)),
-                        None => None,
+                    if should_include {
+                        Some(file_id)
+                    } else {
+                        None
                     }
                 })
-                .collect::<Result<Vec<usize>, JsErr>>()?;
+                .collect::<Vec<usize>>();
             up_frontier = next_frontier;
         }
         // now expand downwards, this is less expensive
@@ -695,37 +692,31 @@ impl UnusedFinderResult {
             });
             let next_frontier = down_frontier
                 .par_iter()
-                .map(|file_id| -> Result<Vec<usize>, JsErr> {
+                .map(|file_id| -> Vec<usize> {
                     // get file
                     let file: &GraphFile = &self.graph.files[*file_id];
-                    let frontier_cand = file
-                        .import_export_info
+                    file.import_export_info
                         .iter_imported_symbols_meta()
-                        .map(|(imported_file, _, _)| {
-                            let id = self
-                                .graph
-                                .path_to_id
-                                .get(imported_file)
-                                .cloned()
-                                .context("imported file must exist in the graph")
-                                .map_err(JsErr::unknown);
-                            id
-                        })
-                        .filter(|x| match x {
-                            Err(_) => true,
-                            Ok(x) => !visited.contains(x),
-                        });
+                        .map(|(imported_file, _, _)| self.graph.path_to_id.get(imported_file))
+                        .filter_map(|x| {
+                            if let Some(idx) = x {
+                                if !visited.contains(idx) {
+                                    return Some(*idx);
+                                }
+                            }
 
-                    let x = frontier_cand.collect::<Result<Vec<_>, JsErr>>()?;
-                    Ok(x)
+                            None
+                        })
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Result<Vec<Vec<usize>>, JsErr>>()?
-                .drain(0..)
                 .flatten()
                 .collect::<Vec<usize>>();
 
             down_frontier = next_frontier;
         }
+
+        println!("up_frontier had {:#?} nodes", up_frontier.len());
+        println!("down_frontier had {:#?} nodes", down_frontier.len());
 
         // write each of the files as subgraphs
         for graph_file in self.graph.files.iter() {
@@ -772,70 +763,64 @@ impl UnusedFinderResult {
         // write add graph edges
         for graph_file in self.graph.files.iter() {
             // write the edges for import _ stmts
-            for (imported_file, imported_symbols) in
+            for (imported_file_path, imported_symbols) in
                 graph_file.import_export_info.imported_symbols.iter()
             {
                 let mut imported_symbols = imported_symbols.iter().collect::<Vec<_>>();
                 imported_symbols.sort();
 
                 // write the edge
-                let target_file_idx: &usize = self
-                    .graph
-                    .path_to_id
-                    .get(imported_file)
-                    .context("imported file must exist in the graph")
+                self.graph
+                    .get_file_by_path(imported_file_path)
+                    .map(|imported_file| {
+                        writeln!(
+                            writer,
+                            r#""{source_id}" -> "{target_id}" [label="import {{ {symbols} }}"];"#,
+                            source_id = cluster_id_for_file(graph_file),
+                            target_id = cluster_id_for_file(imported_file),
+                            symbols = imported_symbols
+                                .iter()
+                                .map(|x| x.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    })
+                    .transpose()
                     .map_err(JsErr::unknown)?;
-                writeln!(
-                    writer,
-                    r#""{source_id}" -> "{target_id}" [label="import {{ {symbols} }}"];"#,
-                    source_id = cluster_id_for_file(graph_file),
-                    target_id = cluster_id_for_file(&self.graph.files[*target_file_idx]),
-                    symbols = imported_symbols
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-                .map_err(JsErr::unknown)?;
             }
 
             // write the edges for require() calls
             for imported_file_path in graph_file.import_export_info.require_paths.iter() {
-                let imported_file_id = self
-                    .graph
-                    .path_to_id
-                    .get(imported_file_path)
-                    .context("imported file must exist in the graph")
-                    .map_err(JsErr::unknown)?;
-                let imported_file = &self.graph.files[*imported_file_id];
-
                 // write the edge
-                writeln!(
-                    writer,
-                    r#""{source_id}" -> "{target_id}" [label="require()"];"#,
-                    source_id = cluster_id_for_file(graph_file),
-                    target_id = cluster_id_for_file(imported_file),
-                )
-                .map_err(JsErr::unknown)?;
+                self.graph
+                    .get_file_by_path(imported_file_path)
+                    .map(|imported_file| {
+                        writeln!(
+                            writer,
+                            r#""{source_id}" -> "{target_id}" [label="require()"];"#,
+                            source_id = cluster_id_for_file(graph_file),
+                            target_id = cluster_id_for_file(imported_file),
+                        )
+                    })
+                    .transpose()
+                    .map_err(JsErr::unknown)?;
             }
 
             // write the edges for import() calls
             for imported_file_path in graph_file.import_export_info.imported_paths.iter() {
-                let imported_file_id = self
-                    .graph
-                    .path_to_id
-                    .get(imported_file_path)
-                    .context("imported file must exist in the graph")
+                // write the edge
+                self.graph
+                    .get_file_by_path(imported_file_path)
+                    .map(|imported_file| {
+                        writeln!(
+                            writer,
+                            r#""{source_id}" -> "{target_id}" [label="import()"];"#,
+                            source_id = cluster_id_for_file(graph_file),
+                            target_id = cluster_id_for_file(imported_file),
+                        )
+                    })
+                    .transpose()
                     .map_err(JsErr::unknown)?;
-                let imported_file = &self.graph.files[*imported_file_id];
-
-                writeln!(
-                    writer,
-                    r#""{source_id}" -> "{target_id}" [label="import()"];"#,
-                    source_id = cluster_id_for_file(graph_file),
-                    target_id = cluster_id_for_file(imported_file),
-                )
-                .map_err(JsErr::unknown)?;
             }
         }
 

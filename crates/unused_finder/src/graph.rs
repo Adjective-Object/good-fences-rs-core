@@ -103,6 +103,10 @@ pub struct Graph {
 }
 
 impl Graph {
+    pub fn get_file_by_path(&self, path: &Path) -> Option<&GraphFile> {
+        self.path_to_id.get(path).map(|id| &self.files[*id])
+    }
+
     /// Create new graph from a list of source files
     pub fn from_source_files<'a>(
         source_files: impl Iterator<Item = &'a ResolvedSourceFile>,
