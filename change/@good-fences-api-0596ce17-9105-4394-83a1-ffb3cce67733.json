@@ -1,0 +1,7 @@
+{
+  "type": "none",
+  "comment": "devcontainer.json: use slirp4netns to boot offline",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "none"
+}

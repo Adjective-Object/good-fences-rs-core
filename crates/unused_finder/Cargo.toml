@@ -37,11 +37,10 @@ bitflags = "2.6.0"
 ignore = "0.4.23"
 abspath = { version = "0.2.0", path = "../abspath" }
 itertools = "0.13.0"
-debug_print = "1.0.0"
 schemars.workspace = true
 logger = { version = "0.2.0", path = "../logger" }
-mutli_err = { version = "0.2.0", path = "../multi_err" }
 logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
+multi_err = { version = "0.2.0", path = "../multi_err" }
 
 [dev-dependencies]
 stringreader = "0.1.1"

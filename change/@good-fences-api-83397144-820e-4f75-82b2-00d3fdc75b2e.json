@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "unused_finder: consume multi_err to report resolution errors",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}

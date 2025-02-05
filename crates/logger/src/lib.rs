@@ -18,15 +18,12 @@ pub trait Logger: Clone {
 }
 
 #[macro_export]
-#[cfg(debug_assertions)]
 macro_rules! debug_logf {
     ($logger:expr, $fmt:expr $(, $arg:expr)*) => {
-            $logger.log(format!($fmt $(, $arg)*));
+        if cfg!(debug_assertions) {
+            $logger.debug(format!($fmt $(, $arg)*));
+        }
     };
-}
-#[cfg(not(debug_assertions))]
-macro_rules! debug_logf {
-    ($logger:expr, $fmt:expr $(, $arg:expr)*) => {};
 }
 
 impl<T: Logger> Logger for &T {
@@ -67,7 +64,7 @@ impl Logger for &VecLogger {
         self.logs
             .lock()
             .expect("locking the logger array should not fail!")
-            .push(message.to_string());
+            .push(format!("{}", message));
     }
 }
 impl VecLogger {

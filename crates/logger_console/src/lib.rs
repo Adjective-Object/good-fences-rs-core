@@ -34,7 +34,7 @@ impl ConsoleLogger {
 
 impl Logger for ConsoleLogger {
     fn log(&self, message: impl Display) {
-        let message_string: String = message.to_string();
+        let message_string: String = format!("{}", message);
         let status = self
             .logfn
             .call(Ok(message_string), ThreadsafeFunctionCallMode::Blocking);

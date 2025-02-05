@@ -4,7 +4,7 @@ use std::{
 };
 
 use ahashmap::{AHashMap, AHashSet, ARandomState};
-use mutli_err::{MultiErr, MultiResult};
+use multi_err::{MultiErr, MultiResult};
 use swc_common::{FileName, Span};
 use swc_ecma_ast::ModuleExportName;
 use swc_ecma_loader::resolve::Resolve;
