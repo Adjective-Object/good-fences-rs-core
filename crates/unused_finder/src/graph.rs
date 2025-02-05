@@ -50,7 +50,8 @@ impl GraphFile {
         // let item = ExportKind::from(item);
         match symbol {
             ExportedSymbol::Default | ExportedSymbol::Named(_) => {
-                tag_named_or_default_symbol(&mut self.symbol_tags, symbol, tag);
+                let old_tag = self.symbol_tags.entry(symbol.clone()).or_default();
+                *old_tag = old_tag.union(tag);
             }
             ExportedSymbol::Namespace => {
                 // namespace imports will use _all_ named symbols from the imported file
@@ -71,16 +72,6 @@ impl GraphFile {
             }
         }
     }
-}
-
-// tags an individual named or default tag on this symbol's symbol map
-fn tag_named_or_default_symbol(
-    symbol_tags: &mut AHashMap<ExportedSymbol, UsedTag>,
-    symbol: &ExportedSymbol,
-    tag: UsedTag,
-) {
-    let old_tag = symbol_tags.entry(symbol.clone()).or_default();
-    *old_tag = old_tag.union(tag);
 }
 
 // A 1-way representation of an edge in the import graph
@@ -111,6 +102,10 @@ pub struct Graph {
 }
 
 impl Graph {
+    pub fn get_file_by_path(&self, path: &Path) -> Option<&GraphFile> {
+        self.path_to_id.get(path).map(|id| &self.files[*id])
+    }
+
     /// Create new graph from a list of source files
     pub fn from_source_files<'a>(
         source_files: impl Iterator<Item = &'a ResolvedSourceFile>,
@@ -142,7 +137,7 @@ impl Graph {
     pub fn get_symbol_tags(&self, path: &Path, symbol: &ExportedSymbol) -> Option<&UsedTag> {
         let file_id = self.path_to_id.get(path)?;
         let file = &self.files[*file_id];
-        file.symbol_tags.get(symbol).clone()
+        file.symbol_tags.get(symbol)
     }
 
     pub fn traverse_bfs(
@@ -152,8 +147,7 @@ impl Graph {
         initial_frontier_symbols: Vec<(&Path, Vec<ExportedSymbol>)>,
         tag: UsedTag,
     ) -> Result<()> {
-        debug_logf!(
-            logger,
+        logger.debug(format!(
             "initial_frontier_files ({}:{}):\n  {}",
             tag,
             initial_frontier_files.len(),
@@ -161,11 +155,10 @@ impl Graph {
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
-                .join("\n  ")
-        );
+                .join("\n  "),
+        ));
 
-        debug_logf!(
-            logger,
+        logger.debug(format!(
             "initial_frontier_symbols ({}:{}):\n  {}",
             tag,
             initial_frontier_symbols.len(),
@@ -182,7 +175,7 @@ impl Graph {
                 )))
                 .collect::<Vec<_>>()
                 .join("\n  ")
-        );
+        ));
 
         let initial_file_edges = initial_frontier_files
             .into_iter()

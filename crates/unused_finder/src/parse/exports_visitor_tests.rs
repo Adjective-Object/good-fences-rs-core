@@ -2,6 +2,8 @@
 mod test {
 
     use ahashmap::{AHashMap, AHashSet};
+    use logger::StdioLogger;
+    use logger_srcfile::{SrcFileLogger, WrapFileLogger};
     use swc_common::comments::{Comments, SingleThreadedComments};
     use swc_common::sync::Lrc;
     use swc_common::{FileName, SourceFile, SourceMap};
@@ -25,7 +27,7 @@ mod test {
         Parser::new_from(capturing)
     }
 
-    fn visit(src: &str) -> ExportsVisitor {
+    fn visit(src: &str) -> ExportsVisitor<impl SrcFileLogger> {
         let cm = Lrc::<SourceMap>::default();
         let comments = SingleThreadedComments::default();
         let fm = cm.new_source_file(
@@ -35,7 +37,11 @@ mod test {
 
         let mut parser = create_test_parser(&fm, Some(&comments));
         let module = parser.parse_typescript_module().unwrap();
-        let mut visitor = ExportsVisitor::new(comments);
+
+        let stdio_logger = StdioLogger::new();
+        let logger = WrapFileLogger::new(cm, stdio_logger);
+
+        let mut visitor = ExportsVisitor::new(logger, comments);
         module.visit_with(&mut visitor);
 
         visitor
@@ -47,7 +53,9 @@ mod test {
         pub is_typeonly: bool,
     }
 
-    fn exported_ids(visitor: &ExportsVisitor) -> AHashMap<ExportedSymbol, TestMeta> {
+    fn exported_ids(
+        visitor: &ExportsVisitor<impl SrcFileLogger>,
+    ) -> AHashMap<ExportedSymbol, TestMeta> {
         visitor
             .exported_ids
             .iter()
@@ -64,7 +72,7 @@ mod test {
     }
 
     fn re_exported_ids(
-        visitor: &ExportsVisitor,
+        visitor: &ExportsVisitor<impl SrcFileLogger>,
     ) -> AHashMap<String, AHashMap<ReExportedSymbol, TestMeta>> {
         visitor
             .export_from_ids
@@ -726,5 +734,28 @@ mod test {
         );
 
         assert_eq!(aset!("./foo".to_owned()), visitor.executed_paths);
+    }
+
+    #[test]
+    fn test_realworld_example() {
+        let visitor = visit(
+            r#"
+            export const updateWorkplaceSuggestionForDay = mutatorAction();
+
+            export const { getWorkplaceSuggestionForDay, setWorkplaceSuggestionForDay } = createAccessors();            "#,
+        );
+
+        assert_eq!(
+            aset!(
+                ExportedSymbol::Named("updateWorkplaceSuggestionForDay".to_owned()),
+                ExportedSymbol::Named("getWorkplaceSuggestionForDay".to_owned()),
+                ExportedSymbol::Named("setWorkplaceSuggestionForDay".to_owned())
+            ),
+            visitor
+                .exported_ids
+                .keys()
+                .cloned()
+                .collect::<AHashSet<_>>()
+        );
     }
 }

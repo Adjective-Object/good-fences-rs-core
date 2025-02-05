@@ -1,5 +1,6 @@
 use super::{ExportedSymbol, ExportedSymbolMetadata, RawImportExportInfo, ReExportedSymbol};
 use ahashmap::{AHashMap, AHashSet};
+use logger_srcfile::SrcFileLogger;
 use std::{collections::HashSet, iter::FromIterator};
 use swc_common::{
     comments::{CommentKind, Comments, SingleThreadedComments},
@@ -8,13 +9,14 @@ use swc_common::{
 use swc_ecma_ast::{
     BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
     ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
-    NamedExport, Pat, Str, TsImportEqualsDecl, TsModuleName,
+    NamedExport, Str, TsImportEqualsDecl, TsModuleName,
 };
 use swc_ecma_visit::{Visit, VisitWith};
 
 // AST visitor that gathers information on file imports and exports from an SWC source tree.
 #[derive(Debug)]
-pub struct ExportsVisitor {
+pub struct ExportsVisitor<TLogger: SrcFileLogger> {
+    pub logger: TLogger,
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
     pub imported_ids_path_name: AHashMap<String, AHashSet<ExportedSymbol>>,
     // require('foo') generates ['foo']
@@ -34,8 +36,8 @@ pub struct ExportsVisitor {
     pub comments: SingleThreadedComments,
 }
 
-impl ExportsVisitor {
-    pub fn new(comments: SingleThreadedComments) -> Self {
+impl<TLogger: SrcFileLogger> ExportsVisitor<TLogger> {
+    pub fn new(logger: TLogger, comments: SingleThreadedComments) -> Self {
         Self {
             imported_ids_path_name: AHashMap::default(),
             require_paths: AHashSet::default(),
@@ -44,6 +46,7 @@ impl ExportsVisitor {
             executed_paths: AHashSet::default(),
             require_identifiers: AHashSet::default(),
             exported_ids: AHashMap::default(),
+            logger,
             comments,
         }
     }
@@ -192,8 +195,8 @@ pub fn has_disable_export_comment(comments: &SingleThreadedComments, lo: BytePos
     false
 }
 
-impl From<ExportsVisitor> for RawImportExportInfo {
-    fn from(x: ExportsVisitor) -> Self {
+impl<T: SrcFileLogger> From<ExportsVisitor<T>> for RawImportExportInfo {
+    fn from(x: ExportsVisitor<T>) -> Self {
         Self {
             imported_path_ids: x.imported_ids_path_name,
             require_paths: x.require_paths,
@@ -205,7 +208,7 @@ impl From<ExportsVisitor> for RawImportExportInfo {
     }
 }
 
-impl Visit for ExportsVisitor {
+impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);
@@ -250,9 +253,12 @@ impl Visit for ExportsVisitor {
             Decl::Var(decl) => decl
                 .decls
                 .iter()
-                .map(|d| match &d.name {
-                    Pat::Ident(ident) => ident.sym.to_string(),
-                    _ => "".to_string(),
+                .flat_map(|d: &swc_ecma_ast::VarDeclarator| -> Vec<String> {
+                    let child_scope = ast_name_tracker::find_names(&self.logger, d);
+                    child_scope
+                        .get_locals()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<_>>()
                 })
                 .collect(),
             Decl::TsInterface(decl) => {

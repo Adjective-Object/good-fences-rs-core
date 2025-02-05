@@ -1,9 +1,13 @@
 use core::option::Option::None;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    hash::{DefaultHasher, Hash, Hasher},
+    path::{Path, PathBuf},
+};
 
 use crate::{
     cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
-    graph::Graph,
+    graph::{Graph, GraphFile},
     ignore_file::IgnoreFile,
     parse::{get_file_import_export_info, ExportedSymbol},
     report::UnusedFinderReport,
@@ -371,7 +375,38 @@ impl UnusedFinder {
             .traverse_bfs(&logger, test_entrypoints, vec![], UsedTag::FROM_TEST)
             .map_err(JsErr::generic_failure)?;
 
-        // mark all typeonly symbols
+        for file in graph.files.iter() {
+            logger.log(format!(
+                "File: {} ({} symbols):\n  {}",
+                file.file_path.display(),
+                file.import_export_info.exported_ids.len(),
+                file.import_export_info
+                    .exported_ids
+                    .iter()
+                    .map(|(symbol, meta)| {
+                        let mut tags = Vec::new();
+                        if meta.allow_unused {
+                            tags.push("allow_unused");
+                        }
+                        if meta.is_type_only {
+                            tags.push("type_only");
+                        }
+                        format!(
+                            "{}{}",
+                            symbol,
+                            if tags.is_empty() {
+                                "".to_string()
+                            } else {
+                                format!(" ({})", tags.join(", "))
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n  ")
+            ));
+        }
+
+        // mark all typeonly symbols as used
         if self.config.allow_unused_types {
             for (path, source_file) in self.last_walk_result.source_files.iter() {
                 for (_original_path, (symbol, metadata)) in
@@ -550,6 +585,31 @@ pub struct UnusedFinderResult {
     pub graph: Graph,
 }
 
+fn cluster_id_for_file(graph_file: &GraphFile) -> String {
+    // hash the file path
+    let mut s = DefaultHasher::new();
+    graph_file.file_path.display().to_string().hash(&mut s);
+
+    format!(
+        "cluster_{}_{}",
+        graph_file
+            .file_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy(),
+        s.finish()
+    )
+}
+
+fn cluster_label_for_file(graph_file: &GraphFile) -> String {
+    graph_file
+        .file_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
+}
+
 impl UnusedFinderResult {
     pub fn new(graph: Graph) -> Self {
         Self { graph }
@@ -558,5 +618,262 @@ impl UnusedFinderResult {
     /// Gets a report that can be presented to the JS bridge.
     pub fn get_report(&self) -> UnusedFinderReport {
         UnusedFinderReport::from(self)
+    }
+
+    pub fn write_dot_graph(
+        &self,
+        logger: impl Logger,
+        filter_glob_str: Option<&str>,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), JsErr> {
+        // Compile the glob
+        let filter_glob = filter_glob_str
+            .map(glob::Pattern::new)
+            .transpose()
+            .map_err(JsErr::invalid_arg)?;
+
+        logger.debug(format!("filter_glob: {:?}", filter_glob_str));
+
+        // find the graph files that match the filter
+        let filtered_file_ids = self
+            .graph
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(i, graph_file)| match filter_glob {
+                Some(ref filter_glob) => {
+                    if filter_glob.matches_path(&graph_file.file_path) {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                }
+                None => Some(i),
+            })
+            .collect::<Vec<_>>();
+        // expand the filter upwards and downwards to include all files that import or are imported by the filtered files
+        let mut up_frontier = filtered_file_ids.clone();
+        let mut up_visited: HashSet<usize> = HashSet::<usize>::new();
+        // expand upwards, this is n^2 time! bad times.
+        while !up_frontier.is_empty() {
+            up_frontier.iter().for_each(|x| {
+                up_visited.insert(*x);
+            });
+            let next_frontier: Vec<usize> = self
+                .graph
+                .files
+                .par_iter()
+                .enumerate()
+                .filter_map(|(file_id, graph_file)| -> Option<usize> {
+                    if up_visited.contains(&file_id) {
+                        return None;
+                    }
+
+                    // check if the file's imports are in the visited set
+                    let should_include = graph_file
+                        .import_export_info
+                        .iter_imported_symbols_meta()
+                        .filter_map(|(imported_file, _, _)| {
+                            self.graph.path_to_id.get(imported_file)
+                        })
+                        .any(|idx| up_visited.contains(idx));
+
+                    if should_include {
+                        Some(file_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<usize>>();
+            up_frontier = next_frontier;
+        }
+        // now expand downwards, this is less expensive
+        let mut down_visited: HashSet<usize> = HashSet::<usize>::new();
+        let mut down_frontier = filtered_file_ids.clone();
+        while !down_frontier.is_empty() {
+            down_frontier.iter().for_each(|x| {
+                down_visited.insert(*x);
+            });
+            let next_frontier = down_frontier
+                .par_iter()
+                .map(|file_id| -> Vec<usize> {
+                    // get file
+                    let file: &GraphFile = &self.graph.files[*file_id];
+                    file.import_export_info
+                        .iter_imported_symbols_meta()
+                        .map(|(imported_file, _, _)| self.graph.path_to_id.get(imported_file))
+                        .filter_map(|x| {
+                            if let Some(idx) = x {
+                                if !down_visited.contains(idx) {
+                                    return Some(*idx);
+                                }
+                            }
+
+                            None
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .flatten()
+                .collect::<Vec<usize>>();
+
+            down_frontier = next_frontier;
+        }
+
+        logger.debug(format!(
+            "filtered_file_ids has {} nodes",
+            filtered_file_ids.len()
+        ));
+        logger.debug(format!("up_frontier had {} nodes", up_frontier.len()));
+        logger.debug(format!("down_frontier had {} nodes", down_frontier.len()));
+
+        let filtered_graph_files = self
+            .graph
+            .path_to_id
+            .iter()
+            .filter_map(|(_path, id)| {
+                if up_visited.contains(id) || down_visited.contains(id) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // write each of the files as subgraphs
+        for graph_file_id in filtered_graph_files.iter() {
+            let graph_file = &self.graph.files[*graph_file_id];
+            writeln!(
+                writer,
+                r#"subgraph {cluster_id} {{
+                label = "{cluster_label}";
+                style = "filled";
+                color = "lightgrey";
+                node [style=filled,color=white];
+                {nodes}
+            }}"#,
+                cluster_id = cluster_id_for_file(graph_file),
+                cluster_label = cluster_label_for_file(graph_file),
+                nodes = graph_file
+                    .import_export_info
+                    .exported_ids
+                    .iter()
+                    .map(|(symbol, meta)| {
+                        let mut additional_info = Vec::new();
+                        if meta.allow_unused {
+                            additional_info.push("allow_unused");
+                        }
+                        if meta.is_type_only {
+                            additional_info.push("type_only");
+                        }
+
+                        format!(
+                            "\"{symbol}{additional_info}\"",
+                            symbol = symbol,
+                            additional_info = (if !additional_info.is_empty() {
+                                format!(" ({})", additional_info.join(", "))
+                            } else {
+                                "".to_string()
+                            }),
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+            )
+            .map_err(JsErr::unknown)?;
+        }
+
+        // write add graph edges
+        for graph_file_id in filtered_graph_files.iter() {
+            let graph_file = &self.graph.files[*graph_file_id];
+            // write the edges for import _ stmts
+            for (imported_file_path, imported_symbols) in
+                graph_file.import_export_info.imported_symbols.iter()
+            {
+                match self.graph.path_to_id.get(imported_file_path) {
+                    None => continue,
+                    Some(x) => {
+                        if !filtered_file_ids.contains(x) {
+                            continue;
+                        }
+                    }
+                };
+
+                let mut imported_symbols = imported_symbols.iter().collect::<Vec<_>>();
+                imported_symbols.sort();
+
+                // write the edge
+                self.graph
+                    .get_file_by_path(imported_file_path)
+                    .map(|imported_file| {
+                        writeln!(
+                            writer,
+                            r#""{source_id}" -> "{target_id}" [label="import {{ {symbols} }}"];"#,
+                            source_id = cluster_id_for_file(graph_file),
+                            target_id = cluster_id_for_file(imported_file),
+                            symbols = imported_symbols
+                                .iter()
+                                .map(|x| x.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    })
+                    .transpose()
+                    .map_err(JsErr::unknown)?;
+            }
+
+            // write the edges for require() calls
+            for imported_file_path in graph_file.import_export_info.require_paths.iter() {
+                match self.graph.path_to_id.get(imported_file_path) {
+                    None => continue,
+                    Some(x) => {
+                        if !filtered_file_ids.contains(x) {
+                            continue;
+                        }
+                    }
+                };
+
+                // write the edge
+                self.graph
+                    .get_file_by_path(imported_file_path)
+                    .map(|imported_file| {
+                        writeln!(
+                            writer,
+                            r#""{source_id}" -> "{target_id}" [label="require()"];"#,
+                            source_id = cluster_id_for_file(graph_file),
+                            target_id = cluster_id_for_file(imported_file),
+                        )
+                    })
+                    .transpose()
+                    .map_err(JsErr::unknown)?;
+            }
+
+            // write the edges for import() calls
+            for imported_file_path in graph_file.import_export_info.imported_paths.iter() {
+                match self.graph.path_to_id.get(imported_file_path) {
+                    None => continue,
+                    Some(x) => {
+                        if !filtered_file_ids.contains(x) {
+                            continue;
+                        }
+                    }
+                };
+
+                // write the edge
+                self.graph
+                    .get_file_by_path(imported_file_path)
+                    .map(|imported_file| {
+                        writeln!(
+                            writer,
+                            r#""{source_id}" -> "{target_id}" [label="import()"];"#,
+                            source_id = cluster_id_for_file(graph_file),
+                            target_id = cluster_id_for_file(imported_file),
+                        )
+                    })
+                    .transpose()
+                    .map_err(JsErr::unknown)?;
+            }
+        }
+
+        Ok(())
     }
 }

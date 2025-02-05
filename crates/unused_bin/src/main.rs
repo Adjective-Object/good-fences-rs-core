@@ -1,9 +1,9 @@
 extern crate unused_finder;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use logger::{Logger, StdioLogger};
-use std::{convert::TryInto, env, fs, path::Path};
+use std::{convert::TryInto, env, fs, io::Write, path::Path};
 use unused_finder::UnusedFinderConfig;
 
 #[derive(Parser, Debug)]
@@ -22,6 +22,18 @@ struct CliArgs {
     // If this flag is set, run the parking_lot deadlock detector
     #[arg(short = 'D', long, default_value_t = true)]
     deadlock_detector: std::primitive::bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Generates a dot graph of the dependency graph
+    Graph {
+        #[arg(short = 'f', alias = "filter")]
+        filter: Option<String>,
+    },
 }
 
 const DEFAULT_CONFIG_PATH: &str = "unused-finder.json";
@@ -121,11 +133,10 @@ fn main() -> Result<()> {
         logger.log("No config file path provided, using default config file path");
         DEFAULT_CONFIG_PATH.to_string()
     });
-
     logger.log(format!("reading config from path {config_path}"));
-
     // read and parse the config file
-    let config_str = fs::read_to_string(&config_path).expect("Failed to read config file");
+    let config_str = fs::read_to_string(&config_path)
+        .with_context(|| format!("reading config file {}", &config_path))?;
     let config: unused_finder::UnusedFinderJSONConfig = serde_hjson::from_str(&config_str)
         .with_context(|| format!("Parsing unused-finder config {config_path}"))?;
     let mut parsed_config: UnusedFinderConfig = config.try_into()?;
@@ -150,9 +161,21 @@ fn main() -> Result<()> {
         .expect("Failed to change working directory to config file directory");
 
     let mut unused_finder = unused_finder::UnusedFinder::new_from_cfg(logger, parsed_config)?;
-    let result = unused_finder.find_unused(logger)?;
+    let result: unused_finder::UnusedFinderResult = unused_finder.find_unused(logger)?;
     let report = result.get_report();
     logger.log(format!("result:\n{report}"));
+
+    match &args.command {
+        Some(Commands::Graph { filter }) => {
+            println!("Generating graph.dot file...");
+            let file = std::fs::File::create("graph.dot").expect("Failed to create graph.dot");
+            let mut stream = std::io::BufWriter::new(file);
+            result.write_dot_graph(logger, filter.as_ref().map(|x| x.as_str()), &mut stream)?;
+            stream.flush().expect("Failed to flush graph.dot");
+            println!("Done!");
+        }
+        None => {}
+    }
 
     logger.log("done!");
     Ok(())

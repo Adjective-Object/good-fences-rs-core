@@ -159,6 +159,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ast-segmenter"
+version = "0.2.0-beta.1"
+
+[[package]]
 name = "ast_node"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2761,6 +2765,7 @@ dependencies = [
  "abspath",
  "ahashmap",
  "anyhow",
+ "ast-name-tracker",
  "bitflags",
  "const_format",
  "glob",
@@ -2769,6 +2774,7 @@ dependencies = [
  "itertools 0.13.0",
  "js_err",
  "logger",
+ "logger_srcfile",
  "multi_err",
  "packagejson",
  "packagejson_exports",

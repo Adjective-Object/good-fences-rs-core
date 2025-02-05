@@ -24,6 +24,7 @@ swc_ecma_parser.workspace = true
 swc_ecma_visit.workspace = true
 swc_ecma_transforms.workspace = true
 swc_utils_parse = { path = "../swc_utils_parse" }
+ast-name-tracker = { path = "../ast_name_tracker" }
 thiserror.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }
 packagejson = { path = "../packagejson" }
@@ -38,6 +39,7 @@ abspath = { version = "0.2.0", path = "../abspath" }
 itertools = "0.13.0"
 schemars.workspace = true
 logger = { version = "0.2.0", path = "../logger" }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
 multi_err = { version = "0.2.0", path = "../multi_err" }
 
 [dev-dependencies]

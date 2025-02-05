@@ -107,6 +107,7 @@ fn run_unused_test(
                 .insert(item.id.clone(), (item.start, item.end));
         }
     }
+
     for (file_path, symbols) in report.extra_symbol_tags.iter() {
         let content_bytes = std::fs::read(file_path).unwrap();
         for tagged_symbol in symbols.iter() {

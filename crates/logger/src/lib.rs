@@ -4,6 +4,11 @@ use anyhow::anyhow;
 
 pub trait Logger: Clone {
     fn log(&self, message: impl Display);
+    fn debug(&self, message: impl Display) {
+        if cfg!(debug_assertions) {
+            self.log(format!("DEBUG: {}", message));
+        }
+    }
     fn warn(&self, message: impl Display) {
         self.log(format!("WARN: {}", message));
     }
@@ -13,17 +18,10 @@ pub trait Logger: Clone {
 }
 
 #[macro_export]
-macro_rules! cfg {
-    ($($cfg:tt)*) => {
-        /* compiler built-in */
-    };
-}
-
-#[macro_export]
 macro_rules! debug_logf {
     ($logger:expr, $fmt:expr $(, $arg:expr)*) => {
         if cfg!(debug_assertions) {
-            $logger.log(format!($fmt $(, $arg)*));
+            $logger.debug(format!($fmt $(, $arg)*));
         }
     };
 }
@@ -34,10 +32,11 @@ impl<T: Logger> Logger for &T {
     }
 }
 
+#[derive(Clone)]
 pub struct StdioLogger {
     zero_time: std::time::Instant,
 }
-impl Logger for &StdioLogger {
+impl Logger for StdioLogger {
     fn log(&self, message: impl Display) {
         let delta_time = std::time::Instant::now().duration_since(self.zero_time);
         println!("[{:.04}] {}", delta_time.as_secs_f64(), message);
