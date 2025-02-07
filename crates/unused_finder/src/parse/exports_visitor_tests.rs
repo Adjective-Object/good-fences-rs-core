@@ -53,7 +53,7 @@ mod test {
         pub is_typeonly: bool,
     }
 
-    fn exported_ids(
+    fn own_exported_ids(
         visitor: &ExportsVisitor<impl SrcFileLogger>,
     ) -> AHashMap<ExportedSymbol, TestMeta> {
         visitor
@@ -112,7 +112,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         );
     }
 
@@ -133,7 +133,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         );
     }
     #[test]
@@ -152,7 +152,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -174,7 +174,7 @@ mod test {
                     is_typeonly: true
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         );
     }
 
@@ -194,7 +194,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         );
     }
 
@@ -213,7 +213,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -232,7 +232,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -323,7 +323,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -351,7 +351,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -379,7 +379,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -407,7 +407,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -426,7 +426,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -445,7 +445,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -466,7 +466,7 @@ mod test {
                     is_typeonly: true
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -485,7 +485,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -503,7 +503,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -521,7 +521,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 
@@ -544,7 +544,7 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            exported_ids(&visitor)
+            own_exported_ids(&visitor)
         )
     }
 

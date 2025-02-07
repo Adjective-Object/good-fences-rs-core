@@ -109,6 +109,23 @@ pub struct ResolvedImportExportInfo {
 }
 
 impl ResolvedImportExportInfo {
+    pub fn get_exported_symbol(&self, symbol: &ExportedSymbol) -> Option<&ExportedSymbolMetadata> {
+        self.exported_ids.get(symbol).or_else(|| {
+            self.export_from_symbols
+                .values()
+                .find_map(|reexported_symbols| {
+                    reexported_symbols
+                        .keys()
+                        .find(|reexported_symbol| {
+                            reexported_symbol.renamed_to.as_ref() == Some(symbol)
+                                || (reexported_symbol.renamed_to.is_none()
+                                    && reexported_symbol.imported == *symbol)
+                        })
+                        .map(|reexported_symbol| &reexported_symbols[reexported_symbol])
+                })
+        })
+    }
+
     pub fn num_exported_symbols(&self) -> usize {
         self.exported_ids.len() + self.export_from_symbols.len()
     }

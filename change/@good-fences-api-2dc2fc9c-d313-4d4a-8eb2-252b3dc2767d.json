@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "unused_finder: show re-exported symbols in debug visualization",
+  "packageName": "@good-fences/api",
+  "email": "Maxwell.HuangHobbs@microsoft.com",
+  "dependentChangeType": "patch"
+}

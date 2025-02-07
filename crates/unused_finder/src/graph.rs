@@ -35,7 +35,7 @@ impl GraphFile {
         Self {
             file_tags: UsedTag::default(),
             symbol_tags: AHashMap::with_capacity_and_hasher(
-                file.import_export_info.exported_ids.len(),
+                file.import_export_info.num_exported_symbols(),
                 Default::default(),
             ),
             file_path: file.source_file_path.clone(),
@@ -132,6 +132,11 @@ impl Graph {
 
         let file = &mut self.files[file_id];
         file.tag_symbol(symbol, tag);
+    }
+
+    pub fn get_file_tags(&self, path: &Path) -> Option<UsedTag> {
+        let file_id = self.path_to_id.get(path)?;
+        Some(self.files[*file_id].file_tags)
     }
 
     pub fn get_symbol_tags(&self, path: &Path, symbol: &ExportedSymbol) -> Option<&UsedTag> {

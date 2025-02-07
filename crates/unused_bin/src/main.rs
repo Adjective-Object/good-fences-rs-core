@@ -33,6 +33,10 @@ enum Commands {
     Graph {
         #[arg(short = 'f', alias = "filter")]
         filter: Option<String>,
+        #[arg(short = 'u', alias = "up_limit")]
+        up_limit: Option<usize>,
+        #[arg(short = 'd', alias = "down_limit")]
+        down_limit: Option<usize>,
     },
 }
 
@@ -166,11 +170,21 @@ fn main() -> Result<()> {
     logger.log(format!("result:\n{report}"));
 
     match &args.command {
-        Some(Commands::Graph { filter }) => {
+        Some(Commands::Graph {
+            filter,
+            up_limit,
+            down_limit,
+        }) => {
             println!("Generating graph.dot file...");
             let file = std::fs::File::create("graph.dot").expect("Failed to create graph.dot");
             let mut stream = std::io::BufWriter::new(file);
-            result.write_dot_graph(logger, filter.as_ref().map(|x| x.as_str()), &mut stream)?;
+            result.write_dot_graph(
+                logger,
+                filter.as_ref().map(|x| x.as_str()),
+                *up_limit,
+                *down_limit,
+                &mut stream,
+            )?;
             stream.flush().expect("Failed to flush graph.dot");
             println!("Done!");
         }

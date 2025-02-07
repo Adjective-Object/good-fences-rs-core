@@ -178,7 +178,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                     return None;
                 }
 
-                let ast_symbol = file.import_export_info.exported_ids.get(symbol_name)?;
+                let ast_symbol = file.import_export_info.get_exported_symbol(symbol_name)?;
 
                 Some(SymbolReport {
                     id: symbol_name.to_string(),
@@ -198,7 +198,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                     return None;
                 }
 
-                let ast_symbol = file.import_export_info.exported_ids.get(symbol_name)?;
+                let ast_symbol = file.import_export_info.get_exported_symbol(symbol_name)?;
 
                 Some(SymbolReportWithTags {
                     symbol: SymbolReport {
