@@ -414,6 +414,7 @@ impl UnusedFinder {
 
         // mark all typeonly symbols as typeonly, an all typeonly files as typeonly
         for (path, source_file) in self.last_walk_result.source_files.iter() {
+            let mut all_symbols_typeonly = true;
             for (_original_path, (symbol, metadata)) in
                 source_file.import_export_info.iter_exported_symbols_meta()
             {
@@ -427,7 +428,12 @@ impl UnusedFinder {
                     // This is because we want to report errors when a typeonly re-export's concrete implementation
                     // is never used.
                     graph.mark_symbol(path, symbol, UsedTag::TYPE_ONLY);
+                } else {
+                    all_symbols_typeonly = false;
                 }
+            }
+            if all_symbols_typeonly {
+                graph.mark_file(path, UsedTag::TYPE_ONLY);
             }
         }
 

@@ -134,6 +134,18 @@ impl Graph {
         file.tag_symbol(symbol, tag);
     }
 
+    pub fn mark_file(&mut self, path: &Path, tag: UsedTag) {
+        let file_id = match self.path_to_id.get(path) {
+            Some(id) => *id,
+            None => {
+                return;
+            }
+        };
+
+        let file = &mut self.files[file_id];
+        file.file_tags.insert(tag);
+    }
+
     pub fn get_file_tags(&self, path: &Path) -> Option<UsedTag> {
         let file_id = self.path_to_id.get(path)?;
         Some(self.files[*file_id].file_tags)
