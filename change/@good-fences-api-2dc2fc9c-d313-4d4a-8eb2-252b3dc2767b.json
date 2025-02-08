@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "unused_finder: mark files as typeonly if their contents are typeonly",
+  "packageName": "@good-fences/api",
+  "email": "Maxwell.HuangHobbs@microsoft.com",
+  "dependentChangeType": "patch"
+}
