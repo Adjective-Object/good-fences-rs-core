@@ -397,6 +397,38 @@ fn test_non_root_root_path() {
 }
 
 #[test]
+fn test_recursive_indirect_empty_import() {
+    // Tests that the package traversal works when there is a non-root "root" path.
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "search_root/packages/root/main.js" => r#"
+            export * from "./depth-1";
+        "#,
+        "search_root/packages/root/depth-1.js" => r#"
+            export * from "./depth-2";
+        "#,
+        "search_root/packages/root/depth-2.js" => r#""#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            ..Default::default()
+        },
+    );
+}
+
+#[test]
 fn test_test_pattern() {
     // Tests tagging "test" files
     let tmpdir = test_tmpdir!(
@@ -557,7 +589,14 @@ fn test_indirect_typeonly_export() {
                     symbol("ReExportedAsTypeOnly"),
                 ]
             ],
-            ..Default::default()
+            extra_file_tags: amap![
+                "<root>/search_root/packages/root/main.js" => (UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY).into()
+            ],
+            extra_symbol_tags: amap![
+                "<root>/search_root/packages/root/main.js" => vec![
+                    tagged_symbol("ReExportedAsTypeOnly", UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY),
+                ]
+            ],
         },
     );
 }
@@ -596,6 +635,41 @@ fn test_typeonly_interface_allowed() {
         UnusedFinderReport {
             extra_symbol_tags: amap![
                 "<root>/search_root/packages/root/other.js" => vec![tagged_symbol("MyInterface", UsedTag::TYPE_ONLY)]
+            ],
+            ..Default::default()
+        },
+    );
+}
+
+#[test]
+fn test_typeonly_files_are_typeonly() {
+    // Tests that interfaces are considered typeonly exports
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "search_root/packages/root/main.js" => r#"
+            export type TypeOnly = string
+        "#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
+            allow_unused_types: true,
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            extra_symbol_tags: amap![
+                "<root>/search_root/packages/root/main.js" => vec![tagged_symbol("TypeOnly", UsedTag::TYPE_ONLY| UsedTag::FROM_ENTRY)]
+            ],
+            extra_file_tags: amap![
+                "<root>/search_root/packages/root/main.js" => (UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY).into()
             ],
             ..Default::default()
         },

@@ -9,7 +9,9 @@ use crate::{
     cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
     graph::{Graph, GraphFile},
     ignore_file::IgnoreFile,
-    parse::{get_file_import_export_info, ExportedSymbol},
+    parse::{
+        get_file_import_export_info, ExportedSymbol, ExportedSymbolMetadata, ReExportedSymbol,
+    },
     report::UnusedFinderReport,
     tag::UsedTag,
     walk::{walk_src_files, RepoPackages, WalkedFiles},
@@ -67,37 +69,40 @@ struct SourceFiles {
 
 impl SourceFiles {
     fn try_resolve(
+        logger: impl Logger,
         walk_result: WalkedFiles,
         resolver: impl Resolve + Sync,
     ) -> Result<SourceFiles, anyhow::Error> {
         // Map of source file path to source file data
-        let (source_files, errors): (AHashMap<PathBuf, ResolvedSourceFile>, Vec<anyhow::Error>) =
-            walk_result
-                .source_files
-                .into_par_iter()
-                .map(|walked_file| -> Result<(PathBuf, ResolvedSourceFile)> {
-                    Ok((
-                        walked_file.source_file_path.clone(),
-                        ResolvedSourceFile {
-                            import_export_info: walked_file
-                                .import_export_info
-                                .try_resolve(&walked_file.source_file_path, &resolver)
-                                .into_anyhow()
-                                .with_context(|| {
-                                    format!(
-                                        "trying to resolve imports for file {}",
-                                        walked_file.source_file_path.display()
-                                    )
-                                })?,
-                            owning_package: walked_file.owning_package,
-                            source_file_path: walked_file.source_file_path,
-                        },
-                    ))
-                })
-                .partition_map::<AHashMap<PathBuf, ResolvedSourceFile>, _, _, _, _>(|r| match r {
-                    Ok(x) => Either::Left(x),
-                    Err(e) => Either::Right(e),
-                });
+        let (mut source_files, errors): (
+            AHashMap<PathBuf, ResolvedSourceFile>,
+            Vec<anyhow::Error>,
+        ) = walk_result
+            .source_files
+            .into_par_iter()
+            .map(|walked_file| -> Result<(PathBuf, ResolvedSourceFile)> {
+                Ok((
+                    walked_file.source_file_path.clone(),
+                    ResolvedSourceFile {
+                        import_export_info: walked_file
+                            .import_export_info
+                            .try_resolve(&walked_file.source_file_path, &resolver)
+                            .into_anyhow()
+                            .with_context(|| {
+                                format!(
+                                    "trying to resolve imports for file {}",
+                                    walked_file.source_file_path.display()
+                                )
+                            })?,
+                        owning_package: walked_file.owning_package,
+                        source_file_path: walked_file.source_file_path,
+                    },
+                ))
+            })
+            .partition_map::<AHashMap<PathBuf, ResolvedSourceFile>, _, _, _, _>(|r| match r {
+                Ok(x) => Either::Left(x),
+                Err(e) => Either::Right(e),
+            });
 
         if !errors.is_empty() {
             if errors.len() == 1 {
@@ -111,6 +116,122 @@ impl SourceFiles {
                         .collect::<Vec<_>>()
                         .join("\n")
                 ));
+            }
+        }
+
+        // expand any "export * from" statements by doing a frontier walk
+        let mut export_star_frontier = source_files
+            .iter()
+            .filter(|(_k, v)| {
+                v.import_export_info
+                    .export_from_symbols
+                    .iter()
+                    .any(|(_, exports)| {
+                        exports
+                            .keys()
+                            .any(|export| export.imported == ExportedSymbol::Namespace)
+                    })
+            })
+            .map(|(k, _v)| k.clone())
+            .collect::<Vec<_>>();
+        while let Some(current_path) = export_star_frontier.pop() {
+            let current_file = source_files.get(&current_path).unwrap();
+            let current_export_from_symbols = &current_file.import_export_info.export_from_symbols;
+
+            // resolving the re-exports requires reading from the source_files map, so we collect the edits to the current file
+            // in a vector and apply them after the loop
+            let mut deferred_re_exports =
+                Vec::<(PathBuf, ReExportedSymbol, ExportedSymbolMetadata)>::new();
+            let mut delete_star_exports = Vec::<PathBuf>::new();
+
+            for (imported_path, re_exports) in current_export_from_symbols.iter() {
+                // can't expand export * from external
+                let target_file = match source_files.get(imported_path) {
+                    Some(file) => file,
+                    None => {
+                        logger.warn(format!(
+                            "Could not find file {} to expand an 'export * from' statement. This was probably an export to an external file or module, which we can't check safely",
+                            imported_path.display()
+                        ));
+                        continue;
+                    }
+                };
+
+                let export_star = ReExportedSymbol {
+                    imported: ExportedSymbol::Namespace,
+                    renamed_to: None,
+                };
+                if !re_exports.contains_key(&export_star) {
+                    continue;
+                }
+
+                delete_star_exports.push(imported_path.clone());
+                deferred_re_exports.extend(target_file.import_export_info.exported_ids.iter().map(
+                    |(symbol, metadata)| -> (PathBuf, ReExportedSymbol, ExportedSymbolMetadata) {
+                        (
+                            imported_path.clone(),
+                            ReExportedSymbol {
+                                imported: symbol.clone(),
+                                renamed_to: None,
+                            },
+                            metadata.clone(),
+                        )
+                    },
+                ));
+                // add re-exports from the target file
+                deferred_re_exports.extend(
+                    target_file
+                        .import_export_info
+                        .export_from_symbols
+                        .iter()
+                        .flat_map(|(imported_path, metadata)| {
+                            metadata.iter().map(|(symbol, metadata)| -> (PathBuf, ReExportedSymbol, ExportedSymbolMetadata) {
+                                (
+                                    imported_path.clone(),
+                                    symbol.clone(),
+                                    metadata.clone(),
+                                )
+                            })
+                        }),
+                );
+            }
+
+            // delete all the star exports we expanded, and replace them with effect imports
+            let current_file_mut = source_files.get_mut(&current_path).unwrap();
+            for imported_path in delete_star_exports {
+                current_file_mut
+                    .import_export_info
+                    .export_from_symbols
+                    .remove(&imported_path);
+                current_file_mut
+                    .import_export_info
+                    .executed_paths
+                    .insert(imported_path);
+            }
+
+            // mutate the current file to include the deferred re-exports
+            let current_file_mut = source_files.get_mut(&current_path).unwrap();
+            for (imported_path, re_export, metadata) in deferred_re_exports {
+                let re_exports = current_file_mut
+                    .import_export_info
+                    .export_from_symbols
+                    .entry(imported_path)
+                    .or_default();
+                re_exports.insert(re_export, metadata);
+            }
+
+            // if any of the deferred re-exports are star exports, re-queue this file in the frontier
+            if current_file_mut
+                .import_export_info
+                .export_from_symbols
+                .iter()
+                .any(|(_, re_exports)| {
+                    re_exports
+                        .keys()
+                        .any(|re_export| re_export.imported == ExportedSymbol::Namespace)
+                })
+            {
+                export_star_frontier.push(current_path);
             }
         }
 
@@ -319,8 +440,8 @@ impl UnusedFinder {
             "Resolving {} files...",
             walked_files.source_files.len()
         ));
-        let resolved =
-            SourceFiles::try_resolve(walked_files, resolver).map_err(JsErr::generic_failure)?;
+        let resolved = SourceFiles::try_resolve(&logger, walked_files, resolver)
+            .map_err(JsErr::generic_failure)?;
         logger.log("Done resolving files");
         Ok(resolved)
     }
@@ -414,6 +535,10 @@ impl UnusedFinder {
 
         // mark all typeonly symbols as typeonly, an all typeonly files as typeonly
         for (path, source_file) in self.last_walk_result.source_files.iter() {
+            if source_file.import_export_info.num_exported_symbols() == 0 {
+                continue;
+            }
+
             let mut all_symbols_typeonly = true;
             for (_original_path, (symbol, metadata)) in
                 source_file.import_export_info.iter_exported_symbols_meta()
@@ -437,7 +562,7 @@ impl UnusedFinder {
             }
         }
 
-        Ok(UnusedFinderResult::new(graph))
+        Ok(UnusedFinderResult::new(graph, self.config.clone()))
     }
 
     fn count_symbols<T, U>(symbols: &[(T, Vec<U>)]) -> usize {
@@ -587,6 +712,7 @@ impl UnusedFinder {
 
 /// Represents the result of computing something over the graph.
 pub struct UnusedFinderResult {
+    pub config: UnusedFinderConfig,
     /// The finished, traversed graph, with unused items marked as used / unused.
     pub graph: Graph,
 }
@@ -631,8 +757,8 @@ fn abbrev(symbols: Vec<String>) -> Vec<String> {
 }
 
 impl UnusedFinderResult {
-    pub fn new(graph: Graph) -> Self {
-        Self { graph }
+    pub fn new(graph: Graph, config: UnusedFinderConfig) -> Self {
+        Self { config, graph }
     }
 
     /// Gets a report that can be presented to the JS bridge.
