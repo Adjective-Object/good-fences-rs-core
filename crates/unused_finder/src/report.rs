@@ -13,7 +13,7 @@ use crate::{
     graph::{Graph, GraphFile},
     parse::ExportedSymbol,
     tag::UsedTag,
-    UnusedFinderResult, UsedTagEnum,
+    UnusedFinderConfig, UnusedFinderResult, UsedTagEnum,
 };
 
 // Report of a single exported item in a file
@@ -127,11 +127,11 @@ fn extract_symbols<T: Send + Sync>(
         .collect::<AHashMap<String, Vec<T>>>()
 }
 
-fn is_used(tags: &UsedTag) -> bool {
+fn is_used(tags: &UsedTag, config: &UnusedFinderConfig) -> bool {
     tags.contains(UsedTag::FROM_ENTRY)
         || tags.contains(UsedTag::FROM_IGNORED)
         || tags.contains(UsedTag::FROM_TEST)
-        || tags.contains(UsedTag::TYPE_ONLY)
+        || (config.allow_unused_types && tags.contains(UsedTag::TYPE_ONLY))
 }
 fn include_extra(tags: &UsedTag) -> bool {
     !tags.is_empty() && *tags != UsedTag::FROM_ENTRY
@@ -144,7 +144,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
             .files
             .par_iter()
             .filter_map(|file| {
-                if is_used(&file.file_tags) {
+                if is_used(&file.file_tags, &value.config) {
                     return None;
                 }
                 Some(file.file_path.to_string_lossy().to_string())
@@ -173,7 +173,7 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                 let symbol_bitflags: &UsedTag =
                     file.symbol_tags.get(symbol_name).unwrap_or(&default);
 
-                if is_used(symbol_bitflags) {
+                if is_used(symbol_bitflags, &value.config) {
                     // don't return used symbols
                     return None;
                 }
