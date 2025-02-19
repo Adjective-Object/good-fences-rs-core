@@ -2,6 +2,85 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Wed, 19 Feb 2025 16:51:32 GMT",
+      "version": "0.19.0",
+      "tag": "@good-fences/api_v0.19.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "e43aa6412d9dfe002f5ff7ef5c2838b43c840c47",
+            "comment": "logger: add debug_logf macro for debug logger"
+          }
+        ],
+        "none": [
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "d7d3c08dfc790b03c84e7a8644de970313ae45d6",
+            "comment": "devcontainer.json: use slirp4netns to boot offline"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "4941ac9a1c73ba392c5efb6f487150662a137ef2",
+            "comment": ".vscode: add missing rust-analyzer extension"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "956ec8bb193a1f4e9a414375ea1d6e20385f57de",
+            "comment": "js_err: allow Into<Error> instead of just Error"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "882787eecb8c7213a9b01046372dd49b09956268",
+            "comment": "multi_err: new crate for combining errors"
+          }
+        ],
+        "patch": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "752be293a2bc2f678ec2c11022f0df1f90a52799",
+            "comment": "unused_finder: mark files as typeonly if their contents are typeonly"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "f66e808e16bd713ac48a7579b38286e5ffd16fbc",
+            "comment": "unused_finder: expand star exports during source file resolution"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "f44af1f6398ba779d23ad9e0cd3647ef305ce46c",
+            "comment": "unused_finder: show re-exported symbols in debug visualization"
+          },
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "3f2bd4e1b0fbc0ee363f630e5ac79b12d0c3e91f",
+            "comment": "fix bug causing tracking to fail"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "cf7bcb78071810b4b8159a447118d62a8d61500b",
+            "comment": "unused_finder: consume multi_err to report resolution errors"
+          },
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "5c363c53c26e1e2374085ac60d2f665761c75a4e",
+            "comment": "unused_finder: ensure tagging passes don't overwrite each other"
+          }
+        ]
+      }
+    },
+    {
       "date": "Tue, 03 Dec 2024 21:05:49 GMT",
       "version": "0.18.4",
       "tag": "@good-fences/api_v0.18.4",

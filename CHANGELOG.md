@@ -1,8 +1,25 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Tue, 03 Dec 2024 21:05:49 GMT and should not be manually modified.
+This log was last generated on Wed, 19 Feb 2025 16:51:32 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.19.0
+
+Wed, 19 Feb 2025 16:51:32 GMT
+
+### Minor changes
+
+- logger: add debug_logf macro for debug logger (mhuan13@gmail.com)
+
+### Patches
+
+- unused_finder: mark files as typeonly if their contents are typeonly (Maxwell.HuangHobbs@microsoft.com)
+- unused_finder: expand star exports during source file resolution (Maxwell.HuangHobbs@microsoft.com)
+- unused_finder: show re-exported symbols in debug visualization (Maxwell.HuangHobbs@microsoft.com)
+- fix bug causing tracking to fail (Maxwell.HuangHobbs@microsoft.com)
+- unused_finder: consume multi_err to report resolution errors (mhuan13@gmail.com)
+- unused_finder: ensure tagging passes don't overwrite each other (mhuan13@gmail.com)
 
 ## 0.18.4
 

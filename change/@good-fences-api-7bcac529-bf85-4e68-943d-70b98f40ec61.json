@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "fix bug causing tracking to fail",
-  "packageName": "@good-fences/api",
-  "email": "Maxwell.HuangHobbs@microsoft.com",
-  "dependentChangeType": "patch"
-}
