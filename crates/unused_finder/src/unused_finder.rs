@@ -166,6 +166,7 @@ impl SourceFiles {
                 }
 
                 delete_star_exports.push(imported_path.clone());
+                // expand star exports
                 deferred_re_exports.extend(target_file.import_export_info.exported_ids.iter().map(
                     |(symbol, metadata)| -> (PathBuf, ReExportedSymbol, ExportedSymbolMetadata) {
                         (
@@ -209,6 +210,14 @@ impl SourceFiles {
                     .insert(imported_path);
             }
 
+            // check if any of the deferred re-exports are star exports
+            let any_reexports_star =
+                deferred_re_exports
+                    .iter()
+                    .any(|(_imported_path, re_export, _metadata)| {
+                        re_export.imported == ExportedSymbol::Namespace
+                    });
+
             // mutate the current file to include the deferred re-exports
             let current_file_mut = source_files.get_mut(&current_path).unwrap();
             for (imported_path, re_export, metadata) in deferred_re_exports {
@@ -221,16 +230,7 @@ impl SourceFiles {
             }
 
             // if any of the deferred re-exports are star exports, re-queue this file in the frontier
-            if current_file_mut
-                .import_export_info
-                .export_from_symbols
-                .iter()
-                .any(|(_, re_exports)| {
-                    re_exports
-                        .keys()
-                        .any(|re_export| re_export.imported == ExportedSymbol::Namespace)
-                })
-            {
+            if any_reexports_star {
                 export_star_frontier.push(current_path);
             }
         }
@@ -1082,5 +1082,95 @@ impl UnusedFinderResult {
         writeln!(writer, "}}").map_err(JsErr::unknown)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::{Path, PathBuf};
+
+    use logger::StdioLogger;
+    use test_tmpdir::{amap2, aset, test_tmpdir};
+
+    use crate::{
+        parse::{ExportedSymbol, ExportedSymbolMetadata, ReExportedSymbol},
+        unused_finder::{resolver_for_packages, SourceFiles},
+        walk::{walk_src_files, RepoPackages},
+        ResolvedImportExportInfo,
+    };
+
+    #[test]
+    fn test_resolve_import_to_external() {
+        // Tests that interfaces are considered typeonly exports
+        let tmpdir = test_tmpdir!(
+            "search_root/main.js" => r#"
+                export * from './side-effect';
+            "#,
+            "search_root/side-effect.js" => r#"
+                export * from './transitive-1';
+            "#,
+            "search_root/transitive-1.js" => r#"
+                export const named_1 = 1;
+                export * from './transitive-2';
+            "#,
+            "search_root/transitive-2.js" => r#"
+                export const named_2 = 2;
+                export * from 'external-package';
+            "#
+        );
+
+        let logger = StdioLogger::new();
+        let unresolved_files = walk_src_files(
+            &logger,
+            &[Path::new("search_root")],
+            tmpdir.root(),
+            &Vec::<String>::new(),
+        )
+        .unwrap();
+        let test_pkgs = RepoPackages::new();
+
+        // resolve sourceFiles
+        let resolved_files = SourceFiles::try_resolve(
+            &logger,
+            unresolved_files,
+            resolver_for_packages(tmpdir.root().to_path_buf(), &test_pkgs),
+        )
+        .unwrap();
+
+        // expect the resolved source file to have the correct import_export_info
+        assert_eq!(
+            resolved_files
+                .source_files
+                .get(&tmpdir.root_join("search_root/main.js"))
+                .unwrap()
+                .import_export_info
+                .with_zeroed_spans(),
+            ResolvedImportExportInfo {
+                executed_paths: aset! {
+                    tmpdir.root_join("search_root/side-effect.js")
+                },
+                export_from_symbols: amap2! {
+                    tmpdir.root_join("search_root/transitive-1.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_1".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    tmpdir.root_join("search_root/transitive-2.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_2".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    PathBuf::from("external-package") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Namespace,
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    }
+                },
+                ..Default::default()
+            }
+        );
     }
 }
