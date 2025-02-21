@@ -17,7 +17,7 @@ use crate::{
     walk::{walk_src_files, RepoPackages, WalkedFiles},
     walked_file::ResolvedSourceFile,
 };
-use ahashmap::AHashMap;
+use ahashmap::{AHashMap, AHashSet};
 use anyhow::{Context, Result};
 use import_resolver::swc_resolver::{
     combined_resolver::CombinedResolverCaches,
@@ -134,6 +134,7 @@ impl SourceFiles {
             })
             .map(|(k, _v)| k.clone())
             .collect::<Vec<_>>();
+        let mut deferred_effect_imports = AHashMap::<PathBuf, AHashSet<PathBuf>>::default();
         while let Some(current_path) = export_star_frontier.pop() {
             let current_file = source_files.get(&current_path).unwrap();
             let current_export_from_symbols = &current_file.import_export_info.export_from_symbols;
@@ -150,8 +151,8 @@ impl SourceFiles {
                     Some(file) => file,
                     None => {
                         logger.warn(format!(
-                            "Could not find file {} to expand an 'export * from' statement. This was probably an export to an external file or module, which we can't check safely",
-                            imported_path.display()
+                            "Could not expand 'export * from '{imported}' statement. '{imported}' is probably an export to an external file or module, which we can't check safely",
+                            imported=imported_path.display(),
                         ));
                         continue;
                     }
@@ -197,17 +198,25 @@ impl SourceFiles {
                 );
             }
 
-            // delete all the star exports we expanded, and replace them with effect imports
+            // delete all the star exports we expanded, and queue them as effect imports
+            //
+            // We defer this until after the loop because we don't want to recursively expand this array,
+            // only the re-exported names!
             let current_file_mut = source_files.get_mut(&current_path).unwrap();
+            let entry = match deferred_effect_imports.get_mut(&current_path) {
+                Some(entry) => entry,
+                None => {
+                    deferred_effect_imports.insert(current_path.clone(), Default::default());
+                    deferred_effect_imports.get_mut(&current_path).unwrap()
+                }
+            };
             for imported_path in delete_star_exports {
                 current_file_mut
                     .import_export_info
                     .export_from_symbols
                     .remove(&imported_path);
-                current_file_mut
-                    .import_export_info
-                    .executed_paths
-                    .insert(imported_path);
+                println!("deferred effect import: {:#?}", imported_path);
+                entry.insert(imported_path);
             }
 
             // check if any of the deferred re-exports are star exports
@@ -232,6 +241,14 @@ impl SourceFiles {
             // if any of the deferred re-exports are star exports, re-queue this file in the frontier
             if any_reexports_star {
                 export_star_frontier.push(current_path);
+            }
+        }
+        // apply deferred effect imports
+        println!("deferred effect imports: {:#?}", deferred_effect_imports);
+        for (path, effect_imports) in deferred_effect_imports {
+            let file = source_files.get_mut(&path).unwrap();
+            for effect_import in effect_imports {
+                file.import_export_info.executed_paths.insert(effect_import);
             }
         }
 
@@ -1171,6 +1188,161 @@ mod test {
                 },
                 ..Default::default()
             }
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_cycle() {
+        // Tests that interfaces are considered typeonly exports
+        let tmpdir = test_tmpdir!(
+            "search_root/loop-1.js" => r#"
+                export const named_1 = 1;
+                export * from './loop-2';
+            "#,
+            "search_root/loop-2.js" => r#"
+                export const named_2 = 2;
+                export * from './loop-3';
+            "#,
+            "search_root/loop-3.js" => r#"
+                export const named_3 = 3;
+                export * from './loop-1';
+                export * from 'external-package';
+            "#
+        );
+
+        let logger = StdioLogger::new();
+        let unresolved_files = walk_src_files(
+            &logger,
+            &[Path::new("search_root")],
+            tmpdir.root(),
+            &Vec::<String>::new(),
+        )
+        .unwrap();
+        let test_pkgs = RepoPackages::new();
+
+        // resolve sourceFiles
+        let resolved_files = SourceFiles::try_resolve(
+            &logger,
+            unresolved_files,
+            resolver_for_packages(tmpdir.root().to_path_buf(), &test_pkgs),
+        )
+        .unwrap();
+
+        // expect the resolved source file to have the correct import_export_info
+        assert_eq!(
+            ResolvedImportExportInfo {
+                exported_ids: amap2! {
+                    ExportedSymbol::Named("named_1".into()) => ExportedSymbolMetadata::default()
+                },
+                executed_paths: aset! {
+                    tmpdir.root_join("search_root/loop-2.js")
+                },
+                export_from_symbols: amap2! {
+                    tmpdir.root_join("search_root/loop-2.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_2".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    tmpdir.root_join("search_root/loop-3.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_3".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    PathBuf::from("external-package") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Namespace,
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    }
+                },
+                ..Default::default()
+            },
+            resolved_files
+                .source_files
+                .get(&tmpdir.root_join("search_root/loop-1.js"))
+                .unwrap()
+                .import_export_info
+                .with_zeroed_spans(),
+        );
+
+        // expect the resolved source file to have the correct import_export_info
+        assert_eq!(
+            ResolvedImportExportInfo {
+                exported_ids: amap2! {
+                    ExportedSymbol::Named("named_2".into()) => ExportedSymbolMetadata::default()
+                },
+                executed_paths: aset! {
+                    tmpdir.root_join("search_root/loop-3.js")
+                },
+                export_from_symbols: amap2! {
+                    tmpdir.root_join("search_root/loop-1.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_1".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    tmpdir.root_join("search_root/loop-3.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_3".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    PathBuf::from("external-package") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Namespace,
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    }
+                },
+                ..Default::default()
+            },
+            resolved_files
+                .source_files
+                .get(&tmpdir.root_join("search_root/loop-2.js"))
+                .unwrap()
+                .import_export_info
+                .with_zeroed_spans(),
+        );
+
+        // expect the resolved source file to have the correct import_export_info
+        assert_eq!(
+            ResolvedImportExportInfo {
+                exported_ids: amap2! {
+                    ExportedSymbol::Named("named_2".into()) => ExportedSymbolMetadata::default()
+                },
+                executed_paths: aset! {
+                    tmpdir.root_join("search_root/loop-1.js")
+                },
+                export_from_symbols: amap2! {
+                    tmpdir.root_join("search_root/loop-1.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_1".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    tmpdir.root_join("search_root/loop-2.js") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Named("named_2".into()),
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    },
+                    PathBuf::from("external-package") => amap2! {
+                        ReExportedSymbol{
+                            imported: ExportedSymbol::Namespace,
+                            renamed_to: None
+                        } => ExportedSymbolMetadata::default()
+                    }
+                },
+                ..Default::default()
+            },
+            resolved_files
+                .source_files
+                .get(&tmpdir.root_join("search_root/loop-3.js"))
+                .unwrap()
+                .import_export_info
+                .with_zeroed_spans(),
         );
     }
 }
