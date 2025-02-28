@@ -205,6 +205,54 @@ impl ResolvedImportExportInfo {
             .chain(re_exports)
             .chain(executed_paths)
     }
+
+    /// Test helper that gets a copy of this ImportExportInfo with all spans
+    /// zeroed.
+    pub fn with_zeroed_spans(&self) -> Self {
+        let exported_ids = self
+            .exported_ids
+            .iter()
+            .map(|(symbol, meta)| {
+                (
+                    symbol.clone(),
+                    ExportedSymbolMetadata {
+                        span: Span::default(),
+                        ..meta.clone()
+                    },
+                )
+            })
+            .collect();
+        let export_from_symbols = self
+            .export_from_symbols
+            .iter()
+            .map(|(path, symbols)| {
+                (
+                    path.clone(),
+                    symbols
+                        .iter()
+                        .map(|(symbol, meta)| {
+                            (
+                                symbol.clone(),
+                                ExportedSymbolMetadata {
+                                    span: Span::default(),
+                                    ..meta.clone()
+                                },
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
+
+        Self {
+            exported_ids,
+            export_from_symbols,
+            imported_symbols: self.imported_symbols.clone(),
+            require_paths: self.require_paths.clone(),
+            imported_paths: self.imported_paths.clone(),
+            executed_paths: self.executed_paths.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Default)]
