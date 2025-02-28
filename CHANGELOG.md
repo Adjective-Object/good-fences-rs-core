@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Wed, 19 Feb 2025 16:51:32 GMT and should not be manually modified.
+This log was last generated on Fri, 28 Feb 2025 19:51:32 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.19.1
+
+Fri, 28 Feb 2025 19:51:32 GMT
+
+### Patches
+
+- Fix infinite loops in export * expansion (mhuan13@gmail.com)
 
 ## 0.19.0
 

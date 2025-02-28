@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Fri, 28 Feb 2025 19:51:32 GMT",
+      "version": "0.19.1",
+      "tag": "@good-fences/api_v0.19.1",
+      "comments": {
+        "patch": [
+          {
+            "author": "mhuan13@gmail.com",
+            "package": "@good-fences/api",
+            "commit": "d5ed7e5b6822dbbfb0d511451c35e541a43adeb7",
+            "comment": "Fix infinite loops in export * expansion"
+          }
+        ]
+      }
+    },
+    {
       "date": "Wed, 19 Feb 2025 16:51:32 GMT",
       "version": "0.19.0",
       "tag": "@good-fences/api_v0.19.0",
