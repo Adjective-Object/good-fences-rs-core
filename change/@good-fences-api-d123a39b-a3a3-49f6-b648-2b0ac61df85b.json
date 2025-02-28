@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Fix infinite loops in export * expansion",
+  "packageName": "@good-fences/api",
+  "email": "mhuan13@gmail.com",
+  "dependentChangeType": "patch"
+}
