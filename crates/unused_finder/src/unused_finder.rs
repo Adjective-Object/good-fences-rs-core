@@ -140,7 +140,14 @@ impl SourceFiles {
         // This breaks import cycles on a per-module basis.
         let mut visited = HashSet::<(PathBuf, PathBuf)>::new();
         let mut deferred_effect_imports = AHashMap::<PathBuf, AHashSet<PathBuf>>::default();
+
+        let mut iterations = 0;
+        const MAX_ITERATIONS: usize = 100000;
         while let Some(current_path) = export_star_frontier.pop() {
+            iterations += 1;
+            if iterations > MAX_ITERATIONS {
+                panic!("recursive expansion of export * expressions in try_resolve exceeded maximum depth")
+            }
             let current_file = source_files.get(&current_path).unwrap();
             let current_export_from_symbols = &current_file.import_export_info.export_from_symbols;
 
@@ -790,7 +797,17 @@ const GENERIC_SEGMENTS: [&str; 4] = ["shared", "src", "lib", "index"];
 fn cluster_label_for_file(graph_file: &GraphFile) -> String {
     let mut segments = Vec::new();
     let mut path: Option<&Path> = Some(&graph_file.file_path);
+
+    let mut iterations = 0;
+    const MAX_ITERATIONS: usize = 1000;
     while let Some(p) = path {
+        iterations += 1;
+        if iterations > MAX_ITERATIONS {
+            panic!(
+                "recursive expansion of export * expressions in try_resolve exceeded maximum depth"
+            )
+        }
+
         let stem = p.file_stem().unwrap_or_default();
         segments.push(p.file_name().unwrap_or(stem).to_string_lossy().to_string());
 
@@ -885,6 +902,7 @@ impl UnusedFinderResult {
                 .join("\n")
         ));
 
+        const MAX_ITERATIONS: usize = 100000;
         // expand upwards, this is n^2 time! bad times.
         let mut u_i = 0;
         while !up_frontier.is_empty() {
@@ -919,6 +937,9 @@ impl UnusedFinderResult {
                 .collect::<HashSet<usize>>();
             up_frontier = next_frontier;
             u_i += 1;
+            if u_i > MAX_ITERATIONS {
+                panic!("recursive upward expansion of graph exceeded maximum depth")
+            }
             if let Some(limit) = up_limit {
                 if u_i >= limit {
                     break;
@@ -960,6 +981,10 @@ impl UnusedFinderResult {
 
             down_frontier = next_frontier;
             d_i += 1;
+            if d_i > MAX_ITERATIONS {
+                panic!("recursive upward expansion of graph exceeded maximum depth")
+            }
+
             if let Some(limit) = down_limit {
                 if d_i >= limit {
                     break;
