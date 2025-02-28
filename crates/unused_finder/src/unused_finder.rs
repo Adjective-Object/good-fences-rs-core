@@ -150,23 +150,23 @@ impl SourceFiles {
                 Vec::<(PathBuf, ReExportedSymbol, ExportedSymbolMetadata)>::new();
             let mut delete_star_exports = Vec::<PathBuf>::new();
 
-            println!("expanding frontier file {}", current_path.display());
+            // println!("expanding frontier file {}", current_path.display());
             for (imported_path, re_exports) in current_export_from_symbols.iter() {
                 // skip imports back to the current path to break cycles
                 let visited_key = (current_path.clone(), imported_path.clone());
                 if !visited.insert(visited_key) {
-                    println!(
-                        "skipping already expanded re_exports ({} -> {})",
-                        current_path.display(),
-                        imported_path.display()
-                    );
+                    // println!(
+                    //     "skipping already expanded re_exports ({} -> {})",
+                    //     current_path.display(),
+                    //     imported_path.display()
+                    // );
                     continue;
                 }
-                println!(
-                    "expanding frontier re_exports from {} -> {}",
-                    current_path.display(),
-                    imported_path.display()
-                );
+                // println!(
+                //     "expanding frontier re_exports from {} -> {}",
+                //     current_path.display(),
+                //     imported_path.display()
+                // );
 
                 // can't expand export * from external
                 let target_file = match source_files.get(imported_path) {
@@ -246,18 +246,18 @@ impl SourceFiles {
                     .import_export_info
                     .export_from_symbols
                     .remove(&imported_path);
-                println!(
-                    "deferred effect import: {:#?} -> {:#?}",
-                    current_path, imported_path
-                );
+                // println!(
+                //     "deferred effect import: {:#?} -> {:#?}",
+                //     current_path, imported_path
+                // );
                 deferred_files_entry.insert(imported_path);
             }
             // Add indirect effect exports we already recursively expanded.
             for indirect_entry in indirect_deferred_effect_exports {
-                println!(
-                    "indirect deferred effect import: {:#?} -> {:#?}",
-                    current_path, indirect_entry
-                );
+                // println!(
+                //     "indirect deferred effect import: {:#?} -> {:#?}",
+                //     current_path, indirect_entry
+                // );
                 if current_path != indirect_entry {
                     deferred_files_entry.insert(indirect_entry);
                 }
@@ -288,7 +288,7 @@ impl SourceFiles {
             }
         }
         // apply deferred effect imports
-        println!("deferred effect imports: {:#?}", deferred_effect_imports);
+        // println!("deferred effect imports: {:#?}", deferred_effect_imports);
         for (path, effect_imports) in deferred_effect_imports {
             let file = source_files.get_mut(&path).unwrap();
             for effect_import in effect_imports {
