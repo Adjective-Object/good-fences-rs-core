@@ -134,6 +134,11 @@ impl SourceFiles {
             })
             .map(|(k, _v)| k.clone())
             .collect::<Vec<_>>();
+        // hash_set of re-export expansion tuples of form
+        // (from_file -> to_file)
+        //
+        // This breaks import cycles on a per-module basis.
+        let mut visited = HashSet::<(PathBuf, PathBuf)>::new();
         let mut deferred_effect_imports = AHashMap::<PathBuf, AHashSet<PathBuf>>::default();
         while let Some(current_path) = export_star_frontier.pop() {
             let current_file = source_files.get(&current_path).unwrap();
@@ -145,7 +150,24 @@ impl SourceFiles {
                 Vec::<(PathBuf, ReExportedSymbol, ExportedSymbolMetadata)>::new();
             let mut delete_star_exports = Vec::<PathBuf>::new();
 
+            println!("expanding frontier file {}", current_path.display());
             for (imported_path, re_exports) in current_export_from_symbols.iter() {
+                // skip imports back to the current path to break cycles
+                let visited_key = (current_path.clone(), imported_path.clone());
+                if !visited.insert(visited_key) {
+                    println!(
+                        "skipping already expanded re_exports ({} -> {})",
+                        current_path.display(),
+                        imported_path.display()
+                    );
+                    continue;
+                }
+                println!(
+                    "expanding frontier re_exports from {} -> {}",
+                    current_path.display(),
+                    imported_path.display()
+                );
+
                 // can't expand export * from external
                 let target_file = match source_files.get(imported_path) {
                     Some(file) => file,
@@ -186,6 +208,9 @@ impl SourceFiles {
                         .import_export_info
                         .export_from_symbols
                         .iter()
+                        .filter(|(imported_path,_)| {
+                            **imported_path != current_path
+                        })
                         .flat_map(|(imported_path, metadata)| {
                             metadata.iter().map(|(symbol, metadata)| -> (PathBuf, ReExportedSymbol, ExportedSymbolMetadata) {
                                 (
@@ -199,11 +224,17 @@ impl SourceFiles {
             }
 
             // delete all the star exports we expanded, and queue them as effect imports
-            //
-            // We defer this until after the loop because we don't want to recursively expand this array,
-            // only the re-exported names!
+            let indirect_deferred_effect_exports = delete_star_exports
+                .iter()
+                .flat_map(|exp| {
+                    deferred_effect_imports
+                        .get(exp)
+                        .map(|elem| elem.iter().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<PathBuf>>();
             let current_file_mut = source_files.get_mut(&current_path).unwrap();
-            let entry = match deferred_effect_imports.get_mut(&current_path) {
+            let deferred_files_entry = match deferred_effect_imports.get_mut(&current_path) {
                 Some(entry) => entry,
                 None => {
                     deferred_effect_imports.insert(current_path.clone(), Default::default());
@@ -215,8 +246,21 @@ impl SourceFiles {
                     .import_export_info
                     .export_from_symbols
                     .remove(&imported_path);
-                println!("deferred effect import: {:#?}", imported_path);
-                entry.insert(imported_path);
+                println!(
+                    "deferred effect import: {:#?} -> {:#?}",
+                    current_path, imported_path
+                );
+                deferred_files_entry.insert(imported_path);
+            }
+            // Add indirect effect exports we already recursively expanded.
+            for indirect_entry in indirect_deferred_effect_exports {
+                println!(
+                    "indirect deferred effect import: {:#?} -> {:#?}",
+                    current_path, indirect_entry
+                );
+                if current_path != indirect_entry {
+                    deferred_files_entry.insert(indirect_entry);
+                }
             }
 
             // check if any of the deferred re-exports are star exports
@@ -1235,7 +1279,8 @@ mod test {
                     ExportedSymbol::Named("named_1".into()) => ExportedSymbolMetadata::default()
                 },
                 executed_paths: aset! {
-                    tmpdir.root_join("search_root/loop-2.js")
+                    tmpdir.root_join("search_root/loop-2.js"),
+                    tmpdir.root_join("search_root/loop-3.js")
                 },
                 export_from_symbols: amap2! {
                     tmpdir.root_join("search_root/loop-2.js") => amap2! {
@@ -1274,7 +1319,8 @@ mod test {
                     ExportedSymbol::Named("named_2".into()) => ExportedSymbolMetadata::default()
                 },
                 executed_paths: aset! {
-                    tmpdir.root_join("search_root/loop-3.js")
+                    tmpdir.root_join("search_root/loop-3.js"),
+                    tmpdir.root_join("search_root/loop-1.js")
                 },
                 export_from_symbols: amap2! {
                     tmpdir.root_join("search_root/loop-1.js") => amap2! {
@@ -1310,10 +1356,11 @@ mod test {
         assert_eq!(
             ResolvedImportExportInfo {
                 exported_ids: amap2! {
-                    ExportedSymbol::Named("named_2".into()) => ExportedSymbolMetadata::default()
+                    ExportedSymbol::Named("named_3".into()) => ExportedSymbolMetadata::default()
                 },
                 executed_paths: aset! {
-                    tmpdir.root_join("search_root/loop-1.js")
+                    tmpdir.root_join("search_root/loop-1.js"),
+                    tmpdir.root_join("search_root/loop-2.js")
                 },
                 export_from_symbols: amap2! {
                     tmpdir.root_join("search_root/loop-1.js") => amap2! {
