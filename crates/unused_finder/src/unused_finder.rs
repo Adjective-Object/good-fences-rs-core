@@ -180,7 +180,7 @@ impl SourceFiles {
                     Some(file) => file,
                     None => {
                         logger.warn(format!(
-                            "Could not expand 'export * from '{imported}' statement. '{imported}' is probably an export to an external file or module, which we can't check safely",
+                            "Could not expand 'export * from '{imported}' in expanded exports of {current_path:#?}. '{imported}' is probably an external module, which we can't check safely",
                             imported=imported_path.display(),
                         ));
                         continue;
@@ -1233,6 +1233,8 @@ mod test {
                 .with_zeroed_spans(),
             ResolvedImportExportInfo {
                 executed_paths: aset! {
+                    tmpdir.root_join("search_root/transitive-1.js"),
+                    tmpdir.root_join("search_root/transitive-2.js"),
                     tmpdir.root_join("search_root/side-effect.js")
                 },
                 export_from_symbols: amap2! {
