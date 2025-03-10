@@ -169,6 +169,7 @@ dependencies = [
  "swc_ecma_ast",
  "swc_ecma_visit",
  "swc_utils_parse",
+ "test_tmpdir",
  "thiserror",
 ]
 

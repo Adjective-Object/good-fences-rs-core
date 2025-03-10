@@ -3,7 +3,10 @@
 // use logger_srcfile::SrcFileLogger;
 // use swc_common::Spanned;
 
-// use crate::{NormalSegment, Segment, SegmentKind};
+// use crate::{
+//     import_expr_visitor::{self, ImportsAndRequires},
+//     NormalSegment, Segment, SegmentKind,
+// };
 
 // struct Visitor {
 //     segments: Vec<SegmentKind>,
@@ -45,13 +48,16 @@
 //                 | swc_ecma_ast::Stmt::ForOf(_) => {
 //                     // Visit to extract the names
 //                     let names = ast_name_tracker::visitor::find_names(file_logger, stmt);
-//                     let imports_exports =
+//                     let ImportsAndRequires {
+//                         imported_paths: lazy_imports,
+//                         require_paths: requires,
+//                     } = import_expr_visitor::find_imports_and_requires(stmt);
 //                     Some(Segment {
 //                         variable_scope: names,
 //                         segment_type: SegmentKind::Normal(NormalSegment {
 //                             imports: crate::NormalSegmentImportInfo {
-//                                 lazy_imports: (),
-//                                 requires: (),
+//                                 lazy_imports,
+//                                 requires,
 //                             },
 //                         }),
 //                     })

@@ -19,6 +19,7 @@ swc_common.workspace = true
 swc_ecma_ast.workspace = true
 swc_ecma_visit.workspace = true
 swc_utils_parse = { version = "0.2.0", path = "../swc_utils_parse" }
+test_tmpdir = { version = "0.1.0", path = "../test_tmpdir" }
 thiserror.workspace = true
 # ahashmap = { version = "0.2.0", path = "../ahashmap" }
 # logger = { version = "0.2.0", path = "../logger" }
