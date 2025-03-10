@@ -2,6 +2,21 @@
   "name": "@good-fences/api",
   "entries": [
     {
+      "date": "Mon, 10 Mar 2025 23:57:11 GMT",
+      "version": "0.20.0",
+      "tag": "@good-fences/api_v0.20.0",
+      "comments": {
+        "minor": [
+          {
+            "author": "Maxwell.HuangHobbs@microsoft.com",
+            "package": "@good-fences/api",
+            "commit": "31938e334830deb4007ead9fa476dd8a6b4b6431",
+            "comment": "change to devongovett/glob-match for js-like globs"
+          }
+        ]
+      }
+    },
+    {
       "date": "Fri, 28 Feb 2025 19:51:32 GMT",
       "version": "0.19.1",
       "tag": "@good-fences/api_v0.19.1",

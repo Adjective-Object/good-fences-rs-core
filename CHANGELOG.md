@@ -1,8 +1,16 @@
 # Change Log - @good-fences/api
 
-This log was last generated on Fri, 28 Feb 2025 19:51:32 GMT and should not be manually modified.
+This log was last generated on Mon, 10 Mar 2025 23:57:11 GMT and should not be manually modified.
 
 <!-- Start content -->
+
+## 0.20.0
+
+Mon, 10 Mar 2025 23:57:11 GMT
+
+### Minor changes
+
+- change to devongovett/glob-match for js-like globs (Maxwell.HuangHobbs@microsoft.com)
 
 ## 0.19.1
 
