@@ -5,8 +5,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::cfg::GlobGroup;
 use crate::{
-    cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
+    cfg::{package_match_rules::compile_globs, UnusedFinderConfig, UnusedFinderJSONConfig},
     graph::{Graph, GraphFile},
     ignore_file::IgnoreFile,
     parse::{
@@ -746,14 +747,12 @@ impl UnusedFinder {
             .source_files
             .par_iter()
             .filter_map(|(path, _)| -> Option<&Path> {
-                for test_glob in &self.config.test_files {
-                    let relative = path.strip_prefix(&self.config.repo_root).unwrap_or(path);
-                    if test_glob.matches_path(relative) {
-                        return Some(path);
-                    }
+                let relative = path.strip_prefix(&self.config.repo_root).unwrap_or(path);
+                if self.config.test_files.globset.is_match(relative) {
+                    Some(path)
+                } else {
+                    None
                 }
-
-                None
             })
             .collect()
     }
@@ -853,13 +852,13 @@ impl UnusedFinderResult {
         writer: &mut dyn std::io::Write,
     ) -> Result<(), JsErr> {
         // Compile the glob
-        let filter_glob: Option<Vec<glob::Pattern>> = filter_glob_str
-            .map(|pat| -> Result<Vec<glob::Pattern>, glob::PatternError> {
-                Ok(vec![
-                    glob::Pattern::new(pat)?,
-                    glob::Pattern::new(&format!("**/{}/**", pat))?,
-                    glob::Pattern::new(&format!("**/{}", pat))?,
-                    glob::Pattern::new(&format!("{}/**", pat))?,
+        let filter_glob: Option<GlobGroup> = filter_glob_str
+            .map(|pat| -> Result<GlobGroup, globset::Error> {
+                compile_globs(&[
+                    pat,
+                    format!("**/{}/**", pat).as_str(),
+                    format!("**/{}", pat).as_str(),
+                    format!("{}/**", pat).as_str(),
                 ])
             })
             .transpose()
@@ -875,10 +874,7 @@ impl UnusedFinderResult {
             .enumerate()
             .filter_map(|(i, graph_file)| match filter_glob {
                 Some(ref filter_glob) => {
-                    if filter_glob
-                        .iter()
-                        .any(|pat| pat.matches_path(&graph_file.file_path))
-                    {
+                    if filter_glob.globset.is_match(&graph_file.file_path) {
                         Some(i)
                     } else {
                         None

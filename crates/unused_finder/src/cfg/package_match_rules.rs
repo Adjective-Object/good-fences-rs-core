@@ -2,13 +2,27 @@ use std::path::Path;
 
 use ahashmap::AHashSet;
 
-use super::{ConfigError, GlobInterp, PatErr};
+use super::{ConfigError, GlobGroup, GlobInterp, PatErr};
 
 #[derive(Debug, Default, Clone)]
 pub struct PackageMatchRules {
     pub names: AHashSet<String>,
-    pub name_patterns: Vec<glob::Pattern>,
-    pub path_patterns: Vec<glob::Pattern>,
+    pub name_patterns: Vec<globset::GlobMatcher>,
+    pub path_patterns: Vec<globset::GlobMatcher>,
+}
+
+pub fn compile_globs(glob_strs: &[&str]) -> Result<GlobGroup, globset::Error> {
+    let mut set = globset::GlobSetBuilder::new();
+    let mut globs = Vec::with_capacity(glob_strs.len());
+    for glob_str in glob_strs.iter() {
+        let as_glob = globset::Glob::new(glob_str)?;
+        globs.push(as_glob.clone());
+        set.add(as_glob);
+    }
+    Ok(GlobGroup {
+        globset: set.build()?,
+        globs,
+    })
 }
 
 impl PackageMatchRules {
@@ -21,7 +35,7 @@ impl PackageMatchRules {
             return true;
         }
         for pattern in &self.name_patterns {
-            if pattern.matches(package_name) {
+            if pattern.is_match(package_name) {
                 return true;
             }
         }
@@ -35,16 +49,14 @@ impl PackageMatchRules {
                 path_string = package_path.to_string_lossy().into_owned();
                 &path_string
             });
-            if pattern.matches(path_string_ref) {
+            if pattern.is_match(path_string_ref) {
                 return true;
             }
         }
 
         false
     }
-}
 
-impl PackageMatchRules {
     pub fn empty() -> Self {
         Self::default()
     }
@@ -59,14 +71,14 @@ impl<T: AsRef<str> + ToString> TryFrom<Vec<T>> for PackageMatchRules {
         let mut errs: Vec<PatErr> = Vec::new();
         for (i, item) in value.into_iter().enumerate() {
             if let Some(trimmed) = item.as_ref().strip_prefix("./") {
-                match glob::Pattern::new(trimmed) {
+                match globset::Glob::new(trimmed) {
                     Err(e) => errs.push(PatErr(i, GlobInterp::Path, e)),
-                    Ok(r) => path_patterns.push(r),
+                    Ok(r) => path_patterns.push(r.compile_matcher()),
                 };
-            } else if item.as_ref().chars().any(|c| "~)('!*".contains(c)) {
-                match glob::Pattern::new(item.as_ref()) {
+            } else if item.as_ref().chars().any(|c| "~)('!*,{".contains(c)) {
+                match globset::Glob::new(item.as_ref()) {
                     Err(e) => errs.push(PatErr(i, GlobInterp::Name, e)),
-                    Ok(r) => name_patterns.push(r),
+                    Ok(r) => name_patterns.push(r.compile_matcher()),
                 };
             } else {
                 names.insert(item.to_string());
@@ -74,7 +86,7 @@ impl<T: AsRef<str> + ToString> TryFrom<Vec<T>> for PackageMatchRules {
         }
 
         if !errs.is_empty() {
-            return Err(ConfigError::InvalidGlobPatterns(super::ErrList(errs)));
+            return Err(ConfigError::InvalidPackageMatchGlob(super::ErrList(errs)));
         }
 
         Ok(Self {
