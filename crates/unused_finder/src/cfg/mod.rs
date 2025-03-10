@@ -4,7 +4,6 @@ use std::{
     path::Path,
 };
 
-use globset::GlobMatcher;
 use itertools::Itertools;
 use package_match_rules::PackageMatchRules;
 use rayon::iter::Either;

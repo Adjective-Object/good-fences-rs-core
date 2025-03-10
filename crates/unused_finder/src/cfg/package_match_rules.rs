@@ -1,25 +1,14 @@
 use std::path::Path;
 
 use ahashmap::AHashSet;
-use itertools::Itertools;
 
 use super::{ConfigError, GlobGroup, GlobInterp, PatErr};
 
-#[derive(custom_debug::Debug, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct PackageMatchRules {
     pub names: AHashSet<String>,
-    #[debug(with = debug_as_glob_str)]
     pub name_patterns: Vec<globset::GlobMatcher>,
-    #[debug(with = debug_as_glob_str)]
     pub path_patterns: Vec<globset::GlobMatcher>,
-}
-
-#[allow(clippy::ptr_arg)]
-fn debug_as_glob_str(
-    n: &Vec<globset::GlobMatcher>,
-    f: &mut core::fmt::Formatter,
-) -> core::fmt::Result {
-    write!(f, "[{}]", n.iter().map(|m| m.glob().glob()).join(", "))
 }
 
 pub fn compile_globs(glob_strs: &[&str]) -> Result<GlobGroup, globset::Error> {

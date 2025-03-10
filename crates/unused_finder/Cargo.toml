@@ -41,7 +41,6 @@ logger = { version = "0.2.0", path = "../logger" }
 logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
 multi_err = { version = "0.2.0", path = "../multi_err" }
 globset = "0.4.16"
-custom_debug = "0.6.2"
 
 [dev-dependencies]
 stringreader = "0.1.1"
