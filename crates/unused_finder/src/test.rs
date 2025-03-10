@@ -446,7 +446,7 @@ fn test_test_pattern() {
         UnusedFinderConfig {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
-            test_files: compile_globs(vec!["**/__tests__/*Test.js"]).unwrap(),
+            test_files: compile_globs(&["**/__tests__/*Test.js"]).unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
@@ -481,7 +481,7 @@ fn test_relative_test_pattern() {
         UnusedFinderConfig {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
-            test_files: compile_globs(vec!["search_root/tests/**"]).unwrap(),
+            test_files: compile_globs(&["search_root/tests/**"]).unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {
@@ -528,7 +528,7 @@ fn test_testfiles_ignored() {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
             entry_packages: PackageMatchRules::empty(),
-            test_files: compile_globs(vec!["**/__tests__/**"]).unwrap(),
+            test_files: compile_globs(&["**/__tests__/**"]).unwrap(),
             ..Default::default()
         },
         UnusedFinderReport {

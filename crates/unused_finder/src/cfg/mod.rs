@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    fmt::{Display, Formatter},
+    fmt::{Debug, Display, Formatter},
     path::Path,
 };
 
@@ -121,8 +121,21 @@ pub struct UnusedFinderJSONConfig {
     pub test_files: Vec<String>,
 }
 
+#[derive(Default, Clone)]
+pub struct GlobGroup {
+    pub globset: globset::GlobSet,
+    // keep these around for debugging
+    pub globs: Vec<globset::Glob>,
+}
+
+impl Debug for GlobGroup {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[{}]", self.globs.iter().map(|m| m.glob()).join(", "))
+    }
+}
+
 /// Configuration for the unused symbols finder
-#[derive(custom_debug::Debug, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct UnusedFinderConfig {
     /// If true, the finder should report exported symbols that are not used anywhere in the project
     pub report_exported_symbols: bool,
@@ -145,8 +158,7 @@ pub struct UnusedFinderConfig {
     /// Matches are made against the relative file paths from the repo root.
     /// A matching file will be tagged as a "test" file, and will be excluded
     /// from the list of unused files
-    #[debug(with = debug_as_glob_str)]
-    pub test_files: Vec<globset::GlobMatcher>,
+    pub test_files: GlobGroup,
 
     /// Globs of individual files & directories to skip during the file walk.
     ///
@@ -155,42 +167,27 @@ pub struct UnusedFinderConfig {
     pub skip: Vec<String>,
 }
 
-#[allow(clippy::ptr_arg)]
-fn debug_as_glob_str(n: &Vec<GlobMatcher>, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "[{}]", n.iter().map(|m| m.glob().glob()).join(", "))
-}
-
 impl UnusedFinderConfig {
     pub fn is_test_path(&self, path: &Path) -> bool {
         let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
         let relative = relative.strip_prefix("/").unwrap_or(relative);
-        for test_glob in &self.test_files {
-            if test_glob.is_match(relative) {
-                return true;
-            }
-        }
-        false
+        self.test_files.globset.is_match(relative)
     }
 
     pub fn is_test_path_str(&self, path: &str) -> bool {
         let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
         let relative = relative.strip_prefix('/').unwrap_or(relative);
-        for test_glob in &self.test_files {
-            if test_glob.is_match(relative) {
-                return true;
-            }
-        }
-        false
+        self.test_files.globset.is_match(relative)
     }
 }
 
 impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
     type Error = ConfigError;
     fn try_from(value: UnusedFinderJSONConfig) -> std::result::Result<Self, Self::Error> {
-        let (test_globs, test_glob_errs): (Vec<globset::GlobMatcher>, Vec<_>) =
+        let (test_globs, test_glob_errs): (Vec<globset::Glob>, Vec<_>) =
             value.test_files.iter().partition_map(|pat| {
                 println!("compile glob {}", pat);
-                match globset::Glob::new(pat).map(|pat| pat.compile_matcher()) {
+                match globset::Glob::new(pat) {
                     Ok(pat) => Either::Left(pat),
                     Err(err) => Either::Right(PatErr(0, GlobInterp::Path, err)),
                 }
@@ -198,6 +195,14 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
         if !test_glob_errs.is_empty() {
             return Err(ConfigError::InvalidTestsGlob(ErrList(test_glob_errs)));
         }
+
+        let mut set_builder = globset::GlobSetBuilder::new();
+        for glob in test_globs.iter() {
+            set_builder.add(glob.clone());
+        }
+        let globset = set_builder.build().map_err(|err| {
+            ConfigError::InvalidTestsGlob(ErrList(vec![PatErr(0, GlobInterp::Path, err)]))
+        })?;
 
         Ok(UnusedFinderConfig {
             // raw fields that are copied from the JSON config
@@ -207,7 +212,10 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             repo_root: value.repo_root,
             // other fields that are processed before use
             entry_packages: value.entry_packages.try_into()?,
-            test_files: test_globs,
+            test_files: GlobGroup {
+                globset,
+                globs: test_globs,
+            },
             skip: value.skip,
         })
     }

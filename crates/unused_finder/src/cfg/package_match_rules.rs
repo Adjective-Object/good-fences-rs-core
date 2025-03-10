@@ -3,7 +3,7 @@ use std::path::Path;
 use ahashmap::AHashSet;
 use itertools::Itertools;
 
-use super::{ConfigError, GlobInterp, PatErr};
+use super::{ConfigError, GlobGroup, GlobInterp, PatErr};
 
 #[derive(custom_debug::Debug, Default, Clone)]
 pub struct PackageMatchRules {
@@ -22,11 +22,18 @@ fn debug_as_glob_str(
     write!(f, "[{}]", n.iter().map(|m| m.glob().glob()).join(", "))
 }
 
-pub fn compile_globs(globs: Vec<&str>) -> Result<Vec<globset::GlobMatcher>, globset::Error> {
-    globs
-        .into_iter()
-        .map(|g| globset::Glob::new(g).map(|x| x.compile_matcher()))
-        .collect::<Result<Vec<_>, _>>()
+pub fn compile_globs(glob_strs: &[&str]) -> Result<GlobGroup, globset::Error> {
+    let mut set = globset::GlobSetBuilder::new();
+    let mut globs = Vec::with_capacity(glob_strs.len());
+    for glob_str in glob_strs.iter() {
+        let as_glob = globset::Glob::new(glob_str)?;
+        globs.push(as_glob.clone());
+        set.add(as_glob);
+    }
+    Ok(GlobGroup {
+        globset: set.build()?,
+        globs,
+    })
 }
 
 impl PackageMatchRules {
