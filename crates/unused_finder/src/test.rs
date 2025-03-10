@@ -1,5 +1,4 @@
-use core::result::Result;
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, path::PathBuf};
 
 use path_slash::PathBufExt;
 use test_tmpdir::{amap, test_tmpdir};
@@ -445,11 +444,7 @@ fn test_test_pattern() {
         UnusedFinderConfig {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
-            test_files: vec!["**/__tests__/*Test.js"]
-                .into_iter()
-                .map(glob::Pattern::new)
-                .collect::<Result<Vec<glob::Pattern>, glob::PatternError>>()
-                .unwrap(),
+            test_files: vec!["**/__tests__/*Test.js".to_string()],
             ..Default::default()
         },
         UnusedFinderReport {
@@ -484,11 +479,7 @@ fn test_relative_test_pattern() {
         UnusedFinderConfig {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
-            test_files: vec!["search_root/tests/**"]
-                .into_iter()
-                .map(glob::Pattern::new)
-                .collect::<Result<Vec<glob::Pattern>, glob::PatternError>>()
-                .unwrap(),
+            test_files: vec!["search_root/tests/**".to_string()],
             ..Default::default()
         },
         UnusedFinderReport {
@@ -535,7 +526,7 @@ fn test_testfiles_ignored() {
             repo_root: tmpdir.root().to_string_lossy().to_string(),
             root_paths: vec!["search_root".to_string()],
             entry_packages: PackageMatchRules::empty(),
-            test_files: vec![glob::Pattern::from_str("**/__tests__/**").unwrap()],
+            test_files: vec!["**/__tests__/**".to_string()],
             ..Default::default()
         },
         UnusedFinderReport {

@@ -1,8 +1,10 @@
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    path::Path,
+};
 
-use itertools::Itertools;
+use glob_match::glob_match;
 use package_match_rules::PackageMatchRules;
-use rayon::iter::Either;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -18,45 +20,6 @@ impl<E: Display> Display for ErrList<E> {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum GlobInterp {
-    Name,
-    Path,
-}
-
-impl Display for GlobInterp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Name => write!(f, "name"),
-            Self::Path => write!(f, "path"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct PatErr(usize, GlobInterp, glob::PatternError);
-
-impl Display for PatErr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "In {} pattern at idx {}: {:#}", self.1, self.0, self.2)
-    }
-}
-
-impl PartialEq for PatErr {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-            && self.1 == other.1
-            && self.2.pos == other.2.pos
-            && self.2.msg == other.2.msg
-    }
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
-pub enum ConfigError {
-    #[error("Error parsing package match rules: {0}")]
-    InvalidGlobPatterns(ErrList<PatErr>),
 }
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
@@ -138,7 +101,7 @@ pub struct UnusedFinderConfig {
     /// Matches are made against the relative file paths from the repo root.
     /// A matching file will be tagged as a "test" file, and will be excluded
     /// from the list of unused files
-    pub test_files: Vec<glob::Pattern>,
+    pub test_files: Vec<String>,
 
     /// Globs of individual files & directories to skip during the file walk.
     ///
@@ -147,119 +110,76 @@ pub struct UnusedFinderConfig {
     pub skip: Vec<String>,
 }
 
-impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
-    type Error = ConfigError;
-    fn try_from(value: UnusedFinderJSONConfig) -> std::result::Result<Self, Self::Error> {
-        let (test_globs, test_glob_errs): (Vec<glob::Pattern>, Vec<_>) = value
-            .test_files
-            .iter()
-            .partition_map(|pat| match glob::Pattern::new(pat) {
-                Ok(pat) => Either::Left(pat),
-                Err(err) => Either::Right(PatErr(0, GlobInterp::Path, err)),
-            });
-        if !test_glob_errs.is_empty() {
-            return Err(ConfigError::InvalidGlobPatterns(ErrList(test_glob_errs)));
+impl UnusedFinderConfig {
+    pub fn is_test_path(&self, path: &Path) -> bool {
+        let mut local_string: String = "".to_string();
+        self.is_test_path_str(path.to_str().unwrap_or_else(|| {
+            local_string = path.to_string_lossy().into_owned();
+            &local_string
+        }))
+    }
+    pub fn is_test_path_str(&self, path: &str) -> bool {
+        let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
+        let relative = relative.strip_prefix('/').unwrap_or(relative);
+        for test_glob in &self.test_files {
+            println!("testing pattern {} against {}", test_glob, relative);
+            if glob_match(test_glob, relative) {
+                println!("  matched!");
+                return true;
+            }
         }
+        false
+    }
+}
 
-        Ok(UnusedFinderConfig {
+impl From<UnusedFinderJSONConfig> for UnusedFinderConfig {
+    fn from(value: UnusedFinderJSONConfig) -> Self {
+        UnusedFinderConfig {
             // raw fields that are copied from the JSON config
             report_exported_symbols: value.report_exported_symbols,
             allow_unused_types: value.allow_unused_types,
             root_paths: value.root_paths,
             repo_root: value.repo_root,
             // other fields that are processed before use
-            entry_packages: value.entry_packages.try_into()?,
-            test_files: test_globs,
+            entry_packages: value.entry_packages.into(),
+            test_files: value.test_files,
             skip: value.skip,
-        })
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     #[test]
-    fn test_invalid_glob_path_err() {
-        let json_config = r#"{
-            "repoRoot": "/path/to/repo",
-            "rootPaths": ["src"],
-            "entryPackages": ["./***"],
-            "skip": []
-        }"#;
-
-        let config: UnusedFinderJSONConfig = serde_json::from_str(json_config).unwrap();
-        let err: ConfigError = UnusedFinderConfig::try_from(config).unwrap_err();
-        let expected_err = ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(
-            0,
-            GlobInterp::Path,
-            glob::PatternError {
-                pos: 2,
-                msg: "wildcards are either regular `*` or recursive `**`",
-            },
-        )]));
-
-        assert_eq!(err, expected_err);
-    }
-
-    #[test]
-    fn test_invalid_glob_name_err() {
-        let json_config = r#"{
-            "repoRoot": "/path/to/repo",
-            "rootPaths": ["src"],
-            "entryPackages": ["@foo/***"],
-            "skip": []
-        }"#;
-
-        let config: UnusedFinderJSONConfig = serde_json::from_str(json_config).unwrap();
-        let err: ConfigError = UnusedFinderConfig::try_from(config).unwrap_err();
-        let expected_err = ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(
-            0,
-            GlobInterp::Name,
-            glob::PatternError {
-                pos: 7,
-                msg: "wildcards are either regular `*` or recursive `**`",
-            },
-        )]));
-
-        assert_eq!(err, expected_err);
-    }
-
-    #[test]
-    fn test_invalid_glob_multi_err() {
-        let json_config = r#"{
-            "repoRoot": "/path/to/repo",
-            "rootPaths": ["src"],
-            "entryPackages": [
-                "my-pkg1",
-                "@foo/***",
-                "my-pkg2-*",
-                "./foo/***"
+    fn test_glob_match_test() {
+        let config = super::UnusedFinderJSONConfig {
+            repo_root: "/workspaces/demo".to_string(),
+            root_paths: vec!["src".to_string()],
+            skip: vec!["target".to_string()],
+            report_exported_symbols: true,
+            allow_unused_types: false,
+            entry_packages: vec!["@myorg/*".to_string()],
+            test_files: vec![
+                "**/*Test{s,}.{ts,tsx}".to_string(),
+                "**/*.stories.{ts,tsx}".to_string(),
+                // allow all mocks
+                "**/__mocks__/**".to_string(),
+                // and jest configs
+                "**/jest.config.js".to_string(),
             ],
-            "skip": []
-        }"#;
+        };
 
-        let config: UnusedFinderJSONConfig = serde_json::from_str(json_config).unwrap();
-        let err: ConfigError = UnusedFinderConfig::try_from(config).unwrap_err();
-        let expected_err = ConfigError::InvalidGlobPatterns(ErrList(vec![
-            PatErr(
-                1,
-                GlobInterp::Name,
-                glob::PatternError {
-                    pos: 7,
-                    msg: "wildcards are either regular `*` or recursive `**`",
-                },
-            ),
-            PatErr(
-                3,
-                GlobInterp::Path,
-                glob::PatternError {
-                    pos: 6,
-                    msg: "wildcards are either regular `*` or recursive `**`",
-                },
-            ),
-        ]));
+        let cases = vec![
+            ("/workspaces/demo/packages/cool/cool-search-bar/src/test/CoolComponent.SomethingElse.Tests.tsx", true)
+        ];
 
-        assert_eq!(expected_err, err);
+        let mut result: Vec<(&str, bool)> = vec![];
+        for (path, _) in cases.iter() {
+            let config = super::UnusedFinderConfig::from(config.clone());
+            let actual = config.is_test_path_str(path);
+            result.push((*path, actual));
+        }
+
+        pretty_assertions::assert_eq!(result, cases);
     }
 }

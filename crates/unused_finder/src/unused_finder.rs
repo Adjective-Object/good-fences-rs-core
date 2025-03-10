@@ -19,6 +19,7 @@ use crate::{
 };
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::{Context, Result};
+use glob_match::glob_match;
 use import_resolver::swc_resolver::{
     combined_resolver::CombinedResolverCaches,
     internal_resolver::InternalOnlyResolver,
@@ -353,7 +354,7 @@ impl UnusedFinder {
         logger: impl Logger + Sync,
         json_config: UnusedFinderJSONConfig,
     ) -> Result<Self, JsErr> {
-        let config = UnusedFinderConfig::try_from(json_config).map_err(JsErr::invalid_arg)?;
+        let config = UnusedFinderConfig::from(json_config);
         Self::new_from_cfg(logger, config).map_err(JsErr::generic_failure)
     }
 
@@ -746,11 +747,8 @@ impl UnusedFinder {
             .source_files
             .par_iter()
             .filter_map(|(path, _)| -> Option<&Path> {
-                for test_glob in &self.config.test_files {
-                    let relative = path.strip_prefix(&self.config.repo_root).unwrap_or(path);
-                    if test_glob.matches_path(relative) {
-                        return Some(path);
-                    }
+                if self.config.is_test_path(path) {
+                    return Some(path);
                 }
 
                 None
@@ -853,17 +851,14 @@ impl UnusedFinderResult {
         writer: &mut dyn std::io::Write,
     ) -> Result<(), JsErr> {
         // Compile the glob
-        let filter_glob: Option<Vec<glob::Pattern>> = filter_glob_str
-            .map(|pat| -> Result<Vec<glob::Pattern>, glob::PatternError> {
-                Ok(vec![
-                    glob::Pattern::new(pat)?,
-                    glob::Pattern::new(&format!("**/{}/**", pat))?,
-                    glob::Pattern::new(&format!("**/{}", pat))?,
-                    glob::Pattern::new(&format!("{}/**", pat))?,
-                ])
-            })
-            .transpose()
-            .map_err(JsErr::invalid_arg)?;
+        let filter_glob: Option<Vec<String>> = filter_glob_str.map(|pat| -> Vec<String> {
+            vec![
+                pat.to_string(),
+                format!("**/{}/**", pat),
+                format!("**/{}", pat),
+                format!("{}/**", pat),
+            ]
+        });
 
         logger.debug(format!("filter_glob: {:?}", filter_glob_str));
 
@@ -877,7 +872,7 @@ impl UnusedFinderResult {
                 Some(ref filter_glob) => {
                     if filter_glob
                         .iter()
-                        .any(|pat| pat.matches_path(&graph_file.file_path))
+                        .any(|pat| glob_match(pat, &graph_file.file_path.to_string_lossy()))
                     {
                         Some(i)
                     } else {

@@ -3,7 +3,7 @@ use crate::fence::{DependencyRule, ExportRule, Fence};
 use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
 use crate::walk_dirs::SourceFile;
-use glob::Pattern;
+use glob_match::glob_match;
 use import_resolver::manual_resolver::{resolve_ts_import, ResolvedImport, SOURCE_EXTENSIONS};
 use path_slash::PathBufExt;
 use relative_path::RelativePath;
@@ -124,29 +124,26 @@ fn is_node_dependency_matching(
     if permitted_node_dependency_pattern == node_dependency {
         return true;
     }
-    let export_rule_glob = Pattern::new(permitted_node_dependency_pattern);
 
-    match export_rule_glob {
-        Ok(glob) => glob.matches(node_dependency),
-        Err(_e) => false,
-    }
+    glob_match(permitted_node_dependency_pattern, node_dependency)
 }
 
 fn export_rule_applies_to_import_path(
     fence_path: &str,
     export_rule: &ExportRule,
     imported_file_path: &Path,
-) -> Result<bool, glob::PatternError> {
+) -> bool {
     let mut buf = PathBuf::from(fence_path);
     buf.pop();
     buf.push(export_rule.modules.clone());
-    let export_rule_glob = Pattern::new(buf.to_str().unwrap());
 
-    match export_rule_glob {
-        Ok(glob) => Ok(glob.matches(imported_file_path.to_str().unwrap())
-            || glob.matches(no_ext(imported_file_path.to_str().unwrap()))),
-        Err(e) => Err(e),
-    }
+    let export_rule_glob = buf.to_str().unwrap();
+
+    glob_match(export_rule_glob, imported_file_path.to_str().unwrap())
+        || glob_match(
+            export_rule_glob,
+            no_ext(imported_file_path.to_str().unwrap()),
+        )
 }
 
 fn is_importer_allowed(accessible_to: &[String], source_file: &SourceFile) -> bool {
@@ -302,7 +299,6 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
                                             export_rule,
                                             imported_file_path,
                                         )
-                                        .unwrap()
                                     })
                                     .collect();
                             if destination_export_rules.is_empty() {

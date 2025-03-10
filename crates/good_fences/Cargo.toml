@@ -15,7 +15,6 @@ serde_derive = "1.0.117"
 void = "1.0.2"
 relative-path = { workspace = true }
 regex = { workspace = true }
-glob = { workspace = true }
 pathdiff = "0.2.0"
 rayon = { workspace = true }
 path-slash = "0.2.1"
@@ -32,6 +31,7 @@ tsconfig_paths = { path = "../tsconfig_paths" }
 swc_ecma_ast.workspace = true
 swc_ecma_visit.workspace = true
 swc_ecma_transforms.workspace = true
+glob-match.workspace = true
 
 [dev-dependencies]
 swc_utils_parse = { path = "../swc_utils_parse" }

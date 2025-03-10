@@ -6,7 +6,6 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
-glob = "0.3.0"
 jwalk = "0.5"
 napi = { version = "2.16.6", default-features = false, features = [
     "compat-mode",
@@ -31,7 +30,7 @@ swc_ecma_transforms = "0.238.0"
 swc_ecma_visit = "0.104.6"
 thiserror = "1.0.52"
 schemars = "0.8.21"
-
+glob-match = "0.2.1"
 
 [profile.release]
 # Build with debug info, but split it into separate pdb files we don't need to distribute
