@@ -1,13 +1,14 @@
 use std::path::Path;
 
 use ahashmap::AHashSet;
-use glob_match::glob_match;
+
+use super::{ConfigError, GlobInterp, PatErr};
 
 #[derive(Debug, Default, Clone)]
 pub struct PackageMatchRules {
     pub names: AHashSet<String>,
-    pub name_patterns: Vec<String>,
-    pub path_patterns: Vec<String>,
+    pub name_patterns: Vec<glob::Pattern>,
+    pub path_patterns: Vec<glob::Pattern>,
 }
 
 impl PackageMatchRules {
@@ -19,8 +20,8 @@ impl PackageMatchRules {
         if self.names.contains(package_name) {
             return true;
         }
-        for pattern in self.name_patterns.iter() {
-            if glob_match(pattern, package_name) {
+        for pattern in &self.name_patterns {
+            if pattern.matches(package_name) {
                 return true;
             }
         }
@@ -34,7 +35,7 @@ impl PackageMatchRules {
                 path_string = package_path.to_string_lossy().into_owned();
                 &path_string
             });
-            if glob_match(pattern, path_string_ref) {
+            if pattern.matches(path_string_ref) {
                 return true;
             }
         }
@@ -49,26 +50,38 @@ impl PackageMatchRules {
     }
 }
 
-impl<T: AsRef<str> + ToString> From<Vec<T>> for PackageMatchRules {
-    fn from(value: Vec<T>) -> Self {
+impl<T: AsRef<str> + ToString> TryFrom<Vec<T>> for PackageMatchRules {
+    type Error = ConfigError;
+    fn try_from(value: Vec<T>) -> Result<Self, Self::Error> {
         let mut names = AHashSet::with_capacity_and_hasher(value.len(), Default::default());
         let mut name_patterns = Vec::new();
         let mut path_patterns = Vec::new();
-        for item in value.into_iter() {
+        let mut errs: Vec<PatErr> = Vec::new();
+        for (i, item) in value.into_iter().enumerate() {
             if let Some(trimmed) = item.as_ref().strip_prefix("./") {
-                path_patterns.push(trimmed.to_string())
-            } else if item.as_ref().chars().any(|c| "~)('!*{,".contains(c)) {
-                name_patterns.push(item.to_string());
+                match glob::Pattern::new(trimmed) {
+                    Err(e) => errs.push(PatErr(i, GlobInterp::Path, e)),
+                    Ok(r) => path_patterns.push(r),
+                };
+            } else if item.as_ref().chars().any(|c| "~)('!*".contains(c)) {
+                match glob::Pattern::new(item.as_ref()) {
+                    Err(e) => errs.push(PatErr(i, GlobInterp::Name, e)),
+                    Ok(r) => name_patterns.push(r),
+                };
             } else {
                 names.insert(item.to_string());
             }
         }
 
-        Self {
+        if !errs.is_empty() {
+            return Err(ConfigError::InvalidGlobPatterns(super::ErrList(errs)));
+        }
+
+        Ok(Self {
             names,
             name_patterns,
             path_patterns,
-        }
+        })
     }
 }
 
@@ -79,7 +92,7 @@ mod test {
     #[test]
     fn test_package_match_path() {
         let package_match_rules_strs = vec!["./shared/**"];
-        let package_match_rules = PackageMatchRules::from(package_match_rules_strs);
+        let package_match_rules = PackageMatchRules::try_from(package_match_rules_strs).unwrap();
         assert!(
             package_match_rules.matches(Path::new("shared/n/my-pkg/package.json"), "@me/my-pkg")
         );

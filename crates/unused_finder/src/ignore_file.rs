@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use glob_match::glob_match;
 use path_slash::PathBufExt;
 
 #[derive(PartialEq)]
@@ -69,7 +68,7 @@ impl IgnoreFile {
 
         let mut ignored = false;
         for pattern in self.patterns.iter() {
-            if glob_match(&pattern.pattern, relative_slash.as_ref()) {
+            if pattern.pattern.matches(relative_slash.as_ref()) {
                 ignored = !pattern.negated;
             }
         }
@@ -80,7 +79,7 @@ impl IgnoreFile {
 
 #[derive(Debug, PartialEq)]
 pub struct IgnorePattern {
-    pub pattern: String,
+    pub pattern: glob::Pattern,
     pub negated: bool,
 }
 
@@ -93,22 +92,24 @@ impl IgnorePattern {
         match trimmed_line.bytes().next().map(|b| b as char) {
             None | Some('#') => Ok(None),
             Some('!') => Ok(Some(IgnorePattern {
-                pattern: Self::glob_line(&trimmed_line[1..]),
+                pattern: Self::glob_line(&trimmed_line[1..])?,
                 negated: true,
             })),
             _ => Ok(Some(IgnorePattern {
-                pattern: Self::glob_line(trimmed_line),
+                pattern: Self::glob_line(trimmed_line)?,
                 negated: false,
             })),
         }
     }
 
-    fn glob_line(line: &str) -> String {
+    fn glob_line(line: &str) -> Result<glob::Pattern, anyhow::Error> {
         if line.ends_with('/') {
             // support trailing slashes for recursibe globs
-            format!("{}**", line)
+            Ok(glob::Pattern::new(&format!("{}**", line))
+                .with_context(|| format!("Failed to parse glob pattern: {}", line))?)
         } else {
-            line.to_string()
+            glob::Pattern::new(line)
+                .with_context(|| format!("Failed to parse glob pattern: {}", line))
         }
     }
 }
