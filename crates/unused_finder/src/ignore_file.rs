@@ -22,7 +22,7 @@ impl Debug for IgnoreFile {
                 &self
                     .patterns
                     .iter()
-                    .map(|p| p.pattern.as_str())
+                    .map(|p| p.pattern.glob().glob())
                     .collect::<Vec<_>>(),
             )
             .finish()
@@ -68,7 +68,7 @@ impl IgnoreFile {
 
         let mut ignored = false;
         for pattern in self.patterns.iter() {
-            if pattern.pattern.matches(relative_slash.as_ref()) {
+            if pattern.pattern.is_match(relative_slash.as_ref()) {
                 ignored = !pattern.negated;
             }
         }
@@ -77,10 +77,16 @@ impl IgnoreFile {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct IgnorePattern {
-    pub pattern: glob::Pattern,
+    pub pattern: globset::GlobMatcher,
     pub negated: bool,
+}
+
+impl PartialEq for IgnorePattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern.glob().glob() == other.pattern.glob().glob() && self.negated == other.negated
+    }
 }
 
 impl IgnorePattern {
@@ -91,26 +97,35 @@ impl IgnorePattern {
         }
         match trimmed_line.bytes().next().map(|b| b as char) {
             None | Some('#') => Ok(None),
-            Some('!') => Ok(Some(IgnorePattern {
-                pattern: Self::glob_line(&trimmed_line[1..])?,
-                negated: true,
-            })),
-            _ => Ok(Some(IgnorePattern {
-                pattern: Self::glob_line(trimmed_line)?,
-                negated: false,
-            })),
+            Some('!') => {
+                let pattern: globset::GlobMatcher = Self::glob_line(&trimmed_line[1..])?;
+                Ok(Some(IgnorePattern {
+                    pattern,
+                    negated: true,
+                }))
+            }
+            _ => {
+                let pattern = Self::glob_line(trimmed_line)?;
+                Ok(Some(IgnorePattern {
+                    pattern,
+                    negated: false,
+                }))
+            }
         }
     }
 
-    fn glob_line(line: &str) -> Result<glob::Pattern, anyhow::Error> {
-        if line.ends_with('/') {
-            // support trailing slashes for recursibe globs
-            Ok(glob::Pattern::new(&format!("{}**", line))
-                .with_context(|| format!("Failed to parse glob pattern: {}", line))?)
+    fn glob_line(line: &str) -> Result<globset::GlobMatcher, anyhow::Error> {
+        let host_string: String;
+        // support trailing slashes for recursibe globs
+        let to_compile: &str = if line.ends_with('/') {
+            host_string = format!("{}**", line);
+            &host_string
         } else {
-            glob::Pattern::new(line)
-                .with_context(|| format!("Failed to parse glob pattern: {}", line))
-        }
+            line
+        };
+        Ok(globset::Glob::new(to_compile)
+            .with_context(|| format!("Failed to parse glob pattern: {}", line))
+            .map(|glob| glob.compile_matcher())?)
     }
 }
 
@@ -136,9 +151,9 @@ mod test {
 
         // check that the patterns are correctly parsed
         assert_eq!(ignore_file.patterns.len(), 2);
-        assert_eq!(ignore_file.patterns[0].pattern.as_str(), "foo/file.js");
+        assert_eq!(ignore_file.patterns[0].pattern.glob().glob(), "foo/file.js");
         assert_eq!(ignore_file.patterns[0].negated, false);
-        assert_eq!(ignore_file.patterns[1].pattern.as_str(), "bar/baz.js");
+        assert_eq!(ignore_file.patterns[1].pattern.glob().glob(), "bar/baz.js");
         assert_eq!(ignore_file.patterns[1].negated, true);
     }
 

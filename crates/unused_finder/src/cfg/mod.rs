@@ -1,8 +1,10 @@
+use core::fmt;
 use std::{
     fmt::{Display, Formatter},
     path::Path,
 };
 
+use globset::GlobMatcher;
 use itertools::Itertools;
 use package_match_rules::PackageMatchRules;
 use rayon::iter::Either;
@@ -39,7 +41,7 @@ impl Display for GlobInterp {
 }
 
 #[derive(Debug)]
-pub struct PatErr(usize, GlobInterp, glob::PatternError);
+pub struct PatErr(usize, GlobInterp, globset::Error);
 
 impl Display for PatErr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -51,15 +53,17 @@ impl PartialEq for PatErr {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
             && self.1 == other.1
-            && self.2.pos == other.2.pos
-            && self.2.msg == other.2.msg
+            && self.2.glob() == other.2.glob()
+            && self.2.kind() == other.2.kind()
     }
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum ConfigError {
     #[error("Error parsing package match rules: {0}")]
-    InvalidGlobPatterns(ErrList<PatErr>),
+    InvalidPackageMatchGlob(ErrList<PatErr>),
+    #[error("Error parsing testFile glob(s): {0}")]
+    InvalidTestsGlob(ErrList<PatErr>),
 }
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
@@ -118,7 +122,7 @@ pub struct UnusedFinderJSONConfig {
 }
 
 /// Configuration for the unused symbols finder
-#[derive(Debug, Default, Clone)]
+#[derive(custom_debug::Debug, Default, Clone)]
 pub struct UnusedFinderConfig {
     /// If true, the finder should report exported symbols that are not used anywhere in the project
     pub report_exported_symbols: bool,
@@ -141,7 +145,8 @@ pub struct UnusedFinderConfig {
     /// Matches are made against the relative file paths from the repo root.
     /// A matching file will be tagged as a "test" file, and will be excluded
     /// from the list of unused files
-    pub test_files: Vec<glob::Pattern>,
+    #[debug(with = debug_as_glob_str)]
+    pub test_files: Vec<globset::GlobMatcher>,
 
     /// Globs of individual files & directories to skip during the file walk.
     ///
@@ -150,39 +155,48 @@ pub struct UnusedFinderConfig {
     pub skip: Vec<String>,
 }
 
+#[allow(clippy::ptr_arg)]
+fn debug_as_glob_str(n: &Vec<GlobMatcher>, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "[{}]", n.iter().map(|m| m.glob().glob()).join(", "))
+}
+
 impl UnusedFinderConfig {
     pub fn is_test_path(&self, path: &Path) -> bool {
-        let mut local_string: String = "".to_string();
-        self.is_test_path_str(path.to_str().unwrap_or_else(|| {
-            local_string = path.to_string_lossy().into_owned();
-            &local_string
-        }))
+        let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
+        let relative = relative.strip_prefix("/").unwrap_or(relative);
+        for test_glob in &self.test_files {
+            if test_glob.is_match(relative) {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn is_test_path_str(&self, path: &str) -> bool {
         let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
         let relative = relative.strip_prefix('/').unwrap_or(relative);
         for test_glob in &self.test_files {
-            if test_glob.matches(relative) {
+            if test_glob.is_match(relative) {
                 return true;
             }
         }
-        return false;
+        false
     }
 }
 
 impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
     type Error = ConfigError;
     fn try_from(value: UnusedFinderJSONConfig) -> std::result::Result<Self, Self::Error> {
-        let (test_globs, test_glob_errs): (Vec<glob::Pattern>, Vec<_>) = value
-            .test_files
-            .iter()
-            .partition_map(|pat| match glob::Pattern::new(pat) {
-                Ok(pat) => Either::Left(pat),
-                Err(err) => Either::Right(PatErr(0, GlobInterp::Path, err)),
+        let (test_globs, test_glob_errs): (Vec<globset::GlobMatcher>, Vec<_>) =
+            value.test_files.iter().partition_map(|pat| {
+                println!("compile glob {}", pat);
+                match globset::Glob::new(pat).map(|pat| pat.compile_matcher()) {
+                    Ok(pat) => Either::Left(pat),
+                    Err(err) => Either::Right(PatErr(0, GlobInterp::Path, err)),
+                }
             });
         if !test_glob_errs.is_empty() {
-            return Err(ConfigError::InvalidGlobPatterns(ErrList(test_glob_errs)));
+            return Err(ConfigError::InvalidTestsGlob(ErrList(test_glob_errs)));
         }
 
         Ok(UnusedFinderConfig {
@@ -204,87 +218,49 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_invalid_glob_path_err() {
+    fn test_invalid_glob_unclosed_alternate() {
         let json_config = r#"{
             "repoRoot": "/path/to/repo",
             "rootPaths": ["src"],
-            "entryPackages": ["./***"],
+            "entryPackages": [],
+            "testFiles": ["@foo/{cb,"],
             "skip": []
         }"#;
 
         let config: UnusedFinderJSONConfig = serde_json::from_str(json_config).unwrap();
         let err: ConfigError = UnusedFinderConfig::try_from(config).unwrap_err();
-        let expected_err = ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(
-            0,
-            GlobInterp::Path,
-            glob::PatternError {
-                pos: 2,
-                msg: "wildcards are either regular `*` or recursive `**`",
-            },
-        )]));
-
-        assert_eq!(err, expected_err);
+        assert_eq!(format!("{}", err), "Error parsing testFile glob(s): In path pattern at idx 0: error parsing glob '@foo/{cb,': unclosed alternate group; missing '}' (maybe escape '{' with '[{]'?)\n");
     }
 
     #[test]
-    fn test_invalid_glob_name_err() {
+    fn test_invalid_glob_nested_alternate() {
         let json_config = r#"{
             "repoRoot": "/path/to/repo",
             "rootPaths": ["src"],
-            "entryPackages": ["@foo/***"],
+            "entryPackages": ["@foo/{a,{cb, d}}"],
             "skip": []
         }"#;
 
         let config: UnusedFinderJSONConfig = serde_json::from_str(json_config).unwrap();
         let err: ConfigError = UnusedFinderConfig::try_from(config).unwrap_err();
-        let expected_err = ConfigError::InvalidGlobPatterns(ErrList(vec![PatErr(
-            0,
-            GlobInterp::Name,
-            glob::PatternError {
-                pos: 7,
-                msg: "wildcards are either regular `*` or recursive `**`",
-            },
-        )]));
-
-        assert_eq!(err, expected_err);
+        assert_eq!(format!("{}", err), "Error parsing package match rules: In name pattern at idx 0: error parsing glob '@foo/{a,{cb, d}}': nested alternate groups are not allowed\n");
     }
 
     #[test]
-    fn test_invalid_glob_multi_err() {
+    fn test_invalid_glob_unclosed_charclass() {
         let json_config = r#"{
             "repoRoot": "/path/to/repo",
             "rootPaths": ["src"],
-            "entryPackages": [
-                "my-pkg1",
-                "@foo/***",
-                "my-pkg2-*",
-                "./foo/***"
+            "entryPackages": ["@foo/[a"],
+            "testFiles": [
+                "@foo/[a"
             ],
             "skip": []
         }"#;
 
         let config: UnusedFinderJSONConfig = serde_json::from_str(json_config).unwrap();
         let err: ConfigError = UnusedFinderConfig::try_from(config).unwrap_err();
-        let expected_err = ConfigError::InvalidGlobPatterns(ErrList(vec![
-            PatErr(
-                1,
-                GlobInterp::Name,
-                glob::PatternError {
-                    pos: 7,
-                    msg: "wildcards are either regular `*` or recursive `**`",
-                },
-            ),
-            PatErr(
-                3,
-                GlobInterp::Path,
-                glob::PatternError {
-                    pos: 6,
-                    msg: "wildcards are either regular `*` or recursive `**`",
-                },
-            ),
-        ]));
-
-        assert_eq!(expected_err, err);
+        assert_eq!(format!("{}", err), "Error parsing testFile glob(s): In path pattern at idx 0: error parsing glob '@foo/[a': unclosed character class; missing ']'\n");
     }
 
     #[test]

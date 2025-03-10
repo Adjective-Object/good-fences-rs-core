@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
+    cfg::{package_match_rules::compile_globs, UnusedFinderConfig, UnusedFinderJSONConfig},
     graph::{Graph, GraphFile},
     ignore_file::IgnoreFile,
     parse::{
@@ -748,7 +748,7 @@ impl UnusedFinder {
             .filter_map(|(path, _)| -> Option<&Path> {
                 for test_glob in &self.config.test_files {
                     let relative = path.strip_prefix(&self.config.repo_root).unwrap_or(path);
-                    if test_glob.matches_path(relative) {
+                    if test_glob.is_match(relative) {
                         return Some(path);
                     }
                 }
@@ -853,13 +853,13 @@ impl UnusedFinderResult {
         writer: &mut dyn std::io::Write,
     ) -> Result<(), JsErr> {
         // Compile the glob
-        let filter_glob: Option<Vec<glob::Pattern>> = filter_glob_str
-            .map(|pat| -> Result<Vec<glob::Pattern>, glob::PatternError> {
-                Ok(vec![
-                    glob::Pattern::new(pat)?,
-                    glob::Pattern::new(&format!("**/{}/**", pat))?,
-                    glob::Pattern::new(&format!("**/{}", pat))?,
-                    glob::Pattern::new(&format!("{}/**", pat))?,
+        let filter_glob: Option<Vec<globset::GlobMatcher>> = filter_glob_str
+            .map(|pat| -> Result<Vec<globset::GlobMatcher>, globset::Error> {
+                compile_globs(vec![
+                    pat,
+                    format!("**/{}/**", pat).as_str(),
+                    format!("**/{}", pat).as_str(),
+                    format!("{}/**", pat).as_str(),
                 ])
             })
             .transpose()
@@ -877,7 +877,7 @@ impl UnusedFinderResult {
                 Some(ref filter_glob) => {
                     if filter_glob
                         .iter()
-                        .any(|pat| pat.matches_path(&graph_file.file_path))
+                        .any(|pat| pat.is_match(&graph_file.file_path))
                     {
                         Some(i)
                     } else {
