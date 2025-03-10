@@ -122,7 +122,6 @@ impl UnusedFinderConfig {
         let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
         let relative = relative.strip_prefix('/').unwrap_or(relative);
         for test_glob in &self.test_files {
-            println!("testing pattern {} against {}", test_glob, relative);
             if glob_match(test_glob, relative) {
                 println!("  matched!");
                 return true;

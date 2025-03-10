@@ -74,7 +74,7 @@ impl Display for UnusedFinderReport {
                     items.len(),
                     if items.len() > 1 { "s" } else { "" },
                 )?,
-                None => writeln!(f, "{} is completely unused", file_path)?,
+                None => writeln!(f, "{} is completely unused (has no exports)", file_path)?,
             };
         }
 
