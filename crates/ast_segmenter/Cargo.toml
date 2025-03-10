@@ -12,6 +12,14 @@ edition = "2018"
 crate-type = ["lib"]
 
 [dependencies]
+ahashmap = { version = "0.2.0", path = "../ahashmap" }
+ast-name-tracker = { version = "0.2.0-beta.1", path = "../ast_name_tracker" }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
+swc_common.workspace = true
+swc_ecma_ast.workspace = true
+swc_ecma_visit.workspace = true
+swc_utils_parse = { version = "0.2.0", path = "../swc_utils_parse" }
+thiserror.workspace = true
 # ahashmap = { version = "0.2.0", path = "../ahashmap" }
 # logger = { version = "0.2.0", path = "../logger" }
 # logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }

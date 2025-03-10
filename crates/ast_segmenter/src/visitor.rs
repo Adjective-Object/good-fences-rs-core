@@ -1,11 +1,12 @@
 // use ahashmap::{AHashMap, AHashSet};
+// use ast_name_tracker::VariableScope;
 // use logger_srcfile::SrcFileLogger;
 // use swc_common::Spanned;
 
-// use crate::{ExportedSymbol, Segment};
+// use crate::{NormalSegment, Segment, SegmentKind};
 
 // struct Visitor {
-//     segments: Vec<Segment>,
+//     segments: Vec<SegmentKind>,
 // }
 
 // const RETURN: &str = "return";
@@ -44,7 +45,16 @@
 //                 | swc_ecma_ast::Stmt::ForOf(_) => {
 //                     // Visit to extract the names
 //                     let names = ast_name_tracker::visitor::find_names(file_logger, stmt);
-//                     Some(names)
+//                     let imports_exports =
+//                     Some(Segment {
+//                         variable_scope: names,
+//                         segment_type: SegmentKind::Normal(NormalSegment {
+//                             imports: crate::NormalSegmentImportInfo {
+//                                 lazy_imports: (),
+//                                 requires: (),
+//                             },
+//                         }),
+//                     })
 //                 }
 //                 swc_ecma_ast::Stmt::With(_) => {
 //                     // with statements are deprecated and unsupported

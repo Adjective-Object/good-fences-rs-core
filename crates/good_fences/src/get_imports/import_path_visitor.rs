@@ -84,14 +84,10 @@ impl Visit for ImportPathVisitor {
     fn visit_call_expr(&mut self, expr: &CallExpr) {
         expr.visit_children_with(self);
         if let Callee::Import(_) = &expr.callee {
-            match extract_argument_value(expr) {
-                Some(import_path) => {
-                    self.import_paths.insert(import_path);
-                }
-                None => return,
+            if let Some(import_path) = extract_argument_value(expr) {
+                self.import_paths.insert(import_path);
             }
-        }
-        if let Callee::Expr(callee) = &expr.callee {
+        } else if let Callee::Expr(callee) = &expr.callee {
             if let Some(ident) = callee.as_ident() {
                 if ident.sym == "require" && !self.require_identifiers.contains(&ident.to_id()) {
                     if let Some(import_path) = extract_argument_value(expr) {

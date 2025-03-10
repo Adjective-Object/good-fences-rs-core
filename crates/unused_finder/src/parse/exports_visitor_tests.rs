@@ -4,28 +4,15 @@ mod test {
     use ahashmap::{AHashMap, AHashSet};
     use logger::StdioLogger;
     use logger_srcfile::{SrcFileLogger, WrapFileLogger};
-    use swc_common::comments::{Comments, SingleThreadedComments};
+    use swc_common::comments::SingleThreadedComments;
     use swc_common::sync::Lrc;
-    use swc_common::{FileName, SourceFile, SourceMap};
-    use swc_ecma_parser::lexer::Lexer;
-    use swc_ecma_parser::{Capturing, Parser};
+    use swc_common::{FileName, SourceMap};
     use swc_ecma_visit::VisitWith;
 
     use crate::parse::{ExportedSymbol, ReExportedSymbol};
-    use swc_utils_parse::create_lexer;
 
     use crate::parse::exports_visitor::ExportsVisitor;
     use test_tmpdir::{amap, amap2, aset};
-
-    fn create_test_parser<'a>(
-        fm: &'a Lrc<SourceFile>,
-        comments: Option<&'a dyn Comments>,
-    ) -> Parser<Capturing<Lexer<'a>>> {
-        let lexer = create_lexer(fm, comments);
-        let capturing = Capturing::new(lexer);
-
-        Parser::new_from(capturing)
-    }
 
     fn visit(src: &str) -> ExportsVisitor<impl SrcFileLogger> {
         let cm = Lrc::<SourceMap>::default();
@@ -35,7 +22,7 @@ mod test {
             src.to_string(),
         );
 
-        let mut parser = create_test_parser(&fm, Some(&comments));
+        let mut parser = swc_utils_parse::create_parser(&fm, Some(&comments));
         let module = parser.parse_typescript_module().unwrap();
 
         let stdio_logger = StdioLogger::new();

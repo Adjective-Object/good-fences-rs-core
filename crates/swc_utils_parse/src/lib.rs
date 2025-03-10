@@ -1,9 +1,10 @@
-use swc_common::comments::Comments;
+use swc_common::comments::{Comments, SingleThreadedComments};
 use swc_common::sync::Lrc;
 use swc_common::{FileName, SourceFile, SourceMap};
 use swc_ecma_ast::Module;
 use swc_ecma_parser::{lexer::Lexer, StringInput, Syntax};
 use swc_ecma_parser::{Capturing, Parser, TsSyntax};
+use swc_ecma_visit::{Visit, VisitWith};
 
 pub fn create_lexer<'a>(fm: &'a SourceFile, comments: Option<&'a dyn Comments>) -> Lexer<'a> {
     let filename = fm.name.to_string();
@@ -47,4 +48,32 @@ where
     let module = parser.parse_typescript_module().unwrap();
 
     (cm, module)
+}
+
+pub fn create_parser<'a>(
+    fm: &'a Lrc<SourceFile>,
+    comments: Option<&'a dyn Comments>,
+) -> Parser<Capturing<Lexer<'a>>> {
+    let lexer = create_lexer(fm, comments);
+    let capturing = Capturing::new(lexer);
+
+    Parser::new_from(capturing)
+}
+
+pub fn parse_and_visit(
+    src: &str,
+    visitor: &mut impl Visit,
+) -> Result<(), swc_ecma_parser::error::Error> {
+    let cm = Lrc::<SourceMap>::default();
+    let comments = SingleThreadedComments::default();
+    let fm = cm.new_source_file(
+        Lrc::new(FileName::Custom("test.ts".into())),
+        src.to_string(),
+    );
+
+    let mut parser = create_parser(&fm, Some(&comments));
+    let module = parser.parse_typescript_module()?;
+
+    module.visit_with(visitor);
+    Ok(())
 }

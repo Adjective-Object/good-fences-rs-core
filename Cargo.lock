@@ -161,6 +161,16 @@ dependencies = [
 [[package]]
 name = "ast-segmenter"
 version = "0.2.0-beta.1"
+dependencies = [
+ "ahashmap",
+ "ast-name-tracker",
+ "logger_srcfile",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_ecma_visit",
+ "swc_utils_parse",
+ "thiserror",
+]
 
 [[package]]
 name = "ast_node"
@@ -2466,6 +2476,7 @@ dependencies = [
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",
+ "swc_ecma_visit",
 ]
 
 [[package]]
