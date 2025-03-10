@@ -123,7 +123,6 @@ impl UnusedFinderConfig {
         let relative = relative.strip_prefix('/').unwrap_or(relative);
         for test_glob in &self.test_files {
             if glob_match(test_glob, relative) {
-                println!("  matched!");
                 return true;
             }
         }
@@ -159,17 +158,14 @@ mod test {
             allow_unused_types: false,
             entry_packages: vec!["@myorg/*".to_string()],
             test_files: vec![
-                "**/*Test{s,}.{ts,tsx}".to_string(),
-                "**/*.stories.{ts,tsx}".to_string(),
-                // allow all mocks
-                "**/__mocks__/**".to_string(),
-                // and jest configs
-                "**/jest.config.js".to_string(),
+                // just test this pattern
+                "**/*{Test,Tests}.{ts,tsx}".to_string(),
             ],
         };
 
         let cases = vec![
-            ("/workspaces/demo/packages/cool/cool-search-bar/src/test/CoolComponent.SomethingElse.Tests.tsx", true)
+            ("/workspaces/demo/packages/cool/cool-search-bar/src/test/CoolComponent.SomethingElse.Tests.tsx", true),
+            ("/workspaces/demo/packages/cool-common/forms/cool-forms-view-view/src/test/utils/infoBarUtilsTests/someTests.ts", true),
         ];
 
         let mut result: Vec<(&str, bool)> = vec![];
