@@ -1,3 +1,5 @@
+#![feature(box_patterns)]
+
 // // use ast_name_tracker::VariableScope;
 // // use swc_ecma_ast::Module;
 

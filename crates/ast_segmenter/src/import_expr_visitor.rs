@@ -1,6 +1,9 @@
 use ahashmap::{AHashMap, AHashSet};
 use logger_srcfile::SrcFileLogger;
-use swc_ecma_ast::{CallExpr, Callee, Lit};
+use swc_ecma_ast::{
+    AssignPatProp, BindingIdent, CallExpr, Callee, Expr, ExprOrSpread, Ident, IdentName,
+    KeyValuePatProp, Lit, MemberExpr, MemberProp, Pat, PropName,
+};
 use swc_ecma_visit::{Visit, VisitWith};
 
 struct NameSet<K, V> {
@@ -18,6 +21,13 @@ impl<K: Eq + std::hash::Hash, V: Eq + std::hash::Hash> NameSet<K, V> {
         self.names.entry(key).or_default().insert(value);
     }
 
+    pub fn insert_all(&mut self, key: K, values: impl IntoIterator<Item = V>) {
+        let entry = self.names.entry(key).or_default();
+        for value in values {
+            entry.insert(value);
+        }
+    }
+
     pub fn insert_nameless(&mut self, key: K) {
         self.names.entry(key).or_default();
     }
@@ -30,8 +40,22 @@ impl<K: Default, V: Default> Default for NameSet<K, V> {
 
 #[derive(Default)]
 pub struct ImportsAndRequires {
-    imported_paths: NameSet<String, Option<String>>,
-    require_paths: NameSet<String, Option<String>>,
+    imported_paths: NameSet<String, String>,
+    require_paths: NameSet<String, String>,
+}
+
+fn is_import_expr(call_expr: &CallExpr) -> bool {
+    if let Callee::Import(_) = &call_expr.callee {
+        return true;
+    }
+    if let Callee::Expr(callee) = &call_expr.callee {
+        if let Some(ident) = callee.as_ident() {
+            if ident.sym == "require" {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 impl Visit for ImportsAndRequires {
@@ -40,30 +64,117 @@ impl Visit for ImportsAndRequires {
     // require('foo')
     fn visit_call_expr(&mut self, expr: &CallExpr) {
         expr.visit_children_with(self);
-        if let Callee::Import(_) = &expr.callee {
-            match extract_argument_value(expr) {
-                Some(import_path) => {
+        match expr {
+            // import()
+            CallExpr {
+                callee: Callee::Import(_),
+                args: ref import_args,
+                ..
+            } => {
+                if let Some(import_path) = args_as_import(import_args) {
                     self.imported_paths.insert_nameless(import_path);
                 }
-                None => return,
             }
-        }
-        if let Callee::Expr(callee) = &expr.callee {
-            if let Some(ident) = callee.as_ident() {
+            // require()
+            CallExpr {
+                callee: Callee::Expr(box Expr::Ident(ident)),
+                args: ref import_args,
+                ..
+            } => {
                 if ident.sym == "require" {
-                    if let Some(import_path) = extract_argument_value(expr) {
+                    if let Some(import_path) = args_as_import(import_args) {
                         self.require_paths.insert_nameless(import_path);
                     }
                 }
             }
+            // import().then(({name1, name2, name3}) => {...})
+            CallExpr {
+                callee:
+                    Callee::Expr(box Expr::Member(MemberExpr {
+                        // import expr
+                        obj:
+                            box Expr::Call(CallExpr {
+                                callee: Callee::Import(_),
+                                args: import_args,
+                                ..
+                            }),
+                        prop: MemberProp::Ident(then_prop),
+                        ..
+                    })),
+                args: ref args,
+                ..
+            } => {
+                if then_prop.sym != "then" {
+                    return;
+                }
+                // the contents of the import(<this stuff>) call
+                let imported_path = match args_as_import(import_args) {
+                    Some(path) => path,
+                    None => return,
+                };
+
+                // args in .then((<args>) => {..}) or .then(function (<args>) {..})
+                let then_arg_obj_pattern = match args.first() {
+                    Some(arg) => match extract_generic_function_def_first_arg(&arg.expr) {
+                        Some(Pat::Object(obj_pat)) => obj_pat,
+                        _ => return,
+                    },
+                    None => return,
+                };
+
+                // extract names from the object binding pattern
+                let obj_names =
+                    then_arg_obj_pattern
+                        .props
+                        .iter()
+                        .filter_map(|prop| -> Option<String> {
+                            println!("arg prop: {:?}", prop);
+
+                            match prop {
+                                swc_ecma_ast::ObjectPatProp::KeyValue(KeyValuePatProp {
+                                    key:
+                                        PropName::Ident(IdentName {
+                                            sym: ref ident_sym, ..
+                                        }),
+                                    ..
+                                })
+                                | swc_ecma_ast::ObjectPatProp::Assign(AssignPatProp {
+                                    key:
+                                        BindingIdent {
+                                            id:
+                                                Ident {
+                                                    sym: ref ident_sym, ..
+                                                },
+                                            ..
+                                        },
+                                    ..
+                                }) => Some(ident_sym.to_string()),
+                                _ => None,
+                            }
+                        });
+
+                // store the names
+                self.imported_paths.insert_all(imported_path, obj_names);
+            }
+            _ => {}
         }
     }
 }
 
-fn extract_argument_value(expr: &CallExpr) -> Option<String> {
-    let import_path = match expr.args.is_empty() {
+fn extract_generic_function_def_first_arg(expr: &Expr) -> Option<&Pat> {
+    if let Expr::Arrow(arrow) = expr {
+        return arrow.params.first();
+    }
+    if let Expr::Fn(fn_expr) = expr {
+        return fn_expr.function.params.first().map(|param| &param.pat);
+    }
+    None
+}
+
+fn args_as_import(args: &Vec<ExprOrSpread>) -> Option<String> {
+    let import_path = match args.is_empty() {
         true => return None,
-        false => expr.args.first(),
+        false => args.first(),
     };
     if let Some(path) = import_path {
         if let Some(path_lit) = path.expr.as_lit() {
@@ -110,10 +221,7 @@ mod test {
             visitor.imported_paths.names,
             expected_imported_paths
                 .iter()
-                .map(|(k, v)| (
-                    k.to_string(),
-                    v.iter().map(|s| Some(s.to_string())).collect()
-                ))
+                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
                 .collect(),
         );
 
@@ -121,10 +229,7 @@ mod test {
             visitor.require_paths.names,
             expected_require_paths
                 .iter()
-                .map(|(k, v)| (
-                    k.to_string(),
-                    v.iter().map(|s| Some(s.to_string())).collect()
-                ))
+                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
                 .collect(),
         );
     }
@@ -161,6 +266,28 @@ mod test {
             amap2![
                 "bar" => vec![]
             ],
+        );
+    }
+
+    #[test]
+    fn test_import_expr_extracts_names_arrow() {
+        test_discovers_import_expr(
+            "import('foo').then(({a,b,c}) => { console.log(a,b,c) })",
+            amap2![
+                "foo" => vec!["a","b","c"]
+            ],
+            Default::default(),
+        );
+    }
+
+    #[test]
+    fn test_import_expr_extracts_names_noarrow() {
+        test_discovers_import_expr(
+            "import('foo').then(function myfunc({a,b,c}) { console.log(a,b,c) })",
+            amap2![
+                "foo" => vec!["a","b","c"]
+            ],
+            Default::default(),
         );
     }
 }
