@@ -1,4 +1,3 @@
-use ahashmap::{AHashMap, AHashSet};
 use logger_srcfile::SrcFileLogger;
 use swc_ecma_ast::{
     AssignPatProp, BindingIdent, CallExpr, Callee, Expr, ExprOrSpread, Ident, IdentName,
@@ -6,64 +5,26 @@ use swc_ecma_ast::{
 };
 use swc_ecma_visit::{Visit, VisitWith};
 
-struct NameSet<K, V> {
-    names: AHashMap<K, AHashSet<V>>,
-}
-impl<K, V> NameSet<K, V> {
-    fn new() -> Self {
-        Self {
-            names: Default::default(),
-        }
-    }
-}
-impl<K: Eq + std::hash::Hash, V: Eq + std::hash::Hash> NameSet<K, V> {
-    pub fn insert(&mut self, key: K, value: V) {
-        self.names.entry(key).or_default().insert(value);
-    }
-
-    pub fn insert_all(&mut self, key: K, values: impl IntoIterator<Item = V>) {
-        let entry = self.names.entry(key).or_default();
-        for value in values {
-            entry.insert(value);
-        }
-    }
-
-    pub fn insert_nameless(&mut self, key: K) {
-        self.names.entry(key).or_default();
-    }
-}
-impl<K: Default, V: Default> Default for NameSet<K, V> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+use crate::{
+    name_set::NameSet,
+    raw_module_deps::{Name, Symbol},
+};
 
 #[derive(Default)]
 pub struct ImportsAndRequires {
-    imported_paths: NameSet<String, String>,
-    require_paths: NameSet<String, String>,
+    pub imported_paths: NameSet<String, Symbol>,
+    pub require_paths: NameSet<String, Symbol>,
 }
 
-fn is_import_expr(call_expr: &CallExpr) -> bool {
-    if let Callee::Import(_) = &call_expr.callee {
-        return true;
-    }
-    if let Callee::Expr(callee) = &call_expr.callee {
-        if let Some(ident) = callee.as_ident() {
-            if ident.sym == "require" {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-impl Visit for ImportsAndRequires {
-    // import('foo')
-    // or
-    // require('foo')
-    fn visit_call_expr(&mut self, expr: &CallExpr) {
-        expr.visit_children_with(self);
+impl ImportsAndRequires {
+    // Checks if the current call expr is one of the supported import() or require() calls
+    // and if it is, updates this data structure with the import path and the names that are
+    // being imported.
+    //
+    // Note that this is not actually an implementation of swc's Visit() because we want to
+    // perform all the visits in a single pass, in order to avoid cache-misses caused by multiple
+    // traverses over the AST nodes, which may be distributed across the heap.
+    pub fn scan_call_expr(&mut self, expr: &CallExpr) {
         match expr {
             // import()
             CallExpr {
@@ -72,7 +33,7 @@ impl Visit for ImportsAndRequires {
                 ..
             } => {
                 if let Some(import_path) = args_as_import(import_args) {
-                    self.imported_paths.insert_nameless(import_path);
+                    self.require_paths.insert(import_path, Symbol::Namespace);
                 }
             }
             // require()
@@ -83,7 +44,7 @@ impl Visit for ImportsAndRequires {
             } => {
                 if ident.sym == "require" {
                     if let Some(import_path) = args_as_import(import_args) {
-                        self.require_paths.insert_nameless(import_path);
+                        self.require_paths.insert(import_path, Symbol::Default);
                     }
                 }
             }
@@ -127,7 +88,7 @@ impl Visit for ImportsAndRequires {
                     then_arg_obj_pattern
                         .props
                         .iter()
-                        .filter_map(|prop| -> Option<String> {
+                        .filter_map(|prop| -> Option<Symbol> {
                             println!("arg prop: {:?}", prop);
 
                             match prop {
@@ -148,7 +109,7 @@ impl Visit for ImportsAndRequires {
                                             ..
                                         },
                                     ..
-                                }) => Some(ident_sym.to_string()),
+                                }) => Some(Symbol::Named(Name::from(ident_sym))),
                                 _ => None,
                             }
                         });
@@ -189,6 +150,13 @@ fn args_as_import(args: &Vec<ExprOrSpread>) -> Option<String> {
     None
 }
 
+impl Visit for ImportsAndRequires {
+    fn visit_call_expr(&mut self, call_expr: &CallExpr) {
+        call_expr.visit_children_with(self);
+        self.scan_call_expr(call_expr);
+    }
+}
+
 pub fn find_imports_and_requires<TLogger, TNode>(ast_node: &TNode) -> ImportsAndRequires
 where
     TLogger: SrcFileLogger,
@@ -201,6 +169,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::raw_module_deps::Symbol;
+
     use super::ImportsAndRequires;
     use ahashmap::AHashMap;
 
@@ -208,8 +178,8 @@ mod test {
 
     fn test_discovers_import_expr(
         source: &str,
-        expected_imported_paths: AHashMap<&str, Vec<&str>>,
-        expected_require_paths: AHashMap<&str, Vec<&str>>,
+        expected_imported_paths: AHashMap<&str, Vec<Symbol>>,
+        expected_require_paths: AHashMap<&str, Vec<Symbol>>,
     ) {
         let mut visitor = ImportsAndRequires {
             imported_paths: Default::default(),
@@ -218,18 +188,18 @@ mod test {
         swc_utils_parse::parse_and_visit(source, &mut visitor).unwrap();
 
         assert_eq!(
-            visitor.imported_paths.names,
+            visitor.imported_paths.names(),
             expected_imported_paths
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
+                .map(|(k, v)| (k.to_string(), v.iter().cloned().collect()))
                 .collect(),
         );
 
         assert_eq!(
-            visitor.require_paths.names,
+            visitor.require_paths.names(),
             expected_require_paths
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
+                .map(|(k, v)| (k.to_string(), v.iter().cloned().collect()))
                 .collect(),
         );
     }
@@ -239,7 +209,7 @@ mod test {
         test_discovers_import_expr(
             "import('foo')",
             amap2![
-                "foo" => vec![]
+                "foo" => vec![Symbol::Namespace]
             ],
             Default::default(),
         );
@@ -251,7 +221,7 @@ mod test {
             "require('foo')",
             Default::default(),
             amap2![
-                "foo" => vec![]
+                "foo" => vec![Symbol::Default]
             ],
         );
     }
@@ -261,10 +231,10 @@ mod test {
         test_discovers_import_expr(
             "if (true) { import('foo') } else { require('bar') }",
             amap2![
-                "foo" => vec![]
+                "foo" => vec![Symbol::Namespace]
             ],
             amap2![
-                "bar" => vec![]
+                "bar" => vec![Symbol::Default]
             ],
         );
     }
@@ -274,7 +244,10 @@ mod test {
         test_discovers_import_expr(
             "import('foo').then(({a,b,c}) => { console.log(a,b,c) })",
             amap2![
-                "foo" => vec!["a","b","c"]
+                "foo" => vec![
+                    Symbol::named("a"),
+                    Symbol::named("b"),
+                    Symbol::named("c")]
             ],
             Default::default(),
         );
@@ -285,7 +258,10 @@ mod test {
         test_discovers_import_expr(
             "import('foo').then(function myfunc({a,b,c}) { console.log(a,b,c) })",
             amap2![
-                "foo" => vec!["a","b","c"]
+                "foo" => vec![
+                    Symbol::named("a"),
+                    Symbol::named("b"),
+                    Symbol::named("c")]
             ],
             Default::default(),
         );

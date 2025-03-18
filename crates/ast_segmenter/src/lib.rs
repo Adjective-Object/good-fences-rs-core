@@ -1,12 +1,16 @@
 #![feature(box_patterns)]
-
 // // use ast_name_tracker::VariableScope;
 // // use swc_ecma_ast::Module;
 
 use ast_name_tracker::VariableScope;
+use raw_module_deps::Name;
+use swc_ecma_ast::ModuleExportName;
 
-mod import_expr_visitor;
+pub mod name_set;
+pub mod raw_module_deps;
+pub mod segment_info;
 pub mod visitor;
+pub mod visitors;
 
 // // Global identifier of a segment
 // // (combination of file id and segment index within that file)
@@ -59,42 +63,63 @@ struct NormalSegment {
     imports: NormalSegmentImportInfo,
 }
 
-// The target of an export, either a symbol or a namespace
+// The target of an import, either a symbol or a namespace
 #[derive(Clone)]
-pub enum ExportTarget {
+pub enum ImportTarget {
     // An individual symbol that is exported
-    Symbol(ExportedSymbol),
+    ExportedSymbol(ExportedSymbol),
     // A namespace export
     Namespace,
-    // an effect-only import of another file
-    // in case of `import './foo';` this executes code in file but imports no symbols
-    EffectOnly,
 }
 
 // A named or default symbol that is exported from or imported into a file
-#[derive(Clone)]
+// This enclosed in <> in the below examples::
+// export foo as <bar>
+// export * as <Foo> from './foo'
+// export type { foo as <default> } from './foo'
+//
+// Note: this is currently a different type than `Symbol`, because `Symbol`
+// is the union of
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone)]
 pub enum ExportedSymbol {
     // The name of the symbol in the exporting file
-    Named(String),
+    Named(Name),
     // The default export
     Default,
+}
+impl<T: ToString + AsRef<str>> From<T> for ExportedSymbol {
+    fn from(name: T) -> Self {
+        if name.as_ref() == "default" {
+            ExportedSymbol::Default
+        } else {
+            ExportedSymbol::Named(name.to_string().into())
+        }
+    }
+}
+impl ExportedSymbol {
+    pub fn from_module_export_name(name: &ModuleExportName) -> Self {
+        match name {
+            ModuleExportName::Ident(ident) => Self::from(ident.sym),
+            ModuleExportName::Str(str) => Self::from(str.value),
+        }
+    }
 }
 
 /// Represents a local symbol that is being exported to another file
 pub struct ExportLocal {
-    local_name: String,
-    exported_as: ExportTarget,
+    local_name: Name,
+    exported_as: Option<ExportedSymbol>,
 }
 
 /// Represents a local symbol that is being imported from another file
 pub struct ImportedLocal {
-    local_name: String,
-    imported_as: ExportTarget,
+    local_name: Name,
+    imported_as: ImportTarget,
 }
 
 pub struct ReExportedSymbol {
-    imported_as: ExportedSymbol,
-    exported_as: ExportedSymbol,
+    imported_as: ImportTarget,
+    exported_as: Option<ExportedSymbol>,
 }
 
 /// This represents the imports and exports of a segment from "normal" code
@@ -115,16 +140,16 @@ struct NormalSegmentImportInfo {
 
 struct LazyModule {
     /// The local name of the lazy module
-    local_name: String,
+    local_name: Name,
     /// The import specifier for the module
     import: String,
 }
 
 struct LazyModuleReference {
     /// The local name of the lazy module
-    local_name: String,
+    local_name: Name,
     /// The member of the lazy module that is being extracted
-    lazy_module_member: String,
+    lazy_module_member: Name,
 }
 
 /// Enum representing how an individual segment imports/exports symbols
