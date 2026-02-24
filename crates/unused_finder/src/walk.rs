@@ -219,7 +219,7 @@ pub const DEFAULT_OVERRIDE_PATTERNS: &[&str] = &["!node_modules", "!lib", "!targ
 fn build_walk(
     logger: impl Logger,
     root_path: impl AsRef<Path>,
-    ingnored_filenames: &[impl AsRef<str>],
+    ignored_filenames: &[impl AsRef<str>],
 ) -> Result<ignore::WalkParallel, anyhow::Error> {
     // Build overrides matcher
     let mut override_builder = OverrideBuilder::new(root_path.as_ref());
@@ -234,10 +234,10 @@ fn build_walk(
     }
 
     // add user-specified ignored filenames
-    for filename in ingnored_filenames {
+    for filename in ignored_filenames {
         let as_ref = filename.as_ref();
-        let inverted_ignore = if as_ref.starts_with("!") {
-            as_ref[2..].to_string()
+        let inverted_ignore = if let Some(stripped) = as_ref.strip_prefix("!") {
+            stripped.to_string()
         } else {
             format!("!{}", as_ref)
         };

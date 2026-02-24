@@ -1,11 +1,10 @@
 use core::option::Option::None;
 use std::{
-    collections::HashSet,
     fmt::Display,
     path::{Path, PathBuf},
 };
 
-use ahashmap::{AHashMap, AHashSet};
+use ahashmap::AHashMap;
 use anyhow::Result;
 use rayon::prelude::*;
 
@@ -232,13 +231,14 @@ impl Graph {
             .flatten();
 
         const SYMBOLS_PER_FILE_HINT: usize = 4;
-        let mut visited = AHashSet::with_capacity_and_hasher(
+        let mut visited: AHashMap<Edge, UsedTag> = AHashMap::with_capacity_and_hasher(
             self.files.len() * SYMBOLS_PER_FILE_HINT,
             Default::default(),
         );
 
-        let mut frontier = initial_file_edges
+        let mut frontier: Vec<(Edge, UsedTag)> = initial_file_edges
             .chain(initial_symbol_edges)
+            .map(|edge| (edge, tag | UsedTag::USED_AS_VALUE))
             .collect::<Vec<_>>();
 
         debug_logf!(
@@ -248,7 +248,7 @@ impl Graph {
             frontier.len(),
             frontier
                 .iter()
-                .map(|p| format!("{}:{}", self.files[p.file_id].file_path.display(), p.symbol))
+                .map(|(e, _)| format!("{}:{}", self.files[e.file_id].file_path.display(), e.symbol))
                 .collect::<Vec<_>>()
                 .join("\n  ")
         );
@@ -256,7 +256,7 @@ impl Graph {
         // Traverse the graph until we exhaust the frontier
         const MAX_ITERATIONS: usize = 1_000_000;
         for _ in 0..MAX_ITERATIONS {
-            let next_frontier: Vec<Edge> = self.bfs_step(&mut visited, &frontier, tag);
+            let next_frontier = self.bfs_step(&mut visited, &frontier);
             frontier = next_frontier;
             if frontier.is_empty() {
                 return Ok(());
@@ -269,77 +269,76 @@ impl Graph {
         ))
     }
 
-    /// Perform a single step of the BFS algorithm, returning the list of files that should be visited next
+    /// Perform a single step of the BFS algorithm, returning the list of
+    /// (edge, tag) pairs that should be visited next.
+    ///
+    /// Each frontier item carries its own tag. When traversing a type-only
+    /// re-export edge, USED_AS_VALUE is replaced with USED_AS_TYPE so that
+    /// downstream nodes are tagged as "used only as a type".
     fn bfs_step(
         &mut self,
-        visited: &mut AHashSet<Edge>,
-        frontier: &[Edge],
-        tag: UsedTag,
-    ) -> Vec<Edge> {
-        // get list of unique files that are being visited in this pass
+        visited: &mut AHashMap<Edge, UsedTag>,
+        frontier: &[(Edge, UsedTag)],
+    ) -> Vec<(Edge, UsedTag)> {
+        // Mark all symbols and files we visited in this pass with their
+        // per-edge tags
+        for (edge, edge_tag) in frontier.iter() {
+            self.files[edge.file_id].tag_symbol(&edge.symbol, *edge_tag);
+            self.files[edge.file_id].file_tags |= *edge_tag;
+            let visited_tag = visited.entry(edge.clone()).or_default();
+            *visited_tag = visited_tag.union(*edge_tag);
+        }
+
+        // Collect unique file IDs from this frontier pass
         let mut from_files = frontier
             .iter()
-            .map(|Edge { file_id, .. }| *file_id)
+            .map(|(Edge { file_id, .. }, _)| *file_id)
             .collect::<Vec<_>>();
         from_files.sort();
         from_files.dedup();
 
-        // mark all symbols we visited in this pass as visited
-        for edge in frontier.iter() {
-            self.files[edge.file_id].tag_symbol(&edge.symbol, tag);
-            visited.insert(edge.clone());
-        }
-        // mark all files we visited in this pass as visited
-        for file in from_files.iter() {
-            self.files[*file].file_tags |= tag;
-        }
-
-        // generate the next frontier in a parallel pass over the files
-        let next_frontier_symbols = from_files
+        // Generate the next frontier with per-edge tags
+        from_files
             .par_iter()
-            .map(|file_id| {
+            .flat_map(|file_id| {
                 let file = &self.files[*file_id];
-                // if the file was not visited before, add all its imports
-                // to the frontier
-                //
-                // TODO: become more granular here for re-exported symbols
-                let outgoing_edges = file
-                    .import_export_info
+                file.import_export_info
                     .iter_imported_symbols_meta()
                     .filter_map(|(path, symbol, meta)| {
-                        // don't traverse type-only re-exports of symbols when marking items.
-                        //
-                        // This is so that we don't mark a symbol as used if it is only used as a type.
-                        // TODO: should this be a TraversalMode that the graph is parameterized on? e.g.
-                        // track USED_ENTRY and USED_ENTRY_AS_TYPE as separate tags?
-                        if let Some(meta) = meta {
-                            if meta.is_type_only {
-                                return None;
-                            }
-                        }
-
                         let edge = match self.path_to_id.get(path) {
                             Some(id) => Edge::new(*id, symbol.clone()),
-                            None => {
-                                return None;
-                            }
+                            None => return None,
                         };
 
-                        // don't re-traverse edges we have already visited
-                        if visited.contains(&edge) {
+                        // Determine the tag for this outgoing edge based on
+                        // the strongest tag any frontier item in this file had.
+                        // Then, if this is a type-only re-export, switch from
+                        // USED_AS_VALUE to USED_AS_TYPE.
+                        let file_tag = frontier
+                            .iter()
+                            .filter(|(e, _)| e.file_id == *file_id)
+                            .fold(UsedTag::empty(), |acc, (_, t)| acc | *t);
+
+                        let outgoing_tag = if meta.map_or(false, |m| m.is_type_only) {
+                            (file_tag - UsedTag::USED_AS_VALUE) | UsedTag::USED_AS_TYPE
+                        } else {
+                            file_tag
+                        };
+
+                        // Only revisit if we're bringing new tag information
+                        let already_visited = visited
+                            .get(&edge)
+                            .map_or(false, |v| v.contains(outgoing_tag));
+                        if already_visited {
                             None
                         } else {
-                            Some(edge)
+                            Some((edge, outgoing_tag))
                         }
                     })
-                    .par_bridge();
-
-                outgoing_edges
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
             })
-            .flatten()
-            .collect::<HashSet<_>>();
-
-        next_frontier_symbols.into_iter().collect()
+            .collect()
     }
 }
 

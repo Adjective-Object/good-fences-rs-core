@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     name: "health checks"
     steps:
-      - name: check gclib version
+      - name: check glibc version
         run: ldd --version
       - name: Check out code
         uses: actions/checkout@v4
@@ -44,12 +44,14 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: ubuntu-24.04
+          - host: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            container: ubuntu:20.04
             test: true
             js-files: true
-          - host: ubuntu-24.04
+          - host: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
+            container: ubuntu:20.04
             packages: gcc-aarch64-linux-gnu
             test: false
           # This is the latest macos that github provides a non-enterprise-tier x86
@@ -69,7 +71,17 @@ jobs:
             test: false
     name: build${{ matrix.settings.test && '+test' || ''}} ${{ matrix.settings.target }} on ${{ matrix.settings.host }}
     runs-on: ${{ matrix.settings.host }}
+    container: ${{ matrix.settings.container || '' }}
     steps:
+      - name: Install container build dependencies
+        if: ${{ matrix.settings.container }}
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y curl wget git build-essential pkg-config libssl-dev ca-certificates gnupg
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
+          corepack enable
       - name: Check out code
         uses: actions/checkout@v4
       - name: Install rust
@@ -88,11 +100,15 @@ jobs:
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
       - name: run package install script
+        if: ${{ matrix.settings.packages }}
         shell: bash
         run: |
-          if [ -n "${{ matrix.settings.packages }}" ]; then
+          if command -v sudo &>/dev/null; then
             sudo apt-get update
             sudo apt-get install -y ${{ matrix.settings.packages }}
+          else
+            apt-get update
+            apt-get install -y ${{ matrix.settings.packages }}
           fi
       - name: napi build
         run: yarn install && yarn build --target ${{ matrix.settings.target }}
@@ -109,14 +125,14 @@ jobs:
       - name: upload-artifacts
         uses: actions/upload-artifact@v4
         # only run when this subworkflow is called from CI (e.g. not a PR)
-        if: needs.pr-check.outputs.number != 'null'
+        if: github.event_name != 'pull_request'
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ./*.node
           if-no-files-found: error
       - name: upload js files
         # only run when this subworkflow is called from CI (e.g. not a PR)
-        if: ${{ matrix.settings.js-files }}
+        if: ${{ matrix.settings.js-files && github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: js-files

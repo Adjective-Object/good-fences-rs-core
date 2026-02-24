@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Fix type-only re-export false positives, off-by-one in skip pattern parsing, and CI glibc compatibility",
+  "packageName": "@good-fences/api",
+  "email": "tywalser@microsoft.com",
+  "dependentChangeType": "patch"
+}

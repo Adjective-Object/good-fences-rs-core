@@ -67,6 +67,8 @@ pub enum UsedTagEnum {
     Ignored,
     TypeOnly,
     Test,
+    UsedAsValue,
+    UsedAsType,
 }
 
 impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
@@ -76,6 +78,8 @@ impl From<unused_finder::UsedTagEnum> for UsedTagEnum {
             unused_finder::UsedTagEnum::Ignored => UsedTagEnum::Ignored,
             unused_finder::UsedTagEnum::TypeOnly => UsedTagEnum::TypeOnly,
             unused_finder::UsedTagEnum::Test => UsedTagEnum::Test,
+            unused_finder::UsedTagEnum::UsedAsValue => UsedTagEnum::UsedAsValue,
+            unused_finder::UsedTagEnum::UsedAsType => UsedTagEnum::UsedAsType,
         }
     }
 }
