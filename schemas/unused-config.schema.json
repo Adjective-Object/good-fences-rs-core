@@ -20,6 +20,14 @@
         "type": "string"
       }
     },
+    "ignoreExportNames": {
+      "description": "List of regex patterns matched against export symbol names. Any unused export whose name matches one of these patterns will be suppressed from the report.\n\nPatterns use Rust regex syntax (compatible with most JS regex patterns, but lookaheads are not supported — use `allow_unused_types` for ignoring type-only exports instead).",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "repoRoot": {
       "description": "Path to the root directory of the repository.",
       "default": "",

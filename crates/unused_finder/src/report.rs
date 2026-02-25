@@ -207,6 +207,11 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                     return None;
                 }
 
+                if value.config.is_export_name_ignored(&symbol_name.to_string()) {
+                    // suppressed by ignoreExportNames config
+                    return None;
+                }
+
                 let ast_symbol = file.import_export_info.get_exported_symbol(symbol_name)?;
 
                 Some(SymbolReport {

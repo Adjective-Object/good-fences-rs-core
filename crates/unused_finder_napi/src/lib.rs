@@ -44,6 +44,10 @@ pub struct UnusedFinderJSONConfig {
     /// glob patterns are matched against the relative file path from the
     /// root of the repository
     pub test_files: Option<Vec<String>>,
+    /// List of regex patterns matched against export symbol names.
+    /// Any unused export whose name matches one of these patterns will be
+    /// suppressed from the report.
+    pub ignore_export_names: Option<Vec<String>>,
 }
 
 impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
@@ -56,6 +60,7 @@ impl From<UnusedFinderJSONConfig> for unused_finder::UnusedFinderJSONConfig {
             entry_packages: val.entry_packages,
             allow_unused_types: val.allow_unused_types.unwrap_or_default(),
             test_files: val.test_files.unwrap_or_default(),
+            ignore_export_names: val.ignore_export_names.unwrap_or_default(),
         }
     }
 }
