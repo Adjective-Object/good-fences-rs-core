@@ -1,9 +1,9 @@
 use core::fmt;
+use regex::Regex;
 use std::{
     fmt::{Debug, Display, Formatter},
     path::Path,
 };
-use regex::Regex;
 
 use itertools::Itertools;
 use package_match_rules::PackageMatchRules;
@@ -229,8 +229,7 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             .iter()
             .enumerate()
             .map(|(i, pat)| {
-                Regex::new(pat)
-                    .map_err(|e| ConfigError::InvalidIgnoreExportNamesRegex(i, e))
+                Regex::new(pat).map_err(|e| ConfigError::InvalidIgnoreExportNamesRegex(i, e))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
