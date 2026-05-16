@@ -38,3 +38,19 @@
 - **`get_export_bindings` lifetime issues**: Changed from `impl Comments` param + returning `impl Iterator` (lifetime conflict) to `&SingleThreadedComments` param + returning `Vec<ExportBinding>`.
 - **`RawModuleDeps` fields**: Made all fields `pub` so `ExportsVisitor` (in a child module) can populate them directly.
 - **`ImportTarget`, `ReExportedSymbol`**: Added `Debug, PartialEq, Eq, Hash, Clone` derives since these types are stored in `AHashSet`.
+
+## Phase 2: Complete the segment orchestrator
+
+### Design decisions
+
+- **`ExportsVisitor` changed to borrow logger and comments**: Changed `ExportsVisitor<TLogger>` to `ExportsVisitor<'a, TLogger>` storing `&'a TLogger` and `&'a SingleThreadedComments` instead of owned values. This avoids cloning the logger/comments per segment and lets `segment_file` pass references through. `SingleThreadedComments` is Rc-backed so cloning was cheap, but borrowing is cleaner.
+- **`Stmt` → `RawModuleDeps` mapping**: For statement segments, `find_imports_and_requires` returns `NameSet<String, Symbol>` for imported_paths and require_paths. These map directly onto `RawModuleDeps.dynamic_imports` (`AHashMap<String, AHashSet<Symbol>>`) and `RawModuleDeps.requires` (`AHashSet<String>`). Static imports/exports fields are left at default (empty) since `Stmt` nodes don't contain static import/export syntax.
+- **`ModuleDecl` → `RawModuleDeps` mapping**: Reuses `ExportsVisitor` (the same visitor that handles `import`, `export`, `require` declarations) by visiting each `ModuleDecl` individually. This gives per-segment granularity.
+- **`segment_file` as public API**: Returns `Vec<RawSegment>` (one per `ModuleItem`), filtering out unsupported constructs (with, return, break, continue) which emit diagnostics.
+- **Tests are assertion-based, not insta-snapshots**: The repo uses `pretty_assertions` + manual assertions. No `insta` dependency existed, so tests follow the existing pattern: parse source → assert segment count and specific field contents.
+
+### Gotchas
+
+- `ExportsVisitor` fields `logger` and `comments` needed all `&self.comments` → `self.comments` fixups since the extra `&` would double-reference.
+- `ast_name_tracker::find_names` takes `&TLogger` — with `self.logger: &TLogger`, must pass `self.logger` (not `&self.logger`) to avoid `&&TLogger`.
+- The old `Segment` / `SegmentKind` types in `lib.rs` are now dead code — left in place as they're pre-existing and may be useful for future phases.

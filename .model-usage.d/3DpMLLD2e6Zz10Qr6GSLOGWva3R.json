@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.segment-aware-migration.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.7",
+    "tokens_in": 3232375,
+    "tokens_out": 26666,
+    "tokens_cached": 3150788,
+    "premium_requests": 3
+  },
+  "started_at": "2026-05-16T23:35:00.129321970Z",
+  "completed_at": "2026-05-16T23:43:14.651428608Z",
+  "session_id": "3DpMLLD2e6Zz10Qr6GSLOGWva3R",
+  "runtime_name": "github-copilot-agent-claude-opus-4.7",
+  "success": true,
+  "machine_id": "4bbfa6af08c5bbd5"
+}

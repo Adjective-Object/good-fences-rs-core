@@ -164,11 +164,13 @@ version = "0.2.0-beta.1"
 dependencies = [
  "ahashmap",
  "ast-name-tracker",
+ "logger",
  "logger_srcfile",
  "roaring",
  "swc_atoms 5.0.0",
  "swc_common",
  "swc_ecma_ast",
+ "swc_ecma_parser",
  "swc_ecma_visit",
  "swc_utils_parse",
  "test_tmpdir",

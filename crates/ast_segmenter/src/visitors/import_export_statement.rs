@@ -18,9 +18,9 @@ use swc_ecma_visit::{Visit, VisitWith};
 
 // AST visitor that gathers information on file imports and exports from an SWC source tree.
 #[derive(Debug)]
-pub struct ExportsVisitor<TLogger: SrcFileLogger> {
-    pub logger: TLogger,
-    pub comments: SingleThreadedComments,
+pub struct ExportsVisitor<'a, TLogger: SrcFileLogger> {
+    pub logger: &'a TLogger,
+    pub comments: &'a SingleThreadedComments,
     pub module_deps: RawModuleDeps,
     require_identifiers: ahashmap::AHashSet<Id>,
 }
@@ -75,8 +75,8 @@ fn get_export_bindings(
     }).collect()
 }
 
-impl<TLogger: SrcFileLogger> ExportsVisitor<TLogger> {
-    pub fn new(logger: TLogger, comments: SingleThreadedComments) -> Self {
+impl<'a, TLogger: SrcFileLogger> ExportsVisitor<'a, TLogger> {
+    pub fn new(logger: &'a TLogger, comments: &'a SingleThreadedComments) -> Self {
         Self {
             logger,
             comments,
@@ -86,7 +86,7 @@ impl<TLogger: SrcFileLogger> ExportsVisitor<TLogger> {
     }
 
     pub fn has_disable_export_comment(&self, lo: BytePos) -> bool {
-        has_disable_export_comment(&self.comments, lo)
+        has_disable_export_comment(self.comments, lo)
     }
 }
 
@@ -99,17 +99,17 @@ pub fn has_disable_export_comment(comments: &SingleThreadedComments, lo: BytePos
     false
 }
 
-impl<T: SrcFileLogger> From<ExportsVisitor<T>> for RawModuleDeps {
-    fn from(x: ExportsVisitor<T>) -> Self {
+impl<'a, T: SrcFileLogger> From<ExportsVisitor<'a, T>> for RawModuleDeps {
+    fn from(x: ExportsVisitor<'a, T>) -> Self {
         x.module_deps
     }
 }
 
-impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
+impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);
-        let tags = SymbolTags::from_comments(&self.comments, expr.span_lo());
+        let tags = SymbolTags::from_comments(self.comments, expr.span_lo());
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
             TaggedSymbol::new(Symbol::Default, tags),
@@ -119,7 +119,7 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     /// Handles `export default class Foo {}` or `export default function foo() {}`
     fn visit_export_default_decl(&mut self, decl: &ExportDefaultDecl) {
         decl.visit_children_with(self);
-        let mut tags = SymbolTags::from_comments(&self.comments, decl.span_lo());
+        let mut tags = SymbolTags::from_comments(self.comments, decl.span_lo());
         tags.is_type_only = decl.decl.is_ts_interface_decl();
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
@@ -130,7 +130,7 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     // Handles `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
         export.visit_children_with(self);
-        let mut tags = SymbolTags::from_comments(&self.comments, export.span_lo());
+        let mut tags = SymbolTags::from_comments(self.comments, export.span_lo());
         tags.is_type_only = export.decl.is_ts_interface() || export.decl.is_ts_type_alias();
         let idents = match &export.decl {
             Decl::Class(decl) => {
@@ -143,7 +143,7 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
                 .decls
                 .iter()
                 .flat_map(|d: &swc_ecma_ast::VarDeclarator| -> Vec<String> {
-                    let child_scope = ast_name_tracker::find_names(&self.logger, d);
+                    let child_scope = ast_name_tracker::find_names(self.logger, d);
                     child_scope
                         .get_locals()
                         .map(|k| k.to_string())
@@ -180,7 +180,6 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
         let source = export.src.value.to_string();
-        let tags = SymbolTags::from_comments(&self.comments, export.span_lo());
         let binding: ReExportedSymbol = ReExportedSymbol {
             imported_as: crate::ImportTarget::Namespace,
             exported_as: None,
@@ -196,9 +195,9 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     fn visit_named_export(&mut self, export: &NamedExport) {
         export.visit_children_with(self);
         if let Some(source) = &export.src {
-            let tags = SymbolTags::from_comments(&self.comments, export.span_lo());
+            let tags = SymbolTags::from_comments(self.comments, export.span_lo());
             let source_str = source.value.to_string();
-            get_export_bindings(&self.comments, tags, export, source).into_iter().for_each(|binding| {
+            get_export_bindings(self.comments, tags, export, source).into_iter().for_each(|binding| {
                 if let Ok(re_export) = TryInto::<ReExportedSymbol>::try_into(binding) {
                     self.module_deps
                         .exports_from
@@ -221,7 +220,7 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
                         let exported_key = exported_as
                             .clone()
                             .unwrap_or_else(|| ExportedSymbol::from(local_name.as_str()));
-                        let mut tags = SymbolTags::from_comments(&self.comments, named.span().lo());
+                        let mut tags = SymbolTags::from_comments(self.comments, named.span().lo());
                         tags.allow_unused_comment |= allow_unused;
                         tags.is_type_only |= is_type_only || named.is_type_only;
                         self.module_deps.exports_locals.insert(
@@ -306,7 +305,7 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
             return;
         }
         // import .. from ..
-        let mut parent_tags = SymbolTags::from_comments(&self.comments, import.span_lo());
+        let mut parent_tags = SymbolTags::from_comments(self.comments, import.span_lo());
         parent_tags.is_type_only |= import.type_only;
 
         let tagged_symbols: Vec<TaggedSymbol> = import

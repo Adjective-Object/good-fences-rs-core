@@ -42,11 +42,11 @@ Each `RawSegment` = `{ module_deps: RawModuleDeps, variables: VariableScope }`.
 For `ModuleItem::Stmt`: run `find_names` + `find_imports_and_requires` on the statement.
 For `ModuleItem::ModuleDecl`: run `find_names` + `ExportsVisitor` on the declaration.
 
-- [ ] Implement `module_item_to_segment` for `Stmt` variants (combine name tracker + dynamic import finder)
-- [ ] Implement `module_item_to_segment` for `ModuleDecl` variants (combine name tracker + exports visitor)
-- [ ] Implement `segment_file` as the public entry point that iterates `module.body`
-- [ ] Add snapshot tests: simple file with mixed imports/exports/statements → verify segment count and contents
-- [ ] Add snapshot tests: file with side-effect imports, re-exports, dynamic imports
+- [x] Implement `module_item_to_segment` for `Stmt` variants (combine name tracker + dynamic import finder)
+- [x] Implement `module_item_to_segment` for `ModuleDecl` variants (combine name tracker + exports visitor)
+- [x] Implement `segment_file` as the public entry point that iterates `module.body`
+- [x] Add snapshot tests: simple file with mixed imports/exports/statements → verify segment count and contents
+- [x] Add snapshot tests: file with side-effect imports, re-exports, dynamic imports
 
 ## Build the segment graph
 

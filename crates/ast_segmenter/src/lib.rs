@@ -12,6 +12,9 @@ pub mod segment_info;
 pub mod visitor;
 pub mod visitors;
 
+pub use segment_info::RawSegment;
+pub use visitor::segment_file;
+
 // // Global identifier of a segment
 // // (combination of file id and segment index within that file)
 // pub struct SegmentId {

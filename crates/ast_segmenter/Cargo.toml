@@ -23,6 +23,10 @@ swc_utils_parse = { version = "0.2.0", path = "../swc_utils_parse" }
 test_tmpdir = { version = "0.1.0", path = "../test_tmpdir" }
 thiserror.workspace = true
 roaring = "0.10"
+
+[dev-dependencies]
+logger = { version = "0.2.0", path = "../logger" }
+swc_ecma_parser.workspace = true
 # ahashmap = { version = "0.2.0", path = "../ahashmap" }
 # logger = { version = "0.2.0", path = "../logger" }
 # logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
