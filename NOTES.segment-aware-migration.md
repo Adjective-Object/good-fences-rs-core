@@ -54,3 +54,21 @@
 - `ExportsVisitor` fields `logger` and `comments` needed all `&self.comments` → `self.comments` fixups since the extra `&` would double-reference.
 - `ast_name_tracker::find_names` takes `&TLogger` — with `self.logger: &TLogger`, must pass `self.logger` (not `&self.logger`) to avoid `&&TLogger`.
 - The old `Segment` / `SegmentKind` types in `lib.rs` are now dead code — left in place as they're pre-existing and may be useful for future phases.
+
+## Phase 3: Build the segment graph
+
+### Design decisions
+
+- **`SegmentGraph` as a flat-indexed graph**: Nodes are stored in a flat `Vec<SegmentNode>` with `SegmentId → index` lookup via `AHashMap`. Edges stored as `Vec<AHashSet<usize>>` (adjacency list). This mirrors the existing `Graph` in `unused_finder` but at segment granularity.
+- **`TagSet` as u32 bitflags**: Simple bitflag propagation (REACHABLE, EFFECTFUL, etc.). Allows multiple independent tags to be propagated in separate BFS passes without interfering. Chosen over an enum because tags are composable.
+- **Hoisting heuristic**: `segment_is_hoisted` returns true for segments with static imports, re-exports (`exports_from`), or side-effect imports (`executed_paths`). These correspond to JS/TS hoisted declarations. `exports_locals` alone (e.g. `export const x = 42`) is NOT hoisted — only `import` and `export ... from` are.
+- **Intra-file effect edges**: Non-hoisted segments form a chain: each depends on the previous non-hoisted segment in file order. Hoisted segments are skipped entirely — they have no execution-order dependency on prior statements.
+- **Inter-file name edges via `add_inter_file_edges`**: Decoupled from `build()` because import specifier resolution (path → file_id) is the caller's responsibility. This keeps the graph construction pure and testable without a filesystem.
+- **Re-exports in file_export_map**: Both `exports_locals` and `exports_from` entries are registered in the per-file export map. For re-exports, the `exported_as` name (or original name if no rename) is used as the key. Wildcard re-exports (`export *`) are skipped since they can't be indexed by a single name.
+- **BFS propagation direction**: Tags propagate forward along dependency edges — if A is seeded and A depends on B, then B also receives the tag. This matches the intuition that "if A is reachable and A imports B, then B is also reachable."
+
+### Gotchas
+
+- **Diamond test required re-export segments**: Initial test used separate export+import segments per file, but inter-file edges only resolve against the file_export_map. Two segments in the same file don't automatically have edges unless connected by effect ordering or shared names. Re-export segments (`exports_from`) are the correct way to model pass-through files.
+- **`exports_locals` segments are NOT hoisted**: `export const x = 42` creates a segment with `exports_locals` but no static imports. This is intentionally non-hoisted because `const` declarations aren't hoisted in JS. Only `export function` would be hoisted, but we can't distinguish that from `exports_locals` alone without AST info — noted as a future refinement.
+- **Wildcard re-exports**: `export * from '...'` can't be represented in the export map keyed by `ExportedSymbol`. Currently skipped during map construction. A future phase may need to resolve wildcards by expanding them against the source file's exports.

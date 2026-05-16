@@ -67,11 +67,11 @@ pub struct SegmentGraph {
 
 Tag propagation: BFS/DFS from seed nodes, propagating tags along edges. Same pattern as existing `Graph::traverse_bfs` but at segment granularity.
 
-- [ ] Define `SegmentId`, `SegmentNode`, `SegmentGraph` types
-- [ ] Implement intra-file effect edges (each segment depends on prior non-hoisted segments in the same file)
-- [ ] Implement inter-file name edges (segment importing symbol X from file Y → edge to the segment in Y that exports X)
-- [ ] Implement `propagate_tags` — BFS from a seed set, propagating a bitflag tag along edges
-- [ ] Add unit tests: linear chain propagation, diamond dependency, cycle handling
+- [x] Define `SegmentId`, `SegmentNode`, `SegmentGraph` types
+- [x] Implement intra-file effect edges (each segment depends on prior non-hoisted segments in the same file)
+- [x] Implement inter-file name edges (segment importing symbol X from file Y → edge to the segment in Y that exports X)
+- [x] Implement `propagate_tags` — BFS from a seed set, propagating a bitflag tag along edges
+- [x] Add unit tests: linear chain propagation, diamond dependency, cycle handling
 
 ## Wire `ast_segmenter` into `unused_finder`
 
