@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -e
+
+echo "=== spot-check: cargo check -p ast-segmenter ==="
+cargo check -p ast-segmenter
+echo "PASS: ast-segmenter compiles"
+
+echo ""
+echo "=== spot-check: cargo test -p ast-segmenter ==="
+cargo test -p ast-segmenter
+echo "PASS: ast-segmenter tests pass"
+
+echo ""
+echo "=== spot-check: cargo check (full workspace) ==="
+cargo check
+echo "PASS: full workspace compiles"
+
+echo ""
+echo "All spot checks passed!"

@@ -64,7 +64,7 @@ struct NormalSegment {
 }
 
 // The target of an import, either a symbol or a namespace
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ImportTarget {
     // An individual symbol that is exported
     ExportedSymbol(ExportedSymbol),
@@ -99,8 +99,8 @@ impl<T: ToString + AsRef<str>> From<T> for ExportedSymbol {
 impl ExportedSymbol {
     pub fn from_module_export_name(name: &ModuleExportName) -> Self {
         match name {
-            ModuleExportName::Ident(ident) => Self::from(ident.sym),
-            ModuleExportName::Str(str) => Self::from(str.value),
+            ModuleExportName::Ident(ident) => Self::from(ident.sym.as_ref()),
+            ModuleExportName::Str(str) => Self::from(str.value.as_ref()),
         }
     }
 }
@@ -117,9 +117,10 @@ pub struct ImportedLocal {
     imported_as: ImportTarget,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ReExportedSymbol {
-    imported_as: ImportTarget,
-    exported_as: Option<ExportedSymbol>,
+    pub imported_as: ImportTarget,
+    pub exported_as: Option<ExportedSymbol>,
 }
 
 /// This represents the imports and exports of a segment from "normal" code

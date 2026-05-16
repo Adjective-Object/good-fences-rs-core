@@ -2,7 +2,7 @@ use logger_srcfile::SrcFileLogger;
 use swc_common::Spanned;
 
 use crate::{
-    import_require::{self, ImportsAndRequires},
+    visitors::import_require_expr,
     NormalSegment, Segment, SegmentKind,
 };
 
@@ -46,16 +46,27 @@ fn module_item_to_segment(
                 | swc_ecma_ast::Stmt::ForOf(_) => {
                     // Visit to extract the names
                     let names = ast_name_tracker::visitor::find_names(file_logger, stmt);
-                    let ImportsAndRequires {
-                        imported_paths: lazy_imports.as_module_imports(),
-                        require_paths: requires,
-                    } = import_require::find_imports_and_requires(stmt);
+                    let imports_and_requires = import_require_expr::find_imports_and_requires(stmt);
+                    let lazy_imports = imports_and_requires.imported_paths.names()
+                        .into_iter()
+                        .map(|(specifier, _symbols)| crate::ModuleImport {
+                            module_specifier: specifier,
+                            extracted_names: None,
+                        })
+                        .collect();
+                    let requires = imports_and_requires.require_paths.names()
+                        .into_iter()
+                        .map(|(specifier, _symbols)| crate::ModuleImport {
+                            module_specifier: specifier,
+                            extracted_names: None,
+                        })
+                        .collect();
                     Some(Segment {
                         variable_scope: names,
                         segment_type: SegmentKind::Normal(NormalSegment {
                             imports: crate::NormalSegmentImportInfo {
-                                lazy_imports: lazy_imports.as_module_imports(),
-                                requires: lazy_imports.as_module_imports(),
+                                lazy_imports,
+                                requires,
                             },
                         }),
                     })
@@ -93,8 +104,17 @@ fn module_item_to_segment(
             }
         }
         swc_ecma_ast::ModuleItem::ModuleDecl(module_decl) => {
-            let names = ast_name_tracker::visitor::find_names(file_logger, stmt);
-            Ok(names)
+            let names = ast_name_tracker::visitor::find_names(file_logger, module_decl);
+            // TODO: run ExportsVisitor on the declaration to populate module_deps
+            Some(Segment {
+                variable_scope: names,
+                segment_type: SegmentKind::Normal(NormalSegment {
+                    imports: crate::NormalSegmentImportInfo {
+                        lazy_imports: vec![],
+                        requires: vec![],
+                    },
+                }),
+            })
         }
     }
 }
@@ -113,7 +133,7 @@ impl Dependencies2D {
     }
 
     pub fn add_dependency(&mut self, from: u32, to: u32) {
-        self.backing_bitmap.contains(self.idx(from, to));
+        self.backing_bitmap.insert(self.idx(from, to));
     }
 
     pub fn depends_on(&self, from: u32, to: u32) -> bool {
@@ -160,12 +180,19 @@ fn segment_module(
     file_logger: &impl SrcFileLogger,
     module: &swc_ecma_ast::Module,
 ) -> ModuleSegments {
+    let mut segments = Vec::new();
     for module_item in module.body.iter() {
-        match module_item {
-            swc_ecma_ast::ModuleItem::Stmt(stmt) => {
-                let segment = statement_to_segment(file_logger, stmt);
-            }
-            swc_ecma_ast::ModuleItem::ModuleDecl(decl) => {}
+        if let Some(segment) = module_item_to_segment(file_logger, module_item) {
+            segments.push(ModuleSegment {
+                ast_node: module_item.clone(),
+                escaped_names: vec![],
+            });
         }
+    }
+    let len = segments.len() as u32;
+    ModuleSegments {
+        segments,
+        name_dependencies: Dependencies2D::new(len),
+        effect_dependencies: Dependencies2D::new(len),
     }
 }

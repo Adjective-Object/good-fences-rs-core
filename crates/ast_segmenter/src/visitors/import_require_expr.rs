@@ -1,4 +1,3 @@
-use logger_srcfile::SrcFileLogger;
 use swc_ecma_ast::{
     AssignPatProp, BindingIdent, CallExpr, Callee, Expr, ExprOrSpread, Ident, IdentName,
     KeyValuePatProp, Lit, MemberExpr, MemberProp, Pat, PropName,
@@ -33,7 +32,7 @@ impl ImportsAndRequires {
                 ..
             } => {
                 if let Some(import_path) = args_as_import(import_args) {
-                    self.require_paths.insert(import_path, Symbol::Namespace);
+                    self.imported_paths.insert(import_path, Symbol::Namespace);
                 }
             }
             // require()
@@ -109,13 +108,18 @@ impl ImportsAndRequires {
                                             ..
                                         },
                                     ..
-                                }) => Some(Symbol::Named(Name::from(ident_sym))),
+                                }) => Some(Symbol::Named(Name::from(ident_sym.as_ref()))),
                                 _ => None,
                             }
                         });
 
-                // store the names
-                self.imported_paths.insert_all(imported_path, obj_names);
+                // store the names (removing any Namespace entry that was added
+                // by visit_children_with processing the inner import() call)
+                let entry = self.imported_paths.entry(imported_path).or_default();
+                entry.remove(&Symbol::Namespace);
+                for name in obj_names {
+                    entry.insert(name);
+                }
             }
             _ => {}
         }
@@ -157,9 +161,8 @@ impl Visit for ImportsAndRequires {
     }
 }
 
-pub fn find_imports_and_requires<TLogger, TNode>(ast_node: &TNode) -> ImportsAndRequires
+pub fn find_imports_and_requires<TNode>(ast_node: &TNode) -> ImportsAndRequires
 where
-    TLogger: SrcFileLogger,
     TNode: for<'a> VisitWith<ImportsAndRequires>,
 {
     let mut visitor = ImportsAndRequires::default();

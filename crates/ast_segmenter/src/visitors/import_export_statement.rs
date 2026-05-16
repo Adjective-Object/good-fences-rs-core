@@ -4,14 +4,14 @@ use crate::{
 };
 
 use logger_srcfile::SrcFileLogger;
-use std::{collections::HashSet, iter::FromIterator};
+use std::convert::TryInto;
 use swc_common::{
     comments::{CommentKind, Comments, SingleThreadedComments},
     BytePos, Spanned,
 };
 use swc_ecma_ast::{
     BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
-    ExportDefaultExpr, ExportSpecifier, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
+    ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit,
     NamedExport, Str, TsImportEqualsDecl, TsModuleName,
 };
 use swc_ecma_visit::{Visit, VisitWith};
@@ -22,6 +22,7 @@ pub struct ExportsVisitor<TLogger: SrcFileLogger> {
     pub logger: TLogger,
     pub comments: SingleThreadedComments,
     pub module_deps: RawModuleDeps,
+    require_identifiers: ahashmap::AHashSet<Id>,
 }
 
 /**
@@ -32,20 +33,19 @@ pub struct ExportsVisitor<TLogger: SrcFileLogger> {
  * - `export { foo } from 'foo'`
  */
 fn get_export_bindings(
-    comments: impl Comments,
+    comments: &SingleThreadedComments,
     parent_tags: SymbolTags,
     export: &NamedExport,
-    source: &Str,
-) -> impl Iterator<Item = ExportBinding> {
+    _source: &Str,
+) -> Vec<ExportBinding> {
     // local copy of the parent tags that considers the 'type' field in `export type`
     let mut parent_tags = parent_tags;
     parent_tags.is_type_only |= export.type_only;
 
-    let borrowed_comments = &comments;
-    let specifiers = export.specifiers.iter().map(|spec| -> ExportBinding {
+    export.specifiers.iter().map(|spec| -> ExportBinding {
         // allow overriding tags on a per-specifier basis
-        let mut specifier_tags =
-            SymbolTags::from_comments_parent(parent_tags, borrowed_comments, spec.span().lo());
+        let specifier_tags =
+            SymbolTags::from_comments_parent(parent_tags.clone(), comments, spec.span().lo());
         match spec {
             // export * as v from 'mod';
             ExportSpecifier::Namespace(spec) => ExportBinding {
@@ -55,11 +55,12 @@ fn get_export_bindings(
             // export v from 'mod';
             ExportSpecifier::Default(spec) => ExportBinding {
                 original: TaggedSymbol::new(Symbol::Default, specifier_tags),
-                exported_as: Some(ExportedSymbol::from(spec.exported)),
+                exported_as: Some(ExportedSymbol::from(spec.exported.sym.as_ref())),
             },
             // export { v as w } from 'mod';
             ExportSpecifier::Named(spec) => {
                 let imported_name = spec.orig.atom().to_string();
+                let mut specifier_tags = specifier_tags;
                 // export { type v as w } from 'mod';
                 specifier_tags.is_type_only |= spec.is_type_only;
                 ExportBinding {
@@ -71,8 +72,7 @@ fn get_export_bindings(
                 }
             }
         }
-    });
-    specifiers
+    }).collect()
 }
 
 impl<TLogger: SrcFileLogger> ExportsVisitor<TLogger> {
@@ -81,6 +81,7 @@ impl<TLogger: SrcFileLogger> ExportsVisitor<TLogger> {
             logger,
             comments,
             module_deps: Default::default(),
+            require_identifiers: Default::default(),
         }
     }
 
@@ -98,16 +99,9 @@ pub fn has_disable_export_comment(comments: &SingleThreadedComments, lo: BytePos
     false
 }
 
-impl<T: SrcFileLogger> From<ExportsVisitor<T>> for RawImportExportInfo {
+impl<T: SrcFileLogger> From<ExportsVisitor<T>> for RawModuleDeps {
     fn from(x: ExportsVisitor<T>) -> Self {
-        Self {
-            imported_path_ids: x.imported_ids_path_name,
-            require_paths: x.require_paths,
-            imported_paths: x.imported_paths,
-            export_from_ids: x.export_from_ids, // TODO replace with Exportx maps
-            exported_ids: x.exported_ids,
-            executed_paths: x.executed_paths,
-        }
+        x.module_deps
     }
 }
 
@@ -115,37 +109,29 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);
-        self.exported_ids.insert(
+        let tags = SymbolTags::from_comments(&self.comments, expr.span_lo());
+        self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol {
-                span: expr.span(),
-                allow_unused: self.has_disable_export_comment(expr.span_lo()),
-                is_type_only: false,
-            },
+            TaggedSymbol::new(Symbol::Default, tags),
         );
     }
 
-    /**
-     * Handles scenarios where `export default` has an inline declaration, e.g. `export default class Foo {}` or `export default function foo() {}`
-     */
+    /// Handles `export default class Foo {}` or `export default function foo() {}`
     fn visit_export_default_decl(&mut self, decl: &ExportDefaultDecl) {
         decl.visit_children_with(self);
-        let is_type_only = decl.decl.is_ts_interface_decl();
-        self.exported_ids.insert(
+        let mut tags = SymbolTags::from_comments(&self.comments, decl.span_lo());
+        tags.is_type_only = decl.decl.is_ts_interface_decl();
+        self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol {
-                span: decl.span(),
-                allow_unused: self.has_disable_export_comment(decl.span_lo()),
-                is_type_only,
-            },
+            TaggedSymbol::new(Symbol::Default, tags),
         );
     }
 
-    // Handles scenarios `export` has an inline declaration, e.g. `export const foo = 1` or `export class Foo {}`
+    // Handles `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
         export.visit_children_with(self);
-        let allow_unused = self.has_disable_export_comment(export.span_lo());
-        let is_type_only = export.decl.is_ts_interface() || export.decl.is_ts_type_alias();
+        let mut tags = SymbolTags::from_comments(&self.comments, export.span_lo());
+        tags.is_type_only = export.decl.is_ts_interface() || export.decl.is_ts_type_alias();
         let idents = match &export.decl {
             Decl::Class(decl) => {
                 vec![decl.ident.sym.to_string()]
@@ -183,57 +169,90 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
         };
 
         for ident in idents {
-            self.exported_ids.insert(
-                ExportedSymbol::Named(ident),
-                TaggedSymbol {
-                    span: export.span(),
-                    allow_unused,
-                    is_type_only,
-                },
+            self.module_deps.exports_locals.insert(
+                ExportedSymbol::from(ident.as_str()),
+                TaggedSymbol::new(Symbol::from(ident.as_str()), tags.clone()),
             );
         }
     }
 
-    // `export * from './foo'`; // TODO allow recursive import resolution
+    // `export * from './foo'`
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
         let source = export.src.value.to_string();
-        let allow_unused = self.has_disable_export_comment(export.span_lo());
-        self.export_from_ids.entry(source).or_default().insert(
-            ExportBinding {
-                imported: ExportedSymbol::Namespace,
-                renamed_to: None,
-            },
-            TaggedSymbol {
-                span: export.span(),
-                allow_unused,
-                is_type_only: export.type_only,
-            },
-        );
+        let tags = SymbolTags::from_comments(&self.comments, export.span_lo());
+        let binding: ReExportedSymbol = ReExportedSymbol {
+            imported_as: crate::ImportTarget::Namespace,
+            exported_as: None,
+        };
+        self.module_deps
+            .exports_from
+            .entry(source)
+            .or_default()
+            .insert(binding);
     }
 
     // export {foo} from './foo';
     fn visit_named_export(&mut self, export: &NamedExport) {
         export.visit_children_with(self);
         if let Some(source) = &export.src {
-            // TODO: track tags
-            let tags = SymbolTags::from_comments(self.comments, export.span_lo());
-            // In case we find `'./foo'` in `export { foo } from './foo'`
-            get_export_bindings(self.comments, tags, export, source).for_each(|binding| {
-                let as_export_binding: ReExportedSymbol = binding.try_as_re_export();
+            let tags = SymbolTags::from_comments(&self.comments, export.span_lo());
+            let source_str = source.value.to_string();
+            get_export_bindings(&self.comments, tags, export, source).into_iter().for_each(|binding| {
+                if let Ok(re_export) = TryInto::<ReExportedSymbol>::try_into(binding) {
+                    self.module_deps
+                        .exports_from
+                        .entry(source_str.clone())
+                        .or_default()
+                        .insert(re_export);
+                }
             });
         } else {
-            self.handle_export_named_specifiers(
-                &export.specifiers,
-                self.has_disable_export_comment(export.span_lo()),
-                export.type_only,
-                export.span(),
-            );
+            let allow_unused = self.has_disable_export_comment(export.span_lo());
+            let is_type_only = export.type_only;
+            for spec in &export.specifiers {
+                match spec {
+                    ExportSpecifier::Named(named) => {
+                        let local_name = named.orig.atom().to_string();
+                        let exported_as = named
+                            .exported
+                            .as_ref()
+                            .map(ExportedSymbol::from_module_export_name);
+                        let exported_key = exported_as
+                            .clone()
+                            .unwrap_or_else(|| ExportedSymbol::from(local_name.as_str()));
+                        let mut tags = SymbolTags::from_comments(&self.comments, named.span().lo());
+                        tags.allow_unused_comment |= allow_unused;
+                        tags.is_type_only |= is_type_only || named.is_type_only;
+                        self.module_deps.exports_locals.insert(
+                            exported_key,
+                            TaggedSymbol::new(Symbol::from(local_name.as_str()), tags),
+                        );
+                    }
+                    ExportSpecifier::Default(default_spec) => {
+                        let mut tags = SymbolTags::default();
+                        tags.allow_unused_comment = allow_unused;
+                        tags.is_type_only = is_type_only;
+                        self.module_deps.exports_locals.insert(
+                            ExportedSymbol::Default,
+                            TaggedSymbol::new(Symbol::Default, tags),
+                        );
+                    }
+                    ExportSpecifier::Namespace(ns) => {
+                        let mut tags = SymbolTags::default();
+                        tags.allow_unused_comment = allow_unused;
+                        tags.is_type_only = is_type_only;
+                        self.module_deps.exports_locals.insert(
+                            ExportedSymbol::from_module_export_name(&ns.name),
+                            TaggedSymbol::new(Symbol::Namespace, tags),
+                        );
+                    }
+                }
+            }
         }
     }
 
     // const foo = require; // <- Binding
-    // const p = foo('./path')
     fn visit_binding_ident(&mut self, binding: &BindingIdent) {
         binding.visit_children_with(self);
         if binding.sym == *"require" {
@@ -245,29 +264,31 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
     fn visit_ts_import_equals_decl(&mut self, decl: &TsImportEqualsDecl) {
         decl.visit_children_with(self);
         if let Some(module_ref) = decl.module_ref.as_ts_external_module_ref() {
-            self.imported_paths
-                .insert(module_ref.expr.value.to_string());
+            self.module_deps
+                .dynamic_imports
+                .entry(module_ref.expr.value.to_string())
+                .or_default()
+                .insert(Symbol::Namespace);
         }
     }
 
-    // import('foo')
-    // or
-    // require('foo')
+    // import('foo') or require('foo')
     fn visit_call_expr(&mut self, expr: &CallExpr) {
         expr.visit_children_with(self);
         if let Callee::Import(_) = &expr.callee {
-            match extract_argument_value(expr) {
-                Some(import_path) => {
-                    self.imported_paths.insert(import_path);
-                }
-                None => return,
+            if let Some(import_path) = extract_argument_value(expr) {
+                self.module_deps
+                    .dynamic_imports
+                    .entry(import_path)
+                    .or_default()
+                    .insert(Symbol::Namespace);
             }
         }
         if let Callee::Expr(callee) = &expr.callee {
             if let Some(ident) = callee.as_ident() {
                 if ident.sym == "require" && !self.require_identifiers.contains(&ident.to_id()) {
                     if let Some(import_path) = extract_argument_value(expr) {
-                        self.require_paths.insert(import_path);
+                        self.module_deps.requires.insert(import_path);
                     }
                 }
             }
@@ -281,59 +302,43 @@ impl<T: SrcFileLogger> Visit for ExportsVisitor<T> {
         let src = import.src.value.to_string();
         // import './foo';
         if import.specifiers.is_empty() {
-            self.executed_paths.insert(src);
+            self.module_deps.executed_paths.insert(src);
             return;
         }
         // import .. from ..
-        let mut specifiers: Vec<ExportedSymbol> = import
+        let mut parent_tags = SymbolTags::from_comments(&self.comments, import.span_lo());
+        parent_tags.is_type_only |= import.type_only;
+
+        let tagged_symbols: Vec<TaggedSymbol> = import
             .specifiers
             .iter()
-            .map(|spec| -> ExportBinding {
+            .map(|spec| -> TaggedSymbol {
+                let mut tags = parent_tags.clone();
                 match spec {
                     ImportSpecifier::Named(named) => {
+                        tags.is_type_only |= named.is_type_only;
                         match &named.imported {
                             Some(module_name) => {
-                                // import { foo as bar } from './foo'
-                                match module_name {
-                                    ModuleExportName::Ident(ident) => {
-                                        // sym_str = foo in `import { foo as bar } from './foo'`
-                                        let sym_str = ident.sym.to_string();
-                                        if sym_str == "default" {
-                                            // import { default as foo } from 'foo'
-                                            return ExportedSymbol::Default;
-                                        }
-                                        ExportedSymbol::Named(sym_str)
-                                    }
-                                    ModuleExportName::Str(s) => {
-                                        ExportedSymbol::Named(s.value.to_string())
-                                    }
-                                }
+                                TaggedSymbol::new(Symbol::from_module_export_name(module_name), tags)
                             }
                             None => {
-                                // import { foo } from './foo'
-                                ExportedSymbol::Named(named.local.sym.to_string())
+                                TaggedSymbol::new(Symbol::from(named.local.sym.as_ref()), tags)
                             }
                         }
                     }
                     ImportSpecifier::Default(_) => {
-                        // import foo from 'foo'
-                        ExportedSymbol::Default
+                        TaggedSymbol::new(Symbol::Default, tags)
                     }
                     ImportSpecifier::Namespace(_) => {
-                        // import * as foo from 'foo'
-                        ExportedSymbol::Namespace
+                        TaggedSymbol::new(Symbol::Namespace, tags)
                     }
                 }
             })
             .collect();
 
-        if let Some(entry) = self.imported_ids_path_name.get_mut(&src) {
-            specifiers.drain(0..).for_each(|s| {
-                entry.insert(s);
-            });
-        } else {
-            self.imported_ids_path_name
-                .insert(src, HashSet::from_iter(specifiers));
+        let entry = self.module_deps.imports.entry(src).or_default();
+        for sym in tagged_symbols {
+            entry.insert(sym);
         }
     }
 }

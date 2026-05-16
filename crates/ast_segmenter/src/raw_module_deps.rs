@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use ahashmap::{AHashMap, AHashSet};
 use std::fmt::Debug;
 use swc_common::{
@@ -6,7 +8,7 @@ use swc_common::{
 };
 use swc_ecma_ast::ModuleExportName;
 
-use crate::{ExportedSymbol, ReExportedSymbol};
+use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
 
 /// Metadata associated with a symbol in a module.
 #[derive(Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Clone)]
@@ -118,8 +120,8 @@ impl<T: ToString + AsRef<str>> From<T> for Symbol {
 impl Symbol {
     pub fn from_module_export_name(name: &ModuleExportName) -> Self {
         match name {
-            ModuleExportName::Ident(ident) => Self::from(ident.sym),
-            ModuleExportName::Str(str) => Self::from(str.value),
+            ModuleExportName::Ident(ident) => Self::from(ident.sym.as_ref()),
+            ModuleExportName::Str(str) => Self::from(str.value.as_ref()),
         }
     }
 }
@@ -171,19 +173,29 @@ pub enum ExportBindingCoerceError {
 }
 
 impl TryInto<ReExportedSymbol> for ExportBinding {
-    Error = ExportBindingCoerceError;
+    type Error = ExportBindingCoerceError;
 
     fn try_into(self) -> Result<ReExportedSymbol, Self::Error> {
         match self.original.symbol {
             Symbol::Named(name) => Ok(ReExportedSymbol {
-                name,
+                imported_as: ImportTarget::ExportedSymbol(ExportedSymbol::Named(name)),
                 exported_as: self.exported_as,
             }),
-            _ => Err(ExportBindingCoerceError::InvalidLocal),
+            Symbol::Default => Ok(ReExportedSymbol {
+                imported_as: ImportTarget::ExportedSymbol(ExportedSymbol::Default),
+                exported_as: self.exported_as,
+            }),
+            Symbol::Namespace => Ok(ReExportedSymbol {
+                imported_as: ImportTarget::Namespace,
+                exported_as: self.exported_as,
+            }),
         }
     }
-
 }
+
+/// Type alias for the key in `exports_locals`.
+/// An exported local is identified by the symbol it's exported as (Named or Default).
+pub type ExportedLocal = ExportedSymbol;
 
 /// Represents the unresolved import/export information from a file, extracted
 /// from traversing the AST.
@@ -191,26 +203,26 @@ impl TryInto<ReExportedSymbol> for ExportBinding {
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct RawModuleDeps {
     // `import foo, {bar as something} from './foo'` generates `{ "./foo": ["default", "bar"] }`
-    imports: AHashMap<String, AHashSet<TaggedSymbol>>,
+    pub imports: AHashMap<String, AHashSet<TaggedSymbol>>,
     // import('./foo') generates ["./foo"]
     //
     // We support extracting a specific set of named imports from
     // dynamic imports, when we see syntax of form:
     //
     // import('foo').then(({ bar, baz }) => { .. })
-    dynamic_imports: AHashMap<String, AHashSet<Symbol>>,
+    pub dynamic_imports: AHashMap<String, AHashSet<Symbol>>,
     // require('foo') generates ['foo']
     //
     // Unlike import(), require() always returns the default export
     // of the module, so we don't track named imports from require().
-    requires: AHashSet<String>,
+    pub requires: AHashSet<String>,
     // `export {default as foo, bar} from './foo'`
     // map is 'imported_module' -> 're_exports'
-    exports_from: AHashMap<String, AHashSet<ReExportedSymbol>>,
+    pub exports_from: AHashMap<String, AHashSet<ReExportedSymbol>>,
     // `export default foo` and `export {foo}` generate `Default` and `Named("foo")` respectively
-    exports_locals: AHashMap<ExportedLocal, TaggedSymbol>,
+    pub exports_locals: AHashMap<ExportedLocal, TaggedSymbol>,
     // `import './foo'`
-    executed_paths: AHashSet<String>,
+    pub executed_paths: AHashSet<String>,
 }
 
 impl RawModuleDeps {

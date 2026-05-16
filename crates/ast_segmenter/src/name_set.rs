@@ -26,6 +26,10 @@ impl<K: Eq + std::hash::Hash, V: Eq + std::hash::Hash> NameSet<K, V> {
             entry.insert(value);
         }
     }
+
+    pub fn entry(&mut self, key: K) -> ahashmap::hash_map::Entry<'_, K, AHashSet<V>> {
+        self.names.entry(key)
+    }
 }
 impl<K: Default, V> Default for NameSet<K, V> {
     fn default() -> Self {
