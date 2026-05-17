@@ -68,6 +68,7 @@ fn module_item_to_segment(
                     Some(RawSegment {
                         module_deps,
                         variables,
+                        span: module_item.span(),
                     })
                 }
                 swc_ecma_ast::Stmt::With(_) => {
@@ -111,6 +112,7 @@ fn module_item_to_segment(
             Some(RawSegment {
                 module_deps,
                 variables,
+                span: module_item.span(),
             })
         }
     }

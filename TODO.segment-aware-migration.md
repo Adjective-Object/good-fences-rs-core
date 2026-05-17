@@ -94,8 +94,8 @@ Integration points:
 
 Extend the graph traversal and reporting to identify unused segments (statements that are neither reachable from an entry point nor transitively depended upon by reachable segments).
 
-- [ ] Extend `traverse_bfs` (or use `SegmentGraph::propagate_tags`) to mark segments as reachable
-- [ ] Add `SegmentReport` type — identifies unused segments by file + span/line range
-- [ ] Update `UnusedFinderReport` to include per-segment results alongside existing per-file results
-- [ ] Add integration test: file with one used and one unused top-level declaration → only the unused one reported
-- [ ] Add integration test: side-effect statement keeps its transitive dependencies alive
+- [x] Extend `traverse_bfs` (or use `SegmentGraph::propagate_tags`) to mark segments as reachable
+- [x] Add `SegmentReport` type — identifies unused segments by file + span/line range
+- [x] Update `UnusedFinderReport` to include per-segment results alongside existing per-file results
+- [x] Add integration test: file with one used and one unused top-level declaration → only the unused one reported
+- [x] Add integration test: side-effect statement keeps its transitive dependencies alive

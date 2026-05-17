@@ -405,6 +405,7 @@ mod test {
         RawSegment {
             module_deps: deps,
             variables: VariableScope::default(),
+            span: swc_common::Span::default(),
         }
     }
 

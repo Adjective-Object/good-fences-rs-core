@@ -102,3 +102,20 @@
 - **Test `test_indirect_typeonly_export` required re-export span propagation**: Without spans on `ReExportedSymbol`, the test validation code attempted `(0 - 1)` on a u32 causing overflow. The fix was to carry spans all the way through.
 - **`ast_segmenter::Symbol` → `ExportedSymbol` conversion needed**: The `Symbol::Namespace` variant maps to `ExportedSymbol::Namespace`. Added `From<&Symbol>` impl.
 - **Re-export `is_type_only` needed propagation**: `export type { X } from '...'` must propagate `is_type_only` through to `ExportedSymbolMetadata` for the BFS type-only tracking to work correctly.
+
+## Phase 5: Segment-level unused reporting
+
+### Design decisions
+
+- **`RawSegment.span` added**: Each `RawSegment` now carries its `swc_common::Span` from the originating `ModuleItem`. This enables reporting unused segments by byte range without re-parsing.
+- **`SegmentReport` type**: Mirrors `SymbolReport` but at segment granularity — carries `segment_idx`, `start`, `end`. Ordered by `(segment_idx, start, end)` for stable output.
+- **`UnusedFinderReport.unused_segments` field**: `AHashMap<String, Vec<SegmentReport>>` alongside existing `unused_files` / `unused_symbols`. Only populated for files that are at least partially used — fully unused files are already in `unused_files`.
+- **`compute_unused_segments` uses `SegmentGraph::propagate_tags`**: Rather than extending the existing file-level `traverse_bfs`, the segment graph is built separately during report generation. This preserves backward compatibility — file-level BFS is untouched. The segment graph is seeded from file/symbol tag data already computed by the BFS.
+- **Seeding strategy**: For fully-used files, all segments are seeded as reachable. For partially-used files, a segment is seeded if (a) it exports a symbol tagged as used, or (b) it has side-effect imports (`executed_paths` or `requires`). Non-exporting, non-side-effect segments rely on intra-file effect edges to become reachable via propagation.
+- **Inter-file edges resolved from segment specifiers**: The `compute_unused_segments` function builds its own `resolved_imports` map by checking each segment's import/export specifiers against `Graph.path_to_id`. This works because `ResolvedImportExportInfo` already contains resolved absolute paths, and segments carry the same specifier strings after the walk phase.
+
+### Gotchas
+
+- **Existing tests needed `unused_segments` field**: All `UnusedFinderReport` literals in tests had to include the new field (either via `..Default::default()` or explicit values). The `test_partially_unused_file` test was updated to expect the `b` export's segment as unused.
+- **`run_unused_test` zero-fill for segments**: Extended the test harness to auto-fill `SegmentReport.start/end` from actual values when expected values are zero, matching the existing pattern for `SymbolReport`.
+- **Segment specifiers are resolved paths**: In `unused_finder`, by the time segments reach the graph, their import specifiers have been resolved to absolute paths (via the walk phase). The segment graph edge builder must use `Path::new(specifier)` to look up `Graph.path_to_id`, which stores `PathBuf` keys.

@@ -1,4 +1,5 @@
 use ast_name_tracker::VariableScope;
+use swc_common::Span;
 
 use crate::raw_module_deps::RawModuleDeps;
 
@@ -8,4 +9,6 @@ pub struct RawSegment {
     pub module_deps: RawModuleDeps,
     // The name scope from traversing the segment
     pub variables: VariableScope,
+    /// The source span of the top-level ModuleItem this segment was created from.
+    pub span: Span,
 }

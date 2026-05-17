@@ -4,13 +4,21 @@ use path_slash::PathBufExt;
 use test_tmpdir::{amap, test_tmpdir};
 
 use crate::{
-    cfg::package_match_rules::PackageMatchRules, report::SymbolReport, tag::UsedTag,
-    SymbolReportWithTags, UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
+    cfg::package_match_rules::PackageMatchRules, report::SegmentReport, report::SymbolReport,
+    tag::UsedTag, SymbolReportWithTags, UnusedFinder, UnusedFinderConfig, UnusedFinderReport,
 };
 
 fn symbol(id: &str) -> SymbolReport {
     SymbolReport {
         id: id.to_string(),
+        start: 0,
+        end: 0,
+    }
+}
+
+fn segment(segment_idx: usize) -> SegmentReport {
+    SegmentReport {
+        segment_idx,
         start: 0,
         end: 0,
     }
@@ -55,6 +63,15 @@ fn normalize_test_report(
             .collect(),
         extra_symbol_tags: result
             .extra_symbol_tags
+            .into_iter()
+            .map(|(k, v)| {
+                let mut s_v = v.clone();
+                s_v.sort();
+                (normalize_path(tmpdir, &k), s_v)
+            })
+            .collect(),
+        unused_segments: result
+            .unused_segments
             .into_iter()
             .map(|(k, v)| {
                 let mut s_v = v.clone();
@@ -155,6 +172,32 @@ fn run_unused_test(
                 {
                     item.symbol.start = *start;
                     item.symbol.end = *end;
+                }
+            }
+        }
+    }
+
+    // For each segment in the expected map, if the offsets are zero,
+    // replace them with the actual offsets from the report
+    for (file_path, segs) in expected.unused_segments.iter_mut() {
+        if let Some(actual_segs) = report.unused_segments.get(file_path.as_str()).or_else(|| {
+            // Try to find by normalized path
+            let norm = normalize_path(tmpdir, file_path);
+            report
+                .unused_segments
+                .iter()
+                .find(|(k, _)| normalize_path(tmpdir, k) == norm)
+                .map(|(_, v)| v)
+        }) {
+            for seg in segs.iter_mut() {
+                if seg.start == 0 && seg.end == 0 {
+                    if let Some(actual_seg) = actual_segs
+                        .iter()
+                        .find(|s| s.segment_idx == seg.segment_idx)
+                    {
+                        seg.start = actual_seg.start;
+                        seg.end = actual_seg.end;
+                    }
                 }
             }
         }
@@ -298,6 +341,11 @@ fn test_partially_unused_file() {
                     symbol("b"),
                 ]
             ),
+            unused_segments: amap!(
+                "<root>/packages/root/imported-1.js" => vec![
+                    segment(1),
+                ]
+            ),
             ..Default::default()
         },
     );
@@ -362,6 +410,7 @@ ignored-*.js
                     tagged_symbol("b", UsedTag::FROM_IGNORED),
                 ]
             ),
+            ..Default::default()
         },
     );
 }
@@ -541,6 +590,7 @@ fn test_testfiles_ignored() {
             extra_symbol_tags: amap![
                 "<root>/search_root/packages/test-helpers/test-helpers.js" => vec![tagged_symbol("myFunction", UsedTag::FROM_TEST)]
             ],
+            ..Default::default()
         },
     );
 }
@@ -588,6 +638,7 @@ fn test_indirect_typeonly_export() {
                     tagged_symbol("ReExportedAsTypeOnly", UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY),
                 ]
             ],
+            ..Default::default()
         },
     );
 }
@@ -664,5 +715,137 @@ fn test_typeonly_files_are_typeonly() {
             ],
             ..Default::default()
         },
+    );
+}
+
+// ── Segment-level unused reporting tests ──────────────────────────────
+
+#[test]
+fn test_segment_one_used_one_unused_declaration() {
+    // File with two exports: `a` is imported by the entry, `b` is not.
+    // The segment containing `b` should appear in unused_segments.
+    let tmpdir = test_tmpdir!(
+        "packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "packages/root/main.js" => r#"
+            import { a } from "./lib.js";
+        "#,
+        "packages/root/lib.js" => r#"
+            export const a = 1;
+            export const b = 2;
+        "#
+    );
+
+    let logger = logger::StdioLogger::new();
+    let mut config = UnusedFinderConfig {
+        root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
+        entry_packages: vec!["entrypoint"].try_into().unwrap(),
+        ..Default::default()
+    };
+    config.repo_root = tmpdir.root().to_string_lossy().to_string();
+
+    let mut finder = UnusedFinder::new_from_cfg(&logger, config).unwrap();
+    let result = finder.find_unused(&logger).unwrap();
+    let report = result.get_report();
+    let normalized = normalize_test_report(&tmpdir, report);
+
+    // `b` should be in unused_symbols (existing behavior).
+    assert!(
+        normalized
+            .unused_symbols
+            .get("<root>/packages/root/lib.js")
+            .map_or(false, |syms| syms.iter().any(|s| s.id == "b")),
+        "expected 'b' in unused_symbols for lib.js: {:#?}",
+        normalized.unused_symbols
+    );
+
+    // The segment containing `b` should appear in unused_segments.
+    let lib_unused_segs = normalized
+        .unused_segments
+        .get("<root>/packages/root/lib.js");
+    assert!(
+        lib_unused_segs.is_some(),
+        "expected unused_segments entry for lib.js, got: {:#?}",
+        normalized.unused_segments
+    );
+    let segs = lib_unused_segs.unwrap();
+    assert!(
+        !segs.is_empty(),
+        "expected at least one unused segment in lib.js"
+    );
+    // Exactly one unused segment (the `export const b = 2;` statement).
+    assert_eq!(
+        segs.len(),
+        1,
+        "expected exactly 1 unused segment in lib.js, got: {:#?}",
+        segs
+    );
+}
+
+#[test]
+fn test_segment_side_effect_keeps_deps_alive() {
+    // The entry imports from helper.js. helper.js has a side-effect import
+    // of polyfill.js. All segments in polyfill.js should be reachable
+    // (not reported as unused).
+    let tmpdir = test_tmpdir!(
+        "packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "packages/root/main.js" => r#"
+            import { helper } from "./helper.js";
+        "#,
+        "packages/root/helper.js" => r#"
+            import "./polyfill.js";
+            export const helper = 1;
+        "#,
+        "packages/root/polyfill.js" => r#"
+            const setup = "polyfill";
+        "#
+    );
+
+    let logger = logger::StdioLogger::new();
+    let mut config = UnusedFinderConfig {
+        root_paths: vec![tmpdir.root().to_string_lossy().to_string()],
+        entry_packages: vec!["entrypoint"].try_into().unwrap(),
+        ..Default::default()
+    };
+    config.repo_root = tmpdir.root().to_string_lossy().to_string();
+
+    let mut finder = UnusedFinder::new_from_cfg(&logger, config).unwrap();
+    let result = finder.find_unused(&logger).unwrap();
+    let report = result.get_report();
+    let normalized = normalize_test_report(&tmpdir, report);
+
+    // polyfill.js should NOT be in unused_files (it's imported for side effects).
+    assert!(
+        !normalized
+            .unused_files
+            .contains(&"<root>/packages/root/polyfill.js".to_string()),
+        "polyfill.js should not be unused: {:#?}",
+        normalized.unused_files
+    );
+
+    // polyfill.js should have no unused segments — the side-effect import
+    // marks the entire file (and all its segments) as reachable.
+    assert!(
+        !normalized
+            .unused_segments
+            .contains_key("<root>/packages/root/polyfill.js"),
+        "polyfill.js should have no unused segments: {:#?}",
+        normalized.unused_segments
+    );
+
+    // helper.js should also have no unused segments.
+    assert!(
+        !normalized
+            .unused_segments
+            .contains_key("<root>/packages/root/helper.js"),
+        "helper.js should have no unused segments: {:#?}",
+        normalized.unused_segments
     );
 }

@@ -26,7 +26,7 @@ mod walked_file;
 
 pub use cfg::{UnusedFinderConfig, UnusedFinderJSONConfig};
 pub use parse::data::ResolvedImportExportInfo;
-pub use report::{SymbolReport, SymbolReportWithTags, UnusedFinderReport};
+pub use report::{SegmentReport, SymbolReport, SymbolReportWithTags, UnusedFinderReport};
 pub use tag::UsedTagEnum;
 pub use unused_finder::{UnusedFinder, UnusedFinderResult};
 
