@@ -233,7 +233,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                             TaggedSymbol::with_span(Symbol::from(local_name.as_str()), tags, export.span()),
                         );
                     }
-                    ExportSpecifier::Default(default_spec) => {
+                    ExportSpecifier::Default(_default_spec) => {
                         let mut tags = SymbolTags::default();
                         tags.allow_unused_comment = allow_unused;
                         tags.is_type_only = is_type_only;

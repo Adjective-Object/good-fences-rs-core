@@ -22,7 +22,7 @@
 
 ## Pre-existing warnings (discovered during dead code cleanup)
 
-- [ ] **`RawModuleDeps` accessor methods never used**: `ast_segmenter/src/raw_module_deps.rs:244-261` — six private getter methods (`imports`, `dynamic_imports`, `requires`, `exports_from`, `exports_locals`, `executed_paths`) are dead code since all callers access the `pub` fields directly.
-- [ ] **`get_file_segments` re-export unused from `parse/mod.rs`**: Callers import directly from `exports_visitor_runner` submodule instead of through the re-export.
-- [ ] **`default_spec` unused variable**: `ast_segmenter/src/visitors/import_export_statement.rs:236` — should be prefixed with `_`.
-- [ ] **Non-shorthand field pattern**: `ast_segmenter/src/visitors/import_require_expr.rs:64` — `args: ref args` should be `ref args`.
+- [x] **`RawModuleDeps` accessor methods never used**: `ast_segmenter/src/raw_module_deps.rs:244-261` — six private getter methods (`imports`, `dynamic_imports`, `requires`, `exports_from`, `exports_locals`, `executed_paths`) are dead code since all callers access the `pub` fields directly.
+- [x] **`get_file_segments` re-export unused from `parse/mod.rs`**: Callers import directly from `exports_visitor_runner` submodule instead of through the re-export.
+- [x] **`default_spec` unused variable**: `ast_segmenter/src/visitors/import_export_statement.rs:236` — should be prefixed with `_`.
+- [x] **Non-shorthand field pattern**: `ast_segmenter/src/visitors/import_require_expr.rs:64` — `args: ref args` should be `ref args`.

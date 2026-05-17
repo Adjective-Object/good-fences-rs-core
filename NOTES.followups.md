@@ -96,3 +96,27 @@ Spotted during compilation but left untouched (unrelated to the dead code task):
 - `RawModuleDeps` has six private accessor methods that are never called (fields are `pub`).
 - `get_file_segments` re-export in `parse/mod.rs` is unused (callers use the submodule path).
 - `default_spec` unused variable and `args: ref args` non-shorthand pattern in `ast_segmenter`.
+
+## Pre-existing warnings (discovered during dead code cleanup)
+
+### Removed `RawModuleDeps` dead accessor methods
+
+Deleted the entire `impl RawModuleDeps` block (6 private getter methods: `imports`,
+`dynamic_imports`, `requires`, `exports_from`, `exports_locals`, `executed_paths`).
+All fields are `pub`, so callers access them directly. No code ever called these methods.
+
+### Removed unused `get_file_segments` re-export from `parse/mod.rs`
+
+The `pub use exports_visitor_runner::get_file_segments;` line was never used — both
+callers (`walk.rs` and `unused_finder.rs`) import via the full submodule path
+`crate::parse::exports_visitor_runner::get_file_segments`.
+
+### Fixed `default_spec` unused variable warning
+
+Prefixed with underscore: `ExportSpecifier::Default(default_spec)` →
+`ExportSpecifier::Default(_default_spec)` in `import_export_statement.rs:236`.
+
+### Fixed non-shorthand field pattern
+
+Changed `args: ref args` to `ref args` in `import_require_expr.rs:64`.
+This is the idiomatic Rust shorthand when binding name matches field name.

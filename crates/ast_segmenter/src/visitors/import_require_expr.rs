@@ -61,7 +61,7 @@ impl ImportsAndRequires {
                         prop: MemberProp::Ident(then_prop),
                         ..
                     })),
-                args: ref args,
+                ref args,
                 ..
             } => {
                 if then_prop.sym != "then" {

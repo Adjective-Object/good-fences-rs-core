@@ -240,24 +240,3 @@ pub struct RawModuleDeps {
     // `import './foo'`
     pub executed_paths: AHashSet<String>,
 }
-
-impl RawModuleDeps {
-    fn imports(&self) -> &AHashMap<String, AHashSet<TaggedSymbol>> {
-        &self.imports
-    }
-    fn dynamic_imports(&self) -> &AHashMap<String, AHashSet<Symbol>> {
-        &self.dynamic_imports
-    }
-    fn requires(&self) -> &AHashSet<String> {
-        &self.requires
-    }
-    fn exports_from(&self) -> &AHashMap<String, AHashSet<ReExportedSymbol>> {
-        &self.exports_from
-    }
-    fn exports_locals(&self) -> &AHashMap<ExportedLocal, TaggedSymbol> {
-        &self.exports_locals
-    }
-    fn executed_paths(&self) -> &AHashSet<String> {
-        &self.executed_paths
-    }
-}
