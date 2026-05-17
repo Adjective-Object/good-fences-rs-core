@@ -13,7 +13,7 @@ use swc_ecma_visit::Fold;
 
 use swc_utils_parse::create_lexer;
 
-use ast_segmenter::segment_info::RawSegment;
+use ast_segmenter::segment_info::Segment;
 use crate::parse::RawImportExportInfo;
 
 #[derive(Debug, thiserror::Error)]
@@ -42,7 +42,7 @@ pub fn get_file_import_export_info(
 /// Parses a source file and returns per-statement segments via `ast_segmenter::segment_file`.
 pub fn get_file_segments(
     file_path: &Path,
-) -> Result<Vec<RawSegment>, SourceFileParseError> {
+) -> Result<Vec<Segment>, SourceFileParseError> {
     let cm = Lrc::<SourceMap>::default();
     let fm = match cm.load_file(file_path) {
         Ok(f) => f,

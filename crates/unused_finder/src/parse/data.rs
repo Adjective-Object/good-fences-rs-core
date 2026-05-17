@@ -10,7 +10,7 @@ use swc_ecma_ast::ModuleExportName;
 use swc_ecma_loader::resolve::Resolve;
 
 // Re-export ast_segmenter types used by downstream consumers
-pub use ast_segmenter::segment_info::RawSegment;
+pub use ast_segmenter::segment_info::Segment;
 pub use ast_segmenter::raw_module_deps::RawModuleDeps;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
@@ -317,10 +317,10 @@ impl Default for RawImportExportInfo {
     }
 }
 
-/// Flatten a list of `RawSegment`s (from `ast_segmenter::segment_file`) into a
+/// Flatten a list of `Segment`s (from `ast_segmenter::segment_file`) into a
 /// single `RawImportExportInfo`, merging all segments' module dependencies.
-impl From<&[RawSegment]> for RawImportExportInfo {
-    fn from(segments: &[RawSegment]) -> Self {
+impl From<&[Segment]> for RawImportExportInfo {
+    fn from(segments: &[Segment]) -> Self {
         let mut info = RawImportExportInfo::new();
         for seg in segments {
             let deps = &seg.module_deps;

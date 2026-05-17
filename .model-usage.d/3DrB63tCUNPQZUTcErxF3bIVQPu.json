@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.followups.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.5",
+    "tokens_in": 1162067,
+    "tokens_out": 15249,
+    "tokens_cached": 1092343,
+    "premium_requests": 3
+  },
+  "started_at": "2026-05-17T15:02:09.358045928Z",
+  "completed_at": "2026-05-17T15:06:48.563987250Z",
+  "session_id": "3DrB63tCUNPQZUTcErxF3bIVQPu",
+  "runtime_name": "github-copilot-agent-claude-opus-4.5",
+  "success": true,
+  "machine_id": "4bbfa6af08c5bbd5"
+}

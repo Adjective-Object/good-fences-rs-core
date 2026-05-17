@@ -7,7 +7,7 @@ use std::{
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
-use ast_segmenter::segment_info::RawSegment;
+use ast_segmenter::segment_info::Segment;
 use rayon::prelude::*;
 
 use crate::{
@@ -31,7 +31,7 @@ pub struct GraphFile {
     pub import_export_info: ResolvedImportExportInfo,
     /// Per-statement segments from ast_segmenter.
     /// Maps each exported symbol back to its source segment index.
-    pub segments: Vec<RawSegment>,
+    pub segments: Vec<Segment>,
     /// Index from exported symbol name → segment index that exports it
     pub symbol_to_segment: AHashMap<ExportedSymbol, usize>,
 }

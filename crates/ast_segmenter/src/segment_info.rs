@@ -4,7 +4,7 @@ use swc_common::Span;
 use crate::raw_module_deps::RawModuleDeps;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawSegment {
+pub struct Segment {
     // The imports/exports extracted from the AST(s) of this segment
     pub module_deps: RawModuleDeps,
     // The name scope from traversing the segment

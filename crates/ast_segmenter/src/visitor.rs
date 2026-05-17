@@ -5,7 +5,7 @@ use swc_ecma_visit::VisitWith;
 
 use crate::{
     raw_module_deps::RawModuleDeps,
-    segment_info::RawSegment,
+    segment_info::Segment,
     visitors::{import_export_statement::ExportsVisitor, import_require_expr},
 };
 
@@ -25,7 +25,7 @@ fn module_item_to_segment(
     file_logger: &impl SrcFileLogger,
     comments: &SingleThreadedComments,
     module_item: &swc_ecma_ast::ModuleItem,
-) -> Option<RawSegment> {
+) -> Option<Segment> {
     match module_item {
         swc_ecma_ast::ModuleItem::Stmt(stmt) => {
             match stmt {
@@ -65,7 +65,7 @@ fn module_item_to_segment(
                         ..Default::default()
                     };
 
-                    Some(RawSegment {
+                    Some(Segment {
                         module_deps,
                         variables,
                         span: module_item.span(),
@@ -109,7 +109,7 @@ fn module_item_to_segment(
             module_decl.visit_with(&mut exports_visitor);
             let module_deps: RawModuleDeps = exports_visitor.into();
 
-            Some(RawSegment {
+            Some(Segment {
                 module_deps,
                 variables,
                 span: module_item.span(),
@@ -118,14 +118,14 @@ fn module_item_to_segment(
     }
 }
 
-/// Segment a parsed module into a list of `RawSegment`s — one per top-level
+/// Segment a parsed module into a list of `Segment`s — one per top-level
 /// `ModuleItem`. Each segment combines variable scope analysis with module
 /// dependency extraction.
 pub fn segment_file(
     logger: &impl SrcFileLogger,
     module: &swc_ecma_ast::Module,
     comments: &SingleThreadedComments,
-) -> Vec<RawSegment> {
+) -> Vec<Segment> {
     module
         .body
         .iter()
@@ -166,7 +166,7 @@ mod test {
     use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
 
     /// Parse source and return the segments produced by `segment_file`.
-    fn segment(src: &str) -> Vec<RawSegment> {
+    fn segment(src: &str) -> Vec<Segment> {
         let cm = swc_common::sync::Lrc::<swc_common::SourceMap>::default();
         let comments = SingleThreadedComments::default();
         let fm = cm.new_source_file(

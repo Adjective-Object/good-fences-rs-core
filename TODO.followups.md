@@ -6,8 +6,8 @@
 
 ## Delete dead segment/segmentkind types
 
-- [ ] **Old `Segment`/`SegmentKind` types in `lib.rs`**: Now fully dead code after `visitor.rs` was rewritten to return `RawSegment`. Consider removing or gating behind a feature flag once downstream phases settle.
-- [ ] Rename old RawSegment type to Segment
+- [x] **Old `Segment`/`SegmentKind` types in `lib.rs`**: Now fully dead code after `visitor.rs` was rewritten to return `RawSegment`. Consider removing or gating behind a feature flag once downstream phases settle.
+- [x] Rename old RawSegment type to Segment
 
 ## Finish migration
 

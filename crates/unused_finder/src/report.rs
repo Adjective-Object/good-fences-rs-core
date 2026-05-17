@@ -6,7 +6,7 @@ use std::fmt::Display;
 
 use ahashmap::AHashMap;
 use ast_segmenter::segment_graph::{SegmentGraph, SegmentId, TagSet};
-use ast_segmenter::segment_info::RawSegment;
+use ast_segmenter::segment_info::Segment;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use swc_common::source_map::SmallPos;
@@ -162,7 +162,7 @@ fn include_extra(tags: &UsedTag) -> bool {
 /// in files that are at least partially used.
 fn compute_unused_segments(graph: &Graph, config: &UnusedFinderConfig) -> AHashMap<String, Vec<SegmentReport>> {
     // Collect file_segments for the SegmentGraph builder.
-    let file_segments: Vec<(usize, &[RawSegment])> = graph
+    let file_segments: Vec<(usize, &[Segment])> = graph
         .files
         .iter()
         .enumerate()

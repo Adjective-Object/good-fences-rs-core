@@ -5,7 +5,7 @@ use crate::parse::exports_visitor_runner::get_file_segments;
 use crate::walked_file::{WalkedPackage, WalkedSourceFile};
 use ahashmap::AHashMap;
 use anyhow::Context;
-use ast_segmenter::segment_info::RawSegment;
+use ast_segmenter::segment_info::Segment;
 use ignore::overrides::OverrideBuilder;
 use ignore::DirEntry;
 use logger::Logger;
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
 enum WalkedFile {
-    SourceFile(PathBuf, RawImportExportInfo, Vec<RawSegment>),
+    SourceFile(PathBuf, RawImportExportInfo, Vec<Segment>),
     PackageJson(WalkedPackage),
     IgnoreFile(IgnoreFile),
 }
@@ -309,7 +309,7 @@ fn collect_results(
 ) -> (WalkedFiles, Vec<anyhow::Error>) {
     // partition the results
     let mut packages = RepoPackages::new();
-    let mut source_files: Vec<(PathBuf, RawImportExportInfo, Vec<RawSegment>)> = Vec::new();
+    let mut source_files: Vec<(PathBuf, RawImportExportInfo, Vec<Segment>)> = Vec::new();
     let mut ignore_files: Vec<IgnoreFile> = Vec::new();
     let mut errors: Vec<anyhow::Error> = Vec::new();
     for file in walked_files.into_iter() {

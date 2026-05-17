@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use ahashmap::{AHashMap, AHashSet};
 
 use crate::raw_module_deps::{ExportedLocal, RawModuleDeps, Symbol};
-use crate::segment_info::RawSegment;
+use crate::segment_info::Segment;
 use crate::ExportedSymbol;
 
 /// Globally unique identifier for a segment within the graph.
@@ -93,7 +93,7 @@ impl SegmentGraph {
     ///
     /// `file_segments` is a list of `(file_id, segments)` pairs. The file_id
     /// is an opaque identifier assigned by the caller (e.g. from a path→id map).
-    pub fn build(file_segments: &[(usize, &[RawSegment])]) -> Self {
+    pub fn build(file_segments: &[(usize, &[Segment])]) -> Self {
         let total_segments: usize = file_segments.iter().map(|(_, segs)| segs.len()).sum();
         let mut nodes = Vec::with_capacity(total_segments);
         let mut edges: Vec<AHashSet<usize>> = Vec::with_capacity(total_segments);
@@ -194,7 +194,7 @@ impl SegmentGraph {
     /// import paths to file IDs.
     pub fn add_inter_file_edges(
         &mut self,
-        file_segments: &[(usize, &[RawSegment])],
+        file_segments: &[(usize, &[Segment])],
         resolved_imports: &AHashMap<(usize, String), usize>,
     ) {
         for &(file_id, segs) in file_segments {
@@ -363,7 +363,7 @@ impl SegmentGraph {
 ///
 /// In JS/TS, function declarations and import/export declarations are hoisted.
 /// Other statements (const, let, class, expression statements, etc.) are not.
-fn segment_is_hoisted(seg: &RawSegment) -> bool {
+fn segment_is_hoisted(seg: &Segment) -> bool {
     // A segment is considered hoisted if it has static imports or exports_from
     // (i.e. it's an import/export declaration) and no dynamic content,
     // OR if it's a function declaration (detected via variable scope).
@@ -397,12 +397,12 @@ mod test {
     use super::*;
     use crate::raw_module_deps::{RawModuleDeps, TaggedSymbol, SymbolTags};
     use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
-    use crate::segment_info::RawSegment;
+    use crate::segment_info::Segment;
     use ast_name_tracker::VariableScope;
 
-    /// Helper: create a minimal RawSegment with given module deps.
-    fn seg(deps: RawModuleDeps) -> RawSegment {
-        RawSegment {
+    /// Helper: create a minimal Segment with given module deps.
+    fn seg(deps: RawModuleDeps) -> Segment {
+        Segment {
             module_deps: deps,
             variables: VariableScope::default(),
             span: swc_common::Span::default(),
@@ -410,7 +410,7 @@ mod test {
     }
 
     /// Helper: create a segment that exports a named symbol.
-    fn exporting_seg(name: &str) -> RawSegment {
+    fn exporting_seg(name: &str) -> Segment {
         let mut deps = RawModuleDeps::default();
         deps.exports_locals.insert(
             ExportedSymbol::Named(name.into()),
@@ -420,7 +420,7 @@ mod test {
     }
 
     /// Helper: create a segment that imports a named symbol from a specifier.
-    fn importing_seg(specifier: &str, name: &str) -> RawSegment {
+    fn importing_seg(specifier: &str, name: &str) -> Segment {
         let mut deps = RawModuleDeps::default();
         let mut symbols = AHashSet::default();
         symbols.insert(TaggedSymbol::new(Symbol::named(name), SymbolTags::default()));
@@ -429,7 +429,7 @@ mod test {
     }
 
     /// Helper: create a plain statement segment (non-hoisted, no deps).
-    fn stmt_seg() -> RawSegment {
+    fn stmt_seg() -> Segment {
         seg(RawModuleDeps::default())
     }
 
@@ -443,7 +443,7 @@ mod test {
         let f0_segs = vec![exporting_seg("a"), exporting_seg("b")];
         let f1_segs = vec![importing_seg("./f0", "a"), importing_seg("./f0", "b")];
 
-        let file_segments: Vec<(usize, &[RawSegment])> =
+        let file_segments: Vec<(usize, &[Segment])> =
             vec![(0, &f0_segs), (1, &f1_segs)];
         let mut graph = SegmentGraph::build(&file_segments);
 
@@ -476,7 +476,7 @@ mod test {
 
     /// Helper: create a re-export segment: `export { <name> } from '<specifier>'`
     /// This is hoisted and creates an edge to the target file's export.
-    fn re_exporting_seg(specifier: &str, name: &str) -> RawSegment {
+    fn re_exporting_seg(specifier: &str, name: &str) -> Segment {
         let mut deps = RawModuleDeps::default();
         let mut re_exports = AHashSet::default();
         re_exports.insert(ReExportedSymbol {
@@ -512,7 +512,7 @@ mod test {
         f3_deps.imports.insert("./f2".to_string(), right_syms);
         let f3 = vec![seg(f3_deps)];
 
-        let file_segments: Vec<(usize, &[RawSegment])> =
+        let file_segments: Vec<(usize, &[Segment])> =
             vec![(0, &f0), (1, &f1), (2, &f2), (3, &f3)];
         let mut graph = SegmentGraph::build(&file_segments);
 
@@ -560,7 +560,7 @@ mod test {
         let f1_import = importing_seg("./f0", "a");
         let f1 = vec![f1_export, f1_import];
 
-        let file_segments: Vec<(usize, &[RawSegment])> =
+        let file_segments: Vec<(usize, &[Segment])> =
             vec![(0, &f0), (1, &f1)];
         let mut graph = SegmentGraph::build(&file_segments);
 
@@ -599,7 +599,7 @@ mod test {
         let s3 = importing_seg("./b", "y"); // hoisted
 
         let f0 = vec![s0, s1, s2, s3];
-        let file_segments: Vec<(usize, &[RawSegment])> = vec![(0, &f0)];
+        let file_segments: Vec<(usize, &[Segment])> = vec![(0, &f0)];
         let graph = SegmentGraph::build(&file_segments);
 
         let idx0 = graph.node_index(&SegmentId::new(0, 0)).unwrap();
@@ -625,7 +625,7 @@ mod test {
         // Use segments in separate files to avoid intra-file effect edges.
         let f0 = vec![exporting_seg("a")];
         let f1 = vec![exporting_seg("b")];
-        let file_segments: Vec<(usize, &[RawSegment])> = vec![(0, &f0), (1, &f1)];
+        let file_segments: Vec<(usize, &[Segment])> = vec![(0, &f0), (1, &f1)];
         let mut graph = SegmentGraph::build(&file_segments);
 
         let idx0 = graph.node_index(&SegmentId::new(0, 0)).unwrap();
@@ -645,7 +645,7 @@ mod test {
     #[test]
     fn nodes_without_tag_reports_unreached() {
         let f0 = vec![exporting_seg("a"), exporting_seg("b"), stmt_seg()];
-        let file_segments: Vec<(usize, &[RawSegment])> = vec![(0, &f0)];
+        let file_segments: Vec<(usize, &[Segment])> = vec![(0, &f0)];
         let mut graph = SegmentGraph::build(&file_segments);
 
         let idx0 = graph.node_index(&SegmentId::new(0, 0)).unwrap();
