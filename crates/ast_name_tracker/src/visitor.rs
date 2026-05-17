@@ -8,7 +8,7 @@ use swc_ecma_ast::AssignPat;
 use swc_ecma_visit::{Visit, VisitWith};
 
 // unique identifier of a variable declaration within a file
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VarID(pub Span);
 
 // Hoisting level that a symbol is declared at.
@@ -16,7 +16,7 @@ pub struct VarID(pub Span);
 //
 // TODO: differentiate var hoisting here. We treat `var` hoisting as identically to
 // `let/const` hoisting.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HoistingLevel {
     // The value and its effects are usable in scope before it is declared.
     // This is only true for `import` declarations
@@ -44,6 +44,7 @@ impl Display for HoistingLevel {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableScope {
     /// Variables declared within the current scope, sorted by name
     local_symbols: AHashMap<swc_atoms::Atom, (HoistingLevel, VarID)>,

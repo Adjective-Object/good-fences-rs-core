@@ -272,6 +272,8 @@ mod test {
         assert!(re_exports.contains(&ReExportedSymbol {
             imported_as: ImportTarget::ExportedSymbol(ExportedSymbol::Named("foo".into())),
             exported_as: Some(ExportedSymbol::Named("bar".into())),
+            tags: SymbolTags::default(),
+            span: Default::default(),
         }));
     }
 
@@ -285,6 +287,8 @@ mod test {
         assert!(re_exports.contains(&ReExportedSymbol {
             imported_as: ImportTarget::Namespace,
             exported_as: None,
+            tags: SymbolTags::default(),
+            span: Default::default(),
         }));
     }
 

@@ -145,10 +145,18 @@ impl Symbol {
 pub struct TaggedSymbol {
     pub symbol: Symbol,
     pub tags: SymbolTags,
+    pub span: swc_common::Span,
 }
 impl TaggedSymbol {
     pub fn new(symbol: Symbol, tags: SymbolTags) -> TaggedSymbol {
-        TaggedSymbol { symbol, tags }
+        TaggedSymbol {
+            symbol,
+            tags,
+            span: swc_common::Span::default(),
+        }
+    }
+    pub fn with_span(symbol: Symbol, tags: SymbolTags, span: swc_common::Span) -> TaggedSymbol {
+        TaggedSymbol { symbol, tags, span }
     }
 }
 
@@ -176,18 +184,26 @@ impl TryInto<ReExportedSymbol> for ExportBinding {
     type Error = ExportBindingCoerceError;
 
     fn try_into(self) -> Result<ReExportedSymbol, Self::Error> {
+        let tags = self.original.tags;
+        let span = self.original.span;
         match self.original.symbol {
             Symbol::Named(name) => Ok(ReExportedSymbol {
                 imported_as: ImportTarget::ExportedSymbol(ExportedSymbol::Named(name)),
                 exported_as: self.exported_as,
+                tags,
+                span,
             }),
             Symbol::Default => Ok(ReExportedSymbol {
                 imported_as: ImportTarget::ExportedSymbol(ExportedSymbol::Default),
                 exported_as: self.exported_as,
+                tags,
+                span,
             }),
             Symbol::Namespace => Ok(ReExportedSymbol {
                 imported_as: ImportTarget::Namespace,
                 exported_as: self.exported_as,
+                tags,
+                span,
             }),
         }
     }

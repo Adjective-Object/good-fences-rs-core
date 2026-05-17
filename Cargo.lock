@@ -2836,6 +2836,7 @@ dependencies = [
  "ahashmap",
  "anyhow",
  "ast-name-tracker",
+ "ast-segmenter",
  "bitflags",
  "const_format",
  "glob-match",

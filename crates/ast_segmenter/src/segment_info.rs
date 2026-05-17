@@ -2,6 +2,7 @@ use ast_name_tracker::VariableScope;
 
 use crate::raw_module_deps::RawModuleDeps;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawSegment {
     // The imports/exports extracted from the AST(s) of this segment
     pub module_deps: RawModuleDeps,

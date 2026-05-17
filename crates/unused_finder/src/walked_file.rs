@@ -11,6 +11,7 @@ use path_clean::PathClean;
 use path_slash::PathBufExt;
 
 use crate::{parse::RawImportExportInfo, ResolvedImportExportInfo};
+use ast_segmenter::segment_info::RawSegment;
 
 /// Source file discovered during the source walk
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -20,6 +21,8 @@ pub struct WalkedSourceFile {
     pub source_file_path: PathBuf,
     /// The imports and exports parsed from this source file
     pub import_export_info: RawImportExportInfo,
+    /// Per-statement segments from ast_segmenter
+    pub segments: Vec<RawSegment>,
 }
 
 /// package.json file discovered during the source walk
@@ -215,6 +218,8 @@ pub struct ResolvedSourceFile {
     pub owning_package: Option<String>,
     /// The full path of this source file
     pub source_file_path: PathBuf,
-    /// The imports and
+    /// The imports and exports (resolved to paths)
     pub import_export_info: ResolvedImportExportInfo,
+    /// Per-statement segments from ast_segmenter
+    pub segments: Vec<RawSegment>,
 }

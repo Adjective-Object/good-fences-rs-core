@@ -5,4 +5,4 @@ pub mod exports_visitor_runner;
 pub mod exports_visitor_tests;
 
 pub use data::*;
-pub use exports_visitor_runner::get_file_import_export_info;
+pub use exports_visitor_runner::{get_file_import_export_info, get_file_segments};

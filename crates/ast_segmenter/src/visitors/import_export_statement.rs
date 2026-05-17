@@ -49,12 +49,12 @@ fn get_export_bindings(
         match spec {
             // export * as v from 'mod';
             ExportSpecifier::Namespace(spec) => ExportBinding {
-                original: TaggedSymbol::new(Symbol::Namespace, specifier_tags),
+                original: TaggedSymbol::with_span(Symbol::Namespace, specifier_tags, spec.span()),
                 exported_as: Some(ExportedSymbol::from_module_export_name(&spec.name)),
             },
             // export v from 'mod';
             ExportSpecifier::Default(spec) => ExportBinding {
-                original: TaggedSymbol::new(Symbol::Default, specifier_tags),
+                original: TaggedSymbol::with_span(Symbol::Default, specifier_tags, spec.span()),
                 exported_as: Some(ExportedSymbol::from(spec.exported.sym.as_ref())),
             },
             // export { v as w } from 'mod';
@@ -64,7 +64,7 @@ fn get_export_bindings(
                 // export { type v as w } from 'mod';
                 specifier_tags.is_type_only |= spec.is_type_only;
                 ExportBinding {
-                    original: TaggedSymbol::new(Symbol::from(imported_name), specifier_tags),
+                    original: TaggedSymbol::with_span(Symbol::from(imported_name), specifier_tags, export.span()),
                     exported_as: spec
                         .exported
                         .as_ref()
@@ -112,7 +112,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
         let tags = SymbolTags::from_comments(self.comments, expr.span_lo());
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol::new(Symbol::Default, tags),
+            TaggedSymbol::with_span(Symbol::Default, tags, expr.span()),
         );
     }
 
@@ -123,7 +123,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
         tags.is_type_only = decl.decl.is_ts_interface_decl();
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol::new(Symbol::Default, tags),
+            TaggedSymbol::with_span(Symbol::Default, tags, decl.span()),
         );
     }
 
@@ -171,7 +171,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
         for ident in idents {
             self.module_deps.exports_locals.insert(
                 ExportedSymbol::from(ident.as_str()),
-                TaggedSymbol::new(Symbol::from(ident.as_str()), tags.clone()),
+                TaggedSymbol::with_span(Symbol::from(ident.as_str()), tags.clone(), export.span()),
             );
         }
     }
@@ -180,9 +180,14 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
         let source = export.src.value.to_string();
+        let tags = SymbolTags::from_comments(self.comments, export.span_lo());
+        let mut export_tags = tags;
+        export_tags.is_type_only |= export.type_only;
         let binding: ReExportedSymbol = ReExportedSymbol {
             imported_as: crate::ImportTarget::Namespace,
             exported_as: None,
+            tags: export_tags,
+            span: export.span(),
         };
         self.module_deps
             .exports_from
@@ -225,7 +230,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         tags.is_type_only |= is_type_only || named.is_type_only;
                         self.module_deps.exports_locals.insert(
                             exported_key,
-                            TaggedSymbol::new(Symbol::from(local_name.as_str()), tags),
+                            TaggedSymbol::with_span(Symbol::from(local_name.as_str()), tags, export.span()),
                         );
                     }
                     ExportSpecifier::Default(default_spec) => {
@@ -234,7 +239,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         tags.is_type_only = is_type_only;
                         self.module_deps.exports_locals.insert(
                             ExportedSymbol::Default,
-                            TaggedSymbol::new(Symbol::Default, tags),
+                            TaggedSymbol::with_span(Symbol::Default, tags, export.span()),
                         );
                     }
                     ExportSpecifier::Namespace(ns) => {
@@ -243,7 +248,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         tags.is_type_only = is_type_only;
                         self.module_deps.exports_locals.insert(
                             ExportedSymbol::from_module_export_name(&ns.name),
-                            TaggedSymbol::new(Symbol::Namespace, tags),
+                            TaggedSymbol::with_span(Symbol::Namespace, tags, export.span()),
                         );
                     }
                 }

@@ -121,10 +121,27 @@ pub struct ImportedLocal {
     imported_as: ImportTarget,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, Clone)]
 pub struct ReExportedSymbol {
     pub imported_as: ImportTarget,
     pub exported_as: Option<ExportedSymbol>,
+    pub tags: raw_module_deps::SymbolTags,
+    pub span: swc_common::Span,
+}
+
+/// Identity is determined by imported_as + exported_as only;
+/// tags and span are metadata.
+impl PartialEq for ReExportedSymbol {
+    fn eq(&self, other: &Self) -> bool {
+        self.imported_as == other.imported_as && self.exported_as == other.exported_as
+    }
+}
+impl Eq for ReExportedSymbol {}
+impl std::hash::Hash for ReExportedSymbol {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.imported_as.hash(state);
+        self.exported_as.hash(state);
+    }
 }
 
 /// This represents the imports and exports of a segment from "normal" code

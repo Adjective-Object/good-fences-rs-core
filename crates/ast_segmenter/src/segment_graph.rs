@@ -481,6 +481,8 @@ mod test {
         re_exports.insert(ReExportedSymbol {
             imported_as: ImportTarget::ExportedSymbol(ExportedSymbol::Named(name.into())),
             exported_as: Some(ExportedSymbol::Named(name.into())),
+            tags: SymbolTags::default(),
+            span: swc_common::Span::default(),
         });
         deps.exports_from.insert(specifier.to_string(), re_exports);
         seg(deps)

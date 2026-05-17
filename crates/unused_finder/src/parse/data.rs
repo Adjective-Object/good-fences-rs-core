@@ -9,6 +9,10 @@ use swc_common::{FileName, Span};
 use swc_ecma_ast::ModuleExportName;
 use swc_ecma_loader::resolve::Resolve;
 
+// Re-export ast_segmenter types used by downstream consumers
+pub use ast_segmenter::segment_info::RawSegment;
+pub use ast_segmenter::raw_module_deps::RawModuleDeps;
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub enum ExportedSymbol {
     // A named export
@@ -51,6 +55,39 @@ impl From<&ModuleExportName> for ExportedSymbol {
         match e.atom().as_str() {
             "default" => ExportedSymbol::Default,
             _ => ExportedSymbol::Named(e.atom().as_str().to_string()),
+        }
+    }
+}
+
+/// Convert from ast_segmenter's ExportedSymbol (Named/Default only) into
+/// unused_finder's ExportedSymbol (which also has Namespace/ExecutionOnly).
+impl From<&ast_segmenter::ExportedSymbol> for ExportedSymbol {
+    fn from(s: &ast_segmenter::ExportedSymbol) -> Self {
+        match s {
+            ast_segmenter::ExportedSymbol::Named(name) => {
+                ExportedSymbol::Named(name.as_ref().to_string())
+            }
+            ast_segmenter::ExportedSymbol::Default => ExportedSymbol::Default,
+        }
+    }
+}
+
+impl From<ast_segmenter::ExportedSymbol> for ExportedSymbol {
+    fn from(s: ast_segmenter::ExportedSymbol) -> Self {
+        ExportedSymbol::from(&s)
+    }
+}
+
+/// Convert from ast_segmenter's Symbol (Named/Default/Namespace) into
+/// unused_finder's ExportedSymbol.
+impl From<&ast_segmenter::raw_module_deps::Symbol> for ExportedSymbol {
+    fn from(s: &ast_segmenter::raw_module_deps::Symbol) -> Self {
+        match s {
+            ast_segmenter::raw_module_deps::Symbol::Named(name) => {
+                ExportedSymbol::Named(name.as_ref().to_string())
+            }
+            ast_segmenter::raw_module_deps::Symbol::Default => ExportedSymbol::Default,
+            ast_segmenter::raw_module_deps::Symbol::Namespace => ExportedSymbol::Namespace,
         }
     }
 }
@@ -277,6 +314,77 @@ impl RawImportExportInfo {
 impl Default for RawImportExportInfo {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Flatten a list of `RawSegment`s (from `ast_segmenter::segment_file`) into a
+/// single `RawImportExportInfo`, merging all segments' module dependencies.
+impl From<&[RawSegment]> for RawImportExportInfo {
+    fn from(segments: &[RawSegment]) -> Self {
+        let mut info = RawImportExportInfo::new();
+        for seg in segments {
+            let deps = &seg.module_deps;
+
+            // Static imports: ast_segmenter uses TaggedSymbol → convert to ExportedSymbol
+            for (path, symbols) in &deps.imports {
+                let entry = info.imported_path_ids.entry(path.clone()).or_default();
+                for tagged in symbols {
+                    entry.insert(ExportedSymbol::from(&tagged.symbol));
+                }
+            }
+
+            // Dynamic imports (import())
+            for path in deps.dynamic_imports.keys() {
+                info.imported_paths.insert(path.clone());
+            }
+
+            // Requires
+            for path in &deps.requires {
+                info.require_paths.insert(path.clone());
+            }
+
+            // Re-exports (export ... from ...)
+            for (path, re_exports) in &deps.exports_from {
+                let entry = info.export_from_ids.entry(path.clone()).or_default();
+                for re_export in re_exports {
+                    let imported = match &re_export.imported_as {
+                        ast_segmenter::ImportTarget::ExportedSymbol(s) => {
+                            ExportedSymbol::from(s)
+                        }
+                        ast_segmenter::ImportTarget::Namespace => ExportedSymbol::Namespace,
+                    };
+                    let renamed_to =
+                        re_export.exported_as.as_ref().map(ExportedSymbol::from);
+                    let converted = ReExportedSymbol {
+                        imported,
+                        renamed_to,
+                    };
+                    let meta = ExportedSymbolMetadata {
+                        span: re_export.span,
+                        allow_unused: re_export.tags.allow_unused_comment,
+                        is_type_only: re_export.tags.is_type_only,
+                    };
+                    entry.insert(converted, meta);
+                }
+            }
+
+            // Local exports
+            for (exported_sym, tagged) in &deps.exports_locals {
+                let sym = ExportedSymbol::from(exported_sym);
+                let meta = ExportedSymbolMetadata {
+                    span: tagged.span,
+                    allow_unused: tagged.tags.allow_unused_comment,
+                    is_type_only: tagged.tags.is_type_only,
+                };
+                info.exported_ids.insert(sym, meta);
+            }
+
+            // Side-effect imports
+            for path in &deps.executed_paths {
+                info.executed_paths.insert(path.clone());
+            }
+        }
+        info
     }
 }
 

@@ -83,12 +83,12 @@ Integration points:
 - `graph.rs` → `GraphFile` gains `segments: Vec<RawSegment>`, symbol lookups index into segments
 - `walked_file.rs` → `ResolvedSourceFile` carries segment-level data
 
-- [ ] Add `ast-segmenter` as a dependency of `unused_finder`
-- [ ] Replace `parse/data.rs` types with re-exports from `ast_segmenter::raw_module_deps` and `ast_segmenter::ExportedSymbol`
-- [ ] Replace `get_file_import_export_info` call site with `segment_file`
-- [ ] Adapt `ResolvedSourceFile` to carry `Vec<RawSegment>` (or a resolved equivalent)
-- [ ] Adapt `GraphFile` to index symbols back to their source segment
-- [ ] Ensure existing tests pass (file-level behavior preserved as a degenerate case of segment-level)
+- [x] Add `ast-segmenter` as a dependency of `unused_finder`
+- [x] Replace `parse/data.rs` types with re-exports from `ast_segmenter::raw_module_deps` and `ast_segmenter::ExportedSymbol`
+- [x] Replace `get_file_import_export_info` call site with `segment_file`
+- [x] Adapt `ResolvedSourceFile` to carry `Vec<RawSegment>` (or a resolved equivalent)
+- [x] Adapt `GraphFile` to index symbols back to their source segment
+- [x] Ensure existing tests pass (file-level behavior preserved as a degenerate case of segment-level)
 
 ## Segment-level unused reporting
 

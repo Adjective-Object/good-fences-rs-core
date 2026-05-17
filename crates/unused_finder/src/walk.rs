@@ -1,9 +1,11 @@
 use crate::ignore_file::IgnoreFile;
 use crate::parse::exports_visitor_runner::SourceFileParseError;
-use crate::parse::{get_file_import_export_info, RawImportExportInfo};
+use crate::parse::RawImportExportInfo;
+use crate::parse::exports_visitor_runner::get_file_segments;
 use crate::walked_file::{WalkedPackage, WalkedSourceFile};
 use ahashmap::AHashMap;
 use anyhow::Context;
+use ast_segmenter::segment_info::RawSegment;
 use ignore::overrides::OverrideBuilder;
 use ignore::DirEntry;
 use logger::Logger;
@@ -15,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
 enum WalkedFile {
-    SourceFile(PathBuf, RawImportExportInfo),
+    SourceFile(PathBuf, RawImportExportInfo, Vec<RawSegment>),
     PackageJson(WalkedPackage),
     IgnoreFile(IgnoreFile),
 }
@@ -307,14 +309,14 @@ fn collect_results(
 ) -> (WalkedFiles, Vec<anyhow::Error>) {
     // partition the results
     let mut packages = RepoPackages::new();
-    let mut source_files: Vec<(PathBuf, RawImportExportInfo)> = Vec::new();
+    let mut source_files: Vec<(PathBuf, RawImportExportInfo, Vec<RawSegment>)> = Vec::new();
     let mut ignore_files: Vec<IgnoreFile> = Vec::new();
     let mut errors: Vec<anyhow::Error> = Vec::new();
     for file in walked_files.into_iter() {
         match file {
             // noop the source files
-            WalkedFile::SourceFile(file_path, imports) => {
-                source_files.push((file_path, imports));
+            WalkedFile::SourceFile(file_path, imports, segments) => {
+                source_files.push((file_path, imports, segments));
             }
             WalkedFile::PackageJson(file) => match packages.add(file) {
                 Ok(_) => {}
@@ -328,13 +330,14 @@ fn collect_results(
     let (source_files, mut pkg_assignment_errs): (Vec<WalkedSourceFile>, Vec<anyhow::Error>) = source_files
         .into_par_iter()
         .map(
-            |(source_file_path, import_export_info)| -> Result<WalkedSourceFile, anyhow::Error> {
+            |(source_file_path, import_export_info, segments)| -> Result<WalkedSourceFile, anyhow::Error> {
                 Ok(WalkedSourceFile {
                     owning_package: packages
                         .get_by_child_path(&source_file_path)?
                         .and_then(|package| package.package_json.name.clone()),
                     source_file_path,
                     import_export_info,
+                    segments,
                 })
             },
         )
@@ -364,10 +367,12 @@ fn visit_entry(entry: DirEntry) -> Result<Option<WalkedFile>, anyhow::Error> {
         Ok(Some(WalkedFile::IgnoreFile(ignore_file)))
     } else if is_js_ts_file(file_name) {
         // Source file [.ts, .tsx, .js, .jsx]
-        match get_file_import_export_info(entry.path()).map(|import_export_info| {
+        match get_file_segments(entry.path()).map(|segments| {
+            let import_export_info = RawImportExportInfo::from(segments.as_slice());
             Some(WalkedFile::SourceFile(
                 dir_path.to_path_buf(),
                 import_export_info,
+                segments,
             ))
         }) {
             // Pass-through results

@@ -7,6 +7,7 @@ use std::{
 
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
+use ast_segmenter::segment_info::RawSegment;
 use rayon::prelude::*;
 
 use crate::{
@@ -28,10 +29,24 @@ pub struct GraphFile {
     // Map of re-exported items to the file that they came from
     // Resolved import/export information w
     pub import_export_info: ResolvedImportExportInfo,
+    /// Per-statement segments from ast_segmenter.
+    /// Maps each exported symbol back to its source segment index.
+    pub segments: Vec<RawSegment>,
+    /// Index from exported symbol name → segment index that exports it
+    pub symbol_to_segment: AHashMap<ExportedSymbol, usize>,
 }
 
 impl GraphFile {
     pub fn new_from_source_file(file: &ResolvedSourceFile) -> Self {
+        // Build reverse index: for each segment that exports symbols, map
+        // those symbols back to the segment index.
+        let mut symbol_to_segment = AHashMap::default();
+        for (seg_idx, seg) in file.segments.iter().enumerate() {
+            for exported_sym in seg.module_deps.exports_locals.keys() {
+                symbol_to_segment.insert(ExportedSymbol::from(exported_sym), seg_idx);
+            }
+        }
+
         Self {
             file_tags: UsedTag::default(),
             symbol_tags: AHashMap::with_capacity_and_hasher(
@@ -40,6 +55,8 @@ impl GraphFile {
             ),
             file_path: file.source_file_path.clone(),
             import_export_info: file.import_export_info.clone(),
+            segments: file.segments.clone(),
+            symbol_to_segment,
         }
     }
 
@@ -362,6 +379,7 @@ mod test {
                 ],
                 ..Default::default()
             },
+            segments: vec![],
         }];
 
         let mut graph = Graph::from_source_files(src_files.iter());

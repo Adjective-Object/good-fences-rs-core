@@ -9,11 +9,11 @@ use swc_common::sync::Lrc;
 use swc_common::{Globals, Mark, SourceMap, GLOBALS};
 use swc_ecma_parser::{Capturing, Parser};
 use swc_ecma_transforms::resolver;
-use swc_ecma_visit::{Fold, VisitWith};
+use swc_ecma_visit::Fold;
 
 use swc_utils_parse::create_lexer;
 
-use crate::parse::exports_visitor::ExportsVisitor;
+use ast_segmenter::segment_info::RawSegment;
 use crate::parse::RawImportExportInfo;
 
 #[derive(Debug, thiserror::Error)]
@@ -29,9 +29,20 @@ pub enum SourceFileParseError {
 }
 
 /// Gets the _unresolved_ import/export info from a file by reading it from disk and parsing it.
+///
+/// Internally delegates to `ast_segmenter::segment_file` to produce per-statement
+/// segments, then flattens them into a single `RawImportExportInfo`.
 pub fn get_file_import_export_info(
     file_path: &Path,
 ) -> Result<RawImportExportInfo, SourceFileParseError> {
+    let segments = get_file_segments(file_path)?;
+    Ok(RawImportExportInfo::from(segments.as_slice()))
+}
+
+/// Parses a source file and returns per-statement segments via `ast_segmenter::segment_file`.
+pub fn get_file_segments(
+    file_path: &Path,
+) -> Result<Vec<RawSegment>, SourceFileParseError> {
     let cm = Lrc::<SourceMap>::default();
     let fm = match cm.load_file(file_path) {
         Ok(f) => f,
@@ -79,24 +90,12 @@ pub fn get_file_import_export_info(
 
     let stdio_logger = StdioLogger::new();
     let logger = WrapFileLogger::new(cm.as_ref(), &stdio_logger);
-    let mut visitor = ExportsVisitor::new(logger, comments);
 
     let globals = Globals::new();
-    GLOBALS.set(&globals, || {
-        // Create resolver for variables
-        let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-        // Assign tags to identifiers
-        let resolved = resolver.fold_module(ts_module.clone());
-        // Do ast walk with our visitor
-        resolved.visit_with(&mut visitor)
+    let resolved = GLOBALS.set(&globals, || {
+        let mut res = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
+        res.fold_module(ts_module.clone())
     });
 
-    Ok(RawImportExportInfo {
-        imported_path_ids: visitor.imported_ids_path_name,
-        require_paths: visitor.require_paths,
-        imported_paths: visitor.imported_paths,
-        export_from_ids: visitor.export_from_ids, // TODO replace with ExportVisitor maps
-        exported_ids: visitor.exported_ids,
-        executed_paths: visitor.executed_paths,
-    })
+    Ok(ast_segmenter::segment_file(&logger, &resolved, &comments))
 }

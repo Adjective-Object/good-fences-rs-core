@@ -10,7 +10,8 @@ use crate::{
     graph::{Graph, GraphFile},
     ignore_file::IgnoreFile,
     parse::{
-        get_file_import_export_info, ExportedSymbol, ExportedSymbolMetadata, ReExportedSymbol,
+        exports_visitor_runner::get_file_segments, ExportedSymbol, ExportedSymbolMetadata,
+        RawImportExportInfo, ReExportedSymbol,
     },
     report::UnusedFinderReport,
     tag::UsedTag,
@@ -97,6 +98,7 @@ impl SourceFiles {
                             })?,
                         owning_package: walked_file.owning_package,
                         source_file_path: walked_file.source_file_path,
+                        segments: walked_file.segments,
                     },
                 ))
             })
@@ -461,8 +463,8 @@ impl UnusedFinder {
             }
         };
 
-        let import_export_info = match get_file_import_export_info(file_path) {
-            Ok(import_export_info) => import_export_info,
+        let segments = match get_file_segments(file_path) {
+            Ok(segments) => segments,
             Err(e) => {
                 logger.log(format!(
                     "Error reading file {}: {:?}",
@@ -472,6 +474,7 @@ impl UnusedFinder {
                 return Err(JsErr::generic_failure(e));
             }
         };
+        let import_export_info = RawImportExportInfo::from(segments.as_slice());
 
         let resolver = resolver_for_packages(
             PathBuf::from(self.config.repo_root.clone()),
@@ -485,6 +488,7 @@ impl UnusedFinder {
                 .try_resolve(file_path, resolver)
                 .into_anyhow()
                 .map_err(JsErr::generic_failure)?,
+            segments,
         };
 
         Ok(resolved_source_file)

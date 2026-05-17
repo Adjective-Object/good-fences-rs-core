@@ -72,3 +72,33 @@
 - **Diamond test required re-export segments**: Initial test used separate export+import segments per file, but inter-file edges only resolve against the file_export_map. Two segments in the same file don't automatically have edges unless connected by effect ordering or shared names. Re-export segments (`exports_from`) are the correct way to model pass-through files.
 - **`exports_locals` segments are NOT hoisted**: `export const x = 42` creates a segment with `exports_locals` but no static imports. This is intentionally non-hoisted because `const` declarations aren't hoisted in JS. Only `export function` would be hoisted, but we can't distinguish that from `exports_locals` alone without AST info — noted as a future refinement.
 - **Wildcard re-exports**: `export * from '...'` can't be represented in the export map keyed by `ExportedSymbol`. Currently skipped during map construction. A future phase may need to resolve wildcards by expanding them against the source file's exports.
+
+## Phase 4: Wire `ast_segmenter` into `unused_finder`
+
+### Design decisions
+
+- **`unused_finder::ExportedSymbol` kept as separate type**: `ast_segmenter::ExportedSymbol` has only Named/Default variants, while `unused_finder` needs Namespace and ExecutionOnly for graph traversal. Added `From` impls to convert between the two type systems.
+- **`RawImportExportInfo` built by flattening `Vec<RawSegment>`**: Implemented `From<&[RawSegment]> for RawImportExportInfo` which merges all segment `RawModuleDeps` into a single flat structure. This preserves backward compatibility — all existing code continues using `RawImportExportInfo` and `ResolvedImportExportInfo` unchanged.
+- **`get_file_import_export_info` preserved as convenience wrapper**: Now delegates to `get_file_segments` → `segment_file` → flatten. The original `ExportsVisitor` in `unused_finder` is kept but no longer called from the main pipeline (still used by tests).
+- **`get_file_segments` added as new public API**: Returns `Vec<RawSegment>` directly, used by `walk.rs` to produce both segments and flattened `RawImportExportInfo` in a single parse pass.
+- **Segments flow through the pipeline**: `WalkedSourceFile`, `ResolvedSourceFile`, and `GraphFile` all carry `Vec<RawSegment>` alongside the existing `import_export_info`. This enables future segment-level analysis without breaking file-level analysis.
+- **`GraphFile::symbol_to_segment` index**: Built during `new_from_source_file` by iterating each segment's `exports_locals` and mapping exported symbol → segment index. Enables looking up which segment owns a given export.
+
+### Span and tag propagation
+
+- **`TaggedSymbol.span` added**: `ast_segmenter::TaggedSymbol` now carries a `swc_common::Span` so export locations survive the type conversion. `with_span()` constructor used where spans are available; `new()` defaults to `Span::default()`.
+- **`ReExportedSymbol.tags` + `span` added**: Re-exports now carry `SymbolTags` (is_type_only, allow_unused) and `Span` from their source AST node. This is critical for type-only re-export propagation (`export type { X } from '...'`).
+- **`ReExportedSymbol` custom Hash/Eq**: Identity is `imported_as + exported_as` only — `tags` and `span` are metadata excluded from equality/hashing. This prevents duplicate entries in `AHashSet<ReExportedSymbol>` when the same re-export has different metadata.
+
+### Derives added to support Clone/Debug/Eq through the pipeline
+
+- `ast_name_tracker::VarID`: added `Debug, PartialEq, Eq`
+- `ast_name_tracker::HoistingLevel`: added `PartialEq, Eq`
+- `ast_name_tracker::VariableScope`: added `Debug, Clone, PartialEq, Eq`
+- `ast_segmenter::RawSegment`: added `Debug, Clone, PartialEq, Eq`
+
+### Gotchas
+
+- **Test `test_indirect_typeonly_export` required re-export span propagation**: Without spans on `ReExportedSymbol`, the test validation code attempted `(0 - 1)` on a u32 causing overflow. The fix was to carry spans all the way through.
+- **`ast_segmenter::Symbol` → `ExportedSymbol` conversion needed**: The `Symbol::Namespace` variant maps to `ExportedSymbol::Namespace`. Added `From<&Symbol>` impl.
+- **Re-export `is_type_only` needed propagation**: `export type { X } from '...'` must propagate `is_type_only` through to `ExportedSymbolMetadata` for the BFS type-only tracking to work correctly.
