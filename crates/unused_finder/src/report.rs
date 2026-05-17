@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use swc_common::source_map::SmallPos;
 
 use crate::{
-    graph::{Graph, GraphFile},
+    find_result::{ResultFile, ResultGraph},
     parse::ExportedSymbol,
     tag::UsedTag,
     UnusedFinderConfig, UnusedFinderResult, UsedTagEnum,
@@ -117,19 +117,19 @@ impl Display for UnusedFinderReport {
 }
 
 fn extract_symbols<T: Send + Sync>(
-    graph: &Graph,
-    include_symbol: impl Fn(&GraphFile, &ExportedSymbol) -> Option<T> + Sync,
+    graph: &ResultGraph,
+    include_symbol: impl Fn(&ResultFile, &ExportedSymbol) -> Option<T> + Sync,
 ) -> AHashMap<String, Vec<T>> {
     graph
         .files
         .par_iter()
-        .filter_map(|graph_file| -> Option<(String, Vec<T>)> {
+        .filter_map(|file| -> Option<(String, Vec<T>)> {
             // Find all used symbols in the file
-            let unused_symbols = graph_file
+            let unused_symbols = file
                 .import_export_info
                 .iter_exported_symbols()
                 .filter_map(|(_, symbol): (_, &ExportedSymbol)| -> Option<T> {
-                    include_symbol(graph_file, symbol)
+                    include_symbol(file, symbol)
                 })
                 .collect::<Vec<_>>();
 
@@ -138,7 +138,7 @@ fn extract_symbols<T: Send + Sync>(
             }
 
             Some((
-                graph_file.file_path.to_string_lossy().to_string(),
+                file.file_path.to_string_lossy().to_string(),
                 unused_symbols,
             ))
         })
@@ -160,7 +160,7 @@ fn include_extra(tags: &UsedTag) -> bool {
 ///
 /// Returns a map from file path → list of `SegmentReport` for unused segments
 /// in files that are at least partially used.
-fn compute_unused_segments(graph: &Graph, config: &UnusedFinderConfig) -> AHashMap<String, Vec<SegmentReport>> {
+fn compute_unused_segments(graph: &ResultGraph, config: &UnusedFinderConfig) -> AHashMap<String, Vec<SegmentReport>> {
     // Collect file_segments for the SegmentGraph builder.
     let file_segments: Vec<(usize, &[Segment])> = graph
         .files

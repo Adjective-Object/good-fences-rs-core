@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     cfg::{UnusedFinderConfig, UnusedFinderJSONConfig},
-    graph::{Graph, GraphFile},
+    find_result::{ResultFile, ResultGraph},
     ignore_file::IgnoreFile,
     parse::{
         exports_visitor_runner::get_file_segments, ExportedSymbol, ExportedSymbolMetadata,
@@ -540,9 +540,6 @@ impl UnusedFinder {
                 .map(Self::to_source_file_input),
         );
 
-        // Build old Graph (for report generation and dot_graph — will be removed in next phase)
-        let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
-
         // print the entry packages config
         debug_logf!(logger, "Entry packages: {:#?}", self.config.entry_packages);
 
@@ -600,10 +597,10 @@ impl UnusedFinder {
             false,
         );
 
-        // Sync tags from TagGraph into old Graph for report compatibility
-        Self::sync_tags_to_graph(&source_graph, &tag_graph, &mut graph);
+        // Build ResultGraph from SourceGraph + TagGraph + source files
+        let mut result_graph = Self::build_result_graph(&source_graph, &tag_graph, &self.last_walk_result.source_files);
 
-        for file in graph.files.iter() {
+        for file in result_graph.files.iter() {
             let file_ids_vec = file
                 .import_export_info
                 .iter_exported_symbols()
@@ -640,28 +637,35 @@ impl UnusedFinder {
             ));
         }
 
-        // mark all typeonly symbols as typeonly, an all typeonly files as typeonly
+        // mark all typeonly symbols as typeonly, and all typeonly files as typeonly
         for (path, source_file) in self.last_walk_result.source_files.iter() {
             if source_file.import_export_info.num_exported_symbols() == 0 {
                 continue;
             }
+
+            let file_id = match result_graph.path_to_id.get(path) {
+                Some(id) => *id,
+                None => continue,
+            };
 
             let mut all_symbols_typeonly = true;
             for (_original_path, (symbol, metadata)) in
                 source_file.import_export_info.iter_exported_symbols_meta()
             {
                 if metadata.is_type_only {
-                    graph.mark_symbol(path, symbol, UsedTag::TYPE_ONLY);
+                    let file = &mut result_graph.files[file_id];
+                    let old_tag = file.symbol_tags.entry(symbol.clone()).or_default();
+                    *old_tag = old_tag.union(UsedTag::TYPE_ONLY);
                 } else {
                     all_symbols_typeonly = false;
                 }
             }
             if all_symbols_typeonly {
-                graph.mark_file(path, UsedTag::TYPE_ONLY);
+                result_graph.files[file_id].file_tags.insert(UsedTag::TYPE_ONLY);
             }
         }
 
-        Ok(UnusedFinderResult::new(graph, self.config.clone()))
+        Ok(UnusedFinderResult::new(result_graph, self.config.clone()))
     }
 
     fn count_symbols<T, U>(symbols: &[(T, Vec<U>)]) -> usize {
@@ -940,57 +944,69 @@ impl UnusedFinder {
         keys
     }
 
-    /// Sync tags from TagGraph into old Graph for report backward compatibility.
-    fn sync_tags_to_graph(source_graph: &SourceGraph, tag_graph: &TagGraph, graph: &mut Graph) {
-        for (file_id, graph_file) in graph.files.iter_mut().enumerate() {
-            let file_id = file_id as u32;
+    /// Build a `ResultGraph` from `SourceGraph` + `TagGraph` + source files.
+    ///
+    /// Converts segment-level tags into per-file and per-symbol tags for
+    /// report generation, replacing the old `sync_tags_to_graph` approach.
+    fn build_result_graph(
+        source_graph: &SourceGraph,
+        tag_graph: &TagGraph,
+        source_files: &AHashMap<PathBuf, ResolvedSourceFile>,
+    ) -> ResultGraph {
+        let mut path_to_id = AHashMap::default();
+        let mut files = Vec::with_capacity(source_files.len());
 
-            // Sync file-level tag: union of all segment tags
-            let file_tag = tag_graph.file_tag(source_graph, file_id);
-            let uf_file_tag = UsedTag::from_bits_truncate(file_tag.bits());
-            graph_file.file_tags = uf_file_tag;
+        for (path, source_file) in source_files.iter() {
+            let id = files.len();
+            path_to_id.insert(path.clone(), id);
 
-            // Sync per-symbol tags: look up each exported symbol's segment
-            let sym_to_seg = match source_graph.file_symbol_to_segment(file_id) {
-                Some(m) => m,
-                None => continue,
-            };
+            let file_id = source_graph.file_id(path).unwrap_or(u32::MAX);
 
-            for (_, symbol) in graph_file.import_export_info.iter_exported_symbols() {
-                let seg_idx = match symbol {
-                    ExportedSymbol::Named(name) => {
-                        let seg_sym =
-                            ast_segmenter::ExportedSymbol::Named(name.as_str().into());
-                        sym_to_seg.get(&seg_sym).copied().or_else(|| {
-                            // Check re-exports: find the segment whose exports_from
-                            // exports this symbol name
-                            Self::find_reexport_segment(source_graph, file_id, &seg_sym)
-                        })
-                    }
-                    ExportedSymbol::Default => {
-                        sym_to_seg.get(&ast_segmenter::ExportedSymbol::Default).copied().or_else(|| {
-                            Self::find_reexport_segment(source_graph, file_id, &ast_segmenter::ExportedSymbol::Default)
-                        })
-                    }
-                    ExportedSymbol::Namespace | ExportedSymbol::ExecutionOnly => {
-                        None
-                    }
-                };
+            // File-level tag: union of all segment tags
+            let file_tag_raw = tag_graph.file_tag(source_graph, file_id);
+            let file_tags = UsedTag::from_bits_truncate(file_tag_raw.bits());
 
-                if let Some(seg_idx) = seg_idx {
-                    let key = SegmentKey::new(file_id, seg_idx);
-                    let seg_tag = tag_graph.get_tag(key);
-                    let uf_tag = UsedTag::from_bits_truncate(seg_tag.bits());
-                    if !uf_tag.is_empty() {
-                        graph_file
-                            .symbol_tags
-                            .entry(symbol.clone())
-                            .or_default()
-                            .insert(uf_tag);
+            // Per-symbol tags
+            let mut symbol_tags: AHashMap<ExportedSymbol, UsedTag> = AHashMap::default();
+            if let Some(sym_to_seg) = source_graph.file_symbol_to_segment(file_id) {
+                for (_, symbol) in source_file.import_export_info.iter_exported_symbols() {
+                    let seg_idx = match symbol {
+                        ExportedSymbol::Named(name) => {
+                            let seg_sym =
+                                ast_segmenter::ExportedSymbol::Named(name.as_str().into());
+                            sym_to_seg.get(&seg_sym).copied().or_else(|| {
+                                Self::find_reexport_segment(source_graph, file_id, &seg_sym)
+                            })
+                        }
+                        ExportedSymbol::Default => {
+                            sym_to_seg.get(&ast_segmenter::ExportedSymbol::Default).copied().or_else(|| {
+                                Self::find_reexport_segment(source_graph, file_id, &ast_segmenter::ExportedSymbol::Default)
+                            })
+                        }
+                        ExportedSymbol::Namespace | ExportedSymbol::ExecutionOnly => None,
+                    };
+
+                    if let Some(seg_idx) = seg_idx {
+                        let key = SegmentKey::new(file_id, seg_idx);
+                        let seg_tag = tag_graph.get_tag(key);
+                        let uf_tag = UsedTag::from_bits_truncate(seg_tag.bits());
+                        if !uf_tag.is_empty() {
+                            symbol_tags.entry(symbol.clone()).or_default().insert(uf_tag);
+                        }
                     }
                 }
             }
+
+            files.push(ResultFile {
+                file_path: path.clone(),
+                file_tags,
+                symbol_tags,
+                import_export_info: source_file.import_export_info.clone(),
+                segments: source_file.segments.clone(),
+            });
         }
+
+        ResultGraph { path_to_id, files }
     }
 
     /// Find the segment index that re-exports a given symbol via `exports_from`.
@@ -1021,22 +1037,22 @@ impl UnusedFinder {
 /// Represents the result of computing something over the graph.
 pub struct UnusedFinderResult {
     pub config: UnusedFinderConfig,
-    /// The finished, traversed graph, with unused items marked as used / unused.
-    pub graph: Graph,
+    /// The finished, tagged result graph with per-file and per-symbol tags.
+    pub graph: ResultGraph,
 }
 
-fn cluster_id_for_file(graph_file: &GraphFile) -> String {
+fn cluster_id_for_file(file: &ResultFile) -> String {
     // hash the file path
     let mut s: DefaultHasher = DefaultHasher::new();
-    graph_file.file_path.display().to_string().hash(&mut s);
+    file.file_path.display().to_string().hash(&mut s);
     format!("f_{:x}", s.finish())
 }
 
 const GENERIC_SEGMENTS: [&str; 4] = ["shared", "src", "lib", "index"];
 
-fn cluster_label_for_file(graph_file: &GraphFile) -> String {
+fn cluster_label_for_file(file: &ResultFile) -> String {
     let mut segments = Vec::new();
-    let mut path: Option<&Path> = Some(&graph_file.file_path);
+    let mut path: Option<&Path> = Some(&file.file_path);
 
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 1000;
@@ -1075,7 +1091,7 @@ fn abbrev(symbols: Vec<String>) -> Vec<String> {
 }
 
 impl UnusedFinderResult {
-    pub fn new(graph: Graph, config: UnusedFinderConfig) -> Self {
+    pub fn new(graph: ResultGraph, config: UnusedFinderConfig) -> Self {
         Self { config, graph }
     }
 
@@ -1198,7 +1214,7 @@ impl UnusedFinderResult {
                 .par_iter()
                 .map(|file_id| -> Vec<usize> {
                     // get file
-                    let file: &GraphFile = &self.graph.files[*file_id];
+                    let file: &ResultFile = &self.graph.files[*file_id];
                     file.import_export_info
                         .iter_imported_symbols_meta()
                         .map(|(imported_file, _, _)| self.graph.path_to_id.get(imported_file))

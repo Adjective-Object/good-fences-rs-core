@@ -261,9 +261,9 @@ from `TagGraph` instead of `GraphFile.file_tags`/`symbol_tags`.
 
 After the new code paths are validated, delete the old types.
 
-- [ ] Remove `Graph`, `GraphFile`, `Edge` from `graph.rs`
-- [ ] Remove `symbol_to_segment` field (currently dead code) along with its parent struct
-- [ ] Remove `tag_symbol` method from `GraphFile`
-- [ ] Clean up any orphaned imports
-- [ ] Run `cargo test -p unused-finder` — all tests pass
-- [ ] Run `cargo test --workspace` — no regressions
+- [x] Remove `Graph`, `GraphFile`, `Edge` from `graph.rs`
+- [x] Remove `symbol_to_segment` field (currently dead code) along with its parent struct
+- [x] Remove `tag_symbol` method from `GraphFile`
+- [x] Clean up any orphaned imports
+- [x] Run `cargo test -p unused-finder` — all tests pass
+- [x] Run `cargo test --workspace` — no regressions

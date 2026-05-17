@@ -13,7 +13,7 @@ extern crate pretty_assertions;
 extern crate test_tmpdir;
 
 mod cfg;
-mod graph;
+mod find_result;
 mod ignore_file;
 mod parse;
 mod report;

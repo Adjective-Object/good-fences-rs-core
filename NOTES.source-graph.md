@@ -131,3 +131,18 @@
 - `unused_finder::ExportedSymbol` has 4 variants (Named/Default/Namespace/ExecutionOnly) while `ast_segmenter::ExportedSymbol` has only 2 (Named/Default). The `sync_tags_to_graph` function skips Namespace/ExecutionOnly.
 - `unused_finder::tag::UsedTag` and `tag_graph::UsedTag` have identical bit values (0x01/0x02/0x04/0x08), convertible via `from_bits_truncate`.
 - `SourceFileInput::resolved_import_paths` maps raw specifiers as they appear in segments' `module_deps` fields — not resolved paths.
+
+## Phase 9: Remove old `Graph` code
+
+### Design decisions
+
+- **`ResultFile` / `ResultGraph` as data-only replacements**: Introduced `find_result.rs` with `ResultFile` and `ResultGraph` — minimal data-only structs with no traversal or mutation methods. `ResultFile` has the same fields as the old `GraphFile` except `symbol_to_segment` (dead code, removed) and `tag_symbol` / `new_from_source_file` (methods, removed). `ResultGraph` keeps only `path_to_id` + `files` + `get_file_by_path`.
+
+- **`build_result_graph` replaces `sync_tags_to_graph`**: Instead of building an old `Graph` via `from_source_files` then syncing tags into it, the new `build_result_graph` constructs `ResultGraph` directly from `SourceGraph` + `TagGraph` + source files. This combines what was previously two passes (build Graph, then sync tags) into a single pass. TYPE_ONLY marking is applied afterward on the `ResultGraph` in the same pattern as before.
+
+- **`graph.rs` deleted, `mod graph` replaced by `mod find_result`**: All BFS traversal, `Edge`, and mutation methods (`tag_symbol`, `mark_symbol`, `mark_file`, `bfs_step`, `traverse_bfs`) were removed along with the file. Report and DOT graph code accesses the same field names on the new types with no logic changes needed.
+
+### Gotchas
+
+- `write_dot_graph` and `report.rs` both use local variables named `graph_file` — these are fine since they access fields by name (same field names on `ResultFile`) and Rust infers the new type from `graph.files`.
+- The `graph_file.import_export_info.exported_ids` access in DOT graph generation still works because `ResultFile.import_export_info` is a `ResolvedImportExportInfo` with the same fields.
