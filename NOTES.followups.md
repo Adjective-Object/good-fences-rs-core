@@ -36,3 +36,33 @@ from the crate root is unchanged in shape.
 No behavioral changes — purely a naming cleanup. Pre-existing warnings
 (`Dependencies2D`, `RawModuleDeps` accessor methods, `ExportsVisitor::new`) are
 unchanged and belong to the next TODO section ("Finish migration").
+
+## Finish migration
+
+### Deleted `unused_finder`'s `ExportsVisitor` and migrated tests to `ast_segmenter`
+
+The old `ExportsVisitor` in `unused_finder/src/parse/exports_visitor.rs` was a
+full SWC `Visit` impl that walked an entire module to collect import/export info
+into `RawImportExportInfo`. The production pipeline had already moved to
+`ast_segmenter::segment_file` (via `exports_visitor_runner.rs`), leaving the old
+visitor used only by `exports_visitor_tests.rs`.
+
+**What changed:**
+- Deleted `exports_visitor.rs` entirely (456 lines).
+- Removed the `pub mod exports_visitor` declaration from `parse/mod.rs`.
+- Rewrote `exports_visitor_tests.rs` to parse via
+  `ast_segmenter::segment_file` → `RawImportExportInfo::from(segments.as_slice())`
+  instead of constructing an `ExportsVisitor` directly.
+- The `parse()` test helper uses `create_lexer` + `Capturing` + `Parser`
+  (matching `exports_visitor_runner.rs`) instead of the old `create_parser`.
+
+All 35 existing test cases pass unchanged — the `ast_segmenter` pipeline
+produces identical `RawImportExportInfo` for every test input.
+
+**Pre-existing warnings observed (not addressed):**
+- `RawModuleDeps` re-export is unused (`data.rs:14`)
+- `get_file_import_export_info` is never used (dead code after callers moved to
+  `get_file_segments`)
+- `Dependencies2D` fields/methods are never read in `ast_segmenter::visitor.rs`
+
+These are candidates for future cleanup but are unrelated to this migration.

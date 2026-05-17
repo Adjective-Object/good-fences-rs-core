@@ -3,18 +3,18 @@ mod test {
 
     use ahashmap::{AHashMap, AHashSet};
     use logger::StdioLogger;
-    use logger_srcfile::{SrcFileLogger, WrapFileLogger};
+    use logger_srcfile::WrapFileLogger;
     use swc_common::comments::SingleThreadedComments;
     use swc_common::sync::Lrc;
     use swc_common::{FileName, SourceMap};
-    use swc_ecma_visit::VisitWith;
 
-    use crate::parse::{ExportedSymbol, ReExportedSymbol};
+    use crate::parse::{ExportedSymbol, RawImportExportInfo, ReExportedSymbol};
 
-    use crate::parse::exports_visitor::ExportsVisitor;
     use test_tmpdir::{amap, amap2, aset};
 
-    fn visit(src: &str) -> ExportsVisitor<impl SrcFileLogger> {
+    /// Parse source via `ast_segmenter::segment_file`, then flatten the
+    /// resulting segments into a `RawImportExportInfo`.
+    fn parse(src: &str) -> RawImportExportInfo {
         let cm = Lrc::<SourceMap>::default();
         let comments = SingleThreadedComments::default();
         let fm = cm.new_source_file(
@@ -22,16 +22,16 @@ mod test {
             src.to_string(),
         );
 
-        let mut parser = swc_utils_parse::create_parser(&fm, Some(&comments));
+        let lexer = swc_utils_parse::create_lexer(&fm, Some(&comments));
+        let capturing = swc_ecma_parser::Capturing::new(lexer);
+        let mut parser = swc_ecma_parser::Parser::new_from(capturing);
         let module = parser.parse_typescript_module().unwrap();
 
         let stdio_logger = StdioLogger::new();
-        let logger = WrapFileLogger::new(cm, stdio_logger);
+        let logger = WrapFileLogger::new(cm, &stdio_logger);
 
-        let mut visitor = ExportsVisitor::new(logger, comments);
-        module.visit_with(&mut visitor);
-
-        visitor
+        let segments = ast_segmenter::segment_file(&logger, &module, &comments);
+        RawImportExportInfo::from(segments.as_slice())
     }
 
     #[derive(PartialEq, Debug)]
@@ -40,11 +40,8 @@ mod test {
         pub is_typeonly: bool,
     }
 
-    fn own_exported_ids(
-        visitor: &ExportsVisitor<impl SrcFileLogger>,
-    ) -> AHashMap<ExportedSymbol, TestMeta> {
-        visitor
-            .exported_ids
+    fn own_exported_ids(info: &RawImportExportInfo) -> AHashMap<ExportedSymbol, TestMeta> {
+        info.exported_ids
             .iter()
             .map(|(k, v)| {
                 (
@@ -59,10 +56,9 @@ mod test {
     }
 
     fn re_exported_ids(
-        visitor: &ExportsVisitor<impl SrcFileLogger>,
+        info: &RawImportExportInfo,
     ) -> AHashMap<String, AHashMap<ReExportedSymbol, TestMeta>> {
-        visitor
-            .export_from_ids
+        info.export_from_ids
             .iter()
             .map(|(k, v)| {
                 (
@@ -85,7 +81,7 @@ mod test {
 
     #[test]
     fn test_allowed_unused_export_named() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 const foo = 1;
                 // @ALLOW-UNUSED-EXPORT
@@ -99,13 +95,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         );
     }
 
     #[test]
     fn test_allowed_unused_export_named_as_bar() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 const foo = 1;
                 // @ALLOW-UNUSED-EXPORT
@@ -120,12 +116,12 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         );
     }
     #[test]
     fn test_allowed_unused_export_default() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 const foo = 1;
                 // @ALLOW-UNUSED-EXPORT
@@ -139,13 +135,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allowed_unused_export_kind_as_default() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 interface Foo {
                     bar: boolean;
@@ -161,13 +157,13 @@ mod test {
                     is_typeonly: true
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         );
     }
 
     #[test]
     fn test_allowed_unused_export_default_execution() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 function foo() { return 1; }
                 // @ALLOW-UNUSED-EXPORT
@@ -181,13 +177,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         );
     }
 
     #[test]
     fn test_allowed_unused_export_default_class() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export default class Foo {}
@@ -200,13 +196,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allowed_unused_export_const() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export const foo = 1;
@@ -219,13 +215,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allowed_unused_export_from() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export { foo } from './foo';
@@ -243,13 +239,13 @@ mod test {
                     }
                 )
             ),
-            re_exported_ids(&visitor)
+            re_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allowed_unused_export_default_from() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export { default as foo } from './foo';
@@ -267,13 +263,13 @@ mod test {
                     }
                 )
             ),
-            re_exported_ids(&visitor)
+            re_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allowed_unused_export_star_from() {
-        let visitor = visit(
+        let info = parse(
             r#"
                 // @ALLOW-UNUSED-EXPORT
                 export * from './foo';
@@ -291,13 +287,13 @@ mod test {
                     }
                 )
             ),
-            re_exported_ids(&visitor)
+            re_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_named() {
-        let visitor = visit(
+        let info = parse(
             r#"
             const foo = 1;
             export { foo }
@@ -310,13 +306,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allow_unused_export_and_collect_not_marked_export() {
-        let visitor = visit(
+        let info = parse(
             r#"
             // some comment
             const foo = 1;
@@ -338,13 +334,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allow_unused_export_and_collect_not_marked_export_default() {
-        let visitor = visit(
+        let info = parse(
             r#"
             // some comment
             const foo = 1;
@@ -366,13 +362,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_allow_unused_export_default_and_collect_not_marked_named_export() {
-        let visitor = visit(
+        let info = parse(
             r#"
             // some comment
             const foo = 1;
@@ -394,13 +390,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_named_as_bar() {
-        let visitor = visit(
+        let info = parse(
             r#"
             const foo = 1;
             export { foo as bar }
@@ -413,13 +409,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_default() {
-        let visitor = visit(
+        let info = parse(
             r#"
             const foo = 1;
             export default foo;
@@ -432,13 +428,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_kind_as_default() {
-        let visitor = visit(
+        let info = parse(
             r#"
             interface Foo {
                 bar: boolean;
@@ -453,13 +449,13 @@ mod test {
                     is_typeonly: true
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_default_execution() {
-        let visitor = visit(
+        let info = parse(
             r#"
             function foo() { return 1; }
             export default foo();
@@ -472,13 +468,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_default_class() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export default class Foo {}
             "#,
@@ -490,13 +486,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_const() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export const foo = 1;
             "#,
@@ -508,13 +504,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_const_multi() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export const foo = 1, bar = 2;
             "#,
@@ -531,13 +527,13 @@ mod test {
                     is_typeonly: false
                 }
             ),
-            own_exported_ids(&visitor)
+            own_exported_ids(&info)
         )
     }
 
     #[test]
     fn test_export_from() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export { foo } from './foo';
             "#,
@@ -553,12 +549,12 @@ mod test {
                 }
             )
         );
-        assert_eq!(expected_map, re_exported_ids(&visitor));
+        assert_eq!(expected_map, re_exported_ids(&info));
     }
 
     #[test]
     fn test_export_default_from() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export { default as foo } from './foo';
             "#,
@@ -574,12 +570,12 @@ mod test {
                 }
             )
         );
-        assert_eq!(expected_map, re_exported_ids(&visitor));
+        assert_eq!(expected_map, re_exported_ids(&info));
     }
 
     #[test]
     fn test_export_star_from() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export * from './foo';
             "#,
@@ -595,24 +591,24 @@ mod test {
                 }
             )
         );
-        assert_eq!(expected_map, re_exported_ids(&visitor));
+        assert_eq!(expected_map, re_exported_ids(&info));
     }
 
     #[test]
     fn test_import_default() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import foo from './foo';
             "#,
         );
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
             amap!("./foo" => aset!(ExportedSymbol::Default));
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
+        assert_eq!(expected_map, info.imported_path_ids);
     }
 
     #[test]
     fn test_import_specifier() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import {foo} from './foo';
             "#,
@@ -620,12 +616,12 @@ mod test {
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!( "./foo" =>
             aset!(ExportedSymbol::Named("foo".to_owned()))
         );
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
+        assert_eq!(expected_map, info.imported_path_ids);
     }
 
     #[test]
     fn test_import_specifier_with_alias() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import {foo as bar} from './foo';
             "#,
@@ -633,24 +629,24 @@ mod test {
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!( "./foo" =>
             aset!(ExportedSymbol::Named("foo".to_owned()))
         );
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
+        assert_eq!(expected_map, info.imported_path_ids);
     }
 
     #[test]
     fn test_import_default_with_alias() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import {default as foo} from './foo';
             "#,
         );
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
             amap!("./foo" => aset!(ExportedSymbol::Default));
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
+        assert_eq!(expected_map, info.imported_path_ids);
     }
 
     #[test]
     fn test_import_call() {
-        let visitor = visit(
+        let info = parse(
             r#"
             const lazyModule = new LazyModule(() => import(/* webpackChunkName: "mailStore" */ './foo'));
             export const lazyModule = new LazyModule(
@@ -661,13 +657,13 @@ mod test {
 
         assert_eq!(
             aset!("./foo".to_string(), "./lazyIndex".to_string()),
-            visitor.imported_paths
+            info.imported_paths
         );
     }
 
     #[test]
     fn test_import_default_and_specifier() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import foo, {bar} from './foo';
             "#,
@@ -675,57 +671,57 @@ mod test {
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> = amap!(
             "./foo" => aset!(ExportedSymbol::Default, ExportedSymbol::Named("bar".to_owned()))
         );
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
+        assert_eq!(expected_map, info.imported_path_ids);
     }
 
     #[test]
     fn test_import_star() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import * as foo from './foo';
             "#,
         );
         let expected_map: AHashMap<String, AHashSet<ExportedSymbol>> =
             amap!("./foo" => aset!(ExportedSymbol::Namespace));
-        assert_eq!(expected_map, visitor.imported_ids_path_name);
+        assert_eq!(expected_map, info.imported_path_ids);
     }
 
     #[test]
     fn test_require() {
-        let visitor = visit(
+        let info = parse(
             r#"
             const foo = require('./foo');
             "#,
         );
 
-        assert_eq!(aset!("./foo".to_owned()), visitor.require_paths);
+        assert_eq!(aset!("./foo".to_owned()), info.require_paths);
     }
 
     #[test]
     fn test_import_equals() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import foo = require('./foo')
             "#,
         );
 
-        assert_eq!(aset!("./foo".to_owned()), visitor.imported_paths);
+        assert_eq!(aset!("./foo".to_owned()), info.imported_paths);
     }
 
     #[test]
     fn test_import_statement() {
-        let visitor = visit(
+        let info = parse(
             r#"
             import './foo'
             "#,
         );
 
-        assert_eq!(aset!("./foo".to_owned()), visitor.executed_paths);
+        assert_eq!(aset!("./foo".to_owned()), info.executed_paths);
     }
 
     #[test]
     fn test_realworld_example() {
-        let visitor = visit(
+        let info = parse(
             r#"
             export const updateWorkplaceSuggestionForDay = mutatorAction();
 
@@ -738,7 +734,7 @@ mod test {
                 ExportedSymbol::Named("getWorkplaceSuggestionForDay".to_owned()),
                 ExportedSymbol::Named("setWorkplaceSuggestionForDay".to_owned())
             ),
-            visitor
+            info
                 .exported_ids
                 .keys()
                 .cloned()

@@ -11,5 +11,11 @@
 
 ## Finish migration
 
-- [ ] **`unused_finder::ExportsVisitor` now unused from main pipeline**: The `ExportsVisitor` in `unused_finder/src/parse/exports_visitor.rs` is no longer called from the production pipeline (replaced by `ast_segmenter::segment_file`). It's still referenced by `exports_visitor_tests.rs`.
-- [ ] Migrate tests to use `ast_segmenter` directly, or keeping it as a reference implementation.
+- [x] **`unused_finder::ExportsVisitor` now unused from main pipeline**: The `ExportsVisitor` in `unused_finder/src/parse/exports_visitor.rs` is no longer called from the production pipeline (replaced by `ast_segmenter::segment_file`). It's still referenced by `exports_visitor_tests.rs`.
+- [x] Migrate tests to use `ast_segmenter` directly, or keeping it as a reference implementation.
+
+## Dead code cleanup (discovered during migration)
+
+- [ ] **`RawModuleDeps` re-export unused**: `unused_finder/src/parse/data.rs:14` re-exports `ast_segmenter::raw_module_deps::RawModuleDeps` but nothing in the crate uses it.
+- [ ] **`get_file_import_export_info` is dead code**: `unused_finder/src/parse/exports_visitor_runner.rs` — all callers now use `get_file_segments` directly.
+- [ ] **`Dependencies2D` fields never read**: `ast_segmenter/src/visitor.rs` — the struct and its methods are defined but never used.
