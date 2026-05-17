@@ -117,6 +117,57 @@ impl SourceGraph {
     pub fn file_symbol_to_segment(&self, file_id: u32) -> Option<&AHashMap<ExportedSymbol, u32>> {
         self.files.get(file_id as usize).map(|f| &f.symbol_to_segment)
     }
+
+    /// Resolve a name reference to the segment that declares it within the same file.
+    ///
+    /// Hoisting rules:
+    /// - `ImportHoisting` / `FunctionHoisting`: visible to all segments in the file,
+    ///   so the declaring segment is always a valid resolution target.
+    /// - `LetConstHoisting`: visible only to segments at the same or later index.
+    ///   When multiple `LetConst` declarations exist, prefer the latest one at or
+    ///   before `referencing_segment_idx`.
+    ///
+    /// Returns `None` if the name is not declared in any reachable segment.
+    pub fn resolve_symbol_in_file(
+        &self,
+        file_id: u32,
+        name: &str,
+        referencing_segment_idx: u32,
+    ) -> Option<SegmentKey> {
+        let file = self.files.get(file_id as usize)?;
+        let atom = Atom::from(name);
+        let declarations = file.name_to_declaring_segments.get(&atom)?;
+
+        // Pick the best declaration according to hoisting rules.
+        // Hoisted declarations (Import/Function) are always visible — take the first.
+        // LetConst declarations are only visible at or after the declaring segment —
+        // take the latest one at or before referencing_segment_idx.
+        let mut best_hoisted: Option<u32> = None;
+        let mut best_let_const: Option<u32> = None;
+
+        for &(seg_idx, hoisting) in declarations {
+            match hoisting {
+                HoistingLevel::ImportHoisting | HoistingLevel::FunctionHoisting => {
+                    // Hoisted: always visible, prefer the first declaration
+                    if best_hoisted.map_or(true, |prev| seg_idx < prev) {
+                        best_hoisted = Some(seg_idx);
+                    }
+                }
+                HoistingLevel::LetConstHoisting => {
+                    // Only visible from the declaring segment onward
+                    if seg_idx <= referencing_segment_idx {
+                        if best_let_const.map_or(true, |prev| seg_idx > prev) {
+                            best_let_const = Some(seg_idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        // LetConst shadows hoisted if both exist and LetConst is visible
+        let chosen = best_let_const.or(best_hoisted)?;
+        Some(SegmentKey::new(file_id, chosen))
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +276,105 @@ mod tests {
         assert_eq!(graph.file_id(Path::new("/nonexistent")), None);
         assert!(graph.file_path(99).is_none());
         assert!(graph.file_segments(99).is_none());
+    }
+
+    fn segment_with_local(name: &str, hoisting: HoistingLevel) -> Segment {
+        let mut vars = VariableScope::new();
+        vars.insert_local(Atom::from(name), hoisting);
+        Segment {
+            module_deps: RawModuleDeps::default(),
+            variables: vars,
+            span: make_span(0, 10),
+        }
+    }
+
+    // -- resolve_symbol_in_file tests --
+
+    #[test]
+    fn test_resolve_import_hoisted_from_later_segment() {
+        // Import-hoisted name declared in segment 0, referenced from segment 2
+        let path = PathBuf::from("/test/a.ts");
+        let graph = SourceGraph::new(
+            vec![SourceFileInput {
+                source_file_path: path,
+                segments: vec![
+                    segment_with_local("foo", HoistingLevel::ImportHoisting), // seg 0
+                    simple_segment(),                                         // seg 1
+                    simple_segment(),                                         // seg 2
+                ],
+            }]
+            .into_iter(),
+        );
+
+        // Import hoisting: visible from any segment, including later ones
+        assert_eq!(
+            graph.resolve_symbol_in_file(0, "foo", 2),
+            Some(SegmentKey::new(0, 0))
+        );
+    }
+
+    #[test]
+    fn test_resolve_function_hoisted_from_earlier_segment() {
+        // Function-hoisted name declared in segment 2, referenced from segment 0
+        let path = PathBuf::from("/test/a.ts");
+        let graph = SourceGraph::new(
+            vec![SourceFileInput {
+                source_file_path: path,
+                segments: vec![
+                    simple_segment(),                                           // seg 0
+                    simple_segment(),                                           // seg 1
+                    segment_with_local("bar", HoistingLevel::FunctionHoisting), // seg 2
+                ],
+            }]
+            .into_iter(),
+        );
+
+        // Function hoisting: visible from earlier segments
+        assert_eq!(
+            graph.resolve_symbol_in_file(0, "bar", 0),
+            Some(SegmentKey::new(0, 2))
+        );
+    }
+
+    #[test]
+    fn test_resolve_let_const_not_visible_from_earlier_segment() {
+        // let/const declared in segment 2, referenced from segment 0
+        let path = PathBuf::from("/test/a.ts");
+        let graph = SourceGraph::new(
+            vec![SourceFileInput {
+                source_file_path: path,
+                segments: vec![
+                    simple_segment(),                                            // seg 0
+                    simple_segment(),                                            // seg 1
+                    segment_with_local("baz", HoistingLevel::LetConstHoisting),  // seg 2
+                ],
+            }]
+            .into_iter(),
+        );
+
+        // LetConst: NOT visible from earlier segments
+        assert_eq!(graph.resolve_symbol_in_file(0, "baz", 0), None);
+        assert_eq!(graph.resolve_symbol_in_file(0, "baz", 1), None);
+        // But visible from the declaring segment and later
+        assert_eq!(
+            graph.resolve_symbol_in_file(0, "baz", 2),
+            Some(SegmentKey::new(0, 2))
+        );
+    }
+
+    #[test]
+    fn test_resolve_name_not_found_returns_none() {
+        let path = PathBuf::from("/test/a.ts");
+        let graph = SourceGraph::new(
+            vec![SourceFileInput {
+                source_file_path: path,
+                segments: vec![simple_segment()],
+            }]
+            .into_iter(),
+        );
+
+        assert_eq!(graph.resolve_symbol_in_file(0, "nonexistent", 0), None);
+        // Also None for invalid file_id
+        assert_eq!(graph.resolve_symbol_in_file(99, "anything", 0), None);
     }
 }

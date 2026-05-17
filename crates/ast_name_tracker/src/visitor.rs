@@ -77,6 +77,13 @@ impl VariableScope {
         self.escaped_symbols.iter()
     }
 
+    /// Insert a local symbol with its hoisting level directly.
+    /// Useful for constructing test fixtures without parsing source code.
+    pub fn insert_local(&mut self, name: Atom, hoisting: HoistingLevel) {
+        self.local_symbols
+            .insert(name, (hoisting, VarID(Span::default())));
+    }
+
     pub fn new() -> Self {
         Self {
             local_symbols: AHashMap::default(),

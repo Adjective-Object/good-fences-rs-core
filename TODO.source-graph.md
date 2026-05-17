@@ -92,11 +92,11 @@ When multiple declarations exist for the same name (shadowing), prefer the lates
 declaration at or before `referencing_segment_idx` for `LetConstHoisting`, or the
 first declaration for hoisted levels.
 
-- [ ] Implement `resolve_symbol_in_file` using `name_to_declaring_segments` index
-- [ ] Test: import-hoisted name resolved from a later segment
-- [ ] Test: function-hoisted name resolved from an earlier segment
-- [ ] Test: let/const name NOT resolved from an earlier segment
-- [ ] Test: name not found returns `None`
+- [x] Implement `resolve_symbol_in_file` using `name_to_declaring_segments` index
+- [x] Test: import-hoisted name resolved from a later segment
+- [x] Test: function-hoisted name resolved from an earlier segment
+- [x] Test: let/const name NOT resolved from an earlier segment
+- [x] Test: name not found returns `None`
 
 ## Implement `resolve_import_across_files`
 

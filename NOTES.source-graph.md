@@ -17,3 +17,15 @@
 ### Workspace integration
 - Workspace uses `members = ["crates/*"]` glob, so no Cargo.toml edit needed.
 - `name_to_declaring_segments` field triggers a dead_code warning since it's not read yet. Will be used by `resolve_symbol_in_file` (phase 2).
+
+## Phase 2: Implement `resolve_symbol_in_file`
+
+### Design decisions
+
+- **Shadowing: LetConst wins over hoisted**: When both a hoisted (import/function) declaration and a visible LetConst declaration exist for the same name, the LetConst declaration takes precedence. This matches JS runtime semantics where `let`/`const` in the same scope shadows hoisted bindings.
+
+- **LetConst: latest-before-reference wins**: When multiple LetConst declarations exist (e.g. from different segments), we pick the latest one at or before `referencing_segment_idx`. This handles sequential `let` rebinding.
+
+- **Hoisted: first declaration wins**: For Import/Function hoisting, the first (lowest segment index) declaration is preferred, since hoisted declarations are visible everywhere and earlier declarations conceptually "win" in JS.
+
+- **`VariableScope::insert_local` added**: Added a public `insert_local(name, hoisting)` method to `VariableScope` for constructing test fixtures without parsing source code. Uses `Span::default()` for the `VarID` since the span isn't relevant for graph resolution.
