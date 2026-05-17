@@ -11,10 +11,11 @@ crate-type = ["lib"]
 [dependencies]
 ahashmap = { version = "0.2.0", path = "../ahashmap" }
 source_graph = { version = "0.2.0", path = "../source_graph" }
+ast-segmenter = { version = "0.2.0-beta.1", path = "../ast_segmenter" }
 bitflags = "2.6.0"
 
 [dev-dependencies]
 pretty_assertions.workspace = true
-ast-segmenter = { version = "0.2.0-beta.1", path = "../ast_segmenter" }
 ast-name-tracker = { version = "0.2.0-beta.1", path = "../ast_name_tracker" }
 swc_common.workspace = true
+swc_atoms = "0.6.7"

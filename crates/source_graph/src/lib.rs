@@ -34,6 +34,9 @@ struct SourceGraphFile {
     named_reexports: AHashMap<ExportedSymbol, Vec<ReExportEntry>>,
     /// Star re-export paths (`export * from`): resolved target paths
     star_reexport_paths: Vec<PathBuf>,
+    /// Resolved import paths: raw specifier → resolved file path.
+    /// Used during tag propagation to follow inter-file import edges.
+    resolved_import_paths: AHashMap<String, PathBuf>,
 }
 
 /// Segment-level import graph.
@@ -58,6 +61,10 @@ pub struct SourceFileInput {
     /// Maps raw import specifiers (keys of `exports_from` in segment `RawModuleDeps`)
     /// to resolved file paths. Required for cross-file re-export resolution.
     pub resolved_reexport_paths: AHashMap<String, PathBuf>,
+    /// Maps raw import specifiers (keys of `imports`, `dynamic_imports`, `requires`,
+    /// `executed_paths` in segment `RawModuleDeps`) to resolved file paths.
+    /// Required for inter-file import edge traversal during tag propagation.
+    pub resolved_import_paths: AHashMap<String, PathBuf>,
 }
 
 impl SourceGraph {
@@ -80,6 +87,7 @@ impl SourceGraph {
                 input.source_file_path,
                 input.segments,
                 input.resolved_reexport_paths,
+                input.resolved_import_paths,
             );
             files.push(file);
         }
@@ -95,6 +103,7 @@ impl SourceGraph {
         path: PathBuf,
         segments: Vec<Segment>,
         resolved_reexport_paths: AHashMap<String, PathBuf>,
+        resolved_import_paths: AHashMap<String, PathBuf>,
     ) -> SourceGraphFile {
         let mut symbol_to_segment: AHashMap<ExportedSymbol, u32> = AHashMap::default();
         let mut name_to_declaring_segments: AHashMap<Atom, Vec<(u32, HoistingLevel)>> =
@@ -171,6 +180,7 @@ impl SourceGraph {
             name_to_declaring_segments,
             named_reexports,
             star_reexport_paths,
+            resolved_import_paths,
         }
     }
 
@@ -197,6 +207,13 @@ impl SourceGraph {
     /// Returns the symbol_to_segment index for a file.
     pub fn file_symbol_to_segment(&self, file_id: u32) -> Option<&AHashMap<ExportedSymbol, u32>> {
         self.files.get(file_id as usize).map(|f| &f.symbol_to_segment)
+    }
+
+    /// Returns the resolved import paths for a file.
+    pub fn file_resolved_import_paths(&self, file_id: u32) -> Option<&AHashMap<String, PathBuf>> {
+        self.files
+            .get(file_id as usize)
+            .map(|f| &f.resolved_import_paths)
     }
 
     /// Resolve a name reference to the segment that declares it within the same file.
@@ -325,6 +342,7 @@ impl SourceGraph {
                 input.source_file_path,
                 input.segments,
                 input.resolved_reexport_paths,
+                input.resolved_import_paths,
             );
             self.files[file_id as usize] = new_file;
         } else {
@@ -335,6 +353,7 @@ impl SourceGraph {
                 input.source_file_path,
                 input.segments,
                 input.resolved_reexport_paths,
+                input.resolved_import_paths,
             );
             self.files.push(new_file);
         }
@@ -414,6 +433,7 @@ mod tests {
             source_file_path: path,
             segments,
             resolved_reexport_paths: AHashMap::default(),
+            resolved_import_paths: AHashMap::default(),
         }
     }
 
@@ -658,6 +678,7 @@ mod tests {
                         m.insert("./b".to_string(), PathBuf::from("/test/b.ts"));
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
                 // B: re-exports foo from C
                 SourceFileInput {
@@ -672,6 +693,7 @@ mod tests {
                         m.insert("./c".to_string(), PathBuf::from("/test/c.ts"));
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
                 // C: directly exports foo
                 simple_input(PathBuf::from("/test/c.ts"), vec![segment_with_export("foo")]),
@@ -706,6 +728,7 @@ mod tests {
                         m.insert("./b".to_string(), PathBuf::from("/test/b.ts"));
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
                 // B: exports foo and bar
                 simple_input(
@@ -753,6 +776,7 @@ mod tests {
                         m.insert("./b".to_string(), PathBuf::from("/test/b.ts"));
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
                 SourceFileInput {
                     source_file_path: path_b,
@@ -766,6 +790,7 @@ mod tests {
                         m.insert("./a".to_string(), PathBuf::from("/test/a.ts"));
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
             ]
             .into_iter(),
@@ -800,6 +825,7 @@ mod tests {
                         m.insert("./b".to_string(), PathBuf::from("/test/b.ts"));
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
                 simple_input(path_b, vec![segment_with_export("foo")]),
             ]
@@ -943,6 +969,7 @@ mod tests {
                         m.insert("./b".to_string(), path_b.clone());
                         m
                     },
+                    resolved_import_paths: AHashMap::default(),
                 },
                 simple_input(path_b.clone(), vec![segment_with_export("foo")]),
             ]

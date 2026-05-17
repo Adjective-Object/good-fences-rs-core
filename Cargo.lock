@@ -2560,6 +2560,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tag_graph"
+version = "0.2.0"
+dependencies = [
+ "ahashmap",
+ "ast-name-tracker",
+ "ast-segmenter",
+ "bitflags",
+ "pretty_assertions",
+ "source_graph",
+ "swc_atoms 0.6.7",
+ "swc_common",
+]
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

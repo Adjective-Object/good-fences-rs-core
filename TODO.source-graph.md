@@ -201,14 +201,14 @@ impl TagGraph {
 }
 ```
 
-- [ ] Implement downward BFS with inter-file edge resolution
-- [ ] Implement intra-file edge resolution via escaped symbols + hoisting
-- [ ] Implement `is_type_only` edge filtering controlled by `follow_type_only` parameter
-- [ ] Test: linear import chain propagates tag to all segments
-- [ ] Test: diamond dependency — tag propagates through both paths
-- [ ] Test: type-only edge skipped when `follow_type_only` is false
-- [ ] Test: cycle terminates cleanly
-- [ ] Test: intra-file escaped symbol creates edge to declaring segment
+- [x] Implement downward BFS with inter-file edge resolution
+- [x] Implement intra-file edge resolution via escaped symbols + hoisting
+- [x] Implement `is_type_only` edge filtering controlled by `follow_type_only` parameter
+- [x] Test: linear import chain propagates tag to all segments
+- [x] Test: diamond dependency — tag propagates through both paths
+- [x] Test: type-only edge skipped when `follow_type_only` is false
+- [x] Test: cycle terminates cleanly
+- [x] Test: intra-file escaped symbol creates edge to declaring segment
 
 ## Implement `propagate_tags_to_users` (upward)
 

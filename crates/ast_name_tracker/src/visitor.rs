@@ -84,6 +84,12 @@ impl VariableScope {
             .insert(name, (hoisting, VarID(Span::default())));
     }
 
+    /// Insert an escaped symbol directly.
+    /// Useful for constructing test fixtures without parsing source code.
+    pub fn insert_escaped(&mut self, name: Atom) {
+        self.escaped_symbols.insert(name);
+    }
+
     pub fn new() -> Self {
         Self {
             local_symbols: AHashMap::default(),

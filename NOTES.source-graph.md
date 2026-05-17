@@ -73,3 +73,21 @@
 - **Workspace auto-discovery**: Workspace uses `members = ["crates/*"]` glob, so no `Cargo.toml` workspace edit needed — same as `source_graph`.
 
 - **Test helpers**: Tests construct `Segment` via `ast_segmenter::raw_module_deps::RawModuleDeps` (public) rather than `segment_info::RawModuleDeps` (re-exported privately). These are dev-dependencies only.
+
+## Phase 6: Implement `propagate_tags_to_used` (downward)
+
+### Design decisions
+
+- **`resolved_import_paths` on `SourceFileInput`**: The TODO spec references `ResolvedImportExportInfo::iter_imported_symbols_meta` for discovering inter-file imports, but that type lives in `unused_finder`. Instead, `SourceFileInput` now carries `resolved_import_paths: AHashMap<String, PathBuf>` alongside the existing `resolved_reexport_paths`. This maps raw import specifiers (keys of `imports`, `dynamic_imports`, `requires`, `executed_paths` in `RawModuleDeps`) to resolved file paths. Phase 7 wiring will populate this from the resolver.
+
+- **`ast-segmenter` promoted to runtime dep**: `tag_graph` now depends on `ast-segmenter` (not just dev-dep) because `propagate_tags_to_used` references `ast_segmenter::raw_module_deps::Symbol` to convert import symbols to `ExportedSymbol` for resolution.
+
+- **Symbol → ExportedSymbol mapping**: `Symbol::Named` → `ExportedSymbol::Named`, `Symbol::Default` → `ExportedSymbol::Default`, `Symbol::Namespace` → tag all segments in target file (namespace import touches everything).
+
+- **Side-effect imports and requires**: `executed_paths` (`import './foo'`) and `requires` (`require('./foo')`) tag all segments in the target file, since they don't import specific symbols but execute the module for its side effects / expose everything.
+
+- **`insert_escaped` on `VariableScope`**: Added public `insert_escaped(name)` method to `ast_name_tracker::VariableScope` for constructing test fixtures with escaped symbol references, matching the existing `insert_local` pattern.
+
+- **BFS visited set**: Uses `AHashSet<SegmentKey>` for cycle detection. Segments are only enqueued once, preventing infinite loops in circular import graphs. The visited set also prevents re-tagging already-tagged segments.
+
+- **`is_type_only` filtering**: Only static imports (`module_deps.imports`) carry `SymbolTags` with `is_type_only`. Dynamic imports, requires, and executed paths don't have type-only semantics and are always followed.
