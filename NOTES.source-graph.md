@@ -47,3 +47,15 @@
 - **`export * as Foo from` deferred**: The `(Namespace, Some(name))` case (namespace re-exported under a name) is silently ignored. This is uncommon and would require resolving to "all exports of target file" — complex and not needed for initial correctness.
 
 - **Bonus test**: Added `test_cross_file_renamed_reexport` for the `export { foo as bar }` pattern, verifying that renaming remaps the lookup symbol correctly and the original name doesn't leak through.
+
+## Phase 4: Implement iterators and `patch_file`
+
+### Design decisions
+
+- **`patch_file` takes `SourceFileInput`**: The TODO spec uses `&ResolvedSourceFile`, but that type lives in `unused_finder`, which would create a circular crate dependency. Consistent with the `SourceFileInput` pattern established in phase 1, `patch_file` accepts an owned `SourceFileInput`.
+
+- **`patch_file` supports adding new files**: If the path doesn't exist in the graph, `patch_file` appends the file and updates `path_to_id`. This supports incremental graph construction without requiring all files upfront.
+
+- **Full cache invalidation on patch**: `patch_file` clears the entire re-export cache rather than selectively invalidating entries that touched the patched file. Selective invalidation would require tracking reverse dependencies through the cache, and full invalidation is simple and correct — the cache repopulates lazily on next access.
+
+- **Iterator return types**: `iter_file_segments` returns `Option<impl Iterator>` (None for unknown paths), while `iter_segments` returns `impl Iterator` directly (always valid, possibly empty).

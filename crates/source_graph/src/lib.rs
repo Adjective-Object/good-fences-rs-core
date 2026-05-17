@@ -283,6 +283,63 @@ impl SourceGraph {
         self.reexport_cache.borrow_mut().clear();
     }
 
+    /// Iterate over segments in a specific file, yielding `(SegmentKey, &Segment)` pairs.
+    pub fn iter_file_segments(
+        &self,
+        path: &Path,
+    ) -> Option<impl Iterator<Item = (SegmentKey, &Segment)>> {
+        let &file_id = self.path_to_id.get(path)?;
+        let file = &self.files[file_id as usize];
+        Some(
+            file.segments
+                .iter()
+                .enumerate()
+                .map(move |(idx, seg)| (SegmentKey::new(file_id, idx as u32), seg)),
+        )
+    }
+
+    /// Iterate over all segments in the graph, yielding `(SegmentKey, &Segment)` pairs.
+    pub fn iter_segments(&self) -> impl Iterator<Item = (SegmentKey, &Segment)> {
+        self.files.iter().enumerate().flat_map(|(file_id, file)| {
+            let file_id = file_id as u32;
+            file.segments
+                .iter()
+                .enumerate()
+                .map(move |(idx, seg)| (SegmentKey::new(file_id, idx as u32), seg))
+        })
+    }
+
+    /// Replace a single file's data in-place. Rebuilds that file's indexes
+    /// and invalidates the re-export resolution cache.
+    ///
+    /// Uses `SourceFileInput` instead of `ResolvedSourceFile` to avoid a
+    /// circular crate dependency with `unused_finder`.
+    pub fn patch_file(&mut self, path: &Path, input: SourceFileInput) {
+        // Clear the entire re-export cache — any cached resolution could
+        // transitively depend on the patched file's exports.
+        self.reexport_cache.borrow_mut().clear();
+
+        if let Some(&file_id) = self.path_to_id.get(path) {
+            // Existing file: rebuild in place
+            let new_file = Self::build_file(
+                input.source_file_path,
+                input.segments,
+                input.resolved_reexport_paths,
+            );
+            self.files[file_id as usize] = new_file;
+        } else {
+            // New file: append and update path_to_id
+            let file_id = self.files.len() as u32;
+            self.path_to_id.insert(input.source_file_path.clone(), file_id);
+            let new_file = Self::build_file(
+                input.source_file_path,
+                input.segments,
+                input.resolved_reexport_paths,
+            );
+            self.files.push(new_file);
+        }
+    }
+
     /// Inner recursive resolution with cycle detection.
     fn resolve_import_inner(
         &self,
@@ -774,5 +831,178 @@ mod tests {
         let result =
             graph.resolve_import_across_files(99, &ExportedSymbol::from("foo"));
         assert_eq!(result, vec![]);
+    }
+
+    // -- iter_file_segments / iter_segments tests --
+
+    #[test]
+    fn test_iter_file_segments() {
+        let path_a = PathBuf::from("/test/a.ts");
+        let path_b = PathBuf::from("/test/b.ts");
+        let graph = SourceGraph::new(
+            vec![
+                simple_input(path_a.clone(), vec![simple_segment(), segment_with_export("foo")]),
+                simple_input(path_b.clone(), vec![segment_with_export("bar")]),
+            ]
+            .into_iter(),
+        );
+
+        // File A has 2 segments
+        let pairs: Vec<_> = graph.iter_file_segments(&path_a).unwrap().collect();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0, SegmentKey::new(0, 0));
+        assert_eq!(pairs[1].0, SegmentKey::new(0, 1));
+
+        // File B has 1 segment
+        let pairs: Vec<_> = graph.iter_file_segments(&path_b).unwrap().collect();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0, SegmentKey::new(1, 0));
+
+        // Unknown file returns None
+        assert!(graph.iter_file_segments(Path::new("/nope")).is_none());
+    }
+
+    #[test]
+    fn test_iter_segments() {
+        let graph = SourceGraph::new(
+            vec![
+                simple_input(PathBuf::from("/test/a.ts"), vec![simple_segment(), simple_segment()]),
+                simple_input(PathBuf::from("/test/b.ts"), vec![simple_segment()]),
+            ]
+            .into_iter(),
+        );
+
+        let keys: Vec<SegmentKey> = graph.iter_segments().map(|(k, _)| k).collect();
+        assert_eq!(
+            keys,
+            vec![
+                SegmentKey::new(0, 0),
+                SegmentKey::new(0, 1),
+                SegmentKey::new(1, 0),
+            ]
+        );
+    }
+
+    // -- patch_file tests --
+
+    #[test]
+    fn test_patch_file_updates_resolution() {
+        let path_a = PathBuf::from("/test/a.ts");
+        let path_b = PathBuf::from("/test/b.ts");
+
+        let mut graph = SourceGraph::new(
+            vec![
+                simple_input(path_a.clone(), vec![segment_with_export("foo")]),
+                simple_input(path_b.clone(), vec![segment_with_export("bar")]),
+            ]
+            .into_iter(),
+        );
+
+        // Before patch: file A exports "foo"
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("foo"));
+        assert_eq!(result, vec![SegmentKey::new(0, 0)]);
+
+        // Patch file A: now exports "baz" instead of "foo"
+        graph.patch_file(
+            &path_a,
+            simple_input(path_a.clone(), vec![segment_with_export("baz")]),
+        );
+
+        // "foo" no longer resolves
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("foo"));
+        assert_eq!(result, vec![]);
+
+        // "baz" now resolves
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("baz"));
+        assert_eq!(result, vec![SegmentKey::new(0, 0)]);
+
+        // File B unaffected
+        let result = graph.resolve_import_across_files(1, &ExportedSymbol::from("bar"));
+        assert_eq!(result, vec![SegmentKey::new(1, 0)]);
+    }
+
+    #[test]
+    fn test_patch_file_invalidates_reexport_cache() {
+        // A re-exports foo from B. B exports foo.
+        // Patch B to export "qux" instead — cached resolution should be invalidated.
+        let path_a = PathBuf::from("/test/a.ts");
+        let path_b = PathBuf::from("/test/b.ts");
+        let foo_sym = ExportedSymbol::from("foo");
+
+        let mut graph = SourceGraph::new(
+            vec![
+                SourceFileInput {
+                    source_file_path: path_a.clone(),
+                    segments: vec![segment_with_reexport(
+                        "./b",
+                        ImportTarget::ExportedSymbol(foo_sym.clone()),
+                        None,
+                    )],
+                    resolved_reexport_paths: {
+                        let mut m = AHashMap::default();
+                        m.insert("./b".to_string(), path_b.clone());
+                        m
+                    },
+                },
+                simple_input(path_b.clone(), vec![segment_with_export("foo")]),
+            ]
+            .into_iter(),
+        );
+
+        // Populate cache
+        let result = graph.resolve_import_across_files(0, &foo_sym);
+        assert_eq!(result, vec![SegmentKey::new(1, 0)]);
+
+        // Patch B: now exports "qux" instead of "foo"
+        graph.patch_file(
+            &path_b,
+            simple_input(path_b.clone(), vec![segment_with_export("qux")]),
+        );
+
+        // Cached result should be gone; re-export chain should now fail
+        let result = graph.resolve_import_across_files(0, &foo_sym);
+        assert_eq!(result, vec![]);
+    }
+
+    #[test]
+    fn test_patch_file_adds_new_file() {
+        let path_a = PathBuf::from("/test/a.ts");
+        let mut graph = SourceGraph::new(
+            vec![simple_input(path_a.clone(), vec![simple_segment()])].into_iter(),
+        );
+        assert_eq!(graph.file_count(), 1);
+
+        // Patch in a new file
+        let path_b = PathBuf::from("/test/b.ts");
+        graph.patch_file(
+            &path_b,
+            simple_input(path_b.clone(), vec![segment_with_export("new_sym")]),
+        );
+
+        assert_eq!(graph.file_count(), 2);
+        assert_eq!(graph.file_id(&path_b), Some(1));
+        let result = graph.resolve_import_across_files(1, &ExportedSymbol::from("new_sym"));
+        assert_eq!(result, vec![SegmentKey::new(1, 0)]);
+    }
+
+    #[test]
+    fn test_patch_file_updates_iterators() {
+        let path = PathBuf::from("/test/a.ts");
+        let mut graph = SourceGraph::new(
+            vec![simple_input(path.clone(), vec![simple_segment()])].into_iter(),
+        );
+
+        // Initially 1 segment
+        assert_eq!(graph.iter_segments().count(), 1);
+        assert_eq!(graph.iter_file_segments(&path).unwrap().count(), 1);
+
+        // Patch with 3 segments
+        graph.patch_file(
+            &path,
+            simple_input(path.clone(), vec![simple_segment(), simple_segment(), simple_segment()]),
+        );
+
+        assert_eq!(graph.iter_segments().count(), 3);
+        assert_eq!(graph.iter_file_segments(&path).unwrap().count(), 3);
     }
 }

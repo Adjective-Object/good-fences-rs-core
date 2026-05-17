@@ -148,11 +148,11 @@ impl SourceGraph {
 }
 ```
 
-- [ ] Implement `iter_file_segments`
-- [ ] Implement `iter_segments`
-- [ ] Implement `patch_file` — replace file entry, rebuild its indexes, clear relevant cache entries
-- [ ] Test: `patch_file` updates resolution results
-- [ ] Test: iterators yield expected `(SegmentKey, &Segment)` pairs
+- [x] Implement `iter_file_segments`
+- [x] Implement `iter_segments`
+- [x] Implement `patch_file` — replace file entry, rebuild its indexes, clear relevant cache entries
+- [x] Test: `patch_file` updates resolution results
+- [x] Test: iterators yield expected `(SegmentKey, &Segment)` pairs
 
 ## Create `tag_graph` crate
 
