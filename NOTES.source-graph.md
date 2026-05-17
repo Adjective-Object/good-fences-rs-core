@@ -29,3 +29,21 @@
 - **Hoisted: first declaration wins**: For Import/Function hoisting, the first (lowest segment index) declaration is preferred, since hoisted declarations are visible everywhere and earlier declarations conceptually "win" in JS.
 
 - **`VariableScope::insert_local` added**: Added a public `insert_local(name, hoisting)` method to `VariableScope` for constructing test fixtures without parsing source code. Uses `Span::default()` for the `VarID` since the span isn't relevant for graph resolution.
+
+## Phase 3: Implement `resolve_import_across_files`
+
+### Design decisions
+
+- **`resolved_reexport_paths` on `SourceFileInput`**: Rather than pulling in `ResolvedImportExportInfo` (which lives in `unused_finder` and would create a circular dep), `SourceFileInput` now carries `resolved_reexport_paths: AHashMap<String, PathBuf>` — a map from raw import specifiers (keys of `exports_from` in `RawModuleDeps`) to resolved file paths. Re-export details (what's imported/exported) are already in each segment's `module_deps.exports_from`; we only need resolved paths to follow them.
+
+- **Re-export index built during construction**: `SourceGraphFile` now has `named_reexports` and `star_reexport_paths` built from iterating all segments' `exports_from`. This avoids scanning all segments on every resolution query. `named_reexports` maps exported symbol → Vec of (target path, imported symbol in target). Star paths are deduplicated.
+
+- **Resolution priority**: Direct export (in `symbol_to_segment`) > named re-exports > star re-exports. This matches JS module semantics where explicit named exports shadow star re-exports.
+
+- **Cycle detection via visited set**: The recursive resolver carries `AHashSet<(u32, ExportedSymbol)>` through the call stack. A repeated (file_id, symbol) pair terminates the branch with an empty result. This is passed only through the inner recursion, not cached.
+
+- **Cache at public API boundary**: The `RefCell`-based cache stores final results keyed by `(file_id, ExportedSymbol)`. It is populated only in the public `resolve_import_across_files` entry point, not in inner recursion (intermediate results during chain-following don't need caching since the final result at each entry will be cached on first access). Cache is cleared via `clear_reexport_cache()` — `patch_file` (phase 4) will call this.
+
+- **`export * as Foo from` deferred**: The `(Namespace, Some(name))` case (namespace re-exported under a name) is silently ignored. This is uncommon and would require resolving to "all exports of target file" — complex and not needed for initial correctness.
+
+- **Bonus test**: Added `test_cross_file_renamed_reexport` for the `export { foo as bar }` pattern, verifying that renaming remaps the lookup symbol correctly and the original name doesn't leak through.

@@ -123,14 +123,14 @@ matching exported symbol in the re-exported file.
 The re-export cache is interior-mutated (`RefCell<AHashMap<(u32, ExportedSymbol), Vec<SegmentKey>>>`)
 so this method can take `&self`.
 
-- [ ] Implement direct export lookup (symbol found in `symbol_to_segment` of target file)
-- [ ] Implement re-export chain following with cycle detection
-- [ ] Implement star re-export fan-out
-- [ ] Add `RefCell`-based cache, invalidated by `patch_file`
-- [ ] Test: direct export resolves to single `SegmentKey`
-- [ ] Test: re-export chain A → B → C resolves to segment in C
-- [ ] Test: star re-export fans out to multiple `SegmentKey`s
-- [ ] Test: cycle in re-exports terminates without panic
+- [x] Implement direct export lookup (symbol found in `symbol_to_segment` of target file)
+- [x] Implement re-export chain following with cycle detection
+- [x] Implement star re-export fan-out
+- [x] Add `RefCell`-based cache, invalidated by `patch_file`
+- [x] Test: direct export resolves to single `SegmentKey`
+- [x] Test: re-export chain A → B → C resolves to segment in C
+- [x] Test: star re-export fans out to multiple `SegmentKey`s
+- [x] Test: cycle in re-exports terminates without panic
 
 ## Implement iterators and `patch_file`
 
