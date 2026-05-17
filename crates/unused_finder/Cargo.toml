@@ -42,6 +42,8 @@ logger = { version = "0.2.0", path = "../logger" }
 logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
 multi_err = { version = "0.2.0", path = "../multi_err" }
 glob-match.workspace = true
+source_graph = { version = "0.2.0", path = "../source_graph" }
+tag_graph = { version = "0.2.0", path = "../tag_graph" }
 
 [dev-dependencies]
 stringreader = "0.1.1"

@@ -112,6 +112,10 @@ impl SourceGraph {
             AHashMap::default();
         let mut star_reexport_paths: Vec<PathBuf> = Vec::new();
 
+        // Merge resolved import and reexport paths so TagGraph can resolve both
+        let mut all_resolved_paths = resolved_import_paths;
+        all_resolved_paths.extend(resolved_reexport_paths.iter().map(|(k, v)| (k.clone(), v.clone())));
+
         for (seg_idx, seg) in segments.iter().enumerate() {
             let seg_idx = seg_idx as u32;
 
@@ -180,7 +184,7 @@ impl SourceGraph {
             name_to_declaring_segments,
             named_reexports,
             star_reexport_paths,
-            resolved_import_paths,
+            resolved_import_paths: all_resolved_paths,
         }
     }
 

@@ -380,6 +380,7 @@ mod test {
                 ..Default::default()
             },
             segments: vec![],
+            specifier_to_resolved: Default::default(),
         }];
 
         let mut graph = Graph::from_source_files(src_files.iter());

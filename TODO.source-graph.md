@@ -250,12 +250,12 @@ Call sites:
 The report generation loop (`for file in graph.files.iter()`) needs to read tags
 from `TagGraph` instead of `GraphFile.file_tags`/`symbol_tags`.
 
-- [ ] Add `source_graph` and `tag_graph` as dependencies of `unused_finder`
-- [ ] Replace `Graph::from_source_files` call with `SourceGraph::new`
-- [ ] Convert entrypoint paths to `Vec<SegmentKey>` for root seeds
-- [ ] Replace 3× `traverse_bfs` calls with `propagate_tags_to_used`
-- [ ] Update report generation to read from `TagGraph` + `SourceGraph`
-- [ ] Verify existing integration tests pass unchanged
+- [x] Add `source_graph` and `tag_graph` as dependencies of `unused_finder`
+- [x] Replace `Graph::from_source_files` call with `SourceGraph::new`
+- [x] Convert entrypoint paths to `Vec<SegmentKey>` for root seeds
+- [x] Replace 3× `traverse_bfs` calls with `propagate_tags_to_used`
+- [x] Update report generation to read from `TagGraph` + `SourceGraph`
+- [x] Verify existing integration tests pass unchanged
 
 ## Remove old `Graph` code
 

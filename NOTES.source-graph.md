@@ -101,3 +101,33 @@
 - **Mirrors forward traversal logic**: `build_reverse_edges` walks the same edge types as `propagate_tags_to_used` (static imports, dynamic imports, requires, executed paths, intra-file escaped symbols) but records the reverse direction. This ensures the two propagation modes are symmetric over the same edge set.
 
 - **`follow_type_only` applied during index construction**: Type-only edges are filtered when building the reverse index (not during BFS traversal). This keeps the BFS loop simple — it only needs to look up reverse edges and enqueue unvisited targets.
+
+## Phase 8: Wire `SourceGraph` + `TagGraph` into `unused_finder`
+
+### Design decisions
+
+- **Old Graph kept alongside new types**: `UnusedFinderResult` still holds `Graph` for report generation and `write_dot_graph`. Tags from `TagGraph` are synced back into `Graph` via `sync_tags_to_graph`. The next TODO phase ("Remove old Graph code") will fully migrate the report.
+
+- **`specifier_to_resolved` on `ResolvedSourceFile`**: Added field to track raw import specifier → resolved path mapping. Lives on `ResolvedSourceFile` (not `ResolvedImportExportInfo`) to avoid breaking `PartialEq` comparisons in tests that use `..Default::default()` syntax.
+
+- **`ResolvedWithMapping<T>` for resolution tracking**: `resolve_hashmap`/`resolve_hashset` now return a wrapper that includes both the resolved data and the specifier→path mapping. This preserves the mapping that was previously discarded during resolution.
+
+### Bugs discovered and fixed
+
+- **Re-export edges missing from TagGraph**: `propagate_tags_to_used` (from phase 6) only handled `imports`, `dynamic_imports`, `requires`, `executed_paths`, and intra-file escaped symbols. It did NOT handle `exports_from` edges (`export { x } from './b'`, `export * from './b'`). Fixed by adding `exports_from` traversal to both forward and reverse BFS.
+
+- **Empty files invisible to segment BFS**: Files with 0 segments (e.g., empty `.js` files) couldn't be tagged because the segment-level BFS has no `SegmentKey` to represent them. Fixed by adding `file_tags: AHashMap<u32, UsedTag>` to `TagGraph` and tagging empty files directly when reached by BFS. `file_tag()` now unions both segment tags and direct file tags.
+
+- **Side-effect imports in other segments not followed**: When visiting a specific segment via a named import, side-effect imports (`import './polyfill'`) in OTHER segments of the same file were not followed. This is wrong because side-effect imports execute at module load time regardless of which export is used. Fixed by tracking `visited_files` in BFS — when any segment of a file is first visited, ALL `executed_paths` from ALL segments in that file are followed.
+
+- **Re-export chains not walked by segment BFS**: `resolve_import_across_files` resolves to the FINAL destination, skipping intermediate re-export files. For `exports_from` edges this caused intermediate files to never be tagged. Fixed by adding `find_exporting_segments` which resolves only one level at a time, letting the BFS naturally walk re-export chains.
+
+- **Re-exported symbols not in `symbol_to_segment`**: `symbol_to_segment` only indexed local exports (from `exports_locals`). Re-exported symbols (from `exports_from`) were missing, causing `sync_tags_to_graph` to not tag them. Fixed via `find_reexport_segment` fallback that scans segments' `exports_from` for the symbol.
+
+- **Resolved reexport paths need merging**: `SourceGraph::build_file` now merges `resolved_reexport_paths` into the stored `resolved_import_paths` so `TagGraph` can resolve both import and re-export specifiers from a single map.
+
+### Gotchas
+
+- `unused_finder::ExportedSymbol` has 4 variants (Named/Default/Namespace/ExecutionOnly) while `ast_segmenter::ExportedSymbol` has only 2 (Named/Default). The `sync_tags_to_graph` function skips Namespace/ExecutionOnly.
+- `unused_finder::tag::UsedTag` and `tag_graph::UsedTag` have identical bit values (0x01/0x02/0x04/0x08), convertible via `from_bits_truncate`.
+- `SourceFileInput::resolved_import_paths` maps raw specifiers as they appear in segments' `module_deps` fields — not resolved paths.

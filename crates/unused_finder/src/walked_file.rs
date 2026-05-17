@@ -11,6 +11,7 @@ use path_clean::PathClean;
 use path_slash::PathBufExt;
 
 use crate::{parse::RawImportExportInfo, ResolvedImportExportInfo};
+use ahashmap::AHashMap;
 use ast_segmenter::segment_info::Segment;
 
 /// Source file discovered during the source walk
@@ -222,4 +223,7 @@ pub struct ResolvedSourceFile {
     pub import_export_info: ResolvedImportExportInfo,
     /// Per-statement segments from ast_segmenter
     pub segments: Vec<Segment>,
+    /// Maps raw import specifiers (as they appear in segments' `module_deps`)
+    /// to resolved file paths. Used to build `SourceFileInput` for `SourceGraph`.
+    pub specifier_to_resolved: AHashMap<String, PathBuf>,
 }

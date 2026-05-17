@@ -30,7 +30,9 @@ use import_resolver::swc_resolver::{
 use js_err::JsErr;
 use logger::{debug_logf, Logger};
 use rayon::{iter::Either, prelude::*};
+use source_graph::{SegmentKey, SourceFileInput, SourceGraph};
 use swc_ecma_loader::{resolve::Resolve, TargetEnv};
+use tag_graph::TagGraph;
 
 #[derive(Debug)]
 enum DirtyFiles {
@@ -83,19 +85,21 @@ impl SourceFiles {
             .source_files
             .into_par_iter()
             .map(|walked_file| -> Result<(PathBuf, ResolvedSourceFile)> {
+                let (import_export_info, specifier_to_resolved) = walked_file
+                    .import_export_info
+                    .try_resolve(&walked_file.source_file_path, &resolver)
+                    .into_anyhow()
+                    .with_context(|| {
+                        format!(
+                            "trying to resolve imports for file {}",
+                            walked_file.source_file_path.display()
+                        )
+                    })?;
                 Ok((
                     walked_file.source_file_path.clone(),
                     ResolvedSourceFile {
-                        import_export_info: walked_file
-                            .import_export_info
-                            .try_resolve(&walked_file.source_file_path, &resolver)
-                            .into_anyhow()
-                            .with_context(|| {
-                                format!(
-                                    "trying to resolve imports for file {}",
-                                    walked_file.source_file_path.display()
-                                )
-                            })?,
+                        import_export_info,
+                        specifier_to_resolved,
                         owning_package: walked_file.owning_package,
                         source_file_path: walked_file.source_file_path,
                         segments: walked_file.segments,
@@ -481,13 +485,16 @@ impl UnusedFinder {
             &self.last_walk_result.packages,
         );
 
+        let (import_export_info, specifier_to_resolved) = import_export_info
+            .try_resolve(file_path, resolver)
+            .into_anyhow()
+            .map_err(JsErr::generic_failure)?;
+
         let resolved_source_file = ResolvedSourceFile {
             owning_package,
             source_file_path: file_path.to_path_buf(),
-            import_export_info: import_export_info
-                .try_resolve(file_path, resolver)
-                .into_anyhow()
-                .map_err(JsErr::generic_failure)?,
+            import_export_info,
+            specifier_to_resolved,
             segments,
         };
 
@@ -525,23 +532,40 @@ impl UnusedFinder {
         // Scan the file-system for changed files
         self.update_dirty_files(&logger)?;
 
-        // Create a new graph with all entries marked as "unused".
+        // Build SourceGraph from source files for segment-level BFS
+        let source_graph = SourceGraph::new(
+            self.last_walk_result
+                .source_files
+                .values()
+                .map(Self::to_source_file_input),
+        );
+
+        // Build old Graph (for report generation and dot_graph — will be removed in next phase)
         let mut graph = Graph::from_source_files(self.last_walk_result.source_files.values());
 
         // print the entry packages config
         debug_logf!(logger, "Entry packages: {:#?}", self.config.entry_packages);
 
-        // Get the walk roots and perform the graph traversal
+        let mut tag_graph = TagGraph::new();
+
+        // FROM_ENTRY traversal: entrypoint files → all segments as roots
         let entrypoints = self.get_entrypoints(&logger);
         logger.log(format!(
             "Starting {} graph traversal with {} entrypoints",
             UsedTag::FROM_ENTRY,
             entrypoints.len()
         ));
-        graph
-            .traverse_bfs(&logger, entrypoints, vec![], UsedTag::FROM_ENTRY)
-            .map_err(JsErr::generic_failure)?;
+        let entry_roots = Self::paths_to_segment_keys(&source_graph, &entrypoints);
+        // Tag entry files with no segments directly
+        Self::tag_empty_segment_files(&source_graph, &mut tag_graph, &entrypoints, tag_graph::UsedTag::FROM_ENTRY);
+        tag_graph.propagate_tags_to_used(
+            &source_graph,
+            entry_roots,
+            tag_graph::UsedTag::FROM_ENTRY,
+            false,
+        );
 
+        // FROM_IGNORED traversal: ignored files + specific ignored symbols
         let ignored_entrypoints = self.get_ignored_files();
         let ignored_symbols = self.get_ignored_symbols();
         logger.log(format!(
@@ -550,24 +574,34 @@ impl UnusedFinder {
             ignored_entrypoints.len(),
             Self::count_symbols(&ignored_symbols)
         ));
-        graph
-            .traverse_bfs(
-                &logger,
-                ignored_entrypoints,
-                ignored_symbols,
-                UsedTag::FROM_IGNORED,
-            )
-            .map_err(JsErr::generic_failure)?;
+        let mut ignored_roots = Self::paths_to_segment_keys(&source_graph, &ignored_entrypoints);
+        ignored_roots.extend(Self::symbols_to_segment_keys(&source_graph, &ignored_symbols));
+        Self::tag_empty_segment_files(&source_graph, &mut tag_graph, &ignored_entrypoints, tag_graph::UsedTag::FROM_IGNORED);
+        tag_graph.propagate_tags_to_used(
+            &source_graph,
+            ignored_roots,
+            tag_graph::UsedTag::FROM_IGNORED,
+            false,
+        );
 
+        // FROM_TEST traversal: test files → all segments as roots
         let test_entrypoints = self.get_test_files();
         logger.log(format!(
             "Starting {} graph traversal with {} entrypoints",
             UsedTag::FROM_TEST,
             test_entrypoints.len(),
         ));
-        graph
-            .traverse_bfs(&logger, test_entrypoints, vec![], UsedTag::FROM_TEST)
-            .map_err(JsErr::generic_failure)?;
+        let test_roots = Self::paths_to_segment_keys(&source_graph, &test_entrypoints);
+        Self::tag_empty_segment_files(&source_graph, &mut tag_graph, &test_entrypoints, tag_graph::UsedTag::FROM_TEST);
+        tag_graph.propagate_tags_to_used(
+            &source_graph,
+            test_roots,
+            tag_graph::UsedTag::FROM_TEST,
+            false,
+        );
+
+        // Sync tags from TagGraph into old Graph for report compatibility
+        Self::sync_tags_to_graph(&source_graph, &tag_graph, &mut graph);
 
         for file in graph.files.iter() {
             let file_ids_vec = file
@@ -616,15 +650,7 @@ impl UnusedFinder {
             for (_original_path, (symbol, metadata)) in
                 source_file.import_export_info.iter_exported_symbols_meta()
             {
-                // println!("checking symbol: {}:{}", path.display(), symbol);
                 if metadata.is_type_only {
-                    // println!("marking typeonly symbol: {}:{}", path.display(), symbol);
-                    // By using the file's own path here instead of the iterators' reported path, we are marking
-                    // re-exported symbols as used within the file, that re-exports them, NOT within the file they
-                    // originate from
-                    //
-                    // This is because we want to report errors when a typeonly re-export's concrete implementation
-                    // is never used.
                     graph.mark_symbol(path, symbol, UsedTag::TYPE_ONLY);
                 } else {
                     all_symbols_typeonly = false;
@@ -777,6 +803,218 @@ impl UnusedFinder {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Convert a `ResolvedSourceFile` into a `SourceFileInput` for `SourceGraph`.
+    fn to_source_file_input(file: &ResolvedSourceFile) -> SourceFileInput {
+        // Split specifier_to_resolved into import vs reexport paths based on
+        // which specifiers appear in segment module_deps.
+        let mut resolved_import_paths = AHashMap::default();
+        let mut resolved_reexport_paths = AHashMap::default();
+
+        // Collect all import specifiers and reexport specifiers from segments
+        let mut import_specifiers = AHashSet::default();
+        let mut reexport_specifiers = AHashSet::default();
+        for seg in &file.segments {
+            for specifier in seg.module_deps.imports.keys() {
+                import_specifiers.insert(specifier.clone());
+            }
+            for specifier in seg.module_deps.dynamic_imports.keys() {
+                import_specifiers.insert(specifier.clone());
+            }
+            for specifier in &seg.module_deps.requires {
+                import_specifiers.insert(specifier.clone());
+            }
+            for specifier in &seg.module_deps.executed_paths {
+                import_specifiers.insert(specifier.clone());
+            }
+            for specifier in seg.module_deps.exports_from.keys() {
+                reexport_specifiers.insert(specifier.clone());
+            }
+        }
+
+        for (specifier, resolved_path) in &file.specifier_to_resolved {
+            if import_specifiers.contains(specifier) {
+                resolved_import_paths.insert(specifier.clone(), resolved_path.clone());
+            }
+            if reexport_specifiers.contains(specifier) {
+                resolved_reexport_paths.insert(specifier.clone(), resolved_path.clone());
+            }
+        }
+
+        SourceFileInput {
+            source_file_path: file.source_file_path.clone(),
+            segments: file.segments.clone(),
+            resolved_reexport_paths,
+            resolved_import_paths,
+        }
+    }
+
+    /// Convert file paths to segment keys (all segments of each file).
+    fn paths_to_segment_keys(source_graph: &SourceGraph, paths: &[&Path]) -> Vec<SegmentKey> {
+        let mut keys = Vec::new();
+        for path in paths {
+            if let Some(file_id) = source_graph.file_id(path) {
+                if let Some(segs) = source_graph.file_segments(file_id) {
+                    for idx in 0..segs.len() {
+                        keys.push(SegmentKey::new(file_id, idx as u32));
+                    }
+                }
+            }
+        }
+        keys
+    }
+
+    /// Tag files that have no segments directly at the file level.
+    /// Files with 0 segments can't be represented as SegmentKeys,
+    /// so they need direct file-level tagging.
+    fn tag_empty_segment_files(
+        source_graph: &SourceGraph,
+        tag_graph: &mut TagGraph,
+        paths: &[&Path],
+        tag: tag_graph::UsedTag,
+    ) {
+        for path in paths {
+            if let Some(file_id) = source_graph.file_id(path) {
+                if let Some(segs) = source_graph.file_segments(file_id) {
+                    if segs.is_empty() {
+                        tag_graph.set_file_tag(file_id, tag);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convert (path, symbols) pairs to segment keys for specific exported symbols.
+    fn symbols_to_segment_keys(
+        source_graph: &SourceGraph,
+        symbols: &[(&Path, Vec<ExportedSymbol>)],
+    ) -> Vec<SegmentKey> {
+        let mut keys = Vec::new();
+        for (path, symbol_list) in symbols {
+            let file_id = match source_graph.file_id(path) {
+                Some(id) => id,
+                None => continue,
+            };
+            let sym_to_seg = match source_graph.file_symbol_to_segment(file_id) {
+                Some(m) => m,
+                None => continue,
+            };
+            for symbol in symbol_list {
+                match symbol {
+                    ExportedSymbol::Named(name) => {
+                        let seg_sym =
+                            ast_segmenter::ExportedSymbol::Named(name.as_str().into());
+                        if let Some(&seg_idx) = sym_to_seg.get(&seg_sym) {
+                            keys.push(SegmentKey::new(file_id, seg_idx));
+                        } else if let Some(seg_idx) =
+                            Self::find_reexport_segment(source_graph, file_id, &seg_sym)
+                        {
+                            keys.push(SegmentKey::new(file_id, seg_idx));
+                        }
+                    }
+                    ExportedSymbol::Default => {
+                        if let Some(&seg_idx) =
+                            sym_to_seg.get(&ast_segmenter::ExportedSymbol::Default)
+                        {
+                            keys.push(SegmentKey::new(file_id, seg_idx));
+                        } else if let Some(seg_idx) = Self::find_reexport_segment(
+                            source_graph,
+                            file_id,
+                            &ast_segmenter::ExportedSymbol::Default,
+                        ) {
+                            keys.push(SegmentKey::new(file_id, seg_idx));
+                        }
+                    }
+                    ExportedSymbol::Namespace | ExportedSymbol::ExecutionOnly => {
+                        // Namespace/ExecutionOnly: seed all segments in the file
+                        if let Some(segs) = source_graph.file_segments(file_id) {
+                            for idx in 0..segs.len() {
+                                keys.push(SegmentKey::new(file_id, idx as u32));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        keys
+    }
+
+    /// Sync tags from TagGraph into old Graph for report backward compatibility.
+    fn sync_tags_to_graph(source_graph: &SourceGraph, tag_graph: &TagGraph, graph: &mut Graph) {
+        for (file_id, graph_file) in graph.files.iter_mut().enumerate() {
+            let file_id = file_id as u32;
+
+            // Sync file-level tag: union of all segment tags
+            let file_tag = tag_graph.file_tag(source_graph, file_id);
+            let uf_file_tag = UsedTag::from_bits_truncate(file_tag.bits());
+            graph_file.file_tags = uf_file_tag;
+
+            // Sync per-symbol tags: look up each exported symbol's segment
+            let sym_to_seg = match source_graph.file_symbol_to_segment(file_id) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            for (_, symbol) in graph_file.import_export_info.iter_exported_symbols() {
+                let seg_idx = match symbol {
+                    ExportedSymbol::Named(name) => {
+                        let seg_sym =
+                            ast_segmenter::ExportedSymbol::Named(name.as_str().into());
+                        sym_to_seg.get(&seg_sym).copied().or_else(|| {
+                            // Check re-exports: find the segment whose exports_from
+                            // exports this symbol name
+                            Self::find_reexport_segment(source_graph, file_id, &seg_sym)
+                        })
+                    }
+                    ExportedSymbol::Default => {
+                        sym_to_seg.get(&ast_segmenter::ExportedSymbol::Default).copied().or_else(|| {
+                            Self::find_reexport_segment(source_graph, file_id, &ast_segmenter::ExportedSymbol::Default)
+                        })
+                    }
+                    ExportedSymbol::Namespace | ExportedSymbol::ExecutionOnly => {
+                        None
+                    }
+                };
+
+                if let Some(seg_idx) = seg_idx {
+                    let key = SegmentKey::new(file_id, seg_idx);
+                    let seg_tag = tag_graph.get_tag(key);
+                    let uf_tag = UsedTag::from_bits_truncate(seg_tag.bits());
+                    if !uf_tag.is_empty() {
+                        graph_file
+                            .symbol_tags
+                            .entry(symbol.clone())
+                            .or_default()
+                            .insert(uf_tag);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Find the segment index that re-exports a given symbol via `exports_from`.
+    fn find_reexport_segment(
+        source_graph: &SourceGraph,
+        file_id: u32,
+        sym: &ast_segmenter::ExportedSymbol,
+    ) -> Option<u32> {
+        let segments = source_graph.file_segments(file_id)?;
+        for (seg_idx, seg) in segments.iter().enumerate() {
+            for reexports in seg.module_deps.exports_from.values() {
+                for reexport in reexports {
+                    let exported = match (&reexport.imported_as, &reexport.exported_as) {
+                        (_, Some(exported)) => exported,
+                        (ast_segmenter::ImportTarget::ExportedSymbol(imported), None) => imported,
+                        _ => continue,
+                    };
+                    if exported == sym {
+                        return Some(seg_idx as u32);
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
