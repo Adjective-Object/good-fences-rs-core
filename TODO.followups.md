@@ -16,6 +16,13 @@
 
 ## Dead code cleanup (discovered during migration)
 
-- [ ] **`RawModuleDeps` re-export unused**: `unused_finder/src/parse/data.rs:14` re-exports `ast_segmenter::raw_module_deps::RawModuleDeps` but nothing in the crate uses it.
-- [ ] **`get_file_import_export_info` is dead code**: `unused_finder/src/parse/exports_visitor_runner.rs` — all callers now use `get_file_segments` directly.
-- [ ] **`Dependencies2D` fields never read**: `ast_segmenter/src/visitor.rs` — the struct and its methods are defined but never used.
+- [x] **`RawModuleDeps` re-export unused**: `unused_finder/src/parse/data.rs:14` re-exports `ast_segmenter::raw_module_deps::RawModuleDeps` but nothing in the crate uses it.
+- [x] **`get_file_import_export_info` is dead code**: `unused_finder/src/parse/exports_visitor_runner.rs` — all callers now use `get_file_segments` directly.
+- [x] **`Dependencies2D` fields never read**: `ast_segmenter/src/visitor.rs` — the struct and its methods are defined but never used.
+
+## Pre-existing warnings (discovered during dead code cleanup)
+
+- [ ] **`RawModuleDeps` accessor methods never used**: `ast_segmenter/src/raw_module_deps.rs:244-261` — six private getter methods (`imports`, `dynamic_imports`, `requires`, `exports_from`, `exports_locals`, `executed_paths`) are dead code since all callers access the `pub` fields directly.
+- [ ] **`get_file_segments` re-export unused from `parse/mod.rs`**: Callers import directly from `exports_visitor_runner` submodule instead of through the re-export.
+- [ ] **`default_spec` unused variable**: `ast_segmenter/src/visitors/import_export_statement.rs:236` — should be prefixed with `_`.
+- [ ] **Non-shorthand field pattern**: `ast_segmenter/src/visitors/import_require_expr.rs:64` — `args: ref args` should be `ref args`.

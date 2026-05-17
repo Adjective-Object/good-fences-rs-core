@@ -22,7 +22,7 @@ swc_ecma_visit.workspace = true
 swc_utils_parse = { version = "0.2.0", path = "../swc_utils_parse" }
 test_tmpdir = { version = "0.1.0", path = "../test_tmpdir" }
 thiserror.workspace = true
-roaring = "0.10"
+
 
 [dev-dependencies]
 logger = { version = "0.2.0", path = "../logger" }
@@ -39,4 +39,3 @@ swc_ecma_parser.workspace = true
 # swc_utils_parse = { path = "../swc_utils_parse" }
 # thiserror.workspace = true
 # ast-name-tracker = { path = "../ast_name_tracker" }
-# roaring = "0.10.7"

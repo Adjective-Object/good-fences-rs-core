@@ -14,7 +14,6 @@ use swc_ecma_visit::Fold;
 use swc_utils_parse::create_lexer;
 
 use ast_segmenter::segment_info::Segment;
-use crate::parse::RawImportExportInfo;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceFileParseError {
@@ -26,17 +25,6 @@ pub enum SourceFileParseError {
     TypeScriptSyntax(PathBuf, String),
     #[error("Parser error in {0}: {1}")]
     Parser(PathBuf, String),
-}
-
-/// Gets the _unresolved_ import/export info from a file by reading it from disk and parsing it.
-///
-/// Internally delegates to `ast_segmenter::segment_file` to produce per-statement
-/// segments, then flattens them into a single `RawImportExportInfo`.
-pub fn get_file_import_export_info(
-    file_path: &Path,
-) -> Result<RawImportExportInfo, SourceFileParseError> {
-    let segments = get_file_segments(file_path)?;
-    Ok(RawImportExportInfo::from(segments.as_slice()))
 }
 
 /// Parses a source file and returns per-statement segments via `ast_segmenter::segment_file`.

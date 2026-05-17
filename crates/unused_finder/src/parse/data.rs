@@ -11,7 +11,6 @@ use swc_ecma_loader::resolve::Resolve;
 
 // Re-export ast_segmenter types used by downstream consumers
 pub use ast_segmenter::segment_info::Segment;
-pub use ast_segmenter::raw_module_deps::RawModuleDeps;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub enum ExportedSymbol {

@@ -66,3 +66,33 @@ produces identical `RawImportExportInfo` for every test input.
 - `Dependencies2D` fields/methods are never read in `ast_segmenter::visitor.rs`
 
 These are candidates for future cleanup but are unrelated to this migration.
+
+## Dead code cleanup (discovered during migration)
+
+### Removed `RawModuleDeps` re-export from `unused_finder/src/parse/data.rs`
+
+Line 14 had `pub use ast_segmenter::raw_module_deps::RawModuleDeps;`. No code in
+`unused_finder` ever referenced this re-export — callers that need `RawModuleDeps`
+import it directly from `ast_segmenter`. Removed the single line.
+
+### Removed `get_file_import_export_info` from `unused_finder/src/parse/exports_visitor_runner.rs`
+
+This function was a thin wrapper: `get_file_segments()` → `RawImportExportInfo::from()`.
+After the segment-aware migration, all production callers switched to `get_file_segments`
+directly. No tests or external code referenced it. Also removed the now-unused
+`use crate::parse::RawImportExportInfo` import and the re-export from `parse/mod.rs`.
+
+### Removed `Dependencies2D` from `ast_segmenter/src/visitor.rs`
+
+The struct and its `impl` block (lines 137–160) were scaffolding for a future
+segment dependency graph feature. It was never instantiated anywhere. Its only
+external dependency was the `roaring` crate (for `RoaringBitmap`), which was also
+unused elsewhere — removed `roaring = "0.10"` from `Cargo.toml` (both the active
+dep and the commented-out dev-dep).
+
+### Pre-existing warnings noted for follow-up
+
+Spotted during compilation but left untouched (unrelated to the dead code task):
+- `RawModuleDeps` has six private accessor methods that are never called (fields are `pub`).
+- `get_file_segments` re-export in `parse/mod.rs` is unused (callers use the submodule path).
+- `default_spec` unused variable and `args: ref args` non-shorthand pattern in `ast_segmenter`.

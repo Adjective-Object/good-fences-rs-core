@@ -133,31 +133,6 @@ pub fn segment_file(
         .collect()
 }
 
-// represents a 2d dependency map between a set of IDs
-struct Dependencies2D {
-    size: u32,
-    backing_bitmap: roaring::RoaringBitmap,
-}
-impl Dependencies2D {
-    pub fn new(size: u32) -> Self {
-        Self {
-            size,
-            backing_bitmap: roaring::RoaringBitmap::new(),
-        }
-    }
-
-    pub fn add_dependency(&mut self, from: u32, to: u32) {
-        self.backing_bitmap.insert(self.idx(from, to));
-    }
-
-    pub fn depends_on(&self, from: u32, to: u32) -> bool {
-        self.backing_bitmap.contains(self.idx(from, to))
-    }
-
-    fn idx(&self, from: u32, to: u32) -> u32 {
-        from * self.size + to
-    }
-}
 
 #[cfg(test)]
 mod test {
