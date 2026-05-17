@@ -1,0 +1,20 @@
+[package]
+name = "tag_graph"
+version = "0.2.0"
+authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"]
+edition = "2021"
+description = "Per-segment tag tracking and propagation for unused detection"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+ahashmap = { version = "0.2.0", path = "../ahashmap" }
+source_graph = { version = "0.2.0", path = "../source_graph" }
+bitflags = "2.6.0"
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+ast-segmenter = { version = "0.2.0-beta.1", path = "../ast_segmenter" }
+ast-name-tracker = { version = "0.2.0-beta.1", path = "../ast_name_tracker" }
+swc_common.workspace = true

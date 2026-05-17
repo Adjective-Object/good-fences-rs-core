@@ -59,3 +59,17 @@
 - **Full cache invalidation on patch**: `patch_file` clears the entire re-export cache rather than selectively invalidating entries that touched the patched file. Selective invalidation would require tracking reverse dependencies through the cache, and full invalidation is simple and correct — the cache repopulates lazily on next access.
 
 - **Iterator return types**: `iter_file_segments` returns `Option<impl Iterator>` (None for unknown paths), while `iter_segments` returns `impl Iterator` directly (always valid, possibly empty).
+
+## Phase 5: Create `tag_graph` crate
+
+### Design decisions
+
+- **`UsedTag` duplicated in `tag_graph`**: `UsedTag` (bitflags) is defined in `unused_finder::tag`, but `tag_graph` can't depend on `unused_finder` (circular dep in phase 7 when `unused_finder` depends on `tag_graph`). Duplicated the bitflags definition in `tag_graph`. Phase 7 should migrate `unused_finder` to import `UsedTag` from `tag_graph` instead.
+
+- **`set_tag` unions flags**: `set_tag(key, tag)` ORs the new tag into any existing tag on that segment. This supports multiple propagation passes (entry, test, ignored) tagging the same segment additively, matching `Graph::tag_symbol` behavior in the old code.
+
+- **`file_tag` derives from `SourceGraph` structure**: Uses `SourceGraph::file_segments(file_id)` to discover how many segments a file has, then unions tags across all of them. Returns `UsedTag::empty()` for unknown file IDs (no panic).
+
+- **Workspace auto-discovery**: Workspace uses `members = ["crates/*"]` glob, so no `Cargo.toml` workspace edit needed — same as `source_graph`.
+
+- **Test helpers**: Tests construct `Segment` via `ast_segmenter::raw_module_deps::RawModuleDeps` (public) rather than `segment_info::RawModuleDeps` (re-exported privately). These are dev-dependencies only.

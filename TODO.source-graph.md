@@ -172,10 +172,10 @@ impl TagGraph {
 }
 ```
 
-- [ ] Create crate at `crates/tag_graph` with `Cargo.toml`, add to workspace members
-- [ ] Define `TagGraph` struct with `tags: AHashMap<SegmentKey, UsedTag>`
-- [ ] Implement `get_tag` and `file_tag`
-- [ ] Add basic unit tests for tag storage and file-level derivation
+- [x] Create crate at `crates/tag_graph` with `Cargo.toml`, add to workspace members
+- [x] Define `TagGraph` struct with `tags: AHashMap<SegmentKey, UsedTag>`
+- [x] Implement `get_tag` and `file_tag`
+- [x] Add basic unit tests for tag storage and file-level derivation
 
 ## Implement `propagate_tags_to_used` (downward)
 
