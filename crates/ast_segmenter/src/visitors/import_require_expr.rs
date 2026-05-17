@@ -88,8 +88,6 @@ impl ImportsAndRequires {
                         .props
                         .iter()
                         .filter_map(|prop| -> Option<Symbol> {
-                            println!("arg prop: {:?}", prop);
-
                             match prop {
                                 swc_ecma_ast::ObjectPatProp::KeyValue(KeyValuePatProp {
                                     key:
