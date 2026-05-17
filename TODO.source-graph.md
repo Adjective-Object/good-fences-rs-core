@@ -59,12 +59,12 @@ struct SourceGraphFile {
 }
 ```
 
-- [ ] Create crate at `crates/source_graph` with `Cargo.toml`, add to workspace members
-- [ ] Define `SegmentKey` in `segment_key.rs`
-- [ ] Define `SegmentEdge` in `edge.rs`
-- [ ] Define `SourceGraphFile` (private) and `SourceGraph` (public) structs in `lib.rs`
-- [ ] Implement `SourceGraph::new()` from an iterator of `ResolvedSourceFile` — build `path_to_id`, `files`, `symbol_to_segment` and `name_to_declaring_segments` indexes per file
-- [ ] Add unit tests for construction from a simple `ResolvedSourceFile`
+- [x] Create crate at `crates/source_graph` with `Cargo.toml`, add to workspace members
+- [x] Define `SegmentKey` in `segment_key.rs`
+- [x] Define `SegmentEdge` in `edge.rs`
+- [x] Define `SourceGraphFile` (private) and `SourceGraph` (public) structs in `lib.rs`
+- [x] Implement `SourceGraph::new()` from an iterator of `SourceFileInput` — build `path_to_id`, `files`, `symbol_to_segment` and `name_to_declaring_segments` indexes per file
+- [x] Add unit tests for construction from a simple `SourceFileInput`
 
 ## Implement `resolve_symbol_in_file`
 

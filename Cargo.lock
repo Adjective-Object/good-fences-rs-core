@@ -2020,6 +2020,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "source_graph"
+version = "0.2.0"
+dependencies = [
+ "ahashmap",
+ "ast-name-tracker",
+ "ast-segmenter",
+ "pretty_assertions",
+ "swc_atoms 0.6.7",
+ "swc_common",
+]
+
+[[package]]
 name = "sourcemap"
 version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

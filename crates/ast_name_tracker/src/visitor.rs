@@ -65,6 +65,18 @@ impl VariableScope {
         self.local_symbols.keys()
     }
 
+    /// Returns an iterator over all local symbols with their hoisting levels.
+    pub fn get_locals_with_hoisting(
+        &self,
+    ) -> impl Iterator<Item = (&swc_atoms::Atom, HoistingLevel)> {
+        self.local_symbols.iter().map(|(k, (h, _))| (k, *h))
+    }
+
+    /// Returns an iterator over all escaped (unresolved) symbols in this scope.
+    pub fn get_escaped_symbols(&self) -> impl Iterator<Item = &swc_atoms::Atom> {
+        self.escaped_symbols.iter()
+    }
+
     pub fn new() -> Self {
         Self {
             local_symbols: AHashMap::default(),
