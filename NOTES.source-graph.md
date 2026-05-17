@@ -91,3 +91,13 @@
 - **BFS visited set**: Uses `AHashSet<SegmentKey>` for cycle detection. Segments are only enqueued once, preventing infinite loops in circular import graphs. The visited set also prevents re-tagging already-tagged segments.
 
 - **`is_type_only` filtering**: Only static imports (`module_deps.imports`) carry `SymbolTags` with `is_type_only`. Dynamic imports, requires, and executed paths don't have type-only semantics and are always followed.
+
+## Phase 7: Implement `propagate_tags_to_users` (upward)
+
+### Design decisions
+
+- **Reverse edges built on demand**: Rather than caching the reverse edge index in `SourceGraph` (which would require invalidation on `patch_file`), `build_reverse_edges` is a private helper called at the start of each `propagate_tags_to_users` invocation. This is simple and correct — the index is O(edges) to build and only needed when upward propagation is requested. If performance becomes a concern, it can be cached with invalidation later.
+
+- **Mirrors forward traversal logic**: `build_reverse_edges` walks the same edge types as `propagate_tags_to_used` (static imports, dynamic imports, requires, executed paths, intra-file escaped symbols) but records the reverse direction. This ensures the two propagation modes are symmetric over the same edge set.
+
+- **`follow_type_only` applied during index construction**: Type-only edges are filtered when building the reverse index (not during BFS traversal). This keeps the BFS loop simple — it only needs to look up reverse edges and enqueue unvisited targets.

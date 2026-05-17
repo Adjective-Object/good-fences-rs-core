@@ -270,6 +270,157 @@ impl TagGraph {
             }
         }
     }
+
+    /// Upward BFS: tag all segments that transitively import any of the `seeds`.
+    ///
+    /// Builds a reverse edge index (target → importers) from the `SourceGraph`,
+    /// then BFS-es upward from `seeds` toward root segments. This finds all
+    /// transitive "users" of the seeded segments.
+    pub fn propagate_tags_to_users(
+        &mut self,
+        source: &SourceGraph,
+        seeds: Vec<SegmentKey>,
+        tag: UsedTag,
+        follow_type_only: bool,
+    ) {
+        use std::collections::VecDeque;
+
+        let reverse_edges = Self::build_reverse_edges(source, follow_type_only);
+
+        let mut visited: AHashSet<SegmentKey> = AHashSet::default();
+        let mut queue: VecDeque<SegmentKey> = VecDeque::new();
+
+        for seed in seeds {
+            if visited.insert(seed) {
+                queue.push_back(seed);
+            }
+        }
+
+        while let Some(key) = queue.pop_front() {
+            self.set_tag(key, tag);
+
+            if let Some(importers) = reverse_edges.get(&key) {
+                for &importer_key in importers {
+                    if visited.insert(importer_key) {
+                        queue.push_back(importer_key);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Build a reverse edge index: for each segment B that is imported by A,
+    /// record A in B's reverse-edge set.
+    ///
+    /// Iterates all segments, resolves their forward edges (imports, dynamic
+    /// imports, requires, executed paths, intra-file escaped symbols), and
+    /// records the reverse mapping.
+    fn build_reverse_edges(
+        source: &SourceGraph,
+        follow_type_only: bool,
+    ) -> AHashMap<SegmentKey, Vec<SegmentKey>> {
+        let mut reverse: AHashMap<SegmentKey, Vec<SegmentKey>> = AHashMap::default();
+
+        for (key, segment) in source.iter_segments() {
+            let resolved_import_paths = source
+                .file_resolved_import_paths(key.file_id)
+                .cloned()
+                .unwrap_or_default();
+
+            // Inter-file: static imports
+            for (specifier, tagged_symbols) in &segment.module_deps.imports {
+                let target_path = match resolved_import_paths.get(specifier) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let target_file_id = match source.file_id(target_path) {
+                    Some(id) => id,
+                    None => continue,
+                };
+
+                for tagged_sym in tagged_symbols {
+                    if !follow_type_only && tagged_sym.tags.is_type_only {
+                        continue;
+                    }
+                    let targets =
+                        Self::resolve_symbol_import(source, target_file_id, &tagged_sym.symbol);
+                    for target_key in targets {
+                        reverse.entry(target_key).or_default().push(key);
+                    }
+                }
+            }
+
+            // Inter-file: dynamic imports
+            for (specifier, symbols) in &segment.module_deps.dynamic_imports {
+                let target_path = match resolved_import_paths.get(specifier) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let target_file_id = match source.file_id(target_path) {
+                    Some(id) => id,
+                    None => continue,
+                };
+
+                for sym in symbols {
+                    let targets = Self::resolve_symbol_import(source, target_file_id, sym);
+                    for target_key in targets {
+                        reverse.entry(target_key).or_default().push(key);
+                    }
+                }
+            }
+
+            // Inter-file: requires
+            for specifier in &segment.module_deps.requires {
+                let target_path = match resolved_import_paths.get(specifier) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let target_file_id = match source.file_id(target_path) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                if let Some(segs) = source.file_segments(target_file_id) {
+                    for idx in 0..segs.len() {
+                        let target_key = SegmentKey::new(target_file_id, idx as u32);
+                        reverse.entry(target_key).or_default().push(key);
+                    }
+                }
+            }
+
+            // Inter-file: side-effect-only imports
+            for specifier in &segment.module_deps.executed_paths {
+                let target_path = match resolved_import_paths.get(specifier) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let target_file_id = match source.file_id(target_path) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                if let Some(segs) = source.file_segments(target_file_id) {
+                    for idx in 0..segs.len() {
+                        let target_key = SegmentKey::new(target_file_id, idx as u32);
+                        reverse.entry(target_key).or_default().push(key);
+                    }
+                }
+            }
+
+            // Intra-file: escaped symbols
+            for escaped_name in segment.variables.get_escaped_symbols() {
+                if let Some(target_key) = source.resolve_symbol_in_file(
+                    key.file_id,
+                    escaped_name.as_ref(),
+                    key.segment_idx,
+                ) {
+                    if target_key != key {
+                        reverse.entry(target_key).or_default().push(key);
+                    }
+                }
+            }
+        }
+
+        reverse
+    }
 }
 
 impl Default for TagGraph {
@@ -730,5 +881,168 @@ mod tests {
 
         assert_eq!(tg.get_tag(SegmentKey::new(0, 1)), UsedTag::FROM_ENTRY);
         assert_eq!(tg.get_tag(SegmentKey::new(0, 0)), UsedTag::FROM_ENTRY);
+    }
+
+    // -- propagate_tags_to_users (upward) tests --
+
+    #[test]
+    fn test_upward_leaf_propagates_to_importer() {
+        // A(seg0) imports foo from B. B(seg0) exports foo.
+        // Seed: B(1,0). Should tag B(1,0) and A(0,0) (A uses B).
+        let sg = SourceGraph::new(
+            vec![
+                SourceFileInput {
+                    source_file_path: "a.ts".into(),
+                    segments: vec![segment_importing("./b", Symbol::Named("foo".into()), false)],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: {
+                        let mut m = AHashMap::default();
+                        m.insert("./b".to_string(), "b.ts".into());
+                        m
+                    },
+                },
+                SourceFileInput {
+                    source_file_path: "b.ts".into(),
+                    segments: vec![segment_exporting("foo")],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: AHashMap::default(),
+                },
+            ]
+            .into_iter(),
+        );
+
+        let mut tg = TagGraph::new();
+        tg.propagate_tags_to_users(&sg, vec![SegmentKey::new(1, 0)], UsedTag::FROM_TEST, false);
+
+        assert_eq!(tg.get_tag(SegmentKey::new(1, 0)), UsedTag::FROM_TEST); // B (seed)
+        assert_eq!(tg.get_tag(SegmentKey::new(0, 0)), UsedTag::FROM_TEST); // A (importer)
+    }
+
+    #[test]
+    fn test_upward_mid_graph_propagates_to_all_importers() {
+        // A → B → C (A imports B, B imports C)
+        // Seed: B(1,0). Should tag B and A (transitive importer), but NOT C.
+        let sg = SourceGraph::new(
+            vec![
+                SourceFileInput {
+                    source_file_path: "a.ts".into(),
+                    segments: vec![segment_importing("./b", Symbol::Named("foo".into()), false)],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: {
+                        let mut m = AHashMap::default();
+                        m.insert("./b".to_string(), "b.ts".into());
+                        m
+                    },
+                },
+                SourceFileInput {
+                    source_file_path: "b.ts".into(),
+                    segments: vec![{
+                        let mut deps = RawModuleDeps::default();
+                        deps.exports_locals.insert(
+                            ast_segmenter::ExportedSymbol::from("foo"),
+                            TaggedSymbol::new(Symbol::from("foo"), SymbolTags::default()),
+                        );
+                        deps.imports
+                            .entry("./c".to_string())
+                            .or_default()
+                            .insert(TaggedSymbol::new(
+                                Symbol::Named("bar".into()),
+                                SymbolTags::default(),
+                            ));
+                        Segment {
+                            span: make_span(0, 10),
+                            module_deps: deps,
+                            variables: VariableScope::new(),
+                        }
+                    }],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: {
+                        let mut m = AHashMap::default();
+                        m.insert("./c".to_string(), "c.ts".into());
+                        m
+                    },
+                },
+                SourceFileInput {
+                    source_file_path: "c.ts".into(),
+                    segments: vec![segment_exporting("bar")],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: AHashMap::default(),
+                },
+            ]
+            .into_iter(),
+        );
+
+        let mut tg = TagGraph::new();
+        tg.propagate_tags_to_users(&sg, vec![SegmentKey::new(1, 0)], UsedTag::FROM_IGNORED, false);
+
+        assert_eq!(tg.get_tag(SegmentKey::new(1, 0)), UsedTag::FROM_IGNORED); // B (seed)
+        assert_eq!(tg.get_tag(SegmentKey::new(0, 0)), UsedTag::FROM_IGNORED); // A (transitive importer)
+        assert_eq!(tg.get_tag(SegmentKey::new(2, 0)), UsedTag::empty());      // C (downstream, NOT tagged)
+    }
+
+    #[test]
+    fn test_upward_does_not_traverse_downward() {
+        // A → B → C. Seed: B. Only A and B get tagged, not C.
+        // This is the same graph as above but explicitly verifies
+        // that upward propagation does NOT follow forward (downward) edges.
+        let sg = SourceGraph::new(
+            vec![
+                SourceFileInput {
+                    source_file_path: "a.ts".into(),
+                    segments: vec![segment_importing("./b", Symbol::Named("x".into()), false)],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: {
+                        let mut m = AHashMap::default();
+                        m.insert("./b".to_string(), "b.ts".into());
+                        m
+                    },
+                },
+                SourceFileInput {
+                    source_file_path: "b.ts".into(),
+                    segments: vec![{
+                        let mut deps = RawModuleDeps::default();
+                        deps.exports_locals.insert(
+                            ast_segmenter::ExportedSymbol::from("x"),
+                            TaggedSymbol::new(Symbol::from("x"), SymbolTags::default()),
+                        );
+                        deps.imports
+                            .entry("./c".to_string())
+                            .or_default()
+                            .insert(TaggedSymbol::new(
+                                Symbol::Named("y".into()),
+                                SymbolTags::default(),
+                            ));
+                        Segment {
+                            span: make_span(0, 10),
+                            module_deps: deps,
+                            variables: VariableScope::new(),
+                        }
+                    }],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: {
+                        let mut m = AHashMap::default();
+                        m.insert("./c".to_string(), "c.ts".into());
+                        m
+                    },
+                },
+                SourceFileInput {
+                    source_file_path: "c.ts".into(),
+                    segments: vec![segment_exporting("y")],
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: AHashMap::default(),
+                },
+            ]
+            .into_iter(),
+        );
+
+        let mut tg = TagGraph::new();
+        tg.propagate_tags_to_users(&sg, vec![SegmentKey::new(1, 0)], UsedTag::FROM_ENTRY, false);
+
+        // B is the seed — tagged
+        assert_eq!(tg.get_tag(SegmentKey::new(1, 0)), UsedTag::FROM_ENTRY);
+        // A imports B — tagged via upward propagation
+        assert_eq!(tg.get_tag(SegmentKey::new(0, 0)), UsedTag::FROM_ENTRY);
+        // C is imported BY B (downstream) — must NOT be tagged
+        assert_eq!(tg.get_tag(SegmentKey::new(2, 0)), UsedTag::empty());
     }
 }

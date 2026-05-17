@@ -230,11 +230,11 @@ impl TagGraph {
 }
 ```
 
-- [ ] Build or lazily compute reverse edge index from `SourceGraph`
-- [ ] Implement upward BFS using reverse edges
-- [ ] Test: tagging a leaf propagates upward to its importer
-- [ ] Test: tagging a mid-graph node propagates to all transitive importers
-- [ ] Test: upward propagation does not traverse downward
+- [x] Build or lazily compute reverse edge index from `SourceGraph`
+- [x] Implement upward BFS using reverse edges
+- [x] Test: tagging a leaf propagates upward to its importer
+- [x] Test: tagging a mid-graph node propagates to all transitive importers
+- [x] Test: upward propagation does not traverse downward
 
 ## Wire `SourceGraph` + `TagGraph` into `unused_finder`
 
