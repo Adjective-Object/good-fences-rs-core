@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.01-visitor-spike.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.7",
+    "tokens_in": 5244886,
+    "tokens_out": 28274,
+    "tokens_cached": 5159315,
+    "premium_requests": 1
+  },
+  "started_at": "2026-05-18T23:08:48.551804138Z",
+  "completed_at": "2026-05-18T23:19:13.504253866Z",
+  "session_id": "3DuxP7bVAW8ghHFHgmoZgUxkOim",
+  "runtime_name": "github-copilot-agent-claude-opus-4.7",
+  "success": true,
+  "machine_id": "9372feebe55f5c9c"
+}

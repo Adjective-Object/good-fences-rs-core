@@ -21,7 +21,7 @@ holds:
 - [ ] Replace `swc_common::Span` with `oxc_span::Span` in `Segment`, `TaggedSymbol`, `ReExportedSymbol`, `ExportBinding`
 - [ ] Replace `BytePos` with `u32` in `SymbolTags::from_comments(_parent)` signatures
 - [ ] Replace `impl Comments` parameter with `&LeadingComments<'_>`
-- [ ] Replace `impl From<&swc_atoms::Atom> for Name` with `impl From<&oxc_span::Atom<'_>> for Name`
+- [ ] Replace `impl From<&swc_atoms::Atom> for Name` with `impl From<Ident<'_>> for Name` (spike correction: `name` fields are `Ident<'a>`, not `Atom<'a>`)
 - [ ] Update `Symbol::from_module_export_name` to match on `oxc_ast::ast::ModuleExportName` (handle the third variant `IdentifierReference`)
 - [ ] Update `ExportedSymbol::from_module_export_name` similarly
 
@@ -49,9 +49,9 @@ phase):
 | `CallExpr` / `Callee::Expr(Ident)` | `CallExpression` whose `callee` is `Expression::Identifier(IdentifierReference)` |
 | `Lit::Str(s)` → `s.value`    | `Expression::StringLiteral(s)` → `s.value` |
 | `TsImportEqualsDecl`         | `TSImportEqualsDeclaration`      |
-| `BindingIdent { sym, id }`   | `BindingIdentifier { name: Atom<'a> }` (no SyntaxContext) |
-| `Ident { sym }`              | `IdentifierReference { name: Atom<'a>, reference_id: Cell<Option<ReferenceId>> }` |
-| `IdentName { sym }`          | `IdentifierName { name: Atom<'a>}` |
+| `BindingIdent { sym, id }`   | `BindingIdentifier { name: Ident<'a> }` (no SyntaxContext; `Ident<'a>` derefs to `&str`) |
+| `Ident { sym }`              | `IdentifierReference { name: Ident<'a>, reference_id: Cell<Option<ReferenceId>> }` (use `.reference_id.get()` for safe access) |
+| `IdentName { sym }`          | `IdentifierName { name: Ident<'a> }` |
 
 The "is `require` a user binding?" check is rewritten using `oxc_semantic`.
 Given the call expression `require("foo")`, the callee is

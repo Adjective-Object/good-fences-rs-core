@@ -73,6 +73,12 @@ Replace `swc_atoms::Atom` (globally interned, `'static`-ish) with
 arena lifetime. Public APIs that exposed `swc_atoms::Atom` (notably
 `VariableScope::get_locals`) become `CompactStr`-shaped.
 
+> **Spike correction (phase 1):** Identifier `name` fields in this OXC rev are
+> `Ident<'a>` (from `oxc_str`), not `Atom<'a>`. `Ident<'a>` implements
+> `Deref<Target = str>`, so `.name.as_str()` or `&*node.name` gives a `&str`.
+> Use `.to_compact_str()` / `.to_string()` to obtain an owned value that
+> outlives the arena.
+
 ### Semantic-driven scope analysis
 
 `ast_name_tracker` is **deleted**. `oxc_semantic::SemanticBuilder` provides:
@@ -92,6 +98,13 @@ Mapping from `HoistingLevel` to OXC `SymbolFlags`:
 | `FunctionHoisting`   | `SymbolFlags::Function`                                  |
 | `LetConstHoisting`   | `SymbolFlags::BlockScopedVariable` (let/const) or `FunctionScopedVariable` (var) |
 
+> **Spike correction (phase 1):** `SymbolFlags::Enum` is a composite alias
+> (`ConstEnum | RegularEnum`), not a single bit. Use
+> `flags.intersects(SymbolFlags::Enum)` to test for enum symbols. Also, there
+> is **no** plain `references()` iterator on `Scoping`; to iterate all
+> references use `scoping.symbol_ids()` + `scoping.get_resolved_references(id)`,
+> or walk AST nodes via `Semantic::nodes().iter()`.
+
 ### Spans
 
 | swc                                  | oxc                                  |
@@ -99,6 +112,7 @@ Mapping from `HoistingLevel` to OXC `SymbolFlags`:
 | `swc_common::Span { lo, hi, ctxt }`  | `oxc_span::Span { start: u32, end: u32 }` (`Copy`) |
 | `swc_common::BytePos(u32)`           | bare `u32`                           |
 | `swc_common::source_map::SmallPos::to_u32()` | field access on `Span`        |
+| `span.contains(other)` (swc)         | `span.contains_inclusive(other)` (oxc — **no** `contains_span`) |
 
 `Segment.span`, `TaggedSymbol.span`, `ReExportedSymbol.span`,
 `ExportedSymbolMetadata.span` all become `oxc_span::Span`.
