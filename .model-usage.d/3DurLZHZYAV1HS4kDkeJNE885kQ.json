@@ -1,0 +1,14 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.00-scaffolding.md"
+  },
+  "usage": null,
+  "started_at": "2026-05-18T22:19:00.580142719Z",
+  "completed_at": "2026-05-18T22:19:04.683119619Z",
+  "session_id": "3DurLZHZYAV1HS4kDkeJNE885kQ",
+  "runtime_name": "github-copilot-agent-claude-opus-4.7",
+  "success": true,
+  "machine_id": "b04c5143fda44a0d"
+}
