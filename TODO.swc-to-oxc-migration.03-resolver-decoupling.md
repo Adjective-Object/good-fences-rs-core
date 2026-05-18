@@ -33,18 +33,18 @@ pub enum TargetEnv { Browser, Node }
 pub const NODE_BUILTINS: &[&str] = &[ /* ... */ ];
 ```
 
-- [ ] Create `import_resolver/src/resolve.rs` with the trait, `Resolution`, `TargetEnv`, `NODE_BUILTINS`
-- [ ] Copy `NODE_BUILTINS` list verbatim from the swc source
-- [ ] Re-export from `import_resolver/src/lib.rs`
+- [x] Create `import_resolver/src/resolve.rs` with the trait, `Resolution`, `TargetEnv`, `NODE_BUILTINS`
+- [x] Copy `NODE_BUILTINS` list verbatim from the swc source
+- [x] Re-export from `import_resolver/src/lib.rs`
 
 ## Rename `swc_resolver` → `node_resolver`
 
 The directory name becomes misleading once swc is gone.
 
-- [ ] `git mv crates/import_resolver/src/swc_resolver crates/import_resolver/src/node_resolver`
-- [ ] Update `mod swc_resolver;` → `mod node_resolver;` in `lib.rs`
-- [ ] Rename the inner `node_resolver.rs` (the actual `CachingNodeModulesResolver`) to `caching.rs` to avoid the module-name collision
-- [ ] Update `use` paths across the workspace (search for `swc_resolver::`)
+- [x] `git mv crates/import_resolver/src/swc_resolver crates/import_resolver/src/node_resolver`
+- [x] Update `mod swc_resolver;` → `mod node_resolver;` in `lib.rs`
+- [x] Rename the inner `node_resolver.rs` (the actual `CachingNodeModulesResolver`) to `caching.rs` to avoid the module-name collision
+- [x] Update `use` paths across the workspace (search for `swc_resolver::`)
 
 ## Replace `FileName` with `&Path`, `swc Resolve` with local `PathResolver`
 
@@ -80,14 +80,14 @@ impl PathResolver for X {
 }
 ```
 
-- [ ] Replace `&FileName` parameter with `&Path` in every `resolve(...)` signature
-- [ ] Drop the `FileName::Real(p) => p, _ => bail!(...)` match — base is already a `&Path`. The non-`Real` variants (`Url`, `Anon`, `Custom`, `Macros`, …) are unreachable from good-fences code paths; no migration work needed for them
-- [ ] Replace `swc_ecma_loader::resolve::Resolution` with `crate::resolve::Resolution` everywhere; update every `Resolution { filename: FileName::Real(p), slug }` constructor to `Resolution { path: p, slug: slug.map(CompactStr::from) }`
-- [ ] Replace every `.filename` field read with `.path`; for the `match &res.filename { FileName::Real(p) => ..., _ => None }` patterns in `tsconfig_resolver.rs`, simplify to `Some(&res.path)` since `path` is always present
-- [ ] Replace `impl Resolve for ...` with `impl PathResolver for ...`
-- [ ] Replace `swc_common::collections::AHashMap` (used in `pkgjson_rewrites.rs`) with `ahashmap::AHashMap`
-- [ ] Replace `swc_ecma_loader::TargetEnv` references with `crate::resolve::TargetEnv`
-- [ ] Replace `swc_ecma_loader::NODE_BUILTINS` references with `crate::resolve::NODE_BUILTINS`
+- [x] Replace `&FileName` parameter with `&Path` in every `resolve(...)` signature
+- [x] Drop the `FileName::Real(p) => p, _ => bail!(...)` match — base is already a `&Path`. The non-`Real` variants (`Url`, `Anon`, `Custom`, `Macros`, …) are unreachable from good-fences code paths; no migration work needed for them
+- [x] Replace `swc_ecma_loader::resolve::Resolution` with `crate::resolve::Resolution` everywhere; update every `Resolution { filename: FileName::Real(p), slug }` constructor to `Resolution { path: p, slug: slug.map(CompactStr::from) }`
+- [x] Replace every `.filename` field read with `.path`; for the `match &res.filename { FileName::Real(p) => ..., _ => None }` patterns in `tsconfig_resolver.rs`, simplify to `Some(&res.path)` since `path` is always present
+- [x] Replace `impl Resolve for ...` with `impl PathResolver for ...`
+- [x] Replace `swc_common::collections::AHashMap` (used in `pkgjson_rewrites.rs`) with `ahashmap::AHashMap`
+- [x] Replace `swc_ecma_loader::TargetEnv` references with `crate::resolve::TargetEnv`
+- [x] Replace `swc_ecma_loader::NODE_BUILTINS` references with `crate::resolve::NODE_BUILTINS`
 
 ## Update callers outside `import_resolver`
 
@@ -98,14 +98,14 @@ Call sites that pass `FileName::Real(...)` or import `swc_ecma_loader::resolve::
 - `unused_finder/src/parse/data.rs`
 - Any napi shims under `crates/*_napi/`
 
-- [ ] Change `resolve_with_extension(base: FileName, ...)` to `resolve_with_extension(base: &Path, ...)`
-- [ ] Update each caller to pass `&PathBuf` / `Path::new(...)` instead of `FileName::Real(...)`
-- [ ] Replace `impl Resolve + Sync` trait bounds with `impl PathResolver`
-- [ ] Update `unused_finder/src/parse/data.rs::try_resolve` to take `&impl PathResolver`
+- [x] Change `resolve_with_extension(base: FileName, ...)` to `resolve_with_extension(base: &Path, ...)`
+- [x] Update each caller to pass `&PathBuf` / `Path::new(...)` instead of `FileName::Real(...)`
+- [x] Replace `impl Resolve + Sync` trait bounds with `impl PathResolver`
+- [x] Update `unused_finder/src/parse/data.rs::try_resolve` to take `&impl PathResolver`
 
 ## Drop swc deps from import_resolver
 
-- [ ] Remove `swc_common` and `swc_ecma_loader` from `import_resolver/Cargo.toml`
-- [ ] Run `cargo shear` (or `cargo-shear`) on the crate to confirm
-- [ ] `cargo test -p import_resolver` passes (entire existing test suite must still pass)
-- [ ] `cargo test --workspace` passes
+- [x] Remove `swc_common` and `swc_ecma_loader` from `import_resolver/Cargo.toml`
+- [x] Run `cargo shear` (or `cargo-shear`) on the crate to confirm
+- [x] `cargo test -p import_resolver` passes (entire existing test suite must still pass)
+- [x] `cargo test --workspace` passes

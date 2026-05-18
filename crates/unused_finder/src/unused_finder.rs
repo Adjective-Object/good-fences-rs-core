@@ -21,17 +21,17 @@ use crate::{
 use ahashmap::{AHashMap, AHashSet};
 use anyhow::{Context, Result};
 use glob_match::glob_match;
-use import_resolver::swc_resolver::{
+use import_resolver::node_resolver::{
     combined_resolver::CombinedResolverCaches,
     internal_resolver::InternalOnlyResolver,
-    node_resolver::{NodeModulesResolverOptions, DEFAULT_EXPORT_CODITIONS, DEFAULT_EXTENSIONS},
+    caching::{NodeModulesResolverOptions, DEFAULT_EXPORT_CODITIONS, DEFAULT_EXTENSIONS},
     MonorepoResolver,
 };
 use js_err::JsErr;
 use logger::{debug_logf, Logger};
 use rayon::{iter::Either, prelude::*};
 use source_graph::{SegmentKey, SourceFileInput, SourceGraph};
-use swc_ecma_loader::{resolve::Resolve, TargetEnv};
+use import_resolver::resolve::{PathResolver, TargetEnv};
 use tag_graph::TagGraph;
 
 #[derive(Debug)]
@@ -75,7 +75,7 @@ impl SourceFiles {
     fn try_resolve(
         logger: impl Logger,
         walk_result: WalkedFiles,
-        resolver: impl Resolve + Sync,
+        resolver: impl PathResolver + Sync,
     ) -> Result<SourceFiles, anyhow::Error> {
         // Map of source file path to source file data
         let (mut source_files, errors): (
@@ -318,7 +318,7 @@ impl SourceFiles {
     }
 }
 
-fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl Resolve {
+fn resolver_for_packages(root_dir: PathBuf, packages: &RepoPackages) -> impl PathResolver {
     let mut caches = CombinedResolverCaches::new();
     // pre-populate the packagejson cache with the loaded package json files
     let pkg_caches = caches.package_json_cache();

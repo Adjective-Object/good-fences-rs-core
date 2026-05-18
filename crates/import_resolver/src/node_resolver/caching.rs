@@ -17,11 +17,8 @@ use std::{
     env::current_dir,
     path::{Component, Path, PathBuf},
 };
-use swc_common::FileName;
-use swc_ecma_loader::{
-    resolve::{Resolution, Resolve},
-    TargetEnv, NODE_BUILTINS,
-};
+
+use crate::resolve::{PathResolver, Resolution, TargetEnv, NODE_BUILTINS};
 use tracing::{debug, trace, Level};
 
 pub type PackageJsonCacheEntry = WithCache<
@@ -140,12 +137,12 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         }
     }
 
-    fn wrap(&self, path: Option<PathBuf>) -> Result<FileName, Error> {
+    fn wrap(&self, path: Option<PathBuf>) -> Result<PathBuf, Error> {
         if let Some(path) = path {
             if self.preserve_symlinks {
-                Ok(FileName::Real(path.clean()))
+                Ok(path.clean())
             } else {
-                Ok(FileName::Real(path.canonicalize()?))
+                Ok(path.canonicalize()?)
             }
         } else {
             Err(anyhow::anyhow!("file not found"))
@@ -522,7 +519,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         Ok(None)
     }
 
-    fn resolve_filename(&self, base: &FileName, module_specifier: &str) -> Result<FileName, Error> {
+    fn resolve_filename(&self, base: &Path, module_specifier: &str) -> Result<PathBuf, Error> {
         debug!(
             "Resolving {} from {:#?} for {:#?}",
             module_specifier, base, self.target_env
@@ -548,11 +545,6 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             }
         }
 
-        let base = match base {
-            FileName::Real(v) => v,
-            _ => bail!("node-resolver supports only files"),
-        };
-
         let base_dir = if base.is_file() {
             let cwd = &Path::new(".");
             base.parent().unwrap_or(cwd)
@@ -563,11 +555,11 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         // Handle builtin modules for nodejs
         if let TargetEnv::Node = self.target_env {
             if module_specifier.starts_with("node:") {
-                return Ok(FileName::Custom(module_specifier.into()));
+                bail!("node builtin: {}", module_specifier);
             }
 
             if is_core_module(module_specifier) {
-                return Ok(FileName::Custom(format!("node:{}", module_specifier)));
+                bail!("node builtin: node:{}", module_specifier);
             }
         }
 
@@ -646,24 +638,22 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         .and_then(|v| {
             // Handle path references for the `browser` package config
             if let TargetEnv::Browser = self.target_env {
-                if let FileName::Real(path) = &v {
-                    // probe for a package.json file
-                    if let Some((pkg_path, browser_cache)) =
-                        self.pkg_json_cache.probe_path(self.monorepo_root, base)?
-                    {
-                        let cache_entry_lock = browser_cache.try_get_cached_or_init(|pkgjson| {
-                            PackageJsonRewriteData::create(self, pkg_path, pkgjson)
-                        })?;
+                // probe for a package.json file
+                if let Some((pkg_path, browser_cache)) =
+                    self.pkg_json_cache.probe_path(self.monorepo_root, base_dir)?
+                {
+                    let cache_entry_lock = browser_cache.try_get_cached_or_init(|pkgjson| {
+                        PackageJsonRewriteData::create(self, pkg_path, pkgjson)
+                    })?;
 
-                        let as_abspath = join_abspath(self.monorepo_root, path)?;
-                        let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
-                        return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
-                            format!(
-                                "failed to rewrite browser path {:#?} for {:#?}",
-                                path, module_specifier,
-                            )
-                        });
-                    }
+                    let as_abspath = join_abspath(self.monorepo_root, &v)?;
+                    let rewrite = (*cache_entry_lock).rewrite_browser(&as_abspath)?;
+                    return self.wrap(Some(rewrite.to_path_buf())).with_context(|| {
+                        format!(
+                            "failed to rewrite browser path {:#?} for {:#?}",
+                            v, module_specifier,
+                        )
+                    });
                 }
             }
             Ok(v)
@@ -673,12 +663,9 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
     }
 }
 
-impl Resolve for CachingNodeModulesResolver<'_> {
-    fn resolve(&self, base: &FileName, module_specifier: &str) -> Result<Resolution, Error> {
+impl PathResolver for CachingNodeModulesResolver<'_> {
+    fn resolve(&self, base: &Path, module_specifier: &str) -> anyhow::Result<Resolution> {
         self.resolve_filename(base, module_specifier)
-            .map(|filename| Resolution {
-                filename,
-                slug: None,
-            })
+            .map(|path| Resolution { path, slug: None })
     }
 }

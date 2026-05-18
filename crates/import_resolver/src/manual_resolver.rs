@@ -5,9 +5,9 @@ use serde::Deserialize;
 use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::string::String;
-use swc_common::FileName;
-use swc_ecma_loader::resolve::Resolve;
 use tsconfig_paths::TsconfigPathsJson;
+
+use crate::resolve::PathResolver;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub enum ResolvedImport {
@@ -20,9 +20,9 @@ pub const SOURCE_EXTENSIONS: &[&str] = &["js", "ts", "d.ts", "tsx", "jsx"];
 pub const ASSET_EXTENSION: &[&str] = &["scss", "css", "svg", "png", "json", "gif"];
 
 pub fn resolve_with_extension(
-    base: FileName,
+    base: &Path,
     imported_path: &str,
-    resolver: impl Resolve,
+    resolver: impl PathResolver,
 ) -> anyhow::Result<ResolvedImport> {
     if is_resource_file(imported_path) {
         return Ok(ResolvedImport::ResourceFileImport);
@@ -33,35 +33,25 @@ pub fn resolve_with_extension(
         .to_slash()
         .unwrap()
         .to_string();
-    let resolved = match resolver.resolve(&base, imported_path) {
+    let resolved = match resolver.resolve(base, imported_path) {
         Ok(r) => r,
         Err(e) => {
-            if let Some(source) = e.source() {
-                if source.to_string() == "failed to get the node_modules path" {
-                    return Ok(ResolvedImport::NodeModulesImport(imported_path.to_owned()));
-                }
+            if e.to_string().starts_with("node builtin:") {
+                return Ok(ResolvedImport::NodeModulesImport(imported_path.to_owned()));
             }
             for ext in SOURCE_EXTENSIONS {
                 let file_with_ext = format!("{}.{}", &imported_path, ext);
-                if let Ok(resolved) = resolver.resolve(&base, &file_with_ext) {
-                    let resolved = match resolved.filename {
-                        FileName::Real(f) => f.to_slash().unwrap().to_string(),
-                        _ => resolved.filename.to_string(),
-                    };
+                if let Ok(resolved) = resolver.resolve(base, &file_with_ext) {
+                    let resolved = resolved.path.to_slash().unwrap().to_string();
                     return Ok(ResolvedImport::ProjectLocalImport(
                         resolved.replacen(&format!("{}/", cwd), "", 1).into(),
                     ));
                 }
             }
             return Err(e);
-            // return Ok(ResolvedImport::NodeModulesImport(imported_specifier.to_string()))
         }
     };
-    // let resolved = RelativePath::new(&resolved.to_string())..to_path("");
-    let resolved = match resolved.filename {
-        FileName::Real(f) => f.to_slash().unwrap().to_string(),
-        _ => resolved.filename.to_string(),
-    };
+    let resolved = resolved.path.to_slash().unwrap().to_string();
     // If we found a local file it starts with cwd
     if resolved.starts_with(&cwd) {
         if is_resource_file(&resolved) || resolved.ends_with(".graphql") {

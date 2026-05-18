@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.03-resolver-decoupling.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.7",
+    "tokens_in": 10927175,
+    "tokens_out": 66963,
+    "tokens_cached": 10732010,
+    "premium_requests": 1
+  },
+  "started_at": "2026-05-18T23:29:19.671698443Z",
+  "completed_at": "2026-05-18T23:47:42.173387802Z",
+  "session_id": "3DuztnxIKqUHBXfmcgyePNsWC0J",
+  "runtime_name": "github-copilot-agent-claude-opus-4.7",
+  "success": true,
+  "machine_id": "9372feebe55f5c9c"
+}

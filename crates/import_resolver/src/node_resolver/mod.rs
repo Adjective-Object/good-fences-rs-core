@@ -1,19 +1,18 @@
-use anyhow::Error;
+use caching::NodeModulesResolverOptions;
 use combined_resolver::{CombinedResolver, CombinedResolverCaches};
 use core::fmt;
-use node_resolver::NodeModulesResolverOptions;
 use ouroboros::self_referencing;
 use std::{
     fmt::{Debug, Formatter},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
-use swc_common::FileName;
-use swc_ecma_loader::resolve::{Resolution, Resolve};
 
+use crate::resolve::{PathResolver, Resolution};
+
+pub mod caching;
 pub mod combined_resolver;
 mod common;
 pub mod internal_resolver;
-pub mod node_resolver;
 mod pkgjson_rewrites;
 mod tsconfig;
 mod tsconfig_resolver;
@@ -59,8 +58,8 @@ impl Debug for MonorepoResolver {
     }
 }
 
-impl Resolve for MonorepoResolver {
-    fn resolve(&self, specifier: &FileName, referrer: &str) -> Result<Resolution, Error> {
-        self.with_resolver(|resolver| resolver.resolve(specifier, referrer))
+impl PathResolver for MonorepoResolver {
+    fn resolve(&self, base: &Path, specifier: &str) -> anyhow::Result<Resolution> {
+        self.with_resolver(|resolver| resolver.resolve(base, specifier))
     }
 }

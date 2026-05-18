@@ -3,7 +3,7 @@
 //!
 //! See https://github.com/swc-project/swc/blob/f988b66e1fd921266a8abf6fe9bb997b6878e949/crates/swc_ecma_loader/src/resolvers/node.rs
 
-use super::node_resolver::CachingNodeModulesResolver;
+use super::caching::CachingNodeModulesResolver;
 use anyhow::Result;
 use packagejson::{Browser, PackageJson, StringOrBool};
 use packagejson_exports::PackageExportRewriteData;
@@ -12,7 +12,7 @@ use std::{
     env::current_dir,
     path::{Component, Path, PathBuf},
 };
-use swc_common::collections::{AHashMap, AHashSet};
+use ahashmap::{AHashMap, AHashSet};
 
 // Used to override imports into a package when targeting a Browser environment.
 #[derive(Debug, Default)]

@@ -1,10 +1,10 @@
 use anyhow::{bail, Context, Result};
 use ftree_cache::context_data::FileContextCache;
 use std::path::{Component, Path};
-use swc_common::FileName;
-use swc_ecma_loader::resolve::{Resolution, Resolve};
 use tracing::info;
 use tracing::{debug, trace, warn, Level};
+
+use crate::resolve::{PathResolver, Resolution};
 
 use super::tsconfig::{Pattern, ProcessedTsconfig, ProcessedTsconfigPaths};
 
@@ -14,12 +14,12 @@ pub type TsconfigCache = FileContextCache<ProcessedTsconfig, "tsconfig.json">;
 
 // Wrapper struct used to implement resolve() for ProcessedTsconfigPaths without needing to
 // copy the processed paths each time a resolver is constructed
-pub struct TsconfigPathsResolver<'tsconfig, R: Resolve> {
+pub struct TsconfigPathsResolver<'tsconfig, R: PathResolver> {
     tsconfig: &'tsconfig ProcessedTsconfigPaths,
     inner_resolver: R,
 }
 
-impl<'tsconfig, R: Resolve> TsconfigPathsResolver<'tsconfig, R> {
+impl<'tsconfig, R: PathResolver> TsconfigPathsResolver<'tsconfig, R> {
     pub fn new(
         tsconfig: &'tsconfig ProcessedTsconfigPaths,
         inner_resolver: R,
@@ -30,19 +30,16 @@ impl<'tsconfig, R: Resolve> TsconfigPathsResolver<'tsconfig, R> {
         }
     }
 
-    /// Calls the inner resolver, and if it fails, tries again using the base_url of the
-    /// tsconfig.json file as the base of the resolution
-    ///
-    /// Lifted from swc_ecma_loader-0.45.23/src/resolvers/tsc.rs
-    fn invoke_inner_resolver(&self, base: &FileName, module_specifier: &str) -> Result<Resolution> {
+    fn invoke_inner_resolver(&self, base: &Path, module_specifier: &str) -> Result<Resolution> {
         let res = self
             .inner_resolver
             .resolve(base, module_specifier)
             .with_context(|| {
                 format!(
-                    "failed to resolve `{module_specifier}` from `{base}` using inner \
+                    "failed to resolve `{module_specifier}` from `{}` using inner \
                  resolver\nbase_url={}",
-                    self.tsconfig.base_url_filename
+                    base.display(),
+                    self.tsconfig.base_url.display()
                 )
             });
 
@@ -50,7 +47,9 @@ impl<'tsconfig, R: Resolve> TsconfigPathsResolver<'tsconfig, R> {
             Ok(resolved) => {
                 info!(
                     "Resolved `{}` as `{}` from `{}`",
-                    module_specifier, resolved.filename, base
+                    module_specifier,
+                    resolved.path.display(),
+                    base.display()
                 );
                 Ok(resolved)
             }
@@ -63,18 +62,18 @@ impl<'tsconfig, R: Resolve> TsconfigPathsResolver<'tsconfig, R> {
     }
 }
 
-/// Implements Resolve for the ProcessedTsconfigPathsResolver
+/// Implements PathResolver for the ProcessedTsconfigPathsResolver
 ///
 /// Lifted from swc_ecma_loader-0.45.23/src/resolvers/tsc.rs
-impl<R: Resolve> Resolve for TsconfigPathsResolver<'_, R> {
-    fn resolve(&self, base: &FileName, module_specifier: &str) -> Result<Resolution> {
+impl<R: PathResolver> PathResolver for TsconfigPathsResolver<'_, R> {
+    fn resolve(&self, base: &Path, module_specifier: &str) -> Result<Resolution> {
         let _tracing = if cfg!(debug_assertions) {
             Some(
                 tracing::span!(
                     Level::ERROR,
                     "TsConfigResolver::resolve",
                     base_url = tracing::field::display(self.tsconfig.base_url.display()),
-                    base = tracing::field::display(base),
+                    base = tracing::field::display(base.display()),
                     src = tracing::field::display(module_specifier),
                 )
                 .entered(),
@@ -93,15 +92,13 @@ impl<R: Resolve> Resolve for TsconfigPathsResolver<'_, R> {
                 .context("not processed by tsc resolver because it's relative import");
         }
 
-        if let FileName::Real(v) = base {
-            if v.components().any(|c| match c {
-                Component::Normal(v) => v == "node_modules",
-                _ => false,
-            }) {
-                return self.invoke_inner_resolver(base, module_specifier).context(
-                    "not processed by tsc resolver because base module is in node_modules",
-                );
-            }
+        if base.components().any(|c| match c {
+            Component::Normal(v) => v == "node_modules",
+            _ => false,
+        }) {
+            return self.invoke_inner_resolver(base, module_specifier).context(
+                "not processed by tsc resolver because base module is in node_modules",
+            );
         }
 
         info!("Checking `jsc.paths`");
@@ -144,16 +141,12 @@ impl<R: Resolve> Resolve for TsconfigPathsResolver<'_, R> {
                             None
                         };
 
+                        let base_url = self.tsconfig.base_url.as_path();
                         let relative = format!("./{}", replaced);
 
                         let res = self
-                            .invoke_inner_resolver(&self.tsconfig.base_url_filename, &relative)
-                            .or_else(|_| {
-                                self.invoke_inner_resolver(
-                                    &self.tsconfig.base_url_filename,
-                                    &replaced,
-                                )
-                            })
+                            .invoke_inner_resolver(base_url, &relative)
+                            .or_else(|_| self.invoke_inner_resolver(base_url, &replaced))
                             .or_else(|_| self.invoke_inner_resolver(base, module_specifier));
 
                         errors.push(match res {
@@ -175,7 +168,7 @@ impl<R: Resolve> Resolve for TsconfigPathsResolver<'_, R> {
                                         .unwrap()
                                         .into(),
                                 ),
-                                filename: FileName::Real(replaced.into()),
+                                path: replaced.into(),
                             });
                         }
                     }
@@ -200,28 +193,27 @@ impl<R: Resolve> Resolve for TsconfigPathsResolver<'_, R> {
                         .map(|v| v.into());
                     if tp.is_absolute() {
                         return Ok(Resolution {
-                            filename: FileName::Real(tp.into()),
+                            path: tp.into(),
                             slug,
                         });
                     }
 
+                    let base_url = self.tsconfig.base_url.as_path();
                     if let Ok(res) =
-                        self.resolve(&self.tsconfig.base_url_filename, &format!("./{}", &to[0]))
+                        self.resolve(base_url, &format!("./{}", &to[0]))
                     {
                         return Ok(Resolution {
-                            slug: match &res.filename {
-                                FileName::Real(p) => p
-                                    .file_stem()
-                                    .filter(|&s| s != "index")
-                                    .map(|v| v.to_string_lossy().into()),
-                                _ => None,
-                            },
+                            slug: res
+                                .path
+                                .file_stem()
+                                .filter(|&s| s != "index")
+                                .map(|v| v.to_string_lossy().into()),
                             ..res
                         });
                     }
 
                     return Ok(Resolution {
-                        filename: FileName::Real(self.tsconfig.base_url.join(&to[0])),
+                        path: self.tsconfig.base_url.join(&to[0]),
                         slug,
                     });
                 }

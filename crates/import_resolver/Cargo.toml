@@ -8,7 +8,9 @@ edition = "2021"
 crate-type = ["lib"]
 
 [dependencies]
+ahashmap = { path = "../ahashmap" }
 anyhow = { workspace = true }
+compact_str = "0.9.0"
 dashmap = "6.0.1"
 ftree_cache = { path = "../ftree_cache" }
 hashbrown = "0.14.5"
@@ -23,8 +25,6 @@ packagejson_exports = { path = "../packagejson_exports" }
 serde_derive = "1.0.117"
 serde_json.workspace = true
 serde.workspace = true
-swc_common.workspace = true
-swc_ecma_loader.workspace = true
 thiserror.workspace = true
 tracing = "0.1.40"
 tsconfig_paths = { path = "../tsconfig_paths" }

@@ -1,8 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Error, Ok};
+use anyhow::Ok;
 use hashbrown::HashSet;
-use swc_ecma_loader::resolve::{Resolution, Resolve};
+
+use crate::resolve::{PathResolver, Resolution};
 
 use super::util::package_name;
 use packagejson::PackageJson;
@@ -46,20 +47,20 @@ impl<R> InternalOnlyResolver<R> {
     }
 }
 
-/// Implements Resolve for the InternalOnlyResolver
-impl<R: Resolve> Resolve for InternalOnlyResolver<R> {
+/// Implements PathResolver for the InternalOnlyResolver
+impl<R: PathResolver> PathResolver for InternalOnlyResolver<R> {
     fn resolve(
         &self,
-        base: &swc_common::FileName,
+        base: &Path,
         module_specifier: &str,
-    ) -> Result<Resolution, Error> {
+    ) -> anyhow::Result<Resolution> {
         // split the package name off the module_specifier, if any
         match package_name(module_specifier) {
             Some(packagename) if !self.internal_packages.contains(packagename) => {
                 // the package is not internal, leave it unresolved.
                 // (this will persist the import/require in the output)
                 Ok(Resolution {
-                    filename: swc_common::FileName::Real(PathBuf::from(module_specifier)),
+                    path: PathBuf::from(module_specifier),
                     slug: None,
                 })
             }

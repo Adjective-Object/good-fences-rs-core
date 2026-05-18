@@ -4,10 +4,10 @@ use std::{
 };
 
 use ahashmap::{AHashMap, AHashSet, ARandomState};
+use import_resolver::resolve::PathResolver;
 use multi_err::{MultiErr, MultiResult};
-use swc_common::{FileName, Span};
+use swc_common::Span;
 use swc_ecma_ast::ModuleExportName;
-use swc_ecma_loader::resolve::Resolve;
 
 // Re-export ast_segmenter types used by downstream consumers
 pub use ast_segmenter::segment_info::Segment;
@@ -394,8 +394,8 @@ struct ResolvedWithMapping<T> {
 }
 
 fn resolve_hashmap<T>(
-    from_file: &FileName,
-    resolver: impl Resolve,
+    from_file: &Path,
+    resolver: impl PathResolver,
     mut map: AHashMap<String, T>,
 ) -> MultiResult<ResolvedWithMapping<AHashMap<PathBuf, T>>, anyhow::Error> {
     let mut accum = AHashMap::with_capacity_and_hasher(map.len(), ARandomState::new());
@@ -410,18 +410,9 @@ fn resolve_hashmap<T>(
             }
         };
 
-        match resolved.filename {
-            FileName::Real(resolved_path) => {
-                spec_map.insert(import_specifier, resolved_path.clone());
-                accum.insert(resolved_path, imported_symbols);
-            }
-            _ => {
-                errs.add_single(anyhow::anyhow!(
-                    "resolved to a non-file path?: {:?}",
-                    resolved
-                ));
-            }
-        }
+        let resolved_path = resolved.path;
+        spec_map.insert(import_specifier, resolved_path.clone());
+        accum.insert(resolved_path, imported_symbols);
     }
     errs.with_value(ResolvedWithMapping {
         resolved: accum,
@@ -430,8 +421,8 @@ fn resolve_hashmap<T>(
 }
 
 fn resolve_hashset(
-    from_file: &FileName,
-    resolver: impl Resolve,
+    from_file: &Path,
+    resolver: impl PathResolver,
     mut set: AHashSet<String>,
 ) -> MultiResult<ResolvedWithMapping<AHashSet<PathBuf>>, anyhow::Error> {
     let mut accum = AHashSet::with_capacity_and_hasher(set.len(), ARandomState::new());
@@ -446,18 +437,9 @@ fn resolve_hashset(
             }
         };
 
-        match resolved.filename {
-            FileName::Real(path) => {
-                spec_map.insert(import_specifier, path.clone());
-                accum.insert(path);
-            }
-            _ => {
-                errs.add_single(anyhow::anyhow!(
-                    "resolved to a non-file path?: {:?}",
-                    resolved
-                ));
-            }
-        }
+        let path = resolved.path;
+        spec_map.insert(import_specifier, path.clone());
+        accum.insert(path);
     }
 
     errs.with_value(ResolvedWithMapping {
@@ -470,7 +452,7 @@ impl RawImportExportInfo {
     pub fn try_resolve(
         self,
         from_file_path: &Path,
-        resolver: impl Resolve,
+        resolver: impl PathResolver,
     ) -> MultiResult<(ResolvedImportExportInfo, AHashMap<String, PathBuf>), anyhow::Error> {
         let RawImportExportInfo {
             imported_path_ids,
@@ -481,26 +463,24 @@ impl RawImportExportInfo {
             executed_paths,
         } = self;
 
-        let from_file = FileName::Real(from_file_path.to_path_buf());
-
         let mut errs = MultiErr::<anyhow::Error>::new();
         let mut all_specifiers = AHashMap::default();
 
         let imports_r =
-            errs.extract(resolve_hashmap(&from_file, &resolver, imported_path_ids));
+            errs.extract(resolve_hashmap(from_file_path, &resolver, imported_path_ids));
         all_specifiers.extend(imports_r.specifier_map);
 
-        let requires_r = errs.extract(resolve_hashset(&from_file, &resolver, require_paths));
+        let requires_r = errs.extract(resolve_hashset(from_file_path, &resolver, require_paths));
         all_specifiers.extend(requires_r.specifier_map);
 
-        let paths_r = errs.extract(resolve_hashset(&from_file, &resolver, imported_paths));
+        let paths_r = errs.extract(resolve_hashset(from_file_path, &resolver, imported_paths));
         all_specifiers.extend(paths_r.specifier_map);
 
         let exports_r =
-            errs.extract(resolve_hashmap(&from_file, &resolver, export_from_ids));
+            errs.extract(resolve_hashmap(from_file_path, &resolver, export_from_ids));
         all_specifiers.extend(exports_r.specifier_map);
 
-        let executed_r = errs.extract(resolve_hashset(&from_file, &resolver, executed_paths));
+        let executed_r = errs.extract(resolve_hashset(from_file_path, &resolver, executed_paths));
         all_specifiers.extend(executed_r.specifier_map);
 
         MultiResult::with_errs(
