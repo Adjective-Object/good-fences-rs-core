@@ -18,7 +18,11 @@ After upgrading to `nightly-2026-03-24`, `unused_finder_napi` emits ~10 warnings
 form `unexpected cfg condition value: noop` from the `#[napi]` macro. These are upstream
 (napi-derive crate) and unrelated to our changes. Track whether napi-derive has a fix.
 
-## Consider `comment.attached_to` for `leading_comments_at`
+## `repo-health` test failure: Dockerfile Rust version mismatch
+
+`test_dockerfile_rust_version_matches_root_toml` in `repo-health` fails on the current branch
+(pre-existing, not introduced by the logger migration). The Dockerfile's toolchain version
+is out of sync with `rust-toolchain.toml`. Needs a Dockerfile update.
 
 OXC populates `Comment::attached_to` with the start offset of the token the leading comment
 is attached to. Once that semantic is confirmed stable, `leading_comments_at` could be

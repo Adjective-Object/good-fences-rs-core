@@ -77,7 +77,7 @@ pub fn get_file_segments(
     };
 
     let stdio_logger = StdioLogger::new();
-    let logger = WrapFileLogger::new(cm.as_ref(), &stdio_logger);
+    let logger = WrapFileLogger::from_swc_source_file(cm.as_ref(), &fm, &stdio_logger);
 
     let globals = Globals::new();
     let resolved = GLOBALS.set(&globals, || {

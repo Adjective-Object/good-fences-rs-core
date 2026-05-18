@@ -1,4 +1,4 @@
-use logger_srcfile::SrcFileLogger;
+use logger_srcfile::{swc_span_to_oxc, SrcFileLogger};
 use swc_common::comments::SingleThreadedComments;
 use swc_common::Spanned;
 use swc_ecma_visit::VisitWith;
@@ -73,28 +73,28 @@ fn module_item_to_segment(
                 }
                 swc_ecma_ast::Stmt::With(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::WithStatmentUnsupported,
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Return(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(RETURN),
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Break(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(BREAK),
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Continue(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(CONTINUE),
                     );
                     None
@@ -154,7 +154,7 @@ mod test {
         let module = parser.parse_typescript_module().expect("parse failed");
 
         let logger = logger::StdioLogger::new();
-        let file_logger = logger_srcfile::WrapFileLogger::new(cm, &logger);
+        let file_logger = logger_srcfile::WrapFileLogger::new("test.ts", src.to_string(), &logger);
         segment_file(&file_logger, &module, &comments)
     }
 

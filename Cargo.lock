@@ -1163,6 +1163,9 @@ name = "logger_srcfile"
 version = "0.2.0"
 dependencies = [
  "logger",
+ "once_cell",
+ "oxc_diagnostics",
+ "oxc_span",
  "swc_common",
 ]
 
