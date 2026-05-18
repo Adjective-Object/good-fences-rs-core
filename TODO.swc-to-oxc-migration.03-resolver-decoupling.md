@@ -10,11 +10,12 @@ New module `import_resolver/src/resolve.rs`:
 
 ```rust
 use std::path::{Path, PathBuf};
+use oxc_span::CompactStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
     pub path: PathBuf,
-    pub slug: Option<String>,
+    pub slug: Option<CompactStr>,
 }
 
 pub trait PathResolver: Send + Sync {
@@ -80,8 +81,9 @@ impl PathResolver for X {
 ```
 
 - [ ] Replace `&FileName` parameter with `&Path` in every `resolve(...)` signature
-- [ ] Drop the `FileName::Real(p) => p, _ => bail!(...)` match — base is already a `&Path`
-- [ ] Replace `swc_ecma_loader::resolve::Resolution` with `crate::resolve::Resolution` everywhere
+- [ ] Drop the `FileName::Real(p) => p, _ => bail!(...)` match — base is already a `&Path`. The non-`Real` variants (`Url`, `Anon`, `Custom`, `Macros`, …) are unreachable from good-fences code paths; no migration work needed for them
+- [ ] Replace `swc_ecma_loader::resolve::Resolution` with `crate::resolve::Resolution` everywhere; update every `Resolution { filename: FileName::Real(p), slug }` constructor to `Resolution { path: p, slug: slug.map(CompactStr::from) }`
+- [ ] Replace every `.filename` field read with `.path`; for the `match &res.filename { FileName::Real(p) => ..., _ => None }` patterns in `tsconfig_resolver.rs`, simplify to `Some(&res.path)` since `path` is always present
 - [ ] Replace `impl Resolve for ...` with `impl PathResolver for ...`
 - [ ] Replace `swc_common::collections::AHashMap` (used in `pkgjson_rewrites.rs`) with `ahashmap::AHashMap`
 - [ ] Replace `swc_ecma_loader::TargetEnv` references with `crate::resolve::TargetEnv`

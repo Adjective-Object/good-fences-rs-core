@@ -41,41 +41,64 @@ impl VariableScope {
 ## Implement segment-scoped binding extraction from `Semantic`
 
 Replace the `ast_name_tracker::visitor::find_names(...)` call in
-[ast_segmenter/src/visitor.rs](crates/ast_segmenter/src/visitor.rs) with logic
-that builds a `VariableScope` for each top-level statement using
-`Semantic.scoping()`:
+[ast_segmenter/src/visitor.rs](crates/ast_segmenter/src/visitor.rs) with a
+**single-pass bucketed** computation. For a file with N top-level statements
+and M total symbols/references, this is O(N + M log N) instead of the
+O(N·M) loop the original draft sketched.
 
 ```rust
-fn variables_for_top_level_stmt(
-    semantic: &Semantic<'_>,
-    stmt_span: Span,
-) -> VariableScope {
-    let mut scope = VariableScope::default();
-    // Bindings declared by `stmt_span`: symbols whose declaration span falls inside stmt_span
-    for symbol_id in semantic.scoping().symbol_ids() {
+/// Compute `VariableScope` for every top-level `Statement` in one pass.
+/// Returned vec has one entry per `program.body[i]` in order.
+fn variables_for_top_level_statements<'a>(
+    semantic: &Semantic<'a>,
+    body: &[Statement<'a>],
+) -> Vec<VariableScope> {
+    // Pre-sort statement spans for binary search.
+    let stmt_spans: Vec<(u32, u32)> =
+        body.iter().map(|s| (s.span().start, s.span().end)).collect();
+    let mut out: Vec<VariableScope> = (0..body.len()).map(|_| VariableScope::default()).collect();
+
+    let find_stmt = |offset: u32| -> Option<usize> {
+        // partition_point on stmt_spans by `end`; check that `start <= offset < end`.
+        let i = stmt_spans.partition_point(|(_, end)| *end <= offset);
+        stmt_spans.get(i).and_then(|(start, end)| (offset >= *start && offset < *end).then_some(i))
+    };
+
+    // Bindings: only walk the program scope (top-level decls).
+    let program_scope = semantic.scoping().root_scope_id();
+    for symbol_id in semantic.scoping().get_bindings(program_scope).values().copied() {
         let decl_span = semantic.symbol_span(symbol_id);
-        if stmt_span.contains_span(decl_span) && decl_span_is_top_level(...) {
-            let name = CompactStr::from(semantic.symbol_name(symbol_id));
-            let hoisting = hoisting_for_flags(semantic.symbol_flags(symbol_id));
-            scope.local_symbols.insert(name, hoisting);
-        }
+        let Some(stmt_idx) = find_stmt(decl_span.start) else { continue };
+        let name = CompactStr::from(semantic.symbol_name(symbol_id));
+        let hoisting = hoisting_for_flags(semantic.symbol_flags(symbol_id));
+        out[stmt_idx].local_symbols.insert(name, hoisting);
     }
-    // Escaped: references inside stmt_span whose symbol_id resolves outside stmt_span (or is None)
+
+    // Escaped: iterate references once; classify by containing statement.
     for reference in semantic.scoping().references() {
         let ref_span = semantic.reference_span(reference.id());
-        if !stmt_span.contains_span(ref_span) { continue; }
-        match reference.symbol_id() {
-            Some(sym) if stmt_span.contains_span(semantic.symbol_span(sym)) => {}
-            _ => { scope.escaped_symbols.insert(CompactStr::from(reference.name())); }
+        let Some(stmt_idx) = find_stmt(ref_span.start) else { continue };
+        let resolves_inside = match reference.symbol_id() {
+            Some(sym) => {
+                let sym_span = semantic.symbol_span(sym);
+                let (s, e) = stmt_spans[stmt_idx];
+                sym_span.start >= s && sym_span.end <= e
+            }
+            None => false,
+        };
+        if !resolves_inside {
+            out[stmt_idx].escaped_symbols.insert(CompactStr::from(reference.name()));
         }
     }
-    scope
+
+    out
 }
 ```
 
-(The exact `Semantic` accessors are: `scoping()`, `symbol_name(SymbolId)`,
-`symbol_flags(SymbolId)`, `symbols_declared_in_scope(ScopeId)`. Confirm names
-against the pinned oxc rev during implementation.)
+(The exact `Semantic` accessors — `scoping()`, `root_scope_id()`,
+`get_bindings()`, `symbol_name`, `symbol_span`, `symbol_flags`,
+`references()`, `reference_span`, `Reference::id`/`symbol_id`/`name` — are
+confirmed in phase 0.5.)
 
 Mapping from `SymbolFlags` to `HoistingLevel`:
 
@@ -85,9 +108,9 @@ Mapping from `SymbolFlags` to `HoistingLevel`:
 | `Function`                                 | `FunctionHoisting`     |
 | `BlockScopedVariable` / `FunctionScopedVariable` / `Class` / `TypeAlias` / `Interface` / `Enum` | `LetConstHoisting` |
 
-- [ ] Implement `variables_for_top_level_stmt(semantic, stmt_span) -> VariableScope`
+- [ ] Implement `variables_for_top_level_statements(semantic, body) -> Vec<VariableScope>` as above
 - [ ] Implement `hoisting_for_flags(SymbolFlags) -> HoistingLevel`
-- [ ] Wire it into `module_item_to_segment(...)` and `module_decl_to_segment(...)`
+- [ ] Wire it into `segment_file(...)`: compute the vec once at the top, index by statement position
 - [ ] Remove the temporary `ast_name_tracker` shim added in phase 3
 - [ ] Add `cargo test -p ast_segmenter` regression coverage: every existing test that asserted on `segment.variables` still passes
 
@@ -111,3 +134,14 @@ Mapping from `SymbolFlags` to `HoistingLevel`:
 - [ ] Remove its `members` entry from root `Cargo.toml` (workspace uses `crates/*` glob; nothing to remove unless explicitly listed)
 - [ ] `cargo build --workspace` passes
 - [ ] `cargo test --workspace` passes
+
+## Audit napi surface for atom-shaped exports
+
+The napi wire format will change for any exported type that contained
+`swc_atoms::Atom`-shaped names (atoms become plain JS strings on the
+boundary). This is acceptable per the plan; the audit just records what
+changes so consumers know to rebuild.
+
+- [ ] Grep `crates/unused_finder_napi/` and `crates/good_fences_napi/` for re-exports of `VariableScope`, `Segment`, `RawModuleDeps`, or any other type that previously held `Atom`
+- [ ] List each napi-exported type whose wire format changes in a new section of `NOTES.swc-to-oxc-migration.md` titled `## napi wire-format changes (phase 4)`
+- [ ] `pnpm test` (NAPI integration tests) passes after re-generating any `.d.ts` files

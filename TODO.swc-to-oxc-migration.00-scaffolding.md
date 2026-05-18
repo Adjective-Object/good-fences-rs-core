@@ -24,7 +24,7 @@ through phase 7.
 ## Create `oxc_utils_parse` crate
 
 Sibling of `swc_utils_parse`. Provides the parse entry point and the
-leading-comment adapter that later phases consume.
+leading-comment lookup helper that later phases consume.
 
 ```
 crates/oxc_utils_parse/
@@ -58,27 +58,30 @@ pub fn parse_tsx<'a>(allocator: &'a Allocator, source: &'a str) -> ParserReturn<
 
 ```rust
 // leading_comments.rs
-use ahashmap::AHashMap;
-use oxc_ast::{ast::Program, Comment};
+use oxc_ast::Comment;
 
-pub struct LeadingComments<'a> {
-    source: &'a str,
-    by_start: AHashMap<u32, &'a [Comment]>,
-}
-
-impl<'a> LeadingComments<'a> {
-    pub fn for_program(source: &'a str, program: &'a Program<'a>) -> Self { /* ... */ }
-    pub fn at(&self, statement_start: u32) -> &'a [Comment] { /* ... */ }
-    pub fn source(&self) -> &'a str { self.source }
-}
+/// Return the contiguous slice of comments in `comments` whose `span.end`
+/// falls immediately before `statement_start` with no intervening statement.
+///
+/// Assumes `comments` is sorted by `span.end` (oxc invariant on
+/// `Program.comments`). Implementation: `partition_point` to find the first
+/// comment whose `span.end > statement_start`, then walk backwards while the
+/// comments are contiguous (gap is only whitespace).
+pub fn leading_comments_at<'a>(
+    comments: &'a [Comment],
+    source: &str,
+    statement_start: u32,
+) -> &'a [Comment];
 ```
 
-- [ ] Create the crate with `Cargo.toml` depending on `oxc_allocator`, `oxc_ast`, `oxc_parser`, `oxc_span`, `ahashmap`
+No wrapper struct. Callers pass `&program.comments` directly.
+
+- [ ] Create the crate with `Cargo.toml` depending on `oxc_allocator`, `oxc_ast`, `oxc_parser`, `oxc_span`
 - [ ] Implement `parse_file`, `parse_ts`, `parse_tsx` in `lib.rs`
-- [ ] Implement `LeadingComments::for_program` by walking `program.comments` and `program.body` once, associating each comment range with the next statement's `span.start`
-- [ ] Implement `LeadingComments::at(lo)` returning the precomputed slice (empty slice if none)
+- [ ] Implement `leading_comments_at(comments, source, statement_start)` using `partition_point` + a backward walk that stops once the gap between two adjacent comments contains a non-whitespace byte
 - [ ] Add unit test: parse a `.ts` and a `.tsx` fixture; assert `errors.is_empty()`
-- [ ] Add unit test: source with `// @ALLOW-UNUSED-EXPORT\nexport const x = 1;` — assert `LeadingComments::at(span_of_export_x)` returns the comment
+- [ ] Add unit test: source `"// @ALLOW-UNUSED-EXPORT\nexport const x = 1;"` — parse, find the `Statement::ExportNamedDeclaration` in `program.body`, take its `.span.start`, assert `leading_comments_at(&program.comments, source, span.start)` returns one comment with `text` containing `"@ALLOW-UNUSED-EXPORT"`
+- [ ] Add unit test: source with an interior comment between two statements — assert that comment is NOT returned as leading for either neighbor (whichever rule we pick: it leads the second one if there's no blank-line gap, else neither). Document the rule we picked in a doc comment on `leading_comments_at`.
 
 ## Verify
 

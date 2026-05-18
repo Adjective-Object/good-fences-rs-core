@@ -14,6 +14,7 @@ Depends on phases 1–7.
 ## Remove the swc-compat adapter
 
 - [ ] Delete `WrapFileLogger::from_swc_source_file` (from phase 1)
+- [ ] Delete the `swc_span_to_oxc` helper (from phase 1)
 - [ ] Delete the `swc-compat` cargo feature in `logger_srcfile/Cargo.toml`
 - [ ] Confirm no caller still references it
 
@@ -39,7 +40,6 @@ Depends on phases 1–7.
 ## Bench + regression check
 
 - [ ] Run `cargo bench` for any crate that has bench targets
-- [ ] Compare wall-clock and allocation counts (if tracked) against a pre-migration baseline
 - [ ] Run `__test__/index.spec.mjs` end-to-end against a representative repo
 - [ ] Run any internal "spot check" script referenced in `scripts/`
 

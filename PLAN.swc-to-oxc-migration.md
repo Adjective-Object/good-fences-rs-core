@@ -53,8 +53,18 @@ borrow from that arena. Consequences:
 - Data structures that cross crate boundaries or outlive a single file's parse
   (e.g. `ast_segmenter::Segment`, `source_graph::SourceGraphFile`,
   `ast_name_tracker::VariableScope`) **must not** hold `Atom<'a>` references.
-- `Allocator` is `Send` but not `Sync`. Each Rayon worker creates its own
-  allocator, parses one file, extracts owned data, and drops the allocator.
+- `Allocator` is `Send` but not `Sync`. We use a **per-worker thread-local
+  arena** held in a `thread_local! { static ARENA: RefCell<Allocator> }` cell.
+  Each Rayon worker borrows the arena, parses one file, extracts owned data,
+  then calls `Allocator::reset()` (cheap — drops bumpalo chunks back to the
+  free list without freeing the backing allocation). This avoids per-call
+  allocator construction and keeps the steady-state arena size bounded by the
+  largest file each worker has parsed.
+
+  All visitor data that escapes a parse must be owned (no `Atom<'a>` / no
+  `&'a` into AST), or the next `reset()` will dangle. The `Segment` /
+  `RawModuleDeps` / `VariableScope` types are already shaped this way per the
+  rule above.
 
 ### Owned identifier type: `CompactStr`
 
@@ -95,32 +105,33 @@ Mapping from `HoistingLevel` to OXC `SymbolFlags`:
 
 ### Comments
 
-OXC stores `Vec<Comment>` directly on `Program` in source order; there is no
-`Comments::get_leading(BytePos)`. The segmenter pipeline builds a per-file
-**leading-comment index** before invoking visitors:
+OXC stores `Vec<Comment>` directly on `Program` in source order (sorted by
+`span.end`); there is no `Comments::get_leading(BytePos)`. We do **not**
+introduce a wrapper type — visitors take `comments: &[Comment]` directly
+(`&program.comments`) and resolve "comments leading statement at offset N" by
+binary-searching the slice for the contiguous run of comments whose
+`span.end <= N` and that aren't separated from N by another statement.
+
+A small free function lives in `oxc_utils_parse`:
 
 ```rust
-pub struct LeadingComments<'a> {
-    source: &'a str,
-    // statement-start byte offset → comment slice that immediately precedes it
-    by_start: AHashMap<u32, &'a [Comment]>,
-}
-impl<'a> LeadingComments<'a> {
-    pub fn for_program(source: &'a str, program: &'a Program<'a>) -> Self { ... }
-    pub fn at(&self, lo: u32) -> &'a [Comment] { ... }
-}
+pub fn leading_comments_at(comments: &[Comment], statement_start: u32) -> &[Comment];
 ```
 
 `SymbolTags::from_comments(comments: impl Comments, lo: BytePos)` becomes
-`SymbolTags::from_comments(comments: &LeadingComments<'_>, lo: u32)`.
+`SymbolTags::from_comments(comments: &[Comment], lo: u32)` and internally
+calls `leading_comments_at`.
 
 ### Diagnostics
 
 `swc_common::errors::Handler` is replaced with `oxc_diagnostics::OxcDiagnostic`
 + `NamedSource`. The `logger_srcfile` crate adopts `NamedSource` for
-file-aware rendering. Parser errors come back in `ParserReturn.errors:
-Vec<OxcDiagnostic>` and are joined as message strings (current behavior) or
-rendered with `miette` (richer output).
+file-aware rendering. `WrapFileLogger` holds **only** the `NamedSource<String>`
+(no separate `source` field); the source text is retrieved via
+`NamedSource::inner()` when needed, and `line_starts: Vec<u32>` is computed
+lazily on first error/warning. Parser errors come back in
+`ParserReturn.errors: Vec<OxcDiagnostic>` and are joined as message strings
+(current behavior) or rendered with `miette` (richer output).
 
 ### Resolver
 
@@ -129,16 +140,21 @@ rendered with `miette` (richer output).
 replaced by a local trait:
 
 ```rust
-pub struct Resolution { pub path: PathBuf, pub slug: Option<String> }
+use oxc_span::CompactStr;
+
+pub struct Resolution { pub path: PathBuf, pub slug: Option<CompactStr> }
 
 pub trait PathResolver: Send + Sync {
     fn resolve(&self, base: &Path, specifier: &str) -> anyhow::Result<Resolution>;
 }
 ```
 
-`swc_common::FileName::Real(p)` use sites become `&Path` directly. Internal
-caching (`ftree_cache`, `MonorepoResolver` ouroboros wrapper, `mark_dirty_root`)
-is preserved as-is.
+`swc_common::FileName::Real(p)` use sites become `&Path` directly. The other
+`FileName` variants (`Url`, `Anon`, `Custom`, `Macros`, etc.) are not used by
+any good-fences code path — every existing `match base { FileName::Real(p) =>
+p, _ => bail!(...) }` branch unconditionally errored. Phase 2 simply drops the
+match and uses the `&Path` directly. Internal caching (`ftree_cache`,
+`MonorepoResolver` ouroboros wrapper, `mark_dirty_root`) is preserved as-is.
 
 `NODE_BUILTINS` and `TargetEnv` are copied locally (each is a small constant
 list + enum).
@@ -151,23 +167,24 @@ list + enum).
 - **oxc stack** — the replacement (`oxc_allocator`, `oxc_ast`, `oxc_parser`,
   `oxc_semantic`, `oxc_ast_visit`, `oxc_span`, `oxc_diagnostics`).
 - **Extract-then-drop** — the parse pattern described above.
-- **Leading-comment index** — the precomputed `LeadingComments<'_>` adapter.
 
 ## Phase dependencies
 
 ```
 0-scaffolding
-   ├─→ 1-logger-srcfile       (independent leaf)
-   ├─→ 2-resolver-decoupling  (independent of AST work)
-   └─→ 3-ast-segmenter
-          └─→ 4-source-graph-and-name-tracker
-                 └─→ 5-unused-finder ←── (2-resolver-decoupling)
-                        └─→ 6-good-fences-get-imports
-                               └─→ 7-tag-graph
-                                      └─→ 8-cleanup
+   └─→ 0.5-visitor-spike      (validates oxc_ast / oxc_ast_visit shape before 3+)
+          ├─→ 1-logger-srcfile       (independent leaf)
+          ├─→ 2-resolver-decoupling  (independent of AST work)
+          └─→ 3-ast-segmenter
+                 └─→ 4-source-graph-and-name-tracker
+                        └─→ 5-unused-finder ←── (2-resolver-decoupling)
+                               └─→ 6-good-fences-get-imports
+                                      └─→ 7-tag-graph
+                                             └─→ 8-cleanup
 ```
 
-Phases 1 and 2 are independent of the rest and can land first.
+Phases 1 and 2 are independent of the rest and can land first (but after 0.5
+so the visitor shape is locked in).
 
 Both stacks coexist between Phase 0 and Phase 8. Phase 8 removes the swc
 workspace deps and the `box_patterns` feature.
@@ -181,9 +198,15 @@ workspace deps and the `box_patterns` feature.
 - Adopting `oxc_codegen` or any AST printer. The only printer call site
   (`swc_utils_print::normalise_src`) is test-only and is deleted in Phase 8.
 - Replacing `ahashmap::AHashMap` with `oxc_data_structures::FxHashMap`.
-- Migrating the napi crates' public API shape. Internal call sites change;
-  exported types stay binary-compatible.
-- Performance tuning beyond restoring parity with the swc baseline.
+
+### Expected breakage
+
+- The napi crates' wire format **will change** for any exported type that
+  contained `swc_atoms::Atom`-shaped names (notably anything reachable from
+  `VariableScope` or `Segment` if those leak through `unused_finder_napi` /
+  `good_fences_napi`). Atoms become plain JS strings on the boundary. This is
+  acceptable; consumers of the napi packages must rebuild and re-deserialize
+  any cached output. Phase 4 audits the napi surface for atom-shaped exports.
 
 ## Cross-cutting test gates
 
@@ -196,6 +219,6 @@ After each phase:
 
 After Phase 8:
 
-- Run the full benchmarks (see crate-level `cargo bench` targets) and confirm
-  no regressions in `unused_finder` / `good_fences` end-to-end on the existing
-  test corpus.
+- Run the full benchmarks (see crate-level `cargo bench` targets) on the
+  existing test corpus. (No formal baseline is captured; eyeball for order-
+  of-magnitude regressions.)
