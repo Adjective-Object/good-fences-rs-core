@@ -1,5 +1,5 @@
 [toolchain]
-channel = "nightly-2024-10-25"
+channel = "nightly-2026-03-24"
 profile = "default"
 components = [
     # Include rust-analyzer, because we want to use the version of rust-analyzer

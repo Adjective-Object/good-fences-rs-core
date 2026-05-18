@@ -6,6 +6,13 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
+oxc_allocator = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_ast      = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_ast_visit = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_parser   = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_semantic  = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_span     = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_diagnostics = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
 jwalk = "0.5"
 napi = { version = "2.16.6", default-features = false, features = [
     "compat-mode",
