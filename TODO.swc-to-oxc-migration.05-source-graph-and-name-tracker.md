@@ -144,4 +144,4 @@ changes so consumers know to rebuild.
 
 - [x] Grep `crates/unused_finder_napi/` and `crates/good_fences_napi/` for re-exports of `VariableScope`, `Segment`, `RawModuleDeps`, or any other type that previously held `Atom`
 - [x] List each napi-exported type whose wire format changes in a new section of `NOTES.swc-to-oxc-migration.md` titled `## napi wire-format changes (phase 4)`
-- [ ] `pnpm test` (NAPI integration tests) passes after re-generating any `.d.ts` files
+- [x] `pnpm test` (NAPI integration tests) passes after re-generating any `.d.ts` files

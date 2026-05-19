@@ -64,9 +64,15 @@ top-level statement. The body is pre-filtered to only module declarations; the
 variables vec covers all statements, so the index into `variables` uses the
 original unfiltered position.
 
+## NAPI integration tests pass
+
+`yarn test` (project uses yarn, not pnpm) was run after `yarn build:debug`. All
+3 integration tests passed. No `.d.ts` regeneration was needed — the napi
+wire-format did not change (no `Atom`-shaped types exposed through the napi
+boundary).
+
 ## Remaining follow-up (not blocking phase 5)
 
 - `segment_graph.rs` still uses `swc_atoms::Atom` for `Name` — deferred to
   phase 8/9 cleanup.
-- `pnpm test` (NAPI integration tests) was not run; no napi types changed.
 - `repo-health` Dockerfile version mismatch is pre-existing and unrelated.
