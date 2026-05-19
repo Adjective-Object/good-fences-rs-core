@@ -136,39 +136,6 @@ impl<TLogger: Logger> SrcFileLogger for SimpleSourceFileLogger<'_, TLogger> {
     }
 }
 
-#[cfg(feature = "swc-compat")]
-mod swc_compat_impl {
-    use swc_common::{SourceFile, SourceMap};
-
-    use super::{Logger, WrapFileLogger};
-
-    impl<TLogger: Logger> WrapFileLogger<TLogger> {
-        /// Construct a `WrapFileLogger` from a swc `SourceFile`.
-        /// Used as a transition adapter while callers still use the swc parser.
-        pub fn from_swc_source_file(
-            _sm: &SourceMap,
-            fm: &SourceFile,
-            inner_logger: TLogger,
-        ) -> Self {
-            let filename = fm.name.to_string();
-            let source = (*fm.src).clone();
-            Self::new(filename, source, inner_logger)
-        }
-    }
-
-    /// Convert a `swc_common::Span` to an `oxc_span::Span`.
-    /// The byte positions are taken directly from the swc `BytePos` inner `u32` values.
-    /// These are source-map-global offsets and may not be file-relative for
-    /// multi-file source maps, but are adequate for diagnostic logging during
-    /// the transition period.
-    pub fn swc_span_to_oxc(span: swc_common::Span) -> oxc_span::Span {
-        oxc_span::Span::new(span.lo.0, span.hi.0)
-    }
-}
-
-#[cfg(feature = "swc-compat")]
-pub use swc_compat_impl::swc_span_to_oxc;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,12 +190,5 @@ mod tests {
         assert_eq!(logger.line_col(5), (3, 0)); // 'c'
     }
 
-    #[cfg(feature = "swc-compat")]
-    #[test]
-    fn swc_span_to_oxc_round_trip() {
-        use swc_common::BytePos;
-        let swc_span = swc_common::Span::new(BytePos(3), BytePos(7));
-        let oxc_span = swc_span_to_oxc(swc_span);
-        assert_eq!(oxc_span, oxc_span::Span::new(3, 7));
-    }
+
 }

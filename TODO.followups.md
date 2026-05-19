@@ -53,3 +53,17 @@ documentation in Phase 9 cleanup.
 mode for `.js` files, rejecting TypeScript syntax (`export type`, interfaces, etc.)
 common in this codebase. Fixed in phase 5 to always use TypeScript mode. Tracked here
 in case other callers of `SourceType::from_path` exist.
+
+## `cargo-shear` not available for unused-dep scanning (phase 9)
+
+`cargo shear --workspace` was called for as part of the phase 9 cleanup but
+`cargo-shear` is not installed in this environment.  A manual scan of all
+`Cargo.toml` files confirmed no remaining SWC references.  Install
+`cargo-shear` (`cargo install cargo-shear`) and run it once to catch any
+other stale workspace deps.
+
+## End-to-end `__test__/index.spec.mjs` not run during phase 9
+
+The integration test requires a built `.node` binary (NAPI); that build was
+not performed during this phase.  Run `yarn build && yarn test` against a
+representative repo to confirm full end-to-end parity after the SWC removal.
