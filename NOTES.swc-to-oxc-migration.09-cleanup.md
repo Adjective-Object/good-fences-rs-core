@@ -51,3 +51,17 @@ This file does not exist in the repo — nothing to archive.
 changes were made in this phase (pure dead-code deletion), so order-of-magnitude
 regressions are not expected.  Full bench run skipped per the plan ("eyeball for
 order-of-magnitude regressions" only).
+
+## End-to-end napi test (`__test__/index.spec.mjs`)
+
+Ran via `yarn test` against the pre-built `@good-fences.linux-x64-gnu.node`
+binary already present in the repo root.  All 3 ava tests passed:
+
+- Full integration run: 6 violations detected (correct).
+- `ignoredDirs: ['componentA']`: 2 violations + 1 unresolved file (correct).
+- `ignoredDirs: ['componentA', 'complexComponentA']`: 1 violation + 1 unresolved
+  file (correct).
+
+Parse-error files emit a non-fatal warning (expected — the test corpus includes
+an intentionally-invalid `.ts` file).  The counts match the hardcoded assertions
+in the test.

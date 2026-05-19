@@ -43,7 +43,8 @@ Depends on phases 1–7.
 
 - [x] Run `cargo bench` for any crate that has bench targets
       (`--no-run` succeeds; full run skipped — no algorithmic changes in this phase)
-- [ ] Run `__test__/index.spec.mjs` end-to-end against a representative repo
+- [x] Run `__test__/index.spec.mjs` end-to-end against a representative repo
+      (3/3 ava tests pass against `good_fences_integration`; 6 expected violations confirmed)
 - [x] Run any internal "spot check" script referenced in `scripts/`
 
 ## Documentation
