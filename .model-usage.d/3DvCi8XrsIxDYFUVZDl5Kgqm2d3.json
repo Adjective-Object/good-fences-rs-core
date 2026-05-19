@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.07-good-fences-get-imports.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.7",
+    "tokens_in": 3754385,
+    "tokens_out": 43903,
+    "tokens_cached": 3566180,
+    "premium_requests": 1
+  },
+  "started_at": "2026-05-19T01:14:40.313102023Z",
+  "completed_at": "2026-05-19T01:27:27.760550137Z",
+  "session_id": "3DvCi8XrsIxDYFUVZDl5Kgqm2d3",
+  "runtime_name": "github-copilot-agent-claude-opus-4.7",
+  "success": true,
+  "machine_id": "9372feebe55f5c9c"
+}

@@ -19,8 +19,6 @@ pathdiff = "0.2.0"
 rayon = { workspace = true }
 path-slash = "0.2.1"
 path-clean = "0.1.0"
-swc_ecma_parser.workspace = true
-swc_common.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -28,11 +26,12 @@ thiserror.workspace = true
 import_resolver = { path = "../import_resolver" }
 path_utils = { path = "../path_utils" }
 tsconfig_paths = { path = "../tsconfig_paths" }
-swc_ecma_ast.workspace = true
-swc_ecma_visit.workspace = true
-swc_ecma_transforms.workspace = true
+oxc_allocator.workspace = true
+oxc_ast.workspace = true
+oxc_ast_visit.workspace = true
+oxc_semantic.workspace = true
+oxc_utils_parse = { version = "0.1.0", path = "../oxc_utils_parse" }
 glob-match.workspace = true
 
 [dev-dependencies]
-swc_utils_parse = { path = "../swc_utils_parse" }
 text-diff = "0.4.0"

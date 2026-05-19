@@ -1,376 +1,279 @@
-use std::{
-    collections::{HashMap, HashSet},
-    iter::FromIterator,
-};
+use std::collections::{HashMap, HashSet};
 
-use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, Id, ImportDecl, ImportSpecifier, Lit, ModuleExportName,
-    NamedExport, TsImportEqualsDecl,
+use oxc_ast::ast::{
+    Argument, CallExpression, Expression, ExportNamedDeclaration, ImportDeclaration,
+    ImportDeclarationSpecifier, ImportExpression, ModuleExportName, TSImportEqualsDeclaration,
+    TSModuleReference,
 };
-use swc_ecma_visit::{Visit, VisitWith};
+use oxc_ast_visit::{walk, Visit};
+use oxc_semantic::Semantic;
 
-#[derive(Debug)]
-pub struct ImportPathVisitor {
+pub struct ImportPathVisitor<'s, 'a> {
     pub require_paths: HashSet<String>,
     pub import_paths: HashSet<String>,
     pub imports_map: HashMap<String, HashSet<String>>,
-    require_identifiers: HashSet<Id>,
+    semantic: &'s Semantic<'a>,
 }
-
-impl Default for ImportPathVisitor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ImportPathVisitor {
-    pub fn new() -> Self {
+impl<'s, 'a> ImportPathVisitor<'s, 'a> {
+    pub fn new(semantic: &'s Semantic<'a>) -> Self {
         Self {
             require_paths: HashSet::new(),
             import_paths: HashSet::new(),
             imports_map: HashMap::new(),
-            require_identifiers: HashSet::new(),
+            semantic,
         }
     }
 }
 
-impl Visit for ImportPathVisitor {
-    fn visit_named_export(&mut self, export: &NamedExport) {
-        export.visit_children_with(self);
+/// Returns true if `ident` is an unresolved reference to the global `require`.
+fn is_global_require<'a>(
+    semantic: &Semantic<'a>,
+    ident: &oxc_ast::ast::IdentifierReference<'a>,
+) -> bool {
+    if ident.name != "require" {
+        return false;
+    }
+    let Some(ref_id) = ident.reference_id.get() else {
+        return false;
+    };
+    semantic.scoping().get_reference(ref_id).symbol_id().is_none()
+}
 
-        if let Some(source) = &export.src {
-            let source = source.value.to_string();
-            let mut specifiers: HashSet<String> = export
+/// Extract the string value from all three `ModuleExportName` variants.
+fn module_export_name_str(name: &ModuleExportName) -> String {
+    match name {
+        ModuleExportName::IdentifierName(ident) => ident.name.to_string(),
+        ModuleExportName::IdentifierReference(ident) => ident.name.to_string(),
+        ModuleExportName::StringLiteral(s) => s.value.to_string(),
+    }
+}
+
+impl<'s, 'a> Visit<'a> for ImportPathVisitor<'s, 'a> {
+    fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'a>) {
+        // Walk children so that any require()/import() inside exported declarations are found.
+        walk::walk_export_named_declaration(self, export);
+
+        if let Some(source) = &export.source {
+            let source_str = source.value.to_string();
+            let specifiers: HashSet<String> = export
                 .specifiers
                 .iter()
-                .filter_map(|x| -> Option<String> {
-                    if let Some(named) = x.as_named() {
-                        if let ModuleExportName::Ident(ident) = &named.orig {
-                            return Some(ident.sym.to_string());
-                        }
-                    }
-                    if x.is_default() {
-                        return Some("default".to_string());
-                    }
-                    None
-                })
+                .map(|spec| module_export_name_str(&spec.local))
                 .collect();
 
-            if let Some(imports) = self.imports_map.get_mut(&source) {
-                specifiers.drain().for_each(|x| {
-                    imports.insert(x);
-                });
+            if let Some(imports) = self.imports_map.get_mut(&source_str) {
+                for s in specifiers {
+                    imports.insert(s);
+                }
             } else {
-                self.imports_map
-                    .insert(source, HashSet::from_iter(specifiers));
+                self.imports_map.insert(source_str, specifiers);
             }
         }
     }
 
-    fn visit_binding_ident(&mut self, binding: &BindingIdent) {
-        binding.visit_children_with(self);
-        if binding.sym == *"require" {
-            self.require_identifiers.insert(binding.id.to_id());
+    fn visit_ts_import_equals_declaration(&mut self, decl: &TSImportEqualsDeclaration<'a>) {
+        if let TSModuleReference::ExternalModuleReference(emr) = &decl.module_reference {
+            self.import_paths.insert(emr.expression.value.to_string());
         }
     }
 
-    fn visit_ts_import_equals_decl(&mut self, decl: &TsImportEqualsDecl) {
-        decl.visit_children_with(self);
-        if let Some(module_ref) = decl.module_ref.as_ts_external_module_ref() {
-            self.import_paths.insert(module_ref.expr.value.to_string());
+    fn visit_import_expression(&mut self, import: &ImportExpression<'a>) {
+        // Walk children first to handle nested import() expressions.
+        walk::walk_import_expression(self, import);
+        if let Expression::StringLiteral(path) = &import.source {
+            self.import_paths.insert(path.value.to_string());
         }
     }
 
-    fn visit_call_expr(&mut self, expr: &CallExpr) {
-        expr.visit_children_with(self);
-        if let Callee::Import(_) = &expr.callee {
-            if let Some(import_path) = extract_argument_value(expr) {
-                self.import_paths.insert(import_path);
-            }
-        } else if let Callee::Expr(callee) = &expr.callee {
-            if let Some(ident) = callee.as_ident() {
-                if ident.sym == "require" && !self.require_identifiers.contains(&ident.to_id()) {
-                    if let Some(import_path) = extract_argument_value(expr) {
-                        self.require_paths.insert(import_path);
-                    }
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // Walk children first so nested require()/import() calls are captured.
+        walk::walk_call_expression(self, call);
+
+        if let Expression::Identifier(ident) = &call.callee {
+            if is_global_require(self.semantic, ident) {
+                if let Some(path) = extract_argument_value(&call.arguments) {
+                    self.require_paths.insert(path);
                 }
             }
         }
     }
 
-    fn visit_import_decl(&mut self, node: &ImportDecl) {
-        node.visit_children_with(self);
-        let source_path = node.src.value.to_string();
+    fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
+        let source_path = node.source.value.to_string();
+        let specifiers = node.specifiers.as_deref().map_or(&[][..], |v| v.as_slice());
         if let Some(imported_names) = self.imports_map.get_mut(&source_path) {
-            for spec in &node.specifiers {
+            for spec in specifiers {
                 append_imported_names(spec, imported_names);
             }
         } else {
             let mut imported_names = HashSet::new();
-            for spec in &node.specifiers {
+            for spec in specifiers {
                 append_imported_names(spec, &mut imported_names);
             }
-            self.imports_map.insert(source_path.clone(), imported_names);
+            self.imports_map.insert(source_path, imported_names);
         }
     }
 }
 
-fn append_imported_names(spec: &ImportSpecifier, imported_names: &mut HashSet<String>) {
-    if let Some(named) = spec.as_named() {
-        match &named.imported {
-            Some(imported) => match imported {
-                ModuleExportName::Ident(identifier) => {
-                    imported_names.insert(identifier.sym.to_string());
-                }
-                ModuleExportName::Str(str_value) => {
-                    imported_names.insert(str_value.value.to_string());
-                }
-            },
-            None => {
-                imported_names.insert(named.local.sym.to_string());
-            }
+fn append_imported_names(spec: &ImportDeclarationSpecifier, imported_names: &mut HashSet<String>) {
+    match spec {
+        ImportDeclarationSpecifier::ImportSpecifier(named) => {
+            imported_names.insert(module_export_name_str(&named.imported));
         }
-    }
-    if spec.is_default() {
-        imported_names.insert("default".to_string());
+        ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {
+            imported_names.insert("default".to_string());
+        }
+        ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => {
+            // Namespace imports (`import * as foo`) carry no specific named specifier.
+        }
     }
 }
 
-fn extract_argument_value(expr: &CallExpr) -> Option<String> {
-    let import_path = match expr.args.is_empty() {
-        true => return None,
-        false => expr.args.first(),
-    };
-    if let Some(path) = import_path {
-        if let Some(path_lit) = path.expr.as_lit() {
-            match path_lit {
-                Lit::Str(value) => {
-                    return Some(value.value.to_string());
-                }
-                _ => return None,
-            }
-        }
+fn extract_argument_value(args: &[Argument]) -> Option<String> {
+    match args.first()? {
+        Argument::StringLiteral(s) => Some(s.value.to_string()),
+        _ => None,
     }
-    None
 }
 
 #[cfg(test)]
 mod test {
     use std::collections::{HashMap, HashSet};
-    use swc_common::{Globals, Mark, GLOBALS};
-    use swc_ecma_transforms::resolver;
-    use swc_ecma_visit::{FoldWith, VisitWith};
 
-    use swc_utils_parse::parse_ecma_src;
+    use oxc_allocator::Allocator;
+    use oxc_ast_visit::Visit;
+    use oxc_semantic::SemanticBuilder;
+    use oxc_utils_parse::parse_ts;
 
     use super::ImportPathVisitor;
 
+    struct VisitorResult {
+        require_paths: HashSet<String>,
+        import_paths: HashSet<String>,
+        imports_map: HashMap<String, HashSet<String>>,
+    }
+
+    fn run(source: &str) -> VisitorResult {
+        let allocator = Allocator::default();
+        let ret = parse_ts(&allocator, source);
+        let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+        let mut visitor = ImportPathVisitor::new(&semantic);
+        visitor.visit_program(&ret.program);
+        VisitorResult {
+            require_paths: visitor.require_paths,
+            import_paths: visitor.import_paths,
+            imports_map: visitor.imports_map,
+        }
+    }
+
     #[test]
     fn text_export_from() {
-        let (_, module) = parse_ecma_src(
-            "test.ts",
-            r#"export { default as a, foo as bar } from './foo'"#,
-        );
-
-        let mut visitor = ImportPathVisitor::new();
-        module.visit_with(&mut visitor);
+        let result = run(r#"export { default as a, foo as bar } from './foo'"#);
         let expected_map: HashMap<String, HashSet<String>> = HashMap::from([(
             "./foo".to_owned(),
             HashSet::from(["default".to_owned(), "foo".to_owned()]),
         )]);
-        assert_eq!(expected_map, visitor.imports_map);
+        assert_eq!(expected_map, result.imports_map);
     }
 
     #[test]
     fn test_require_imports() {
-        let (_, module) = parse_ecma_src("test.ts", r#"require('hello-world')"#.to_string());
-        let mut visitor = ImportPathVisitor::new();
-        module.visit_with(&mut visitor);
+        let result = run(r#"require('hello-world')"#);
         let expected_require_set = HashSet::from(["hello-world".to_string()]);
-        assert_eq!(expected_require_set, visitor.require_paths);
+        assert_eq!(expected_require_set, result.require_paths);
     }
 
     #[test]
     fn test_import_call() {
-        let (_, module) = parse_ecma_src(
-            "test.ts",
-            r#"
-                import('foo')
-                "#
-            .to_string(),
-        );
-        let mut visitor = ImportPathVisitor::new();
-
-        module.visit_with(&mut visitor);
+        let result = run("import('foo')");
         let expected_import_paths = HashSet::from(["foo".to_string()]);
-        assert_eq!(expected_import_paths, visitor.import_paths);
+        assert_eq!(expected_import_paths, result.import_paths);
     }
 
     #[test]
     fn test_nested_import_call() {
-        let (_, module) = parse_ecma_src(
-            "test.ts",
-            r#"
-                import(import('import_subrequire').default + '/parent')
-                "#
-            .to_string(),
-        );
-        let mut visitor = ImportPathVisitor::new();
-
-        module.visit_with(&mut visitor);
+        let result = run("import(import('import_subrequire').default + '/parent')");
         let expected_import_paths = HashSet::from(["import_subrequire".to_string()]);
-        assert_eq!(expected_import_paths, visitor.import_paths);
+        assert_eq!(expected_import_paths, result.import_paths);
     }
 
     #[test]
     fn test_require_shadowing() {
-        let globals = Globals::new();
-        GLOBALS.set(&globals, || {
-            let (_, module) = parse_ecma_src(
-                "test.ts",
-                r#"
-                require("foo");
-                (function() {
-                  const require = console.log;
-                  require("bar");
-                })();
-                require("original")
-                "#
-                .to_string(),
-            );
-            let mut visitor = ImportPathVisitor::new();
-
-            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = module.clone().fold_with(&mut resolver);
-            resolved.visit_with(&mut visitor);
-            let expected_require_set = HashSet::from(["foo".to_string(), "original".to_string()]);
-            assert_eq!(expected_require_set, visitor.require_paths);
-        });
+        // require at outer scope is global; require shadowed inside an IIFE is local.
+        let result = run(r#"
+            require("foo");
+            (function() {
+              const require = console.log;
+              require("bar");
+            })();
+            require("original")
+        "#);
+        let expected_require_set = HashSet::from(["foo".to_string(), "original".to_string()]);
+        assert_eq!(expected_require_set, result.require_paths);
     }
 
     #[test]
     fn test_imports() {
-        let (_, module) = parse_ecma_src(
-            "test.ts",
-            r#"
-            import foo from './bar';
-            "#,
-        );
-
-        let mut visitor = ImportPathVisitor::new();
-        module.visit_with(&mut visitor);
-
+        let result = run("import foo from './bar';");
         let expected_import_map =
             HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
-
-        assert_eq!(expected_import_map, visitor.imports_map);
+        assert_eq!(expected_import_map, result.imports_map);
     }
 
     #[test]
     fn trest_import_with_satisfies() {
-        let (_, module) = parse_ecma_src(
-            "test.ts",
-            r#"
+        let result = run(r#"
             import foo from './bar';
             foo satisfies never;
-            "#,
-        );
-
-        let mut visitor = ImportPathVisitor::new();
-        module.visit_with(&mut visitor);
-
+        "#);
         let expected_import_map =
             HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
-
-        assert_eq!(expected_import_map, visitor.imports_map);
+        assert_eq!(expected_import_map, result.imports_map);
     }
 
     #[test]
     fn test_imports_specifiers() {
-        let (_, module) = parse_ecma_src(
-            "test.ts",
-            r#"
-            import {foo, bar} from './bar';
-            "#,
-        );
-
-        let mut visitor = ImportPathVisitor::new();
-        module.visit_with(&mut visitor);
-
+        let result = run("import {foo, bar} from './bar';");
         let expected_import_map = HashMap::from([(
             "./bar".to_string(),
             HashSet::from(["foo".to_string(), "bar".to_string()]),
         )]);
-
-        assert_eq!(expected_import_map, visitor.imports_map);
+        assert_eq!(expected_import_map, result.imports_map);
     }
 
     #[test]
     fn test_require_redefinition() {
-        let mut visitor = ImportPathVisitor::new();
-        let globals = Globals::new();
-        GLOBALS.set(&globals, || {
-            let (_, module) = parse_ecma_src(
-                "test.ts",
-                r#"
-                require('before_definition')
-                var require = function(){}
-                require('after_definition')
-                "#
-                .to_string(),
-            );
-
-            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = module.clone().fold_with(&mut resolver);
-            resolved.visit_with(&mut visitor);
-        });
-        let expected_require_set = HashSet::from(["before_definition".to_string()]);
-        assert_eq!(expected_require_set, visitor.require_paths);
+        // `var require` is hoisted to the top of the scope; both call sites resolve
+        // to the local symbol, so neither is treated as the global require.
+        let result = run(r#"
+            require('before_definition')
+            var require = function(){}
+            require('after_definition')
+        "#);
+        assert!(
+            result.require_paths.is_empty(),
+            "expected no global require calls, got {:?}",
+            result.require_paths
+        );
     }
 
     #[test]
     fn test_require_inside_call_expr() {
-        let mut visitor = ImportPathVisitor::new();
-        let globals = Globals::new();
-        GLOBALS.set(&globals, || {
-            let (_, module) = parse_ecma_src(
-                "test.ts",
-                r#"
-                (function otherFunction() {})(require('arg_subrequire'))
-                (require('callee_subrequire'))("foo")
-                "#
-                .to_string(),
-            );
-
-            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = module.clone().fold_with(&mut resolver);
-            resolved.visit_with(&mut visitor);
-        });
+        let result = run(r#"
+            (function otherFunction() {})(require('arg_subrequire'))
+            (require('callee_subrequire'))("foo")
+        "#);
         let expected_require_set = HashSet::from([
             "arg_subrequire".to_string(),
             "callee_subrequire".to_string(),
         ]);
-        assert_eq!(expected_require_set, visitor.require_paths);
+        assert_eq!(expected_require_set, result.require_paths);
     }
 
     #[test]
     fn test_require_inside_require() {
-        let mut visitor = ImportPathVisitor::new();
-        let globals = Globals::new();
-        GLOBALS.set(&globals, || {
-            let (_, module) = parse_ecma_src(
-                "test.ts",
-                r#"
-                require(require('require_subrequire').default + '/parent')
-                "#
-                .to_string(),
-            );
-
-            let mut resolver = resolver(Mark::fresh(Mark::root()), Mark::fresh(Mark::root()), true);
-            let resolved = module.clone().fold_with(&mut resolver);
-            resolved.visit_with(&mut visitor);
-        });
+        let result = run(r#"require(require('require_subrequire').default + '/parent')"#);
         let expected_require_set = HashSet::from(["require_subrequire".to_string()]);
-        assert_eq!(expected_require_set, visitor.require_paths);
+        assert_eq!(expected_require_set, result.require_paths);
     }
 }

@@ -821,6 +821,11 @@ dependencies = [
  "import_resolver",
  "jwalk",
  "lazy_static",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_semantic",
+ "oxc_utils_parse",
  "path-clean",
  "path-slash",
  "path_utils",
@@ -831,12 +836,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
- "swc_ecma_transforms",
- "swc_ecma_visit",
- "swc_utils_parse",
  "text-diff",
  "thiserror 1.0.63",
  "tsconfig_paths",
@@ -2668,20 +2667,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "swc_ecma_transforms"
-version = "0.238.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6a33679b1611630ee41f8ee8b41b9587de4171819698d313f7f8ae2c699f41a"
-dependencies = [
- "swc_atoms",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_transforms_base",
- "swc_ecma_utils",
- "swc_ecma_visit",
-]
-
-[[package]]
 name = "swc_ecma_transforms_base"
 version = "0.144.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3224,9 +3209,6 @@ dependencies = [
  "serde_json",
  "source_graph",
  "stringreader",
- "swc_common",
- "swc_ecma_parser",
- "swc_utils_parse",
  "tag_graph",
  "test_tmpdir",
  "thiserror 1.0.63",
