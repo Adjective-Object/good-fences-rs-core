@@ -1,0 +1,8 @@
+#!/bin/sh
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export PATH="${PATH}:${REPO_ROOT}/target/debug"
+if ! command -v git-hooks >/dev/null 2>&1; then
+    echo "git-hooks not found, building it first..."
+    cargo build --bin git-hooks
+fi
+exec git-hooks hook commit-msg "$@"

@@ -143,29 +143,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
-name = "ast-name-tracker"
-version = "0.2.0-beta.1"
-dependencies = [
- "ahashmap",
- "logger",
- "logger_srcfile",
- "oxc_semantic",
- "oxc_span",
- "pretty_assertions",
- "swc_atoms",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_visit",
- "swc_utils_parse",
- "thiserror 1.0.63",
-]
-
-[[package]]
 name = "ast-segmenter"
 version = "0.2.0-beta.1"
 dependencies = [
  "ahashmap",
- "ast-name-tracker",
+ "compact_str",
  "logger",
  "logger_srcfile",
  "oxc_allocator",
@@ -2386,11 +2368,10 @@ name = "source_graph"
 version = "0.2.0"
 dependencies = [
  "ahashmap",
- "ast-name-tracker",
  "ast-segmenter",
+ "compact_str",
+ "oxc_span",
  "pretty_assertions",
- "swc_atoms",
- "swc_common",
 ]
 
 [[package]]
@@ -2900,13 +2881,12 @@ name = "tag_graph"
 version = "0.2.0"
 dependencies = [
  "ahashmap",
- "ast-name-tracker",
  "ast-segmenter",
  "bitflags",
+ "compact_str",
+ "oxc_span",
  "pretty_assertions",
  "source_graph",
- "swc_atoms",
- "swc_common",
 ]
 
 [[package]]
@@ -3217,7 +3197,6 @@ dependencies = [
  "abspath",
  "ahashmap",
  "anyhow",
- "ast-name-tracker",
  "ast-segmenter",
  "bitflags",
  "const_format",

@@ -5,10 +5,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use ahashmap::{AHashMap, AHashSet};
-use ast_name_tracker::visitor::HoistingLevel;
+use ast_segmenter::variables::HoistingLevel;
 use ast_segmenter::segment_info::Segment;
 use ast_segmenter::{ExportedSymbol, ImportTarget};
-use swc_atoms::Atom;
+use compact_str::CompactString as CompactStr;
 
 pub use edge::SegmentEdge;
 pub use segment_key::SegmentKey;
@@ -29,7 +29,7 @@ struct SourceGraphFile {
     /// Exported symbol → segment index that declares the export
     symbol_to_segment: AHashMap<ExportedSymbol, u32>,
     /// Local name → Vec<(segment_idx, HoistingLevel)> for intra-file lookup
-    name_to_declaring_segments: AHashMap<Atom, Vec<(u32, HoistingLevel)>>,
+    name_to_declaring_segments: AHashMap<CompactStr, Vec<(u32, HoistingLevel)>>,
     /// Named re-exports: exported symbol → list of (target path, symbol to look up in target)
     named_reexports: AHashMap<ExportedSymbol, Vec<ReExportEntry>>,
     /// Star re-export paths (`export * from`): resolved target paths
@@ -106,7 +106,7 @@ impl SourceGraph {
         resolved_import_paths: AHashMap<String, PathBuf>,
     ) -> SourceGraphFile {
         let mut symbol_to_segment: AHashMap<ExportedSymbol, u32> = AHashMap::default();
-        let mut name_to_declaring_segments: AHashMap<Atom, Vec<(u32, HoistingLevel)>> =
+        let mut name_to_declaring_segments: AHashMap<CompactStr, Vec<(u32, HoistingLevel)>> =
             AHashMap::default();
         let mut named_reexports: AHashMap<ExportedSymbol, Vec<ReExportEntry>> =
             AHashMap::default();
@@ -237,8 +237,7 @@ impl SourceGraph {
         referencing_segment_idx: u32,
     ) -> Option<SegmentKey> {
         let file = self.files.get(file_id as usize)?;
-        let atom = Atom::from(name);
-        let declarations = file.name_to_declaring_segments.get(&atom)?;
+        let declarations = file.name_to_declaring_segments.get(name)?;
 
         // Pick the best declaration according to hoisting rules.
         // Hoisted declarations (Import/Function) are always visible — take the first.
@@ -416,12 +415,13 @@ impl SourceGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast_name_tracker::visitor::VariableScope;
+    use ast_segmenter::variables::{HoistingLevel, VariableScope};
     use ast_segmenter::raw_module_deps::RawModuleDeps;
-    use swc_common::{BytePos, Span};
+    use compact_str::CompactString as CompactStr;
+    use oxc_span::Span;
 
-    fn make_span(lo: u32, hi: u32) -> Span {
-        Span::new(BytePos(lo), BytePos(hi))
+    fn make_span(start: u32, end: u32) -> Span {
+        Span::new(start, end)
     }
 
     fn simple_segment() -> Segment {
@@ -549,7 +549,7 @@ mod tests {
 
     fn segment_with_local(name: &str, hoisting: HoistingLevel) -> Segment {
         let mut vars = VariableScope::new();
-        vars.insert_local(Atom::from(name), hoisting);
+        vars.insert_local(CompactStr::from(name), hoisting);
         Segment {
             module_deps: RawModuleDeps::default(),
             variables: vars,

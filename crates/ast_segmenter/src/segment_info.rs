@@ -1,4 +1,4 @@
-use ast_name_tracker::VariableScope;
+use crate::variables::VariableScope;
 use oxc_span::Span;
 
 use crate::raw_module_deps::RawModuleDeps;

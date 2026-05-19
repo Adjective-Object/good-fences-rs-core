@@ -7,6 +7,7 @@ use oxc_span::GetSpan;
 use crate::{
     raw_module_deps::RawModuleDeps,
     segment_info::Segment,
+    variables::{variables_for_top_level_statements, VariableScope},
     visitors::{import_export_statement::ExportsVisitor, import_require_expr},
 };
 
@@ -26,20 +27,36 @@ fn statement_to_segment<'a>(
     file_logger: &impl SrcFileLogger,
     semantic: &Semantic<'a>,
     stmt: &Statement<'a>,
+    variables: VariableScope,
 ) -> Option<Segment> {
     let span = stmt.span();
     match stmt {
-        // ── Module declarations ──────────────────────────────────────────────
+        // ── Simple module declarations (no body content with dynamic imports) ─
         Statement::ImportDeclaration(_)
-        | Statement::ExportNamedDeclaration(_)
         | Statement::ExportAllDeclaration(_)
-        | Statement::ExportDefaultDeclaration(_)
         | Statement::TSImportEqualsDeclaration(_) => {
-            let variables =
-                ast_name_tracker::scope_from_semantic(semantic, span);
             let mut exports_visitor = ExportsVisitor::new(file_logger, semantic);
             walk::walk_statement(&mut exports_visitor, stmt);
             let module_deps: RawModuleDeps = exports_visitor.into();
+            Some(Segment { module_deps, variables, span })
+        }
+
+        // ── Export declarations that may contain expression bodies ────────────
+        // These go through ExportsVisitor for exports/re-exports AND through
+        // find_imports_and_requires to capture dynamic import() calls in the body.
+        Statement::ExportNamedDeclaration(_) | Statement::ExportDefaultDeclaration(_) => {
+            let mut exports_visitor = ExportsVisitor::new(file_logger, semantic);
+            walk::walk_statement(&mut exports_visitor, stmt);
+            let mut module_deps: RawModuleDeps = exports_visitor.into();
+            // Also find any dynamic imports embedded in the exported value.
+            let imports_and_requires =
+                import_require_expr::find_imports_and_requires(semantic, stmt);
+            module_deps
+                .dynamic_imports
+                .extend(imports_and_requires.imported_paths.names());
+            module_deps
+                .requires
+                .extend(imports_and_requires.require_paths.names().into_keys());
             Some(Segment { module_deps, variables, span })
         }
 
@@ -66,7 +83,6 @@ fn statement_to_segment<'a>(
         | Statement::TSEnumDeclaration(_)
         | Statement::TSModuleDeclaration(_)
         | Statement::TSGlobalDeclaration(_) => {
-            let variables = ast_name_tracker::scope_from_semantic(semantic, span);
             let imports_and_requires = import_require_expr::find_imports_and_requires(semantic, stmt);
 
             let dynamic_imports = imports_and_requires.imported_paths.names().into_iter().collect();
@@ -111,7 +127,6 @@ fn statement_to_segment<'a>(
         // ── TSExportAssignment / TSNamespaceExportDeclaration ────────────────
         // These are uncommon TS-specific module forms; treat as regular stmts.
         Statement::TSExportAssignment(_) | Statement::TSNamespaceExportDeclaration(_) => {
-            let variables = ast_name_tracker::scope_from_semantic(semantic, span);
             Some(Segment {
                 module_deps: Default::default(),
                 variables,
@@ -128,10 +143,14 @@ pub fn segment_file<'a>(
     program: &Program<'a>,
     semantic: &Semantic<'a>,
 ) -> Vec<Segment> {
+    let variables = variables_for_top_level_statements(semantic, &program.body);
     program
         .body
         .iter()
-        .filter_map(|stmt| statement_to_segment(logger, semantic, stmt))
+        .enumerate()
+        .filter_map(|(i, stmt)| {
+            statement_to_segment(logger, semantic, stmt, variables[i].clone())
+        })
         .collect()
 }
 

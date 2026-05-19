@@ -5,10 +5,12 @@ pub mod name_set;
 pub mod raw_module_deps;
 pub mod segment_graph;
 pub mod segment_info;
+pub mod variables;
 pub mod visitor;
 pub mod visitors;
 
 pub use segment_info::Segment;
+pub use variables::{HoistingLevel, VariableScope};
 pub use visitor::segment_file;
 
 // The target of an import, either a symbol or a namespace

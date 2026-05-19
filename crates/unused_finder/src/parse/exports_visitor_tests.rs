@@ -4,9 +4,6 @@ mod test {
     use ahashmap::{AHashMap, AHashSet};
     use logger::StdioLogger;
     use logger_srcfile::WrapFileLogger;
-    use swc_common::comments::SingleThreadedComments;
-    use swc_common::sync::Lrc;
-    use swc_common::{FileName, SourceMap};
 
     use crate::parse::{ExportedSymbol, RawImportExportInfo, ReExportedSymbol};
 
@@ -15,22 +12,15 @@ mod test {
     /// Parse source via `ast_segmenter::segment_file`, then flatten the
     /// resulting segments into a `RawImportExportInfo`.
     fn parse(src: &str) -> RawImportExportInfo {
-        let cm = Lrc::<SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            Lrc::new(FileName::Custom("test.ts".into())),
-            src.to_string(),
-        );
-
-        let lexer = swc_utils_parse::create_lexer(&fm, Some(&comments));
-        let capturing = swc_ecma_parser::Capturing::new(lexer);
-        let mut parser = swc_ecma_parser::Parser::new_from(capturing);
-        let module = parser.parse_typescript_module().unwrap();
+        let allocator = oxc_allocator::Allocator::default();
+        let ret = oxc_utils_parse::parse_ts(&allocator, src);
+        let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&ret.program);
 
         let stdio_logger = StdioLogger::new();
         let logger = WrapFileLogger::new("test.ts", src.to_string(), &stdio_logger);
 
-        let segments = ast_segmenter::segment_file(&logger, &module, &comments);
+        let segments =
+            ast_segmenter::segment_file(&logger, &ret.program, &semantic_ret.semantic);
         RawImportExportInfo::from(segments.as_slice())
     }
 
