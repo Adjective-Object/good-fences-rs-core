@@ -11,14 +11,14 @@ established as the workspace conventions).
 `swc_common::{BytePos, Span}` and `swc_atoms::Atom` only inside `#[cfg(test)]`
 blocks.
 
-- [ ] Replace `use swc_common::{BytePos, Span};` with `use oxc_span::Span;`
-- [ ] Replace `Span::new(BytePos(a), BytePos(b))` constructors with `Span::new(a, b)`
-- [ ] Replace `use swc_atoms::Atom;` with `use oxc_span::CompactStr;`
-- [ ] Replace `Atom::from("...")` with `CompactStr::from("...")` (or `CompactStr::new`)
-- [ ] All existing assertions must pass unchanged
+- [x] Replace `use swc_common::{BytePos, Span};` with `use oxc_span::Span;`
+- [x] Replace `Span::new(BytePos(a), BytePos(b))` constructors with `Span::new(a, b)`
+- [x] Replace `use swc_atoms::Atom;` with `use oxc_span::CompactStr;`
+- [x] Replace `Atom::from("...")` with `CompactStr::from("...")` (or `CompactStr::new`)
+- [x] All existing assertions must pass unchanged
 
 ## Cargo.toml cleanup
 
-- [ ] Remove `swc_common` and `swc_atoms` from `tag_graph/Cargo.toml`
-- [ ] Add `oxc_span` (dev-dependency only if test-only)
-- [ ] `cargo test -p tag_graph` passes
+- [x] Remove `swc_common` and `swc_atoms` from `tag_graph/Cargo.toml`
+- [x] Add `oxc_span` (dev-dependency only if test-only)
+- [x] `cargo test -p tag_graph` passes

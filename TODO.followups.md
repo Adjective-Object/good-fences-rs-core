@@ -34,6 +34,19 @@ via partition_point is fine as-is, but the intent would be clearer).
 `crates/ast_segmenter/src/segment_graph.rs` still uses `swc_atoms::Atom` as the `Name`
 type. Migrate this to a plain `Arc<str>` or `Box<str>` in phase 8/9 cleanup.
 
+## `oxc_span::CompactStr` is not publicly exported (swc-to-oxc plan inaccuracy)
+
+`PLAN.swc-to-oxc-migration.md` and TODO phase 8 describe migrating to
+`oxc_span::CompactStr`, but that type is not re-exported from `oxc_span` at the
+pinned revision (87f065e). The codebase settled on `compact_str::CompactString`
+imported directly, which is consistent across all crates. Update the plan
+documentation in Phase 9 cleanup.
+
+## `ast_segmenter/src/variables.rs` unused doc-comment warning
+
+`variables.rs:107` has a `///` doc comment on a closure/let-statement, producing
+`#[warn(unused_doc_comments)]`. Convert to `//` plain comment during Phase 9 cleanup.
+
 ## `.js` files with TypeScript syntax require TS parse mode (swc-to-oxc phase 4 oversight)
 
 `oxc_utils_parse::parse_file` was using `SourceType::from_path` which sets JavaScript
