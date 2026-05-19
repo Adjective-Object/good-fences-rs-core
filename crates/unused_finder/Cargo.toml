@@ -16,9 +16,6 @@ path-slash.workspace = true
 rayon.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-swc_common.workspace = true
-swc_ecma_parser.workspace = true
-swc_utils_parse = { path = "../swc_utils_parse" }
 oxc_allocator.workspace = true
 oxc_semantic.workspace = true
 oxc_span.workspace = true
@@ -38,7 +35,7 @@ abspath = { version = "0.2.0", path = "../abspath" }
 itertools = "0.13.0"
 schemars.workspace = true
 logger = { version = "0.2.0", path = "../logger" }
-logger_srcfile = { version = "0.2.0", path = "../logger_srcfile", features = ["swc-compat"] }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
 multi_err = { version = "0.2.0", path = "../multi_err" }
 glob-match.workspace = true
 source_graph = { version = "0.2.0", path = "../source_graph" }

@@ -76,14 +76,14 @@ pub fn get_file_segments(file_path: &Path) -> Result<Vec<Segment>, SourceFilePar
 }
 ```
 
-- [ ] Replace the swc parser/lexer/Handler/resolver stack with the oxc body above
-- [ ] Declare the `PARSE_ARENA` thread-local at module scope
-- [ ] Confirm with a unit test that calling `get_file_segments` twice in the same thread reuses the same `Allocator` instance (track the allocator's address through a debug-only hook, or assert via `bumpalo::Bump::allocated_bytes` that the second call doesn't grow unbounded)
-- [ ] Drop `use swc_common::{Globals, Mark, SourceMap, GLOBALS};` and related imports
-- [ ] Drop `use swc_ecma_transforms::resolver;`
-- [ ] Drop `use swc_ecma_visit::Fold;`
-- [ ] Update `SourceFileParseError` variants if needed (the existing ones still apply)
-- [ ] `cargo test -p unused_finder` runs `get_file_segments` correctly on the existing fixtures, including the parallel `par_iter` paths in `unused_finder.rs`
+- [x] Replace the swc parser/lexer/Handler/resolver stack with the oxc body above
+- [x] Declare the `PARSE_ARENA` thread-local at module scope
+- [x] Confirm with a unit test that calling `get_file_segments` twice in the same thread reuses the same `Allocator` instance (track the allocator's address through a debug-only hook, or assert via `bumpalo::Bump::allocated_bytes` that the second call doesn't grow unbounded)
+- [x] Drop `use swc_common::{Globals, Mark, SourceMap, GLOBALS};` and related imports
+- [x] Drop `use swc_ecma_transforms::resolver;`
+- [x] Drop `use swc_ecma_visit::Fold;`
+- [x] Update `SourceFileParseError` variants if needed (the existing ones still apply)
+- [x] `cargo test -p unused_finder` runs `get_file_segments` correctly on the existing fixtures, including the parallel `par_iter` paths in `unused_finder.rs`
 
 ## Update `report.rs` to drop `SmallPos`
 
@@ -91,30 +91,30 @@ pub fn get_file_segments(file_path: &Path) -> Result<Vec<Segment>, SourceFilePar
 imports `swc_common::source_map::SmallPos` to call `.to_u32()` on byte
 positions.
 
-- [ ] Remove `use swc_common::source_map::SmallPos;`
-- [ ] Replace `pos.to_u32()` calls with direct field access on `oxc_span::Span` (`.start` / `.end`)
+- [x] Remove `use swc_common::source_map::SmallPos;`
+- [x] Replace `pos.to_u32()` calls with direct field access on `oxc_span::Span` (`.start` / `.end`)
 
 ## Update `data.rs` to take `&impl PathResolver`
 
 [crates/unused_finder/src/parse/data.rs](crates/unused_finder/src/parse/data.rs)
 
-- [ ] Replace `use swc_common::{FileName, Span};` with `use oxc_span::Span;`
-- [ ] Replace `use swc_ecma_ast::ModuleExportName;` — already removed if data.rs no longer references AST types (the types here are owned mirrors; verify)
-- [ ] Replace `swc_ecma_loader::resolve::Resolve` bound with `import_resolver::PathResolver`
-- [ ] Replace `FileName::Real(...)` constructor calls with `&Path` arguments
+- [x] Replace `use swc_common::{FileName, Span};` with `use oxc_span::Span;`
+- [x] Replace `use swc_ecma_ast::ModuleExportName;` — already removed if data.rs no longer references AST types (the types here are owned mirrors; verify)
+- [x] Replace `swc_ecma_loader::resolve::Resolve` bound with `import_resolver::PathResolver`
+- [x] Replace `FileName::Real(...)` constructor calls with `&Path` arguments
 
 ## Update `unused_finder.rs`
 
 [crates/unused_finder/src/unused_finder.rs](crates/unused_finder/src/unused_finder.rs)
 
-- [ ] Replace `use swc_ecma_loader::{resolve::Resolve, TargetEnv};` with `use import_resolver::{PathResolver, resolve::TargetEnv};`
-- [ ] Update every `impl Resolve` / `impl Resolve + Sync` bound to `impl PathResolver`
-- [ ] Update `MonorepoResolver` call sites — should still work; `MonorepoResolver` now implements `PathResolver` (per phase 2)
+- [x] Replace `use swc_ecma_loader::{resolve::Resolve, TargetEnv};` with `use import_resolver::{PathResolver, resolve::TargetEnv};`
+- [x] Update every `impl Resolve` / `impl Resolve + Sync` bound to `impl PathResolver`
+- [x] Update `MonorepoResolver` call sites — should still work; `MonorepoResolver` now implements `PathResolver` (per phase 2)
 
 ## Cargo.toml cleanup
 
-- [ ] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_loader`, `swc_ecma_parser`, `swc_ecma_visit`, `swc_ecma_transforms`, `swc_utils_parse` from `unused_finder/Cargo.toml`
-- [ ] Add `oxc_allocator`, `oxc_ast`, `oxc_semantic`, `oxc_span`, `oxc_utils_parse`
-- [ ] `cargo test -p unused_finder` passes
-- [ ] `cargo test -p unused_finder_napi` passes
-- [ ] `cargo build -p unused_bin` succeeds
+- [x] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_loader`, `swc_ecma_parser`, `swc_ecma_visit`, `swc_ecma_transforms`, `swc_utils_parse` from `unused_finder/Cargo.toml`
+- [x] Add `oxc_allocator`, `oxc_ast`, `oxc_semantic`, `oxc_span`, `oxc_utils_parse`
+- [x] `cargo test -p unused_finder` passes
+- [x] `cargo test -p unused_finder_napi` passes
+- [x] `cargo build -p unused_bin` succeeds
