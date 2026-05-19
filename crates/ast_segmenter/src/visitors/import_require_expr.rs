@@ -1,8 +1,9 @@
-use swc_ecma_ast::{
-    AssignPatProp, BindingIdent, CallExpr, Callee, Expr, ExprOrSpread, Ident, IdentName,
-    KeyValuePatProp, Lit, MemberExpr, MemberProp, Pat, PropName,
+use oxc_ast::ast::{
+    Argument, BindingPattern, CallExpression, Expression,
+    FormalParameters, ImportExpression, PropertyKey, Statement,
 };
-use swc_ecma_visit::{Visit, VisitWith};
+use oxc_ast_visit::{walk, Visit};
+use oxc_semantic::Semantic;
 
 use crate::{
     name_set::NameSet,
@@ -15,203 +16,190 @@ pub struct ImportsAndRequires {
     pub require_paths: NameSet<String, Symbol>,
 }
 
-impl ImportsAndRequires {
-    // Checks if the current call expr is one of the supported import() or require() calls
-    // and if it is, updates this data structure with the import path and the names that are
-    // being imported.
-    //
-    // Note that this is not actually an implementation of swc's Visit() because we want to
-    // perform all the visits in a single pass, in order to avoid cache-misses caused by multiple
-    // traverses over the AST nodes, which may be distributed across the heap.
-    pub fn scan_call_expr(&mut self, expr: &CallExpr) {
-        match expr {
-            // import()
-            CallExpr {
-                callee: Callee::Import(_),
-                args: ref import_args,
-                ..
-            } => {
-                if let Some(import_path) = args_as_import(import_args) {
-                    self.imported_paths.insert(import_path, Symbol::Namespace);
+/// Checks if `ident` is a reference to the global `require` (i.e., unresolved).
+fn is_global_require<'a>(semantic: &Semantic<'a>, ident: &oxc_ast::ast::IdentifierReference<'a>) -> bool {
+    if ident.name != "require" {
+        return false;
+    }
+    let Some(ref_id) = ident.reference_id.get() else {
+        return false;
+    };
+    semantic.scoping().get_reference(ref_id).symbol_id().is_none()
+}
+
+/// Extract the static string value from a string-literal import argument list.
+fn args_as_string_literal<'a>(args: &[Argument<'a>]) -> Option<String> {
+    match args.first()? {
+        Argument::StringLiteral(s) => Some(s.value.to_string()),
+        _ => None,
+    }
+}
+
+/// Extract named import symbols from the first parameter of a `.then()` callback.
+///
+/// Matches: `({ a, b, c }) => ...` and `function({ a, b, c }) { ... }`.
+/// Returns the static key names (what the module exports), not the local binding names.
+fn extract_then_arg_names<'a>(args: &[Argument<'a>]) -> Option<Vec<Symbol>> {
+    let first_arg = args.first()?;
+
+    let params: &FormalParameters = match first_arg {
+        Argument::ArrowFunctionExpression(arrow) => &arrow.params,
+        Argument::FunctionExpression(f) => &f.params,
+        _ => return None,
+    };
+
+    let first_param = params.items.first()?;
+    let BindingPattern::ObjectPattern(obj) = &first_param.pattern else {
+        return None;
+    };
+
+    let names: Vec<Symbol> = obj
+        .properties
+        .iter()
+        .filter_map(|prop| {
+            match &prop.key {
+                PropertyKey::StaticIdentifier(id) => {
+                    Some(Symbol::Named(Name::from(id.name.as_str())))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+
+    if names.is_empty() {
+        None
+    } else {
+        Some(names)
+    }
+}
+
+struct ImportRequireVisitor<'s, 'a> {
+    semantic: &'s Semantic<'a>,
+    result: ImportsAndRequires,
+}
+
+impl<'s, 'a> ImportRequireVisitor<'s, 'a> {
+    fn new(semantic: &'s Semantic<'a>) -> Self {
+        Self {
+            semantic,
+            result: Default::default(),
+        }
+    }
+}
+
+impl<'s, 'a> Visit<'a> for ImportRequireVisitor<'s, 'a> {
+    /// Handle `import('foo')` — adds Namespace to imported_paths.
+    ///
+    /// Intentionally does NOT walk children; the source of import() can only be
+    /// a static string in the cases we track.
+    fn visit_import_expression(&mut self, import: &ImportExpression<'a>) {
+        if let Expression::StringLiteral(path) = &import.source {
+            self.result
+                .imported_paths
+                .entry(path.value.to_string())
+                .or_default()
+                .insert(Symbol::Namespace);
+        }
+    }
+
+    /// Handle `require('foo')` and `import('foo').then(({a,b}) => ...)`.
+    ///
+    /// Children are walked first so that nested `import()` expressions have
+    /// already been recorded before we check for the `.then()` upgrade pattern.
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // Visit children first (processes any nested import() expressions)
+        walk::walk_call_expression(self, call);
+
+        // require('foo') — only if it's an unresolved global `require`
+        if let Expression::Identifier(ident) = &call.callee {
+            if is_global_require(self.semantic, ident) {
+                if let Some(path) = args_as_string_literal(&call.arguments) {
+                    self.result.require_paths.insert(path, Symbol::Default);
                 }
             }
-            // require()
-            CallExpr {
-                callee: Callee::Expr(box Expr::Ident(ident)),
-                args: ref import_args,
-                ..
-            } => {
-                if ident.sym == "require" {
-                    if let Some(import_path) = args_as_import(import_args) {
-                        self.require_paths.insert(import_path, Symbol::Default);
+        }
+
+        // import('foo').then(({a,b,c}) => { ... })
+        //   — detect the pattern and replace the Namespace entry with named imports
+        if let Expression::StaticMemberExpression(member) = &call.callee {
+            if member.property.name == "then" {
+                if let Expression::ImportExpression(import_expr) = &member.object {
+                    if let Expression::StringLiteral(path) = &import_expr.source {
+                        let path_str = path.value.to_string();
+                        if let Some(names) = extract_then_arg_names(&call.arguments) {
+                            let entry = self.result.imported_paths.entry(path_str).or_default();
+                            entry.remove(&Symbol::Namespace);
+                            for name in names {
+                                entry.insert(name);
+                            }
+                        }
                     }
                 }
             }
-            // import().then(({name1, name2, name3}) => {...})
-            CallExpr {
-                callee:
-                    Callee::Expr(box Expr::Member(MemberExpr {
-                        // import expr
-                        obj:
-                            box Expr::Call(CallExpr {
-                                callee: Callee::Import(_),
-                                args: import_args,
-                                ..
-                            }),
-                        prop: MemberProp::Ident(then_prop),
-                        ..
-                    })),
-                ref args,
-                ..
-            } => {
-                if then_prop.sym != "then" {
-                    return;
-                }
-                // the contents of the import(<this stuff>) call
-                let imported_path = match args_as_import(import_args) {
-                    Some(path) => path,
-                    None => return,
-                };
-
-                // args in .then((<args>) => {..}) or .then(function (<args>) {..})
-                let then_arg_obj_pattern = match args.first() {
-                    Some(arg) => match extract_generic_function_def_first_arg(&arg.expr) {
-                        Some(Pat::Object(obj_pat)) => obj_pat,
-                        _ => return,
-                    },
-                    None => return,
-                };
-
-                // extract names from the object binding pattern
-                let obj_names =
-                    then_arg_obj_pattern
-                        .props
-                        .iter()
-                        .filter_map(|prop| -> Option<Symbol> {
-                            match prop {
-                                swc_ecma_ast::ObjectPatProp::KeyValue(KeyValuePatProp {
-                                    key:
-                                        PropName::Ident(IdentName {
-                                            sym: ref ident_sym, ..
-                                        }),
-                                    ..
-                                })
-                                | swc_ecma_ast::ObjectPatProp::Assign(AssignPatProp {
-                                    key:
-                                        BindingIdent {
-                                            id:
-                                                Ident {
-                                                    sym: ref ident_sym, ..
-                                                },
-                                            ..
-                                        },
-                                    ..
-                                }) => Some(Symbol::Named(Name::from(ident_sym.as_ref()))),
-                                _ => None,
-                            }
-                        });
-
-                // store the names (removing any Namespace entry that was added
-                // by visit_children_with processing the inner import() call)
-                let entry = self.imported_paths.entry(imported_path).or_default();
-                entry.remove(&Symbol::Namespace);
-                for name in obj_names {
-                    entry.insert(name);
-                }
-            }
-            _ => {}
         }
     }
 }
 
-fn extract_generic_function_def_first_arg(expr: &Expr) -> Option<&Pat> {
-    if let Expr::Arrow(arrow) = expr {
-        return arrow.params.first();
-    }
-    if let Expr::Fn(fn_expr) = expr {
-        return fn_expr.function.params.first().map(|param| &param.pat);
-    }
-    None
-}
-
-fn args_as_import(args: &Vec<ExprOrSpread>) -> Option<String> {
-    let import_path = match args.is_empty() {
-        true => return None,
-        false => args.first(),
-    };
-    if let Some(path) = import_path {
-        if let Some(path_lit) = path.expr.as_lit() {
-            match path_lit {
-                Lit::Str(value) => {
-                    return Some(value.value.to_string());
-                }
-                _ => return None,
-            }
-        }
-    }
-    None
-}
-
-impl Visit for ImportsAndRequires {
-    fn visit_call_expr(&mut self, call_expr: &CallExpr) {
-        call_expr.visit_children_with(self);
-        self.scan_call_expr(call_expr);
-    }
-}
-
-pub fn find_imports_and_requires<TNode>(ast_node: &TNode) -> ImportsAndRequires
-where
-    TNode: for<'a> VisitWith<ImportsAndRequires>,
-{
-    let mut visitor = ImportsAndRequires::default();
-    ast_node.visit_with(&mut visitor);
-    visitor
+/// Walk a single statement and collect all dynamic `import()` and `require()` calls.
+pub fn find_imports_and_requires<'a>(
+    semantic: &Semantic<'a>,
+    stmt: &Statement<'a>,
+) -> ImportsAndRequires {
+    let mut visitor = ImportRequireVisitor::new(semantic);
+    walk::walk_statement(&mut visitor, stmt);
+    visitor.result
 }
 
 #[cfg(test)]
 mod test {
     use crate::raw_module_deps::Symbol;
 
-    use super::ImportsAndRequires;
-    use ahashmap::AHashMap;
-
-    use test_tmpdir::amap2;
+    use super::find_imports_and_requires;
+    use ahashmap::{AHashMap, AHashSet};
+    use oxc_allocator::Allocator;
+    use oxc_semantic::SemanticBuilder;
+    use oxc_utils_parse::parse_ts;
 
     fn test_discovers_import_expr(
         source: &str,
-        expected_imported_paths: AHashMap<&str, Vec<Symbol>>,
-        expected_require_paths: AHashMap<&str, Vec<Symbol>>,
+        expected_imported_paths: AHashMap<String, AHashSet<Symbol>>,
+        expected_require_paths: AHashMap<String, AHashSet<Symbol>>,
     ) {
-        let mut visitor = ImportsAndRequires {
-            imported_paths: Default::default(),
-            require_paths: Default::default(),
-        };
-        swc_utils_parse::parse_and_visit(source, &mut visitor).unwrap();
+        let allocator = Allocator::default();
+        let ret = parse_ts(&allocator, source);
+        let semantic = SemanticBuilder::new().build(&ret.program).semantic;
 
-        assert_eq!(
-            visitor.imported_paths.names(),
-            expected_imported_paths
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().cloned().collect()))
-                .collect(),
-        );
+        // Aggregate results from all statements
+        let mut all_imported: AHashMap<String, AHashSet<Symbol>> = AHashMap::default();
+        let mut all_required: AHashMap<String, AHashSet<Symbol>> = AHashMap::default();
+        for stmt in &ret.program.body {
+            let result = find_imports_and_requires(&semantic, stmt);
+            let (imported_paths, require_paths) =
+                (result.imported_paths, result.require_paths);
+            for (k, v) in imported_paths.names() {
+                all_imported.entry(k).or_default().extend(v);
+            }
+            for (k, v) in require_paths.names() {
+                all_required.entry(k).or_default().extend(v);
+            }
+        }
 
-        assert_eq!(
-            visitor.require_paths.names(),
-            expected_require_paths
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.iter().cloned().collect()))
-                .collect(),
-        );
+        assert_eq!(all_imported, expected_imported_paths, "imported_paths mismatch for: {source}");
+        assert_eq!(all_required, expected_require_paths, "require_paths mismatch for: {source}");
+    }
+
+    fn imap(pairs: &[(&str, Vec<Symbol>)]) -> AHashMap<String, AHashSet<Symbol>> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.iter().cloned().collect()))
+            .collect()
     }
 
     #[test]
     fn test_basic_import() {
         test_discovers_import_expr(
             "import('foo')",
-            amap2![
-                "foo" => vec![Symbol::Namespace]
-            ],
+            imap(&[("foo", vec![Symbol::Namespace])]),
             Default::default(),
         );
     }
@@ -221,9 +209,7 @@ mod test {
         test_discovers_import_expr(
             "require('foo')",
             Default::default(),
-            amap2![
-                "foo" => vec![Symbol::Default]
-            ],
+            imap(&[("foo", vec![Symbol::Default])]),
         );
     }
 
@@ -231,12 +217,8 @@ mod test {
     fn test_import_expr_deep() {
         test_discovers_import_expr(
             "if (true) { import('foo') } else { require('bar') }",
-            amap2![
-                "foo" => vec![Symbol::Namespace]
-            ],
-            amap2![
-                "bar" => vec![Symbol::Default]
-            ],
+            imap(&[("foo", vec![Symbol::Namespace])]),
+            imap(&[("bar", vec![Symbol::Default])]),
         );
     }
 
@@ -244,12 +226,7 @@ mod test {
     fn test_import_expr_extracts_names_arrow() {
         test_discovers_import_expr(
             "import('foo').then(({a,b,c}) => { console.log(a,b,c) })",
-            amap2![
-                "foo" => vec![
-                    Symbol::named("a"),
-                    Symbol::named("b"),
-                    Symbol::named("c")]
-            ],
+            imap(&[("foo", vec![Symbol::named("a"), Symbol::named("b"), Symbol::named("c")])]),
             Default::default(),
         );
     }
@@ -258,12 +235,7 @@ mod test {
     fn test_import_expr_extracts_names_noarrow() {
         test_discovers_import_expr(
             "import('foo').then(function myfunc({a,b,c}) { console.log(a,b,c) })",
-            amap2![
-                "foo" => vec![
-                    Symbol::named("a"),
-                    Symbol::named("b"),
-                    Symbol::named("c")]
-            ],
+            imap(&[("foo", vec![Symbol::named("a"), Symbol::named("b"), Symbol::named("c")])]),
             Default::default(),
         );
     }

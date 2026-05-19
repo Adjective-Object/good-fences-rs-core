@@ -6,8 +6,7 @@ use std::{
 use ahashmap::{AHashMap, AHashSet, ARandomState};
 use import_resolver::resolve::PathResolver;
 use multi_err::{MultiErr, MultiResult};
-use swc_common::Span;
-use swc_ecma_ast::ModuleExportName;
+use oxc_span::Span;
 
 // Re-export ast_segmenter types used by downstream consumers
 pub use ast_segmenter::segment_info::Segment;
@@ -46,15 +45,6 @@ impl std::fmt::Display for ExportedSymbol {
 impl Default for ExportedSymbol {
     fn default() -> Self {
         Self::Default
-    }
-}
-
-impl From<&ModuleExportName> for ExportedSymbol {
-    fn from(e: &ModuleExportName) -> Self {
-        match e.atom().as_str() {
-            "default" => ExportedSymbol::Default,
-            _ => ExportedSymbol::Named(e.atom().as_str().to_string()),
-        }
     }
 }
 

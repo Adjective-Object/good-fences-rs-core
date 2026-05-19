@@ -149,8 +149,10 @@ dependencies = [
  "ahashmap",
  "logger",
  "logger_srcfile",
+ "oxc_semantic",
+ "oxc_span",
  "pretty_assertions",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_visit",
@@ -166,13 +168,13 @@ dependencies = [
  "ast-name-tracker",
  "logger",
  "logger_srcfile",
- "swc_atoms 5.0.0",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
- "swc_ecma_visit",
- "swc_utils_parse",
- "test_tmpdir",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_utils_parse",
  "thiserror 1.0.63",
 ]
 
@@ -923,20 +925,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hstr"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71399f53a92ef72ee336a4b30201c6e944827e14e0af23204c291aad9c24cc85"
-dependencies = [
- "hashbrown 0.14.5",
- "new_debug_unreachable",
- "once_cell",
- "phf 0.11.2",
- "rustc-hash 2.1.1",
- "triomphe",
-]
-
-[[package]]
 name = "idna"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1041,6 +1029,15 @@ name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -1474,6 +1471,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxc_ast_visit"
+version = "0.132.0"
+source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
+dependencies = [
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_span",
+ "oxc_syntax",
+]
+
+[[package]]
 name = "oxc_data_structures"
 version = "0.132.0"
 source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
@@ -1555,6 +1563,26 @@ dependencies = [
  "phf 0.13.1",
  "rustc-hash 2.1.1",
  "unicode-id-start",
+]
+
+[[package]]
+name = "oxc_semantic"
+version = "0.132.0"
+source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
+dependencies = [
+ "itertools 0.14.0",
+ "memchr",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_diagnostics",
+ "oxc_ecmascript",
+ "oxc_index",
+ "oxc_span",
+ "oxc_str",
+ "oxc_syntax",
+ "rustc-hash 2.1.1",
+ "self_cell",
 ]
 
 [[package]]
@@ -2180,6 +2208,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "self_cell"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b12e76d157a900eb52e81bc6e9f3069344290341720e9178cde2407113ac8d89"
+
+[[package]]
 name = "semver"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2355,7 +2389,7 @@ dependencies = [
  "ast-name-tracker",
  "ast-segmenter",
  "pretty_assertions",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
 ]
 
@@ -2446,21 +2480,9 @@ version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb6567e4e67485b3e7662b486f1565bdae54bd5b9d6b16b2ba1a9babb1e42125"
 dependencies = [
- "hstr 0.2.12",
+ "hstr",
  "once_cell",
  "rustc-hash 1.1.0",
- "serde",
-]
-
-[[package]]
-name = "swc_atoms"
-version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d7077ba879f95406459bc0c81f3141c529b34580bc64d7ab7bd15e7118a0391"
-dependencies = [
- "hstr 1.0.0",
- "once_cell",
- "rustc-hash 2.1.1",
  "serde",
 ]
 
@@ -2497,7 +2519,7 @@ dependencies = [
  "siphasher 0.3.11",
  "sourcemap",
  "swc_allocator",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_eq_ignore_macros",
  "swc_visit",
  "tracing",
@@ -2520,7 +2542,7 @@ dependencies = [
  "serde_json",
  "sourcemap",
  "swc_allocator",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_config",
  "swc_ecma_ast",
@@ -2571,7 +2593,7 @@ dependencies = [
  "scoped-tls",
  "serde",
  "string_enum",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "unicode-id-start",
 ]
@@ -2588,7 +2610,7 @@ dependencies = [
  "serde",
  "sourcemap",
  "swc_allocator",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_codegen_macros",
@@ -2627,7 +2649,7 @@ dependencies = [
  "serde",
  "serde_json",
  "swc_allocator",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_config",
  "swc_ecma_ast",
@@ -2657,7 +2679,7 @@ dependencies = [
  "smallvec",
  "smartstring",
  "stacker",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "tracing",
@@ -2670,7 +2692,7 @@ version = "0.238.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6a33679b1611630ee41f8ee8b41b9587de4171819698d313f7f8ae2c699f41a"
 dependencies = [
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_transforms_base",
@@ -2692,7 +2714,7 @@ dependencies = [
  "rustc-hash 1.1.0",
  "serde",
  "smallvec",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",
@@ -2725,7 +2747,7 @@ dependencies = [
  "petgraph",
  "rustc-hash 1.1.0",
  "serde_json",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",
@@ -2745,7 +2767,7 @@ checksum = "6b04b74fc4525b03d1402018ca00855c10421631e4bbda4e202fc877d801acfa"
 dependencies = [
  "indexmap",
  "rustc-hash 1.1.0",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_utils",
@@ -2765,7 +2787,7 @@ dependencies = [
  "once_cell",
  "rustc-hash 1.1.0",
  "ryu-js",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_visit",
@@ -2781,7 +2803,7 @@ checksum = "dbc4752373e273b1d2bc870a7d084a0f765270247fa82b8b9b6d746dd5282647"
 dependencies = [
  "new_debug_unreachable",
  "num-bigint",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
  "swc_ecma_ast",
  "swc_visit",
@@ -2883,7 +2905,7 @@ dependencies = [
  "bitflags",
  "pretty_assertions",
  "source_graph",
- "swc_atoms 0.6.7",
+ "swc_atoms",
  "swc_common",
 ]
 
@@ -3207,6 +3229,10 @@ dependencies = [
  "logger",
  "logger_srcfile",
  "multi_err",
+ "oxc_allocator",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_utils_parse",
  "packagejson",
  "packagejson_exports",
  "path-clean",
@@ -3220,10 +3246,7 @@ dependencies = [
  "source_graph",
  "stringreader",
  "swc_common",
- "swc_ecma_ast",
  "swc_ecma_parser",
- "swc_ecma_transforms",
- "swc_ecma_visit",
  "swc_utils_parse",
  "tag_graph",
  "test_tmpdir",

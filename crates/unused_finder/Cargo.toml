@@ -17,11 +17,12 @@ rayon.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 swc_common.workspace = true
-swc_ecma_ast.workspace = true
 swc_ecma_parser.workspace = true
-swc_ecma_visit.workspace = true
-swc_ecma_transforms.workspace = true
 swc_utils_parse = { path = "../swc_utils_parse" }
+oxc_allocator.workspace = true
+oxc_semantic.workspace = true
+oxc_span.workspace = true
+oxc_utils_parse = { version = "0.1.0", path = "../oxc_utils_parse" }
 ast-name-tracker = { path = "../ast_name_tracker" }
 ast-segmenter = { path = "../ast_segmenter" }
 thiserror.workspace = true

@@ -14,28 +14,16 @@ crate-type = ["lib"]
 [dependencies]
 ahashmap = { version = "0.2.0", path = "../ahashmap" }
 ast-name-tracker = { version = "0.2.0-beta.1", path = "../ast_name_tracker" }
-logger_srcfile = { version = "0.2.0", path = "../logger_srcfile", features = ["swc-compat"] }
-swc_atoms = "5.0.0"
-swc_common.workspace = true
-swc_ecma_ast.workspace = true
-swc_ecma_visit.workspace = true
-swc_utils_parse = { version = "0.2.0", path = "../swc_utils_parse" }
-test_tmpdir = { version = "0.1.0", path = "../test_tmpdir" }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
+oxc_ast.workspace = true
+oxc_ast_visit.workspace = true
+oxc_semantic.workspace = true
+oxc_span.workspace = true
+oxc_utils_parse = { version = "0.1.0", path = "../oxc_utils_parse" }
 thiserror.workspace = true
 
 
 [dev-dependencies]
 logger = { version = "0.2.0", path = "../logger" }
-swc_ecma_parser.workspace = true
-# ahashmap = { version = "0.2.0", path = "../ahashmap" }
-# logger = { version = "0.2.0", path = "../logger" }
-# logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
-# swc_atoms = "0.6.7"
-# swc_common.workspace = true
-# swc_ecma_ast.workspace = true
-# swc_ecma_parser.workspace = true
-# swc_ecma_transforms.workspace = true
-# swc_ecma_visit.workspace = true
-# swc_utils_parse = { path = "../swc_utils_parse" }
-# thiserror.workspace = true
-# ast-name-tracker = { path = "../ast_name_tracker" }
+oxc_allocator.workspace = true
+oxc_parser.workspace = true

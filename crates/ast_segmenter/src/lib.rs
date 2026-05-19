@@ -1,7 +1,5 @@
-#![feature(box_patterns)]
-
+use oxc_ast::ast::ModuleExportName;
 use raw_module_deps::Name;
-use swc_ecma_ast::ModuleExportName;
 
 pub mod name_set;
 pub mod raw_module_deps;
@@ -49,8 +47,9 @@ impl<T: ToString + AsRef<str>> From<T> for ExportedSymbol {
 impl ExportedSymbol {
     pub fn from_module_export_name(name: &ModuleExportName) -> Self {
         match name {
-            ModuleExportName::Ident(ident) => Self::from(ident.sym.as_ref()),
-            ModuleExportName::Str(str) => Self::from(str.value.as_ref()),
+            ModuleExportName::IdentifierName(ident) => Self::from(ident.name.as_str()),
+            ModuleExportName::IdentifierReference(ident) => Self::from(ident.name.as_str()),
+            ModuleExportName::StringLiteral(str) => Self::from(str.value.as_str()),
         }
     }
 }
@@ -60,7 +59,7 @@ pub struct ReExportedSymbol {
     pub imported_as: ImportTarget,
     pub exported_as: Option<ExportedSymbol>,
     pub tags: raw_module_deps::SymbolTags,
-    pub span: swc_common::Span,
+    pub span: oxc_span::Span,
 }
 
 /// Identity is determined by imported_as + exported_as only;
@@ -77,4 +76,3 @@ impl std::hash::Hash for ReExportedSymbol {
         self.exported_as.hash(state);
     }
 }
-

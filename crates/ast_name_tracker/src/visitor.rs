@@ -414,6 +414,43 @@ where
     child_scope
 }
 
+/// Temporary shim for phase 3→4 migration: extract a `VariableScope` from
+/// `oxc_semantic::Semantic` for a given statement span.
+///
+/// Only populates *declared* locals (symbols whose declaration span falls within
+/// `stmt_span`).  Escaped-symbol tracking is intentionally omitted; full
+/// replacement of this shim with oxc-native scope analysis happens in phase 05
+/// (source-graph-and-name-tracker).
+///
+/// # Nested-declaration caveat
+/// Symbols declared in inner scopes (functions, blocks) are included because we
+/// filter purely by span containment.  This is a known approximation accepted
+/// for the temporary shim lifetime.
+pub fn scope_from_semantic(
+    semantic: &oxc_semantic::Semantic<'_>,
+    stmt_span: oxc_span::Span,
+) -> VariableScope {
+    use oxc_semantic::SymbolFlags;
+    let mut scope = VariableScope::new();
+    let scoping = semantic.scoping();
+    for sym_id in scoping.symbol_ids() {
+        let sym_span = scoping.symbol_span(sym_id);
+        if stmt_span.contains_inclusive(sym_span) {
+            let name = scoping.symbol_name(sym_id);
+            let flags = scoping.symbol_flags(sym_id);
+            let hoisting = if flags.intersects(SymbolFlags::Import | SymbolFlags::TypeImport) {
+                HoistingLevel::ImportHoisting
+            } else if flags.contains(SymbolFlags::Function) {
+                HoistingLevel::FunctionHoisting
+            } else {
+                HoistingLevel::LetConstHoisting
+            };
+            scope.insert_local(swc_atoms::Atom::from(name), hoisting);
+        }
+    }
+    scope
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

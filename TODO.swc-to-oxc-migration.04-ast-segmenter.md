@@ -18,12 +18,12 @@ holds:
 - `impl From<&swc_atoms::Atom> for Name` (used by callers that hand off swc atoms)
 - `Symbol::from_module_export_name(&ModuleExportName)`
 
-- [ ] Replace `swc_common::Span` with `oxc_span::Span` in `Segment`, `TaggedSymbol`, `ReExportedSymbol`, `ExportBinding`
-- [ ] Replace `BytePos` with `u32` in `SymbolTags::from_comments(_parent)` signatures
-- [ ] Replace `impl Comments` parameter with `&LeadingComments<'_>`
-- [ ] Replace `impl From<&swc_atoms::Atom> for Name` with `impl From<Ident<'_>> for Name` (spike correction: `name` fields are `Ident<'a>`, not `Atom<'a>`)
-- [ ] Update `Symbol::from_module_export_name` to match on `oxc_ast::ast::ModuleExportName` (handle the third variant `IdentifierReference`)
-- [ ] Update `ExportedSymbol::from_module_export_name` similarly
+- [x] Replace `swc_common::Span` with `oxc_span::Span` in `Segment`, `TaggedSymbol`, `ReExportedSymbol`, `ExportBinding`
+- [x] Replace `BytePos` with `u32` in `SymbolTags::from_comments(_parent)` signatures
+- [x] Replace `impl Comments` parameter with `&LeadingComments<'_>`
+- [x] Replace `impl From<&swc_atoms::Atom> for Name` with `impl From<Ident<'_>> for Name` (spike correction: `name` fields are `Ident<'a>`, not `Atom<'a>`)
+- [x] Update `Symbol::from_module_export_name` to match on `oxc_ast::ast::ModuleExportName` (handle the third variant `IdentifierReference`)
+- [x] Update `ExportedSymbol::from_module_export_name` similarly
 
 ## Port `import_export_statement.rs` visitor
 
@@ -71,18 +71,18 @@ No `require_identifiers: AHashSet<Id>` tracking is needed because
 declaring scope; a `symbol_id.is_none()` result means "unresolved → falls
 through to the global object."
 
-- [ ] Add `&Semantic<'a>` parameter to `ExportsVisitor::new`
-- [ ] Add `&'a [Comment]` parameter to `ExportsVisitor::new` (replaces `&SingleThreadedComments`)
-- [ ] Drop the `require_identifiers: AHashSet<Id>` field and `visit_binding_ident` override
-- [ ] Add a private `is_global_require(&self, ident: &IdentifierReference) -> bool` helper that implements the recipe above
-- [ ] In `visit_call_expression`, when the callee is an `IdentifierReference`, call `is_global_require` to decide whether to treat the call as `require("...")`
-- [ ] Port `visit_import_decl` → `visit_import_declaration`
-- [ ] Port `visit_named_export` / `visit_export_decl` / `visit_export_default_decl` / `visit_export_default_expr` / `visit_export_all`
-- [ ] Port `visit_ts_import_equals_decl` → `visit_ts_import_equals_declaration`
-- [ ] Update `get_export_bindings` to handle the new `ModuleExportName::IdentifierReference` variant
-- [ ] `SymbolTags::from_comments(comments, lo)` calls become `SymbolTags::from_comments(&program.comments, lo)` (slice, not wrapper)
-- [ ] All `.sym.to_string()` calls become `.name.to_string()` (oxc uses `name` for `Atom`)
-- [ ] All `.value.to_string()` on `Str` become `.value.to_string()` on `StringLiteral` (unchanged)
+- [x] Add `&Semantic<'a>` parameter to `ExportsVisitor::new`
+- [x] Add `&'a [Comment]` parameter to `ExportsVisitor::new` (replaces `&SingleThreadedComments`)
+- [x] Drop the `require_identifiers: AHashSet<Id>` field and `visit_binding_ident` override
+- [x] Add a private `is_global_require(&self, ident: &IdentifierReference) -> bool` helper that implements the recipe above
+- [x] In `visit_call_expression`, when the callee is an `IdentifierReference`, call `is_global_require` to decide whether to treat the call as `require("...")`
+- [x] Port `visit_import_decl` → `visit_import_declaration`
+- [x] Port `visit_named_export` / `visit_export_decl` / `visit_export_default_decl` / `visit_export_default_expr` / `visit_export_all`
+- [x] Port `visit_ts_import_equals_decl` → `visit_ts_import_equals_declaration`
+- [x] Update `get_export_bindings` to handle the new `ModuleExportName::IdentifierReference` variant
+- [x] `SymbolTags::from_comments(comments, lo)` calls become `SymbolTags::from_comments(&program.comments, lo)` (slice, not wrapper)
+- [x] All `.sym.to_string()` calls become `.name.to_string()` (oxc uses `name` for `Atom`)
+- [x] All `.value.to_string()` on `Str` become `.value.to_string()` on `StringLiteral` (unchanged)
 
 ## Port `import_require_expr.rs` visitor
 
@@ -104,12 +104,12 @@ pub fn find_imports_and_requires<'a>(
 No `WalkWith` trait bound. Top-level callers in `visitor.rs` already match on
 `Statement` variants, so they have a `&Statement` to hand off directly.
 
-- [ ] Rewrite the `scan_call_expr` match using `match &expr.callee { Expression::ImportExpression(_) => ..., Expression::Identifier(id) if is_global_require(semantic, id) => ..., Expression::StaticMemberExpression(m) => ... }`
-- [ ] Rewrite the `.then(({ a, b, c }) => { ... })` pattern walker against oxc's `ArrowFunctionExpression` / `Function` and `BindingPattern`
-- [ ] Drop the `box_patterns` destructures — `Box<Expression>` is `&Expression` via `Deref`
-- [ ] Update `extract_generic_function_def_first_arg` to take `&'a Expression<'a>`
-- [ ] Update `args_as_import` to take `&'a oxc_allocator::Vec<'a, Argument<'a>>`
-- [ ] Replace `find_imports_and_requires<TNode>` with the concrete `fn find_imports_and_requires<'a>(semantic: &Semantic<'a>, stmt: &Statement<'a>) -> ImportsAndRequires` signature above; implementation calls `oxc_ast_visit::walk::walk_statement(&mut visitor, stmt)`
+- [x] Rewrite the `scan_call_expr` match using `match &expr.callee { Expression::ImportExpression(_) => ..., Expression::Identifier(id) if is_global_require(semantic, id) => ..., Expression::StaticMemberExpression(m) => ... }`
+- [x] Rewrite the `.then(({ a, b, c }) => { ... })` pattern walker against oxc's `ArrowFunctionExpression` / `Function` and `BindingPattern`
+- [x] Drop the `box_patterns` destructures — `Box<Expression>` is `&Expression` via `Deref`
+- [x] Update `extract_generic_function_def_first_arg` to take `&'a Expression<'a>`
+- [x] Update `args_as_import` to take `&'a oxc_allocator::Vec<'a, Argument<'a>>`
+- [x] Replace `find_imports_and_requires<TNode>` with the concrete `fn find_imports_and_requires<'a>(semantic: &Semantic<'a>, stmt: &Statement<'a>) -> ImportsAndRequires` signature above; implementation calls `oxc_ast_visit::walk::walk_statement(&mut visitor, stmt)`
 
 ## Update `visitor.rs` (the top-level segmenter)
 
@@ -127,11 +127,11 @@ pub fn segment_file<'a>(
 
 `program.comments` is read directly from the `Program` (no wrapper).
 
-- [ ] Change `module: &swc_ecma_ast::Module` parameter to `program: &Program<'a>`
-- [ ] Add `&Semantic<'a>` parameter
-- [ ] Replace match on `ModuleItem::{Stmt, ModuleDecl}` with oxc's `Statement::*` variants (oxc flattens these into `Statement`; module-decl statements are `Statement::ImportDeclaration`, `Statement::ExportNamedDeclaration`, etc.)
-- [ ] Replace `module_item.span()` calls (from `Spanned` trait) with direct `.span` field access
-- [ ] Replace `ast_name_tracker::visitor::find_names(...)` calls with a temporary shim that asks `semantic` for the bindings — full deletion happens in phase 4
+- [x] Change `module: &swc_ecma_ast::Module` parameter to `program: &Program<'a>`
+- [x] Add `&Semantic<'a>` parameter
+- [x] Replace match on `ModuleItem::{Stmt, ModuleDecl}` with oxc's `Statement::*` variants (oxc flattens these into `Statement`; module-decl statements are `Statement::ImportDeclaration`, `Statement::ExportNamedDeclaration`, etc.)
+- [x] Replace `module_item.span()` calls (from `Spanned` trait) with direct `.span` field access
+- [x] Replace `ast_name_tracker::visitor::find_names(...)` calls with a temporary shim that asks `semantic` for the bindings — full deletion happens in phase 4
 
 ## Update in-crate tests
 
@@ -158,14 +158,14 @@ fn segment(src: &str) -> Vec<Segment> {
 }
 ```
 
-- [ ] Rewrite the in-crate `segment(...)` helper
-- [ ] Rewrite the `find_imports_and_requires` tests to parse with oxc
-- [ ] All existing assertions (segment counts, contents of `module_deps`, `exports_locals`, etc.) must pass unchanged
+- [x] Rewrite the in-crate `segment(...)` helper
+- [x] Rewrite the `find_imports_and_requires` tests to parse with oxc
+- [x] All existing assertions (segment counts, contents of `module_deps`, `exports_locals`, etc.) must pass unchanged
 
 ## Drop swc and nightly
 
-- [ ] Remove `#![feature(box_patterns)]` from `ast_segmenter/src/lib.rs`
-- [ ] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_ecma_parser`, `swc_atoms`, `swc_utils_parse` from `ast_segmenter/Cargo.toml`
-- [ ] Add `oxc_ast`, `oxc_ast_visit`, `oxc_span`, `oxc_semantic`, `oxc_utils_parse` to `ast_segmenter/Cargo.toml`
-- [ ] `cargo test -p ast_segmenter` passes
-- [ ] `cargo build --workspace` passes (downstream callers still use swc-parsed AST via the runner — that's phase 5)
+- [x] Remove `#![feature(box_patterns)]` from `ast_segmenter/src/lib.rs`
+- [x] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_ecma_parser`, `swc_atoms`, `swc_utils_parse` from `ast_segmenter/Cargo.toml`
+- [x] Add `oxc_ast`, `oxc_ast_visit`, `oxc_span`, `oxc_semantic`, `oxc_utils_parse` to `ast_segmenter/Cargo.toml`
+- [x] `cargo test -p ast_segmenter` passes
+- [x] `cargo build --workspace` passes (downstream callers still use swc-parsed AST via the runner — that's phase 5)

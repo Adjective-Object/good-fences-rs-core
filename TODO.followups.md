@@ -28,3 +28,23 @@ OXC populates `Comment::attached_to` with the start offset of the token the lead
 is attached to. Once that semantic is confirmed stable, `leading_comments_at` could be
 simplified to a filter on `c.is_leading() && c.attached_to == statement_start` (O(log n)
 via partition_point is fine as-is, but the intent would be clearer).
+
+## `scope_from_semantic` includes symbols from nested scopes (swc-to-oxc phase 4)
+
+The `scope_from_semantic` shim in `ast_name_tracker` (added in phase 4) uses span containment
+to find symbols belonging to a statement. This includes symbols declared in nested scopes
+(e.g., inside function bodies). A proper implementation would walk only the statement's
+direct scope boundary. Phase 5 should replace this with a precise scope-tree walk or
+remove it entirely once `ast_name_tracker` is fully migrated.
+
+## `segment_graph.rs` retains `swc_atoms::Atom` for `Name` (swc-to-oxc)
+
+`crates/ast_segmenter/src/segment_graph.rs` still uses `swc_atoms::Atom` as the `Name`
+type (it did not need to be changed for phase 4). Migrate this to a plain `Arc<str>` or
+`Box<str>` in phase 8/9 cleanup alongside the `ast_name_tracker` name type migration.
+
+## `unused_finder/parse/exports_visitor_tests.rs` still parses with swc (swc-to-oxc)
+
+The test helper in `crates/unused_finder/src/parse/exports_visitor_tests.rs` still uses
+the swc parser to produce `RawImportExportInfo` for assertion. This will be migrated as
+part of the `unused_finder` phase (phase 5 or later).
