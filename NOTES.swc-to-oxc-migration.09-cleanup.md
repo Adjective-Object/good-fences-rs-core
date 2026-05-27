@@ -43,3 +43,14 @@
 - `__test__/index.spec.mjs` (ava): 3/3 tests pass against the `good_fences_integration` fixture via napi.
 - `./scripts/spot-check`: passes — `ast-segmenter` compiles and tests pass (26/26), full workspace compiles.
 - Pre-existing warnings remain in `unused_finder` (dead code) and `ftree_cache` (lifetime syntax) — unrelated to migration.
+
+## Documentation
+
+- Updated `README.md`: changed swc link/mention to oxc.
+- Created `crates/ast_segmenter/AGENTS.md`: documents the extract-then-drop
+  arena pattern, thread-local allocator reuse, and oxc_semantic scope analysis.
+- Created `crates/import_resolver/AGENTS.md`: documents the `PathResolver`
+  trait, its implementors, the swc_resolver→node_resolver rename lineage, and
+  why oxc_resolver is not adopted.
+- `NOTES.swc-to-oxc-migration.md` (without phase suffix) does not exist — no
+  archival needed. Phase-specific NOTES files are kept as-is.

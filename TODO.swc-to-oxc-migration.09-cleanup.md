@@ -45,9 +45,9 @@ Depends on phases 1–7.
 
 ## Documentation
 
-- [ ] Update root `README.md` to note the oxc-based parser stack
-- [ ] Update `crates/ast_segmenter/AGENTS.md` (or create it) noting the
+- [x] Update root `README.md` to note the oxc-based parser stack
+- [x] Update `crates/ast_segmenter/AGENTS.md` (or create it) noting the
       extract-then-drop arena pattern
-- [ ] Update `crates/import_resolver/AGENTS.md` (or create it) noting the
+- [x] Update `crates/import_resolver/AGENTS.md` (or create it) noting the
       `PathResolver` trait
-- [ ] Archive `NOTES.swc-to-oxc-migration.md` if it exists; keep `PLAN.swc-to-oxc-migration.md`
+- [x] Archive `NOTES.swc-to-oxc-migration.md` if it exists; keep `PLAN.swc-to-oxc-migration.md`
