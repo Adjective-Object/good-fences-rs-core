@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.05-source-graph-and-name-tracker.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.5",
+    "tokens_in": 3382933,
+    "tokens_out": 17545,
+    "tokens_cached": 3313815,
+    "premium_requests": 3
+  },
+  "started_at": "2026-05-27T03:28:25.755888157Z",
+  "completed_at": "2026-05-27T03:34:24.906344797Z",
+  "session_id": "3EI3xoOmaCR0HgAQdX3fBgrTD5H",
+  "runtime_name": "github-copilot-agent-claude-opus-4.5",
+  "success": true,
+  "machine_id": "b04c5143fda44a0d"
+}

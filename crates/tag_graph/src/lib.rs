@@ -625,7 +625,7 @@ mod tests {
 
     use ast_segmenter::raw_module_deps::RawModuleDeps;
     use ast_segmenter::Segment;
-    use ast_name_tracker::visitor::VariableScope;
+    use ast_segmenter::variables::VariableScope;
     use oxc_span::Span;
 
     fn make_span(lo: u32, hi: u32) -> Span {
@@ -736,8 +736,8 @@ mod tests {
     // -- propagate_tags_to_used tests --
 
     use ast_segmenter::raw_module_deps::{Symbol, SymbolTags, TaggedSymbol};
-    use ast_name_tracker::visitor::HoistingLevel;
-    use swc_atoms::Atom;
+    use ast_segmenter::variables::HoistingLevel;
+    use compact_str::CompactString;
 
     /// Build a segment that imports `symbol` from `specifier`.
     fn segment_importing(specifier: &str, symbol: Symbol, is_type_only: bool) -> Segment {
@@ -780,7 +780,7 @@ mod tests {
     /// Build a segment with an escaped symbol reference (intra-file dependency).
     fn segment_with_escaped(escaped_name: &str) -> Segment {
         let mut vars = VariableScope::new();
-        vars.insert_escaped(Atom::from(escaped_name));
+        vars.insert_escaped(CompactString::new(escaped_name));
         Segment {
             span: make_span(0, 10),
             module_deps: RawModuleDeps::default(),
@@ -791,7 +791,7 @@ mod tests {
     /// Build a segment that declares a local variable.
     fn segment_with_local_decl(name: &str, hoisting: HoistingLevel) -> Segment {
         let mut vars = VariableScope::new();
-        vars.insert_local(Atom::from(name), hoisting);
+        vars.insert_local_str(name, hoisting);
         Segment {
             span: make_span(0, 10),
             module_deps: RawModuleDeps::default(),

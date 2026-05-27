@@ -164,7 +164,7 @@ name = "ast-segmenter"
 version = "0.2.0-beta.1"
 dependencies = [
  "ahashmap",
- "ast-name-tracker",
+ "compact_str",
  "logger",
  "logger_srcfile",
  "oxc_allocator",
@@ -2545,12 +2545,10 @@ name = "source_graph"
 version = "0.2.0"
 dependencies = [
  "ahashmap",
- "ast-name-tracker",
  "ast-segmenter",
+ "compact_str",
  "oxc_span",
  "pretty_assertions",
- "swc_atoms",
- "swc_common",
 ]
 
 [[package]]
@@ -3084,14 +3082,12 @@ name = "tag_graph"
 version = "0.2.0"
 dependencies = [
  "ahashmap",
- "ast-name-tracker",
  "ast-segmenter",
  "bitflags",
+ "compact_str",
  "oxc_span",
  "pretty_assertions",
  "source_graph",
- "swc_atoms",
- "swc_common",
 ]
 
 [[package]]
@@ -3379,7 +3375,6 @@ dependencies = [
  "abspath",
  "ahashmap",
  "anyhow",
- "ast-name-tracker",
  "ast-segmenter",
  "bitflags",
  "const_format",

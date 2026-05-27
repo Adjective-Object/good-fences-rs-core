@@ -34,9 +34,9 @@ impl VariableScope {
 }
 ```
 
-- [ ] Move `VariableScope` and `HoistingLevel` from `ast_name_tracker` into `ast_segmenter::variables` (new module)
-- [ ] Replace `swc_atoms::Atom` keys with `oxc_span::CompactStr`
-- [ ] Drop the `VarID(Span)` field (was unused outside diagnostics)
+- [x] Move `VariableScope` and `HoistingLevel` from `ast_name_tracker` into `ast_segmenter::variables` (new module)
+- [x] Replace `swc_atoms::Atom` keys with `oxc_span::CompactStr`
+- [x] Drop the `VarID(Span)` field (was unused outside diagnostics)
 
 ## Implement segment-scoped binding extraction from `Semantic`
 

@@ -5,6 +5,7 @@ pub mod name_set;
 pub mod raw_module_deps;
 pub mod segment_graph;
 pub mod segment_info;
+pub mod variables;
 pub mod visitor;
 pub mod visitors;
 

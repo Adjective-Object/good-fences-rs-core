@@ -398,7 +398,7 @@ mod test {
     use crate::raw_module_deps::{RawModuleDeps, TaggedSymbol, SymbolTags};
     use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
     use crate::segment_info::Segment;
-    use ast_name_tracker::VariableScope;
+    use crate::variables::VariableScope;
 
     /// Helper: create a minimal Segment with given module deps.
     fn seg(deps: RawModuleDeps) -> Segment {

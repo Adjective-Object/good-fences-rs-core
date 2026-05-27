@@ -27,7 +27,6 @@ swc_ecma_parser.workspace = true
 swc_ecma_visit.workspace = true
 swc_ecma_transforms.workspace = true
 swc_utils_parse = { path = "../swc_utils_parse" }
-ast-name-tracker = { path = "../ast_name_tracker" }
 ast-segmenter = { path = "../ast_segmenter" }
 thiserror.workspace = true
 tsconfig_paths = { path = "../tsconfig_paths" }

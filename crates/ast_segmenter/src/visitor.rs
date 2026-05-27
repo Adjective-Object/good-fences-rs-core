@@ -1,4 +1,4 @@
-use ast_name_tracker::{visitor::HoistingLevel, VariableScope};
+use crate::variables::{HoistingLevel, VariableScope};
 use logger_srcfile::SrcFileLogger;
 use oxc_ast::ast::{Program, Statement};
 use oxc_ast_visit::walk;
@@ -25,7 +25,7 @@ pub enum StatementToSegmentError {
 
 /// Temporary shim: extract a `VariableScope` from oxc `Semantic` for the
 /// root scope bindings. Replaces `ast_name_tracker::visitor::find_names`.
-/// Full deletion of `ast_name_tracker` happens in phase 4.
+/// Full deletion of `ast_name_tracker` happens in phase 5.
 fn find_names_from_semantic(semantic: &Semantic<'_>) -> VariableScope {
     let scoping = semantic.scoping();
     let root_scope = scoping.root_scope_id();
