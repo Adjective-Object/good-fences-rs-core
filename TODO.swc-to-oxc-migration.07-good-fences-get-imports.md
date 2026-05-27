@@ -56,9 +56,9 @@ pub fn get_imports_map_from_file<P: AsRef<str>>(file_path: &P) -> Result<FileImp
 }
 ```
 
-- [ ] Rewrite `get_imports_map_from_file` against the thread-local arena pattern above
-- [ ] Delete the swc-specific `create_lexer` helper (was duplicated from `swc_utils_parse`)
-- [ ] Update tests at the bottom of `mod.rs` (they hit real files — should still pass unchanged)
+- [x] Rewrite `get_imports_map_from_file` against the thread-local arena pattern above
+- [x] Delete the swc-specific `create_lexer` helper (was duplicated from `swc_utils_parse`)
+- [x] Update tests at the bottom of `mod.rs` (they hit real files — should still pass unchanged)
 
 ## Port `ImportPathVisitor`
 
@@ -76,21 +76,21 @@ fn is_global_require(semantic: &Semantic<'_>, ident: &IdentifierReference<'_>) -
 }
 ```
 
-- [ ] Add `semantic: &'s Semantic<'a>` field to `ImportPathVisitor`
-- [ ] Replace `swc_ecma_visit::{Visit, VisitWith}` with `oxc_ast_visit::Visit<'a>`
-- [ ] Port `visit_named_export` → `visit_export_named_declaration`
-- [ ] Replace `visit_binding_ident` + `require_identifiers: HashSet<Id>` with the `is_global_require` helper, called from `visit_call_expression`
-- [ ] Port `visit_ts_import_equals_decl` → `visit_ts_import_equals_declaration`
-- [ ] Port `visit_call_expr` → `visit_call_expression`
-- [ ] Port `visit_import_decl` → `visit_import_declaration`
-- [ ] Update `append_imported_names` and `extract_argument_value` to take oxc types
-- [ ] Handle the third `ModuleExportName::IdentifierReference` variant
-- [ ] Drop the `require_identifiers: HashSet<Id>` field
-- [ ] Rewrite the in-crate tests to parse with `oxc_utils_parse::parse_file`
+- [x] Add `semantic: &'s Semantic<'a>` field to `ImportPathVisitor`
+- [x] Replace `swc_ecma_visit::{Visit, VisitWith}` with `oxc_ast_visit::Visit<'a>`
+- [x] Port `visit_named_export` → `visit_export_named_declaration`
+- [x] Replace `visit_binding_ident` + `require_identifiers: HashSet<Id>` with the `is_global_require` helper, called from `visit_call_expression`
+- [x] Port `visit_ts_import_equals_decl` → `visit_ts_import_equals_declaration`
+- [x] Port `visit_call_expr` → `visit_call_expression`
+- [x] Port `visit_import_decl` → `visit_import_declaration`
+- [x] Update `append_imported_names` and `extract_argument_value` to take oxc types
+- [x] Handle the third `ModuleExportName::IdentifierReference` variant
+- [x] Drop the `require_identifiers: HashSet<Id>` field
+- [x] Rewrite the in-crate tests to parse with `oxc_utils_parse::parse_file`
 
 ## Cargo.toml cleanup
 
-- [ ] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_parser`, `swc_ecma_visit`, `swc_ecma_transforms`, `swc_utils_parse` from `good_fences/Cargo.toml`
-- [ ] Add `oxc_allocator`, `oxc_ast`, `oxc_ast_visit`, `oxc_semantic`, `oxc_span`, `oxc_utils_parse`
-- [ ] `cargo test -p good_fences` passes
-- [ ] `cargo test -p good_fences_napi` passes
+- [x] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_parser`, `swc_ecma_visit`, `swc_ecma_transforms`, `swc_utils_parse` from `good_fences/Cargo.toml`
+- [x] Add `oxc_allocator`, `oxc_ast`, `oxc_ast_visit`, `oxc_semantic`, `oxc_span`, `oxc_utils_parse`
+- [x] `cargo test -p good_fences` passes
+- [x] `cargo test -p good_fences_napi` passes
