@@ -6,10 +6,10 @@ Depends on phases 1–7.
 
 ## Delete dead helper crates
 
-- [ ] Delete `crates/swc_utils_parse/`
-- [ ] Delete `crates/swc_utils_print/`
-- [ ] `grep -r 'swc_utils_parse\|swc_utils_print' crates/` returns no matches
-- [ ] `cargo build --workspace` succeeds
+- [x] Delete `crates/swc_utils_parse/`
+- [x] Delete `crates/swc_utils_print/`
+- [x] `grep -r 'swc_utils_parse\|swc_utils_print' crates/` returns no matches
+- [x] `cargo build --workspace` succeeds
 
 ## Remove the swc-compat adapter
 
