@@ -1,10 +1,9 @@
-use anyhow::{anyhow, Error};
+use anyhow::Error;
 use std::path::Path;
-use swc_common::FileName;
-use swc_ecma_loader::resolve::{Resolution, Resolve};
 
+use crate::resolve::{PathResolver, Resolution};
 use super::{
-    node_resolver::{
+    caching::{
         CachingNodeModulesResolver, NodeModulesCache, NodeModulesResolverOptions, PackageJsonCache,
     },
     tsconfig::ProcessedTsconfig,
@@ -72,12 +71,9 @@ pub struct CombinedResolver<'a> {
     node_modules_resolver: CachingNodeModulesResolver<'a>,
 }
 
-impl Resolve for CombinedResolver<'_> {
-    fn resolve(&self, base: &FileName, module_specifier: &str) -> Result<Resolution, Error> {
-        let base_path = match base {
-            FileName::Real(path) => path,
-            _ => return Err(anyhow!("Base must be a real file path")),
-        };
+impl PathResolver for CombinedResolver<'_> {
+    fn resolve(&self, base: &Path, module_specifier: &str) -> Result<Resolution, Error> {
+        let base_path = base;
 
         match self.tsconfig_cache.probe_path(self.root_dir, base_path)? {
             Some((path, maybe_tsconfig)) => match maybe_tsconfig.value() {
@@ -90,7 +86,7 @@ impl Resolve for CombinedResolver<'_> {
                     tracing::debug!(
                         "tsconfig resolved {} to {}",
                         module_specifier,
-                        resolution.filename,
+                        resolution.path.display(),
                     );
 
                     Ok(resolution)
@@ -117,7 +113,7 @@ mod test {
 
     use super::*;
     use pretty_assertions::assert_eq;
-    use swc_ecma_loader::TargetEnv;
+    use crate::resolve::TargetEnv;
     use test_tmpdir::test_tmpdir;
 
     fn check_deadlocks() {
@@ -167,11 +163,9 @@ mod test {
 
         let resolution = resolver
             .resolve(
-                &FileName::Real(
-                    tmp.root()
+                &tmp.root()
                         .to_owned()
                         .join("packages/my/importing/module.ts"),
-                ),
                 "to-node-modules",
             )
             .unwrap();
@@ -179,7 +173,7 @@ mod test {
         assert_eq!(
             resolution,
             Resolution {
-                filename: FileName::Real(
+                path: (
                     tmp.root()
                         .to_owned()
                         .join("node_modules/to-node-modules/index.js")
@@ -211,7 +205,7 @@ mod test {
         );
         let resolution = resolver
             .resolve(
-                &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
+                &tmp.root_join("packages/my/importing/module.ts"),
                 "non-glob-specifier",
             )
             .unwrap();
@@ -219,7 +213,7 @@ mod test {
         assert_eq!(
             resolution,
             Resolution {
-                filename: FileName::Real(
+                path: (
                     tmp.root()
                         .to_owned()
                         .join("packages/non-glob-specifier/lib/index.ts")
@@ -251,7 +245,7 @@ mod test {
         );
         let resolution = resolver
             .resolve(
-                &FileName::Real(tmp.root_join("packages/my/importing/module.ts")),
+                &tmp.root_join("packages/my/importing/module.ts"),
                 "glob-specifier/lib/something",
             )
             .unwrap();
@@ -259,7 +253,7 @@ mod test {
         assert_eq!(
             resolution,
             Resolution {
-                filename: FileName::Real(
+                path: (
                     tmp.root()
                         .to_owned()
                         .join("packages/glob-specifier/src/something.ts")
@@ -300,7 +294,7 @@ mod test {
         );
         let resolution = resolver
             .resolve(
-                &FileName::Real(tmp.root_join("t/packages/my/importing/module.ts")),
+                &tmp.root_join("t/packages/my/importing/module.ts"),
                 "glob-specifier/lib/bar",
             )
             .unwrap();
@@ -308,7 +302,7 @@ mod test {
         assert_eq!(
             resolution,
             Resolution {
-                filename: FileName::Real(
+                path: (
                     tmp.root()
                         .to_owned()
                         .join("t/override-packages/glob-specifier/src/bar.ts")
@@ -341,7 +335,7 @@ mod test {
         );
         let resolution = resolver
             .resolve(
-                &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
+                &tmp.root_join("root/packages/my/importing/module.ts"),
                 "in-root/lib/bar.ts",
             )
             .unwrap();
@@ -349,7 +343,7 @@ mod test {
         assert_eq!(
             resolution,
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root()
                         .to_owned()
@@ -383,7 +377,7 @@ mod test {
         );
         let resolution = resolver
             .resolve(
-                &FileName::Real(tmp.root_join("root/packages/my/importing/module.ts")),
+                &tmp.root_join("root/packages/my/importing/module.ts"),
                 "in-root/lib/bar.ts",
             )
             .unwrap();
@@ -391,7 +385,7 @@ mod test {
         assert_eq!(
             resolution,
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root()
                         .to_owned()
@@ -431,7 +425,7 @@ mod test {
             options.export_conditions = conditions.into_iter().map(|s| s.to_string()).collect();
             let import_resolver = caches.resolver(tmp.root(), options);
             import_resolver
-                .resolve(&FileName::Real(tmp.root().join(from)), to)
+                .resolve(&tmp.root().join(from), to)
                 .unwrap()
         };
 
@@ -443,7 +437,7 @@ mod test {
                 vec!["require"],
             ),
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root()
                         .to_owned()
@@ -461,7 +455,7 @@ mod test {
                 vec!["import"],
             ),
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root()
                         .to_owned()
@@ -479,7 +473,7 @@ mod test {
                 vec!["not-present", "require", "import"],
             ),
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root()
                         .to_owned()
@@ -497,7 +491,7 @@ mod test {
                 vec!["require"],
             ),
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root().to_owned().join("node_modules/hetero/lib/foo.ts")
                 ),
@@ -511,7 +505,7 @@ mod test {
                 vec!["import"],
             ),
             Resolution {
-                filename: FileName::Real(
+                path: (
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root().to_owned().join("node_modules/hetero/lib/foo.ts")
                 ),

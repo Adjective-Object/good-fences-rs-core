@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use swc_common::FileName;
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Default, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -35,9 +34,9 @@ pub enum Pattern {
 pub struct ProcessedTsconfigPaths {
     pub paths: Vec<(Pattern, Vec<String>)>,
     pub base_url: PathBuf,
-    // A filename representation of base_url, used for invoking the inner_resolver
-    // with the base_url as a filename
-    pub base_url_filename: FileName,
+    // A path representation of base_url, used for invoking the inner_resolver
+    // with the base_url as a base path
+    pub base_url_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -134,12 +133,12 @@ impl ContextData for ProcessedTsconfig {
             })?;
 
         let as_buf = base_url;
-        let for_swc = ProcessedTsconfigPaths {
+        let processed = ProcessedTsconfigPaths {
             paths: pattern_paths,
-            base_url_filename: FileName::Real(as_buf.clone()),
+            base_url_path: as_buf.clone(),
             base_url: as_buf,
         };
 
-        Ok(Some(ProcessedTsconfig::HasPaths(for_swc)))
+        Ok(Some(ProcessedTsconfig::HasPaths(processed)))
     }
 }

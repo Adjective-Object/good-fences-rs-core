@@ -1114,6 +1114,7 @@ name = "import_resolver"
 version = "0.2.0"
 dependencies = [
  "abspath",
+ "ahashmap",
  "anyhow",
  "dashmap 6.2.1",
  "ftree_cache",
@@ -1132,10 +1133,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "swc_common",
- "swc_ecma_loader",
  "test_tmpdir",
- "thiserror 1.0.69",
  "tracing",
  "tsconfig_paths",
 ]
