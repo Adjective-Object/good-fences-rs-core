@@ -1,4 +1,5 @@
 use crate::variables::{HoistingLevel, VariableScope};
+use compact_str::CompactString;
 use logger_srcfile::SrcFileLogger;
 use oxc_ast::ast::{Program, Statement};
 use oxc_ast_visit::walk;
@@ -23,26 +24,84 @@ pub enum StatementToSegmentError {
     WithStatmentUnsupported,
 }
 
-/// Temporary shim: extract a `VariableScope` from oxc `Semantic` for the
-/// root scope bindings. Replaces `ast_name_tracker::visitor::find_names`.
-/// Full deletion of `ast_name_tracker` happens in phase 5.
-fn find_names_from_semantic(semantic: &Semantic<'_>) -> VariableScope {
-    let scoping = semantic.scoping();
-    let root_scope = scoping.root_scope_id();
-    let mut scope = VariableScope::new();
-    let bindings = scoping.get_bindings(root_scope);
-    for (name, &symbol_id) in bindings.iter() {
-        let flags = scoping.symbol_flags(symbol_id);
-        let hoisting = if flags.contains(SymbolFlags::Import) {
-            HoistingLevel::ImportHoisting
-        } else if flags.contains(SymbolFlags::Function) {
-            HoistingLevel::FunctionHoisting
-        } else {
-            HoistingLevel::LetConstHoisting
-        };
-        scope.insert_local_str(name.as_str(), hoisting);
+/// Map `SymbolFlags` to `HoistingLevel`.
+fn hoisting_for_flags(flags: SymbolFlags) -> HoistingLevel {
+    if flags.contains(SymbolFlags::Import) {
+        HoistingLevel::ImportHoisting
+    } else if flags.contains(SymbolFlags::Function) {
+        HoistingLevel::FunctionHoisting
+    } else {
+        HoistingLevel::LetConstHoisting
     }
-    scope
+}
+
+/// Compute `VariableScope` for every top-level `Statement` in one pass.
+/// Returned vec has one entry per `program.body[i]` in order.
+///
+/// For a file with N top-level statements and M total symbols/references,
+/// this is O(N + M log N) instead of O(N·M).
+fn variables_for_top_level_statements<'a>(
+    semantic: &Semantic<'a>,
+    body: &[Statement<'a>],
+) -> Vec<VariableScope> {
+    let stmt_spans: Vec<(u32, u32)> = body
+        .iter()
+        .map(|s| (s.span().start, s.span().end))
+        .collect();
+    let mut out: Vec<VariableScope> = (0..body.len()).map(|_| VariableScope::default()).collect();
+
+    let find_stmt = |offset: u32| -> Option<usize> {
+        // partition_point on stmt_spans by `end`; check that `start <= offset < end`.
+        let i = stmt_spans.partition_point(|(_, end)| *end <= offset);
+        stmt_spans
+            .get(i)
+            .and_then(|(start, end)| (offset >= *start && offset < *end).then_some(i))
+    };
+
+    let scoping = semantic.scoping();
+    let program_scope = scoping.root_scope_id();
+    let bindings = scoping.get_bindings(program_scope);
+
+    // Bindings: walk the program scope (top-level decls) and bucket by statement.
+    for (name, &symbol_id) in bindings.iter() {
+        let decl_span = scoping.symbol_span(symbol_id);
+        let Some(stmt_idx) = find_stmt(decl_span.start) else {
+            continue;
+        };
+        let hoisting = hoisting_for_flags(scoping.symbol_flags(symbol_id));
+        out[stmt_idx].insert_local(CompactString::new(name.as_str()), hoisting);
+    }
+
+    // Escaped (resolved): for each root binding, check if any of its references
+    // fall in a different statement than the binding's declaration.
+    for (_name, &symbol_id) in bindings.iter() {
+        let decl_stmt = find_stmt(scoping.symbol_span(symbol_id).start);
+        let sym_name = scoping.symbol_name(symbol_id);
+
+        for reference in scoping.get_resolved_references(symbol_id) {
+            let ref_span = semantic.reference_span(reference);
+            let Some(ref_stmt) = find_stmt(ref_span.start) else {
+                continue;
+            };
+            if Some(ref_stmt) != decl_stmt {
+                out[ref_stmt].insert_escaped(CompactString::new(sym_name));
+            }
+        }
+    }
+
+    // Escaped (unresolved): globals and other names with no binding.
+    for (name, ref_ids) in scoping.root_unresolved_references().iter() {
+        let name_str = name.as_str();
+        for ref_id in ref_ids.iter() {
+            let reference = scoping.get_reference(*ref_id);
+            let ref_span = semantic.reference_span(reference);
+            if let Some(stmt_idx) = find_stmt(ref_span.start) {
+                out[stmt_idx].insert_escaped(CompactString::new(name_str));
+            }
+        }
+    }
+
+    out
 }
 
 fn statement_to_segment<'a>(
@@ -51,6 +110,7 @@ fn statement_to_segment<'a>(
     source: &str,
     semantic: &Semantic<'a>,
     stmt: &Statement<'a>,
+    variables: VariableScope,
 ) -> Option<Segment> {
     let span = stmt.span();
     match stmt {
@@ -60,8 +120,6 @@ fn statement_to_segment<'a>(
         | Statement::ExportDefaultDeclaration(_)
         | Statement::ExportAllDeclaration(_)
         | Statement::TSImportEqualsDeclaration(_) => {
-            let variables = find_names_from_semantic(semantic);
-
             let mut exports_visitor = ExportsVisitor::new(file_logger, comments, source, semantic);
             walk::walk_statement(&mut exports_visitor, stmt);
             let module_deps: RawModuleDeps = exports_visitor.into();
@@ -100,8 +158,8 @@ fn statement_to_segment<'a>(
         }
         // Regular statements — extract dynamic imports/requires
         _ => {
-            let variables = find_names_from_semantic(semantic);
-            let imports_and_requires = import_require_expr::find_imports_and_requires(semantic, stmt);
+            let imports_and_requires =
+                import_require_expr::find_imports_and_requires(semantic, stmt);
 
             let dynamic_imports = imports_and_requires
                 .imported_paths
@@ -137,16 +195,22 @@ pub fn segment_file<'a>(
     program: &Program<'a>,
     semantic: &Semantic<'a>,
 ) -> Vec<Segment> {
+    let mut per_stmt_variables = variables_for_top_level_statements(semantic, &program.body);
+
     program
         .body
         .iter()
-        .filter_map(|stmt| {
+        .enumerate()
+        .filter_map(|(i, stmt)| {
+            // Take ownership of the pre-computed VariableScope for this statement.
+            let variables = std::mem::take(&mut per_stmt_variables[i]);
             statement_to_segment(
                 logger,
                 &program.comments,
                 program.source_text,
                 semantic,
                 stmt,
+                variables,
             )
         })
         .collect()
@@ -340,5 +404,98 @@ mod test {
             .module_deps
             .dynamic_imports
             .contains_key("./chunk"));
+    }
+
+    // ── Per-statement variable scoping ────────────────────────────────
+
+    #[test]
+    fn per_statement_locals_are_bucketed() {
+        let segments = segment(
+            r#"
+            import { foo } from './foo';
+            const x = 1;
+            function bar() {}
+            "#,
+        );
+        assert_eq!(segments.len(), 3);
+
+        // Segment 0: import → declares `foo` with ImportHoisting
+        let locals0: Vec<&str> = segments[0].variables.get_locals().map(|s| s.as_ref()).collect();
+        assert!(locals0.contains(&"foo"), "expected 'foo' in segment 0 locals");
+        assert_eq!(
+            segments[0].variables.get_locals_with_hoisting().find(|(n, _)| n.as_str() == "foo").map(|(_, h)| h),
+            Some(HoistingLevel::ImportHoisting)
+        );
+
+        // Segment 1: const → declares `x` with LetConstHoisting
+        let locals1: Vec<&str> = segments[1].variables.get_locals().map(|s| s.as_ref()).collect();
+        assert!(locals1.contains(&"x"), "expected 'x' in segment 1 locals");
+        assert!(!locals1.contains(&"foo"), "'foo' should not be in segment 1");
+
+        // Segment 2: function → declares `bar` with FunctionHoisting
+        let locals2: Vec<&str> = segments[2].variables.get_locals().map(|s| s.as_ref()).collect();
+        assert!(locals2.contains(&"bar"), "expected 'bar' in segment 2 locals");
+        assert_eq!(
+            segments[2].variables.get_locals_with_hoisting().find(|(n, _)| n.as_str() == "bar").map(|(_, h)| h),
+            Some(HoistingLevel::FunctionHoisting)
+        );
+    }
+
+    #[test]
+    fn escaped_symbols_cross_statement() {
+        let segments = segment(
+            r#"
+            import { foo } from './foo';
+            const x = foo();
+            "#,
+        );
+        assert_eq!(segments.len(), 2);
+
+        // Segment 0 (import): `foo` is local, not escaped
+        let escaped0: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
+        assert!(!escaped0.contains(&"foo"));
+
+        // Segment 1 (const x = foo()): `foo` is escaped (declared in segment 0)
+        let escaped1: Vec<&str> = segments[1].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
+        assert!(escaped1.contains(&"foo"), "expected 'foo' escaped in segment 1");
+    }
+
+    #[test]
+    fn escaped_symbols_unresolved_globals() {
+        let segments = segment("const x = console.log('hello');");
+        assert_eq!(segments.len(), 1);
+
+        let escaped: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
+        assert!(escaped.contains(&"console"), "expected 'console' as escaped global");
+    }
+
+    #[test]
+    fn self_reference_not_escaped() {
+        let segments = segment("function foo() { return foo; }");
+        assert_eq!(segments.len(), 1);
+
+        let locals: Vec<&str> = segments[0].variables.get_locals().map(|s| s.as_ref()).collect();
+        assert!(locals.contains(&"foo"));
+
+        let escaped: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
+        assert!(!escaped.contains(&"foo"), "'foo' should not be escaped in its own statement");
+    }
+
+    #[test]
+    fn export_function_referencing_import() {
+        let segments = segment(
+            r#"
+            import { helper } from './helpers';
+            export function doWork() { return helper(); }
+            "#,
+        );
+        assert_eq!(segments.len(), 2);
+
+        // `helper` is local in segment 0, escaped in segment 1
+        let locals0: Vec<&str> = segments[0].variables.get_locals().map(|s| s.as_ref()).collect();
+        assert!(locals0.contains(&"helper"));
+
+        let escaped1: Vec<&str> = segments[1].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
+        assert!(escaped1.contains(&"helper"), "expected 'helper' escaped in segment 1");
     }
 }

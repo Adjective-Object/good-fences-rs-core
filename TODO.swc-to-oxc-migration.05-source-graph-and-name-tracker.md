@@ -108,11 +108,11 @@ Mapping from `SymbolFlags` to `HoistingLevel`:
 | `Function`                                 | `FunctionHoisting`     |
 | `BlockScopedVariable` / `FunctionScopedVariable` / `Class` / `TypeAlias` / `Interface` / `RegularEnum` / `ConstEnum` | `LetConstHoisting` |
 
-- [ ] Implement `variables_for_top_level_statements(semantic, body) -> Vec<VariableScope>` as above
-- [ ] Implement `hoisting_for_flags(SymbolFlags) -> HoistingLevel`
-- [ ] Wire it into `segment_file(...)`: compute the vec once at the top, index by statement position
-- [ ] Remove the temporary `ast_name_tracker` shim added in phase 3
-- [ ] Add `cargo test -p ast_segmenter` regression coverage: every existing test that asserted on `segment.variables` still passes
+- [x] Implement `variables_for_top_level_statements(semantic, body) -> Vec<VariableScope>` as above
+- [x] Implement `hoisting_for_flags(SymbolFlags) -> HoistingLevel`
+- [x] Wire it into `segment_file(...)`: compute the vec once at the top, index by statement position
+- [x] Remove the temporary `ast_name_tracker` shim added in phase 3
+- [x] Add `cargo test -p ast_segmenter` regression coverage: every existing test that asserted on `segment.variables` still passes
 
 ## Update `source_graph`
 
