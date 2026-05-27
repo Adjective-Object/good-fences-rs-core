@@ -19,7 +19,7 @@ pretty_assertions = "1.4.0"
 rayon = "1.5.1"
 regex = "1"
 relative-path = "1.7.2"
-serde = { version = "1.0.117", features = ["rc", "derive"] }
+serde = { version = ">=1.0.117, <1.0.219", features = ["rc", "derive"] }
 serde_json = "1.0.59"
 swc_common = "0.37.4"
 swc_compiler_base = "0.18.1"
@@ -31,6 +31,13 @@ swc_ecma_visit = "0.104.6"
 thiserror = "1.0.52"
 schemars = "0.8.21"
 glob-match = "0.2.1"
+oxc_allocator = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_ast = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_ast_visit = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_parser = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_semantic = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_span = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_diagnostics = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
 
 [profile.release]
 # Build with debug info, but split it into separate pdb files we don't need to distribute
