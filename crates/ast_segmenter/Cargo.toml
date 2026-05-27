@@ -14,7 +14,7 @@ crate-type = ["lib"]
 [dependencies]
 ahashmap = { version = "0.2.0", path = "../ahashmap" }
 ast-name-tracker = { version = "0.2.0-beta.1", path = "../ast_name_tracker" }
-logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile", features = ["swc-compat"] }
 swc_atoms = "5.0.0"
 swc_common.workspace = true
 swc_ecma_ast.workspace = true

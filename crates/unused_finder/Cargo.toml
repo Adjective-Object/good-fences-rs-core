@@ -39,7 +39,7 @@ abspath = { version = "0.2.0", path = "../abspath" }
 itertools = "0.13.0"
 schemars.workspace = true
 logger = { version = "0.2.0", path = "../logger" }
-logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }
+logger_srcfile = { version = "0.2.0", path = "../logger_srcfile", features = ["swc-compat"] }
 multi_err = { version = "0.2.0", path = "../multi_err" }
 glob-match.workspace = true
 source_graph = { version = "0.2.0", path = "../source_graph" }

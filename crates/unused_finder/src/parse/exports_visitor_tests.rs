@@ -28,7 +28,7 @@ mod test {
         let module = parser.parse_typescript_module().unwrap();
 
         let stdio_logger = StdioLogger::new();
-        let logger = WrapFileLogger::new(cm, &stdio_logger);
+        let logger = WrapFileLogger::from_swc_source_map(&cm, &stdio_logger);
 
         let segments = ast_segmenter::segment_file(&logger, &module, &comments);
         RawImportExportInfo::from(segments.as_slice())

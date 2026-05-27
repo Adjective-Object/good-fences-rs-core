@@ -52,13 +52,13 @@ impl<TLogger> WrapFileLogger<TLogger> {
 `SimpleSourceFileLogger` (which only has a path, no source text) is preserved
 and updated to take `Span` instead of `&Span`.
 
-- [ ] Change `SrcFileLogger` trait to take `Span` (oxc) by value instead of `&swc_common::Span`
-- [ ] Replace `WrapFileLogger` fields: drop `source_map: TSrcMap`, add `named_source: NamedSource<String>` and `line_starts: OnceCell<Vec<u32>>` (no separate `source: String` — read via `NamedSource::inner()`)
-- [ ] Implement `WrapFileLogger::new(filename, source, inner_logger)` constructing `NamedSource::new(filename, source)` and an empty `OnceCell`
-- [ ] Implement `line_col(byte_offset)` that lazily populates `line_starts` via `OnceCell::get_or_init` and `binary_search`es into it
-- [ ] Re-implement `src_warn`/`src_error` to emit `"{filename}:{line}:{col} :: {message}"` (preserves existing log format)
-- [ ] Update `SimpleSourceFileLogger` to use `Span` (oxc) — no source text, just emits `"{path}:byte={span.start}:: {message}"` (intentional format change for the no-source variant)
-- [ ] Remove `swc_common` dependency from `logger_srcfile/Cargo.toml`; add `oxc_span`, `oxc_diagnostics`, `once_cell`
+- [x] Change `SrcFileLogger` trait to take `Span` (oxc) by value instead of `&swc_common::Span`
+- [x] Replace `WrapFileLogger` fields: drop `source_map: TSrcMap`, add `named_source: NamedSource<String>` and `line_starts: OnceCell<Vec<u32>>` (no separate `source: String` — read via `NamedSource::inner()`)
+- [x] Implement `WrapFileLogger::new(filename, source, inner_logger)` constructing `NamedSource::new(filename, source)` and an empty `OnceCell`
+- [x] Implement `line_col(byte_offset)` that lazily populates `line_starts` via `OnceCell::get_or_init` and `binary_search`es into it
+- [x] Re-implement `src_warn`/`src_error` to emit `"{filename}:{line}:{col} :: {message}"` (preserves existing log format)
+- [x] Update `SimpleSourceFileLogger` to use `Span` (oxc) — no source text, just emits `"{path}:byte={span.start}:: {message}"` (intentional format change for the no-source variant)
+- [x] Remove `swc_common` dependency from `logger_srcfile/Cargo.toml`; add `oxc_span`, `oxc_diagnostics`, `once_cell`
 
 ## Update call sites
 
@@ -83,14 +83,14 @@ pub fn swc_span_to_oxc(span: swc_common::Span) -> oxc_span::Span {
 }
 ```
 
-- [ ] Add `WrapFileLogger::from_swc_source_file(sm: &SourceMap, fm: &SourceFile, logger)` adapter behind a `swc-compat` cargo feature
-- [ ] Add `swc_span_to_oxc(swc_common::Span) -> oxc_span::Span` helper behind the same `swc-compat` feature
-- [ ] Update each call site to construct `WrapFileLogger` via the adapter, and to wrap every `&swc_span` argument with `swc_span_to_oxc(*span)` until the upstream visitor itself is migrated
-- [ ] Update test call sites in `ast_segmenter` and `ast_name_tracker` similarly
-- [ ] Add unit test: line/col lookup matches expected for multi-line source with `\r\n` and `\n` endings
-- [ ] Add unit test: `swc_span_to_oxc(Span::new(BytePos(3), BytePos(7), Default::default()))` round-trips to `Span::new(3, 7)`
+- [x] Add `WrapFileLogger::from_swc_source_file(sm: &SourceMap, fm: &SourceFile, logger)` adapter behind a `swc-compat` cargo feature
+- [x] Add `swc_span_to_oxc(swc_common::Span) -> oxc_span::Span` helper behind the same `swc-compat` feature
+- [x] Update each call site to construct `WrapFileLogger` via the adapter, and to wrap every `&swc_span` argument with `swc_span_to_oxc(*span)` until the upstream visitor itself is migrated
+- [x] Update test call sites in `ast_segmenter` and `ast_name_tracker` similarly
+- [x] Add unit test: line/col lookup matches expected for multi-line source with `\r\n` and `\n` endings
+- [x] Add unit test: `swc_span_to_oxc(Span::new(BytePos(3), BytePos(7), Default::default()))` round-trips to `Span::new(3, 7)`
 
 ## Verify
 
-- [ ] `cargo test -p logger_srcfile` passes
-- [ ] `cargo test --workspace` still passes (regressions caught)
+- [x] `cargo test -p logger_srcfile` passes
+- [x] `cargo test --workspace` still passes (regressions caught)

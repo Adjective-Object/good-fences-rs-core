@@ -73,28 +73,28 @@ fn module_item_to_segment(
                 }
                 swc_ecma_ast::Stmt::With(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::WithStatmentUnsupported,
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Return(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(RETURN),
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Break(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(BREAK),
                     );
                     None
                 }
                 swc_ecma_ast::Stmt::Continue(_) => {
                     file_logger.src_error(
-                        &module_item.span(),
+                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
                         StatementToSegmentError::StatementUnexpectedInModuleScope(CONTINUE),
                     );
                     None
@@ -154,7 +154,7 @@ mod test {
         let module = parser.parse_typescript_module().expect("parse failed");
 
         let logger = logger::StdioLogger::new();
-        let file_logger = logger_srcfile::WrapFileLogger::new(cm, &logger);
+        let file_logger = logger_srcfile::WrapFileLogger::from_swc_source_map(&cm, &logger);
         segment_file(&file_logger, &module, &comments)
     }
 

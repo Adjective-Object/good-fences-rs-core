@@ -223,11 +223,11 @@ where
             }
             swc_ecma_ast::Pat::Invalid(invalid_pat) => {
                 self.logger
-                    .src_warn(&invalid_pat.span, "invalid pattern in variable declaration");
+                    .src_warn(logger_srcfile::swc_compat::swc_span_to_oxc(invalid_pat.span), "invalid pattern in variable declaration");
             }
             swc_ecma_ast::Pat::Expr(expr_pat) => {
                 self.logger.src_warn(
-                    &expr_pat.leftmost().span(),
+                    logger_srcfile::swc_compat::swc_span_to_oxc(expr_pat.leftmost().span()),
                     "expr pattern in variable declaration was ignored",
                 );
             }
@@ -236,7 +236,7 @@ where
 
     fn declare_local(&mut self, ident: &swc_ecma_ast::Ident, hoisting_level: HoistingLevel) {
         if let Err(e) = self.node.declare_local(ident, hoisting_level) {
-            self.logger.src_error(&ident.span, format!("{}", e));
+            self.logger.src_error(logger_srcfile::swc_compat::swc_span_to_oxc(ident.span), format!("{}", e));
         }
     }
 
@@ -423,7 +423,7 @@ mod test {
         let (sourcemap, parsed_module) = swc_utils_parse::parse_ecma_src("test.ts", src_str);
 
         let logger = logger::StdioLogger::new();
-        let file_logger = logger_srcfile::WrapFileLogger::new(sourcemap, &logger);
+        let file_logger = logger_srcfile::WrapFileLogger::from_swc_source_map(&sourcemap, &logger);
 
         find_names(&file_logger, &parsed_module)
     }
