@@ -6,7 +6,6 @@ use std::{
 use ahashmap::{AHashMap, AHashSet, ARandomState};
 use multi_err::{MultiErr, MultiResult};
 use oxc_span::Span;
-use swc_ecma_ast::ModuleExportName;
 
 use import_resolver::resolve::PathResolver;
 
@@ -47,15 +46,6 @@ impl std::fmt::Display for ExportedSymbol {
 impl Default for ExportedSymbol {
     fn default() -> Self {
         Self::Default
-    }
-}
-
-impl From<&ModuleExportName> for ExportedSymbol {
-    fn from(e: &ModuleExportName) -> Self {
-        match e.atom().as_str() {
-            "default" => ExportedSymbol::Default,
-            _ => ExportedSymbol::Named(e.atom().as_str().to_string()),
-        }
     }
 }
 

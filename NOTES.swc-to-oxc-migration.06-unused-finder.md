@@ -17,3 +17,32 @@
   `TypeScriptSyntax` — the TODO template specifies `Parser` for that path.
 - `test_typeonly_interface_allowed` is a pre-existing failure (unrelated to
   this change).
+
+## Drop SmallPos from report.rs (done — was already clean)
+
+- `report.rs` had no `SmallPos` import or `.to_u32()` calls; prior phases
+  already migrated spans to `oxc_span::Span` with direct `.start` / `.end`
+  field access.
+
+## Update data.rs (done)
+
+- Removed `use swc_ecma_ast::ModuleExportName` and the `From<&ModuleExportName>`
+  impl. The impl was dead code — no call sites existed. The ast_segmenter
+  already uses `oxc_ast::ast::ModuleExportName` internally; unused_finder
+  doesn't need it since it works with owned `ExportedSymbol` mirrors.
+- `use oxc_span::Span` and `import_resolver::resolve::PathResolver` were
+  already in place from prior phases.
+
+## Update unused_finder.rs (done — was already clean)
+
+- Already using `import_resolver::resolve::{PathResolver, TargetEnv}`.
+  No swc imports remained.
+
+## Cargo.toml cleanup (done)
+
+- Removed: `swc_common`, `swc_ecma_ast`, `swc_ecma_loader`, `swc_ecma_parser`,
+  `swc_ecma_visit`, `swc_ecma_transforms`, `swc_utils_parse`.
+- Dropped `features = ["swc-compat"]` from `logger_srcfile` dep.
+- `oxc_allocator`, `oxc_semantic`, `oxc_span`, `oxc_utils_parse` were already
+  present. `oxc_ast` not added — unused_finder doesn't reference oxc AST types
+  directly (ast_segmenter owns that boundary).

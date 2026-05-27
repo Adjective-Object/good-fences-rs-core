@@ -5,6 +5,11 @@
 - `ftree_cache`: elided lifetime warning (`RwLockReadGuard<'_, Option<T>>`)
 - `unused_finder`: dead code warnings for `ErrList`, `FileInfo`, `ExportedItem`
 
+## Style: thiserror usage in unused_finder
+
+- `unused_finder/src/parse/exports_visitor_runner.rs` uses `thiserror::Error`;
+  repo convention is `eyre`. Low priority — the type is internal.
+
 ## Pre-existing test failure
 
 - `repo-health::dockerfile_matches_rust_version` fails: Dockerfile rust channel
