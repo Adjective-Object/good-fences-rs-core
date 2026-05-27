@@ -1,0 +1,329 @@
+● User
+  │ @README.md   Read the first incomplete section of @TODO.swc-to-oxc-migration.03-resolver-decoupling.md. Detailed plan in @PLAN.swc-to-oxc-migration.md Complete the tasks Run ./scripts/spot-check to validate your changes Mark the completed t…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/README.md.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.03-resolver-decoupling.md.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/PLAN.swc-to-oxc-migration.md.
+● Reasoning
+  │ Let me start by reading the relevant files to understand the task.
+● Tool ▸ report_intent
+  │ Understanding task requirements
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/README.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.03-resolver-decoupling.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/PLAN.swc-to-oxc-migration.md
+  └ ✓ Intent logged
+  └ ✓ 1. # good-fences-rs-core 2.  3. <!-- Core implementation of [`good-fences-rs`](https://github.com/Adjective-Object/good-fences.rs) --> 4.  5.  6. <!-- Written against `rustc 1.47.0 (18bf6b4f0 2020-10-…
+  └ ✓ 1. High level goal: remove `swc_common::FileName` and `swc_ecma_loader::resolve` 2. from the custom resolver while keeping all resolution behavior, caching, and 3. the `MonorepoResolver` ouroboros wra…
+  └ ✓ 1. # SWC → OXC Migration 2.  3. Migrate `good-fences-rs-core` from the SWC ecosystem to the OXC ecosystem 4. (parser, AST, visitor, semantic analyzer, diagnostics). The custom node-modules 5. + tsconf…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/Cargo.toml.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/lib.rs.
+● Thinking (glob)
+  │ **/NOTES.swc-to-oxc-migration.03-resolver-decoupling.md
+● Thinking (glob)
+  │ **/TODO.followups.md
+● Reasoning
+  │ Let me understand the task. The TODO file has several sections. I need to find the first incomplete section and complete those tasks. Let me also check if there's already a NOTES file and look at the current codebase structure.
+● Tool ▸ report_intent
+  │ Exploring codebase structure
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/Cargo.toml
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/lib.rs
+● Tool ▸ glob
+  │ **/NOTES.swc-to-oxc-migration.03-resolver-decoupling.md
+● Tool ▸ glob
+  │ **/TODO.followups.md
+  └ ✓ Intent logged
+  └ ✓ No files matched the pattern.
+  └ ✓ ./TODO.followups.md
+  └ ✓ 1. [package] 2. name = "import_resolver" 3. version = "0.2.0" 4. authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"] 5. edition = "2021" 6.  7. [lib] 8. crate-type = ["lib"] 9.  10. [dependencies] 1…
+  └ ✓ 1. // For paths processing in tsconfig 2. #![feature(iterator_try_collect)] 3.  4. #[cfg(test)] 5. extern crate pretty_assertions; 6.  7. pub mod manual_resolver; 8. pub mod swc_resolver; 9. 
+  └ ✓ lib.rs manual_resolver.rs swc_resolver
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/TODO.followups.md.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/TODO.followups.md
+  └ ✓ 1. # Follow-up items 2.  3. ## Pre-existing warnings in workspace 4.  5. - `ftree_cache`: elided lifetime warning (`RwLockReadGuard<'_, Option<T>>`) 6. - `unused_finder`: dead code warnings for `ErrLi…
+  └ ✓ combined_resolver.rs common.rs internal_resolver.rs mod.rs node_resolver.rs pkgjson_rewrites.rs tsconfig.rs tsconfig_resolver.rs util
+● Thinking (report_intent)
+  │ tool request
+● Thinking (grep)
+  │ NODE_BUILTINS
+● Thinking (grep)
+  │ TargetEnv
+● Thinking (grep)
+  │ swc_ecma_loader
+● Reasoning
+  │ The first incomplete section in the TODO is "Introduce a local `PathResolver` trait". Let me look at all the checkboxes:
+
+1. "Introduce a local `PathResolver` trait" - all unchecked
+2. "Rename `swc_resolver` → `node_resolver`" - all unchecked
+3. "Replace `FileName` with `&Path`, `swc Resolve` with local `PathResolver`" - all unchecked
+4. "Update callers outside `import_resolver`" - all unchecked
+5. "Drop swc deps from import_resolver" - all unchecked
+
+So the first incomplete section is "Introduce a local `PathResolver` trait". Let me do those tasks:
+
+
+I need to create a new file with the trait definition, including the `Resolution` and `TargetEnv` types, plus the Node builtins list. I'll copy the builtins directly from swc's source and then re-export everything from the library root.
+● Tool ▸ report_intent
+  │ Creating PathResolver trait module
+● Tool ▸ grep
+  │ NODE_BUILTINS
+● Tool ▸ grep
+  │ TargetEnv
+● Tool ▸ grep
+  │ swc_ecma_loader
+  └ ✓ Intent logged
+  └ ✓ ./TODO.swc-to-oxc-migration.03-resolver-decoupling.md ./PLAN.swc-to-oxc-migration.md ./.model-usage.d/logs/3EHx0aONZoy1ja75pPE9f0uHZDo.log ./crates/import_resolver/src/swc_resolver/node_resolver.rs
+  └ ✓ ./PLAN.swc-to-oxc-migration.md ./TODO.swc-to-oxc-migration.03-resolver-decoupling.md ./TODO.swc-to-oxc-migration.06-unused-finder.md ./.model-usage.d/logs/3DpO0u5xnL2x2kX4CZXPi1UwdSn.log ./.model-usag…
+  └ ✓ ./Cargo.toml ./TODO.swc-to-oxc-migration.03-resolver-decoupling.md ./Cargo.lock ./PLAN.swc-to-oxc-migration.md ./TODO.swc-to-oxc-migration.06-unused-finder.md ./TODO.swc-to-oxc-migration.09-cleanup.md…
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/node_resolver.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/combined_resolver.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/mod.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/manual_resolver.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/internal_resolver.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/tsconfig_resolver.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/tsconfig.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/pkgjson_rewrites.rs.
+Let me read the swc source files to understand NODE_BUILTINS and TargetEnv, and the current resolver code:
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/node_resolver.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/combined_resolver.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/mod.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/manual_resolver.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/internal_resolver.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/tsconfig_resolver.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/tsconfig.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/pkgjson_rewrites.rs
+  └ ✓ File too large to read at once (26.8 KB). Consider using the grep tool to search within the file, or view with view_range to read specific sections.
+  └ ✓ 1. use anyhow::Error; 2. use combined_resolver::{CombinedResolver, CombinedResolverCaches}; 3. use core::fmt; 4. use node_resolver::NodeModulesResolverOptions; 5. use ouroboros::self_referencing; 6. u…
+  └ ✓ 1. use anyhow::{anyhow, Error}; 2. use std::path::Path; 3. use swc_common::FileName; 4. use swc_ecma_loader::resolve::{Resolution, Resolve}; 5.  6. use super::{ 7.     node_resolver::{ 8.         Cach…
+  └ ✓ 1. use path_clean::PathClean as _; 2. use path_slash::PathBufExt; 3. use relative_path::{RelativePath, RelativePathBuf}; 4. use serde::Deserialize; 5. use std::env::current_dir; 6. use std::path::{Pat…
+  └ ✓ 1. use std::path::PathBuf; 2.  3. use anyhow::{Error, Ok}; 4. use hashbrown::HashSet; 5. use swc_ecma_loader::resolve::{Resolution, Resolve}; 6.  7. use super::util::package_name; 8. use packagejson::…
+  └ ✓ 1. use anyhow::{bail, Context, Result}; 2. use ftree_cache::context_data::FileContextCache; 3. use std::path::{Component, Path}; 4. use swc_common::FileName; 5. use swc_ecma_loader::resolve::{Resoluti…
+  └ ✓ 1. use anyhow::{anyhow, ensure, Context, Result}; 2. use ftree_cache::context_data::ContextData; 3. use path_clean::PathClean; 4. use serde::Deserialize; 5. use std::collections::HashMap; 6. use std::…
+  └ ✓ 1. //! Modified version of swc_ecma_loader/resolvers/node 2. //! which is in-turn based on https://github.com/goto-bus-stop/node-resolve 3. //! 4. //! See https://github.com/swc-project/swc/blob/f988b…
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/node_resolver.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/common.rs.
+● Thinking (grep)
+  │ NODE_BUILTINS|TargetEnv
+● Thinking (grep)
+  │ swc_ecma_loader|swc_common|FileName
+● Thinking (grep)
+  │ swc_ecma_loader|swc_common|FileName|Resolve
+● Reasoning
+  │ Now let me also look at the node_resolver.rs file and the unused_finder files that reference swc_ecma_loader:
+Now let me read the node_resolver.rs file (the large one) and the unused_finder files:
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/node_resolver.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/common.rs
+● Tool ▸ grep
+  │ NODE_BUILTINS|TargetEnv
+● Tool ▸ grep
+  │ swc_ecma_loader|swc_common|FileName
+● Tool ▸ grep
+  │ swc_ecma_loader|swc_common|FileName|Resolve
+  └ ✓ /workspaces/good-fences-rs-core/crates/unused_finder/src/unused_finder.rs:34:use swc_ecma_loader::{resolve::Resolve, TargetEnv};
+  └ ✓ /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/node_resolver.rs:23:    TargetEnv, NODE_BUILTINS, /workspaces/good-fences-rs-core/crates/import_resolver/src/swc_resolver/node_r…
+  └ ✓ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/data.rs:8:use swc_common::{FileName, Span}; /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/data.rs:10:use swc_ecma_loader…
+  └ ✓ 1. //! Modified version of swc_ecma_loader/resolvers/node 2. //! which is in-turn based on https://github.com/goto-bus-stop/node-resolve 3. //! 4. //! See https://github.com/swc-project/swc/blob/f988b…
+  └ ✓ 1. pub type AHashMap<K, V> = swc_common::collections::AHashMap<K, V>; 2. // pub type AHashSet<T> = swc_common::collections::AHashSet<T>; 3. 
+● Thinking (bash)
+  │ Find swc_ecma_loader source
+● Reasoning
+  │ Now I have a good picture. The first incomplete section is "Introduce a local `PathResolver` trait". But actually, I should do ALL the sections since they're all unchecked and they form a complete phase. Let me re-read the task:
+
+"Read the first incomplete section"
+
+OK, let me just do the first incomplete section: "Introduce a local `PathResolver` trait". Let me check the swc source for NODE_BUILTINS.
+Let me find the swc NODE_BUILTINS source:
+● Tool ▸ bash
+  │ Find swc_ecma_loader source
+  └ ✓  <exited with exit code 0>
+● Thinking (bash)
+  │ Find swc_ecma_loader source files
+● Tool ▸ bash
+  │ Find swc_ecma_loader source files
+  └ ✓ /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_ecma_loader-0.49.1/src/lib.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_ecma_loader-0.49.1/src/resolve…
+● Thinking (view)
+  │ view the file at /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_ecma_loader-0.49.1/src/lib.rs.
+● Thinking (view)
+  │ view the file at /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_ecma_loader-0.49.1/src/resolve.rs.
+● Tool ▸ view
+  │ /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_ecma_loader-0.49.1/src/lib.rs
+● Tool ▸ view
+  │ /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/swc_ecma_loader-0.49.1/src/resolve.rs
+  └ ✓ 1. #![cfg_attr(docsrs, feature(doc_cfg))] 2.  3. use serde::{Deserialize, Serialize}; 4.  5. pub mod resolve; 6. pub mod resolvers; 7.  8. /// List of built in packages for latest stable node with LTS…
+  └ ✓ 1. use std::sync::Arc; 2.  3. use anyhow::Error; 4. use swc_atoms::Atom; 5. #[allow(unused_imports)] 6. use swc_common::{ 7.     sync::{Send, Sync}, 8.     FileName, 9. }; 10.  11. #[derive(Debug, Clo…
+● Thinking (grep)
+  │ oxc_span|ahashmap|CompactStr
+Good, now I have everything I need. Let me also check the workspace Cargo.toml for dependency definitions:
+● Tool ▸ grep
+  │ oxc_span|ahashmap|CompactStr
+  └ ✓ /workspaces/good-fences-rs-core/Cargo.toml:39:oxc_span = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+● Thinking (bash)
+  │ Check oxc_span in import_resolver deps
+● Tool ▸ bash
+  │ Check oxc_span in import_resolver deps
+  └ ✓  <exited with exit code 1>
+● Thinking (bash)
+  │ Check for oxc_str workspace dep
+● Reasoning
+  │ So `oxc_span` is in the workspace but not yet in `import_resolver`'s deps. The TODO says the `Resolution` struct should use `oxc_span::CompactStr`. Let me check if `oxc_span::CompactStr` is available at the pinned rev.
+
+Actually, the PLAN says:
+> Note: `oxc_span::CompactStr` is **private** at the pinned rev; use `oxc_str::CompactStr` directly (add `oxc_str` as a workspace dependency) or fall back to `String`.
+
+But the TODO says to use `oxc_span::CompactStr`. 
+
+Let me just focus on the immediate task—creating the `resolve.rs` file with the trait, Resolution, TargetEnv, and NODE_BUILTINS, then re-exporting from lib.rs. I'll keep it simple for now and see what actually works with the available dependencies.
+● Tool ▸ bash
+  │ Check for oxc_str workspace dep
+  └ ✓  <exited with exit code 1>
+● Thinking (bash)
+  │ Check oxc packages available
+● Tool ▸ bash
+  │ Check oxc packages available
+  └ ✓ oxc_utils_parse 0.1.0 <exited with exit code 0>
+● Thinking (bash)
+  │ Check oxc_span usage
+● Reasoning
+  │ So only `oxc_utils_parse` is in the workspace. `oxc_span` is a workspace dep but not used by any crate yet apparently. Let me check:
+● Tool ▸ bash
+  │ Check oxc_span usage
+  └ ✓ 39:oxc_span = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" } --- /workspaces/good-fences-rs-core/crates/logger_srcfile/Cargo.toml:15:oxc_span.workspac…
+● Thinking (bash)
+  │ Check oxc_span CompactStr availability
+● Tool ▸ bash
+  │ Check oxc_span CompactStr availability
+  └ ✓ Documenting oxc_span v0.132.0 (https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065eb)     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.78s    Gene…
+● Thinking (bash)
+  │ Check if CompactStr is public in oxc_span
+● Tool ▸ bash
+  │ Check if CompactStr is public in oxc_span
+  └ ✓  <exited with exit code 1>
+● Thinking (bash)
+  │ Check CompactStr in oxc_span
+● Tool ▸ bash
+  │ Check CompactStr in oxc_span
+  └ ✓ /home/ubuntu/.cargo/git/checkouts/oxc-cf38a75f42fbe65e/87f065e/crates/oxc_span/src/lib.rs:14:use oxc_str::{CompactStr, Ident, Str}; /home/ubuntu/.cargo/git/checkouts/oxc-cf38a75f42fbe65e/87f065e/crate…
+● Thinking (bash)
+  │ Check oxc_span public exports
+● Tool ▸ bash
+  │ Check oxc_span public exports
+  └ ✓ 12:pub use cmp::ContentEq; 13:pub use edit_distance::{best_match, min_edit_distance}; 15:pub use source_type::{ 19:pub use span::{GetSpan, GetSpanMut, SPAN, Span}; 34:pub mod __internal { 36:    pub u…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (create)
+  │ create a new file at /workspaces/good-fences-rs-core/crates/import_resolver/src/resolve.rs.
+So `CompactStr` is NOT re-exported from `oxc_span`. Per the PLAN, I should use `String` as fallback. Let me now create the resolve module. The TODO says to use `oxc_span::CompactStr`, but the PLAN says it's private. I'll use `String` since `oxc_str` isn't a workspace dep either.
+● Tool ▸ report_intent
+  │ Implementing PathResolver trait
+● Tool ▸ create
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/resolve.rs
+  └ ✓ Intent logged
+  └ ✓ Created file /workspaces/good-fences-rs-core/crates/import_resolver/src/resolve.rs with 2523 characters
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/import_resolver/src/lib.rs.
+Now update `lib.rs` to re-export the module:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/import_resolver/src/lib.rs
+  └ ✓ File /workspaces/good-fences-rs-core/crates/import_resolver/src/lib.rs updated with changes.
+● Thinking (bash)
+  │ Check import_resolver compiles
+Now let's add `serde` to import_resolver's dependencies (needed for the Serialize/Deserialize on TargetEnv) — wait, it's already there as `serde.workspace = true`. Good. Let me verify the crate compiles:
+● Tool ▸ bash
+  │ Check import_resolver compiles
+  └ ✓ warning: hiding a lifetime that's elided elsewhere is confusing    --> crates/ftree_cache/src/context_data.rs:108:20     | 108 |     readonly_lock: RwLockReadGuard<Option<T>>,     |                   …
+● Thinking (bash)
+  │ Test import_resolver
+Compiles. Now let me run the tests:
+● Tool ▸ bash
+  │ Test import_resolver
+  └ ✓ test manual_resolver::test::test_non_glob_specifier ... ok test manual_resolver::test::test_non_glob_specifier_with_base_url ... ok test swc_resolver::util::pkgname::test::test_package_name ... ok tes…
+● Thinking (bash)
+  │ Run spot-check
+All 18 tests pass. Now let me run spot-check:
+● Tool ▸ bash
+  │ Run spot-check
+  └ ✓ Checking good_fences v0.2.0 (/workspaces/good-fences-rs-core/crates/good_fences)     Checking good_fences_napi v0.2.0 (/workspaces/good-fences-rs-core/crates/good_fences_napi) warning: struct `ErrList…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.03-resolver-decoupling.md.
+All spot checks pass. Now let me mark the completed tasks in the TODO and create the NOTES file:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.03-resolver-decoupling.md
+  └ ✓ File /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.03-resolver-decoupling.md updated with changes.
+● Thinking (create)
+  │ create a new file at /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.03-resolver-decoupling.md.
+● Tool ▸ create
+  │ /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.03-resolver-decoupling.md
+  └ ✓ Created file /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.03-resolver-decoupling.md with 731 characters
+● Thinking (bash)
+  │ Stage and check changes
+Now commit:
+● Tool ▸ bash
+  │ Stage and check changes
+  └ ✓ .cache/git-hooks/sessions/3DuuhPtbVS2Z3FJ0jp6BSxoraJc/tracing.log.json |   0  .cache/git-hooks/sessions/3EHrvLP6GhygotB91dtrWtzWPuR/tracing.log.json |   0  .cache/git-hooks/sessions/3EHsw7ePdiAUKqWN3o…
+● Thinking (bash)
+  │ Stage only relevant files
+There are a lot of unrelated cache/config files staged. Let me be selective:
+● Tool ▸ bash
+  │ Stage only relevant files
+  └ ✓ Unstaged changes after reset: M	TODO.swc-to-oxc-migration.03-resolver-decoupling.md M	crates/import_resolver/src/lib.rs M	schedule.md  NOTES.swc-to-oxc-migration.03-resolver-decoupling.md |  11 ++++++…
+● Thinking (bash)
+  │ Commit changes
+● Tool ▸ bash
+  │ Commit changes
+  └ ✓ [segment-aware bbd07b5] feat(swc-to-oxc-migration.03-resolver-decoupling, import_resolver): introduce local PathResolver trait  4 files changed, 130 insertions(+), 3 deletions(-)  create mode 100644 N…
+Done. Here's what was completed:
+
+**Section 1: Introduce a local `PathResolver` trait** ✅
+
+- Created `import_resolver/src/resolve.rs` with:
+  - `Resolution` struct (`path: PathBuf`, `slug: Option<String>`)
+  - `PathResolver` trait (replaces `swc_ecma_loader::resolve::Resolve`)
+  - `TargetEnv` enum (copied from swc)
+  - `NODE_BUILTINS` constant (verbatim from swc)
+  - Blanket impls for `&R`, `Box<R>`, `Arc<R>`
+- Re-exported via `pub mod resolve` in `lib.rs`
+- Used `String` for slug (not `CompactStr` — private at pinned oxc rev)
+- All 18 tests pass, spot-check passes
+[result] 3 premium requests, 181112ms session

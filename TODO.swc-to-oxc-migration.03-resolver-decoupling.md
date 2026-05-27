@@ -33,9 +33,9 @@ pub enum TargetEnv { Browser, Node }
 pub const NODE_BUILTINS: &[&str] = &[ /* ... */ ];
 ```
 
-- [ ] Create `import_resolver/src/resolve.rs` with the trait, `Resolution`, `TargetEnv`, `NODE_BUILTINS`
-- [ ] Copy `NODE_BUILTINS` list verbatim from the swc source
-- [ ] Re-export from `import_resolver/src/lib.rs`
+- [x] Create `import_resolver/src/resolve.rs` with the trait, `Resolution`, `TargetEnv`, `NODE_BUILTINS`
+- [x] Copy `NODE_BUILTINS` list verbatim from the swc source
+- [x] Re-export from `import_resolver/src/lib.rs`
 
 ## Rename `swc_resolver` → `node_resolver`
 
