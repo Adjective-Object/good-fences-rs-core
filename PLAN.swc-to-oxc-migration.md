@@ -69,9 +69,11 @@ borrow from that arena. Consequences:
 ### Owned identifier type: `CompactStr`
 
 Replace `swc_atoms::Atom` (globally interned, `'static`-ish) with
-`oxc_span::CompactStr` (24-byte SSO) wherever the value is stored beyond the
-arena lifetime. Public APIs that exposed `swc_atoms::Atom` (notably
-`VariableScope::get_locals`) become `CompactStr`-shaped.
+`oxc_str::CompactStr` (24-byte SSO) wherever the value is stored beyond the
+arena lifetime. Note: `oxc_span::CompactStr` is **private** at the pinned rev;
+use `oxc_str::CompactStr` directly (add `oxc_str` as a workspace dependency)
+or fall back to `String`. Public APIs that exposed `swc_atoms::Atom` (notably
+`VariableScope::get_locals`) become `CompactStr`-shaped (or `String`).
 
 ### Semantic-driven scope analysis
 
@@ -91,6 +93,21 @@ Mapping from `HoistingLevel` to OXC `SymbolFlags`:
 | `ImportHoisting`     | `SymbolFlags::Import`                                    |
 | `FunctionHoisting`   | `SymbolFlags::Function`                                  |
 | `LetConstHoisting`   | `SymbolFlags::BlockScopedVariable` (let/const) or `FunctionScopedVariable` (var) |
+
+Note: `SymbolFlags::Enum` does not exist as a single flag; use
+`SymbolFlags::RegularEnum | SymbolFlags::ConstEnum` for enum detection.
+
+`IdentifierReference.reference_id` is a **field** (`Cell<Option<ReferenceId>>`),
+accessed via `.reference_id.get()`, not a method call.
+
+`Span::contains_inclusive(other)` replaces the assumed `contains_span(other)`.
+
+`export * as ns from 'mod'` is `ExportAllDeclaration` with
+`exported: Option<ModuleExportName>` — there is no separate
+`ExportNamespaceSpecifier` type.
+
+Identifier name fields are `name: Ident<'a>` (not `Atom<'a>` or `&'a str`).
+Access string content via `.name.as_str()`.
 
 ### Spans
 

@@ -33,69 +33,87 @@ Where the assumption is wrong, update the corresponding line in
 
 ### `oxc_ast_visit` shape
 
-- [ ] Confirm: `oxc_ast_visit::Visit<'a>` exists and has the per-node
+- [x] Confirm: `oxc_ast_visit::Visit<'a>` exists and has the per-node
       `visit_*` hooks named in phase 3's translation table.
-- [ ] Confirm: there is a `walk_statement(&mut Visitor, &Statement)` (or
+- [x] Confirm: there is a `walk_statement(&mut Visitor, &Statement)` (or
       equivalent free function) so `find_imports_and_requires(stmt)` in
       `ast_segmenter::visitors::import_require_expr` can walk a single
       `Statement` rather than a whole `Program`. If not, change the API to
       take `&Program` and a span filter instead.
-- [ ] Confirm: visiting a `&Statement` from the body of a `Program` does
+      → **confirmed**: `walk::walk_statement` exists.
+- [x] Confirm: visiting a `&Statement` from the body of a `Program` does
       not require any builder/state setup beyond constructing the visitor.
 
 ### AST enum shapes
 
-- [ ] Confirm the exact name and variants of `ModuleExportName`. Phase 3
+- [x] Confirm the exact name and variants of `ModuleExportName`. Phase 3
       assumes three variants including `IdentifierReference`.
-- [ ] Confirm dynamic `import(x)` shape. Phase 3 originally said
+      → **confirmed**: `IdentifierName`, `IdentifierReference`, `StringLiteral`.
+- [x] Confirm dynamic `import(x)` shape. Phase 3 originally said
       `Expression::Import` but that is likely wrong; verify against the
       pinned rev whether it is `Expression::ImportExpression(_)` or a
       `CallExpression` whose callee is some import marker.
-- [ ] Confirm `ExportNamedDeclaration` shape for the `export *` and
+      → **confirmed**: `Expression::ImportExpression(Box<'a, ImportExpression>)`.
+- [x] Confirm `ExportNamedDeclaration` shape for the `export *` and
       `export * as ns from 'mod'` cases. Phase 3's mapping table guesses
       `ExportNamespaceSpecifier`; check the actual variant.
-- [ ] Confirm whether `export v from 'mod'` (swc's `ExportSpecifier::Default`)
+      → **corrected**: No `ExportNamespaceSpecifier`. It's `ExportAllDeclaration`
+        with `exported: Option<ModuleExportName>`.
+- [x] Confirm whether `export v from 'mod'` (swc's `ExportSpecifier::Default`)
       is even parsed by oxc at the pinned rev. If not, document that
       good-fences will silently stop recognising that stage-1 syntax and
       verify no fixtures use it.
-- [ ] Confirm `BindingIdentifier`, `IdentifierReference`, `IdentifierName`
+      → **confirmed not parsed**. No fixtures use it.
+- [x] Confirm `BindingIdentifier`, `IdentifierReference`, `IdentifierName`
       field names (`name: Atom<'a>` vs `name: &'a str`).
-- [ ] Confirm `TSImportEqualsDeclaration` field names (`module_reference`,
+      → **corrected**: `name: Ident<'a>` (access via `.as_str()`).
+- [x] Confirm `TSImportEqualsDeclaration` field names (`module_reference`,
       `id`, etc.).
+      → **confirmed**: `id`, `module_reference`, `import_kind`.
 
 ### Semantic API
 
-- [ ] Confirm the existence of `Semantic::scoping()` and that the returned
+- [x] Confirm the existence of `Semantic::scoping()` and that the returned
       type has `get_reference(ReferenceId) -> &Reference`,
       `references()` iterator, and `get_bindings(ScopeId)` (or equivalent
       "bindings declared in this scope").
-- [ ] Confirm the `IdentifierReference` node carries a `reference_id()`
+      → **confirmed** with correction: no `references()` iterator,
+        but `references_len()` and `get_reference(id)` exist.
+- [x] Confirm the `IdentifierReference` node carries a `reference_id()`
       accessor that returns a `ReferenceId` after `SemanticBuilder` has
       run.
-- [ ] Confirm `Semantic` (or `Scoping`) exposes per-symbol declaration
+      → **corrected**: field `reference_id: Cell<Option<ReferenceId>>`,
+        access via `.reference_id.get()`.
+- [x] Confirm `Semantic` (or `Scoping`) exposes per-symbol declaration
       span — either `symbol_span(SymbolId) -> Span` or via
       `SymbolTable::spans`. Phase 4's binding-bucketing approach needs
       this.
-- [ ] Confirm `SymbolFlags` variants: `Import`, `Function`,
+      → **confirmed**: `Scoping::symbol_span(SymbolId) -> Span`.
+- [x] Confirm `SymbolFlags` variants: `Import`, `Function`,
       `BlockScopedVariable`, `FunctionScopedVariable`, `Class`,
       `TypeAlias`, `Interface`, `Enum`. Adjust phase 4's hoisting map if
       names differ.
+      → **corrected**: No single `Enum` — split into `RegularEnum` + `ConstEnum`.
+        All others confirmed.
 
 ### Span ergonomics
 
-- [ ] Confirm `oxc_span::Span` has `contains_span(other: Span) -> bool`
+- [x] Confirm `oxc_span::Span` has `contains_span(other: Span) -> bool`
       and `start: u32` / `end: u32` field access. Used pervasively by
       phase 4's bucketing.
-- [ ] Confirm `SourceType::from_path` returns a `SourceType` with
+      → **corrected**: method is `contains_inclusive(Span) -> bool`.
+- [x] Confirm `SourceType::from_path` returns a `SourceType` with
       `jsx=true` for `.tsx`. (Authoritative-by-extension is fine in this
       codebase; no audit needed beyond confirming the helper actually
       sets the flag.)
+      → **confirmed**: `is_jsx() = true` for `.tsx`.
 
 ## Output
 
-- [ ] Create `NOTES.swc-to-oxc-migration.md` with one bullet per item
+- [x] Create `NOTES.swc-to-oxc-migration.md` with one bullet per item
       above, each marked **confirmed** or **corrected: ...**
-- [ ] Apply every correction back into `PLAN.swc-to-oxc-migration.md` and
+      → Created as `NOTES.swc-to-oxc-migration.01-visitor-spike.md`
+- [x] Apply every correction back into `PLAN.swc-to-oxc-migration.md` and
       the affected phase TODOs **before** phase 3 begins
-- [ ] Delete `crates/oxc_spike/`
-- [ ] `cargo build --workspace` succeeds with the spike removed
+- [x] Delete `crates/oxc_spike/`
+- [x] `cargo build --workspace` succeeds with the spike removed

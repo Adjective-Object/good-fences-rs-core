@@ -106,7 +106,7 @@ Mapping from `SymbolFlags` to `HoistingLevel`:
 | ------------------------------------------ | ---------------------- |
 | `Import`                                   | `ImportHoisting`       |
 | `Function`                                 | `FunctionHoisting`     |
-| `BlockScopedVariable` / `FunctionScopedVariable` / `Class` / `TypeAlias` / `Interface` / `Enum` | `LetConstHoisting` |
+| `BlockScopedVariable` / `FunctionScopedVariable` / `Class` / `TypeAlias` / `Interface` / `RegularEnum` / `ConstEnum` | `LetConstHoisting` |
 
 - [ ] Implement `variables_for_top_level_statements(semantic, body) -> Vec<VariableScope>` as above
 - [ ] Implement `hoisting_for_flags(SymbolFlags) -> HoistingLevel`
