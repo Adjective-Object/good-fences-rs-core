@@ -33,9 +33,9 @@ Depends on phases 1–7.
 
 ## Drop the nightly feature gate
 
-- [ ] Confirm `#![feature(box_patterns)]` is gone from every crate (phase 3 removed it from `ast_segmenter`)
-- [ ] `grep -rn 'feature(box_patterns)' crates/` returns no matches
-- [ ] `grep -rn 'cargo-features\|#!\[feature' crates/` reviews remaining nightly gates and removes those no longer needed
+- [x] Confirm `#![feature(box_patterns)]` is gone from every crate (phase 3 removed it from `ast_segmenter`)
+- [x] `grep -rn 'feature(box_patterns)' crates/` returns no matches
+- [x] `grep -rn 'cargo-features\|#!\[feature' crates/` reviews remaining nightly gates and removes those no longer needed
 
 ## Bench + regression check
 

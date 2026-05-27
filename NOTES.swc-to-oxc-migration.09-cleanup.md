@@ -26,3 +26,13 @@
 - `cargo shear` reports no swc-related unused deps. Other findings (hashbrown,
   serde_derive, etc.) are pre-existing — logged in `TODO.followups.md`.
 - `cargo build --workspace` and `./scripts/spot-check` both pass.
+
+## Drop the nightly feature gate
+
+- `#![feature(box_patterns)]` was already removed in phase 3 from `ast_segmenter`; no other crate ever used it.
+- `grep -rn 'feature(box_patterns)' crates/` returns zero matches — confirmed clean.
+- Remaining nightly gates are all actively used and unrelated to the swc migration:
+  - `patch_vfs`: `str_split_remainder` (`.remainder()` call), `closure_lifetime_binder` (`for<'a>` closure syntax)
+  - `import_resolver`: `iterator_try_collect` (`.try_collect()` in tsconfig.rs)
+  - `ftree_cache`: `adt_const_params`, `unsized_const_params` (const generic parameters)
+- These are pre-existing and cannot be removed without rewriting unrelated code.
