@@ -18,3 +18,14 @@
   `extra_symbol_tags` to contain `[TypeOnly]` but got `[Entry, TypeOnly]`.
   Likely a tag-propagation issue in the BFS traversal (re-exported type-only
   symbols gaining an `Entry` tag).
+
+## cargo-shear: pre-existing unused dependencies
+
+`cargo shear` reports 25 unused deps across the workspace — none are swc-related.
+Notable ones:
+- `hashbrown` unused in `deadlock_ref` and `ftree_cache`
+- `oxc_span` unused in `good_fences`
+- `serde_derive` unused in `good_fences`, `import_resolver`, `packagejson`
+- `itertools` unused in `unused_finder`
+- `unused_finder/src/throttled_async_map.rs` is an unlinked file
+- Various napi crates have unused `napi`, `anyhow`, `js_err`, `serde` deps

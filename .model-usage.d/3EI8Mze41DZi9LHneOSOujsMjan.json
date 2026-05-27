@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.09-cleanup.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.5",
+    "tokens_in": 565240,
+    "tokens_out": 6282,
+    "tokens_cached": 533718,
+    "premium_requests": 3
+  },
+  "started_at": "2026-05-27T04:04:38.151990670Z",
+  "completed_at": "2026-05-27T04:06:38.273488730Z",
+  "session_id": "3EI8Mze41DZi9LHneOSOujsMjan",
+  "runtime_name": "github-copilot-agent-claude-opus-4.5",
+  "success": true,
+  "machine_id": "b04c5143fda44a0d"
+}

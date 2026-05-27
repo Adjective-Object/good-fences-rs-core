@@ -14,3 +14,15 @@
 - Removed `swc-compat` feature and `swc_common` optional dep from `logger_srcfile/Cargo.toml`.
 - Removed `features = ["swc-compat"]` from `ast_segmenter/Cargo.toml` — it was the only consumer and didn't actually use any symbol from the module.
 - `grep -r 'swc_compat\|from_swc_source\|swc_span_to_oxc' crates/` returns no matches.
+
+## Drop the workspace swc dependencies
+
+- Removed all 7 `swc_*` entries from `[workspace.dependencies]` in root `Cargo.toml`:
+  `swc_common`, `swc_compiler_base`, `swc_ecma_ast`, `swc_ecma_loader`,
+  `swc_ecma_parser`, `swc_ecma_transforms`, `swc_ecma_visit`.
+- No crate-level `Cargo.toml` under `crates/` referenced any `swc_*` dependency.
+- `grep -r '^use swc_\|swc_atoms\|swc_common\|swc_ecma' crates/` returns only
+  comments (historical attribution in `import_resolver/src/node_resolver/`).
+- `cargo shear` reports no swc-related unused deps. Other findings (hashbrown,
+  serde_derive, etc.) are pre-existing — logged in `TODO.followups.md`.
+- `cargo build --workspace` and `./scripts/spot-check` both pass.

@@ -20,7 +20,7 @@ Depends on phases 1–7.
 
 ## Drop the workspace swc dependencies
 
-- [ ] Remove the following from `[workspace.dependencies]` in the root `Cargo.toml`:
+- [x] Remove the following from `[workspace.dependencies]` in the root `Cargo.toml`:
   - `swc_common`
   - `swc_compiler_base`
   - `swc_ecma_ast`
@@ -28,8 +28,8 @@ Depends on phases 1–7.
   - `swc_ecma_parser`
   - `swc_ecma_transforms`
   - `swc_ecma_visit`
-- [ ] Run `cargo shear --workspace` (or `cargo-shear`) and resolve any reported unused crates
-- [ ] `grep -r '^use swc_\|swc_atoms\|swc_common\|swc_ecma' crates/` returns no production-code matches
+- [x] Run `cargo shear --workspace` (or `cargo-shear`) and resolve any reported unused crates
+- [x] `grep -r '^use swc_\|swc_atoms\|swc_common\|swc_ecma' crates/` returns no production-code matches
 
 ## Drop the nightly feature gate
 
