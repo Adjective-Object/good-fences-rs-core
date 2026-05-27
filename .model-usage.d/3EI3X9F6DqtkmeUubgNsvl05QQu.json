@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.04-ast-segmenter.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.5",
+    "tokens_in": 1455047,
+    "tokens_out": 9598,
+    "tokens_cached": 1401499,
+    "premium_requests": 3
+  },
+  "started_at": "2026-05-27T03:24:52.872636096Z",
+  "completed_at": "2026-05-27T03:28:22.103274234Z",
+  "session_id": "3EI3X9F6DqtkmeUubgNsvl05QQu",
+  "runtime_name": "github-copilot-agent-claude-opus-4.5",
+  "success": true,
+  "machine_id": "b04c5143fda44a0d"
+}

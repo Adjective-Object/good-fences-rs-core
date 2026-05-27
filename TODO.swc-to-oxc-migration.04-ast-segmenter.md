@@ -164,8 +164,8 @@ fn segment(src: &str) -> Vec<Segment> {
 
 ## Drop swc and nightly
 
-- [ ] Remove `#![feature(box_patterns)]` from `ast_segmenter/src/lib.rs`
-- [ ] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_ecma_parser`, `swc_atoms`, `swc_utils_parse` from `ast_segmenter/Cargo.toml`
-- [ ] Add `oxc_ast`, `oxc_ast_visit`, `oxc_span`, `oxc_semantic`, `oxc_utils_parse` to `ast_segmenter/Cargo.toml`
-- [ ] `cargo test -p ast_segmenter` passes
-- [ ] `cargo build --workspace` passes (downstream callers still use swc-parsed AST via the runner — that's phase 5)
+- [x] Remove `#![feature(box_patterns)]` from `ast_segmenter/src/lib.rs`
+- [x] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_ecma_parser`, `swc_atoms`, `swc_utils_parse` from `ast_segmenter/Cargo.toml`
+- [x] Add `oxc_ast`, `oxc_ast_visit`, `oxc_span`, `oxc_semantic`, `oxc_utils_parse` to `ast_segmenter/Cargo.toml`
+- [x] `cargo test -p ast_segmenter` passes
+- [x] `cargo build --workspace` passes (downstream callers still use swc-parsed AST via the runner — that's phase 5)

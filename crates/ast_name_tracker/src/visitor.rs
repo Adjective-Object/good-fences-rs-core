@@ -84,6 +84,12 @@ impl VariableScope {
             .insert(name, (hoisting, VarID(Span::default())));
     }
 
+    /// Insert a local symbol from a `&str`, avoiding the need for callers to
+    /// depend on `swc_atoms` directly.
+    pub fn insert_local_str(&mut self, name: &str, hoisting: HoistingLevel) {
+        self.insert_local(Atom::from(name), hoisting);
+    }
+
     /// Insert an escaped symbol directly.
     /// Useful for constructing test fixtures without parsing source code.
     pub fn insert_escaped(&mut self, name: Atom) {

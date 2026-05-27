@@ -1,0 +1,311 @@
+● User
+  │ @README.md   Read the first incomplete section of @TODO.swc-to-oxc-migration.04-ast-segmenter.md. Detailed plan in @PLAN.swc-to-oxc-migration.md Complete the tasks Run ./scripts/spot-check to validate your changes Mark the completed tasks i…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/README.md.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.04-ast-segmenter.md.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/PLAN.swc-to-oxc-migration.md.
+● Reasoning
+  │ Let me start by reading the relevant files to understand the task.
+● Tool ▸ report_intent
+  │ Exploring task requirements
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/README.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.04-ast-segmenter.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/PLAN.swc-to-oxc-migration.md
+  └ ✓ Intent logged
+  └ ✓ 1. High level goal: port `ast_segmenter` from swc AST to oxc AST. Drop the 2. `box_patterns` nightly feature. Use the leading-comment adapter from phase 0. 3.  4. Depends on phase 0. Phase 1 may or ma…
+  └ ✓ 1. # good-fences-rs-core 2.  3. <!-- Core implementation of [`good-fences-rs`](https://github.com/Adjective-Object/good-fences.rs) --> 4.  5.  6. <!-- Written against `rustc 1.47.0 (18bf6b4f0 2020-10-…
+  └ ✓ 1. # SWC → OXC Migration 2.  3. Migrate `good-fences-rs-core` from the SWC ecosystem to the OXC ecosystem 4. (parser, AST, visitor, semantic analyzer, diagnostics). The custom node-modules 5. + tsconf…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/src/lib.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml.
+● Thinking (glob)
+  │ crates/ast_segmenter/**/*.rs
+● Reasoning
+  │ The first incomplete section in the TODO file is "Drop swc and nightly" starting at line 167. Let me look at the current state of the codebase to understand what needs to be done.
+
+The tasks are:
+- [ ] Remove `#![feature(box_patterns)]` from `ast_segmenter/src/lib.rs`
+- [ ] Remove `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_ecma_parser`, `swc_atoms`, `swc_utils_parse` from `ast_segmenter/Cargo.toml`
+
+
+- [ ] Add `oxc_ast`, `oxc_ast_visit`, `oxc_span`, `oxc_semantic`, `oxc_utils_parse` to `ast_segmenter/Cargo.toml`
+- [ ] Verify that `cargo test -p ast_segmenter` and `cargo build --workspace` both pass
+
+Let me examine the relevant files to see what changes are needed.
+● Tool ▸ report_intent
+  │ Exploring ast_segmenter crate
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/src/lib.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml
+● Tool ▸ glob
+  │ crates/ast_segmenter/**/*.rs
+  └ ✓ Intent logged
+  └ ✓ ./crates/ast_segmenter/src/raw_module_deps.rs ./crates/ast_segmenter/src/name_set.rs ./crates/ast_segmenter/src/lib.rs ./crates/ast_segmenter/src/segment_info.rs ./crates/ast_segmenter/src/visitor.rs …
+  └ ✓ 1. [package] 2. name = "ast-segmenter" 3. version = "0.2.0-beta.1" 4. authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"] 5. license = "Apache-2.0" 6. description = """ 7. Parses web source files in…
+  └ ✓ 1. #![feature(box_patterns)] 2.  3. use raw_module_deps::Name; 4. use oxc_ast::ast::ModuleExportName; 5.  6. pub mod name_set; 7. pub mod raw_module_deps; 8. pub mod segment_graph; 9. pub mod segment_…
+● Thinking (grep)
+  │ swc_|box_patterns|swc_atoms|swc_common|swc_ecma
+● Reasoning
+  │ Now I need to check if there are any remaining references to swc or box_patterns in the ast_segmenter source files.
+● Tool ▸ grep
+  │ swc_|box_patterns|swc_atoms|swc_common|swc_ecma
+  └ ✓ crates/ast_segmenter/Cargo.toml:24:swc_atoms = "0.6.7" crates/ast_segmenter/Cargo.toml:25:swc_common.workspace = true crates/ast_segmenter/Cargo.toml:26:swc_ecma_ast.workspace = true crates/ast_segmen…
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/src/raw_module_deps.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/src/visitor.rs.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/src/raw_module_deps.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/src/visitor.rs
+  └ ✓ 1. use std::convert::TryInto; 2.  3. use ahashmap::{AHashMap, AHashSet}; 4. use std::fmt::Debug; 5. use oxc_ast::ast::ModuleExportName; 6. use oxc_ast::{Comment, CommentKind}; 7. use oxc_span::Span; 8…
+  └ ✓ 1. use ast_name_tracker::{visitor::HoistingLevel, VariableScope}; 2. use logger_srcfile::SrcFileLogger; 3. use oxc_ast::ast::{Program, Statement}; 4. use oxc_ast_visit::walk; 5. use oxc_semantic::{Sem…
+● Thinking (grep)
+  │ insert_local
+● Thinking (grep)
+  │ fn insert_local
+● Thinking (grep)
+  │ thiserror
+● Reasoning
+  │ Now I can see the remaining swc references:
+
+1. `#![feature(box_patterns)]` in `lib.rs` line 1
+2. `swc_atoms::Atom::from(name.as_str())` in `visitor.rs` line 43
+3. `from_swc_comments_parent` and `from_swc_comments` in `raw_module_deps.rs` lines 57-89
+4. Various swc deps in `Cargo.toml`
+
+Let me check what `VariableScope::insert_local` expects to understand how to replace the `swc_atoms::Atom` usage.
+● Tool ▸ grep
+  │ insert_local
+● Tool ▸ grep
+  │ fn insert_local
+● Tool ▸ grep
+  │ thiserror
+  └ ✓ ./.model-usage.d/logs/3EI3X9F6DqtkmeUubgNsvl05QQu.log:77:  │ fn insert_local ./.model-usage.d/logs/3EI3X9F6DqtkmeUubgNsvl05QQu.log:92:  │ fn insert_local ./.model-usage.d/logs/3DrMh2tc5bAgOZLIzYOjH1oL…
+  └ ✓ crates/ast_segmenter/src/raw_module_deps.rs:212:#[derive(thiserror::Error, Debug)] crates/ast_segmenter/src/visitor.rs:18:#[derive(thiserror::Error, Debug)]
+  └ ✓ crates/ast_name_tracker/src/visitor.rs:82:    pub fn insert_local(&mut self, name: Atom, hoisting: HoistingLevel) {
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs
+  └ ✓ 1. use std::fmt::Display; 2.  3. use ahashmap::{AHashMap, AHashSet}; 4. use logger_srcfile::SrcFileLogger; 5. use swc_atoms::Atom; 6. use swc_common::{Span, Spanned}; 7. use swc_ecma_ast::AssignPat; 8…
+  └ ✓ 75.     /// Returns an iterator over all escaped (unresolved) symbols in this scope. 76.     pub fn get_escaped_symbols(&self) -> impl Iterator<Item = &swc_atoms::Atom> { 77.         self.escaped_symb…
+● Thinking (grep)
+  │ pub use|pub mod
+● Reasoning
+  │ So `insert_local` takes `swc_atoms::Atom`. The TODO says the `ast_name_tracker` deletion happens in phase 4, so for now I need to keep the `swc_atoms` dependency only if `ast_name_tracker` requires it. But wait - the task says to remove swc deps from `ast_segmenter/Cargo.toml`. Let me check if `ast_name_tracker` itself depends on swc_atoms.
+
+The `visitor.rs` in `ast_segmenter` uses `swc_atoms::Atom::from(name.as_str())` to call `insert_local`. The `ast_name_tracker` crate uses `swc_atoms::Atom` internally. Since `ast_name_tracker` is still used from `ast_segmenter` and `ast_name_tracker` pulls in `swc_atoms`, the dependency on `swc_atoms` may be transitive.
+
+
+The TODO explicitly requires removing `swc_atoms` from `ast_segmenter/Cargo.toml`, so I need to stop using it directly in `visitor.rs` line 43. Since `Atom` implements `From<&str>`, I could potentially access it through `ast_name_tracker`'s public API instead, but I need to figure out how `insert_local` actually expects the `Atom` type to be provided.
+● Tool ▸ grep
+  │ pub use|pub mod
+  └ ✓ crates/ast_name_tracker/src/lib.rs:1:pub mod visitor; crates/ast_name_tracker/src/lib.rs:2:pub use visitor::{find_names, VariableScope};
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_name_tracker/Cargo.toml.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_name_tracker/Cargo.toml
+  └ ✓ 1. [package] 2. name = "ast-name-tracker" 3. version = "0.2.0-beta.1" 4. authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"] 5. license = "Apache-2.0" 6. description = """ 7. Tracks name references …
+● Thinking (grep)
+  │ from_swc_comments
+● Reasoning
+  │ So `ast_name_tracker` uses `swc_atoms` directly. But the TODO says to remove `swc_atoms` from `ast_segmenter/Cargo.toml` while keeping `ast-name-tracker` as a dependency (since it's only deleted in phase 4).
+
+The issue is that `visitor.rs` line 43 does `swc_atoms::Atom::from(name.as_str())`. I need to replace this with something that doesn't require `swc_atoms` as a direct dependency. I could:
+
+1. Re-export `Atom` from `ast_name_tracker`
+
+
+2. Use `ast_name_tracker`'s public interface differently
+
+The problem is that `swc_atoms::Atom` is a type used in `insert_local`, and even if I access it through `ast_name_tracker`, it doesn't re-export `Atom`. So I have a few options: keep `swc_atoms` as a direct dependency despite the TODO, add a convenience method to `insert_local` that takes `&str` instead of `Atom`, or try to use `swc_atoms` transitively through `ast_name_tracker`.
+
+The real constraint is that in Rust 2018+, I can't use a transitive dependency unless it's explicitly in my `Cargo.toml` — even though `ast_name_tracker` depends on `swc_atoms`, my crate can't access it that way. Since `insert_local` requires an `Atom` and `Atom` implements `From<&str>`, I need to either import `swc_atoms` directly or change the API. I think the cleanest solution is to add a convenience method to `VariableScope` that accepts a string slice instead of requiring an `Atom`, so `ast_segmenter` can avoid the `swc_atoms` dependency altogether. I'll add an `insert_local_str` method...
+
+Adding convenience method...
+
+As for `thiserror`, the TODO only mentions removing swc dependencies, not replacing the error handling library, so I'll leave that as-is since it's pre-existing and outside the scope of this task.
+
+Now I need to search for any usage of `from_swc_comments` and `from_swc_comments_parent` outside of ast_segmenter to ensure removing these functions won't break any callers.
+● Tool ▸ grep
+  │ from_swc_comments
+  └ ✓ ./.model-usage.d/logs/3EI3X9F6DqtkmeUubgNsvl05QQu.log:85:3. `from_swc_comments_parent` and `from_swc_comments` in `raw_module_deps.rs` lines 57-89 ./.model-usage.d/logs/3EI3X9F6DqtkmeUubgNsvl05QQu.log…
+● Thinking (grep)
+  │ from_swc_comments
+Good — `from_swc_comments` and `from_swc_comments_parent` are only used inside `ast_segmenter` itself. Let me also check for any usage outside the crate:
+● Tool ▸ grep
+  │ from_swc_comments
+  └ ✓ ./crates/ast_segmenter/src/raw_module_deps.rs:57:    pub fn from_swc_comments_parent( ./crates/ast_segmenter/src/raw_module_deps.rs:83:    /// Temporary bridge: see `from_swc_comments_parent`. ./crate…
+● Thinking (grep)
+  │ swc
+No external callers. Now let me check if there are any other swc references in the source files:
+● Tool ▸ grep
+  │ swc
+  └ ✓ crates/ast_segmenter/src/visitor.rs:43:        scope.insert_local(swc_atoms::Atom::from(name.as_str()), hoisting); crates/ast_segmenter/src/raw_module_deps.rs:53:    /// Temporary bridge: extract tags…
+● Thinking (report_intent)
+  │ tool request
+● Tool ▸ report_intent
+  │ Implementing swc removal
+  └ ✓ Intent logged
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs.
+Now I have a clear picture. Let me implement all changes:
+
+1. Remove `#![feature(box_patterns)]` from `lib.rs`
+2. Remove swc bridge methods from `raw_module_deps.rs`
+3. Replace `swc_atoms::Atom::from(name.as_str())` in `visitor.rs` with a `&str`-based method
+4. Clean up `Cargo.toml`
+
+First, I need to add a `&str`-accepting method to `ast_name_tracker::VariableScope`:
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs
+  └ ✓ 78.     } 79.  80.     /// Insert a local symbol with its hoisting level directly. 81.     /// Useful for constructing test fixtures without parsing source code. 82.     pub fn insert_local(&mut self,…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs.
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs
+  └ ✓ File /workspaces/good-fences-rs-core/crates/ast_name_tracker/src/visitor.rs updated with changes.
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/src/lib.rs.
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/src/visitor.rs.
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/src/raw_module_deps.rs.
+Now apply all `ast_segmenter` changes:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/src/lib.rs
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/src/visitor.rs
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/src/raw_module_deps.rs
+  └ ✓ File /workspaces/good-fences-rs-core/crates/ast_segmenter/src/lib.rs updated with changes.
+  └ ✓ File /workspaces/good-fences-rs-core/crates/ast_segmenter/src/raw_module_deps.rs updated with changes.
+  └ ✓ File /workspaces/good-fences-rs-core/crates/ast_segmenter/src/visitor.rs updated with changes.
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml.
+Now update `Cargo.toml` — remove swc deps and swc dev-deps:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml
+  └ ✓ File /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml updated with changes.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml.
+Also clean up the commented-out swc dev-dependencies:
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml
+  └ ✓ 1. [package] 2. name = "ast-segmenter" 3. version = "0.2.0-beta.1" 4. authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"] 5. license = "Apache-2.0" 6. description = """ 7. Parses web source files in…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml.
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml
+  └ ✓ File /workspaces/good-fences-rs-core/crates/ast_segmenter/Cargo.toml updated with changes.
+● Thinking (bash)
+  │ Run ast_segmenter tests
+Now let me run the tests:
+● Tool ▸ bash
+  │ Run ast_segmenter tests
+  └ ✓ error: package ID specification `ast_segmenter` did not match any packages  help: a package with a similar name exists: `ast-segmenter` <exited with exit code 101>
+● Thinking (bash)
+  │ Run ast-segmenter tests
+● Tool ▸ bash
+  │ Run ast-segmenter tests
+  └ ✓ Compiling libc v0.2.186     Building [=====================>   ] 166/186: libc(build.rs)                                                          Building [=====================>   ] 167/186: libc(bui…
+● Thinking (bash)
+  │ Build workspace
+All 21 tests pass. Now let me run `cargo build --workspace`:
+● Tool ▸ bash
+  │ Build workspace
+  └ ✓ warning: hiding a lifetime that's elided elsewhere is confusing    --> crates/ftree_cache/src/context_data.rs:108:20     | 108 |     readonly_lock: RwLockReadGuard<Option<T>>,     |                   …
+● Thinking (bash)
+  │ Run spot-check
+Workspace builds cleanly. Now run `./scripts/spot-check`:
+● Tool ▸ bash
+  │ Run spot-check
+  └ ✓ === spot-check: cargo check -p ast-segmenter ===     Checking libc v0.2.186     Building [=====================>   ] 170/186: libc                                                                    Ch…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.04-ast-segmenter.md.
+● Thinking (glob)
+  │ NOTES.swc-to-oxc-migration.04-ast-segmenter.md
+All spot checks pass. Now let me update the TODO file, create notes, and check for existing NOTES/AGENTS files:
+● Tool ▸ report_intent
+  │ Updating docs and committing
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.04-ast-segmenter.md
+● Tool ▸ glob
+  │ NOTES.swc-to-oxc-migration.04-ast-segmenter.md
+  └ ✓ Intent logged
+  └ ✓ File /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.04-ast-segmenter.md updated with changes.
+  └ ✓ ./NOTES.swc-to-oxc-migration.04-ast-segmenter.md
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.04-ast-segmenter.md.
+● Thinking (glob)
+  │ TODO.followups.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.04-ast-segmenter.md
+● Tool ▸ glob
+  │ TODO.followups.md
+  └ ✓ 1. # Notes: swc-to-oxc-migration phase 04 — ast_segmenter 2.  3. ## Section 1: Port data types 4.  5. ### Span migration 6. - `Segment.span`, `TaggedSymbol.span`, `ReExportedSymbol.span` now use `oxc_…
+  └ ✓ ./TODO.followups.md
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/TODO.followups.md.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/TODO.followups.md
+  └ ✓ 1. # Follow-up items 2.  3. ## Pre-existing warnings in workspace 4.  5. - `ftree_cache`: elided lifetime warning (`RwLockReadGuard<'_, Option<T>>`) 6. - `unused_finder`: dead code warnings for `ErrLi…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.04-ast-segmenter.md.
+Now update the notes file and commit:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.04-ast-segmenter.md
+  └ ✓ File /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.04-ast-segmenter.md updated with changes.
+● Thinking (glob)
+  │ crates/ast_segmenter/{AGENTS,README}.md
+Now let me check the ast_segmenter AGENTS.md and README.md:
+● Tool ▸ glob
+  │ crates/ast_segmenter/{AGENTS,README}.md
+  └ ✓ No files matched the pattern.
+● Thinking (bash)
+  │ Stage and review changes
+No README/AGENTS to update. Let me commit:
+● Tool ▸ bash
+  │ Stage and review changes
+  └ ✓ .cache/git-hooks/sessions/3DuuhPtbVS2Z3FJ0jp6BSxoraJc/tracing.log.json |   0  .cache/git-hooks/sessions/3EHrvLP6GhygotB91dtrWtzWPuR/tracing.log.json |   0  .cache/git-hooks/sessions/3EHsw7ePdiAUKqWN3o…
+● Thinking (bash)
+  │ Stage only relevant files
+There are many unrelated files staged. Let me be precise about what to commit:
+● Tool ▸ bash
+  │ Stage only relevant files
+  └ ✓ Unstaged changes after reset: M	Cargo.lock M	NOTES.swc-to-oxc-migration.04-ast-segmenter.md M	TODO.swc-to-oxc-migration.04-ast-segmenter.md M	crates/ast_name_tracker/src/visitor.rs M	crates/ast_segmen…
+● Thinking (bash)
+  │ Commit changes
+● Tool ▸ bash
+  │ Commit changes
+  └ ✓ [segment-aware 9edcf9f] feat(swc-to-oxc-migration.04-ast-segmenter, ast-segmenter): drop swc deps and nightly box_patterns  8 files changed, 25 insertions(+), 69 deletions(-) <exited with exit code 0>
+Done. Here's what I did:
+
+**Completed the "Drop swc and nightly" section** of phase 04:
+
+1. **Removed `#![feature(box_patterns)]`** from `ast_segmenter/src/lib.rs`
+2. **Removed all swc deps** from `Cargo.toml`: `swc_atoms`, `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_utils_parse` (deps) and `swc_ecma_parser` (dev-deps), plus stale commented-out entries
+3. **Deleted `from_swc_comments`/`from_swc_comments_parent`** bridge methods — no external callers remained
+4. **Added `insert_local_str(&str)`** to `ast_name_tracker::VariableScope` to avoid needing `swc_atoms` directly from `ast_segmenter`
+5. **All 21 tests pass**, workspace builds, and `./scripts/spot-check` passes
+
+The entire TODO file for phase 04 is now complete. SWC crates still flow transitively via `ast-name-tracker`, which is removed in phase 4 (source graph migration).
+[result] 3 premium requests, 206305ms session

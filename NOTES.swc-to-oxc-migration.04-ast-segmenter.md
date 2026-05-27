@@ -68,3 +68,16 @@
 ### Cargo.toml updates
 - ast_segmenter: added `oxc_allocator`, `oxc_ast_visit`, `oxc_semantic`; swc_atoms pinned to 0.6.7 (must match ast_name_tracker)
 - unused_finder: added `oxc_allocator`, `oxc_semantic`, `oxc_utils_parse`
+
+## Section 3: Drop swc and nightly from ast_segmenter
+
+### box_patterns removal
+- `#![feature(box_patterns)]` was the only nightly feature gate; no `box` patterns remained in source (already removed in section 2)
+
+### swc dependency removal
+- Removed: `swc_atoms`, `swc_common`, `swc_ecma_ast`, `swc_ecma_visit`, `swc_utils_parse` from `[dependencies]`
+- Removed: `swc_ecma_parser` from `[dev-dependencies]`
+- Cleaned up commented-out swc dev-dependencies
+- `from_swc_comments` / `from_swc_comments_parent` bridge methods deleted from `raw_module_deps.rs` (no external callers)
+- `swc_atoms::Atom::from(name.as_str())` in `find_names_from_semantic` replaced with `insert_local_str(&str)` — new convenience method added to `ast_name_tracker::VariableScope` to avoid direct `swc_atoms` dependency
+- swc crates still pulled transitively via `ast-name-tracker` dep (removed in phase 4)

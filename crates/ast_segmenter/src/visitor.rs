@@ -40,7 +40,7 @@ fn find_names_from_semantic(semantic: &Semantic<'_>) -> VariableScope {
         } else {
             HoistingLevel::LetConstHoisting
         };
-        scope.insert_local(swc_atoms::Atom::from(name.as_str()), hoisting);
+        scope.insert_local_str(name.as_str(), hoisting);
     }
     scope
 }

@@ -173,12 +173,6 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "oxc_utils_parse",
- "swc_atoms",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
- "swc_ecma_visit",
- "swc_utils_parse",
  "test_tmpdir",
  "thiserror 1.0.69",
 ]

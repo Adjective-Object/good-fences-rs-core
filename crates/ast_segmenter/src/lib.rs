@@ -1,5 +1,3 @@
-#![feature(box_patterns)]
-
 use raw_module_deps::Name;
 use oxc_ast::ast::ModuleExportName;
 

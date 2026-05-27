@@ -50,43 +50,6 @@ impl SymbolTags {
         SymbolTags::from_comments_parent(SymbolTags::default(), comments, source, lo)
     }
 
-    /// Temporary bridge: extract tags using swc's `Comments` trait.
-    /// Used while the visitor still operates on swc AST nodes whose byte
-    /// positions have a source-map-global offset that doesn't match oxc's
-    /// 0-based comment positions. Removed when the visitor is ported to oxc.
-    pub fn from_swc_comments_parent(
-        parent: Self,
-        comments: &impl swc_common::comments::Comments,
-        lo: swc_common::BytePos,
-    ) -> SymbolTags {
-        let mut tags = parent;
-        let line_comments = match comments.get_leading(lo) {
-            Some(line_comments) => line_comments,
-            None => return tags,
-        };
-        for c in line_comments.iter() {
-            let line = match c.kind {
-                swc_common::comments::CommentKind::Line => c.text.trim(),
-                _ => continue,
-            };
-            if line.len() < Self::IGNORE_UNUSED_PREFIX.len() {
-                continue;
-            }
-            let prefix = &line[..Self::IGNORE_UNUSED_PREFIX.len()];
-            if prefix.eq_ignore_ascii_case(Self::IGNORE_UNUSED_PREFIX) {
-                tags.allow_unused_comment = true;
-            }
-        }
-        tags
-    }
-
-    /// Temporary bridge: see `from_swc_comments_parent`.
-    pub fn from_swc_comments(
-        comments: &impl swc_common::comments::Comments,
-        lo: swc_common::BytePos,
-    ) -> SymbolTags {
-        SymbolTags::from_swc_comments_parent(SymbolTags::default(), comments, lo)
-    }
 }
 
 /// The interior representation of the name of a symbol.
