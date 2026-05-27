@@ -1,5 +1,5 @@
 use ast_name_tracker::VariableScope;
-use swc_common::Span;
+use oxc_span::Span;
 
 use crate::raw_module_deps::RawModuleDeps;
 

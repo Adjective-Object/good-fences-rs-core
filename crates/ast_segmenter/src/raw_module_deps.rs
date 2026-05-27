@@ -2,11 +2,10 @@ use std::convert::TryInto;
 
 use ahashmap::{AHashMap, AHashSet};
 use std::fmt::Debug;
-use swc_common::{
-    comments::{CommentKind, Comments},
-    BytePos,
-};
-use swc_ecma_ast::ModuleExportName;
+use oxc_ast::ast::ModuleExportName;
+use oxc_ast::{Comment, CommentKind};
+use oxc_span::Span;
+use oxc_utils_parse::leading_comments_at;
 
 use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
 
@@ -21,15 +20,19 @@ pub struct SymbolTags {
 impl SymbolTags {
     const IGNORE_UNUSED_PREFIX: &str = "@ALLOW-UNUSED-EXPORT";
 
-    pub fn from_comments_parent(parent: Self, comments: impl Comments, lo: BytePos) -> SymbolTags {
+    pub fn from_comments_parent(parent: Self, comments: &[Comment], source: &str, lo: u32) -> SymbolTags {
         let mut tags = parent;
-        let line_comments = match comments.get_leading(lo) {
-            Some(line_comments) => line_comments,
-            None => return tags,
-        };
+        let line_comments = leading_comments_at(comments, source, lo);
+        if line_comments.is_empty() {
+            return tags;
+        }
         for c in line_comments.iter() {
             let line = match c.kind {
-                CommentKind::Line => c.text.trim(),
+                CommentKind::Line => {
+                    // Line comment span includes the `//` prefix; skip it.
+                    let text = &source[(c.span.start as usize + 2)..c.span.end as usize];
+                    text.trim()
+                }
                 _ => continue,
             };
             if line.len() < Self::IGNORE_UNUSED_PREFIX.len() {
@@ -43,8 +46,46 @@ impl SymbolTags {
         tags
     }
 
-    pub fn from_comments(comments: impl Comments, lo: BytePos) -> SymbolTags {
-        SymbolTags::from_comments_parent(SymbolTags::default(), comments, lo)
+    pub fn from_comments(comments: &[Comment], source: &str, lo: u32) -> SymbolTags {
+        SymbolTags::from_comments_parent(SymbolTags::default(), comments, source, lo)
+    }
+
+    /// Temporary bridge: extract tags using swc's `Comments` trait.
+    /// Used while the visitor still operates on swc AST nodes whose byte
+    /// positions have a source-map-global offset that doesn't match oxc's
+    /// 0-based comment positions. Removed when the visitor is ported to oxc.
+    pub fn from_swc_comments_parent(
+        parent: Self,
+        comments: &impl swc_common::comments::Comments,
+        lo: swc_common::BytePos,
+    ) -> SymbolTags {
+        let mut tags = parent;
+        let line_comments = match comments.get_leading(lo) {
+            Some(line_comments) => line_comments,
+            None => return tags,
+        };
+        for c in line_comments.iter() {
+            let line = match c.kind {
+                swc_common::comments::CommentKind::Line => c.text.trim(),
+                _ => continue,
+            };
+            if line.len() < Self::IGNORE_UNUSED_PREFIX.len() {
+                continue;
+            }
+            let prefix = &line[..Self::IGNORE_UNUSED_PREFIX.len()];
+            if prefix.eq_ignore_ascii_case(Self::IGNORE_UNUSED_PREFIX) {
+                tags.allow_unused_comment = true;
+            }
+        }
+        tags
+    }
+
+    /// Temporary bridge: see `from_swc_comments_parent`.
+    pub fn from_swc_comments(
+        comments: &impl swc_common::comments::Comments,
+        lo: swc_common::BytePos,
+    ) -> SymbolTags {
+        SymbolTags::from_swc_comments_parent(SymbolTags::default(), comments, lo)
     }
 }
 
@@ -90,13 +131,6 @@ impl From<&str> for Name {
         }
     }
 }
-impl From<&swc_atoms::Atom> for Name {
-    fn from(s: &swc_atoms::Atom) -> Self {
-        Name {
-            inner: s.as_ref().to_string(),
-        }
-    }
-}
 
 /// Represents a symbol either at a module boundary (exported/imported) or within a module.
 #[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Clone)]
@@ -120,8 +154,9 @@ impl<T: ToString + AsRef<str>> From<T> for Symbol {
 impl Symbol {
     pub fn from_module_export_name(name: &ModuleExportName) -> Self {
         match name {
-            ModuleExportName::Ident(ident) => Self::from(ident.sym.as_ref()),
-            ModuleExportName::Str(str) => Self::from(str.value.as_ref()),
+            ModuleExportName::IdentifierName(ident) => Self::from(ident.name.as_str()),
+            ModuleExportName::IdentifierReference(ident) => Self::from(ident.name.as_str()),
+            ModuleExportName::StringLiteral(str) => Self::from(str.value.as_ref()),
         }
     }
 }
@@ -145,17 +180,17 @@ impl Symbol {
 pub struct TaggedSymbol {
     pub symbol: Symbol,
     pub tags: SymbolTags,
-    pub span: swc_common::Span,
+    pub span: Span,
 }
 impl TaggedSymbol {
     pub fn new(symbol: Symbol, tags: SymbolTags) -> TaggedSymbol {
         TaggedSymbol {
             symbol,
             tags,
-            span: swc_common::Span::default(),
+            span: Span::default(),
         }
     }
-    pub fn with_span(symbol: Symbol, tags: SymbolTags, span: swc_common::Span) -> TaggedSymbol {
+    pub fn with_span(symbol: Symbol, tags: SymbolTags, span: Span) -> TaggedSymbol {
         TaggedSymbol { symbol, tags, span }
     }
 }

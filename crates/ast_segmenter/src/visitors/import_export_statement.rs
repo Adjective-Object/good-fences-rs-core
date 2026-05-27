@@ -6,7 +6,7 @@ use crate::{
 use logger_srcfile::SrcFileLogger;
 use std::convert::TryInto;
 use swc_common::{
-    comments::{CommentKind, Comments, SingleThreadedComments},
+    comments::{Comments as _, SingleThreadedComments},
     BytePos, Spanned,
 };
 use swc_ecma_ast::{
@@ -16,11 +16,34 @@ use swc_ecma_ast::{
 };
 use swc_ecma_visit::{Visit, VisitWith};
 
+/// Convert a swc `ModuleExportName` to an `ExportedSymbol`.
+/// Temporary bridge while the visitor still uses the swc AST.
+fn exported_symbol_from_swc_export_name(name: &swc_ecma_ast::ModuleExportName) -> ExportedSymbol {
+    match name {
+        swc_ecma_ast::ModuleExportName::Ident(ident) => ExportedSymbol::from(ident.sym.as_ref()),
+        swc_ecma_ast::ModuleExportName::Str(str) => ExportedSymbol::from(str.value.as_ref()),
+    }
+}
+
+/// Convert a swc `ModuleExportName` to a `Symbol`.
+/// Temporary bridge while the visitor still uses the swc AST.
+fn symbol_from_swc_export_name(name: &swc_ecma_ast::ModuleExportName) -> Symbol {
+    match name {
+        swc_ecma_ast::ModuleExportName::Ident(ident) => Symbol::from(ident.sym.as_ref()),
+        swc_ecma_ast::ModuleExportName::Str(str) => Symbol::from(str.value.as_ref()),
+    }
+}
+
+/// Convert a swc `Span` to an `oxc_span::Span`.
+fn to_oxc_span(span: swc_common::Span) -> oxc_span::Span {
+    logger_srcfile::swc_compat::swc_span_to_oxc(span)
+}
+
 // AST visitor that gathers information on file imports and exports from an SWC source tree.
 #[derive(Debug)]
 pub struct ExportsVisitor<'a, TLogger: SrcFileLogger> {
     pub logger: &'a TLogger,
-    pub comments: &'a SingleThreadedComments,
+    pub swc_comments: &'a SingleThreadedComments,
     pub module_deps: RawModuleDeps,
     require_identifiers: ahashmap::AHashSet<Id>,
 }
@@ -33,10 +56,10 @@ pub struct ExportsVisitor<'a, TLogger: SrcFileLogger> {
  * - `export { foo } from 'foo'`
  */
 fn get_export_bindings(
-    comments: &SingleThreadedComments,
+    swc_comments: &SingleThreadedComments,
     parent_tags: SymbolTags,
     export: &NamedExport,
-    _source: &Str,
+    _source_str: &Str,
 ) -> Vec<ExportBinding> {
     // local copy of the parent tags that considers the 'type' field in `export type`
     let mut parent_tags = parent_tags;
@@ -45,16 +68,16 @@ fn get_export_bindings(
     export.specifiers.iter().map(|spec| -> ExportBinding {
         // allow overriding tags on a per-specifier basis
         let specifier_tags =
-            SymbolTags::from_comments_parent(parent_tags.clone(), comments, spec.span().lo());
+            SymbolTags::from_swc_comments_parent(parent_tags.clone(), swc_comments, spec.span().lo());
         match spec {
             // export * as v from 'mod';
             ExportSpecifier::Namespace(spec) => ExportBinding {
-                original: TaggedSymbol::with_span(Symbol::Namespace, specifier_tags, spec.span()),
-                exported_as: Some(ExportedSymbol::from_module_export_name(&spec.name)),
+                original: TaggedSymbol::with_span(Symbol::Namespace, specifier_tags, to_oxc_span(spec.span())),
+                exported_as: Some(exported_symbol_from_swc_export_name(&spec.name)),
             },
             // export v from 'mod';
             ExportSpecifier::Default(spec) => ExportBinding {
-                original: TaggedSymbol::with_span(Symbol::Default, specifier_tags, spec.span()),
+                original: TaggedSymbol::with_span(Symbol::Default, specifier_tags, to_oxc_span(spec.span())),
                 exported_as: Some(ExportedSymbol::from(spec.exported.sym.as_ref())),
             },
             // export { v as w } from 'mod';
@@ -64,11 +87,11 @@ fn get_export_bindings(
                 // export { type v as w } from 'mod';
                 specifier_tags.is_type_only |= spec.is_type_only;
                 ExportBinding {
-                    original: TaggedSymbol::with_span(Symbol::from(imported_name), specifier_tags, export.span()),
+                    original: TaggedSymbol::with_span(Symbol::from(imported_name), specifier_tags, to_oxc_span(export.span())),
                     exported_as: spec
                         .exported
                         .as_ref()
-                        .map(ExportedSymbol::from_module_export_name),
+                        .map(|n| exported_symbol_from_swc_export_name(n)),
                 }
             }
         }
@@ -76,24 +99,28 @@ fn get_export_bindings(
 }
 
 impl<'a, TLogger: SrcFileLogger> ExportsVisitor<'a, TLogger> {
-    pub fn new(logger: &'a TLogger, comments: &'a SingleThreadedComments) -> Self {
+    pub fn new(
+        logger: &'a TLogger,
+        swc_comments: &'a SingleThreadedComments,
+    ) -> Self {
         Self {
             logger,
-            comments,
+            swc_comments,
             module_deps: Default::default(),
             require_identifiers: Default::default(),
         }
     }
 
     pub fn has_disable_export_comment(&self, lo: BytePos) -> bool {
-        has_disable_export_comment(self.comments, lo)
+        has_disable_export_comment(self.swc_comments, lo)
     }
 }
 
 pub fn has_disable_export_comment(comments: &SingleThreadedComments, lo: BytePos) -> bool {
     if let Some(comments) = comments.get_leading(lo) {
         return comments.iter().any(|c| {
-            c.kind == CommentKind::Line && c.text.trim().starts_with("@ALLOW-UNUSED-EXPORT")
+            c.kind == swc_common::comments::CommentKind::Line
+                && c.text.trim().starts_with("@ALLOW-UNUSED-EXPORT")
         });
     }
     false
@@ -109,28 +136,28 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
     // Handles `export default foo`
     fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
         expr.visit_children_with(self);
-        let tags = SymbolTags::from_comments(self.comments, expr.span_lo());
+        let tags = SymbolTags::from_swc_comments(self.swc_comments, expr.span_lo());
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol::with_span(Symbol::Default, tags, expr.span()),
+            TaggedSymbol::with_span(Symbol::Default, tags, to_oxc_span(expr.span())),
         );
     }
 
     /// Handles `export default class Foo {}` or `export default function foo() {}`
     fn visit_export_default_decl(&mut self, decl: &ExportDefaultDecl) {
         decl.visit_children_with(self);
-        let mut tags = SymbolTags::from_comments(self.comments, decl.span_lo());
+        let mut tags = SymbolTags::from_swc_comments(self.swc_comments, decl.span_lo());
         tags.is_type_only = decl.decl.is_ts_interface_decl();
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol::with_span(Symbol::Default, tags, decl.span()),
+            TaggedSymbol::with_span(Symbol::Default, tags, to_oxc_span(decl.span())),
         );
     }
 
     // Handles `export const foo = 1` or `export class Foo {}`
     fn visit_export_decl(&mut self, export: &ExportDecl) {
         export.visit_children_with(self);
-        let mut tags = SymbolTags::from_comments(self.comments, export.span_lo());
+        let mut tags = SymbolTags::from_swc_comments(self.swc_comments, export.span_lo());
         tags.is_type_only = export.decl.is_ts_interface() || export.decl.is_ts_type_alias();
         let idents = match &export.decl {
             Decl::Class(decl) => {
@@ -171,7 +198,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
         for ident in idents {
             self.module_deps.exports_locals.insert(
                 ExportedSymbol::from(ident.as_str()),
-                TaggedSymbol::with_span(Symbol::from(ident.as_str()), tags.clone(), export.span()),
+                TaggedSymbol::with_span(Symbol::from(ident.as_str()), tags.clone(), to_oxc_span(export.span())),
             );
         }
     }
@@ -180,14 +207,14 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
     fn visit_export_all(&mut self, export: &ExportAll) {
         export.visit_children_with(self);
         let source = export.src.value.to_string();
-        let tags = SymbolTags::from_comments(self.comments, export.span_lo());
+        let tags = SymbolTags::from_swc_comments(self.swc_comments, export.span_lo());
         let mut export_tags = tags;
         export_tags.is_type_only |= export.type_only;
         let binding: ReExportedSymbol = ReExportedSymbol {
             imported_as: crate::ImportTarget::Namespace,
             exported_as: None,
             tags: export_tags,
-            span: export.span(),
+            span: to_oxc_span(export.span()),
         };
         self.module_deps
             .exports_from
@@ -200,9 +227,9 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
     fn visit_named_export(&mut self, export: &NamedExport) {
         export.visit_children_with(self);
         if let Some(source) = &export.src {
-            let tags = SymbolTags::from_comments(self.comments, export.span_lo());
+            let tags = SymbolTags::from_swc_comments(self.swc_comments, export.span_lo());
             let source_str = source.value.to_string();
-            get_export_bindings(self.comments, tags, export, source).into_iter().for_each(|binding| {
+            get_export_bindings(self.swc_comments, tags, export, source).into_iter().for_each(|binding| {
                 if let Ok(re_export) = TryInto::<ReExportedSymbol>::try_into(binding) {
                     self.module_deps
                         .exports_from
@@ -221,16 +248,16 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         let exported_as = named
                             .exported
                             .as_ref()
-                            .map(ExportedSymbol::from_module_export_name);
+                            .map(|n| exported_symbol_from_swc_export_name(n));
                         let exported_key = exported_as
                             .clone()
                             .unwrap_or_else(|| ExportedSymbol::from(local_name.as_str()));
-                        let mut tags = SymbolTags::from_comments(self.comments, named.span().lo());
+                        let mut tags = SymbolTags::from_swc_comments(self.swc_comments, named.span().lo());
                         tags.allow_unused_comment |= allow_unused;
                         tags.is_type_only |= is_type_only || named.is_type_only;
                         self.module_deps.exports_locals.insert(
                             exported_key,
-                            TaggedSymbol::with_span(Symbol::from(local_name.as_str()), tags, export.span()),
+                            TaggedSymbol::with_span(Symbol::from(local_name.as_str()), tags, to_oxc_span(export.span())),
                         );
                     }
                     ExportSpecifier::Default(_default_spec) => {
@@ -239,7 +266,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         tags.is_type_only = is_type_only;
                         self.module_deps.exports_locals.insert(
                             ExportedSymbol::Default,
-                            TaggedSymbol::with_span(Symbol::Default, tags, export.span()),
+                            TaggedSymbol::with_span(Symbol::Default, tags, to_oxc_span(export.span())),
                         );
                     }
                     ExportSpecifier::Namespace(ns) => {
@@ -247,8 +274,8 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         tags.allow_unused_comment = allow_unused;
                         tags.is_type_only = is_type_only;
                         self.module_deps.exports_locals.insert(
-                            ExportedSymbol::from_module_export_name(&ns.name),
-                            TaggedSymbol::with_span(Symbol::Namespace, tags, export.span()),
+                            exported_symbol_from_swc_export_name(&ns.name),
+                            TaggedSymbol::with_span(Symbol::Namespace, tags, to_oxc_span(export.span())),
                         );
                     }
                 }
@@ -310,7 +337,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
             return;
         }
         // import .. from ..
-        let mut parent_tags = SymbolTags::from_comments(self.comments, import.span_lo());
+        let mut parent_tags = SymbolTags::from_swc_comments(self.swc_comments, import.span_lo());
         parent_tags.is_type_only |= import.type_only;
 
         let tagged_symbols: Vec<TaggedSymbol> = import
@@ -323,7 +350,7 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
                         tags.is_type_only |= named.is_type_only;
                         match &named.imported {
                             Some(module_name) => {
-                                TaggedSymbol::new(Symbol::from_module_export_name(module_name), tags)
+                                TaggedSymbol::new(symbol_from_swc_export_name(module_name), tags)
                             }
                             None => {
                                 TaggedSymbol::new(Symbol::from(named.local.sym.as_ref()), tags)

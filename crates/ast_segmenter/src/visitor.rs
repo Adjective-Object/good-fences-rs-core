@@ -23,7 +23,7 @@ pub enum StatementToSegmentError {
 
 fn module_item_to_segment(
     file_logger: &impl SrcFileLogger,
-    comments: &SingleThreadedComments,
+    swc_comments: &SingleThreadedComments,
     module_item: &swc_ecma_ast::ModuleItem,
 ) -> Option<Segment> {
     match module_item {
@@ -68,7 +68,7 @@ fn module_item_to_segment(
                     Some(Segment {
                         module_deps,
                         variables,
-                        span: module_item.span(),
+                        span: logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
                     })
                 }
                 swc_ecma_ast::Stmt::With(_) => {
@@ -105,14 +105,14 @@ fn module_item_to_segment(
             let variables = ast_name_tracker::visitor::find_names(file_logger, module_decl);
 
             // Run ExportsVisitor on the declaration to extract import/export deps
-            let mut exports_visitor = ExportsVisitor::new(file_logger, comments);
+            let mut exports_visitor = ExportsVisitor::new(file_logger, swc_comments);
             module_decl.visit_with(&mut exports_visitor);
             let module_deps: RawModuleDeps = exports_visitor.into();
 
             Some(Segment {
                 module_deps,
                 variables,
-                span: module_item.span(),
+                span: logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
             })
         }
     }
@@ -124,12 +124,12 @@ fn module_item_to_segment(
 pub fn segment_file(
     logger: &impl SrcFileLogger,
     module: &swc_ecma_ast::Module,
-    comments: &SingleThreadedComments,
+    swc_comments: &SingleThreadedComments,
 ) -> Vec<Segment> {
     module
         .body
         .iter()
-        .filter_map(|item| module_item_to_segment(logger, comments, item))
+        .filter_map(|item| module_item_to_segment(logger, swc_comments, item))
         .collect()
 }
 

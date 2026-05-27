@@ -626,10 +626,10 @@ mod tests {
     use ast_segmenter::raw_module_deps::RawModuleDeps;
     use ast_segmenter::Segment;
     use ast_name_tracker::visitor::VariableScope;
-    use swc_common::{BytePos, Span};
+    use oxc_span::Span;
 
     fn make_span(lo: u32, hi: u32) -> Span {
-        Span::new(BytePos(lo), BytePos(hi))
+        Span::new(lo, hi)
     }
 
     fn make_segment(lo: u32, hi: u32) -> Segment {

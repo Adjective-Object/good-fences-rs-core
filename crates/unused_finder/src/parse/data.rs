@@ -5,7 +5,7 @@ use std::{
 
 use ahashmap::{AHashMap, AHashSet, ARandomState};
 use multi_err::{MultiErr, MultiResult};
-use swc_common::Span;
+use oxc_span::Span;
 use swc_ecma_ast::ModuleExportName;
 
 use import_resolver::resolve::PathResolver;

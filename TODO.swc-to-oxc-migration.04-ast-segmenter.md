@@ -18,12 +18,12 @@ holds:
 - `impl From<&swc_atoms::Atom> for Name` (used by callers that hand off swc atoms)
 - `Symbol::from_module_export_name(&ModuleExportName)`
 
-- [ ] Replace `swc_common::Span` with `oxc_span::Span` in `Segment`, `TaggedSymbol`, `ReExportedSymbol`, `ExportBinding`
-- [ ] Replace `BytePos` with `u32` in `SymbolTags::from_comments(_parent)` signatures
-- [ ] Replace `impl Comments` parameter with `&LeadingComments<'_>`
-- [ ] Replace `impl From<&swc_atoms::Atom> for Name` with `impl From<&oxc_span::Atom<'_>> for Name`
-- [ ] Update `Symbol::from_module_export_name` to match on `oxc_ast::ast::ModuleExportName` (handle the third variant `IdentifierReference`)
-- [ ] Update `ExportedSymbol::from_module_export_name` similarly
+- [x] Replace `swc_common::Span` with `oxc_span::Span` in `Segment`, `TaggedSymbol`, `ReExportedSymbol`, `ExportBinding`
+- [x] Replace `BytePos` with `u32` in `SymbolTags::from_comments(_parent)` signatures
+- [x] Replace `impl Comments` parameter with `&[Comment]` + `&str` (source text for `leading_comments_at`)
+- [x] Replace `impl From<&swc_atoms::Atom> for Name` with `From<&str>` (removed; existing `From<&str>` suffices since oxc `Ident` implements `AsRef<str>`)
+- [x] Update `Symbol::from_module_export_name` to match on `oxc_ast::ast::ModuleExportName` (handle the third variant `IdentifierReference`)
+- [x] Update `ExportedSymbol::from_module_export_name` similarly
 
 ## Port `import_export_statement.rs` visitor
 

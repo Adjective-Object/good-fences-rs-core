@@ -9,7 +9,6 @@ use ast_segmenter::segment_graph::{SegmentGraph, SegmentId, TagSet};
 use ast_segmenter::segment_info::Segment;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use swc_common::source_map::SmallPos;
 
 use crate::{
     find_result::{ResultFile, ResultGraph},
@@ -288,8 +287,8 @@ fn compute_unused_segments(graph: &ResultGraph, config: &UnusedFinderConfig) -> 
                 if !seg_graph.node(node_idx).tags.contains(TagSet::REACHABLE) {
                     unused_segs.push(SegmentReport {
                         segment_idx: seg_idx,
-                        start: seg.span.lo().to_u32(),
-                        end: seg.span.hi().to_u32(),
+                        start: seg.span.start,
+                        end: seg.span.end,
                     });
                 }
             }
@@ -352,8 +351,8 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
 
                 Some(SymbolReport {
                     id: symbol_name.to_string(),
-                    start: ast_symbol.span.lo().to_u32(),
-                    end: ast_symbol.span.hi().to_u32(),
+                    start: ast_symbol.span.start,
+                    end: ast_symbol.span.end,
                 })
             });
 
@@ -373,8 +372,8 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
                 Some(SymbolReportWithTags {
                     symbol: SymbolReport {
                         id: symbol_name.to_string(),
-                        start: ast_symbol.span.lo().to_u32(),
-                        end: ast_symbol.span.hi().to_u32(),
+                        start: ast_symbol.span.start,
+                        end: ast_symbol.span.end,
                     },
                     tags: (*symbol_bitflags).into(),
                 })

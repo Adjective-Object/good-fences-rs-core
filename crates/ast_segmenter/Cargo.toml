@@ -15,6 +15,9 @@ crate-type = ["lib"]
 ahashmap = { version = "0.2.0", path = "../ahashmap" }
 ast-name-tracker = { version = "0.2.0-beta.1", path = "../ast_name_tracker" }
 logger_srcfile = { version = "0.2.0", path = "../logger_srcfile", features = ["swc-compat"] }
+oxc_ast.workspace = true
+oxc_span.workspace = true
+oxc_utils_parse = { version = "0.1.0", path = "../oxc_utils_parse" }
 swc_atoms = "5.0.0"
 swc_common.workspace = true
 swc_ecma_ast.workspace = true
@@ -26,6 +29,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 logger = { version = "0.2.0", path = "../logger" }
+oxc_allocator.workspace = true
 swc_ecma_parser.workspace = true
 # ahashmap = { version = "0.2.0", path = "../ahashmap" }
 # logger = { version = "0.2.0", path = "../logger" }

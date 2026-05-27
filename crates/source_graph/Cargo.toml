@@ -16,4 +16,5 @@ swc_atoms = "0.6.7"
 swc_common.workspace = true
 
 [dev-dependencies]
+oxc_span.workspace = true
 pretty_assertions.workspace = true
