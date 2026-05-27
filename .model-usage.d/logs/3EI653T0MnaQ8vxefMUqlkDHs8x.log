@@ -1,0 +1,363 @@
+● User
+  │ @README.md   Read the first incomplete section of @TODO.swc-to-oxc-migration.06-unused-finder.md. Detailed plan in @PLAN.swc-to-oxc-migration.md Complete the tasks Run ./scripts/spot-check to validate your changes Mark the completed tasks i…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.06-unused-finder.md.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/PLAN.swc-to-oxc-migration.md.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/README.md.
+● Reasoning
+  │ Let me start by reading the TODO file, the PLAN file, and the README to understand what needs to be done.
+● Tool ▸ report_intent
+  │ Understanding task requirements
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.06-unused-finder.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/PLAN.swc-to-oxc-migration.md
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/README.md
+  └ ✓ Intent logged
+  └ ✓ 1. # SWC → OXC Migration 2.  3. Migrate `good-fences-rs-core` from the SWC ecosystem to the OXC ecosystem 4. (parser, AST, visitor, semantic analyzer, diagnostics). The custom node-modules 5. + tsconf…
+  └ ✓ 1. # good-fences-rs-core 2.  3. <!-- Core implementation of [`good-fences-rs`](https://github.com/Adjective-Object/good-fences.rs) --> 4.  5.  6. <!-- Written against `rustc 1.47.0 (18bf6b4f0 2020-10-…
+  └ ✓ 1. High level goal: switch `unused_finder` to use the oxc parser pipeline. Drop 2. `swc_ecma_transforms::resolver` / `Globals` / `Mark` / `GLOBALS`. Drop 3. `SmallPos` and the swc-loader `Resolve` tra…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/Cargo.toml.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/data.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/report.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/unused_finder.rs.
+● Reasoning
+  │ The first incomplete section is "Rewrite `get_file_segments`". Let me explore the current state of the codebase to understand what exists.
+Now let me explore the current codebase to understand the existing implementation.
+● Tool ▸ report_intent
+  │ Exploring codebase structure
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/Cargo.toml
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/data.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/report.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/unused_finder.rs
+  └ ✓ Intent logged
+  └ ✓ File too large to read at once (64.3 KB). Consider using the grep tool to search within the file, or view with view_range to read specific sections.
+  └ ✓ 1. use core::{ 2.     convert::Into, 3.     option::Option::{None, Some}, 4. }; 5. use std::fmt::Display; 6.  7. use ahashmap::AHashMap; 8. use ast_segmenter::segment_graph::{SegmentGraph, SegmentId, …
+  └ ✓ 1. use std::{ 2.     fmt::Debug, 3.     path::{Path, PathBuf}, 4. }; 5.  6. use ahashmap::{AHashMap, AHashSet, ARandomState}; 7. use multi_err::{MultiErr, MultiResult}; 8. use oxc_span::Span; 9. use s…
+  └ ✓ 1.  2. [package] 3. name = "unused_finder" 4. version = "0.2.0" 5. authors = ["Maxwell Huang-Hobbs <mhuan13@gmail.com>"] 6. edition = "2021" 7.  8. [lib] 9. crate-type = ["lib"] 10.  11. [dependencies…
+  └ ✓ 1. use std::path::Path; 2. use std::path::PathBuf; 3.  4. use logger::StdioLogger; 5. use logger_srcfile::WrapFileLogger; 6.  7. use ast_segmenter::segment_info::Segment; 8.  9. #[derive(Debug, thiser…
+● Thinking (grep)
+  │ use swc_
+● Thinking (grep)
+  │ SmallPos
+● Thinking (grep)
+  │ swc_ecma_loader|TargetEnv|swc_common::FileName|Resolve
+● Reasoning
+  │ Let me check the key parts of unused_finder.rs and also check what swc imports remain.
+● Tool ▸ grep
+  │ use swc_
+● Tool ▸ grep
+  │ SmallPos
+● Tool ▸ grep
+  │ swc_ecma_loader|TargetEnv|swc_common::FileName|Resolve
+  └ ✓ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/data.rs:9:use swc_ecma_ast::ModuleExportName;
+  └ ✓ /workspaces/good-fences-rs-core/crates/unused_finder/src/unused_finder.rs:19:    walked_file::ResolvedSourceFile, /workspaces/good-fences-rs-core/crates/unused_finder/src/unused_finder.rs:25:    combi…
+  └ ✓ No matches found.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/oxc_utils_parse.
+● Thinking (grep)
+  │ pub fn parse_file|panicked|struct.*Return|ParserReturn
+● Thinking (glob)
+  │ crates/unused_finder/src/**/*.rs
+● Reasoning
+  │ Good. The first incomplete section is "Rewrite `get_file_segments`". Looking at the current code, it seems like `exports_visitor_runner.rs` has already been partially migrated - it's using `oxc_allocator`, `oxc_utils_parse`, and `oxc_semantic`. But it's missing the thread-local arena pattern.
+
+Let me check what's needed:
+1. Replace the per-call allocator with a thread-local `PARSE_ARENA`
+2. Confirm with a unit test that calling `get_file_segments` twice reuses the same `Allocator`
+3. Drop swc imports (already done in this file)
+
+
+4. Update `SourceFileParseError` if needed
+5. Make sure `cargo test -p unused_finder` passes
+
+Looking at the TODO checklist, I need to replace the swc parser/lexer/Handler/resolver stack with the oxc equivalents, declare the `PARSE_ARENA` thread-local at module scope, confirm it with a unit test, and clean up all the swc imports including `swc_common` and `swc_ecma`.
+
+Checking the current `exports_visitor_runner.rs`, it already uses oxc and doesn't have swc imports, but it's missing the thread-local `PARSE_ARENA` pattern and doesn't check for `ret.panicked`. The current implementation creates a new allocator per call, whereas the TODO template wants a thread-local arena that gets reset, and it should handle both `TypeScriptSyntax` and `Parser` error variants.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/oxc_utils_parse
+● Tool ▸ grep
+  │ pub fn parse_file|panicked|struct.*Return|ParserReturn
+● Tool ▸ glob
+  │ crates/unused_finder/src/**/*.rs
+  └ ✓ ./crates/unused_finder/src/cfg/package_match_rules.rs ./crates/unused_finder/src/cfg/mod.rs ./crates/unused_finder/src/lib.rs ./crates/unused_finder/src/ignore_file.rs ./crates/unused_finder/src/find_…
+  └ ✓ Cargo.toml src
+  └ ✓ /workspaces/good-fences-rs-core/crates/oxc_utils_parse/src/lib.rs:6:use oxc_parser::{Parser, ParserReturn}; /workspaces/good-fences-rs-core/crates/oxc_utils_parse/src/lib.rs:11:pub fn parse_file<'a>( …
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/oxc_utils_parse/src/lib.rs.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_tests.rs.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/oxc_utils_parse/src/lib.rs
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_tests.rs
+  └ ✓ 1. mod leading_comments; 2.  3. pub use leading_comments::leading_comments_at; 4.  5. use oxc_allocator::Allocator; 6. use oxc_parser::{Parser, ParserReturn}; 7. use oxc_span::SourceType; 8.  9. /// P…
+  └ ✓ 1. #[cfg(test)] 2. mod test { 3.  4.     use ahashmap::{AHashMap, AHashSet}; 5.     use logger::StdioLogger; 6.     use logger_srcfile::WrapFileLogger; 7.  8.     use crate::parse::{ExportedSymbol, Ra…
+● Thinking (bash)
+  │ Check if ParserReturn has panicked field
+● Reasoning
+  │ Now I have a clear picture. Let me check what `ParserReturn` has for the `panicked` field.
+● Tool ▸ bash
+  │ Check if ParserReturn has panicked field
+  └ ✓ <command with shellId: 0 is still running after 30 seconds. The command is still running but hasn't produced output yet. It may be waiting for input or still processing. Use read_bash to continue wait…
+● Thinking (stop_bash)
+  │ tool request
+● Tool ▸ stop_bash
+  │ {"shellId":"0"}
+  └ ✓ <command with id: 0 stopped>
+● Thinking (bash)
+  │ Check panicked field usage
+● Tool ▸ bash
+  │ Check panicked field usage
+  └ ✓  <exited with exit code 0>
+● Thinking (bash)
+  │ Find ParserReturn definition
+● Tool ▸ bash
+  │ Find ParserReturn definition
+  └ ✓ Documenting oxc_parser v0.132.0 (https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065eb)     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.34s    Ge…
+● Thinking (bash)
+  │ Find ParserReturn in oxc git checkout
+● Tool ▸ bash
+  │ Find ParserReturn in oxc git checkout
+  └ ✓  <exited with exit code 0>
+● Thinking (bash)
+  │ Find oxc_parser source
+● Tool ▸ bash
+  │ Find oxc_parser source
+  └ ✓  <exited with exit code 0>
+● Thinking (bash)
+  │ Find oxc_parser source files
+● Tool ▸ bash
+  │ Find oxc_parser source files
+  └ ✓ /home/ubuntu/.cargo/git/checkouts/oxc-cf38a75f42fbe65e/87f065e/crates/oxc_parser/src/lib.rs /home/ubuntu/.cargo/git/checkouts/oxc-2492aa67f5b41d4f/87f065e/crates/oxc_parser/src/lib.rs /home/ubuntu/.ca…
+● Thinking (bash)
+  │ Check ParserReturn fields
+● Tool ▸ bash
+  │ Check ParserReturn fields
+  └ ✓ 140:/// 3. [`panicked`] will be false 143:/// be empty and [`panicked`] will be `true`. 147:/// [`panicked`]: ParserReturn::panicked 149:pub struct ParserReturn<'a> { 152:    /// Will be empty (e.g. n…
+● Thinking (bash)
+  │ Check existing notes files
+Good, `ParserReturn` does have a `panicked` field. Now I have everything I need. Let me also check if `ModuleExportName` is still used somewhere in `data.rs` that needs updating, and what `NOTES` file exists.
+● Tool ▸ bash
+  │ Check existing notes files
+  └ ✓ /workspaces/good-fences-rs-core/TODO.followups.md <exited with exit code 0>
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/TODO.followups.md.
+● Thinking (bash)
+  │ Check spot-check script
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/TODO.followups.md
+● Tool ▸ bash
+  │ Check spot-check script
+  └ ✓ 1. # Follow-up items 2.  3. ## Pre-existing warnings in workspace 4.  5. - `ftree_cache`: elided lifetime warning (`RwLockReadGuard<'_, Option<T>>`) 6. - `unused_finder`: dead code warnings for `ErrLi…
+  └ ✓ #!/usr/bin/env bash set -e  echo "=== spot-check: cargo check -p ast-segmenter ===" cargo check -p ast-segmenter echo "PASS: ast-segmenter compiles"  echo "" echo "=== spot-check: cargo test -p ast-se…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs.
+● Reasoning
+  │ Now let me understand what needs to be done for the first incomplete section "Rewrite `get_file_segments`":
+
+1. Add thread-local `PARSE_ARENA` to reuse allocator across calls
+2. Add `panicked` check
+3. Write a unit test verifying allocator reuse
+4. Remove swc deps from Cargo.toml (swc imports are already gone from exports_visitor_runner.rs)
+5. Remove `swc_ecma_ast::ModuleExportName` from data.rs
+6. Run tests
+
+Wait, re-reading the TODO more carefully - only the first section "Rewrite `get_file_segments`" is what I need to do. 
+
+Looking at the current state of `exports_visitor_runner.rs`, the oxc stack is already in place with allocator, parser, and semantic analysis. What's missing is the thread-local arena for reuse, the panicked check, and a unit test to verify the allocator is being reused properly. The swc imports are already cleaned up, so I just need to focus on those core improvements and update the error handling.
+
+I'm also noticing that `data.rs` still has a dependency on `ModuleExportName` from swc, which I'll need to handle separately. But for this first section on `get_file_segments`, I should stay focused on just the allocator optimization and testing. Now I'm laying out the remaining tasks: adding a panic check, writing a unit test to verify the allocator gets reused properly, confirming swc imports have been removed from this file, updating any SourceFileParseError variants if necessary, and then running the test suite to make sure everything works.
+Now I have a clear picture. The first incomplete section is "Rewrite `get_file_segments`". The file already uses oxc but lacks the thread-local arena pattern. Let me implement it.
+● Tool ▸ report_intent
+  │ Implementing thread-local arena
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs
+  └ ✓ Intent logged
+  └ ✓ File /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs updated with changes.
+● Thinking (bash)
+  │ Check tempfile dependency
+Now I need to add `tempfile` as a dev-dependency for the test:
+● Tool ▸ bash
+  │ Check tempfile dependency
+  └ ✓  <exited with exit code 1>
+● Thinking (bash)
+  │ Check tempfile in workspace
+● Tool ▸ bash
+  │ Check tempfile in workspace
+  └ ✓ crates/test_tmpdir/Cargo.toml:tempfile = "3.10.1" <exited with exit code 0>
+● Thinking (bash)
+  │ Check dev-deps
+The `test_tmpdir` crate already depends on `tempfile` and `unused_finder` already has `test_tmpdir` as a dev-dep. Let me use `test_tmpdir` instead, or just add `tempfile` directly.
+● Tool ▸ bash
+  │ Check dev-deps
+  └ ✓ [dev-dependencies] stringreader = "0.1.1" test_tmpdir = { path = "../test_tmpdir" } pretty_assertions.workspace = true <exited with exit code 0>
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/test_tmpdir/src/lib.rs.
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/test_tmpdir/src/lib.rs
+  └ ✓ 1. extern crate path_slash; 2.  3. use path_slash::PathBufExt; 4. use std::{ 5.     collections::HashMap, 6.     fs::File, 7.     io::{Error, Write}, 8.     path::{Path, PathBuf}, 9. }; 10.  11. pub s…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs.
+Good, `test_tmpdir` wraps `tempfile`. Let me use it in the test instead:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs
+  └ ✓ File /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs updated with changes.
+● Thinking (bash)
+  │ Check TmpDir API
+Now let me check if `TmpDir` has a `path()` method:
+● Tool ▸ bash
+  │ Check TmpDir API
+  └ ✓ pub fn new() -> TmpDir {     pub fn new_with_content(content: &HashMap<String, &str>) -> TmpDir { <exited with exit code 0>
+● Thinking (bash)
+  │ Check TmpDir methods
+● Tool ▸ bash
+  │ Check TmpDir methods
+  └ ✓ 12:    tmp_root: tempfile::TempDir, 13:    canonical_root: PathBuf, 130:    pub fn new() -> TmpDir { 132:        let canonical_root = std::fs::canonicalize(&root).unwrap(); 134:            tmp_root: r…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs.
+OK, the API is `root()` not `path()`, and `new_with_content()` takes a `HashMap`. Let me fix:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs
+  └ ✓ File /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs updated with changes.
+● Thinking (bash)
+  │ Check Allocator API
+Now let me check if `Allocator::allocated_bytes` exists and if `Allocator::reset` is available:
+● Tool ▸ bash
+  │ Check Allocator API
+  └ ✓ /home/ubuntu/.cargo/git/checkouts/oxc-cf38a75f42fbe65e/87f065e/crates/oxc_allocator/src/allocator.rs:481:    pub fn reset(&mut self) { <exited with exit code 0>
+● Thinking (bash)
+  │ Check Allocator public API
+`reset` exists but `allocated_bytes` doesn't. Let me check what's available on the bumpalo backing:
+● Tool ▸ bash
+  │ Check Allocator public API
+  └ ✓ 17:/// To do that, an [`Allocator`] consists of multiple memory chunks. 19:/// [`Allocator::new`] creates a new allocator without any chunks. When you first allocate an object 20:/// into it, it will …
+● Thinking (bash)
+  │ Check all public methods
+● Tool ▸ bash
+  │ Check all public methods
+  └ ✓ 244:    pub fn new() -> Self { 255:    pub fn with_capacity(capacity: usize) -> Self { 277:    pub fn alloc<T>(&self, val: T) -> &mut T { 300:    pub fn alloc_str<'alloc>(&'alloc self, src: &str) -> &…
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs.
+There's `capacity()` and `used_bytes()`. After `reset()`, `used_bytes()` should be 0, but `capacity()` should stay the same or grow. Let me use `capacity()`:
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs
+  └ ✓ File /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs updated with changes.
+● Thinking (view)
+  │ view the file at /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs.
+Let me verify the final state of the file:
+● Tool ▸ view
+  │ /workspaces/good-fences-rs-core/crates/unused_finder/src/parse/exports_visitor_runner.rs
+  └ ✓ 1. use std::cell::RefCell; 2. use std::path::Path; 3. use std::path::PathBuf; 4.  5. use logger::StdioLogger; 6. use logger_srcfile::WrapFileLogger; 7. use oxc_allocator::Allocator; 8.  9. use ast_seg…
+● Thinking (bash)
+  │ Check OxcDiagnostic fields
+Now let me check if `OxcDiagnostic` has a `message` field:
+● Tool ▸ bash
+  │ Check OxcDiagnostic fields
+  └ ✓ /home/ubuntu/.cargo/git/checkouts/oxc-cf38a75f42fbe65e/87f065e/crates/oxc_diagnostics/src/lib.rs:74:pub struct OxcDiagnostic { /home/ubuntu/.cargo/git/checkouts/oxc-cf38a75f42fbe65e/87f065e/crates/oxc…
+● Thinking (bash)
+  │ Check OxcDiagnostic structure
+● Tool ▸ bash
+  │ Check OxcDiagnostic structure
+  └ ✓ pub struct OxcDiagnostic {     inner: OxcDiagnosticInner, }  impl Deref for OxcDiagnostic {     type Target = OxcDiagnosticInner;      fn deref(&self) -> &Self::Target {         &self.inner     } }  i…
+● Thinking (bash)
+  │ Run unused_finder tests
+Good, `message` is accessible via `Deref`. Now let me run the tests:
+● Tool ▸ bash
+  │ Run unused_finder tests
+  └ ✓ warning: hiding a lifetime that's elided elsewhere is confusing    --> crates/ftree_cache/src/context_data.rs:108:20     | 108 |     readonly_lock: RwLockReadGuard<Option<T>>,     |                   …
+● Thinking (bash)
+  │ Check if test failure is pre-existing
+● Reasoning
+  │ The `test_typeonly_interface_allowed` test fails, but this appears to be a pre-existing issue - it's not related to my changes. Let me verify by checking if this test was failing before my changes.
+
+Let me check the git status and the test itself.
+Let me verify this test failure is pre-existing:
+● Tool ▸ bash
+  │ Check if test failure is pre-existing
+  └ ✓ Saved working directory and index state WIP on segment-aware: fc247ae feat(swc-to-oxc-migration.05-source-graph-and-name-tracker): delete ast_name_tracker and complete phase 5      unused_symbols: {},…
+● Thinking (bash)
+  │ Restore changes
+Pre-existing failure confirmed. Let me restore my changes:
+● Tool ▸ bash
+  │ Restore changes
+  └ ✓ On branch segment-aware Your branch and 'origin/segment-aware' have diverged, and have 12 and 33 different commits each, respectively.   (use "git pull" if you want to integrate the remote branch with…
+● Thinking (report_intent)
+  │ tool request
+● Thinking (bash)
+  │ Run spot-check
+All 65 tests pass (including my new test), and the 1 failure (`test_typeonly_interface_allowed`) is pre-existing. Now let me run the spot-check:
+● Tool ▸ report_intent
+  │ Running spot-check validation
+● Tool ▸ bash
+  │ Run spot-check
+  └ ✓ Intent logged
+  └ ✓ === spot-check: cargo check -p ast-segmenter ===     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s PASS: ast-segmenter compiles  === spot-check: cargo test -p ast-segmenter ===  …
+● Thinking (report_intent)
+  │ tool request
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.06-unused-finder.md.
+All spot checks pass. Now let me update the TODO file, create the NOTES file, and commit.
+● Tool ▸ report_intent
+  │ Updating TODO and notes
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.06-unused-finder.md
+  └ ✓ Intent logged
+  └ ✓ File /workspaces/good-fences-rs-core/TODO.swc-to-oxc-migration.06-unused-finder.md updated with changes.
+● Thinking (create)
+  │ create a new file at /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.06-unused-finder.md.
+● Tool ▸ create
+  │ /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.06-unused-finder.md
+  └ ✓ Created file /workspaces/good-fences-rs-core/NOTES.swc-to-oxc-migration.06-unused-finder.md with 1084 characters
+● Thinking (bash)
+  │ Check if failure already tracked
+Now check if the pre-existing `test_typeonly_interface_allowed` failure is already in the followups file:
+● Tool ▸ bash
+  │ Check if failure already tracked
+  └ ✓ 0 <exited with exit code 1>
+● Thinking (edit)
+  │ edit the file at /workspaces/good-fences-rs-core/TODO.followups.md.
+● Tool ▸ edit
+  │ /workspaces/good-fences-rs-core/TODO.followups.md
+  └ ✓ File /workspaces/good-fences-rs-core/TODO.followups.md updated with changes.
+● Thinking (bash)
+  │ Commit changes
+Now let me commit:
+● Tool ▸ bash
+  │ Commit changes
+  └ ✓ [segment-aware 8722cbf] feat(swc-to-oxc-migration.06-unused-finder, unused_finder): add thread-local parse arena to get_file_segments  4 files changed, 119 insertions(+), 34 deletions(-)  create mode …
+Done. Here's a summary of what was completed:
+
+**Section: Rewrite `get_file_segments`** — all 8 checkboxes marked done.
+
+**Changes made:**
+- Added `thread_local! { PARSE_ARENA: RefCell<Allocator> }` for arena reuse across Rayon workers
+- Restructured `get_file_segments` to borrow from the thread-local arena, parse, extract owned segments, then reset
+- Added `panicked` check on `ParserReturn` (maps to `TypeScriptSyntax` error)
+- Parse errors now map to `SourceFileParseError::Parser` (per TODO template)
+- Added unit test `thread_local_arena_is_reused_across_calls` verifying capacity stability
+- SWC imports were already absent from this file (removed in prior phases)
+
+**Validation:** `./scripts/spot-check` passes, 65/66 tests pass (1 pre-existing failure tracked in `TODO.followups.md`).
+[result] 3 premium requests, 299925ms session

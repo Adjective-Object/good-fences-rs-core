@@ -76,14 +76,14 @@ pub fn get_file_segments(file_path: &Path) -> Result<Vec<Segment>, SourceFilePar
 }
 ```
 
-- [ ] Replace the swc parser/lexer/Handler/resolver stack with the oxc body above
-- [ ] Declare the `PARSE_ARENA` thread-local at module scope
-- [ ] Confirm with a unit test that calling `get_file_segments` twice in the same thread reuses the same `Allocator` instance (track the allocator's address through a debug-only hook, or assert via `bumpalo::Bump::allocated_bytes` that the second call doesn't grow unbounded)
-- [ ] Drop `use swc_common::{Globals, Mark, SourceMap, GLOBALS};` and related imports
-- [ ] Drop `use swc_ecma_transforms::resolver;`
-- [ ] Drop `use swc_ecma_visit::Fold;`
-- [ ] Update `SourceFileParseError` variants if needed (the existing ones still apply)
-- [ ] `cargo test -p unused_finder` runs `get_file_segments` correctly on the existing fixtures, including the parallel `par_iter` paths in `unused_finder.rs`
+- [x] Replace the swc parser/lexer/Handler/resolver stack with the oxc body above
+- [x] Declare the `PARSE_ARENA` thread-local at module scope
+- [x] Confirm with a unit test that calling `get_file_segments` twice in the same thread reuses the same `Allocator` instance (track the allocator's address through a debug-only hook, or assert via `bumpalo::Bump::allocated_bytes` that the second call doesn't grow unbounded)
+- [x] Drop `use swc_common::{Globals, Mark, SourceMap, GLOBALS};` and related imports
+- [x] Drop `use swc_ecma_transforms::resolver;`
+- [x] Drop `use swc_ecma_visit::Fold;`
+- [x] Update `SourceFileParseError` variants if needed (the existing ones still apply)
+- [x] `cargo test -p unused_finder` runs `get_file_segments` correctly on the existing fixtures, including the parallel `par_iter` paths in `unused_finder.rs`
 
 ## Update `report.rs` to drop `SmallPos`
 
