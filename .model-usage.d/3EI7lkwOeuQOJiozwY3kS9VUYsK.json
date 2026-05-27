@@ -1,0 +1,20 @@
+{
+  "context": {
+    "module_path": "slop_loop::runner",
+    "scenario": "slop-loop",
+    "supplemental": "TODO.swc-to-oxc-migration.08-tag-graph.md"
+  },
+  "usage": {
+    "model": "claude-opus-4.5",
+    "tokens_in": 285947,
+    "tokens_out": 2710,
+    "tokens_cached": 258612,
+    "premium_requests": 3
+  },
+  "started_at": "2026-05-27T03:59:42.903694210Z",
+  "completed_at": "2026-05-27T04:00:44.842745538Z",
+  "session_id": "3EI7lkwOeuQOJiozwY3kS9VUYsK",
+  "runtime_name": "github-copilot-agent-claude-opus-4.5",
+  "success": true,
+  "machine_id": "b04c5143fda44a0d"
+}
