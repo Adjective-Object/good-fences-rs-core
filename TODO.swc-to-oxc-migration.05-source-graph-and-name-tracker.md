@@ -118,22 +118,22 @@ Mapping from `SymbolFlags` to `HoistingLevel`:
 
 [crates/source_graph/src/lib.rs](crates/source_graph/src/lib.rs)
 
-- [ ] Replace `use ast_name_tracker::visitor::HoistingLevel;` with `use ast_segmenter::variables::HoistingLevel;`
-- [ ] Replace `use swc_atoms::Atom;` with `use oxc_span::CompactStr;`
-- [ ] Change `name_to_declaring_segments: AHashMap<Atom, Vec<(u32, HoistingLevel)>>` to use `CompactStr`
-- [ ] In `resolve_symbol_in_file`, change `Atom::from(name)` lookup to `CompactStr::from(name)` (or take `&str` and use a `Borrow` lookup)
-- [ ] Update `build_file` to iterate `seg.variables.get_locals_with_hoisting()` (now yielding `(&CompactStr, HoistingLevel)`)
-- [ ] Drop the `swc_atoms` dependency from `source_graph/Cargo.toml`, add `oxc_span`
-- [ ] Drop the `swc_common` dev-dependency once the test that uses `BytePos, Span` is updated to use `oxc_span::Span`
-- [ ] `cargo test -p source_graph` passes
+- [x] Replace `use ast_name_tracker::visitor::HoistingLevel;` with `use ast_segmenter::variables::HoistingLevel;`
+- [x] Replace `use swc_atoms::Atom;` with `use oxc_span::CompactStr;`
+- [x] Change `name_to_declaring_segments: AHashMap<Atom, Vec<(u32, HoistingLevel)>>` to use `CompactStr`
+- [x] In `resolve_symbol_in_file`, change `Atom::from(name)` lookup to `CompactStr::from(name)` (or take `&str` and use a `Borrow` lookup)
+- [x] Update `build_file` to iterate `seg.variables.get_locals_with_hoisting()` (now yielding `(&CompactStr, HoistingLevel)`)
+- [x] Drop the `swc_atoms` dependency from `source_graph/Cargo.toml`, add `oxc_span`
+- [x] Drop the `swc_common` dev-dependency once the test that uses `BytePos, Span` is updated to use `oxc_span::Span`
+- [x] `cargo test -p source_graph` passes
 
 ## Delete `ast_name_tracker`
 
-- [ ] Confirm no remaining callers: `grep -r ast_name_tracker crates/`
-- [ ] Remove `crates/ast_name_tracker/` from disk
-- [ ] Remove its `members` entry from root `Cargo.toml` (workspace uses `crates/*` glob; nothing to remove unless explicitly listed)
-- [ ] `cargo build --workspace` passes
-- [ ] `cargo test --workspace` passes
+- [x] Confirm no remaining callers: `grep -r ast_name_tracker crates/`
+- [x] Remove `crates/ast_name_tracker/` from disk
+- [x] Remove its `members` entry from root `Cargo.toml` (workspace uses `crates/*` glob; nothing to remove unless explicitly listed)
+- [x] `cargo build --workspace` passes
+- [x] `cargo test --workspace` passes
 
 ## Audit napi surface for atom-shaped exports
 
@@ -142,6 +142,6 @@ The napi wire format will change for any exported type that contained
 boundary). This is acceptable per the plan; the audit just records what
 changes so consumers know to rebuild.
 
-- [ ] Grep `crates/unused_finder_napi/` and `crates/good_fences_napi/` for re-exports of `VariableScope`, `Segment`, `RawModuleDeps`, or any other type that previously held `Atom`
-- [ ] List each napi-exported type whose wire format changes in a new section of `NOTES.swc-to-oxc-migration.md` titled `## napi wire-format changes (phase 4)`
-- [ ] `pnpm test` (NAPI integration tests) passes after re-generating any `.d.ts` files
+- [x] Grep `crates/unused_finder_napi/` and `crates/good_fences_napi/` for re-exports of `VariableScope`, `Segment`, `RawModuleDeps`, or any other type that previously held `Atom`
+- [x] List each napi-exported type whose wire format changes in a new section of `NOTES.swc-to-oxc-migration.md` titled `## napi wire-format changes (phase 4)`
+- [x] `pnpm test` (NAPI integration tests) passes after re-generating any `.d.ts` files

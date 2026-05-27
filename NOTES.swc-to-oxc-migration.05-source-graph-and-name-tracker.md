@@ -54,3 +54,31 @@ Total: O(N + M log N) where N = statements, M = symbols + references.
 - `reference_span()` lives on `Semantic`, not `Scoping` (needs AST node access).
 - `ReferenceId` is `define_nonmax_u32_index_type!` — could be iterated numerically
   but the per-symbol + unresolved approach is cleaner.
+
+## Section 3: Update source_graph
+
+All items were already completed in prior phases (sections 1 and 2 updated
+`source_graph` transitively):
+
+- `HoistingLevel` import already points at `ast_segmenter::variables`.
+- `CompactString` (from `compact_str`) used throughout; no `swc_atoms::Atom`.
+- `resolve_symbol_in_file` takes `&str`, queries `AHashMap<CompactString, _>`
+  via `Borrow<str>` — no conversion needed.
+- `swc_common` dev-dep already removed; tests use `oxc_span::Span`.
+- 21/21 tests pass.
+
+## Section 4: Delete ast_name_tracker
+
+- No remaining callers (`grep -r ast_name_tracker crates/` returns nothing).
+- `crates/ast_name_tracker/` removed from disk.
+- Workspace uses `members = ["crates/*"]` glob, so no Cargo.toml edit needed.
+- `cargo build --workspace` and `cargo test --workspace` pass (only pre-existing
+  `repo-health` Dockerfile toolchain mismatch test fails — unrelated).
+
+## Section 5: Audit napi surface
+
+- Neither `unused_finder_napi` nor `good_fences_napi` re-export `VariableScope`,
+  `Segment`, `RawModuleDeps`, `HoistingLevel`, or any type that held
+  `swc_atoms::Atom`.
+- **No wire-format changes** — these types are internal to the Rust crate graph
+  and do not cross the napi boundary.
