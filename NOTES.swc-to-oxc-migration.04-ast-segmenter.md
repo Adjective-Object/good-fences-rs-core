@@ -32,3 +32,39 @@
 ### Downstream crate updates
 - `source_graph`, `tag_graph`: test helpers use `oxc_span::Span::new(lo, hi)` instead of `swc_common::Span::new(BytePos(lo), BytePos(hi))`
 - `unused_finder`: `ExportedSymbolMetadata.span` changed from `swc_common::Span` to `oxc_span::Span`; `report.rs` updated for field access
+
+## Section 2: Port visitors and top-level segmenter
+
+### import_export_statement.rs
+- Full rewrite from `swc_ecma_visit::Visit` to `oxc_ast_visit::Visit<'a>`
+- `ExportsVisitor` now takes `&Semantic<'a>`, `&[Comment]`, `&str` instead of `&SingleThreadedComments`
+- Dropped `require_identifiers: AHashSet<Id>` + `visit_binding_ident`; replaced with `is_global_require()` using semantic scope resolution
+- `import()` in oxc is `ImportExpression`, NOT a `CallExpression` — needs separate `visit_import_expression` handler (not just checking `callee`)
+- `get_export_bindings`: when local == exported name, set `exported_as: None` to match swc behavior (swc omitted rename when names matched)
+- Removed temporary bridge helpers (`to_oxc_span`, swc export name converters)
+
+### import_require_expr.rs
+- `ImportsAndRequiresVisitor` wraps `ImportsAndRequires` + `&Semantic` for the Visit impl
+- Added `visit_import_expression` for standalone `import('foo')` → Namespace
+- `visit_call_expression` handles `require('foo')` and `import('foo').then(cb)` pattern
+- For `.then()` pattern: oxc AST has `StaticMemberExpression.object = ImportExpression` directly (not wrapped in `CallExpression`)
+- Walk order ensures `visit_import_expression` fires first (adding Namespace), then `scan_call_expr` replaces with Named entries for `.then()` destructuring
+
+### visitor.rs (top-level segmenter)
+- `segment_file` now takes `&Program<'a>` + `&Semantic<'a>`
+- `find_names_from_semantic()` shim extracts root-scope bindings into `VariableScope` — intentionally returns ALL program-level bindings for every statement (lossy but acceptable as bridge; phase 4 removes ast_name_tracker)
+- Simplified match: no exhaustive variant listing, just module-decl arms + error arms + wildcard
+- `Statement::UsingDeclaration` doesn't exist in oxc — `using` is `VariableDeclaration { kind: Using }`
+
+### oxc_utils_parse
+- `parse_file` now always uses TypeScript source type (matching swc's `Syntax::Typescript`), since many codebases use TS syntax in `.js` files
+- `.tsx`/`.jsx` extensions get `SourceType::tsx()`, everything else gets `SourceType::ts()`
+
+### unused_finder (downstream)
+- `exports_visitor_runner.rs`: rewritten to use oxc parsing + SemanticBuilder
+- `exports_visitor_tests.rs`: parse() helper uses oxc
+- `source.clone()` needed for WrapFileLogger since source is borrowed by parser
+
+### Cargo.toml updates
+- ast_segmenter: added `oxc_allocator`, `oxc_ast_visit`, `oxc_semantic`; swc_atoms pinned to 0.6.7 (must match ast_name_tracker)
+- unused_finder: added `oxc_allocator`, `oxc_semantic`, `oxc_utils_parse`

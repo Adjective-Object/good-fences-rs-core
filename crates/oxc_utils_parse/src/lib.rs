@@ -6,14 +6,23 @@ use oxc_allocator::Allocator;
 use oxc_parser::{Parser, ParserReturn};
 use oxc_span::SourceType;
 
-/// Parse a file, inferring the source type from the file extension.
-/// Falls back to TypeScript if the extension is not recognized.
+/// Parse a file, always treating it as TypeScript (matching the swc parser behavior
+/// which always used `Syntax::Typescript`). JSX/TSX is inferred from file extension.
 pub fn parse_file<'a>(
     allocator: &'a Allocator,
     source: &'a str,
     path: &std::path::Path,
 ) -> ParserReturn<'a> {
-    let source_type = SourceType::from_path(path).unwrap_or_else(|_| SourceType::ts());
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    let source_type = match ext {
+        "tsx" | "jsx" => SourceType::tsx(),
+        // Always parse as TypeScript even for .js/.mjs/.cjs files,
+        // since many codebases use TS syntax in .js files.
+        _ => SourceType::ts(),
+    };
     Parser::new(allocator, source, source_type).parse()
 }
 

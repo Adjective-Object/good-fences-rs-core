@@ -4,363 +4,315 @@ use crate::{
 };
 
 use logger_srcfile::SrcFileLogger;
+use oxc_ast::ast::{
+    Argument, CallExpression, Declaration, ExportAllDeclaration, ExportDefaultDeclaration,
+    ExportDefaultDeclarationKind, ExportNamedDeclaration, ExportSpecifier as OxcExportSpecifier,
+    Expression, ImportDeclaration, ImportDeclarationSpecifier, ImportOrExportKind,
+    ModuleExportName, TSImportEqualsDeclaration, TSModuleDeclarationName, TSModuleReference,
+};
+use oxc_ast::{Comment, ast::IdentifierReference};
+use oxc_ast_visit::{Visit, walk};
+use oxc_semantic::Semantic;
 use std::convert::TryInto;
-use swc_common::{
-    comments::{Comments as _, SingleThreadedComments},
-    BytePos, Spanned,
-};
-use swc_ecma_ast::{
-    BindingIdent, CallExpr, Callee, Decl, ExportAll, ExportDecl, ExportDefaultDecl,
-    ExportDefaultExpr, ExportSpecifier, Id, ImportDecl, ImportSpecifier, Lit,
-    NamedExport, Str, TsImportEqualsDecl, TsModuleName,
-};
-use swc_ecma_visit::{Visit, VisitWith};
 
-/// Convert a swc `ModuleExportName` to an `ExportedSymbol`.
-/// Temporary bridge while the visitor still uses the swc AST.
-fn exported_symbol_from_swc_export_name(name: &swc_ecma_ast::ModuleExportName) -> ExportedSymbol {
-    match name {
-        swc_ecma_ast::ModuleExportName::Ident(ident) => ExportedSymbol::from(ident.sym.as_ref()),
-        swc_ecma_ast::ModuleExportName::Str(str) => ExportedSymbol::from(str.value.as_ref()),
-    }
-}
-
-/// Convert a swc `ModuleExportName` to a `Symbol`.
-/// Temporary bridge while the visitor still uses the swc AST.
-fn symbol_from_swc_export_name(name: &swc_ecma_ast::ModuleExportName) -> Symbol {
-    match name {
-        swc_ecma_ast::ModuleExportName::Ident(ident) => Symbol::from(ident.sym.as_ref()),
-        swc_ecma_ast::ModuleExportName::Str(str) => Symbol::from(str.value.as_ref()),
-    }
-}
-
-/// Convert a swc `Span` to an `oxc_span::Span`.
-fn to_oxc_span(span: swc_common::Span) -> oxc_span::Span {
-    logger_srcfile::swc_compat::swc_span_to_oxc(span)
-}
-
-// AST visitor that gathers information on file imports and exports from an SWC source tree.
-#[derive(Debug)]
-pub struct ExportsVisitor<'a, TLogger: SrcFileLogger> {
-    pub logger: &'a TLogger,
-    pub swc_comments: &'a SingleThreadedComments,
+/// AST visitor that gathers information on file imports and exports from an oxc AST.
+pub struct ExportsVisitor<'v, 'a, TLogger: SrcFileLogger> {
+    pub logger: &'v TLogger,
+    pub comments: &'v [Comment],
+    pub source: &'v str,
+    pub semantic: &'v Semantic<'a>,
     pub module_deps: RawModuleDeps,
-    require_identifiers: ahashmap::AHashSet<Id>,
 }
 
-/**
- * Extracts information from each specifier imported in source to treat it as an string
- * Supported sytax list:
- * - `export { foo as bar } from 'foo'`
- * - `export { default as foo } from 'foo'`
- * - `export { foo } from 'foo'`
- */
-fn get_export_bindings(
-    swc_comments: &SingleThreadedComments,
+/// Extracts information from each specifier in an `export { ... } from '...'` declaration.
+fn get_export_bindings<'a>(
+    comments: &[Comment],
+    source_text: &str,
     parent_tags: SymbolTags,
-    export: &NamedExport,
-    _source_str: &Str,
+    export: &ExportNamedDeclaration<'a>,
 ) -> Vec<ExportBinding> {
-    // local copy of the parent tags that considers the 'type' field in `export type`
     let mut parent_tags = parent_tags;
-    parent_tags.is_type_only |= export.type_only;
+    parent_tags.is_type_only |= export.export_kind == ImportOrExportKind::Type;
 
-    export.specifiers.iter().map(|spec| -> ExportBinding {
-        // allow overriding tags on a per-specifier basis
-        let specifier_tags =
-            SymbolTags::from_swc_comments_parent(parent_tags.clone(), swc_comments, spec.span().lo());
-        match spec {
-            // export * as v from 'mod';
-            ExportSpecifier::Namespace(spec) => ExportBinding {
-                original: TaggedSymbol::with_span(Symbol::Namespace, specifier_tags, to_oxc_span(spec.span())),
-                exported_as: Some(exported_symbol_from_swc_export_name(&spec.name)),
-            },
-            // export v from 'mod';
-            ExportSpecifier::Default(spec) => ExportBinding {
-                original: TaggedSymbol::with_span(Symbol::Default, specifier_tags, to_oxc_span(spec.span())),
-                exported_as: Some(ExportedSymbol::from(spec.exported.sym.as_ref())),
-            },
-            // export { v as w } from 'mod';
-            ExportSpecifier::Named(spec) => {
-                let imported_name = spec.orig.atom().to_string();
-                let mut specifier_tags = specifier_tags;
-                // export { type v as w } from 'mod';
-                specifier_tags.is_type_only |= spec.is_type_only;
-                ExportBinding {
-                    original: TaggedSymbol::with_span(Symbol::from(imported_name), specifier_tags, to_oxc_span(export.span())),
-                    exported_as: spec
-                        .exported
-                        .as_ref()
-                        .map(|n| exported_symbol_from_swc_export_name(n)),
-                }
+    export
+        .specifiers
+        .iter()
+        .map(|spec: &OxcExportSpecifier<'a>| -> ExportBinding {
+            let specifier_tags = SymbolTags::from_comments_parent(
+                parent_tags.clone(),
+                comments,
+                source_text,
+                spec.span.start,
+            );
+            let imported_name = module_export_name_to_str(&spec.local);
+            let exported_name = module_export_name_to_str(&spec.exported);
+            let mut specifier_tags = specifier_tags;
+            specifier_tags.is_type_only |= spec.export_kind == ImportOrExportKind::Type;
+            let exported_as = if imported_name == exported_name {
+                None
+            } else {
+                Some(ExportedSymbol::from_module_export_name(&spec.exported))
+            };
+            ExportBinding {
+                original: TaggedSymbol::with_span(
+                    Symbol::from(imported_name),
+                    specifier_tags,
+                    export.span,
+                ),
+                exported_as,
             }
-        }
-    }).collect()
+        })
+        .collect()
 }
 
-impl<'a, TLogger: SrcFileLogger> ExportsVisitor<'a, TLogger> {
+fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> &'a str {
+    match name {
+        ModuleExportName::IdentifierName(ident) => ident.name.as_str(),
+        ModuleExportName::IdentifierReference(ident) => ident.name.as_str(),
+        ModuleExportName::StringLiteral(s) => s.value.as_str(),
+    }
+}
+
+fn is_global_require<'a>(semantic: &Semantic<'a>, ident: &IdentifierReference<'a>) -> bool {
+    if ident.name != "require" {
+        return false;
+    }
+    let Some(ref_id) = ident.reference_id.get() else {
+        return false;
+    };
+    semantic.scoping().get_reference(ref_id).symbol_id().is_none()
+}
+
+impl<'v, 'a, TLogger: SrcFileLogger> ExportsVisitor<'v, 'a, TLogger> {
     pub fn new(
-        logger: &'a TLogger,
-        swc_comments: &'a SingleThreadedComments,
+        logger: &'v TLogger,
+        comments: &'v [Comment],
+        source: &'v str,
+        semantic: &'v Semantic<'a>,
     ) -> Self {
         Self {
             logger,
-            swc_comments,
+            comments,
+            source,
+            semantic,
             module_deps: Default::default(),
-            require_identifiers: Default::default(),
         }
     }
 
-    pub fn has_disable_export_comment(&self, lo: BytePos) -> bool {
-        has_disable_export_comment(self.swc_comments, lo)
+    pub fn has_disable_export_comment(&self, lo: u32) -> bool {
+        has_disable_export_comment(self.comments, self.source, lo)
     }
 }
 
-pub fn has_disable_export_comment(comments: &SingleThreadedComments, lo: BytePos) -> bool {
-    if let Some(comments) = comments.get_leading(lo) {
-        return comments.iter().any(|c| {
-            c.kind == swc_common::comments::CommentKind::Line
-                && c.text.trim().starts_with("@ALLOW-UNUSED-EXPORT")
-        });
-    }
-    false
+pub fn has_disable_export_comment(comments: &[Comment], source: &str, lo: u32) -> bool {
+    let leading = oxc_utils_parse::leading_comments_at(comments, source, lo);
+    leading.iter().any(|c| {
+        if c.kind != oxc_ast::CommentKind::Line {
+            return false;
+        }
+        let text = &source[(c.span.start as usize + 2)..c.span.end as usize];
+        text.trim().starts_with("@ALLOW-UNUSED-EXPORT")
+    })
 }
 
-impl<'a, T: SrcFileLogger> From<ExportsVisitor<'a, T>> for RawModuleDeps {
-    fn from(x: ExportsVisitor<'a, T>) -> Self {
+impl<'v, 'a, T: SrcFileLogger> From<ExportsVisitor<'v, 'a, T>> for RawModuleDeps {
+    fn from(x: ExportsVisitor<'v, 'a, T>) -> Self {
         x.module_deps
     }
 }
 
-impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
+impl<'v, 'a, T: SrcFileLogger> Visit<'a> for ExportsVisitor<'v, 'a, T> {
     // Handles `export default foo`
-    fn visit_export_default_expr(&mut self, expr: &ExportDefaultExpr) {
-        expr.visit_children_with(self);
-        let tags = SymbolTags::from_swc_comments(self.swc_comments, expr.span_lo());
+    // Handles `export default class Foo {}` or `export default function foo() {}`
+    fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
+        walk::walk_export_default_declaration(self, decl);
+        let mut tags = SymbolTags::from_comments(self.comments, self.source, decl.span.start);
+        tags.is_type_only = matches!(
+            &decl.declaration,
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
+        );
         self.module_deps.exports_locals.insert(
             ExportedSymbol::Default,
-            TaggedSymbol::with_span(Symbol::Default, tags, to_oxc_span(expr.span())),
+            TaggedSymbol::with_span(Symbol::Default, tags, decl.span),
         );
     }
 
-    /// Handles `export default class Foo {}` or `export default function foo() {}`
-    fn visit_export_default_decl(&mut self, decl: &ExportDefaultDecl) {
-        decl.visit_children_with(self);
-        let mut tags = SymbolTags::from_swc_comments(self.swc_comments, decl.span_lo());
-        tags.is_type_only = decl.decl.is_ts_interface_decl();
-        self.module_deps.exports_locals.insert(
-            ExportedSymbol::Default,
-            TaggedSymbol::with_span(Symbol::Default, tags, to_oxc_span(decl.span())),
-        );
-    }
+    // Handles `export const foo = 1`, `export class Foo {}`, `export function bar() {}`
+    // Also handles `export { foo as bar } from 'source'` and `export { foo }`
+    fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'a>) {
+        walk::walk_export_named_declaration(self, export);
 
-    // Handles `export const foo = 1` or `export class Foo {}`
-    fn visit_export_decl(&mut self, export: &ExportDecl) {
-        export.visit_children_with(self);
-        let mut tags = SymbolTags::from_swc_comments(self.swc_comments, export.span_lo());
-        tags.is_type_only = export.decl.is_ts_interface() || export.decl.is_ts_type_alias();
-        let idents = match &export.decl {
-            Decl::Class(decl) => {
-                vec![decl.ident.sym.to_string()]
-            }
-            Decl::Fn(decl) => {
-                vec![decl.ident.sym.to_string()]
-            }
-            Decl::Var(decl) => decl
-                .decls
-                .iter()
-                .flat_map(|d: &swc_ecma_ast::VarDeclarator| -> Vec<String> {
-                    let child_scope = ast_name_tracker::find_names(self.logger, d);
-                    child_scope
-                        .get_locals()
-                        .map(|k| k.to_string())
-                        .collect::<Vec<_>>()
-                })
-                .collect(),
-            Decl::TsInterface(decl) => {
-                vec![decl.id.sym.to_string()]
-            }
-            Decl::TsTypeAlias(decl) => {
-                vec![decl.id.sym.to_string()]
-            }
-            Decl::TsEnum(decl) => {
-                vec![decl.id.sym.to_string()]
-            }
-            Decl::TsModule(decl) => match &decl.id {
-                TsModuleName::Ident(ident) => vec![ident.sym.to_string()],
-                TsModuleName::Str(str) => vec![str.value.to_string()],
-            },
-            Decl::Using(_) => {
-                vec![]
-            }
-        };
-
-        for ident in idents {
-            self.module_deps.exports_locals.insert(
-                ExportedSymbol::from(ident.as_str()),
-                TaggedSymbol::with_span(Symbol::from(ident.as_str()), tags.clone(), to_oxc_span(export.span())),
+        if let Some(source) = &export.source {
+            // Re-export: `export { foo } from './foo'`
+            let tags = SymbolTags::from_comments(self.comments, self.source, export.span.start);
+            let source_str = source.value.to_string();
+            get_export_bindings(self.comments, self.source, tags, export)
+                .into_iter()
+                .for_each(|binding| {
+                    if let Ok(re_export) = TryInto::<ReExportedSymbol>::try_into(binding) {
+                        self.module_deps
+                            .exports_from
+                            .entry(source_str.clone())
+                            .or_default()
+                            .insert(re_export);
+                    }
+                });
+        } else if let Some(declaration) = &export.declaration {
+            // Export declaration: `export const foo = 1`
+            let mut tags = SymbolTags::from_comments(self.comments, self.source, export.span.start);
+            let is_type = matches!(
+                declaration,
+                Declaration::TSInterfaceDeclaration(_) | Declaration::TSTypeAliasDeclaration(_)
             );
+            tags.is_type_only = is_type;
+
+            let idents = extract_declaration_names(self.logger, declaration);
+
+            for ident in idents {
+                self.module_deps.exports_locals.insert(
+                    ExportedSymbol::from(ident.as_str()),
+                    TaggedSymbol::with_span(
+                        Symbol::from(ident.as_str()),
+                        tags.clone(),
+                        export.span,
+                    ),
+                );
+            }
+        } else {
+            // Local re-export: `export { foo }` or `export { foo as bar }`
+            let allow_unused = self.has_disable_export_comment(export.span.start);
+            let is_type_only = export.export_kind == ImportOrExportKind::Type;
+            for spec in &export.specifiers {
+                let local_name = module_export_name_to_str(&spec.local).to_string();
+                let exported_as = ExportedSymbol::from_module_export_name(&spec.exported);
+                let exported_key = exported_as.clone();
+                let mut tags = SymbolTags::from_comments(
+                    self.comments,
+                    self.source,
+                    spec.span.start,
+                );
+                tags.allow_unused_comment |= allow_unused;
+                tags.is_type_only |= is_type_only || spec.export_kind == ImportOrExportKind::Type;
+                self.module_deps.exports_locals.insert(
+                    exported_key,
+                    TaggedSymbol::with_span(
+                        Symbol::from(local_name.as_str()),
+                        tags,
+                        export.span,
+                    ),
+                );
+            }
         }
     }
 
     // `export * from './foo'`
-    fn visit_export_all(&mut self, export: &ExportAll) {
-        export.visit_children_with(self);
-        let source = export.src.value.to_string();
-        let tags = SymbolTags::from_swc_comments(self.swc_comments, export.span_lo());
-        let mut export_tags = tags;
-        export_tags.is_type_only |= export.type_only;
-        let binding: ReExportedSymbol = ReExportedSymbol {
-            imported_as: crate::ImportTarget::Namespace,
-            exported_as: None,
-            tags: export_tags,
-            span: to_oxc_span(export.span()),
-        };
-        self.module_deps
-            .exports_from
-            .entry(source)
-            .or_default()
-            .insert(binding);
-    }
+    fn visit_export_all_declaration(&mut self, export: &ExportAllDeclaration<'a>) {
+        walk::walk_export_all_declaration(self, export);
+        let source = export.source.value.to_string();
+        let mut tags = SymbolTags::from_comments(self.comments, self.source, export.span.start);
+        tags.is_type_only |= export.export_kind == ImportOrExportKind::Type;
 
-    // export {foo} from './foo';
-    fn visit_named_export(&mut self, export: &NamedExport) {
-        export.visit_children_with(self);
-        if let Some(source) = &export.src {
-            let tags = SymbolTags::from_swc_comments(self.swc_comments, export.span_lo());
-            let source_str = source.value.to_string();
-            get_export_bindings(self.swc_comments, tags, export, source).into_iter().for_each(|binding| {
-                if let Ok(re_export) = TryInto::<ReExportedSymbol>::try_into(binding) {
-                    self.module_deps
-                        .exports_from
-                        .entry(source_str.clone())
-                        .or_default()
-                        .insert(re_export);
-                }
-            });
+        if let Some(exported) = &export.exported {
+            // `export * as ns from 'mod'`
+            let binding = ReExportedSymbol {
+                imported_as: crate::ImportTarget::Namespace,
+                exported_as: Some(ExportedSymbol::from_module_export_name(exported)),
+                tags,
+                span: export.span,
+            };
+            self.module_deps
+                .exports_from
+                .entry(source)
+                .or_default()
+                .insert(binding);
         } else {
-            let allow_unused = self.has_disable_export_comment(export.span_lo());
-            let is_type_only = export.type_only;
-            for spec in &export.specifiers {
-                match spec {
-                    ExportSpecifier::Named(named) => {
-                        let local_name = named.orig.atom().to_string();
-                        let exported_as = named
-                            .exported
-                            .as_ref()
-                            .map(|n| exported_symbol_from_swc_export_name(n));
-                        let exported_key = exported_as
-                            .clone()
-                            .unwrap_or_else(|| ExportedSymbol::from(local_name.as_str()));
-                        let mut tags = SymbolTags::from_swc_comments(self.swc_comments, named.span().lo());
-                        tags.allow_unused_comment |= allow_unused;
-                        tags.is_type_only |= is_type_only || named.is_type_only;
-                        self.module_deps.exports_locals.insert(
-                            exported_key,
-                            TaggedSymbol::with_span(Symbol::from(local_name.as_str()), tags, to_oxc_span(export.span())),
-                        );
-                    }
-                    ExportSpecifier::Default(_default_spec) => {
-                        let mut tags = SymbolTags::default();
-                        tags.allow_unused_comment = allow_unused;
-                        tags.is_type_only = is_type_only;
-                        self.module_deps.exports_locals.insert(
-                            ExportedSymbol::Default,
-                            TaggedSymbol::with_span(Symbol::Default, tags, to_oxc_span(export.span())),
-                        );
-                    }
-                    ExportSpecifier::Namespace(ns) => {
-                        let mut tags = SymbolTags::default();
-                        tags.allow_unused_comment = allow_unused;
-                        tags.is_type_only = is_type_only;
-                        self.module_deps.exports_locals.insert(
-                            exported_symbol_from_swc_export_name(&ns.name),
-                            TaggedSymbol::with_span(Symbol::Namespace, tags, to_oxc_span(export.span())),
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // const foo = require; // <- Binding
-    fn visit_binding_ident(&mut self, binding: &BindingIdent) {
-        binding.visit_children_with(self);
-        if binding.sym == *"require" {
-            self.require_identifiers.insert(binding.id.to_id());
+            // `export * from 'mod'`
+            let binding = ReExportedSymbol {
+                imported_as: crate::ImportTarget::Namespace,
+                exported_as: None,
+                tags,
+                span: export.span,
+            };
+            self.module_deps
+                .exports_from
+                .entry(source)
+                .or_default()
+                .insert(binding);
         }
     }
 
     // import foo = require('./foo')
-    fn visit_ts_import_equals_decl(&mut self, decl: &TsImportEqualsDecl) {
-        decl.visit_children_with(self);
-        if let Some(module_ref) = decl.module_ref.as_ts_external_module_ref() {
+    fn visit_ts_import_equals_declaration(&mut self, decl: &TSImportEqualsDeclaration<'a>) {
+        walk::walk_ts_import_equals_declaration(self, decl);
+        if let TSModuleReference::ExternalModuleReference(module_ref) = &decl.module_reference {
             self.module_deps
                 .dynamic_imports
-                .entry(module_ref.expr.value.to_string())
+                .entry(module_ref.expression.value.to_string())
                 .or_default()
                 .insert(Symbol::Namespace);
         }
     }
 
-    // import('foo') or require('foo')
-    fn visit_call_expr(&mut self, expr: &CallExpr) {
-        expr.visit_children_with(self);
-        if let Callee::Import(_) = &expr.callee {
-            if let Some(import_path) = extract_argument_value(expr) {
-                self.module_deps
-                    .dynamic_imports
-                    .entry(import_path)
-                    .or_default()
-                    .insert(Symbol::Namespace);
-            }
+    // import('foo')
+    fn visit_import_expression(&mut self, import_expr: &oxc_ast::ast::ImportExpression<'a>) {
+        walk::walk_import_expression(self, import_expr);
+        if let Some(import_path) = extract_string_from_expression(&import_expr.source) {
+            self.module_deps
+                .dynamic_imports
+                .entry(import_path)
+                .or_default()
+                .insert(Symbol::Namespace);
         }
-        if let Callee::Expr(callee) = &expr.callee {
-            if let Some(ident) = callee.as_ident() {
-                if ident.sym == "require" && !self.require_identifiers.contains(&ident.to_id()) {
-                    if let Some(import_path) = extract_argument_value(expr) {
-                        self.module_deps.requires.insert(import_path);
-                    }
+    }
+
+    // require('foo')
+    fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
+        walk::walk_call_expression(self, expr);
+        if let Expression::Identifier(ident) = &expr.callee {
+            if is_global_require(self.semantic, ident) {
+                if let Some(import_path) = extract_first_string_argument(&expr.arguments) {
+                    self.module_deps.requires.insert(import_path);
                 }
             }
         }
     }
 
     // import foo from './foo';
-    fn visit_import_decl(&mut self, import: &ImportDecl) {
-        import.visit_children_with(self);
+    fn visit_import_declaration(&mut self, import: &ImportDeclaration<'a>) {
+        walk::walk_import_declaration(self, import);
 
-        let src = import.src.value.to_string();
+        let src = import.source.value.to_string();
+
         // import './foo';
-        if import.specifiers.is_empty() {
-            self.module_deps.executed_paths.insert(src);
-            return;
-        }
-        // import .. from ..
-        let mut parent_tags = SymbolTags::from_swc_comments(self.swc_comments, import.span_lo());
-        parent_tags.is_type_only |= import.type_only;
+        let specifiers = match &import.specifiers {
+            Some(specs) if !specs.is_empty() => specs,
+            _ => {
+                self.module_deps.executed_paths.insert(src);
+                return;
+            }
+        };
 
-        let tagged_symbols: Vec<TaggedSymbol> = import
-            .specifiers
+        // import .. from ..
+        let mut parent_tags =
+            SymbolTags::from_comments(self.comments, self.source, import.span.start);
+        parent_tags.is_type_only |= import.import_kind == ImportOrExportKind::Type;
+
+        let tagged_symbols: Vec<TaggedSymbol> = specifiers
             .iter()
             .map(|spec| -> TaggedSymbol {
                 let mut tags = parent_tags.clone();
                 match spec {
-                    ImportSpecifier::Named(named) => {
-                        tags.is_type_only |= named.is_type_only;
-                        match &named.imported {
-                            Some(module_name) => {
-                                TaggedSymbol::new(symbol_from_swc_export_name(module_name), tags)
-                            }
-                            None => {
-                                TaggedSymbol::new(Symbol::from(named.local.sym.as_ref()), tags)
-                            }
-                        }
+                    ImportDeclarationSpecifier::ImportSpecifier(named) => {
+                        tags.is_type_only |= named.import_kind == ImportOrExportKind::Type;
+                        TaggedSymbol::new(
+                            Symbol::from_module_export_name(&named.imported),
+                            tags,
+                        )
                     }
-                    ImportSpecifier::Default(_) => {
+                    ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {
                         TaggedSymbol::new(Symbol::Default, tags)
                     }
-                    ImportSpecifier::Namespace(_) => {
+                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => {
                         TaggedSymbol::new(Symbol::Namespace, tags)
                     }
                 }
@@ -374,20 +326,83 @@ impl<'a, T: SrcFileLogger> Visit for ExportsVisitor<'a, T> {
     }
 }
 
-fn extract_argument_value(expr: &CallExpr) -> Option<String> {
-    let import_path = match expr.args.is_empty() {
-        true => return None,
-        false => expr.args.first(),
-    };
-    if let Some(path) = import_path {
-        if let Some(path_lit) = path.expr.as_lit() {
-            match path_lit {
-                Lit::Str(value) => {
-                    return Some(value.value.to_string());
-                }
-                _ => return None,
-            }
-        }
+/// Extract a string value from an expression (e.g. `'foo'` in `import('foo')`).
+fn extract_string_from_expression(expr: &Expression<'_>) -> Option<String> {
+    if let Expression::StringLiteral(s) = expr {
+        Some(s.value.to_string())
+    } else {
+        None
     }
-    None
+}
+
+/// Extract the first string argument from a call's argument list.
+fn extract_first_string_argument(args: &oxc_allocator::Vec<'_, Argument<'_>>) -> Option<String> {
+    let first = args.first()?;
+    match first {
+        Argument::StringLiteral(s) => Some(s.value.to_string()),
+        _ => None,
+    }
+}
+
+/// Extract declared names from a `Declaration` node.
+fn extract_declaration_names(_logger: &impl SrcFileLogger, decl: &Declaration<'_>) -> Vec<String> {
+    match decl {
+        Declaration::ClassDeclaration(class) => {
+            class.id.as_ref().map_or(vec![], |id| vec![id.name.to_string()])
+        }
+        Declaration::FunctionDeclaration(func) => {
+            func.id.as_ref().map_or(vec![], |id| vec![id.name.to_string()])
+        }
+        Declaration::VariableDeclaration(var_decl) => var_decl
+            .declarations
+            .iter()
+            .flat_map(|d| collect_binding_names(&d.id))
+            .collect(),
+        Declaration::TSInterfaceDeclaration(decl) => {
+            vec![decl.id.name.to_string()]
+        }
+        Declaration::TSTypeAliasDeclaration(decl) => {
+            vec![decl.id.name.to_string()]
+        }
+        Declaration::TSEnumDeclaration(decl) => {
+            vec![decl.id.name.to_string()]
+        }
+        Declaration::TSModuleDeclaration(decl) => match &decl.id {
+            TSModuleDeclarationName::Identifier(ident) => vec![ident.name.to_string()],
+            TSModuleDeclarationName::StringLiteral(s) => vec![s.value.to_string()],
+        },
+        _ => vec![],
+    }
+}
+
+/// Recursively collect all binding identifier names from a `BindingPattern`.
+fn collect_binding_names(pattern: &oxc_ast::ast::BindingPattern<'_>) -> Vec<String> {
+    use oxc_ast::ast::BindingPattern;
+    match pattern {
+        BindingPattern::BindingIdentifier(ident) => vec![ident.name.to_string()],
+        BindingPattern::ObjectPattern(obj) => obj
+            .properties
+            .iter()
+            .flat_map(|prop| collect_binding_names(&prop.value))
+            .chain(
+                obj.rest
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|rest| collect_binding_names(&rest.argument)),
+            )
+            .collect(),
+        BindingPattern::ArrayPattern(arr) => arr
+            .elements
+            .iter()
+            .flatten()
+            .flat_map(|elem| collect_binding_names(elem))
+            .chain(
+                arr.rest
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|rest| collect_binding_names(&rest.argument)),
+            )
+            .collect(),
+        BindingPattern::AssignmentPattern(assign) => collect_binding_names(&assign.left),
+    }
 }

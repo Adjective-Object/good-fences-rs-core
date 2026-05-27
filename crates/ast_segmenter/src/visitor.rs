@@ -1,7 +1,9 @@
+use ast_name_tracker::{visitor::HoistingLevel, VariableScope};
 use logger_srcfile::SrcFileLogger;
-use swc_common::comments::SingleThreadedComments;
-use swc_common::Spanned;
-use swc_ecma_visit::VisitWith;
+use oxc_ast::ast::{Program, Statement};
+use oxc_ast_visit::walk;
+use oxc_semantic::{Semantic, SymbolFlags};
+use oxc_span::GetSpan;
 
 use crate::{
     raw_module_deps::RawModuleDeps,
@@ -21,115 +23,132 @@ pub enum StatementToSegmentError {
     WithStatmentUnsupported,
 }
 
-fn module_item_to_segment(
+/// Temporary shim: extract a `VariableScope` from oxc `Semantic` for the
+/// root scope bindings. Replaces `ast_name_tracker::visitor::find_names`.
+/// Full deletion of `ast_name_tracker` happens in phase 4.
+fn find_names_from_semantic(semantic: &Semantic<'_>) -> VariableScope {
+    let scoping = semantic.scoping();
+    let root_scope = scoping.root_scope_id();
+    let mut scope = VariableScope::new();
+    let bindings = scoping.get_bindings(root_scope);
+    for (name, &symbol_id) in bindings.iter() {
+        let flags = scoping.symbol_flags(symbol_id);
+        let hoisting = if flags.contains(SymbolFlags::Import) {
+            HoistingLevel::ImportHoisting
+        } else if flags.contains(SymbolFlags::Function) {
+            HoistingLevel::FunctionHoisting
+        } else {
+            HoistingLevel::LetConstHoisting
+        };
+        scope.insert_local(swc_atoms::Atom::from(name.as_str()), hoisting);
+    }
+    scope
+}
+
+fn statement_to_segment<'a>(
     file_logger: &impl SrcFileLogger,
-    swc_comments: &SingleThreadedComments,
-    module_item: &swc_ecma_ast::ModuleItem,
+    comments: &[oxc_ast::Comment],
+    source: &str,
+    semantic: &Semantic<'a>,
+    stmt: &Statement<'a>,
 ) -> Option<Segment> {
-    match module_item {
-        swc_ecma_ast::ModuleItem::Stmt(stmt) => {
-            match stmt {
-                swc_ecma_ast::Stmt::Decl(_)
-                | swc_ecma_ast::Stmt::Expr(_)
-                | swc_ecma_ast::Stmt::Block(_)
-                | swc_ecma_ast::Stmt::Empty(_)
-                | swc_ecma_ast::Stmt::Debugger(_)
-                | swc_ecma_ast::Stmt::Labeled(_)
-                | swc_ecma_ast::Stmt::Switch(_)
-                | swc_ecma_ast::Stmt::If(_)
-                | swc_ecma_ast::Stmt::Throw(_)
-                | swc_ecma_ast::Stmt::Try(_)
-                | swc_ecma_ast::Stmt::While(_)
-                | swc_ecma_ast::Stmt::DoWhile(_)
-                | swc_ecma_ast::Stmt::For(_)
-                | swc_ecma_ast::Stmt::ForIn(_)
-                | swc_ecma_ast::Stmt::ForOf(_) => {
-                    let variables = ast_name_tracker::visitor::find_names(file_logger, stmt);
-                    let imports_and_requires = import_require_expr::find_imports_and_requires(stmt);
+    let span = stmt.span();
+    match stmt {
+        // Module declaration statements — run the exports visitor
+        Statement::ImportDeclaration(_)
+        | Statement::ExportNamedDeclaration(_)
+        | Statement::ExportDefaultDeclaration(_)
+        | Statement::ExportAllDeclaration(_)
+        | Statement::TSImportEqualsDeclaration(_) => {
+            let variables = find_names_from_semantic(semantic);
 
-                    // Convert dynamic imports and requires into RawModuleDeps
-                    let dynamic_imports = imports_and_requires
-                        .imported_paths
-                        .names()
-                        .into_iter()
-                        .collect();
-                    let requires = imports_and_requires
-                        .require_paths
-                        .names()
-                        .into_keys()
-                        .collect();
-
-                    let module_deps = RawModuleDeps {
-                        dynamic_imports,
-                        requires,
-                        ..Default::default()
-                    };
-
-                    Some(Segment {
-                        module_deps,
-                        variables,
-                        span: logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
-                    })
-                }
-                swc_ecma_ast::Stmt::With(_) => {
-                    file_logger.src_error(
-                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
-                        StatementToSegmentError::WithStatmentUnsupported,
-                    );
-                    None
-                }
-                swc_ecma_ast::Stmt::Return(_) => {
-                    file_logger.src_error(
-                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
-                        StatementToSegmentError::StatementUnexpectedInModuleScope(RETURN),
-                    );
-                    None
-                }
-                swc_ecma_ast::Stmt::Break(_) => {
-                    file_logger.src_error(
-                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
-                        StatementToSegmentError::StatementUnexpectedInModuleScope(BREAK),
-                    );
-                    None
-                }
-                swc_ecma_ast::Stmt::Continue(_) => {
-                    file_logger.src_error(
-                        logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
-                        StatementToSegmentError::StatementUnexpectedInModuleScope(CONTINUE),
-                    );
-                    None
-                }
-            }
-        }
-        swc_ecma_ast::ModuleItem::ModuleDecl(module_decl) => {
-            let variables = ast_name_tracker::visitor::find_names(file_logger, module_decl);
-
-            // Run ExportsVisitor on the declaration to extract import/export deps
-            let mut exports_visitor = ExportsVisitor::new(file_logger, swc_comments);
-            module_decl.visit_with(&mut exports_visitor);
+            let mut exports_visitor = ExportsVisitor::new(file_logger, comments, source, semantic);
+            walk::walk_statement(&mut exports_visitor, stmt);
             let module_deps: RawModuleDeps = exports_visitor.into();
 
             Some(Segment {
                 module_deps,
                 variables,
-                span: logger_srcfile::swc_compat::swc_span_to_oxc(module_item.span()),
+                span,
+            })
+        }
+        // Error statements
+        Statement::WithStatement(_) => {
+            file_logger.src_error(span, StatementToSegmentError::WithStatmentUnsupported);
+            None
+        }
+        Statement::ReturnStatement(_) => {
+            file_logger.src_error(
+                span,
+                StatementToSegmentError::StatementUnexpectedInModuleScope(RETURN),
+            );
+            None
+        }
+        Statement::BreakStatement(_) => {
+            file_logger.src_error(
+                span,
+                StatementToSegmentError::StatementUnexpectedInModuleScope(BREAK),
+            );
+            None
+        }
+        Statement::ContinueStatement(_) => {
+            file_logger.src_error(
+                span,
+                StatementToSegmentError::StatementUnexpectedInModuleScope(CONTINUE),
+            );
+            None
+        }
+        // Regular statements — extract dynamic imports/requires
+        _ => {
+            let variables = find_names_from_semantic(semantic);
+            let imports_and_requires = import_require_expr::find_imports_and_requires(semantic, stmt);
+
+            let dynamic_imports = imports_and_requires
+                .imported_paths
+                .names()
+                .into_iter()
+                .collect();
+            let requires = imports_and_requires
+                .require_paths
+                .names()
+                .into_keys()
+                .collect();
+
+            let module_deps = RawModuleDeps {
+                dynamic_imports,
+                requires,
+                ..Default::default()
+            };
+
+            Some(Segment {
+                module_deps,
+                variables,
+                span,
             })
         }
     }
 }
 
-/// Segment a parsed module into a list of `Segment`s — one per top-level
-/// `ModuleItem`. Each segment combines variable scope analysis with module
+/// Segment a parsed program into a list of `Segment`s — one per top-level
+/// `Statement`. Each segment combines variable scope analysis with module
 /// dependency extraction.
-pub fn segment_file(
+pub fn segment_file<'a>(
     logger: &impl SrcFileLogger,
-    module: &swc_ecma_ast::Module,
-    swc_comments: &SingleThreadedComments,
+    program: &Program<'a>,
+    semantic: &Semantic<'a>,
 ) -> Vec<Segment> {
-    module
+    program
         .body
         .iter()
-        .filter_map(|item| module_item_to_segment(logger, swc_comments, item))
+        .filter_map(|stmt| {
+            statement_to_segment(
+                logger,
+                &program.comments,
+                program.source_text,
+                semantic,
+                stmt,
+            )
+        })
         .collect()
 }
 
@@ -142,20 +161,14 @@ mod test {
 
     /// Parse source and return the segments produced by `segment_file`.
     fn segment(src: &str) -> Vec<Segment> {
-        let cm = swc_common::sync::Lrc::<swc_common::SourceMap>::default();
-        let comments = SingleThreadedComments::default();
-        let fm = cm.new_source_file(
-            swc_common::sync::Lrc::new(swc_common::FileName::Custom("test.ts".into())),
-            src.to_string(),
-        );
-        let lexer = swc_utils_parse::create_lexer(&fm, Some(&comments));
-        let capturing = swc_ecma_parser::Capturing::new(lexer);
-        let mut parser = swc_ecma_parser::Parser::new_from(capturing);
-        let module = parser.parse_typescript_module().expect("parse failed");
-
+        let allocator = oxc_allocator::Allocator::default();
+        let ret = oxc_utils_parse::parse_file(&allocator, src, std::path::Path::new("test.ts"));
+        assert!(ret.errors.is_empty(), "parse errors: {:?}", ret.errors);
+        let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&ret.program);
+        let semantic = &semantic_ret.semantic;
         let logger = logger::StdioLogger::new();
-        let file_logger = logger_srcfile::WrapFileLogger::from_swc_source_map(&cm, &logger);
-        segment_file(&file_logger, &module, &comments)
+        let file_logger = logger_srcfile::WrapFileLogger::new("test.ts", src.to_owned(), &logger);
+        segment_file(&file_logger, &ret.program, semantic)
     }
 
     // ── Mixed imports / exports / statements ───────────────────────────
