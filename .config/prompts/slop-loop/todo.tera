@@ -1,0 +1,43 @@
+{#description:
+    This prompt is the initial prompt passed to slop-loop while it consumes a TODO file.
+#}
+{#defaults:
+{
+  "todo_file_path": "TODO.md",
+  "plan_file_path": "PLAN.md",
+  "notes_file_path": "NOTES.md",
+  "todo_domain": "example-domain"
+}
+#}
+@README.md
+{% if include_context and todo_content %}
+
+## TODO File: {{todo_file_path}}
+
+{{todo_content}}
+{% if plan_content %}
+## PLAN File: {% if plan_file_path %}{{plan_file_path}}{% endif %}
+
+{{plan_content}}
+{% endif %}
+Focus on the first incomplete section of the TODO file above.
+{%- else %}
+
+Read the first incomplete section of @{{todo_file_path}}.
+{% if plan_file_path %}Detailed plan in @{{plan_file_path}}{% endif %}
+{%- endif %}
+Complete the tasks
+Run ./scripts/spot-check to validate your changes
+Mark the completed tasks in @{{todo_file_path}}
+{% if notes_file_path %}Leave concise working notes in @{{notes_file_path}} as you go — record design decisions, gotchas, and anything a future reader would need.{% endif %}
+Make note of any unrelated issues encountered for follow-up in TODO.followups.md
+commit your changes with a descriptive message header:
+{% if todo_domain %}
+Include the TODO domain "{{todo_domain}}" in the commit scope alongside any crate names:
+
+WRONG: "chore(repo-normalize): implement phase 5 changes"
+CORRECT: "feat({{todo_domain}}, repo-normalize): filter by embeddings to detect duplicates"
+{% else %}
+WRONG: "chore(repo-normalize): implement phase 5 changes"
+CORRECT: "feat(repo-normalize): filter by embeddings to detect duplicates"
+{% endif %}

@@ -145,50 +145,6 @@ impl<TLogger: Logger> SrcFileLogger for SimpleSourceFileLogger<'_, TLogger> {
     }
 }
 
-// ── swc-compat helpers ───────────────────────────────────────────────
-
-#[cfg(feature = "swc-compat")]
-pub mod swc_compat {
-    use super::*;
-    use swc_common::source_map::SmallPos;
-
-    /// Convert a `swc_common::Span` to an `oxc_span::Span`.
-    pub fn swc_span_to_oxc(span: swc_common::Span) -> Span {
-        Span::new(span.lo.to_u32(), span.hi.to_u32())
-    }
-
-    impl<TLogger: Logger> WrapFileLogger<TLogger> {
-        /// Construct from a swc `SourceMap` + `SourceFile`, extracting the
-        /// filename and source text for the new oxc-based logger.
-        pub fn from_swc_source_file(
-            source_map: &swc_common::SourceMap,
-            source_file: &swc_common::SourceFile,
-            inner_logger: TLogger,
-        ) -> Self {
-            let filename = source_file.name.to_string();
-            let source = source_map
-                .get_source_file(&source_file.name)
-                .map(|f| f.src.to_string())
-                .unwrap_or_default();
-            Self::new(filename, source, inner_logger)
-        }
-
-        /// Construct from a swc `SourceMap` by taking the first (and usually
-        /// only) file. Used at call sites that only have `Lrc<SourceMap>`.
-        pub fn from_swc_source_map(
-            source_map: &swc_common::SourceMap,
-            inner_logger: TLogger,
-        ) -> Self {
-            // swc SourceMap.files() returns a snapshot; single-file parses have exactly one
-            let files = source_map.files();
-            let sf = &files[0];
-            let filename = sf.name.to_string();
-            let source = sf.src.to_string();
-            Self::new(filename, source, inner_logger)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,16 +230,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-#[cfg(feature = "swc-compat")]
-mod swc_compat_tests {
-    use super::swc_compat::swc_span_to_oxc;
-
-    #[test]
-    fn swc_span_to_oxc_roundtrip() {
-        use swc_common::BytePos;
-        let swc_span = swc_common::Span::new(BytePos(3), BytePos(7));
-        let oxc = swc_span_to_oxc(swc_span);
-        assert_eq!(oxc, oxc_span::Span::new(3, 7));
-    }
-}

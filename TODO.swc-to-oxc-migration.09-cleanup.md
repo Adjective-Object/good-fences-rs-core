@@ -13,10 +13,10 @@ Depends on phases 1–7.
 
 ## Remove the swc-compat adapter
 
-- [ ] Delete `WrapFileLogger::from_swc_source_file` (from phase 1)
-- [ ] Delete the `swc_span_to_oxc` helper (from phase 1)
-- [ ] Delete the `swc-compat` cargo feature in `logger_srcfile/Cargo.toml`
-- [ ] Confirm no caller still references it
+- [x] Delete `WrapFileLogger::from_swc_source_file` (from phase 1)
+- [x] Delete the `swc_span_to_oxc` helper (from phase 1)
+- [x] Delete the `swc-compat` cargo feature in `logger_srcfile/Cargo.toml`
+- [x] Confirm no caller still references it
 
 ## Drop the workspace swc dependencies
 

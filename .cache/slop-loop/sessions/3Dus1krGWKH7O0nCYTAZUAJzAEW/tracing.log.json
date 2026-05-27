@@ -1,0 +1,6 @@
+{"timestamp":"2026-05-18T22:24:38.541292Z","level":"INFO","fields":{"message":"running agent inference","agent":"github-copilot-agent-claude-opus-4.7","task":"TODO.swc-to-oxc-migration.00-scaffolding.md"},"target":"slop_loop::runner"}
+{"timestamp":"2026-05-18T22:24:38.542062Z","level":"INFO","fields":{"message":"forcing copilot session UUID via --resume","session_uuid":"1d2b63a8-398b-4a81-a840-421c70c12f2e","events_path":"/home/ubuntu/.copilot/session-state/1d2b63a8-398b-4a81-a840-421c70c12f2e/events.jsonl"},"target":"copilot.run"}
+{"timestamp":"2026-05-18T22:24:38.545744Z","level":"INFO","fields":{"message":"spawned copilot child","pid":71169},"target":"copilot.run"}
+{"timestamp":"2026-05-18T22:24:43.192082Z","level":"WARN","fields":{"message":"events.jsonl was never created; file-only events not captured","path":"/home/ubuntu/.copilot/session-state/1d2b63a8-398b-4a81-a840-421c70c12f2e/events.jsonl"},"target":"copilot.file"}
+{"timestamp":"2026-05-18T22:24:43.192353Z","level":"WARN","fields":{"message":"no assistant.message content was parsed; falling back to raw stdout — downstream consumers may receive raw JSONL","raw_stdout_bytes":0},"target":"copilot.parse"}
+{"timestamp":"2026-05-18T22:24:43.192498Z","level":"INFO","fields":{"message":"copilot run complete","exit":0,"stdout_bytes":0,"has_session_usage":false},"target":"copilot.run"}
