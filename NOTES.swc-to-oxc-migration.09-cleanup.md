@@ -36,3 +36,10 @@
   - `import_resolver`: `iterator_try_collect` (`.try_collect()` in tsconfig.rs)
   - `ftree_cache`: `adt_const_params`, `unsized_const_params` (const generic parameters)
 - These are pre-existing and cannot be removed without rewriting unrelated code.
+
+## Bench + regression check
+
+- No `[[bench]]` targets exist in any crate `Cargo.toml` — `cargo bench` is a no-op.
+- `__test__/index.spec.mjs` (ava): 3/3 tests pass against the `good_fences_integration` fixture via napi.
+- `./scripts/spot-check`: passes — `ast-segmenter` compiles and tests pass (26/26), full workspace compiles.
+- Pre-existing warnings remain in `unused_finder` (dead code) and `ftree_cache` (lifetime syntax) — unrelated to migration.

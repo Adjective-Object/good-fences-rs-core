@@ -39,9 +39,9 @@ Depends on phases 1–7.
 
 ## Bench + regression check
 
-- [ ] Run `cargo bench` for any crate that has bench targets
-- [ ] Run `__test__/index.spec.mjs` end-to-end against a representative repo
-- [ ] Run any internal "spot check" script referenced in `scripts/`
+- [x] Run `cargo bench` for any crate that has bench targets
+- [x] Run `__test__/index.spec.mjs` end-to-end against a representative repo
+- [x] Run any internal "spot check" script referenced in `scripts/`
 
 ## Documentation
 
