@@ -2783,6 +2783,7 @@ dependencies = [
  "pathdiff",
  "pretty_assertions",
  "rayon",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

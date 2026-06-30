@@ -12,8 +12,12 @@ bitflags::bitflags! {
         /// True if this file or symbol was used recursively by an
         /// ignored symbol or file.
         const FROM_IGNORED = 0x04;
-        // True if this symbol is a type-only symbol
+        // True if this symbol is a type-only symbol (interface, type alias)
         const TYPE_ONLY = 0x08;
+        /// True if this symbol was reached through a non-type-only import edge
+        const USED_AS_VALUE = 0x10;
+        /// True if this symbol was reached through a type-only import edge
+        const USED_AS_TYPE = 0x20;
     }
 }
 
@@ -32,6 +36,12 @@ impl Display for UsedTag {
         if self.contains(Self::TYPE_ONLY) {
             tags.push("type-only");
         }
+        if self.contains(Self::USED_AS_VALUE) {
+            tags.push("used-as-value");
+        }
+        if self.contains(Self::USED_AS_TYPE) {
+            tags.push("used-as-type");
+        }
         write!(f, "{}", tags.join("+"))
     }
 }
@@ -43,6 +53,8 @@ pub enum UsedTagEnum {
     Ignored,
     Test,
     TypeOnly,
+    UsedAsValue,
+    UsedAsType,
 }
 
 impl Display for UsedTagEnum {
@@ -52,6 +64,8 @@ impl Display for UsedTagEnum {
             UsedTagEnum::Ignored => write!(f, "ignored"),
             UsedTagEnum::Test => write!(f, "test"),
             UsedTagEnum::TypeOnly => write!(f, "type-only"),
+            UsedTagEnum::UsedAsValue => write!(f, "used-as-value"),
+            UsedTagEnum::UsedAsType => write!(f, "used-as-type"),
         }
     }
 }
@@ -70,6 +84,12 @@ impl From<UsedTag> for Vec<UsedTagEnum> {
         }
         if flags.contains(UsedTag::TYPE_ONLY) {
             result.push(UsedTagEnum::TypeOnly);
+        }
+        if flags.contains(UsedTag::USED_AS_VALUE) {
+            result.push(UsedTagEnum::UsedAsValue);
+        }
+        if flags.contains(UsedTag::USED_AS_TYPE) {
+            result.push(UsedTagEnum::UsedAsType);
         }
 
         result

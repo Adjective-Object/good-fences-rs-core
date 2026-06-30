@@ -1,4 +1,5 @@
 use core::fmt;
+use regex::Regex;
 use std::{
     fmt::{Debug, Display, Formatter},
     path::Path,
@@ -57,12 +58,14 @@ impl PartialEq for PatErr {
     }
 }
 
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("Error parsing package match rules: {0}")]
     InvalidPackageMatchGlob(ErrList<PatErr>),
     #[error("Error parsing testFile glob(s): {0}")]
     InvalidTestsGlob(ErrList<PatErr>),
+    #[error("Error parsing ignoreExportNames pattern at index {0}: {1}")]
+    InvalidIgnoreExportNamesRegex(usize, regex::Error),
 }
 
 /// A JSON serializable proxy for the UnusedFinderConfig struct
@@ -118,6 +121,15 @@ pub struct UnusedFinderJSONConfig {
     /// root of the repository
     #[serde(default)]
     pub test_files: Vec<String>,
+    /// List of regex patterns matched against export symbol names.
+    /// Any unused export whose name matches one of these patterns will be
+    /// suppressed from the report.
+    ///
+    /// Patterns use Rust regex syntax (compatible with most JS regex patterns,
+    /// but lookaheads are not supported — use `allow_unused_types` for
+    /// ignoring type-only exports instead).
+    #[serde(default)]
+    pub ignore_export_names: Vec<String>,
 }
 
 #[derive(Default, Clone)]
@@ -164,9 +176,18 @@ pub struct UnusedFinderConfig {
     /// Some internal directories are always skipped.
     /// See [crate::walk::DEFAULT_SKIPPED_DIRS] for more details.
     pub skip: Vec<String>,
+
+    /// Compiled regexes for `ignore_export_names`.
+    /// Any unused export whose name matches one of these patterns will be
+    /// suppressed from the report.
+    pub ignore_export_names: Vec<Regex>,
 }
 
 impl UnusedFinderConfig {
+    pub fn is_export_name_ignored(&self, name: &str) -> bool {
+        self.ignore_export_names.iter().any(|re| re.is_match(name))
+    }
+
     pub fn is_test_path(&self, path: &Path) -> bool {
         let relative = path.strip_prefix(&self.repo_root).unwrap_or(path);
         let relative = relative.strip_prefix("/").unwrap_or(relative);
@@ -203,6 +224,15 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
             ConfigError::InvalidTestsGlob(ErrList(vec![PatErr(0, GlobInterp::Path, err)]))
         })?;
 
+        let ignore_export_names = value
+            .ignore_export_names
+            .iter()
+            .enumerate()
+            .map(|(i, pat)| {
+                Regex::new(pat).map_err(|e| ConfigError::InvalidIgnoreExportNamesRegex(i, e))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(UnusedFinderConfig {
             // raw fields that are copied from the JSON config
             report_exported_symbols: value.report_exported_symbols,
@@ -216,6 +246,7 @@ impl TryFrom<UnusedFinderJSONConfig> for UnusedFinderConfig {
                 globs: test_globs,
             },
             skip: value.skip,
+            ignore_export_names,
         })
     }
 }
@@ -283,6 +314,7 @@ mod test {
                 // just test this pattern
                 "**/*{Test,Tests}.{ts,tsx}".to_string(),
             ],
+            ignore_export_names: vec![],
         };
 
         let cases = vec![

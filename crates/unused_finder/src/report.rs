@@ -128,13 +128,42 @@ fn extract_symbols<T: Send + Sync>(
 }
 
 fn is_used(tags: &UsedTag, config: &UnusedFinderConfig) -> bool {
-    tags.contains(UsedTag::FROM_ENTRY)
+    let has_reachability = tags.contains(UsedTag::FROM_ENTRY)
         || tags.contains(UsedTag::FROM_IGNORED)
-        || tags.contains(UsedTag::FROM_TEST)
-        || (config.allow_unused_types && tags.contains(UsedTag::TYPE_ONLY))
+        || tags.contains(UsedTag::FROM_TEST);
+
+    if !has_reachability {
+        // Not reachable from any traversal at all.
+        // Still allow type-only symbols (interfaces, type aliases) to count
+        // as used when allow_unused_types is on.
+        return config.allow_unused_types && tags.contains(UsedTag::TYPE_ONLY);
+    }
+
+    // Reachable. Check if it's only used as a type (not as a value).
+    let used_as_value = tags.contains(UsedTag::USED_AS_VALUE);
+    if used_as_value {
+        return true;
+    }
+
+    // Reached only through type-only edges. Whether this counts as "used"
+    // depends on allow_unused_types.
+    let used_as_type = tags.contains(UsedTag::USED_AS_TYPE);
+    if used_as_type {
+        return config.allow_unused_types;
+    }
+
+    // Has reachability tag but no value/type qualifier (shouldn't happen in
+    // practice, but treat as used to avoid false positives).
+    true
 }
 fn include_extra(tags: &UsedTag) -> bool {
-    !tags.is_empty() && *tags != UsedTag::FROM_ENTRY
+    if tags.is_empty() {
+        return false;
+    }
+    // Exclude items that are only tagged with reachability + USED_AS_VALUE
+    // (fully used as values, nothing interesting to report)
+    let interesting = *tags - UsedTag::USED_AS_VALUE;
+    interesting != UsedTag::FROM_ENTRY
 }
 
 impl From<&UnusedFinderResult> for UnusedFinderReport {
@@ -175,6 +204,14 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
 
                 if is_used(symbol_bitflags, &value.config) {
                     // don't return used symbols
+                    return None;
+                }
+
+                if value
+                    .config
+                    .is_export_name_ignored(&symbol_name.to_string())
+                {
+                    // suppressed by ignoreExportNames config
                     return None;
                 }
 

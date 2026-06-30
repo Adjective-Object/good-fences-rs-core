@@ -356,12 +356,12 @@ ignored-*.js
                 ]
             ),
             extra_file_tags: amap!(
-                "<root>/packages/root/ignored-unused.js" => UsedTag::FROM_IGNORED.into()
+                "<root>/packages/root/ignored-unused.js" => (UsedTag::FROM_IGNORED | UsedTag::USED_AS_VALUE).into()
             ),
             extra_symbol_tags: amap!(
                 "<root>/packages/root/ignored-unused.js" => vec![
-                    tagged_symbol("a", UsedTag::FROM_IGNORED),
-                    tagged_symbol("b", UsedTag::FROM_IGNORED),
+                    tagged_symbol("a", UsedTag::FROM_IGNORED | UsedTag::USED_AS_VALUE),
+                    tagged_symbol("b", UsedTag::FROM_IGNORED | UsedTag::USED_AS_VALUE),
                 ]
             ),
         },
@@ -451,12 +451,12 @@ fn test_test_pattern() {
         },
         UnusedFinderReport {
             extra_file_tags: amap!(
-                "<root>/search_root/packages/__tests__/myTest.js" => UsedTag::FROM_TEST.into(),
-                "<root>/search_root/packages/utils/testUtils.js" => UsedTag::FROM_TEST.into()
+                "<root>/search_root/packages/__tests__/myTest.js" => (UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE).into(),
+                "<root>/search_root/packages/utils/testUtils.js" => (UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE).into()
             ),
             extra_symbol_tags: amap!(
                 "<root>/search_root/packages/utils/testUtils.js" => vec![
-                    tagged_symbol("testSymbol", UsedTag::FROM_TEST),
+                    tagged_symbol("testSymbol", UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE),
                 ]
             ),
             ..Default::default()
@@ -486,12 +486,12 @@ fn test_relative_test_pattern() {
         },
         UnusedFinderReport {
             extra_file_tags: amap!(
-                "<root>/search_root/tests/myTest.js" => UsedTag::FROM_TEST.into(),
-                "<root>/search_root/packages/test-utils/testUtils.js" => UsedTag::FROM_TEST.into()
+                "<root>/search_root/tests/myTest.js" => (UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE).into(),
+                "<root>/search_root/packages/test-utils/testUtils.js" => (UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE).into()
             ),
             extra_symbol_tags: amap!(
                 "<root>/search_root/packages/test-utils/testUtils.js" => vec![
-                    tagged_symbol("testSymbol", UsedTag::FROM_TEST),
+                    tagged_symbol("testSymbol", UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE),
                 ]
             ),
             ..Default::default()
@@ -537,11 +537,11 @@ fn test_testfiles_ignored() {
                 "<root>/search_root/packages/test-helpers/unused-helpers.js" => vec![symbol("myFunction")]
             ],
             extra_file_tags: amap![
-                "<root>/search_root/packages/test-helpers/test-helpers.js" => UsedTag::FROM_TEST.into(),
-                "<root>/search_root/packages/__tests__/myTests.test.js" => UsedTag::FROM_TEST.into()
+                "<root>/search_root/packages/test-helpers/test-helpers.js" => (UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE).into(),
+                "<root>/search_root/packages/__tests__/myTests.test.js" => (UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE).into()
             ],
             extra_symbol_tags: amap![
-                "<root>/search_root/packages/test-helpers/test-helpers.js" => vec![tagged_symbol("myFunction", UsedTag::FROM_TEST)]
+                "<root>/search_root/packages/test-helpers/test-helpers.js" => vec![tagged_symbol("myFunction", UsedTag::FROM_TEST | UsedTag::USED_AS_VALUE)]
             ],
         },
     );
@@ -549,7 +549,10 @@ fn test_testfiles_ignored() {
 
 #[test]
 fn test_indirect_typeonly_export() {
-    // Tests typeonly exports do not propogate as "used"
+    // Tests that type-only re-exports create graph edges with USED_AS_TYPE
+    // tagging. The source file is reachable, but its concrete symbol is
+    // tagged as "used as type" rather than "used as value", allowing
+    // allow_unused_types to control whether it counts as used.
     let tmpdir = test_tmpdir!(
         "search_root/packages/root/package.json" => r#"{
             "name": "entrypoint",
@@ -575,19 +578,22 @@ fn test_indirect_typeonly_export() {
             ..Default::default()
         },
         UnusedFinderReport {
-            unused_files: vec!["<root>/search_root/packages/root/other.js".to_string()],
+            unused_files: vec![],
             unused_symbols: amap![
                 "<root>/search_root/packages/root/other.js" => vec![
                     symbol("NotReExported"),
-                    symbol("ReExportedAsTypeOnly"),
                 ]
             ],
             extra_file_tags: amap![
-                "<root>/search_root/packages/root/main.js" => (UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY).into()
+                "<root>/search_root/packages/root/main.js" => (UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY | UsedTag::USED_AS_VALUE).into(),
+                "<root>/search_root/packages/root/other.js" => (UsedTag::FROM_ENTRY | UsedTag::USED_AS_TYPE).into()
             ],
             extra_symbol_tags: amap![
                 "<root>/search_root/packages/root/main.js" => vec![
-                    tagged_symbol("ReExportedAsTypeOnly", UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY),
+                    tagged_symbol("ReExportedAsTypeOnly", UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY | UsedTag::USED_AS_VALUE),
+                ],
+                "<root>/search_root/packages/root/other.js" => vec![
+                    tagged_symbol("ReExportedAsTypeOnly", UsedTag::FROM_ENTRY | UsedTag::USED_AS_TYPE),
                 ]
             ],
         },
@@ -635,6 +641,51 @@ fn test_typeonly_interface_allowed() {
 }
 
 #[test]
+fn test_typeonly_interface_disallowed() {
+    // Tests that when allow_unused_types is false, type-only symbols (like interfaces)
+    // are reported as unused even though they have the TYPE_ONLY tag.
+    let tmpdir = test_tmpdir!(
+        "search_root/packages/root/package.json" => r#"{
+            "name": "entrypoint",
+            "main": "./main.js",
+            "exports": {}
+        }"#,
+        "search_root/packages/root/main.js" => r#"
+            export { ReExported } from "./other";
+        "#,
+        "search_root/packages/root/other.js" => r#"
+            export interface MyInterface {
+                getFoo: () => string;
+            }
+
+            export class ReExported<T extends MyInterface> {}
+        "#
+    );
+
+    run_unused_test(
+        &tmpdir,
+        UnusedFinderConfig {
+            repo_root: tmpdir.root().to_string_lossy().to_string(),
+            root_paths: vec!["search_root".to_string()],
+            entry_packages: vec!["entrypoint"].try_into().unwrap(),
+            allow_unused_types: false,
+            ..Default::default()
+        },
+        UnusedFinderReport {
+            unused_symbols: amap![
+                "<root>/search_root/packages/root/other.js" => vec![
+                    symbol("MyInterface"),
+                ]
+            ],
+            extra_symbol_tags: amap![
+                "<root>/search_root/packages/root/other.js" => vec![tagged_symbol("MyInterface", UsedTag::TYPE_ONLY)]
+            ],
+            ..Default::default()
+        },
+    );
+}
+
+#[test]
 fn test_typeonly_files_are_typeonly() {
     // Tests that interfaces are considered typeonly exports
     let tmpdir = test_tmpdir!(
@@ -659,10 +710,10 @@ fn test_typeonly_files_are_typeonly() {
         },
         UnusedFinderReport {
             extra_symbol_tags: amap![
-                "<root>/search_root/packages/root/main.js" => vec![tagged_symbol("TypeOnly", UsedTag::TYPE_ONLY| UsedTag::FROM_ENTRY)]
+                "<root>/search_root/packages/root/main.js" => vec![tagged_symbol("TypeOnly", UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY | UsedTag::USED_AS_VALUE)]
             ],
             extra_file_tags: amap![
-                "<root>/search_root/packages/root/main.js" => (UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY).into()
+                "<root>/search_root/packages/root/main.js" => (UsedTag::TYPE_ONLY | UsedTag::FROM_ENTRY | UsedTag::USED_AS_VALUE).into()
             ],
             ..Default::default()
         },
