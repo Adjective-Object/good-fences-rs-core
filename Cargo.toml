@@ -40,7 +40,7 @@ split-debuginfo = "packed"
 # optimises for speed over size
 opt-level = "s"
 # run link-time optimisation for release builds.
-# This will make the final binary take longer to build, but can result in faster, samller  code.
+# This will make the final binary take longer to build, but can result in faster, smaller code.
 lto = true
 # on panic, abort instead of unwinding. This allows us to avoid gimli (rust's stack unwinder
 # but also makes debugging from stack traces harder.

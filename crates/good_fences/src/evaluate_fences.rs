@@ -489,6 +489,7 @@ mod test {
                 paths: HashMap::new(),
                 base_url: Option::None,
             },
+            exclude: Vec::new(),
         };
     }
 

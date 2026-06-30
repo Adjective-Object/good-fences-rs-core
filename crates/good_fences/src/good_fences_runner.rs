@@ -3,6 +3,7 @@ use crate::evaluate_fences::{evaluate_fences, FenceEvaluationResult};
 use crate::fence::Fence;
 use crate::fence_collection::FenceCollection;
 use crate::walk_dirs::{discover_fences_and_files, ExternalFences, SourceFile, WalkFileData};
+use glob::Pattern;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -56,10 +57,23 @@ impl GoodFencesRunner {
             })
             .collect();
 
-        // build sources map
+        // build exclude patterns from tsconfig
+        let exclude_patterns: Vec<Pattern> = tsconfig_paths_json
+            .exclude
+            .iter()
+            .filter_map(|pat| Pattern::new(pat).ok())
+            .collect();
+
+        // build sources map, filtering out excluded files
         let source_file_map: HashMap<String, SourceFile> = HashMap::from_iter(
             sources
                 .into_iter()
+                .filter(|source_file| {
+                    if exclude_patterns.is_empty() {
+                        return true;
+                    }
+                    !exclude_patterns.iter().any(|pat| pat.matches(&source_file.source_file_path))
+                })
                 .map(|source_file| (source_file.source_file_path.clone(), source_file)),
         );
         // println!("source file map: {:#?}", source_file_map);
@@ -77,7 +91,7 @@ impl GoodFencesRunner {
     }
 
     pub fn find_import_violations(&self) -> FenceEvaluationResult<'_, '_> {
-        println!("Evaluating {} files", self.source_files.keys().len());
+        eprintln!("Evaluating {} files", self.source_files.keys().len());
         let mut evaluation_results = FenceEvaluationResult::new();
 
         let violation_results = self
@@ -217,6 +231,7 @@ mod test {
                         base_url: None,
                         paths: HashMap::new(),
                     },
+                    exclude: vec!["lib".to_owned()],
                 },
                 fence_collection: FenceCollection {
                     fences_map: map!(

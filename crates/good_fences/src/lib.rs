@@ -37,28 +37,6 @@ pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
 
     let eval_results = good_fences_runner.find_import_violations();
 
-    // Print results and statistics
-    if !eval_results.violations.is_empty() {
-        println!("Violations:");
-        eval_results
-            .violations
-            .iter()
-            .for_each(|v| println!("{}", v));
-        println!("Total violations: {}", eval_results.violations.len());
-    }
-
-    if !eval_results.unresolved_files.is_empty() {
-        println!("Unresolved files:",);
-        eval_results
-            .unresolved_files
-            .iter()
-            .for_each(|f| println!("{}", f));
-        println!(
-            "Total unresolved files: {}",
-            eval_results.unresolved_files.len()
-        );
-    }
-
     let mut errors: Vec<GoodFencesResult> = Vec::new();
 
     eval_results.violations.iter().for_each(|v| {
