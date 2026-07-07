@@ -72,7 +72,9 @@ impl GoodFencesRunner {
                     if exclude_patterns.is_empty() {
                         return true;
                     }
-                    !exclude_patterns.iter().any(|pat| pat.matches(&source_file.source_file_path))
+                    !exclude_patterns
+                        .iter()
+                        .any(|pat| pat.matches(&source_file.source_file_path))
                 })
                 .map(|source_file| (source_file.source_file_path.clone(), source_file)),
         );

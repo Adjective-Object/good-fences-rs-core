@@ -253,7 +253,8 @@ mod test {
                     "glob-specifier/lib/*" => vec!["packages/glob-specifier/src/*".to_owned()],
                     "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                 )
-            }
+            },
+            exclude: vec![],
         };
     }
 
@@ -313,6 +314,7 @@ mod test {
                         "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                     ),
                 },
+                exclude: vec![],
             },
             &RelativePathBuf::from("packages/my/importing/module"),
             "../imported/module",
@@ -336,6 +338,7 @@ mod test {
                         "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                     ),
                 },
+                exclude: vec![],
             },
             &RelativePathBuf::from("packages/my/importing/module.ts"),
             "../imported/module",
@@ -359,6 +362,7 @@ mod test {
                         "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                     ),
                 },
+                exclude: vec![],
             },
             &RelativePathBuf::from("packages/my/importing/module.ts"),
             ".",
@@ -382,6 +386,7 @@ mod test {
                         "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                     ),
                 },
+                exclude: vec![],
             },
             &RelativePathBuf::from("packages/my/importing/module.ts"),
             "..",
@@ -405,6 +410,7 @@ mod test {
                         "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                     ),
                 },
+                exclude: vec![],
             },
             &RelativePathBuf::from("packages/my/importing/module.ts"),
             "../imported/module",
@@ -427,6 +433,7 @@ mod test {
                         "non-glob-specifier" => vec!["packages/non-glob-specifier/lib/index".to_owned()]
                     ),
                 },
+                exclude: vec![],
             },
             &RelativePathBuf::from("packages/my/importing/module"),
             "non-glob-specifier",

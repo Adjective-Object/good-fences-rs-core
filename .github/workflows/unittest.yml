@@ -31,6 +31,8 @@ jobs:
           clippy_flags: -- --all-targets -Dwarnings
       - name: run package install script
         shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
           sudo apt-get install -y openssl libssl3 libssl-dev
@@ -76,6 +78,8 @@ jobs:
       - name: Install container build dependencies
         if: ${{ matrix.settings.container }}
         shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update
           apt-get install -y curl wget git build-essential pkg-config libssl-dev ca-certificates gnupg
@@ -102,6 +106,8 @@ jobs:
       - name: run package install script
         if: ${{ matrix.settings.packages }}
         shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           if command -v sudo &>/dev/null; then
             sudo apt-get update

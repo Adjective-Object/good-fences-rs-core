@@ -1,6 +1,6 @@
 {
   "name": "@good-fences/api",
-  "version": "0.20.5",
+  "version": "0.20.0",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
