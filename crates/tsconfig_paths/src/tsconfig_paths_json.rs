@@ -61,7 +61,10 @@ impl TsconfigPathsJson {
             None => base.map(|b| b.exclude).unwrap_or_default(),
         };
 
-        Ok(TsconfigPathsJson { compiler_options, exclude })
+        Ok(TsconfigPathsJson {
+            compiler_options,
+            exclude,
+        })
     }
 }
 
