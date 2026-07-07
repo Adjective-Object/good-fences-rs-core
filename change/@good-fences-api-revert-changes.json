@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Revert unintended changes to beachball workflow and package versions",
+  "packageName": "@good-fences/api",
+  "email": "mbiesek@cribl.io",
+  "dependentChangeType": "patch"
+}
