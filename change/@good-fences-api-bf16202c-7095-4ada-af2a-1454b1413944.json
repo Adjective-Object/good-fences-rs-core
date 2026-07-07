@@ -1,7 +1,0 @@
-{
-  "type": "patch",
-  "comment": "Fix: use thin LTO to preserve NAPI #[ctor] constructors on macOS",
-  "packageName": "@good-fences/api",
-  "email": "michalbiesek@gmail.com",
-  "dependentChangeType": "patch"
-}

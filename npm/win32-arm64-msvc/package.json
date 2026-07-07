@@ -1,6 +1,6 @@
 {
   "name": "@good-fences/api-win32-arm64-msvc",
-  "version": "0.20.5",
+  "version": "0.20.0",
   "os": [
     "win32"
   ],
