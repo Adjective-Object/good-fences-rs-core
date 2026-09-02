@@ -8,6 +8,6 @@
 - [x] TODO.swc-to-oxc-migration.04-ast-segmenter.md
 - [x] TODO.swc-to-oxc-migration.05-source-graph-and-name-tracker.md
 - [x] TODO.swc-to-oxc-migration.06-unused-finder.md
-- [ ] TODO.swc-to-oxc-migration.07-good-fences-get-imports.md
-- [ ] TODO.swc-to-oxc-migration.08-tag-graph.md
-- [ ] TODO.swc-to-oxc-migration.09-cleanup.md
+- [x] TODO.swc-to-oxc-migration.07-good-fences-get-imports.md
+- [x] TODO.swc-to-oxc-migration.08-tag-graph.md
+- [x] TODO.swc-to-oxc-migration.09-cleanup.md

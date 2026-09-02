@@ -12,3 +12,17 @@
 {"timestamp":"2026-05-19T01:14:37.056382Z","level":"INFO","fields":{"message":"copilot run complete","exit":0,"stdout_bytes":1927,"has_session_usage":true},"target":"copilot.run"}
 {"timestamp":"2026-05-19T01:14:40.312976Z","level":"INFO","fields":{"message":"running agent inference","agent":"github-copilot-agent-claude-opus-4.7","task":"TODO.swc-to-oxc-migration.07-good-fences-get-imports.md"},"target":"slop_loop::runner"}
 {"timestamp":"2026-05-19T01:14:40.320401Z","level":"INFO","fields":{"message":"spawned copilot child","pid":1965245},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:27:27.759866Z","level":"WARN","fields":{"message":"never saw session.start on stdout; events.jsonl path unknown, file-only events not captured"},"target":"copilot.file"}
+{"timestamp":"2026-05-19T01:27:27.760075Z","level":"INFO","fields":{"message":"copilot run complete","exit":0,"stdout_bytes":5994,"has_session_usage":true},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:27:31.327619Z","level":"INFO","fields":{"message":"running agent inference","agent":"github-copilot-agent-claude-opus-4.7","task":"TODO.swc-to-oxc-migration.08-tag-graph.md"},"target":"slop_loop::runner"}
+{"timestamp":"2026-05-19T01:27:31.334981Z","level":"INFO","fields":{"message":"spawned copilot child","pid":2075148},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:31:27.587182Z","level":"WARN","fields":{"message":"never saw session.start on stdout; events.jsonl path unknown, file-only events not captured"},"target":"copilot.file"}
+{"timestamp":"2026-05-19T01:31:27.587445Z","level":"INFO","fields":{"message":"copilot run complete","exit":0,"stdout_bytes":986,"has_session_usage":true},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:31:31.280374Z","level":"INFO","fields":{"message":"running agent inference","agent":"github-copilot-agent-claude-opus-4.7","task":"TODO.swc-to-oxc-migration.09-cleanup.md"},"target":"slop_loop::runner"}
+{"timestamp":"2026-05-19T01:31:31.287669Z","level":"INFO","fields":{"message":"spawned copilot child","pid":2100129},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:38:58.465407Z","level":"WARN","fields":{"message":"never saw session.start on stdout; events.jsonl path unknown, file-only events not captured"},"target":"copilot.file"}
+{"timestamp":"2026-05-19T01:38:58.465657Z","level":"INFO","fields":{"message":"copilot run complete","exit":0,"stdout_bytes":4937,"has_session_usage":true},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:39:02.217637Z","level":"INFO","fields":{"message":"running agent inference","agent":"github-copilot-agent-claude-opus-4.7","task":"TODO.swc-to-oxc-migration.09-cleanup.md"},"target":"slop_loop::runner"}
+{"timestamp":"2026-05-19T01:39:02.224958Z","level":"INFO","fields":{"message":"spawned copilot child","pid":2108935},"target":"copilot.run"}
+{"timestamp":"2026-05-19T01:40:46.917540Z","level":"WARN","fields":{"message":"never saw session.start on stdout; events.jsonl path unknown, file-only events not captured"},"target":"copilot.file"}
+{"timestamp":"2026-05-19T01:40:46.917769Z","level":"INFO","fields":{"message":"copilot run complete","exit":0,"stdout_bytes":781,"has_session_usage":true},"target":"copilot.run"}
