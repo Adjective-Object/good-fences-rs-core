@@ -126,6 +126,15 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
 
 # Development
 
+## Incremental bundler
+
+The incremental bundler is a phased project built on the segment-aware unused
+tracker, not yet a working bundler. See the
+[implementation plan](PLAN.incremental-bundler.md) and
+[phase checklist](TODO.incremental-bundler.md).
+Phase 0 establishes [portable upstream runtime fixtures](fixtures/bundler/README.md)
+from esbuild and rspack; their baseline execution is not bundler conformance.
+
 ## Setting up the Development Environment
 1. Install a container engine:
     The repo uses a devcontainer, which is like a lightweight virtual machine that contains a pre-configured development environment.
