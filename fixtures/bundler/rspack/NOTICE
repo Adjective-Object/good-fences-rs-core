@@ -1,0 +1,53 @@
+Provenance for the portable rspack semantic fixtures
+===================================================
+
+Immediate source: https://github.com/web-infra-dev/rspack
+Commit: 96dcd72db4d25a89c37d22d514285ab82fc46a3d
+
+LICENSE is an unmodified copy of rspack's MIT license:
+Copyright (c) 2022-present Bytedance Inc and its affiliates.
+
+THIRD-PARTY-LICENSE is an unmodified copy of rspack's third-party notice.
+It explicitly identifies webpack and includes its full MIT permission notice:
+Copyright JS Foundation and other contributors
+
+LICENSE.webpack is additionally copied verbatim from:
+https://github.com/webpack/webpack/blob/e12e1224c2824c0cc78d6f3faf4cfa47926aa3cf/LICENSE
+
+Rspack's main license is NOT being treated as a replacement for webpack's
+copyright and permission notice. Retain all three license files when
+redistributing this corpus. The selected source files have no additional
+per-file copyright/license headers.
+
+Each case.json identifies the exact rspack source paths, original test
+name, selected semantic scope, and adaptations. No engine snapshots,
+third-party packages, or upstream test harness implementation are copied.
+
+Verified webpack counterparts at commit
+e12e1224c2824c0cc78d6f3faf4cfa47926aa3cf:
+
+Local case             Webpack directory
+cjs-self-cycle         test/cases/runtime/runtime-cases/circular-dependencies/
+dynamic-import-cjs     test/cases/chunks/async-chunks/import/
+cjs-named-reexport     test/cases/parsing/harmony-modules/harmony-commonjs/
+esm-live-binding      test/cases/parsing/harmony-modules/harmony-spec/
+esm-effect-order      test/cases/parsing/harmony-modules/harmony-spec/
+
+Compared counterpart files:
+- circular-dependencies: index.js, circular.js
+- import: index.js, two.js
+- harmony-commonjs: index.js, reexport.js, e.js
+- harmony-spec: index.js, live.js, order-tracker.js, order-a.js, order-b.js,
+  order-c.js
+
+All listed support files are byte-identical between the pinned rspack and
+webpack revisions before the documented local adaptations. Entry tests
+retain the same selected assertions; webpack prefixes the test names, and
+its import test uses a done callback rather than rspack's outer Promise.
+The pins identify verified source states, not an assertion about the
+historical commit at which rspack first imported those files.
+
+cjs-default-export comes from rspack normalCases/interop/exports; no
+separate webpack origin is asserted for that case. Both repositories'
+licenses are independently verified MIT; webpack-derived cases retain
+webpack's notices in addition to rspack's.

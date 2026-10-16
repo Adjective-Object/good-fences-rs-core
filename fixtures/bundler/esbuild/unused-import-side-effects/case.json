@@ -1,0 +1,27 @@
+{
+  "id": "esbuild/unused-import-side-effects",
+  "upstream": {
+    "repository": "https://github.com/evanw/esbuild",
+    "commit": "f6058f8364fe7ab91ca57a83e02577ed74c9cae4",
+    "paths": ["scripts/end-to-end-tests.js"],
+    "test": "Test tree shaking / Keep because side effects (ES6)",
+    "license": "MIT",
+    "adaptations": [
+      "Extracted entry.js, foo/index.js, and foo/package.json; expanded statements onto separate lines and added final newlines.",
+      "Changed the directory import ./foo to explicit ./foo/index.js for native ESM.",
+      "Replaced Node's global alias with standard globalThis in both sources.",
+      "Replaced the failure assertion with console output of globalThis.dce2; kept the unused namespace import and exported abc.",
+      "Added a root type: module package.json and added type: module to the copied foo/package.json, preserving sideEffects: true.",
+      "Direct Node execution observes mandatory module effects, not whether a bundler honors the sideEffects package hint."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["entry.js"],
+  "expectations": {
+    "stdout": ["123"]
+  },
+  "goals": [
+    "A dependency imported through an unused namespace binding must retain its top-level observable side effect.",
+    "Preserve package sideEffects: true metadata for a later bundler driver."
+  ]
+}

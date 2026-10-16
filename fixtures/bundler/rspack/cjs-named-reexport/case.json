@@ -1,0 +1,30 @@
+{
+  "id": "rspack/cjs-named-reexport",
+  "upstream": {
+    "repository": "https://github.com/web-infra-dev/rspack",
+    "commit": "96dcd72db4d25a89c37d22d514285ab82fc46a3d",
+    "paths": [
+      "tests/rspack-test/normalCases/parsing/harmony-commonjs/index.js",
+      "tests/rspack-test/normalCases/parsing/harmony-commonjs/reexport.js",
+      "tests/rspack-test/normalCases/parsing/harmony-commonjs/e.js"
+    ],
+    "test": "should be possible to reexport a module with unknown exports",
+    "license": "MIT",
+    "adaptations": [
+      "Select only the named a/b reexport test; omit unrelated require-of-ESM, Babel __esModule, and double-reexport tests and their imports.",
+      "Replace it/expect assertions with JSON output of the same a and b values in assertion order.",
+      "Rename e.js to e.cjs, make all import/export request extensions explicit, and add files/package.json with type module.",
+      "Keep both export-star and the side-effect import in reexport.js. Node can detect these static exports.a/exports.b assignments; this does not claim support for arbitrary computed CommonJS export names.",
+      "Preserve webpack's MIT notice in LICENSE.webpack and rspack's original THIRD-PARTY-LICENSE; see NOTES.incremental-bundler.rspack.md for verified webpack counterpart paths."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["index.js"],
+  "expectations": {
+    "stdout": ["[\"a\",\"b\"]"]
+  },
+  "goals": [
+    "Named ESM requests traverse an export-star facade to statically discoverable CommonJS exports.",
+    "Do not mistake the absence of ESM export declarations in a CommonJS dependency for an empty export surface."
+  ]
+}

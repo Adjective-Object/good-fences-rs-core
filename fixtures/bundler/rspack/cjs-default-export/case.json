@@ -1,0 +1,26 @@
+{
+  "id": "rspack/cjs-default-export",
+  "upstream": {
+    "repository": "https://github.com/web-infra-dev/rspack",
+    "commit": "96dcd72db4d25a89c37d22d514285ab82fc46a3d",
+    "paths": [
+      "tests/rspack-test/normalCases/interop/exports/index.js",
+      "tests/rspack-test/normalCases/interop/exports/lib.js"
+    ],
+    "test": "should exports default",
+    "license": "MIT",
+    "adaptations": [
+      "Replace the it/expect wrapper in index.js with console.log of the same imported default value.",
+      "Rename lib.js to lib.cjs and spell the import extension explicitly, preserving its module.exports assignment.",
+      "Add files/package.json with type module so native Node distinguishes the ESM entry from its CommonJS dependency."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["index.js"],
+  "expectations": {
+    "stdout": ["42"]
+  },
+  "goals": [
+    "An ESM default import of CommonJS observes the primitive assigned to module.exports, not an artificial namespace object."
+  ]
+}

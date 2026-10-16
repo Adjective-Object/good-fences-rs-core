@@ -1,0 +1,32 @@
+{
+  "id": "rspack/esm-effect-order",
+  "upstream": {
+    "repository": "https://github.com/web-infra-dev/rspack",
+    "commit": "96dcd72db4d25a89c37d22d514285ab82fc46a3d",
+    "paths": [
+      "tests/rspack-test/normalCases/parsing/harmony-spec/index.js",
+      "tests/rspack-test/normalCases/parsing/harmony-spec/order-tracker.js",
+      "tests/rspack-test/normalCases/parsing/harmony-spec/order-a.js",
+      "tests/rspack-test/normalCases/parsing/harmony-spec/order-b.js",
+      "tests/rspack-test/normalCases/parsing/harmony-spec/order-c.js"
+    ],
+    "test": "should execute modules in the correct order",
+    "license": "MIT",
+    "adaptations": [
+      "Select only the ESM effect-order test and its dependencies; omit unrelated live-binding, ES5 interop, eval, and cycle tests.",
+      "Replace it/expect with JSON output of getLog(); preserve the import of order-b after log('c') in order-c.js.",
+      "Make import extensions explicit and add files/package.json with type module; retain upstream helper bodies and source ordering.",
+      "Preserve webpack's MIT notice in LICENSE.webpack and rspack's original THIRD-PARTY-LICENSE; see NOTES.incremental-bundler.rspack.md for verified webpack counterpart paths."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["index.js"],
+  "expectations": {
+    "stdout": ["[\"a\",\"b\",\"c\"]"]
+  },
+  "goals": [
+    "Static dependencies execute before the importing module body, even when an import declaration follows a body statement.",
+    "Preserve source-ordered sibling evaluation and side-effect-only imports.",
+    "Multiple imports of the shared tracker observe one module instance."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "rspack/cjs-self-cycle",
+  "upstream": {
+    "repository": "https://github.com/web-infra-dev/rspack",
+    "commit": "96dcd72db4d25a89c37d22d514285ab82fc46a3d",
+    "paths": [
+      "tests/rspack-test/normalCases/runtime/circular-dependencies/index.js",
+      "tests/rspack-test/normalCases/runtime/circular-dependencies/circular.js"
+    ],
+    "test": "should load circular dependencies correctly",
+    "license": "MIT",
+    "adaptations": [
+      "Replace it/expect in index.js with console.log of the same require result; keep the circular.js body unchanged and add its missing final newline.",
+      "Omit circular2.js, which the selected upstream test does not reference.",
+      "Add files/package.json with type commonjs to isolate module interpretation from the containing repository.",
+      "Preserve webpack's MIT notice in LICENSE.webpack and rspack's original THIRD-PARTY-LICENSE; see NOTES.incremental-bundler.rspack.md for verified webpack counterpart paths."
+    ]
+  },
+  "moduleType": "commonjs",
+  "entryPoints": ["index.js"],
+  "expectations": {
+    "stdout": ["1"]
+  },
+  "goals": [
+    "Install the CommonJS module record before executing its body, so a self-require terminates.",
+    "A cyclic require observes the current module.exports replacement, not the original empty exports object."
+  ]
+}

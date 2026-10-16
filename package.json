@@ -43,6 +43,7 @@
     "build:debug": "napi build --cargo-name napi_root --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
+    "test:bundler-fixtures": "node scripts/bundler-fixtures.mjs",
     "version": "napi version"
   },
   "dependencies": {

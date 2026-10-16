@@ -33,3 +33,10 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
 - Implementation notes go in NOTES.\*.md for the current workplan.
 - Architectural notes go in AGENTS.md. no long-form guides or source code excerpts
 - `-cli` crates export both a lib and a bin. The lib exports the clap definition so commands can be embedded as subcommands in other binaries (e.g., `mx`)
+
+## Bundler fixtures
+
+- `fixtures/bundler/` holds portable runtime contracts, not generated-code snapshots.
+  Preserve pinned upstream provenance, adaptation notes, and all applicable licenses.
+- `node scripts/bundler-fixtures.mjs` validates native Node baselines only.
+  Bundler conformance and incremental invalidation require separate future drivers.

@@ -9,6 +9,7 @@
 node_modules
 *.node
 index.js
+!fixtures/bundler/**/index.js
 index.d.ts
 good-fences-violations.json
 .yarn/*

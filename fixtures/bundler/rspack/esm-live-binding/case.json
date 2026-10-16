@@ -1,0 +1,28 @@
+{
+  "id": "rspack/esm-live-binding",
+  "upstream": {
+    "repository": "https://github.com/web-infra-dev/rspack",
+    "commit": "96dcd72db4d25a89c37d22d514285ab82fc46a3d",
+    "paths": [
+      "tests/rspack-test/normalCases/parsing/harmony-spec/index.js",
+      "tests/rspack-test/normalCases/parsing/harmony-spec/live.js"
+    ],
+    "test": "should establish live binding of values",
+    "license": "MIT",
+    "adaptations": [
+      "Select only the native ESM live-binding test and its dependency; omit unrelated ES5 interop, eval, cycle, and effect-order tests.",
+      "Replace it/expect with console.log at the same observation points, before and after add(2); keep live.js unchanged.",
+      "Make the import extension explicit and add files/package.json with type module.",
+      "Preserve webpack's MIT notice in LICENSE.webpack and rspack's original THIRD-PARTY-LICENSE; see NOTES.incremental-bundler.rspack.md for verified webpack counterpart paths."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["index.js"],
+  "expectations": {
+    "stdout": ["0", "2"]
+  },
+  "goals": [
+    "ESM imports refer to mutable exporting-module bindings rather than copied values.",
+    "An exported function's mutation is observable through an already-linked named import."
+  ]
+}

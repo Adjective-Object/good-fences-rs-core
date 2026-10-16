@@ -1,0 +1,26 @@
+{
+  "id": "esbuild/shared-entrypoint-identity",
+  "upstream": {
+    "repository": "https://github.com/evanw/esbuild",
+    "commit": "f6058f8364fe7ab91ca57a83e02577ed74c9cae4",
+    "paths": ["scripts/end-to-end-tests.js"],
+    "test": "Identical output chunks should not be shared (second test: a/b/ca/cb re-exports)",
+    "license": "MIT",
+    "adaptations": [
+      "Extracted the second three-entrypoint test under the Identical output chunks should not be shared comment; normalized indentation and added final newlines.",
+      "Added .js extensions to relative re-exports and changed node.js imports from ./out/{a,b,c}.js to source ./{a,b,c}.js.",
+      "Replaced the node.js failure assertion with console output of its four identity comparisons, preserving their order.",
+      "Added a root package.json with type: module for direct Node execution.",
+      "Run upstream build entrypoints a.js, b.js, c.js separately, then node.js as a same-process observation driver. This baseline checks identity, not emitted chunk sharing or names."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["a.js", "b.js", "c.js", "node.js"],
+  "expectations": {
+    "stdout": ["false false true true"]
+  },
+  "goals": [
+    "Multiple source entrypoints share a dependency through named re-exports.",
+    "Distinct exports retain distinct object identity while re-export aliases retain shared identity."
+  ]
+}

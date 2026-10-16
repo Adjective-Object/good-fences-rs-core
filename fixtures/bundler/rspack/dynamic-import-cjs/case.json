@@ -1,0 +1,31 @@
+{
+  "id": "rspack/dynamic-import-cjs",
+  "upstream": {
+    "repository": "https://github.com/web-infra-dev/rspack",
+    "commit": "96dcd72db4d25a89c37d22d514285ab82fc46a3d",
+    "paths": [
+      "tests/rspack-test/normalCases/chunks/import/index.js",
+      "tests/rspack-test/normalCases/chunks/import/two.js"
+    ],
+    "test": "should be able to use import",
+    "license": "MIT",
+    "adaptations": [
+      "Remove the it wrapper, done callback, redundant outer Promise, and nsObj helper; retain dynamic import and its Promise continuation.",
+      "Observe the namespace default value instead of exact namespace keys/prototype, which differ between native Node versions and bundler runtimes.",
+      "Add sync-before/sync-after console markers around import() and an evaluate marker immediately before the original module.exports assignment. These extra observations make the async boundary and dependency-before-continuation order explicit; they were not upstream assertions.",
+      "Rename two.js to two.cjs, make the import extension explicit, and add files/package.json with type module.",
+      "Add a rejection handler that throws on a later microtask, ensuring load failure exits unsuccessfully without a test framework.",
+      "Preserve webpack's MIT notice in LICENSE.webpack and rspack's original THIRD-PARTY-LICENSE; see NOTES.incremental-bundler.rspack.md for verified webpack counterpart paths."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["index.js"],
+  "expectations": {
+    "stdout": ["sync-before", "sync-after", "evaluate", "default:2"]
+  },
+  "goals": [
+    "Dynamic import returns before executing the imported dependency and resolves after evaluation.",
+    "A dynamically imported CommonJS primitive is exposed through namespace.default.",
+    "Preserve the asynchronous semantic boundary without prescribing chunks, filenames, or a loading runtime."
+  ]
+}

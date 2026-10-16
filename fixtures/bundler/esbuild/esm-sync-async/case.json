@@ -1,0 +1,25 @@
+{
+  "id": "esbuild/esm-sync-async",
+  "upstream": {
+    "repository": "https://github.com/evanw/esbuild",
+    "commit": "f6058f8364fe7ab91ca57a83e02577ed74c9cae4",
+    "paths": ["scripts/end-to-end-tests.js"],
+    "test": "Code splitting via ES6 module double-imported with sync and async imports",
+    "license": "MIT",
+    "adaptations": [
+      "Extracted a.js, b.js, and node.js; normalized indentation and added final newlines.",
+      "Added .js extensions to ./b imports and changed the driver import from ./out/a.js to ./a.js.",
+      "Replaced the exported async harness callback with top-level await and replaced its failure assertion with console output of a and b.",
+      "Added a root package.json with type: module for direct Node execution; no splitting or output-format assertion remains."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["node.js"],
+  "expectations": {
+    "stdout": ["123 -123"]
+  },
+  "goals": [
+    "Static and dynamic imports of the same ESM dependency expose consistent exports.",
+    "An asynchronously imported entry can itself await another dynamic import."
+  ]
+}

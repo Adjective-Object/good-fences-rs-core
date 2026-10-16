@@ -1,0 +1,26 @@
+{
+  "id": "esbuild/reexport-cycle",
+  "upstream": {
+    "repository": "https://github.com/evanw/esbuild",
+    "commit": "f6058f8364fe7ab91ca57a83e02577ed74c9cae4",
+    "paths": ["scripts/end-to-end-tests.js"],
+    "test": "Complex circular bundled and non-bundled import case (issue #758, first test without forced require wrappers)",
+    "license": "MIT",
+    "adaptations": [
+      "Extracted the first issue #758 test's node.ts, re-export.ts, a.ts, and b.ts; normalized indentation and added final newlines.",
+      "Renamed .ts sources to .js; their source bodies already contain only JavaScript syntax, so no type stripping was needed.",
+      "Added explicit .js extensions to all relative imports and the star re-export.",
+      "Replaced the driver's failure assertion with console output of fn === a and fn() === a.",
+      "Added a root package.json with type: module and execute native ESM instead of bundling to CommonJS; wrapper-forcing and transpilation variants are intentionally omitted."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["node.js"],
+  "expectations": {
+    "stdout": ["false true"]
+  },
+  "goals": [
+    "A cyclic ESM graph resolves through a star re-export.",
+    "Deferred function calls observe the correct cyclic binding identities after initialization."
+  ]
+}

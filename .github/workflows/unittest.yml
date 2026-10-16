@@ -8,6 +8,20 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  bundler-fixtures:
+    runs-on: ubuntu-24.04
+    name: "bundler fixture baselines"
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test fixture runner
+        run: node --test scripts/bundler-fixtures.test.mjs
+      - name: Validate portable runtime fixtures
+        run: node scripts/bundler-fixtures.mjs
   checks:
     strategy:
       fail-fast: false

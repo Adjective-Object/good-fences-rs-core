@@ -1,0 +1,25 @@
+{
+  "id": "esbuild/dynamic-import-tla-order",
+  "upstream": {
+    "repository": "https://github.com/evanw/esbuild",
+    "commit": "f6058f8364fe7ab91ca57a83e02577ed74c9cae4",
+    "paths": ["scripts/end-to-end-tests.js"],
+    "test": "Top-level await tests (tlaTrace: in.js -> a.js -> b.js)",
+    "license": "MIT",
+    "adaptations": [
+      "Extracted the tlaTrace test's in.js, a.js, and b.js; normalized indentation and added final newlines.",
+      "Replaced the final failure assertion with console output of the imported value and comma-joined trace.",
+      "Execute in.js directly instead of retaining node.js, which only imports ./out/in.js.",
+      "Added a root package.json with type: module for direct Node execution; no bundling, output directory, or lowering is performed."
+    ]
+  },
+  "moduleType": "module",
+  "entryPoints": ["in.js"],
+  "expectations": {
+    "stdout": ["123 1,2,3,4,5,6"]
+  },
+  "goals": [
+    "Dynamic import waits for evaluation of a re-exported dependency with top-level await.",
+    "Caller, awaited dependency, and re-exporting module preserve observable evaluation order."
+  ]
+}
