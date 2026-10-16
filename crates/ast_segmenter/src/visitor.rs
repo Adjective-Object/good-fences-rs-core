@@ -84,7 +84,10 @@ fn variables_for_top_level_statements<'a>(
                 continue;
             };
             if Some(ref_stmt) != decl_stmt {
-                out[ref_stmt].insert_escaped(CompactString::new(sym_name));
+                out[ref_stmt].insert_escaped_reference(
+                    CompactString::new(sym_name),
+                    reference.is_type() && !reference.is_value(),
+                );
             }
         }
     }
@@ -96,7 +99,10 @@ fn variables_for_top_level_statements<'a>(
             let reference = scoping.get_reference(*ref_id);
             let ref_span = semantic.reference_span(reference);
             if let Some(stmt_idx) = find_stmt(ref_span.start) {
-                out[stmt_idx].insert_escaped(CompactString::new(name_str));
+                out[stmt_idx].insert_escaped_reference(
+                    CompactString::new(name_str),
+                    reference.is_type() && !reference.is_value(),
+                );
             }
         }
     }
@@ -467,6 +473,42 @@ mod test {
 
         let escaped: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
         assert!(escaped.contains(&"console"), "expected 'console' as escaped global");
+    }
+
+    #[test]
+    fn escaped_symbols_preserve_type_only_references() {
+        let segments = segment(
+            r#"
+            interface Shape {}
+            class Value {}
+            export class Consumer<T extends Shape> implements Shape {
+                value: Value;
+            }
+            export type Query = typeof Value;
+            export class Runtime extends Value {}
+            export function mixed(value: Value) { return new Value(); }
+            export function reversed() { return new Value() as Value; }
+            export type GlobalType = MissingType;
+            export const globalValue = missingValue();
+            "#,
+        );
+        for (idx, expected) in [
+            (2, vec![("Shape", true), ("Value", true)]),
+            (3, vec![("Value", true)]),
+            (4, vec![("Value", false)]),
+            (5, vec![("Value", false)]),
+            (6, vec![("Value", false)]),
+            (7, vec![("MissingType", true)]),
+            (8, vec![("missingValue", false)]),
+        ] {
+            let mut actual: Vec<_> = segments[idx]
+                .variables
+                .get_escaped_symbols_with_type_only()
+                .map(|(name, type_only)| (name.as_str(), type_only))
+                .collect();
+            actual.sort();
+            assert_eq!(actual, expected, "segment {idx}");
+        }
     }
 
     #[test]

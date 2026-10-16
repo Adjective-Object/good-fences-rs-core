@@ -684,6 +684,59 @@ fn test_typeonly_interface_allowed() {
 }
 
 #[test]
+fn test_typeonly_references_through_imports_and_reexports() {
+    for entry_source in [
+        r#"export { Consumer } from "./lib";"#,
+        r#"import { Consumer } from "./lib"; new Consumer();"#,
+    ] {
+        let tmpdir = test_tmpdir!(
+            "packages/root/package.json" => r#"{
+                "name": "entrypoint",
+                "main": "./main.js",
+                "exports": {}
+            }"#,
+            "packages/root/main.js" => entry_source,
+            "packages/root/lib.js" => r#"
+                import { Shape as ImportedShape } from "./types";
+                import type { ExplicitShape } from "./types";
+                export interface LocalShape {}
+                export class RuntimeBase {}
+                export class Consumer<T extends LocalShape & ImportedShape & ExplicitShape>
+                    extends RuntimeBase {}
+            "#,
+            "packages/root/types.js" => r#"
+                export interface Shape {}
+                export interface ExplicitShape {}
+            "#
+        );
+        run_unused_test(
+            &tmpdir,
+            UnusedFinderConfig {
+                root_paths: vec!["packages".to_string()],
+                entry_packages: vec!["entrypoint"].try_into().unwrap(),
+                allow_unused_types: true,
+                ..Default::default()
+            },
+            UnusedFinderReport {
+                extra_file_tags: amap![
+                    "<root>/packages/root/types.js" => UsedTag::TYPE_ONLY.into()
+                ],
+                extra_symbol_tags: amap![
+                    "<root>/packages/root/lib.js" => vec![
+                        tagged_symbol("LocalShape", UsedTag::TYPE_ONLY),
+                    ],
+                    "<root>/packages/root/types.js" => vec![
+                        tagged_symbol("ExplicitShape", UsedTag::TYPE_ONLY),
+                        tagged_symbol("Shape", UsedTag::TYPE_ONLY),
+                    ]
+                ],
+                ..Default::default()
+            },
+        );
+    }
+}
+
+#[test]
 fn test_typeonly_files_are_typeonly() {
     // Tests that interfaces are considered typeonly exports
     let tmpdir = test_tmpdir!(

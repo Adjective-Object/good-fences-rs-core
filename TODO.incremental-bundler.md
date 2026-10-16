@@ -5,11 +5,12 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**This increment delivers P0; subsequent increments follow P1–P9.** Both
+**P0 is complete; autonomous implementation now proceeds through P1–P9 in
+narrow linear commits. P1.1 is verified; all other P1–P9 items remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
-31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete;
-P1–P9 remain unchecked. These results do not establish bundler parity or full
+31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
+These P0 results do not establish bundler parity or full
 workspace test success.
 
 ## P0 — Planning and portable fixtures
@@ -54,11 +55,15 @@ workspace test success.
 
 ## P1 — Compatibility and owned parse records
 
-- [ ] **P1.1 — Restore type-only compatibility gate.** Depends: P0.1.
+- [x] **P1.1 — Restore type-only compatibility gate.** Depends: P0.1.
   Reproduce `unused_finder::test::test_typeonly_interface_allowed` and fix the
   Entry-tag pollution without changing its expected `[TypeOnly]` behavior.
   Check adjacent `test_indirect_typeonly_export`/`test_typeonly_files_are_typeonly`
   and import/re-export propagation. Acceptance: focused regression passes.
+  **Verified:** preserve type/value reference metadata during extraction and
+  filter intra-file edges in both tag traversal directions. Original assertions,
+  mixed runtime references, entry roots, and import/re-export regressions pass;
+  132 tests across affected/dependent packages and `./scripts/spot-check` pass.
 - [ ] **P1.2 — Pin span and report-path behavior.** Depends: P0.1.
   Add UTF-8/0-offset/end-exclusive parse assertions and existing public-report
   compatibility assertions; reproduce/fix raw relative specifier misses in

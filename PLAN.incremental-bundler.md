@@ -2,10 +2,11 @@
 
 ## Scope and status
 
-This increment delivers **P0**: this grounded plan, a small portable
+The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
-implementation. P1–P9 remain pending; the checklist in
+implementation. Autonomous implementation now proceeds in narrow linear
+commits: P1.1 is verified; the rest of P1–P9 remains pending. The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
 This plan was grounded by reading the current sources, not by assuming checked
@@ -46,10 +47,11 @@ Additional compatibility gates:
 
 - `TODO.segment-aware-migration.md` and `TODO.source-graph.md` contain completed
   migration checklists, but the above parallel graph/type paths still exist.
-- `TODO.followups.md` records `unused_finder::test::test_typeonly_interface_allowed`
-  failing because `[TypeOnly]` becomes `[Entry, TypeOnly]`. This is a **reported
-  existing regression**, not a newly verified failure or an acceptable snapshot
-  update. Reproduce and fix it before claiming unused-tracker compatibility.
+- P1.1 reproduced `unused_finder::test::test_typeonly_interface_allowed`
+  failing because `[TypeOnly]` became `[Entry, TypeOnly]`, then fixed lost
+  type-reference metadata and intra-file tag traversal without changing the
+  expected report. See the implementation checkpoint in NOTES for verification;
+  this closes that compatibility gate, not the remaining graph/report gaps.
 - `SegmentReport.start` in `report.rs` still documents a 1-based SWC convention.
   OXC spans are byte offsets; establish actual report compatibility in tests and
   use an explicit 0-based, end-exclusive contract for new IR. Never use stale

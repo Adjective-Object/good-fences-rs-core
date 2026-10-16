@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use ahashmap::{AHashMap, AHashSet};
+use ahashmap::AHashMap;
 use compact_str::CompactString;
 
 /// Hoisting level that a symbol is declared at.
@@ -35,7 +35,8 @@ pub struct VariableScope {
     local_symbols: AHashMap<CompactString, HoistingLevel>,
     /// Names in this scope that escape, e.g. they are used in this scope,
     /// but are not declared in this scope.
-    escaped_symbols: AHashSet<CompactString>,
+    /// The value is true only when every reference to the name is type-only.
+    escaped_symbols: AHashMap<CompactString, bool>,
 }
 
 impl VariableScope {
@@ -56,7 +57,14 @@ impl VariableScope {
 
     /// Returns an iterator over all escaped (unresolved) symbols in this scope.
     pub fn get_escaped_symbols(&self) -> impl Iterator<Item = &CompactString> {
-        self.escaped_symbols.iter()
+        self.escaped_symbols.keys()
+    }
+
+    /// Returns escaped names and whether all their references are type-only.
+    pub fn get_escaped_symbols_with_type_only(&self) -> impl Iterator<Item = (&CompactString, bool)> {
+        self.escaped_symbols
+            .iter()
+            .map(|(name, type_only)| (name, *type_only))
     }
 
     /// Insert a local symbol with its hoisting level directly.
@@ -73,6 +81,14 @@ impl VariableScope {
     /// Insert an escaped symbol directly.
     /// Useful for constructing test fixtures without parsing source code.
     pub fn insert_escaped(&mut self, name: CompactString) {
-        self.escaped_symbols.insert(name);
+        self.insert_escaped_reference(name, false);
+    }
+
+    /// Merge a reference, preserving runtime usage regardless of insertion order.
+    pub fn insert_escaped_reference(&mut self, name: CompactString, is_type_only: bool) {
+        self.escaped_symbols
+            .entry(name)
+            .and_modify(|type_only| *type_only &= is_type_only)
+            .or_insert(is_type_only);
     }
 }

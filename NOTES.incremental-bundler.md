@@ -2,11 +2,43 @@
 
 ## Current scope
 
-Ground the phased design in the current OXC/segment graph implementation and
-upstream bundlers. Phase 0 imports a small, portable runtime fixture corpus from
-esbuild and rspack; it does not claim to implement a bundler.
+Phase 0 is historical planning/fixture work. Current scope is autonomous P1
+onward in narrow linear commits. This checkpoint implements only P1.1, not the
+remaining bundler phases.
 
-## Completed integration
+## P1.1 checkpoint — type-only compatibility
+
+- Reproduced with `cargo test -p unused_finder test_typeonly_interface_allowed`:
+  `test test::test_typeonly_interface_allowed ... FAILED`, expected `[TypeOnly]`
+  but actual `[Entry, TypeOnly]` on `MyInterface`.
+- Root cause: extraction collapsed OXC type/value references into an untyped
+  escaped-name set. Both tag traversals treated generic constraints as runtime
+  intra-file dependencies. Retain a per-name type-only flag (AND across uses),
+  and honor `follow_type_only` in forward and reverse traversal. No report
+  filtering, changed expectations, or blanket suppression of type root tags.
+- Added extraction coverage for constraints, annotations, implements, typeof,
+  class inheritance, unresolved names, and mixed type/runtime references in
+  both orders. Graph tests cover both traversal directions, both policies,
+  entry/test/ignored tags, and explicit roots. Full-report filesystem tests
+  cover ordinary/type imports and runtime re-exports; existing assertions stay.
+- Verification: focused extraction and graph regressions pass; all four
+  `cargo test -p unused_finder typeonly` tests pass. `cargo test -p ast-segmenter
+  -p tag_graph -p unused_finder -p source_graph` passes 132 tests (27/17/67/21).
+  `./scripts/spot-check` passes. Existing lifetime/dead-code warnings remain.
+  Tests used managed directories under repository-local `target/p1-test-tmp`
+  via `TMPDIR`, not system temporary paths.
+- Adjacent probe, outside P1.1: a static import through a named re-export
+  barrel reaches the leaf but leaves the barrel unused. With main importing
+  `Consumer` from barrel and barrel re-exporting it from lib, the report diff was
+  `unused_files: ["<root>/packages/root/barrel.js"]` and
+  `unused_symbols: {"<root>/packages/root/barrel.js": [SymbolReport {
+  id: "Consumer", start: 17, end: 50 }]}` instead of empty collections.
+  Static-import resolution currently skips intermediate re-export segments.
+  This separate linking/report issue is not normalized into a passing expected
+  report or fixed here; the committed regression tests direct imports and
+  re-exports. Revisit with P3 linking/shared-edge work.
+
+## Completed phase-0 integration (historical)
 
 - esbuild is checked out at `../esbuild`, pinned for this research to
   `f6058f8364fe7ab91ca57a83e02577ed74c9cae4`.
@@ -26,7 +58,7 @@ esbuild and rspack; it does not claim to implement a bundler.
   effect analysis, chunk assignment, and bundle emission are not implemented
   by this increment.
 
-## Parallel ownership during this increment
+## Phase-0 parallel ownership (historical)
 
 - Architecture: `PLAN.incremental-bundler.md` and
   `TODO.incremental-bundler.md`; inspect current crates without modifying them.

@@ -311,7 +311,11 @@ impl TagGraph {
             }
 
             // Intra-file edges: escaped symbols reference declarations in the same file
-            for escaped_name in segment.variables.get_escaped_symbols() {
+            for (escaped_name, is_type_only) in segment.variables.get_escaped_symbols_with_type_only()
+            {
+                if !follow_type_only && is_type_only {
+                    continue;
+                }
                 if let Some(target_key) = source.resolve_symbol_in_file(
                     key.file_id,
                     escaped_name.as_ref(),
@@ -594,7 +598,11 @@ impl TagGraph {
             }
 
             // Intra-file: escaped symbols
-            for escaped_name in segment.variables.get_escaped_symbols() {
+            for (escaped_name, is_type_only) in segment.variables.get_escaped_symbols_with_type_only()
+            {
+                if !follow_type_only && is_type_only {
+                    continue;
+                }
                 if let Some(target_key) = source.resolve_symbol_in_file(
                     key.file_id,
                     escaped_name.as_ref(),
@@ -796,6 +804,60 @@ mod tests {
             span: make_span(0, 10),
             module_deps: RawModuleDeps::default(),
             variables: vars,
+        }
+    }
+
+    #[test]
+    fn test_type_only_intra_file_edges_in_both_directions() {
+        for runtime_first in [false, true] {
+            let mut type_user = make_segment(10, 20);
+            type_user
+                .variables
+                .insert_escaped_reference("Value".into(), true);
+            let mut mixed_user = make_segment(20, 30);
+            for is_type_only in [!runtime_first, runtime_first] {
+                mixed_user
+                    .variables
+                    .insert_escaped_reference("Value".into(), is_type_only);
+            }
+            let sg = make_source_graph(vec![(
+                "types.ts",
+                vec![
+                    segment_with_local_decl("Value", HoistingLevel::LetConstHoisting),
+                    type_user,
+                    mixed_user,
+                ],
+            )]);
+            let declaration = SegmentKey::new(0, 0);
+            let type_user = SegmentKey::new(0, 1);
+            let mixed_user = SegmentKey::new(0, 2);
+            for tag in [UsedTag::FROM_ENTRY, UsedTag::FROM_TEST, UsedTag::FROM_IGNORED] {
+                for follow_type_only in [false, true] {
+                    let expected = if follow_type_only {
+                        tag
+                    } else {
+                        UsedTag::empty()
+                    };
+                    let mut down = TagGraph::new();
+                    down.propagate_tags_to_used(&sg, vec![type_user], tag, follow_type_only);
+                    assert_eq!(down.get_tag(type_user), tag, "explicit type root");
+                    assert_eq!(down.get_tag(declaration), expected);
+
+                    let mut mixed = TagGraph::new();
+                    mixed.propagate_tags_to_used(&sg, vec![mixed_user], tag, follow_type_only);
+                    assert_eq!(
+                        mixed.get_tag(declaration),
+                        tag,
+                        "mixed reference is runtime"
+                    );
+
+                    let mut up = TagGraph::new();
+                    up.propagate_tags_to_users(&sg, vec![declaration], tag, follow_type_only);
+                    assert_eq!(up.get_tag(declaration), tag);
+                    assert_eq!(up.get_tag(type_user), expected);
+                    assert_eq!(up.get_tag(mixed_user), tag);
+                }
+            }
         }
     }
 

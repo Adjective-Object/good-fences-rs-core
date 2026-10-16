@@ -26,3 +26,6 @@ and calls `Allocator::reset()` between files to reuse memory.
 
 `oxc_semantic` replaces the old hand-rolled `ast_name_tracker`. `SymbolFlags`
 maps to `HoistingLevel` via `hoisting_for_flags()`.
+Escaped references retain OXC's type/value distinction; a name is type-only
+only if all its references in the segment are type-only. Do not discard runtime
+references when merging names.
