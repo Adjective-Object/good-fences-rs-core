@@ -13,6 +13,10 @@ use crate::{SegmentKey, SourceFileInput, SourceGraph};
 pub enum GraphNode {
     Module(u32),
     Segment(SegmentKey),
+    Unlinked {
+        file_id: u32,
+        dependency: DependencyId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,13 +166,33 @@ impl SourceGraph {
                 });
             }
             for dependency in &input.facts.dependencies {
-                let Some(DependencyTarget::File(path)) = input.resolutions.get(&dependency.id)
-                else {
-                    continue;
+                let unresolved = GraphNode::Unlinked {
+                    file_id,
+                    dependency: dependency.id,
                 };
-                let Some(target) = self.file_id(path) else {
-                    continue;
+                let target = match input.resolutions.get(&dependency.id) {
+                    Some(DependencyTarget::File(path)) => self
+                        .file_id(path)
+                        .map(GraphNode::Module)
+                        .unwrap_or(unresolved),
+                    _ => unresolved,
                 };
+                let failure = match input.resolutions.get(&dependency.id) {
+                    Some(DependencyTarget::External(_)) => None,
+                    Some(DependencyTarget::Missing(message)) => Some(message.clone()),
+                    Some(DependencyTarget::File(path)) if self.file_id(path).is_none() => {
+                        Some(format!("target not in graph: {}", path.display()))
+                    }
+                    None => Some(format!("unresolved dependency {:?}", dependency.specifier)),
+                    _ => None,
+                };
+                if let Some(message) = failure {
+                    self.diagnostics.push(crate::LinkDiagnostic {
+                        file_id,
+                        site: dependency.span,
+                        message,
+                    });
+                }
                 let kind = match dependency.kind {
                     DependencyKind::Import => EdgeKind::Import,
                     DependencyKind::ReExport => EdgeKind::ReExport,
@@ -184,7 +208,7 @@ impl SourceGraph {
                     .collect();
                 let base = OccurrenceEdge {
                     from: self.segment_at(file_id, dependency.span),
-                    to: GraphNode::Module(target),
+                    to: target,
                     kind,
                     purpose: if bindings.is_empty() {
                         EdgePurpose::Execution
@@ -257,6 +281,7 @@ impl SourceGraph {
                         let file_id = match edge.from {
                             GraphNode::Module(id) => id,
                             GraphNode::Segment(key) => key.file_id,
+                            GraphNode::Unlinked { file_id, .. } => file_id,
                         };
                         self.diagnostics.push(crate::LinkDiagnostic {
                             file_id,

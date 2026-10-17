@@ -4,8 +4,12 @@ mod structure;
 pub use structure::*;
 mod linker;
 pub use linker::*;
+mod revision;
+pub use revision::*;
 #[cfg(test)]
 mod linker_tests;
+#[cfg(test)]
+mod revision_tests;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -39,6 +43,7 @@ struct SourceGraphFile {
 /// Maps files to their segments and provides indexes for resolving
 /// names to segments within and across files.
 pub struct SourceGraph {
+    revision: GraphRevision,
     diagnostics: Vec<LinkDiagnostic>,
     edges: Vec<OccurrenceEdge>,
     outgoing: AHashMap<GraphNode, Vec<usize>>,
@@ -92,6 +97,7 @@ impl SourceGraph {
         }
 
         SourceGraph {
+            revision: GraphRevision::default(),
             diagnostics: Vec::new(),
             edges: Vec::new(),
             outgoing: AHashMap::default(),
@@ -154,16 +160,20 @@ impl SourceGraph {
 
     /// Returns the number of files in the graph.
     pub fn file_count(&self) -> usize {
-        self.files.len()
+        self.path_to_id.len()
     }
 
     /// Returns the path of a file by its id.
     pub fn file_path(&self, file_id: u32) -> Option<&Path> {
-        self.files.get(file_id as usize).map(|f| f.path.as_path())
+        self.files
+            .get(file_id as usize)
+            .filter(|f| self.file_id(&f.path) == Some(file_id))
+            .map(|f| f.path.as_path())
     }
 
     /// Returns the segments for a file by its id.
     pub fn file_segments(&self, file_id: u32) -> Option<&[Segment]> {
+        self.file_path(file_id)?;
         self.files
             .get(file_id as usize)
             .map(|f| f.segments.as_slice())
@@ -269,6 +279,7 @@ impl SourceGraph {
                     .enumerate()
                     .map(|(i, _)| SegmentKey::new(id, i as u32))
                     .collect(),
+                GraphNode::Unlinked { .. } => vec![],
             })
             .unwrap_or_default();
 
@@ -316,7 +327,11 @@ impl SourceGraph {
     ///
     /// Uses `SourceFileInput` instead of `ResolvedSourceFile` to avoid a
     /// circular crate dependency with `unused_finder`.
-    pub fn patch_file(&mut self, path: &Path, input: SourceFileInput) {
+    pub fn patch_file(&mut self, path: &Path, input: SourceFileInput) -> eyre::Result<()> {
+        eyre::ensure!(
+            path == input.source_file_path,
+            "patch path mismatch; rename requires remove plus add"
+        );
         // Clear the entire re-export cache — any cached resolution could
         // transitively depend on the patched file's exports.
         self.reexport_cache.borrow_mut().clear();
@@ -343,6 +358,10 @@ impl SourceGraph {
             );
             self.files.push(new_file);
         }
+        self.revision.source += 1;
+        self.revision.resolution += 1;
+        self.rebuild_edges();
+        Ok(())
     }
 }
 
@@ -869,10 +888,12 @@ mod tests {
         assert_eq!(result, vec![SegmentKey::new(0, 0)]);
 
         // Patch file A: now exports "baz" instead of "foo"
-        graph.patch_file(
-            &path_a,
-            simple_input(path_a.clone(), vec![segment_with_export("baz")]),
-        );
+        graph
+            .patch_file(
+                &path_a,
+                simple_input(path_a.clone(), vec![segment_with_export("baz")]),
+            )
+            .unwrap();
 
         // "foo" no longer resolves
         let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("foo"));
@@ -921,10 +942,12 @@ mod tests {
         assert_eq!(result, vec![SegmentKey::new(1, 0)]);
 
         // Patch B: now exports "qux" instead of "foo"
-        graph.patch_file(
-            &path_b,
-            simple_input(path_b.clone(), vec![segment_with_export("qux")]),
-        );
+        graph
+            .patch_file(
+                &path_b,
+                simple_input(path_b.clone(), vec![segment_with_export("qux")]),
+            )
+            .unwrap();
 
         // Cached result should be gone; re-export chain should now fail
         let result = graph.resolve_import_across_files(0, &foo_sym);
@@ -941,10 +964,12 @@ mod tests {
 
         // Patch in a new file
         let path_b = PathBuf::from("/test/b.ts");
-        graph.patch_file(
-            &path_b,
-            simple_input(path_b.clone(), vec![segment_with_export("new_sym")]),
-        );
+        graph
+            .patch_file(
+                &path_b,
+                simple_input(path_b.clone(), vec![segment_with_export("new_sym")]),
+            )
+            .unwrap();
 
         assert_eq!(graph.file_count(), 2);
         assert_eq!(graph.file_id(&path_b), Some(1));
@@ -963,13 +988,15 @@ mod tests {
         assert_eq!(graph.iter_file_segments(&path).unwrap().count(), 1);
 
         // Patch with 3 segments
-        graph.patch_file(
-            &path,
-            simple_input(
-                path.clone(),
-                vec![simple_segment(), simple_segment(), simple_segment()],
-            ),
-        );
+        graph
+            .patch_file(
+                &path,
+                simple_input(
+                    path.clone(),
+                    vec![simple_segment(), simple_segment(), simple_segment()],
+                ),
+            )
+            .unwrap();
 
         assert_eq!(graph.iter_segments().count(), 3);
         assert_eq!(graph.iter_file_segments(&path).unwrap().count(), 3);

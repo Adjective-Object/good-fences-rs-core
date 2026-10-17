@@ -800,6 +800,7 @@ dependencies = [
  "ahashmap",
  "anyhow",
  "dashmap",
+ "eyre",
  "ftree_cache",
  "hashbrown 0.14.5",
  "lazy_static",
@@ -2075,11 +2076,13 @@ dependencies = [
  "ast-segmenter",
  "compact_str",
  "eyre",
+ "import_resolver",
  "logger",
  "oxc_allocator",
  "oxc_span",
  "oxc_utils_parse",
  "pretty_assertions",
+ "test_tmpdir",
 ]
 
 [[package]]

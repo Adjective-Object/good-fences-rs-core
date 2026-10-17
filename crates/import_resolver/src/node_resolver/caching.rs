@@ -89,6 +89,7 @@ pub struct CachingNodeModulesResolver<'a> {
 pub const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
 pub const DEFAULT_EXPORT_CODITIONS: &[&str] = &["import", "require", "default"];
 
+#[derive(Clone)]
 pub struct NodeModulesResolverOptions {
     pub target_env: TargetEnv,
     pub alias: AHashMap<String, String>,

@@ -14,9 +14,11 @@ ast-segmenter = { version = "0.2.0-beta.1", path = "../ast_segmenter" }
 compact_str = "0.9.0"
 oxc_span.workspace = true
 eyre.workspace = true
+import_resolver = { path = "../import_resolver" }
 
 [dev-dependencies]
 pretty_assertions.workspace = true
 oxc_allocator.workspace = true
 oxc_utils_parse = { path = "../oxc_utils_parse" }
 logger = { path = "../logger" }
+test_tmpdir = { path = "../test_tmpdir" }

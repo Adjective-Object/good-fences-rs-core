@@ -7,3 +7,4 @@ extern crate pretty_assertions;
 pub mod manual_resolver;
 pub mod resolve;
 pub mod node_resolver;
+pub mod structural;

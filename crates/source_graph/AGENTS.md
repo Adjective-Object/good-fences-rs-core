@@ -10,3 +10,8 @@ Lexical binding is independent of TDZ evaluation. Checked export resolution
 returns canonical identity plus barrel route; stars exclude default, explicit
 exports win, and ambiguous distinct identities fail. Legacy adapters include
 types/return empty on failure; do not use them for executable validation.
+
+Source/resolution epochs invalidate derived handles. Remove tombstones IDs;
+recreation appends, never recycles. Patch paths must match input paths. Resolver
+refresh includes prior misses and rebuilds both indexes/cache; coarse
+invalidation is the initial correctness contract, not P9 minimal invalidation.

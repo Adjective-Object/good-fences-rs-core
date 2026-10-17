@@ -186,12 +186,17 @@ workspace test success.
   and source-site diagnostics. Owned binding IDs resolve forward/nested uses;
   legacy forward lookup now binds lexicals. Three new focused linker tests,
   all 26 graph/17 tag/70 unused tests and spot-check pass.
-- [ ] **P3.3 — Add resolution revision/add/remove contracts.** Depends: P3.1.
+- [x] **P3.3 — Add resolution revision/add/remove contracts.** Depends: P3.1.
   Read import-resolver AGENTS before changing it; adapt resolver into shared
   graph inputs with import/require conditions and external policy. Add
   generation-aware patch/delete and reject mismatched path-as-rename.
   Tests: removed target, new previously missing file, package/tsconfig changes,
   rename, symlink policy and stale reverse indexes; compare full rebuild.
+  **Verified:** explicit resolver mode/external policy, separate condition
+  caches, source/resolution epochs, stale handles, tombstone deletion and
+  mismatched patch rejection. Four managed-filesystem tests cover all listed
+  edits and normalized full-rebuild parity. 160 tests across resolver/cache/
+  graphs/unused_finder and spot-check pass. Invalidation is coarse by design.
 - [ ] **P3.4 — Converge unused analysis on shared edges.** Depends: P1.1,
   P1.2, P3.2, P3.3. Adapt `TagGraph` traversals and
   `report::compute_unused_segments`, retiring duplicated dependency logic only

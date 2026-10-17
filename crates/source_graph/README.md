@@ -21,3 +21,17 @@ missing/cycle-only exports fail. `validate_links` exposes construction diagnosti
 with source sites. Legacy symbol adapters remain permissive type-inclusive
 lookups; executable callers must use the checked linker, not their empty-on-error
 compatibility results.
+
+`refresh_resolution` invokes the explicit occurrence resolver for every site,
+including prior failures, and returns errors after replacing stale results with
+current source-site diagnostics. External/missing sites retain `Unlinked` nodes;
+`dependency_target` distinguishes them. Invalidate the resolver before refresh
+when its environment changes. No source reparse is needed for resolution edits.
+
+`patch_file`/`patch_owned` reject mismatched paths (rename = remove + add).
+`remove_file` tombstones IDs; recreation appends a new ID. Mutations rebuild both
+indexes and invalidate export caches. `GraphRevision` separates source and
+resolution epochs; `VersionedNode` rejects stale handles even when segment
+indices repeat. Paths are supplied identities: the graph never silently
+canonicalizes them or merges symlink aliases. Refresh/rebuild is deliberately
+coarse, not a claim of minimal P9 invalidation.

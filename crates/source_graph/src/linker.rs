@@ -28,6 +28,7 @@ pub enum ExportIdentity {
     Binding(u32, BindingId),
     Expression(SegmentKey),
     Namespace(u32),
+    External(String, Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,16 +132,13 @@ impl SourceGraph {
                         if let Some(import) =
                             input.facts.imports.iter().find(|i| i.binding == *binding)
                         {
-                            if let Some(DependencyTarget::File(path)) =
-                                input.resolutions.get(&import.dependency)
-                            {
-                                if let Some(target) = self.file_id(path) {
-                                    explicit.push(self.import_candidate(
-                                        target,
-                                        &import.imported,
-                                        node,
-                                    ));
-                                }
+                            if let Some(candidate) = self.resolved_candidate(
+                                file_id,
+                                import.dependency,
+                                &import.imported,
+                                node,
+                            ) {
+                                explicit.push(candidate);
                             }
                         } else if let Some(declaration) = self.resolve_binding(file_id, *binding) {
                             explicit.push(Candidate::Local(LinkedExport {
@@ -163,17 +161,21 @@ impl SourceGraph {
                         dependency,
                         imported,
                     } => {
-                        let Some(DependencyTarget::File(path)) = input.resolutions.get(dependency)
-                        else {
-                            continue;
-                        };
-                        let Some(target) = self.file_id(path) else {
-                            continue;
-                        };
                         if is_explicit {
-                            explicit.push(self.import_candidate(target, imported, node));
+                            if let Some(candidate) =
+                                self.resolved_candidate(file_id, *dependency, imported, node)
+                            {
+                                explicit.push(candidate);
+                            }
                         } else if name != "default" {
-                            stars.push(Candidate::Indirect(target, name.to_owned(), node));
+                            if let Some(candidate) = self.resolved_candidate(
+                                file_id,
+                                *dependency,
+                                &ImportedName::Name(name.to_owned()),
+                                node,
+                            ) {
+                                stars.push(candidate);
+                            }
                         }
                     }
                     _ => {}
@@ -257,6 +259,37 @@ impl SourceGraph {
                 declaration: GraphNode::Module(target),
                 route: vec![node, GraphNode::Module(target)],
             }),
+        }
+    }
+    fn resolved_candidate(
+        &self,
+        file_id: u32,
+        dependency: ast_segmenter::owned::DependencyId,
+        imported: &ImportedName,
+        node: GraphNode,
+    ) -> Option<Candidate> {
+        match self.dependency_target(file_id, dependency)? {
+            DependencyTarget::File(path) => {
+                Some(self.import_candidate(self.file_id(path)?, imported, node))
+            }
+            DependencyTarget::External(specifier) => {
+                let declaration = GraphNode::Unlinked {
+                    file_id,
+                    dependency,
+                };
+                Some(Candidate::Local(LinkedExport {
+                    identity: ExportIdentity::External(
+                        specifier.clone(),
+                        match imported {
+                            ImportedName::Name(name) => Some(name.clone()),
+                            ImportedName::Namespace => None,
+                        },
+                    ),
+                    declaration,
+                    route: vec![node, declaration],
+                }))
+            }
+            DependencyTarget::Missing(_) => None,
         }
     }
 }

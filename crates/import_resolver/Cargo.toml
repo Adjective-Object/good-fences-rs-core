@@ -10,6 +10,7 @@ crate-type = ["lib"]
 [dependencies]
 ahashmap = { path = "../ahashmap" }
 anyhow = { workspace = true }
+eyre.workspace = true
 dashmap = "6.0.1"
 ftree_cache = { path = "../ftree_cache" }
 hashbrown = "0.14.5"

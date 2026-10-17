@@ -28,3 +28,11 @@ Previously `node_resolver/` was `swc_resolver/` and consumed
 The custom resolver has tsconfig-paths handling, ftree caching, and
 `mark_dirty_root` for incremental invalidation. Replacing it with
 `oxc_resolver` is out of scope.
+
+## Structural graph policy
+
+`StructuralResolver` uses separate import/require cache trees because legacy
+node_modules caches omit conditions from their keys. Externals require exact
+explicit declarations. `invalidate` replaces both trees, including misses;
+call it after filesystem/config changes, then refresh the graph. Symlink
+identity follows explicit options; source paths must follow that same policy.

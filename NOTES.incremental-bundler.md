@@ -2,6 +2,24 @@
 
 ## Current scope
 
+## P3.3 checkpoint
+
+- Added explicit import/require `StructuralResolver` with exact external policy,
+  per-mode caches and invalidation epochs. Existing node_modules caches key only
+  by specifier: sharing them between conditions would return stale wrong-mode
+  targets. Coarse invalidation replaces trees, including misses/config ancestry.
+- Graph resolution refresh consumes every owned occurrence, preserving missing/
+  external sites and returning diagnostics instead of old success. Package and
+  tsconfig edits relink without changing source epochs. Source paths obey the
+  resolver's explicit symlink policy; no hidden graph canonicalization.
+- Patch APIs reject path-as-rename, remove tombstones IDs, recreation appends,
+  both indexes/cache rebuild and versioned node handles expire on mutation.
+- Verification: four new managed-filesystem graph tests cover missing→added,
+  removed/recreated, mismatch rejection, separate conditions, package/tsconfig
+  edits, external opt-in, symlinks and full-rebuild edge/diagnostic parity.
+  30 graph + 18 resolver + 25 cache + 17 tag + 70 unused tests pass (160).
+  `./scripts/spot-check` passes. No fine-grained P9 invalidation claim.
+
 ## P3.1 checkpoint
 
 ## P3.2 checkpoint
