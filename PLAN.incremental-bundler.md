@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P1.1–P1.5 are verified; P2–P9 remain pending. The checklist in
+commits: P1.1–P1.5 and P2.1 are verified; P2.2–P9 remain pending. The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
@@ -69,8 +69,8 @@ Additional compatibility gates:
   `87f065ebf7cde21d1229322f4c7ee58baca5648e` in `Cargo.toml`.
   There is no workspace `oxc_codegen`/transformer dependency or CBOR codec in the
   inspected manifests. Check APIs at that revision, not current upstream docs.
-  Workspace serde is constrained to `>=1.0.117, <1.0.219`; evaluate any codec
-  against that constraint before adding it.
+  Workspace serde is constrained to `>=1.0.117, <1.0.219`; `segment_cache`
+  uses serde_cbor 0.11.2 with locked serde 1.0.218 and SHA-256 0.10.9.
 
 ### Pinned esbuild grounding
 
@@ -378,6 +378,12 @@ Document affected crates' READMEs before package changes (the inspected crate
 roots currently have no README). Do not repurpose usage tags as effect flags.
 
 ### P2 — Parse cache
+
+P2.1 implements `segment_cache::{CacheRecord, CachedModule, ParserConfig}`.
+The deterministic CBOR envelope protects a versioned payload with SHA-256;
+preflight limits allocations before serde and validates every source-local
+range/link/order against the exact source. Existing owned facts/body are reused;
+legacy maps/tags are not serialized. Filesystem IO remains P2.2.
 
 Implement deterministic DTO encoding/version checks separately from filesystem
 IO. Add atomic sidecars and cache hit/miss reasons. Cover cold/warm equivalence,

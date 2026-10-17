@@ -1,0 +1,18 @@
+[package]
+name = "segment_cache"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Versioned source-local segment facts and atomic CBOR sidecars"
+
+[dependencies]
+ast-segmenter = { path = "../ast_segmenter" }
+eyre.workspace = true
+logger = { path = "../logger" }
+oxc_span.workspace = true
+serde.workspace = true
+serde_cbor = "0.11.2"
+sha2 = "0.10.9"
+
+[dev-dependencies]
+test_tmpdir = { path = "../test_tmpdir" }

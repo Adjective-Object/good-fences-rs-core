@@ -75,6 +75,11 @@ unchanged.
 | JSX, decorators, auto-accessors, TS enums/namespaces/parameter properties, TS import/export assignments and namespace exports, resource management | Unsupported-transform diagnostic |
 | Native-addon/asset specifiers, external/builtin specifiers, require-of-ESM targets | Raw target string and occurrence preserved, **not resolved, externalized, transformed or validated for execution**; these need resolver/linker policy, including require-of-async-ESM diagnostics |
 
+Owned occurrence records and `ModuleBody` support serde for the versioned
+`segment_cache` codec. Span serialization is a pair of byte offsets, not OXC
+arena identity. The codec validates these offsets against the exact source.
+Legacy statement dependency/name sets are deliberately not serialized.
+
 There is no source-file IO, cache, linking, effect analysis or emission here.
 Target-dependent checks cannot be decided from source syntax alone.
 

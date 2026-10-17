@@ -3,7 +3,29 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P1.1–P1.5 are implemented; P2–P9 remain pending.
+onward in narrow linear commits. P1.1–P1.5 and P2.1 are implemented;
+P2.2–P9 remain pending.
+
+## P2.1 checkpoint — deterministic bounded codec
+
+- New `segment_cache` crate reuses `ModuleFacts` and `ModuleBody`, with statement
+  ranges as the source-local segment projection. It intentionally does not
+  serialize legacy usage tags/name sets or create a parallel occurrence IR.
+- CBOR schema/extractor versions and exact pinned OXC revision accompany source
+  SHA-256/length and effective JS/TS/JSX/definition/CJS config. Parser defaults
+  and checked extraction policy belong to the extractor version. A checksummed
+  envelope, canonical re-encoding and byte/item/depth preflight reject damaged,
+  ambiguous, oversized or incompatible data before trusting facts.
+- Validate every UTF-8 range, IDs, binding/dependency links, occurrence ordering,
+  and the one-body CJS invariant. Owned facts remain available after arena drop.
+  serde_cbor 0.11.2 uses existing serde 1.0.218 without raising its constraint;
+  SHA-256 0.10.9 was already locked. READMEs preceded source/package edits.
+- Verification: `TMPDIR="$PWD/target/p1-test-tmp" cargo test -p segment_cache`
+  passes four tests, including five deterministic roundtrip modes, every-byte
+  corruption/truncation checks and malformed length/depth/allocation inputs.
+  `./scripts/spot-check` passes (47 ast-segmenter tests and workspace check).
+  Only touched Rust files are rustfmt-formatted; workspace-wide fmt check
+  exposes unrelated pre-existing formatting differences.
 
 ## P1.5 checkpoint — opaque CommonJS and explicit support gate
 

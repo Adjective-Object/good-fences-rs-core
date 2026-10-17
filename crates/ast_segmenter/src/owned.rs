@@ -9,19 +9,21 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{ScopeFlags, Semantic, SymbolFlags, SymbolId};
 use oxc_span::{GetSpan, Span};
+use serde::{Deserialize, Serialize};
 
 /// The byte offset of a binding's first declaration, not an OXC symbol ID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BindingId(pub u32);
 
 /// The byte offset of a dependency expression/declaration. Repeated paths stay distinct.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DependencyId(pub u32);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Binding {
     pub id: BindingId,
     pub name: String,
+    #[serde(with = "span_serde::list")]
     pub declarations: Vec<Span>,
     pub top_level: bool,
     pub function_scoped: bool,
@@ -32,9 +34,10 @@ pub struct Binding {
     pub ambient: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reference {
     pub name: String,
+    #[serde(with = "span_serde")]
     pub span: Span,
     pub binding: Option<BindingId>,
     pub read: bool,
@@ -44,14 +47,14 @@ pub struct Reference {
     pub commonjs: Option<CommonJsGlobal>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommonJsGlobal {
     Require,
     Module,
     Exports,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DependencyKind {
     Import,
     ReExport,
@@ -60,35 +63,40 @@ pub enum DependencyKind {
     ImportType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dependency {
     pub id: DependencyId,
     pub kind: DependencyKind,
+    #[serde(with = "span_serde")]
     pub span: Span,
     pub specifier: String,
+    #[serde(with = "span_serde")]
     pub specifier_span: Span,
     pub type_only: bool,
     /// Lexical containment only, not a claim that a module-level site runs eagerly.
+    #[serde(with = "span_serde::optional")]
     pub enclosing_function: Option<Span>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportedName {
     Name(String),
     Namespace,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportBinding {
     pub dependency: DependencyId,
     pub binding: BindingId,
     pub imported: ImportedName,
+    #[serde(with = "span_serde")]
     pub span: Span,
+    #[serde(with = "span_serde")]
     pub imported_span: Span,
     pub type_only: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExportValue {
     Binding(BindingId),
     ReExport {
@@ -96,27 +104,30 @@ pub enum ExportValue {
         imported: ImportedName,
     },
     /// Includes anonymous default functions/classes and default expressions.
-    Expression(Span),
+    Expression(#[serde(with = "span_serde")] Span),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Export {
     /// `None` means export-star, not a default export.
     pub name: Option<String>,
     pub value: ExportValue,
+    #[serde(with = "span_serde")]
     pub span: Span,
     /// Absent for the implicit `default` name and export-star.
+    #[serde(with = "span_serde::optional")]
     pub name_span: Option<Span>,
     pub type_only: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Directive {
     pub value: String,
+    #[serde(with = "span_serde")]
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleFacts {
     pub bindings: Vec<Binding>,
     pub references: Vec<Reference>,
@@ -125,6 +136,52 @@ pub struct ModuleFacts {
     pub exports: Vec<Export>,
     pub directives: Vec<Directive>,
     pub hashbang: Option<Directive>,
+}
+
+/// Stable byte-pair representation, independent of OXC's serde features.
+pub mod span_serde {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(span: &Span, serializer: S) -> Result<S::Ok, S::Error> {
+        (span.start, span.end).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Span, D::Error> {
+        let (start, end) = Deserialize::deserialize(deserializer)?;
+        Ok(Span::new(start, end))
+    }
+
+    pub mod optional {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(span: &Option<Span>, s: S) -> Result<S::Ok, S::Error> {
+            span.map(|s| (s.start, s.end)).serialize(s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Span>, D::Error> {
+            Ok(Option::<(u32, u32)>::deserialize(d)?.map(|(a, b)| Span::new(a, b)))
+        }
+    }
+
+    pub mod list {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(spans: &[Span], s: S) -> Result<S::Ok, S::Error> {
+            spans
+                .iter()
+                .map(|s| (s.start, s.end))
+                .collect::<Vec<_>>()
+                .serialize(s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Span>, D::Error> {
+            Ok(Vec::<(u32, u32)>::deserialize(d)?
+                .into_iter()
+                .map(|(a, b)| Span::new(a, b))
+                .collect())
+        }
+    }
 }
 
 pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::Result<ModuleFacts> {

@@ -21,11 +21,12 @@ pub struct ParsedModule {
     pub facts: crate::owned::ModuleFacts,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ModuleBody {
     Esm,
     /// One indivisible executable segment, excluding the hashbang.
     CommonJs {
+        #[serde(with = "crate::owned::span_serde")]
         span: Span,
     },
 }

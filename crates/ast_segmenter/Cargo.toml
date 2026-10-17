@@ -13,6 +13,7 @@ crate-type = ["lib"]
 
 [dependencies]
 eyre.workspace = true
+serde.workspace = true
 ahashmap = { version = "0.2.0", path = "../ahashmap" }
 compact_str = "0.9.0"
 logger_srcfile = { version = "0.2.0", path = "../logger_srcfile" }

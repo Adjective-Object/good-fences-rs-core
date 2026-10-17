@@ -124,10 +124,17 @@ workspace test success.
 
 ## P2 — Versioned `.seg.cbor` cache
 
-- [ ] **P2.1 — Define codec and versioned DTO.** Depends: P1.4, P1.5.
+- [x] **P2.1 — Define codec and versioned DTO.** Depends: P1.4, P1.5.
   Select compatible CBOR/hash dependencies; encode source hash/length, schema,
   extractor/OXC version and effective parser config. Test deterministic bytes,
   roundtrip after arena drop, invalid spans, unknown versions and bounded decode.
+  **Verified:** `segment_cache` reuses owned occurrence facts/body with ordered
+  segment ranges, not legacy tracker tags/maps. Deterministic serde_cbor 0.11.2
+  and SHA-256 work with locked serde 1.0.218. Version/config/source/checksum,
+  UTF-8 range, ID/link/order checks and pre-allocation CBOR byte/item/depth
+  limits reject malformed records. Four codec tests include ESM/CJS/definition
+  roundtrips after arena drop, every-byte corruption/truncation, invalid
+  spans/links/versions and allocation bombs; `./scripts/spot-check` passes.
 - [ ] **P2.2 — Implement atomic sidecars.** Depends: P2.1.
   Write `<source>.seg.cbor` via sibling staging/atomic replacement, with defined
   concurrent-writer and read-only-source behavior. Tests: corruption,

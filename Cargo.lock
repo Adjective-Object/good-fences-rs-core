@@ -144,6 +144,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "oxc_utils_parse",
+ "serde",
  "test_tmpdir",
  "thiserror 1.0.69",
 ]
@@ -737,6 +738,12 @@ dependencies = [
  "napi-derive",
  "serde",
 ]
+
+[[package]]
+name = "half"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
 
 [[package]]
 name = "hashbrown"
@@ -1895,6 +1902,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "segment_cache"
+version = "0.1.0"
+dependencies = [
+ "ast-segmenter",
+ "eyre",
+ "logger",
+ "oxc_span",
+ "serde",
+ "serde_cbor",
+ "sha2",
+ "test_tmpdir",
+]
+
+[[package]]
 name = "self_cell"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1931,6 +1952,16 @@ dependencies = [
  "linked-hash-map",
  "num-traits",
  "regex",
+ "serde",
+]
+
+[[package]]
+name = "serde_cbor"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
+dependencies = [
+ "half",
  "serde",
 ]
 
