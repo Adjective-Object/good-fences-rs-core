@@ -83,6 +83,10 @@ impl CacheRecord {
         }
         let facts = &module.facts;
         ensure!(
+            facts.commonjs == config.commonjs,
+            "facts parser format mismatch"
+        );
+        ensure!(
             sorted(
                 facts
                     .effects

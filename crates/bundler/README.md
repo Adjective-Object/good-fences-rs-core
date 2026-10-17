@@ -38,8 +38,29 @@ Node allocates records before invoking wrappers, binds wrapper `this` to the
 initial exports object and returns the current `module.exports`. Recursive
 requires see partial exports; deferred sites execute only when called. Failed
 factories are removed from the require cache and retry on the next require.
-Successful modules execute once. Entry CJS loading currently returns an object
-with `default` holding the require result; static ESM proxy demand is P7.2.
+Successful modules execute once. Entry CJS loading returns a canonical native
+ESM proxy namespace, also used by static ESM imports/reexports.
+
+### Interop policy
+
+`Artifacts::cjs_proxies` reports canonical proxy tokens and static surfaces.
+Reverse typed occurrences supply requested **original** names, including
+renamed imports and barrel routes; no CommonJS assignment/export guessing.
+Default is always the complete require result; `__esModule` never unwraps it.
+Named exports snapshot requested properties after the factory finishes; getters
+run once per requested name in sorted order. Missing properties are undefined.
+Property mutation is visible through the default object's identity, not through
+named snapshots; later `module.exports` replacement affects subsequent require
+results but not the proxy's captured default or named values.
+
+A native namespace has `default` plus the bundle's statically requested names.
+Namespace-only access does not discover arbitrary dynamic keys: `ns.unknown` is
+undefined unless independently requested; use `ns.default.unknown` for dynamic
+CommonJS property access. Star reexports propagate requested names, excluding
+default. The proxy namespace is a real immutable ESM namespace, not a mutable
+object masquerading as one. Factory throws retry through require, but an ESM
+proxy evaluation failure is cached by native ESM, as for any failed ESM module.
+Proxies and require share the same native CJS cache; no duplicate factories.
 
 ## Rewrite backend
 

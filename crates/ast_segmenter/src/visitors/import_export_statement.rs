@@ -10,8 +10,8 @@ use oxc_ast::ast::{
     Expression, ImportDeclaration, ImportDeclarationSpecifier, ImportOrExportKind,
     ModuleExportName, TSImportEqualsDeclaration, TSModuleDeclarationName, TSModuleReference,
 };
-use oxc_ast::{Comment, ast::IdentifierReference};
-use oxc_ast_visit::{Visit, walk};
+use oxc_ast::{ast::IdentifierReference, Comment};
+use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::Semantic;
 use std::convert::TryInto;
 
@@ -80,7 +80,11 @@ fn is_global_require<'a>(semantic: &Semantic<'a>, ident: &IdentifierReference<'a
     let Some(ref_id) = ident.reference_id.get() else {
         return false;
     };
-    semantic.scoping().get_reference(ref_id).symbol_id().is_none()
+    semantic
+        .scoping()
+        .get_reference(ref_id)
+        .symbol_id()
+        .is_none()
 }
 
 impl<'v, 'a, TLogger: SrcFileLogger> ExportsVisitor<'v, 'a, TLogger> {
@@ -186,20 +190,13 @@ impl<'v, 'a, T: SrcFileLogger> Visit<'a> for ExportsVisitor<'v, 'a, T> {
                 let local_name = module_export_name_to_str(&spec.local).to_string();
                 let exported_as = ExportedSymbol::from_module_export_name(&spec.exported);
                 let exported_key = exported_as.clone();
-                let mut tags = SymbolTags::from_comments(
-                    self.comments,
-                    self.source,
-                    spec.span.start,
-                );
+                let mut tags =
+                    SymbolTags::from_comments(self.comments, self.source, spec.span.start);
                 tags.allow_unused_comment |= allow_unused;
                 tags.is_type_only |= is_type_only || spec.export_kind == ImportOrExportKind::Type;
                 self.module_deps.exports_locals.insert(
                     exported_key,
-                    TaggedSymbol::with_span(
-                        Symbol::from(local_name.as_str()),
-                        tags,
-                        export.span,
-                    ),
+                    TaggedSymbol::with_span(Symbol::from(local_name.as_str()), tags, export.span),
                 );
             }
         }
@@ -304,10 +301,7 @@ impl<'v, 'a, T: SrcFileLogger> Visit<'a> for ExportsVisitor<'v, 'a, T> {
                 match spec {
                     ImportDeclarationSpecifier::ImportSpecifier(named) => {
                         tags.is_type_only |= named.import_kind == ImportOrExportKind::Type;
-                        TaggedSymbol::new(
-                            Symbol::from_module_export_name(&named.imported),
-                            tags,
-                        )
+                        TaggedSymbol::new(Symbol::from_module_export_name(&named.imported), tags)
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {
                         TaggedSymbol::new(Symbol::Default, tags)
@@ -347,12 +341,14 @@ fn extract_first_string_argument(args: &oxc_allocator::Vec<'_, Argument<'_>>) ->
 /// Extract declared names from a `Declaration` node.
 fn extract_declaration_names(_logger: &impl SrcFileLogger, decl: &Declaration<'_>) -> Vec<String> {
     match decl {
-        Declaration::ClassDeclaration(class) => {
-            class.id.as_ref().map_or(vec![], |id| vec![id.name.to_string()])
-        }
-        Declaration::FunctionDeclaration(func) => {
-            func.id.as_ref().map_or(vec![], |id| vec![id.name.to_string()])
-        }
+        Declaration::ClassDeclaration(class) => class
+            .id
+            .as_ref()
+            .map_or(vec![], |id| vec![id.name.to_string()]),
+        Declaration::FunctionDeclaration(func) => func
+            .id
+            .as_ref()
+            .map_or(vec![], |id| vec![id.name.to_string()]),
         Declaration::VariableDeclaration(var_decl) => var_decl
             .declarations
             .iter()

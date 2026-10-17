@@ -33,7 +33,10 @@ without adding effects policy or usage tags to the shared graph.
 binding identity plus all intermediate barrel sites. Stars exclude default,
 explicit exports take precedence, equal-identity diamonds merge, and ambiguous/
 missing/cycle-only exports fail. `validate_links` exposes construction diagnostics
-with source sites. Legacy symbol adapters remain permissive type-inclusive
+with source sites. Opaque CommonJS value requests resolve to
+`ExportIdentity::CommonJs(file, requested_name)` and a module/body demand, not
+guessed source exports. Type requests do not gain this dynamic fallback.
+Legacy symbol adapters remain permissive type-inclusive
 lookups; executable callers must use the checked linker, not their empty-on-error
 compatibility results.
 

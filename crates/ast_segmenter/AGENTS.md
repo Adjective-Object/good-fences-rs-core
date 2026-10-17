@@ -49,6 +49,8 @@ declaration byte offsets and dependency IDs are site byte offsets, local to
 the exact source/configuration. Keep all declaration/reference spans and
 type/value metadata; never expose OXC IDs. Sort DTO collections by source
 position before returning.
+Keep the effective commonjs format in facts so graph/cache consumers never
+infer package format from extension, wrapper references or export syntax.
 
 `ModuleBody::CommonJs` always has one opaque executable segment excluding
 hashbang, never independently tree-shakable internal statements. Classify

@@ -3,8 +3,8 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 3 /
-extractor 4, including invocation inputs/annotation sites and normalized member
+Syntax-local effect reasons/timing are persisted and range-checked (schema 4 /
+extractor 5, including effective commonjs format, invocation inputs/annotation sites and normalized member
 shapes). No resolver, usage, effects-policy, graph, absolute path or arena IDs
 are stored.
 

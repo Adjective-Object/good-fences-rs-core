@@ -3,6 +3,7 @@ source: crates/ast_segmenter/src/commonjs_tests.rs
 expression: module.facts
 ---
 ModuleFacts {
+    commonjs: true,
     effects: [
         EffectSite {
             span: Span {

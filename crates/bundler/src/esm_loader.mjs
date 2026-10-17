@@ -12,13 +12,17 @@ const urls = new Map([...modules.keys()].map(token => [
 ]));
 const sources = new Map([...modules].map(([token, pieces]) => [get(urls, token), pieces]));
 const formats = new Map([...modules.keys()].map(token => [get(urls, token), config.formats[token]]));
+for (const [token, path] of Object.entries(config.proxies)) {
+  set(urls, token, new Url(path, import.meta.url).href);
+}
+const proxyUrls = new Set(Object.values(config.proxies).map(path => new Url(path, import.meta.url).href));
 const payloads = new Map();
 const require = createRequire(import.meta.url);
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (has(sources, specifier)) return { url: specifier, shortCircuit: true };
-    if (has(urls, specifier) && (has(sources, context.parentURL) || context.parentURL === import.meta.url)) {
+    if (has(urls, specifier) && (has(sources, context.parentURL) || proxyUrls.has(context.parentURL) || context.parentURL === import.meta.url)) {
       return { url: get(urls, specifier), shortCircuit: true };
     }
     return nextResolve(specifier, context);
@@ -48,9 +52,7 @@ export async function loadEntry(name) {
   const tokens = config.entries[name];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    result[result.length] = config.formats[token] === 'commonjs'
-      ? { default: requireModule(token) }
-      : await import(get(urls, token));
+    result[result.length] = await import(get(urls, token));
   }
   return result.length === 1 ? result[0] : result;
 }

@@ -25,6 +25,7 @@ pub enum Namespace {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExportIdentity {
+    CommonJs(u32, String),
     Binding(u32, BindingId),
     Expression(SegmentKey),
     Namespace(u32),
@@ -113,6 +114,19 @@ impl SourceGraph {
             active.remove(&key);
             return vec![];
         };
+        if namespace == Namespace::Value
+            && file
+                .owned
+                .as_ref()
+                .is_some_and(|input| input.facts.commonjs)
+        {
+            active.remove(&key);
+            return vec![LinkedExport {
+                identity: ExportIdentity::CommonJs(file_id, name.to_owned()),
+                declaration: GraphNode::Module(file_id),
+                route: vec![GraphNode::Module(file_id)],
+            }];
+        }
         let mut explicit = Vec::new();
         let mut stars = Vec::new();
         let mut has_explicit = false;

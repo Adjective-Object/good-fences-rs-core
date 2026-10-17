@@ -294,11 +294,16 @@ workspace test success.
   require and failure/retry. Do not eagerly execute deferred require bodies.
   Native createRequire/hook loading owns wrappers/cache; thrown factories evict
   and retry. Real Node differential test covers every listed runtime behavior.
-- [ ] **P7.2 — Derive CJS proxy demands and policy.** Depends: P7.1, P3.2.
+- [x] **P7.2 — Derive CJS proxy demands and policy.** Depends: P7.1, P3.2.
   Use reverse typed occurrences for static named/default/namespace requests;
   generate ESM proxy segments and runtime dependencies. Tests: renamed imports,
   re-exports, unknown namespace access, `__esModule`, getters and post-evaluation
   mutation/reassignment under an explicitly chosen interop contract.
+  Reverse typed edges and checked barrel identities derive original names.
+  Native ESM proxies snapshot named properties/getters; default is the require
+  result, regardless of __esModule. Namespace keys are static demands + default;
+  unknown dynamic properties require namespace.default access. Format facts are
+  explicit; cache schema 4/extractor 5 validates their parser-mode identity.
 - [ ] **P7.3 — Integrate proxies across chunks.** Depends: P7.2, P6.3.
   Feed synthetic segments through exact-set partitioning and share one registry
   per runtime. Same-process multi-entry tests verify once-only execution and

@@ -129,6 +129,8 @@ pub struct Directive {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleFacts {
+    /// Effective parser format, including package policy for extensionless/.js input.
+    pub commonjs: bool,
     pub effects: Vec<crate::effects::EffectSite>,
     pub invocations: Vec<crate::invocation::Invocation>,
     pub bindings: Vec<Binding>,
@@ -219,6 +221,7 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
             .map(|(i, b): (_, &Binding)| (b.id, i))
             .collect(),
         facts: ModuleFacts {
+            commonjs: program.source_type.is_commonjs(),
             bindings,
             directives: program
                 .directives

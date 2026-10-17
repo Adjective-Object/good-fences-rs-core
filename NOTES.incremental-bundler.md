@@ -2,6 +2,14 @@
 
 ## Current scope
 
+P7.2: `Artifacts::cjs_proxies` records canonical native ESM proxy tokens/static
+surfaces. Reverse typed requests resolve original names through checked barrel
+routes; CommonJs export identity is dynamic value demand, never export guessing.
+Named/getter snapshots, full-result default ignoring __esModule, replacement
+and namespace.default dynamic access are tested. `ModuleFacts::commonjs` closes
+the package-format handoff gap; schema 4/extractor 5 rejects mismatched bits.
+P7.3 will move these generated proxy source pieces into exact-set payloads.
+
 P7.1: opaque CJS bodies are rewritten only at checked require specifiers and
 source hints, then stored in their original exact-set segment payload. Runtime
 `requireModule(token)` uses Node createRequire and native cache, including

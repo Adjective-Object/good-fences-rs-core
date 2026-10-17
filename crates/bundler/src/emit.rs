@@ -58,8 +58,12 @@ pub(crate) fn checked_source(
     let path = graph
         .file_path(file)
         .ok_or_eyre("missing emission module")?;
-    let parsed =
-        ast_segmenter::parse_module(&logger::StdioLogger::new(), source, path, ModuleFormat::Esm)?;
+    let format = if graph.file_facts(file).is_some_and(|f| f.commonjs) {
+        ModuleFormat::CommonJs
+    } else {
+        ModuleFormat::Esm
+    };
+    let parsed = ast_segmenter::parse_module(&logger::StdioLogger::new(), source, path, format)?;
     ensure!(
         !parsed.source_type.is_typescript() && !parsed.source_type.is_jsx(),
         "{}: emission supports JavaScript only at bytes 0..{}; TS/JSX need later backends",

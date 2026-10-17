@@ -21,7 +21,8 @@ statement extraction for callers that already validated an AST and semantic
 model; it does not perform the full bundler support-policy/occurrence checks.
 `segment_file` retains the unused tracker's legacy behavior.
 
-`ParsedModule::facts` contains the owned occurrence IR in `owned`: bindings,
+`ParsedModule::facts` contains the owned occurrence IR in `owned`: effective
+`commonjs` parser-format bit (including package policy for `.js`), bindings,
 declaration and reference ranges, import aliases, export mappings, directives,
 hashbang and individual static/dynamic/require dependencies. Binding and
 dependency IDs are source byte offsets (first declaration and dependency site,

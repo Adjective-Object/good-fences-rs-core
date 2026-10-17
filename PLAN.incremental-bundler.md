@@ -15,6 +15,11 @@ P7.1 adopts Node createRequire + synchronous source hooks for opaque CJS,
 preserving native early cache insertion, partial cycles, wrapper aliases/this,
 replacement values and retry after factory throws. CJS/ESM proxy interop follows
 in P7.2; no hand-written competing require cache is introduced.
+P7.2 supplies native ESM proxies using reverse typed requests/checked original
+barrel identities: named properties snapshot once, default captures full require
+result, __esModule is ignored, dynamic property access is via namespace.default.
+Format now survives owned graph/cache facts (schema 4/extractor 5), including
+package-commonjs `.js` files. No source assignment guessing defines exports.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
 binding/declaration/reference records, import aliases and export mappings,

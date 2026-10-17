@@ -139,6 +139,82 @@ fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
 }
 
 #[test]
+fn commonjs_proxy_static_requests_aliases_reexports_and_snapshot_policy() {
+    let source = sources(&[
+        ("entry.mjs", "import value, {a as renamed, bump} from './dep.cjs'; import {again} from './barrel.mjs'; import * as ns from './dep.cjs'; import bridge from './bridge.cjs'; console.log(renamed, again, ns.a, ns.default === value, bridge === value); bump(); console.log(renamed, ns.a, value.a);"),
+        ("bridge.cjs", "module.exports = require('./dep.cjs');"),
+        ("barrel.mjs", "export {a as again} from './dep.cjs'; export * from './dep.cjs';"),
+        ("dep.cjs", "exports.a = 1; exports.bump = () => { exports.a++; };"),
+    ]);
+    let output = compare(&source, "entry.mjs");
+    assert_eq!(
+        output.cjs_proxies[Path::new("dep.cjs")].1,
+        BTreeSet::from(["a".into(), "bump".into(), "default".into()])
+    );
+
+    // Deliberately not Node's guessed-exports interop: requested getters and
+    // computed names work, __esModule never unwraps default.
+    let source = sources(&[
+        ("entry.mjs", "import value, {computed as renamed, read, replace} from './dep.cjs'; import * as ns from './dep.cjs'; console.log(renamed, read, value.default, ns.unknown, ns.default.unknown); replace(); console.log(value.default, ns.default.default);"),
+        ("dep.cjs", "module.exports = { __esModule: true, default: 5, ['computed']: 7, unknown: 9, get read() { console.log('getter'); return 11; }, replace() { module.exports = {default: 99}; } };"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    insta::assert_snapshot!(String::from_utf8(actual.stdout).unwrap(), @"
+    getter
+    7 11 5 undefined 9
+    5 5
+    ");
+}
+
+#[test]
+fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
+    let source = "module.exports = 17;";
+    let parsed = parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("dep.js"),
+        ModuleFormat::CommonJs,
+    )
+    .unwrap();
+    let graph = SourceGraph::from_owned([OwnedSourceFileInput {
+        path: "dep.js".into(),
+        segments: parsed.segments,
+        facts: parsed.facts,
+        resolutions: Default::default(),
+    }]);
+    let policy = EffectPolicy::default();
+    let plan = partition(
+        &graph,
+        &[RootSeed {
+            id: RootId::Entry("main".into()),
+            evaluation_roots: vec![0],
+            binding_roots: vec![],
+        }],
+        &policy,
+    )
+    .unwrap();
+    let mut output = esm(&graph, &plan, &policy, &sources(&[("dep.js", source)])).unwrap();
+    output.files.insert(
+        "observe.mjs".into(),
+        "import {loadEntry} from './runtime.mjs'; console.log((await loadEntry('main')).default);"
+            .into(),
+    );
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"17\n");
+}
+
+#[test]
 fn native_cycle_instantiation_distinguishes_functions_var_and_lexical_tdz() {
     let output = compare(&sources(&[
         ("entry.mjs", "import {read, bump, value} from './a.mjs'; console.log(read(), value); bump(); console.log(read(), value);"),

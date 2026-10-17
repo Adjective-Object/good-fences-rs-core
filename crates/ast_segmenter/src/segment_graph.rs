@@ -98,7 +98,8 @@ impl SegmentGraph {
         let total_segments: usize = file_segments.iter().map(|(_, segs)| segs.len()).sum();
         let mut nodes = Vec::with_capacity(total_segments);
         let mut edges: Vec<AHashSet<usize>> = Vec::with_capacity(total_segments);
-        let mut id_to_index = AHashMap::with_capacity_and_hasher(total_segments, Default::default());
+        let mut id_to_index =
+            AHashMap::with_capacity_and_hasher(total_segments, Default::default());
         let mut file_export_map: AHashMap<usize, AHashMap<ExportedLocal, usize>> =
             AHashMap::default();
         let mut file_node_ranges = AHashMap::default();
@@ -395,10 +396,10 @@ fn segment_is_hoisted(seg: &Segment) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::raw_module_deps::{RawModuleDeps, TaggedSymbol, SymbolTags};
-    use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
+    use crate::raw_module_deps::{RawModuleDeps, SymbolTags, TaggedSymbol};
     use crate::segment_info::Segment;
     use crate::variables::VariableScope;
+    use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
 
     /// Helper: create a minimal Segment with given module deps.
     fn seg(deps: RawModuleDeps) -> Segment {
@@ -423,7 +424,10 @@ mod test {
     fn importing_seg(specifier: &str, name: &str) -> Segment {
         let mut deps = RawModuleDeps::default();
         let mut symbols = AHashSet::default();
-        symbols.insert(TaggedSymbol::new(Symbol::named(name), SymbolTags::default()));
+        symbols.insert(TaggedSymbol::new(
+            Symbol::named(name),
+            SymbolTags::default(),
+        ));
         deps.imports.insert(specifier.to_string(), symbols);
         seg(deps)
     }
@@ -443,8 +447,7 @@ mod test {
         let f0_segs = vec![exporting_seg("a"), exporting_seg("b")];
         let f1_segs = vec![importing_seg("./f0", "a"), importing_seg("./f0", "b")];
 
-        let file_segments: Vec<(usize, &[Segment])> =
-            vec![(0, &f0_segs), (1, &f1_segs)];
+        let file_segments: Vec<(usize, &[Segment])> = vec![(0, &f0_segs), (1, &f1_segs)];
         let mut graph = SegmentGraph::build(&file_segments);
 
         // Resolve "./f0" from file 1 → file 0.
@@ -537,15 +540,20 @@ mod test {
         // (the re-exported name in f1/f2 is "shared", so f3 imports "shared")
         let mut f3_deps = RawModuleDeps::default();
         let mut left_syms = AHashSet::default();
-        left_syms.insert(TaggedSymbol::new(Symbol::named("shared"), SymbolTags::default()));
+        left_syms.insert(TaggedSymbol::new(
+            Symbol::named("shared"),
+            SymbolTags::default(),
+        ));
         f3_deps.imports.insert("./f1".to_string(), left_syms);
         let mut right_syms = AHashSet::default();
-        right_syms.insert(TaggedSymbol::new(Symbol::named("shared"), SymbolTags::default()));
+        right_syms.insert(TaggedSymbol::new(
+            Symbol::named("shared"),
+            SymbolTags::default(),
+        ));
         f3_deps.imports.insert("./f2".to_string(), right_syms);
         let f3 = vec![seg(f3_deps)];
 
-        let file_segments: Vec<(usize, &[Segment])> =
-            vec![(0, &f0), (1, &f1), (2, &f2), (3, &f3)];
+        let file_segments: Vec<(usize, &[Segment])> = vec![(0, &f0), (1, &f1), (2, &f2), (3, &f3)];
         let mut graph = SegmentGraph::build(&file_segments);
 
         let mut resolved = AHashMap::default();
@@ -592,8 +600,7 @@ mod test {
         let f1_import = importing_seg("./f0", "a");
         let f1 = vec![f1_export, f1_import];
 
-        let file_segments: Vec<(usize, &[Segment])> =
-            vec![(0, &f0), (1, &f1)];
+        let file_segments: Vec<(usize, &[Segment])> = vec![(0, &f0), (1, &f1)];
         let mut graph = SegmentGraph::build(&file_segments);
 
         let mut resolved = AHashMap::default();

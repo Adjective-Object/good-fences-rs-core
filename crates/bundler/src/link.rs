@@ -34,6 +34,8 @@ pub struct Artifacts {
     pub members: BTreeMap<NodeId, PathBuf>,
     pub chunk_artifacts: BTreeMap<ChunkId, BTreeSet<PathBuf>>,
     pub manifest: DiagnosticManifest,
+    /// CJS identity -> canonical native ESM proxy token and its static surface.
+    pub cjs_proxies: BTreeMap<PathBuf, (String, BTreeSet<String>)>,
 }
 
 struct Module<'a> {
@@ -74,8 +76,12 @@ pub fn esm(
             },
         );
     }
-    let names = export_names(graph);
+    let names = export_names(graph, plan);
     for (&file, module) in &mut modules {
+        if module.parsed.facts.commonjs {
+            module.surface = names[&file].clone();
+            continue;
+        }
         for name in &names[&file] {
             let linked = match graph.resolve_export(file, name, Namespace::Value) {
                 Ok(linked) => linked,
@@ -131,6 +137,7 @@ pub fn esm(
     }
     let mut module_pieces = BTreeMap::new();
     let mut module_payloads = BTreeMap::new();
+    let mut cjs_proxies = BTreeMap::new();
     for (&file, module) in &modules {
         let edits = dependency_edits(graph, plan, file, &modules)?;
         let parts = if matches!(module.parsed.body, ModuleBody::CommonJs { .. }) {
@@ -177,6 +184,31 @@ pub fn esm(
             pieces.iter().map(|(path, _)| path.clone()).collect(),
         );
         module_pieces.insert(module.token.clone(), pieces);
+        if module.parsed.facts.commonjs {
+            let proxy = proxy_token(module);
+            let mut source = format!(
+                "import {{requireModule}} from '../runtime.mjs';\nconst value = requireModule({});\nexport default value;\n",
+                quote(&module.token)
+            );
+            for (index, name) in module
+                .surface
+                .iter()
+                .filter(|name| name.as_str() != "default")
+                .enumerate()
+            {
+                source.push_str(&format!(
+                    "const v{index} = value == null ? undefined : value[{}];\nexport {{v{index} as {}}};\n",
+                    quote(name), quote(name)
+                ));
+            }
+            let path = PathBuf::from(format!("proxies/{}.mjs", digest(&proxy)));
+            rewrite::validate(&path, &source)?;
+            files.insert(path.clone(), source);
+            cjs_proxies.insert(
+                graph.file_path(file).unwrap().to_owned(),
+                (proxy, module.surface.clone()),
+            );
+        }
     }
     for (path, payload) in payloads {
         files.insert(path, serde_json::to_string(&payload)?);
@@ -213,7 +245,13 @@ pub fn esm(
                 name.clone(),
                 evaluation
                     .into_iter()
-                    .map(|file| modules[&file].token.clone())
+                    .map(|file| {
+                        if modules[&file].parsed.facts.commonjs {
+                            proxy_token(&modules[&file])
+                        } else {
+                            modules[&file].token.clone()
+                        }
+                    })
                     .collect::<Vec<_>>(),
             ))
         })
@@ -232,7 +270,11 @@ pub fn esm(
             )
         })
         .collect();
-    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens, "formats": formats });
+    let proxies: BTreeMap<_, _> = cjs_proxies
+        .values()
+        .map(|(token, _)| (token.clone(), format!("proxies/{}.mjs", digest(token))))
+        .collect();
+    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens, "formats": formats, "proxies": proxies });
     let runtime_source = format!(
         "const config = JSON.parse({});\n{}",
         quote(&config.to_string()),
@@ -266,6 +308,7 @@ pub fn esm(
         members,
         chunk_artifacts,
         manifest,
+        cjs_proxies,
     })
 }
 
@@ -309,7 +352,13 @@ fn dependency_edits(
         let target_module = modules
             .get(&target)
             .ok_or_eyre("static target absent from retention")?;
-        let target_specifier = quote(&target_module.token);
+        let target_specifier = quote(&if target_module.parsed.facts.commonjs
+            && dependency.kind != DependencyKind::Require
+        {
+            proxy_token(target_module)
+        } else {
+            target_module.token.clone()
+        });
         if dependency.kind == DependencyKind::Require {
             ensure!(
                 matches!(module.parsed.body, ModuleBody::CommonJs { .. }),
@@ -321,12 +370,6 @@ fn dependency_edits(
             });
             continue;
         }
-        ensure!(
-            target_module.parsed.body == ModuleBody::Esm,
-            "static CJS imports require P7.2 proxy demands at bytes {}..{}",
-            dependency.span.start,
-            dependency.span.end
-        );
         let mut replacement = format!("import {target_specifier};\n");
         if dependency.kind == DependencyKind::Import {
             for import in module
@@ -454,19 +497,58 @@ fn target_file(graph: &SourceGraph, file: u32, dependency: &Dependency) -> eyre:
     }
 }
 
-fn export_names(graph: &SourceGraph) -> BTreeMap<u32, BTreeSet<String>> {
+fn export_names(graph: &SourceGraph, plan: &ChunkPlan) -> BTreeMap<u32, BTreeSet<String>> {
     let mut names: BTreeMap<_, BTreeSet<_>> = graph
         .module_ids()
         .map(|file| {
             (
                 file,
-                graph
-                    .file_facts(file)
-                    .into_iter()
-                    .flat_map(|f| &f.exports)
-                    .filter(|e| !e.type_only)
-                    .filter_map(|e| e.name.clone())
-                    .collect(),
+                if graph.file_facts(file).is_some_and(|facts| facts.commonjs) {
+                    let mut names = BTreeSet::from(["default".to_owned()]);
+                    for edge in graph.incoming(GraphNode::Module(file)).filter(|edge| {
+                        !edge.type_only
+                            && matches!(
+                                edge.kind,
+                                source_graph::EdgeKind::Import | source_graph::EdgeKind::ReExport
+                            )
+                            && retained(plan, edge.from)
+                    }) {
+                        if let Some(ImportedName::Name(name)) = &edge.imported {
+                            let from = match edge.from {
+                                GraphNode::Module(file) => file,
+                                GraphNode::Segment(key) => key.file_id,
+                                GraphNode::Unlinked { file_id, .. } => file_id,
+                            };
+                            let target = edge
+                                .dependency
+                                .and_then(|dependency| graph.dependency_target(from, dependency))
+                                .and_then(|target| match target {
+                                    DependencyTarget::File(path) => graph.file_id(path),
+                                    _ => None,
+                                });
+                            if let Some(source_graph::ExportIdentity::CommonJs(target, name)) =
+                                target
+                                    .and_then(|target| {
+                                        graph.resolve_export(target, name, Namespace::Value).ok()
+                                    })
+                                    .map(|linked| linked.identity)
+                            {
+                                if target == file {
+                                    names.insert(name);
+                                }
+                            }
+                        }
+                    }
+                    names
+                } else {
+                    graph
+                        .file_facts(file)
+                        .into_iter()
+                        .flat_map(|f| &f.exports)
+                        .filter(|e| !e.type_only)
+                        .filter_map(|e| e.name.clone())
+                        .collect()
+                },
             )
         })
         .collect();
@@ -499,6 +581,10 @@ fn export_names(graph: &SourceGraph) -> BTreeMap<u32, BTreeSet<String>> {
             return names;
         }
     }
+}
+
+fn proxy_token(module: &Module<'_>) -> String {
+    format!("{}:proxy", module.token)
 }
 
 fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {
