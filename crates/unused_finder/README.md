@@ -15,10 +15,16 @@ non-entry interface used only as a generic constraint retains just `TypeOnly`.
 
 Symbol and segment report ranges are zero-based UTF-8 byte offsets with an
 exclusive end: slice the original source bytes at `[start, end)`. Segment
-dependencies use the resolver's raw-specifier-to-file mapping, including relative
-imports, dynamic imports, re-exports, side-effect imports, and `require`.
+dependencies traverse the same authoritative `SourceGraph` edges as file/symbol
+usage, including relative imports, dynamic imports, re-exports, side-effect
+imports, and `require`. `ResultGraph::source_graph` shares that immutable graph;
+result file indices are not structural module IDs. Legacy parsing maps are
+projected once by `SourceGraph`, not resolved again during report generation.
+Checked export routes retain intermediate barrels across all report surfaces.
 Side-effect imports and opaque requires retain all target statements, even when
 the target has no exports. This conservative report graph is not bundler effect
-analysis or an execution scheduler.
+analysis or an execution scheduler. Segment reports retain their existing
+non-hoisted predecessor chain as report-only policy; `SegmentGraph` is no longer
+used to reconstruct report dependencies.
 
 Run `cargo test -p unused_finder` for configuration, parsing, and report tests.

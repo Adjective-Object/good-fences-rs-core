@@ -27,11 +27,36 @@ pub enum DependencyTarget {
 }
 
 /// Source-local data and environment-dependent resolutions remain separate.
+#[derive(Debug)]
 pub struct OwnedSourceFileInput {
     pub path: PathBuf,
     pub segments: Vec<Segment>,
     pub facts: ModuleFacts,
     pub resolutions: AHashMap<DependencyId, DependencyTarget>,
+}
+
+impl OwnedSourceFileInput {
+    /// Cache hits need only owned facts/ranges, never reconstructed tracker maps.
+    pub fn from_ranges(
+        path: PathBuf,
+        ranges: impl IntoIterator<Item = Span>,
+        facts: ModuleFacts,
+        resolutions: AHashMap<DependencyId, DependencyTarget>,
+    ) -> Self {
+        Self {
+            path,
+            facts,
+            resolutions,
+            segments: ranges
+                .into_iter()
+                .map(|span| Segment {
+                    span,
+                    module_deps: Default::default(),
+                    variables: Default::default(),
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +119,19 @@ impl SourceGraph {
             }
         }));
         for (file, input) in graph.files.iter_mut().zip(inputs) {
+            file.symbol_to_segment.clear();
+            for export in &input.facts.exports {
+                if let Some(name) = &export.name {
+                    if let Some(index) = file.segments.iter().position(|s| {
+                        s.span.start <= export.span.start && export.span.end <= s.span.end
+                    }) {
+                        file.symbol_to_segment.insert(
+                            ast_segmenter::ExportedSymbol::from(name.as_str()),
+                            index as u32,
+                        );
+                    }
+                }
+            }
             file.owned = Some(input);
         }
         graph.rebuild_edges();
@@ -135,7 +173,10 @@ impl SourceGraph {
         let mut edges = Vec::new();
         for (file_id, file) in self.files.iter().enumerate() {
             let file_id = file_id as u32;
-            let Some(input) = &file.owned else { continue };
+            let Some(input) = &file.owned else {
+                edges.extend(self.legacy_edges(file_id));
+                continue;
+            };
             for reference in &input.facts.references {
                 let Some(binding) = reference.binding else {
                     continue;
@@ -210,7 +251,9 @@ impl SourceGraph {
                     from: self.segment_at(file_id, dependency.span),
                     to: target,
                     kind,
-                    purpose: if bindings.is_empty() {
+                    purpose: if kind == EdgeKind::ReExport {
+                        EdgePurpose::Evaluation
+                    } else if bindings.is_empty() {
                         EdgePurpose::Execution
                     } else {
                         EdgePurpose::Evaluation
@@ -264,7 +307,12 @@ impl SourceGraph {
             if let (GraphNode::Module(target), Some(ImportedName::Name(name))) =
                 (edge.to, &edge.imported)
             {
-                let namespace = if edge.type_only {
+                let from_file = match edge.from {
+                    GraphNode::Segment(k) => k.file_id,
+                    GraphNode::Module(id) | GraphNode::Unlinked { file_id: id, .. } => id,
+                };
+                let namespace = if edge.type_only || self.files[from_file as usize].owned.is_none()
+                {
                     crate::Namespace::Type
                 } else {
                     crate::Namespace::Value
@@ -288,6 +336,11 @@ impl SourceGraph {
                             site: edge.site,
                             message: error.to_string(),
                         });
+                        let mut edge = edge;
+                        edge.to = GraphNode::Unlinked {
+                            file_id,
+                            dependency: edge.dependency.unwrap_or(DependencyId(edge.site.start)),
+                        };
                         linked.push(edge);
                     }
                 }
@@ -356,7 +409,17 @@ pub(crate) mod tests {
         for edge in graph.edges() {
             assert_eq!(graph.outgoing(edge.from).filter(|e| *e == edge).count(), 1);
             assert_eq!(graph.incoming(edge.to).filter(|e| *e == edge).count(), 1);
-            assert_eq!(edge.to, GraphNode::Module(1));
+            if edge.purpose == EdgePurpose::Binding {
+                assert_eq!(
+                    edge.to,
+                    GraphNode::Unlinked {
+                        file_id: 0,
+                        dependency: edge.dependency.unwrap(),
+                    }
+                );
+            } else {
+                assert_eq!(edge.to, GraphNode::Module(1));
+            }
             assert!(!source[edge.site.start as usize..edge.site.end as usize].is_empty());
         }
     }

@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P2 are verified; P3–P9 remain pending. P2 ownership stops before P3.
+commits: P0–P3 are verified; P4–P9 remain pending.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -398,7 +398,7 @@ P2.3 verifies exact cold/warm/disabled parse-fact parity, unchanged-mtime edits,
 effective parser/package modes, relocation with the real resolver, source and
 dependency deletion/orphans, current-path regenerated diagnostics and separation
 from resolver/effects configuration. The public API is documented in the
-[cache README](crates/segment_cache/README.md). P2 is complete; P3 is not begun.
+[cache README](crates/segment_cache/README.md). P2 is complete; P3 is recorded below.
 
 Implement deterministic DTO encoding/version checks separately from filesystem
 IO. Add atomic sidecars and cache hit/miss reasons. Cover cold/warm equivalence,
@@ -431,6 +431,19 @@ correctness and generation-aware patch/add/remove. Resolve conditions for
 `import` versus `require` separately. Keep a full-rebuild correctness oracle.
 Adapt `tag_graph` only behind parity tests; converge
 `report::compute_unused_segments` onto the verified graph in its own commit.
+
+P3.4 completes that convergence. Both usage directions read the authoritative
+forward/reverse indexes, including checked intermediate barrel routes; reports
+share the same immutable graph through `ResultGraph::source_graph`. Legacy
+tracker maps project once into shared edges, deliberately retaining their
+type-inclusive lookup policy without claiming absent occurrence facts.
+`OwnedSourceFileInput::from_ranges` links decoded cache facts without legacy
+maps. Only the conservative report predecessor chain remains report-local.
+Regressions preserve entry/test/ignore/type behavior, namespace/async/require/
+side-effect traversal, empty identity and stale-tag invalidation; managed
+filesystem tests fix static named-import barrels on file/symbol/segment surfaces
+and prove reports no longer use the result's resolution maps. P4 must consume
+structural evaluation/binding edges independently of `UsedTag`.
 
 ### P4 — Effects and retention
 

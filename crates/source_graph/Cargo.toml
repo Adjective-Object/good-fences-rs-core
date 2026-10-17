@@ -22,3 +22,4 @@ oxc_allocator.workspace = true
 oxc_utils_parse = { path = "../oxc_utils_parse" }
 logger = { path = "../logger" }
 test_tmpdir = { path = "../test_tmpdir" }
+segment_cache = { path = "../segment_cache" }

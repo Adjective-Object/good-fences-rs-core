@@ -6,13 +6,14 @@ mod linker;
 pub use linker::*;
 mod revision;
 pub use revision::*;
+mod legacy;
 #[cfg(test)]
 mod linker_tests;
 #[cfg(test)]
 mod revision_tests;
 
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use ahashmap::AHashMap;
 use ast_segmenter::segment_info::Segment;
@@ -25,6 +26,7 @@ pub use segment_key::SegmentKey;
 
 /// Per-file data owned by the SourceGraph.
 /// Pre-built indexes enable fast intra-file name resolution.
+#[derive(Debug)]
 struct SourceGraphFile {
     owned: Option<OwnedSourceFileInput>,
     path: PathBuf,
@@ -42,6 +44,7 @@ struct SourceGraphFile {
 ///
 /// Maps files to their segments and provides indexes for resolving
 /// names to segments within and across files.
+#[derive(Debug)]
 pub struct SourceGraph {
     revision: GraphRevision,
     diagnostics: Vec<LinkDiagnostic>,
@@ -52,7 +55,7 @@ pub struct SourceGraph {
     files: Vec<SourceGraphFile>,
     /// Cache for cross-file import resolution. Keyed by (file_id, symbol).
     /// Interior-mutated so `resolve_import_across_files` can take `&self`.
-    reexport_cache: RefCell<AHashMap<(u32, ExportedSymbol), Vec<SegmentKey>>>,
+    reexport_cache: Mutex<AHashMap<(u32, ExportedSymbol), Vec<SegmentKey>>>,
 }
 
 /// Input data for constructing a [`SourceGraph`].
@@ -69,6 +72,12 @@ pub struct SourceFileInput {
     /// `executed_paths` in segment `RawModuleDeps`) to resolved file paths.
     /// Required for inter-file import edge traversal during tag propagation.
     pub resolved_import_paths: AHashMap<String, PathBuf>,
+}
+
+impl Default for SourceGraph {
+    fn default() -> Self {
+        Self::new(std::iter::empty())
+    }
 }
 
 impl SourceGraph {
@@ -96,7 +105,7 @@ impl SourceGraph {
             files.push(file);
         }
 
-        SourceGraph {
+        let mut graph = SourceGraph {
             revision: GraphRevision::default(),
             diagnostics: Vec::new(),
             edges: Vec::new(),
@@ -104,8 +113,10 @@ impl SourceGraph {
             incoming: AHashMap::default(),
             path_to_id,
             files,
-            reexport_cache: RefCell::new(AHashMap::default()),
-        }
+            reexport_cache: Mutex::new(AHashMap::default()),
+        };
+        graph.rebuild_edges();
+        graph
     }
 
     fn build_file(
@@ -265,7 +276,12 @@ impl SourceGraph {
     ) -> Vec<SegmentKey> {
         // Check cache first
         let cache_key = (target_file_id, symbol.clone());
-        if let Some(cached) = self.reexport_cache.borrow().get(&cache_key) {
+        if let Some(cached) = self
+            .reexport_cache
+            .lock()
+            .expect("export cache")
+            .get(&cache_key)
+        {
             return cached.clone();
         }
 
@@ -285,7 +301,8 @@ impl SourceGraph {
 
         // Cache the result
         self.reexport_cache
-            .borrow_mut()
+            .lock()
+            .expect("export cache")
             .insert(cache_key, result.clone());
         result
     }
@@ -293,7 +310,7 @@ impl SourceGraph {
     /// Clear the re-export resolution cache.
     /// Should be called when file data changes (e.g., via `patch_file`).
     pub fn clear_reexport_cache(&self) {
-        self.reexport_cache.borrow_mut().clear();
+        self.reexport_cache.lock().expect("export cache").clear();
     }
 
     /// Iterate over segments in a specific file, yielding `(SegmentKey, &Segment)` pairs.
@@ -334,7 +351,7 @@ impl SourceGraph {
         );
         // Clear the entire re-export cache — any cached resolution could
         // transitively depend on the patched file's exports.
-        self.reexport_cache.borrow_mut().clear();
+        self.reexport_cache.lock().expect("export cache").clear();
 
         if let Some(&file_id) = self.path_to_id.get(path) {
             // Existing file: rebuild in place

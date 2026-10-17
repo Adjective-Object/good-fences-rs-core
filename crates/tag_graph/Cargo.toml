@@ -18,3 +18,4 @@ bitflags = "2.6.0"
 pretty_assertions.workspace = true
 compact_str = "0.9.0"
 oxc_span.workspace = true
+logger = { path = "../logger" }

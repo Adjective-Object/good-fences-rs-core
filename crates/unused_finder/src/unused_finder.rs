@@ -22,16 +22,16 @@ use ahashmap::{AHashMap, AHashSet};
 use anyhow::{Context, Result};
 use glob_match::glob_match;
 use import_resolver::node_resolver::{
+    caching::{NodeModulesResolverOptions, DEFAULT_EXPORT_CODITIONS, DEFAULT_EXTENSIONS},
     combined_resolver::CombinedResolverCaches,
     internal_resolver::InternalOnlyResolver,
-    caching::{NodeModulesResolverOptions, DEFAULT_EXPORT_CODITIONS, DEFAULT_EXTENSIONS},
     MonorepoResolver,
 };
+use import_resolver::resolve::{PathResolver, TargetEnv};
 use js_err::JsErr;
 use logger::{debug_logf, Logger};
 use rayon::{iter::Either, prelude::*};
 use source_graph::{SegmentKey, SourceFileInput, SourceGraph};
-use import_resolver::resolve::{PathResolver, TargetEnv};
 use tag_graph::TagGraph;
 
 #[derive(Debug)]
@@ -533,12 +533,12 @@ impl UnusedFinder {
         self.update_dirty_files(&logger)?;
 
         // Build SourceGraph from source files for segment-level BFS
-        let source_graph = SourceGraph::new(
+        let source_graph = std::sync::Arc::new(SourceGraph::new(
             self.last_walk_result
                 .source_files
                 .values()
                 .map(Self::to_source_file_input),
-        );
+        ));
 
         // print the entry packages config
         debug_logf!(logger, "Entry packages: {:#?}", self.config.entry_packages);
@@ -554,7 +554,12 @@ impl UnusedFinder {
         ));
         let entry_roots = Self::paths_to_segment_keys(&source_graph, &entrypoints);
         // Tag entry files with no segments directly
-        Self::tag_empty_segment_files(&source_graph, &mut tag_graph, &entrypoints, tag_graph::UsedTag::FROM_ENTRY);
+        Self::tag_empty_segment_files(
+            &source_graph,
+            &mut tag_graph,
+            &entrypoints,
+            tag_graph::UsedTag::FROM_ENTRY,
+        );
         tag_graph.propagate_tags_to_used(
             &source_graph,
             entry_roots,
@@ -572,8 +577,16 @@ impl UnusedFinder {
             Self::count_symbols(&ignored_symbols)
         ));
         let mut ignored_roots = Self::paths_to_segment_keys(&source_graph, &ignored_entrypoints);
-        ignored_roots.extend(Self::symbols_to_segment_keys(&source_graph, &ignored_symbols));
-        Self::tag_empty_segment_files(&source_graph, &mut tag_graph, &ignored_entrypoints, tag_graph::UsedTag::FROM_IGNORED);
+        ignored_roots.extend(Self::symbols_to_segment_keys(
+            &source_graph,
+            &ignored_symbols,
+        ));
+        Self::tag_empty_segment_files(
+            &source_graph,
+            &mut tag_graph,
+            &ignored_entrypoints,
+            tag_graph::UsedTag::FROM_IGNORED,
+        );
         tag_graph.propagate_tags_to_used(
             &source_graph,
             ignored_roots,
@@ -589,7 +602,12 @@ impl UnusedFinder {
             test_entrypoints.len(),
         ));
         let test_roots = Self::paths_to_segment_keys(&source_graph, &test_entrypoints);
-        Self::tag_empty_segment_files(&source_graph, &mut tag_graph, &test_entrypoints, tag_graph::UsedTag::FROM_TEST);
+        Self::tag_empty_segment_files(
+            &source_graph,
+            &mut tag_graph,
+            &test_entrypoints,
+            tag_graph::UsedTag::FROM_TEST,
+        );
         tag_graph.propagate_tags_to_used(
             &source_graph,
             test_roots,
@@ -598,7 +616,11 @@ impl UnusedFinder {
         );
 
         // Build ResultGraph from SourceGraph + TagGraph + source files
-        let mut result_graph = Self::build_result_graph(&source_graph, &tag_graph, &self.last_walk_result.source_files);
+        let mut result_graph = Self::build_result_graph(
+            &source_graph,
+            &tag_graph,
+            &self.last_walk_result.source_files,
+        );
 
         for file in result_graph.files.iter() {
             let file_ids_vec = file
@@ -661,7 +683,9 @@ impl UnusedFinder {
                 }
             }
             if all_symbols_typeonly {
-                result_graph.files[file_id].file_tags.insert(UsedTag::TYPE_ONLY);
+                result_graph.files[file_id]
+                    .file_tags
+                    .insert(UsedTag::TYPE_ONLY);
             }
         }
 
@@ -907,8 +931,7 @@ impl UnusedFinder {
             for symbol in symbol_list {
                 match symbol {
                     ExportedSymbol::Named(name) => {
-                        let seg_sym =
-                            ast_segmenter::ExportedSymbol::Named(name.as_str().into());
+                        let seg_sym = ast_segmenter::ExportedSymbol::Named(name.as_str().into());
                         if let Some(&seg_idx) = sym_to_seg.get(&seg_sym) {
                             keys.push(SegmentKey::new(file_id, seg_idx));
                         } else if let Some(seg_idx) =
@@ -949,7 +972,7 @@ impl UnusedFinder {
     /// Converts segment-level tags into per-file and per-symbol tags for
     /// report generation, replacing the old `sync_tags_to_graph` approach.
     fn build_result_graph(
-        source_graph: &SourceGraph,
+        source_graph: &std::sync::Arc<SourceGraph>,
         tag_graph: &TagGraph,
         source_files: &AHashMap<PathBuf, ResolvedSourceFile>,
     ) -> ResultGraph {
@@ -978,11 +1001,16 @@ impl UnusedFinder {
                                 Self::find_reexport_segment(source_graph, file_id, &seg_sym)
                             })
                         }
-                        ExportedSymbol::Default => {
-                            sym_to_seg.get(&ast_segmenter::ExportedSymbol::Default).copied().or_else(|| {
-                                Self::find_reexport_segment(source_graph, file_id, &ast_segmenter::ExportedSymbol::Default)
-                            })
-                        }
+                        ExportedSymbol::Default => sym_to_seg
+                            .get(&ast_segmenter::ExportedSymbol::Default)
+                            .copied()
+                            .or_else(|| {
+                                Self::find_reexport_segment(
+                                    source_graph,
+                                    file_id,
+                                    &ast_segmenter::ExportedSymbol::Default,
+                                )
+                            }),
                         ExportedSymbol::Namespace | ExportedSymbol::ExecutionOnly => None,
                     };
 
@@ -991,7 +1019,10 @@ impl UnusedFinder {
                         let seg_tag = tag_graph.get_tag(key);
                         let uf_tag = UsedTag::from_bits_truncate(seg_tag.bits());
                         if !uf_tag.is_empty() {
-                            symbol_tags.entry(symbol.clone()).or_default().insert(uf_tag);
+                            symbol_tags
+                                .entry(symbol.clone())
+                                .or_default()
+                                .insert(uf_tag);
                         }
                     }
                 }
@@ -1007,7 +1038,11 @@ impl UnusedFinder {
             });
         }
 
-        ResultGraph { path_to_id, files }
+        ResultGraph {
+            source_graph: source_graph.clone(),
+            path_to_id,
+            files,
+        }
     }
 
     /// Find the segment index that re-exports a given symbol via `exports_from`.

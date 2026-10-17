@@ -2082,6 +2082,7 @@ dependencies = [
  "oxc_span",
  "oxc_utils_parse",
  "pretty_assertions",
+ "segment_cache",
  "test_tmpdir",
 ]
 
@@ -2133,6 +2134,7 @@ dependencies = [
  "ast-segmenter",
  "bitflags",
  "compact_str",
+ "logger",
  "oxc_span",
  "pretty_assertions",
  "source_graph",

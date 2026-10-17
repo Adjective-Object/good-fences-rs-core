@@ -2,6 +2,42 @@
 
 ## Current scope
 
+P0–P3 are complete; P4–P9 remain pending. This recovery finished only P3.4,
+preserving the cancelled agent's uncommitted implementation. No P4 policy work
+or nested delegation was performed.
+
+## P3.4 checkpoint
+
+- Legacy `SourceFileInput` projects lossy maps once in `source_graph/src/legacy.rs`
+  into the authoritative edges. It intentionally lacks owned lexical occurrence
+  facts; legacy type-inclusive lookup and absent/external-target tolerance stay
+  compatible. Unlinked execution sites still retain their own usage tags.
+- `TagGraph` reads `outgoing`/`incoming` in both directions, skips structural
+  evaluation edges, follows checked barrel routes and conservatively expands
+  namespace/execution module targets. Dynamic/require usage remains unchanged;
+  this is not an eager-execution or bundler effects policy.
+- Reports hold the same `Arc<SourceGraph>` in `ResultGraph::source_graph`;
+  result-local file IDs must not be substituted for structural module IDs.
+  Segment reports use TagGraph plus only the pre-existing non-hoisted predecessor
+  chain. They no longer construct SegmentGraph or resolve result metadata.
+  The standalone public ast_segmenter SegmentGraph remains for compatibility.
+- Cache consumers can use `OwnedSourceFileInput::from_ranges` with decoded
+  ranges/facts. The owned export index derives from facts, not legacy maps;
+  cold/cache edges, export identity/routes and lexical resolution match.
+- Regression evidence: five shared usage tests cover both directions, all
+  usage root tags/type filtering, checked barrels, unrelated exports, namespace/
+  async/require/execution, empty modules, external sites and revision reset.
+  Real-filesystem barrel tests now retain both fully and partially used barrels
+  on file/symbol/segment reports. Relative-dependency report tests clear result
+  resolution maps to prove reports read shared structure.
+- Validation (repository-local TMPDIR): `cargo test -p ast-segmenter
+  -p oxc_utils_parse -p import_resolver -p segment_cache -p source_graph
+  -p tag_graph -p unused_finder -p good_fences`: 284 tests
+  (47/9/18/25/31/22/72/60), plus doc tests. `cargo clippy -p source_graph
+  -p tag_graph -p unused_finder --all-targets` and `./scripts/spot-check`
+  pass; existing unrelated warnings remain. No bundler conformance, execution
+  scheduler or fine-grained P9 invalidation is claimed.
+
 ## P3.3 checkpoint
 
 - Added explicit import/require `StructuralResolver` with exact external policy,
@@ -48,9 +84,8 @@
   pass using repository-local TMPDIR. TagGraph/report migration is P3.4;
   missing/external resolution diagnostics and revision APIs are P3.3.
 
-Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P0–P2 are implemented; P3–P9 remain pending.
-The bounded P2 ownership ends here, before P3.
+Phase 0 is historical planning/fixture work. The following P2 checkpoint records
+its original bounded ownership; the current P3 completion is recorded above.
 
 ## P2.3 checkpoint — source-local independence and invalidation
 

@@ -114,3 +114,47 @@ fn link_edges_include_barrel_and_missing_ambiguous_diagnostics() {
     assert!(graph.validate_links().is_err());
     assert!(graph.diagnostics()[0].message.contains("missing"));
 }
+
+#[test]
+fn decoded_cache_ranges_and_facts_link_without_legacy_maps() {
+    use ast_segmenter::{parse_module, ModuleFormat};
+    use segment_cache::{CacheRecord, ParserConfig};
+    use std::path::Path;
+    let source = "before; const before = 1; export {before as x};";
+    let parsed = parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("leaf.ts"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let cold = SourceGraph::from_owned([input("leaf.ts", source)]);
+    let record = CacheRecord::from_parsed(source, &parsed).unwrap();
+    let bytes = record.encode(source).unwrap();
+    drop(parsed);
+    let record = CacheRecord::decode(
+        &bytes,
+        source,
+        ParserConfig::for_path(Path::new("leaf.ts"), ModuleFormat::Esm).unwrap(),
+    )
+    .unwrap();
+    let warm = SourceGraph::from_owned([OwnedSourceFileInput::from_ranges(
+        "leaf.ts".into(),
+        record.module.segments,
+        record.module.facts,
+        Default::default(),
+    )]);
+    assert_eq!(cold.edges(), warm.edges());
+    assert_eq!(
+        cold.file_symbol_to_segment(0),
+        warm.file_symbol_to_segment(0)
+    );
+    assert_eq!(
+        cold.resolve_export(0, "x", Namespace::Value).unwrap(),
+        warm.resolve_export(0, "x", Namespace::Value).unwrap()
+    );
+    assert_eq!(
+        warm.resolve_symbol_in_file(0, "before", 0),
+        Some(SegmentKey::new(0, 1))
+    );
+}

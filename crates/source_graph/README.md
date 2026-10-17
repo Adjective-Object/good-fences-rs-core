@@ -6,6 +6,13 @@ tags and bundler effects. `SourceFileInput` is the legacy tracker adapter.
 and per-occurrence resolution results (also reusable from `segment_cache`).
 
 `edges`, `outgoing` and `incoming` expose one authoritative edge collection.
+Legacy tracker inputs project their lossy maps into this collection once at
+construction/mutation, including checked barrel routes. They have no lexical
+occurrence facts: spans are statement-level, absent targets remain `Unlinked`,
+and import lookups retain the tracker's type-inclusive compatibility policy.
+Use owned inputs for executable validation and precise occurrence metadata.
+`OwnedSourceFileInput::from_ranges` accepts decoded cache ranges/facts without
+reconstructing legacy dependency or variable maps.
 Module nodes preserve empty-file identity. Dependency sites retain source spans,
 binding requests, type namespace and sync/async/function-containment metadata.
 Containment does not authorize eager execution. Evaluation and binding demand
@@ -35,3 +42,7 @@ resolution epochs; `VersionedNode` rejects stale handles even when segment
 indices repeat. Paths are supplied identities: the graph never silently
 canonicalizes them or merges symlink aliases. Refresh/rebuild is deliberately
 coarse, not a claim of minimal P9 invalidation.
+
+Unused analysis shares the immutable graph with reports through `Arc`; the
+legacy export cache is synchronized so parallel report readers remain safe.
+Usage tags and conservative statement-order reporting stay outside this crate.

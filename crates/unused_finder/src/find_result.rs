@@ -21,7 +21,7 @@ pub struct ResultFile {
     pub symbol_tags: AHashMap<ExportedSymbol, UsedTag>,
     /// Import/export metadata from resolution.
     pub import_export_info: ResolvedImportExportInfo,
-    /// Raw dependency specifier to resolved file path, shared with segment reporting.
+    /// Legacy resolution metadata; reporting traverses `ResultGraph::source_graph`.
     pub specifier_to_resolved: AHashMap<String, PathBuf>,
     /// Per-statement segments from ast_segmenter.
     pub segments: Vec<Segment>,
@@ -29,10 +29,12 @@ pub struct ResultFile {
 
 /// Data-only graph result with file-indexed access.
 ///
-/// Replaces the old `Graph` type — stores only the final tagged results
-/// without any traversal or mutation methods.
+/// Shares the immutable structural graph with report generation; file indices
+/// below are result-local and need not equal structural module IDs.
 #[derive(Default, Debug, Clone)]
 pub struct ResultGraph {
+    /// The authoritative graph used to compute these tags and segment reports.
+    pub source_graph: std::sync::Arc<source_graph::SourceGraph>,
     pub path_to_id: AHashMap<PathBuf, usize>,
     pub files: Vec<ResultFile>,
 }

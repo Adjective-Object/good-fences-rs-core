@@ -1,7 +1,12 @@
 use ahashmap::{AHashMap, AHashSet};
-use source_graph::{SegmentKey, SourceGraph};
+use source_graph::{
+    EdgeKind, EdgePurpose, GraphNode, GraphRevision, OccurrenceEdge, SegmentKey, SourceGraph,
+};
 
 use core::fmt::{self, Display};
+
+#[cfg(test)]
+mod shared_tests;
 
 bitflags::bitflags! {
     /// Tracks how a segment or file is transitively used.
@@ -49,15 +54,136 @@ impl Display for UsedTag {
 /// Files with no segments (e.g., empty files) are tracked via a separate
 /// `file_tags` map so they can still be marked as "used" when reached by BFS.
 pub struct TagGraph {
+    revision: Option<GraphRevision>,
     tags: AHashMap<SegmentKey, UsedTag>,
     /// Direct file-level tags for files with no segments.
     file_tags: AHashMap<u32, UsedTag>,
 }
 
 impl TagGraph {
+    /// Discard analysis state after any structural revision.
+    pub fn synchronize(&mut self, source: &SourceGraph) {
+        if self
+            .revision
+            .is_some_and(|revision| revision != source.revision())
+        {
+            self.tags.clear();
+            self.file_tags.clear();
+        }
+        self.revision = Some(source.revision());
+    }
+
+    /// Report-only conservative statement-order policy, not structural effects.
+    pub fn propagate_tags_for_report(
+        &mut self,
+        source: &SourceGraph,
+        roots: Vec<SegmentKey>,
+        tag: UsedTag,
+        follow_type_only: bool,
+        previous: &AHashMap<SegmentKey, SegmentKey>,
+    ) {
+        self.walk(source, roots, tag, follow_type_only, false, Some(previous));
+    }
+
+    fn follows(edge: &OccurrenceEdge, follow_type_only: bool) -> bool {
+        edge.purpose != EdgePurpose::Evaluation && (follow_type_only || !edge.type_only)
+    }
+
+    fn propagate(
+        &mut self,
+        source: &SourceGraph,
+        roots: Vec<SegmentKey>,
+        tag: UsedTag,
+        follow_type_only: bool,
+        reverse: bool,
+    ) {
+        self.walk(source, roots, tag, follow_type_only, reverse, None);
+    }
+
+    fn walk(
+        &mut self,
+        source: &SourceGraph,
+        roots: Vec<SegmentKey>,
+        tag: UsedTag,
+        follow_type_only: bool,
+        reverse: bool,
+        previous: Option<&AHashMap<SegmentKey, SegmentKey>>,
+    ) {
+        self.synchronize(source);
+        let mut queue: std::collections::VecDeque<_> =
+            roots.into_iter().map(GraphNode::Segment).collect();
+        let mut visited = AHashSet::default();
+        let mut files = AHashSet::default();
+        while let Some(node) = queue.pop_front() {
+            if !visited.insert(node) {
+                continue;
+            }
+            let file_id = match node {
+                GraphNode::Segment(key) => {
+                    if source
+                        .file_segments(key.file_id)
+                        .and_then(|s| s.get(key.segment_idx as usize))
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    self.set_tag(key, tag);
+                    if let Some(previous) = previous.and_then(|p| p.get(&key)) {
+                        queue.push_back(GraphNode::Segment(*previous));
+                    }
+                    key.file_id
+                }
+                GraphNode::Module(id) => {
+                    if !reverse {
+                        self.set_file_tag(id, tag);
+                        if let Some(segments) = source.file_segments(id) {
+                            queue.extend(
+                                (0..segments.len())
+                                    .map(|i| GraphNode::Segment(SegmentKey::new(id, i as u32))),
+                            );
+                        }
+                    }
+                    id
+                }
+                GraphNode::Unlinked { .. } => continue,
+            };
+            if reverse {
+                for edge in source
+                    .incoming(node)
+                    .chain(source.incoming(GraphNode::Module(file_id)))
+                {
+                    if Self::follows(edge, follow_type_only) {
+                        queue.push_back(edge.from);
+                    }
+                }
+            } else {
+                if files.insert(file_id) {
+                    if let Some(segments) = source.file_segments(file_id) {
+                        for i in 0..segments.len() {
+                            let site = GraphNode::Segment(SegmentKey::new(file_id, i as u32));
+                            if source.outgoing(site).any(|e| {
+                                e.kind == EdgeKind::Import
+                                    && e.purpose == EdgePurpose::Execution
+                                    && Self::follows(e, follow_type_only)
+                            }) {
+                                queue.push_back(site);
+                            }
+                        }
+                    }
+                }
+                for edge in source.outgoing(node) {
+                    if Self::follows(edge, follow_type_only) {
+                        queue.push_back(edge.to);
+                    }
+                }
+            }
+        }
+    }
+
     /// Create a new empty `TagGraph`.
     pub fn new() -> Self {
         TagGraph {
+            revision: None,
             tags: AHashMap::default(),
             file_tags: AHashMap::default(),
         }
@@ -66,10 +192,7 @@ impl TagGraph {
     /// Get the tag for a specific segment. Returns `UsedTag::empty()` if
     /// the segment has not been tagged.
     pub fn get_tag(&self, key: SegmentKey) -> UsedTag {
-        self.tags
-            .get(&key)
-            .copied()
-            .unwrap_or_else(UsedTag::empty)
+        self.tags.get(&key).copied().unwrap_or_else(UsedTag::empty)
     }
 
     /// Set (union) a tag on a specific segment.
@@ -88,6 +211,12 @@ impl TagGraph {
     /// Returns `UsedTag::empty()` if the file has no segments or no
     /// segments have been tagged.
     pub fn file_tag(&self, source: &SourceGraph, file_id: u32) -> UsedTag {
+        if self
+            .revision
+            .is_some_and(|revision| revision != source.revision())
+        {
+            return UsedTag::empty();
+        }
         // Start with any direct file-level tag (for files with no segments)
         let mut combined = self
             .file_tags
@@ -109,18 +238,8 @@ impl TagGraph {
 }
 
 impl TagGraph {
-    /// Downward BFS: tag all segments reachable from `roots` along import edges.
-    ///
-    /// For each segment in the frontier:
-    /// 1. Tag the segment with `tag`
-    /// 2. Find inter-file imports via `RawModuleDeps` (imports, dynamic_imports,
-    ///    requires, executed_paths)
-    /// 3. Resolve each import to target `SegmentKey`(s) via
-    ///    `SourceGraph::resolve_import_across_files`
-    /// 4. Skip edges where `is_type_only` is true unless `follow_type_only` is set
-    /// 5. Find intra-file dependencies via escaped symbols →
-    ///    `SourceGraph::resolve_symbol_in_file`
-    /// 6. Add unvisited targets to the next frontier
+    /// Downward usage traversal over shared structural edges. Async sites remain
+    /// ordinary usage dependencies; this is not a bundler activation algorithm.
     pub fn propagate_tags_to_used(
         &mut self,
         source: &SourceGraph,
@@ -128,302 +247,12 @@ impl TagGraph {
         tag: UsedTag,
         follow_type_only: bool,
     ) {
-        use std::collections::VecDeque;
-
-        let mut visited: AHashSet<SegmentKey> = AHashSet::default();
-        let mut visited_files: AHashSet<u32> = AHashSet::default();
-        let mut queue: VecDeque<SegmentKey> = VecDeque::new();
-
-        for root in roots {
-            if visited.insert(root) {
-                queue.push_back(root);
-            }
-        }
-
-        while let Some(key) = queue.pop_front() {
-            self.set_tag(key, tag);
-
-            let segments = match source.file_segments(key.file_id) {
-                Some(segs) => segs,
-                None => continue,
-            };
-            let segment = match segments.get(key.segment_idx as usize) {
-                Some(seg) => seg,
-                None => continue,
-            };
-
-            let resolved_import_paths = source
-                .file_resolved_import_paths(key.file_id)
-                .cloned()
-                .unwrap_or_default();
-
-            // When first visiting any segment of a file, follow side-effect
-            // imports from ALL segments in that file. Side-effect imports
-            // (`import './polyfill'`) execute at module load time regardless
-            // of which specific export is used.
-            if visited_files.insert(key.file_id) {
-                for (seg_idx, seg) in segments.iter().enumerate() {
-                    for specifier in &seg.module_deps.executed_paths {
-                        let target_path = match resolved_import_paths.get(specifier) {
-                            Some(p) => p,
-                            None => continue,
-                        };
-                        let target_file_id = match source.file_id(target_path) {
-                            Some(id) => id,
-                            None => continue,
-                        };
-                        Self::enqueue_all_segments(
-                            source,
-                            target_file_id,
-                            &mut visited,
-                            &mut queue,
-                            &mut self.file_tags,
-                            tag,
-                        );
-                    }
-                    // Also tag the side-effect segment itself
-                    if !seg.module_deps.executed_paths.is_empty() {
-                        let side_effect_key = SegmentKey::new(key.file_id, seg_idx as u32);
-                        if visited.insert(side_effect_key) {
-                            queue.push_back(side_effect_key);
-                        }
-                    }
-                }
-            }
-
-            // Inter-file edges: static imports
-            for (specifier, tagged_symbols) in &segment.module_deps.imports {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                for tagged_sym in tagged_symbols {
-                    if !follow_type_only && tagged_sym.tags.is_type_only {
-                        continue;
-                    }
-                    let targets =
-                        Self::resolve_symbol_import(source, target_file_id, &tagged_sym.symbol);
-                    for target_key in targets {
-                        if visited.insert(target_key) {
-                            queue.push_back(target_key);
-                        }
-                    }
-                }
-            }
-
-            // Inter-file edges: dynamic imports
-            for (specifier, symbols) in &segment.module_deps.dynamic_imports {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                for sym in symbols {
-                    let targets = Self::resolve_symbol_import(source, target_file_id, sym);
-                    for target_key in targets {
-                        if visited.insert(target_key) {
-                            queue.push_back(target_key);
-                        }
-                    }
-                }
-            }
-
-            // Inter-file edges: requires (CommonJS — namespace-like, tag all exports)
-            for specifier in &segment.module_deps.requires {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-                Self::enqueue_all_segments(source, target_file_id, &mut visited, &mut queue, &mut self.file_tags, tag);
-            }
-
-            // Inter-file edges: side-effect-only imports (`import './foo'`)
-            for specifier in &segment.module_deps.executed_paths {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-                Self::enqueue_all_segments(source, target_file_id, &mut visited, &mut queue, &mut self.file_tags, tag);
-            }
-
-            // Inter-file edges: re-exports (`export { x } from './b'`, `export * from './b'`)
-            for (specifier, reexports) in &segment.module_deps.exports_from {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                for reexport in reexports {
-                    if !follow_type_only && reexport.tags.is_type_only {
-                        continue;
-                    }
-                    match &reexport.imported_as {
-                        ast_segmenter::ImportTarget::ExportedSymbol(sym) => {
-                            // Resolve one level: find the segment in the target
-                            // file that exports or re-exports this symbol.
-                            // Don't follow re-export chains — let the BFS do that
-                            // by processing the target segment in a later iteration.
-                            let targets = Self::find_exporting_segments(
-                                source,
-                                target_file_id,
-                                sym,
-                            );
-                            for target_key in targets {
-                                if visited.insert(target_key) {
-                                    queue.push_back(target_key);
-                                }
-                            }
-                        }
-                        ast_segmenter::ImportTarget::Namespace => {
-                            // `export * from './b'` — tag all segments in target
-                            Self::enqueue_all_segments(
-                                source,
-                                target_file_id,
-                                &mut visited,
-                                &mut queue,
-                                &mut self.file_tags,
-                                tag,
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Intra-file edges: escaped symbols reference declarations in the same file
-            for (escaped_name, is_type_only) in segment.variables.get_escaped_symbols_with_type_only()
-            {
-                if !follow_type_only && is_type_only {
-                    continue;
-                }
-                if let Some(target_key) = source.resolve_symbol_in_file(
-                    key.file_id,
-                    escaped_name.as_ref(),
-                    key.segment_idx,
-                ) {
-                    if target_key != key && visited.insert(target_key) {
-                        queue.push_back(target_key);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Find segments in a file that export or re-export a given symbol.
-    /// Unlike `resolve_symbol_import`, this does NOT follow re-export chains
-    /// across files — it returns the segment in THIS file that handles the symbol.
-    fn find_exporting_segments(
-        source: &SourceGraph,
-        file_id: u32,
-        sym: &ast_segmenter::ExportedSymbol,
-    ) -> Vec<SegmentKey> {
-        // Check local exports first
-        if let Some(sym_to_seg) = source.file_symbol_to_segment(file_id) {
-            if let Some(&seg_idx) = sym_to_seg.get(sym) {
-                return vec![SegmentKey::new(file_id, seg_idx)];
-            }
-        }
-        // Check re-exports: find the segment that re-exports this symbol
-        if let Some(segments) = source.file_segments(file_id) {
-            for (seg_idx, seg) in segments.iter().enumerate() {
-                for reexports in seg.module_deps.exports_from.values() {
-                    for reexport in reexports {
-                        let exported = match (&reexport.imported_as, &reexport.exported_as) {
-                            (_, Some(exported)) => exported,
-                            (ast_segmenter::ImportTarget::ExportedSymbol(imported), None) => {
-                                imported
-                            }
-                            _ => continue,
-                        };
-                        if exported == sym {
-                            return vec![SegmentKey::new(file_id, seg_idx as u32)];
-                        }
-                    }
-                }
-            }
-        }
-        // Fallback: resolve across files (for star re-exports)
-        source.resolve_import_across_files(file_id, sym)
-    }
-
-    /// Convert a `Symbol` (Named/Default/Namespace) to resolution targets.
-    fn resolve_symbol_import(
-        source: &SourceGraph,
-        target_file_id: u32,
-        symbol: &ast_segmenter::raw_module_deps::Symbol,
-    ) -> Vec<SegmentKey> {
-        use ast_segmenter::raw_module_deps::Symbol;
-        match symbol {
-            Symbol::Named(name) => {
-                let exported = ast_segmenter::ExportedSymbol::Named(name.clone());
-                source.resolve_import_across_files(target_file_id, &exported)
-            }
-            Symbol::Default => {
-                source.resolve_import_across_files(target_file_id, &ast_segmenter::ExportedSymbol::Default)
-            }
-            Symbol::Namespace => {
-                // Namespace import: tag all segments in the target file
-                let mut keys = Vec::new();
-                if let Some(segs) = source.file_segments(target_file_id) {
-                    for idx in 0..segs.len() {
-                        keys.push(SegmentKey::new(target_file_id, idx as u32));
-                    }
-                }
-                keys
-            }
-        }
-    }
-
-    /// Enqueue all segments of a file into the BFS.
-    /// If the file has no segments, directly tag the file.
-    fn enqueue_all_segments(
-        source: &SourceGraph,
-        file_id: u32,
-        visited: &mut AHashSet<SegmentKey>,
-        queue: &mut std::collections::VecDeque<SegmentKey>,
-        file_tags: &mut AHashMap<u32, UsedTag>,
-        tag: UsedTag,
-    ) {
-        if let Some(segs) = source.file_segments(file_id) {
-            if segs.is_empty() {
-                // File has no segments — tag it directly at the file level
-                *file_tags.entry(file_id).or_insert_with(UsedTag::empty) |= tag;
-            } else {
-                for idx in 0..segs.len() {
-                    let key = SegmentKey::new(file_id, idx as u32);
-                    if visited.insert(key) {
-                        queue.push_back(key);
-                    }
-                }
-            }
-        }
+        self.propagate(source, roots, tag, follow_type_only, false);
     }
 
     /// Upward BFS: tag all segments that transitively import any of the `seeds`.
     ///
-    /// Builds a reverse edge index (target → importers) from the `SourceGraph`,
-    /// then BFS-es upward from `seeds` toward root segments. This finds all
-    /// transitive "users" of the seeded segments.
+    /// Reads SourceGraph's reverse index, including namespace/module consumers.
     pub fn propagate_tags_to_users(
         &mut self,
         source: &SourceGraph,
@@ -431,191 +260,7 @@ impl TagGraph {
         tag: UsedTag,
         follow_type_only: bool,
     ) {
-        use std::collections::VecDeque;
-
-        let reverse_edges = Self::build_reverse_edges(source, follow_type_only);
-
-        let mut visited: AHashSet<SegmentKey> = AHashSet::default();
-        let mut queue: VecDeque<SegmentKey> = VecDeque::new();
-
-        for seed in seeds {
-            if visited.insert(seed) {
-                queue.push_back(seed);
-            }
-        }
-
-        while let Some(key) = queue.pop_front() {
-            self.set_tag(key, tag);
-
-            if let Some(importers) = reverse_edges.get(&key) {
-                for &importer_key in importers {
-                    if visited.insert(importer_key) {
-                        queue.push_back(importer_key);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Build a reverse edge index: for each segment B that is imported by A,
-    /// record A in B's reverse-edge set.
-    ///
-    /// Iterates all segments, resolves their forward edges (imports, dynamic
-    /// imports, requires, executed paths, intra-file escaped symbols), and
-    /// records the reverse mapping.
-    fn build_reverse_edges(
-        source: &SourceGraph,
-        follow_type_only: bool,
-    ) -> AHashMap<SegmentKey, Vec<SegmentKey>> {
-        let mut reverse: AHashMap<SegmentKey, Vec<SegmentKey>> = AHashMap::default();
-
-        for (key, segment) in source.iter_segments() {
-            let resolved_import_paths = source
-                .file_resolved_import_paths(key.file_id)
-                .cloned()
-                .unwrap_or_default();
-
-            // Inter-file: static imports
-            for (specifier, tagged_symbols) in &segment.module_deps.imports {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                for tagged_sym in tagged_symbols {
-                    if !follow_type_only && tagged_sym.tags.is_type_only {
-                        continue;
-                    }
-                    let targets =
-                        Self::resolve_symbol_import(source, target_file_id, &tagged_sym.symbol);
-                    for target_key in targets {
-                        reverse.entry(target_key).or_default().push(key);
-                    }
-                }
-            }
-
-            // Inter-file: dynamic imports
-            for (specifier, symbols) in &segment.module_deps.dynamic_imports {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                for sym in symbols {
-                    let targets = Self::resolve_symbol_import(source, target_file_id, sym);
-                    for target_key in targets {
-                        reverse.entry(target_key).or_default().push(key);
-                    }
-                }
-            }
-
-            // Inter-file: requires
-            for specifier in &segment.module_deps.requires {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-                if let Some(segs) = source.file_segments(target_file_id) {
-                    for idx in 0..segs.len() {
-                        let target_key = SegmentKey::new(target_file_id, idx as u32);
-                        reverse.entry(target_key).or_default().push(key);
-                    }
-                }
-            }
-
-            // Inter-file: side-effect-only imports
-            for specifier in &segment.module_deps.executed_paths {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-                if let Some(segs) = source.file_segments(target_file_id) {
-                    for idx in 0..segs.len() {
-                        let target_key = SegmentKey::new(target_file_id, idx as u32);
-                        reverse.entry(target_key).or_default().push(key);
-                    }
-                }
-            }
-
-            // Inter-file: re-exports (`export { x } from`, `export * from`)
-            for (specifier, reexports) in &segment.module_deps.exports_from {
-                let target_path = match resolved_import_paths.get(specifier) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target_file_id = match source.file_id(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                };
-
-                for reexport in reexports {
-                    if !follow_type_only && reexport.tags.is_type_only {
-                        continue;
-                    }
-                    match &reexport.imported_as {
-                        ast_segmenter::ImportTarget::ExportedSymbol(sym) => {
-                            let exported_sym = match sym {
-                                ast_segmenter::ExportedSymbol::Named(name) => {
-                                    ast_segmenter::raw_module_deps::Symbol::Named(name.clone())
-                                }
-                                ast_segmenter::ExportedSymbol::Default => {
-                                    ast_segmenter::raw_module_deps::Symbol::Default
-                                }
-                            };
-                            let targets =
-                                Self::resolve_symbol_import(source, target_file_id, &exported_sym);
-                            for target_key in targets {
-                                reverse.entry(target_key).or_default().push(key);
-                            }
-                        }
-                        ast_segmenter::ImportTarget::Namespace => {
-                            if let Some(segs) = source.file_segments(target_file_id) {
-                                for idx in 0..segs.len() {
-                                    let target_key =
-                                        SegmentKey::new(target_file_id, idx as u32);
-                                    reverse.entry(target_key).or_default().push(key);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Intra-file: escaped symbols
-            for (escaped_name, is_type_only) in segment.variables.get_escaped_symbols_with_type_only()
-            {
-                if !follow_type_only && is_type_only {
-                    continue;
-                }
-                if let Some(target_key) = source.resolve_symbol_in_file(
-                    key.file_id,
-                    escaped_name.as_ref(),
-                    key.segment_idx,
-                ) {
-                    if target_key != key {
-                        reverse.entry(target_key).or_default().push(key);
-                    }
-                }
-            }
-        }
-
-        reverse
+        self.propagate(source, seeds, tag, follow_type_only, true);
     }
 }
 
@@ -632,8 +277,8 @@ mod tests {
     use source_graph::{SourceFileInput, SourceGraph};
 
     use ast_segmenter::raw_module_deps::RawModuleDeps;
-    use ast_segmenter::Segment;
     use ast_segmenter::variables::VariableScope;
+    use ast_segmenter::Segment;
     use oxc_span::Span;
 
     fn make_span(lo: u32, hi: u32) -> Span {
@@ -649,14 +294,16 @@ mod tests {
     }
 
     fn make_source_graph(file_segments: Vec<(&str, Vec<Segment>)>) -> SourceGraph {
-        SourceGraph::new(file_segments.into_iter().map(|(path, segments)| {
-            SourceFileInput {
-                source_file_path: path.into(),
-                segments,
-                resolved_reexport_paths: AHashMap::default(),
-                resolved_import_paths: AHashMap::default(),
-            }
-        }))
+        SourceGraph::new(
+            file_segments
+                .into_iter()
+                .map(|(path, segments)| SourceFileInput {
+                    source_file_path: path.into(),
+                    segments,
+                    resolved_reexport_paths: AHashMap::default(),
+                    resolved_import_paths: AHashMap::default(),
+                }),
+        )
     }
 
     #[test]
@@ -680,17 +327,19 @@ mod tests {
         let key = SegmentKey::new(0, 0);
         tg.set_tag(key, UsedTag::FROM_ENTRY);
         tg.set_tag(key, UsedTag::FROM_TEST);
-        assert_eq!(
-            tg.get_tag(key),
-            UsedTag::FROM_ENTRY | UsedTag::FROM_TEST
-        );
+        assert_eq!(tg.get_tag(key), UsedTag::FROM_ENTRY | UsedTag::FROM_TEST);
     }
 
     #[test]
     fn test_file_tag_unions_all_segments() {
-        let sg = make_source_graph(vec![
-            ("a.ts", vec![make_segment(0, 10), make_segment(10, 20), make_segment(20, 30)]),
-        ]);
+        let sg = make_source_graph(vec![(
+            "a.ts",
+            vec![
+                make_segment(0, 10),
+                make_segment(10, 20),
+                make_segment(20, 30),
+            ],
+        )]);
         let mut tg = TagGraph::new();
 
         // Tag first segment as entry, third as test
@@ -703,18 +352,17 @@ mod tests {
 
     #[test]
     fn test_file_tag_empty_when_no_tags() {
-        let sg = make_source_graph(vec![
-            ("a.ts", vec![make_segment(0, 10), make_segment(10, 20)]),
-        ]);
+        let sg = make_source_graph(vec![(
+            "a.ts",
+            vec![make_segment(0, 10), make_segment(10, 20)],
+        )]);
         let tg = TagGraph::new();
         assert_eq!(tg.file_tag(&sg, 0), UsedTag::empty());
     }
 
     #[test]
     fn test_file_tag_unknown_file_returns_empty() {
-        let sg = make_source_graph(vec![
-            ("a.ts", vec![make_segment(0, 10)]),
-        ]);
+        let sg = make_source_graph(vec![("a.ts", vec![make_segment(0, 10)])]);
         let tg = TagGraph::new();
         // file_id 99 doesn't exist
         assert_eq!(tg.file_tag(&sg, 99), UsedTag::empty());
@@ -773,10 +421,7 @@ mod tests {
     fn segment_exporting(name: &str) -> Segment {
         let mut deps = RawModuleDeps::default();
         let sym = ast_segmenter::ExportedSymbol::from(name);
-        let tagged = TaggedSymbol::new(
-            Symbol::from(name),
-            SymbolTags::default(),
-        );
+        let tagged = TaggedSymbol::new(Symbol::from(name), SymbolTags::default());
         deps.exports_locals.insert(sym, tagged);
         Segment {
             span: make_span(0, 10),
@@ -831,7 +476,11 @@ mod tests {
             let declaration = SegmentKey::new(0, 0);
             let type_user = SegmentKey::new(0, 1);
             let mixed_user = SegmentKey::new(0, 2);
-            for tag in [UsedTag::FROM_ENTRY, UsedTag::FROM_TEST, UsedTag::FROM_IGNORED] {
+            for tag in [
+                UsedTag::FROM_ENTRY,
+                UsedTag::FROM_TEST,
+                UsedTag::FROM_IGNORED,
+            ] {
                 for follow_type_only in [false, true] {
                     let expected = if follow_type_only {
                         tag
@@ -907,14 +556,12 @@ mod tests {
                     source_file_path: "a.ts".into(),
                     segments: vec![{
                         let mut deps = RawModuleDeps::default();
-                        deps.imports
-                            .entry("./b".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(Symbol::Named("foo".into()), SymbolTags::default()));
-                        deps.imports
-                            .entry("./c".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(Symbol::Named("bar".into()), SymbolTags::default()));
+                        deps.imports.entry("./b".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("foo".into()), SymbolTags::default()),
+                        );
+                        deps.imports.entry("./c".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("bar".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,
@@ -938,10 +585,9 @@ mod tests {
                             ast_segmenter::ExportedSymbol::from("foo"),
                             TaggedSymbol::new(Symbol::from("foo"), SymbolTags::default()),
                         );
-                        deps.imports
-                            .entry("./d".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(Symbol::Named("baz".into()), SymbolTags::default()));
+                        deps.imports.entry("./d".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("baz".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,
@@ -964,10 +610,9 @@ mod tests {
                             ast_segmenter::ExportedSymbol::from("bar"),
                             TaggedSymbol::new(Symbol::from("bar"), SymbolTags::default()),
                         );
-                        deps.imports
-                            .entry("./d".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(Symbol::Named("baz".into()), SymbolTags::default()));
+                        deps.imports.entry("./d".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("baz".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,
@@ -1054,10 +699,9 @@ mod tests {
                             ast_segmenter::ExportedSymbol::from("bar"),
                             TaggedSymbol::new(Symbol::from("bar"), SymbolTags::default()),
                         );
-                        deps.imports
-                            .entry("./b".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(Symbol::Named("foo".into()), SymbolTags::default()));
+                        deps.imports.entry("./b".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("foo".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,
@@ -1079,10 +723,9 @@ mod tests {
                             ast_segmenter::ExportedSymbol::from("foo"),
                             TaggedSymbol::new(Symbol::from("foo"), SymbolTags::default()),
                         );
-                        deps.imports
-                            .entry("./a".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(Symbol::Named("bar".into()), SymbolTags::default()));
+                        deps.imports.entry("./a".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("bar".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,
@@ -1192,13 +835,9 @@ mod tests {
                             ast_segmenter::ExportedSymbol::from("foo"),
                             TaggedSymbol::new(Symbol::from("foo"), SymbolTags::default()),
                         );
-                        deps.imports
-                            .entry("./c".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(
-                                Symbol::Named("bar".into()),
-                                SymbolTags::default(),
-                            ));
+                        deps.imports.entry("./c".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("bar".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,
@@ -1223,11 +862,16 @@ mod tests {
         );
 
         let mut tg = TagGraph::new();
-        tg.propagate_tags_to_users(&sg, vec![SegmentKey::new(1, 0)], UsedTag::FROM_IGNORED, false);
+        tg.propagate_tags_to_users(
+            &sg,
+            vec![SegmentKey::new(1, 0)],
+            UsedTag::FROM_IGNORED,
+            false,
+        );
 
         assert_eq!(tg.get_tag(SegmentKey::new(1, 0)), UsedTag::FROM_IGNORED); // B (seed)
         assert_eq!(tg.get_tag(SegmentKey::new(0, 0)), UsedTag::FROM_IGNORED); // A (transitive importer)
-        assert_eq!(tg.get_tag(SegmentKey::new(2, 0)), UsedTag::empty());      // C (downstream, NOT tagged)
+        assert_eq!(tg.get_tag(SegmentKey::new(2, 0)), UsedTag::empty()); // C (downstream, NOT tagged)
     }
 
     #[test]
@@ -1255,13 +899,9 @@ mod tests {
                             ast_segmenter::ExportedSymbol::from("x"),
                             TaggedSymbol::new(Symbol::from("x"), SymbolTags::default()),
                         );
-                        deps.imports
-                            .entry("./c".to_string())
-                            .or_default()
-                            .insert(TaggedSymbol::new(
-                                Symbol::Named("y".into()),
-                                SymbolTags::default(),
-                            ));
+                        deps.imports.entry("./c".to_string()).or_default().insert(
+                            TaggedSymbol::new(Symbol::Named("y".into()), SymbolTags::default()),
+                        );
                         Segment {
                             span: make_span(0, 10),
                             module_deps: deps,

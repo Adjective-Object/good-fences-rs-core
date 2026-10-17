@@ -5,7 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P2 are complete. P3–P9 remain pending; P2 ownership stops before P3.** Both
+**P0–P3 are complete. P4–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -197,12 +197,21 @@ workspace test success.
   mismatched patch rejection. Four managed-filesystem tests cover all listed
   edits and normalized full-rebuild parity. 160 tests across resolver/cache/
   graphs/unused_finder and spot-check pass. Invalidation is coarse by design.
-- [ ] **P3.4 — Converge unused analysis on shared edges.** Depends: P1.1,
+- [x] **P3.4 — Converge unused analysis on shared edges.** Depends: P1.1,
   P1.2, P3.2, P3.3. Adapt `TagGraph` traversals and
   `report::compute_unused_segments`, retiring duplicated dependency logic only
   after parity tests. Acceptance: type-only/ignore/test/file/symbol/segment
   reports preserved or explicitly corrected by regression tests; bundler policy
   never changes existing usage defaults.
+  **Verified:** both TagGraph directions and segment reports traverse the same
+  authoritative edges; legacy maps project once with checked barrel routes.
+  Cache facts/ranges link without tracker maps. Five shared traversal regressions
+  cover entry/test/ignore tags, type filtering, namespaces, async/require/
+  execution edges, empty modules and stale state. Two managed-filesystem barrel
+  regressions fix file/symbol/segment reporting, including partial barrels.
+  All 284 tests across parser/resolver/cache/graphs/unused/good_fences pass;
+  touched-crate clippy and `./scripts/spot-check` pass (existing warnings only).
+  Report-only predecessor policy remains separate from structural effects.
 
 ## P4 — Effects and retention
 

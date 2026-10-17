@@ -15,3 +15,8 @@ Source/resolution epochs invalidate derived handles. Remove tombstones IDs;
 recreation appends, never recycles. Patch paths must match input paths. Resolver
 refresh includes prior misses and rebuilds both indexes/cache; coarse
 invalidation is the initial correctness contract, not P9 minimal invalidation.
+
+Legacy tracker maps project once into the same edge indexes; missing owned
+facts are intentional, not a second nominal IR. Usage walks skip evaluation
+edges, keep checked barrel routes, and own their report-only statement ordering.
+Cache ranges/facts can construct owned inputs without legacy maps.
