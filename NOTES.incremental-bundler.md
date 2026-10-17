@@ -2,7 +2,7 @@
 
 ## Current scope
 
-P0–P5 and P6.1 are complete; P6.2–P9 remain pending. This phase targets
+P0–P5 and P6.1–P6.2 are complete; P6.3–P9 remain pending. This phase targets
 P6.1–P6.3 without nested delegation and stops before P7.
 
 ## P6.1 rewrite backend
@@ -13,6 +13,21 @@ avoid whole-AST reconstruction and the printer's partial comment preservation.
 public bindings/capture are rejected. No source maps or TS/JSX lowering.
 Tests cover overlapping/invalid/UTF-8 spans, binding and assignment shorthand,
 lexical shadows, comments/directives/hashbang and invalid generated identifiers.
+
+## P6.2 single-module emission
+
+`emit::single_module` checks retention freshness, reparses actual JS ESM and
+checks facts/ranges against the shared graph before projecting retained source.
+Dead statements disappear; directives/hashbang and unrelated trivia remain.
+PURE recipes compose recursively, including optional-chain completion guards
+and spread iteration. Terminal optional calls work; nested optional calls or
+private fields inside a guarded PURE callee fail explicitly.
+Native ESM supplies lexical hoisting/TDZ/live exports, not hand-written cells.
+Six Node-backed test groups cover shadows, var/function hoisting, forward TDZ,
+live mutation/aliases/defaults, measurable removal, getter/argument/iterator
+order, late demand, nested recipes and unsupported/stale inputs.
+Dependency-wide clippy finds existing ast-segmenter lint failures; use
+`cargo clippy -p bundler --all-targets --no-deps -- -D warnings` for local lint.
 
 ## P5.3 checkpoint / P6–P8 integration
 

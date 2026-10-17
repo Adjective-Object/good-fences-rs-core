@@ -1,7 +1,7 @@
 # bundler
 
-Library-only effect/retention and exact chunk planning over the checked owned `SourceGraph`.
-This is not a JavaScript emitter, runtime, or unused-report adapter.
+Library-only retention, exact chunk planning and JavaScript ESM emission over
+the checked owned `SourceGraph`. This is not an unused-report adapter.
 
 `retain(graph, evaluation_roots, binding_roots)` keeps module evaluation demand
 separate from binding demand. Every runtime static import/re-export demands the
@@ -47,6 +47,26 @@ cannot validate the output. Output is JavaScript ESM only: no TypeScript or JSX
 lowering. The emitter must reject those language modes. No source maps are
 generated or advertised; generated offsets are not original-source positions.
 Diagnostics for rejected edits refer to original source bytes.
+
+## Single-module emission
+
+`emit::single_module(graph, retention, policy, file_id, source)` returns owned
+JavaScript without writing files. Supply a current retention plan; for public
+exports, request their checked binding routes or the module namespace when
+building retention. Evaluation-only entrypoints need not retain unused exports.
+The emitter reparses source, checks owned facts/ranges against the graph,
+removes dead statements and applies retention's PURE recipes. Output is reparsed
+and semantically checked. Native ESM preserves lexical scopes, hoisting, TDZ,
+live bindings and default/alias exports; no wrapper snapshots are introduced.
+
+PURE erasure evaluates callee/reference and arguments in order, consumes spread
+iterators, preserves optional-chain completion separately from an undefined
+getter value, and composes nested recipes. Fresh arrow parameters avoid capture.
+Optional calls/private fields **inside an optional PURE callee chain** are
+explicitly rejected; ordinary optional terminal calls are supported.
+The current single-module API rejects runtime dependencies (use linked emission),
+CJS/TS/JSX modes, and source-policy unsupported syntax such as TLA/import.meta.
+No externals, implicit TS stripping, source maps or filesystem publication.
 
 ## Root reachability
 

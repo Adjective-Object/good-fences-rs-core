@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P5 and P6.1 are verified; P6.2–P9 remain pending. This bounded phase
+commits: P0–P5 and P6.1–P6.2 are verified; P6.3–P9 remain pending. This bounded phase
 targets P6.1–P6.3 and stops before P7.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
@@ -534,6 +534,12 @@ parser/semantic validation. Whole-AST printing would reconstruct owned syntax
 and only partially preserve leading comments at the pinned revision.
 `bundler::rewrite` proves private lexical renames (including shorthand), overlap
 rejection and preamble preservation. No source maps or TS/JSX lowering.
+
+P6.2 exposes `emit::single_module`: current retention and checked actual source
+drive statement removal and composed PURE recipes. The output remains native
+ESM, preserving scope/hoisting/TDZ/live exports. Node tests validate runtime
+observations and measurable tree shaking. Guarded PURE callee chains with
+nested optional calls/private fields are diagnosed, not incorrectly rewritten.
 
 Choose the emitter strategy with a small pinned-OXC prototype; implement
 single-module rewriting before multi-module/cross-chunk linkage. Gate supported

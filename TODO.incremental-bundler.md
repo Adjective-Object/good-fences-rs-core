@@ -5,7 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P5 and P6.1 are complete. P6.2–P9 remain pending.** Both
+**P0–P5 and P6.1–P6.2 are complete. P6.3–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -261,10 +261,14 @@ workspace test success.
   Checked UTF-8 source edits plus pinned-OXC parser/semantic validation;
   private lexical renames expand shorthand, reject capture/public bindings.
   JS-only emission, no source maps; see bundler README.
-- [ ] **P6.2 — Emit single-module ESM subset.** Depends: P6.1, P4.2.
+- [x] **P6.2 — Emit single-module ESM subset.** Depends: P6.1, P4.2.
   Preserve local evaluation and exports under retention. Runtime tests:
   lexical shadowing, var/function hoisting, forward lexical TDZ, live mutation,
   export aliases/default forms and effect order. Unsupported features fail.
+  `emit::single_module` consumes current retention and owned facts/ranges,
+  tree-shakes statements and composes effect-preserving PURE recipes. Real Node
+  tests exercise scopes/hoisting/TDZ/live exports and optional-chain/getter/spread
+  order. Unsupported modes/dependencies/callee chains return source diagnostics.
 - [ ] **P6.3 — Link multi-module and cross-chunk ESM.** Depends: P6.2, P5.3.
   Preserve instantiation versus evaluation, cycles and live exported bindings;
   resolve/emit namespaces and cross-chunk imports. Compare portable fixtures

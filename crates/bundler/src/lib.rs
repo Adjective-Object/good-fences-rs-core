@@ -1,6 +1,7 @@
 //! Derived retention and exact chunk planning, independent of usage reporting/emission.
 pub mod chunks;
 pub mod effects;
+pub mod emit;
 pub mod manifest;
 pub mod policy;
 pub mod rewrite;
