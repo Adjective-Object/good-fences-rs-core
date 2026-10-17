@@ -3,8 +3,46 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P1.1–P1.5 and P2.1–P2.2 are implemented;
-P2.3–P9 remain pending.
+onward in narrow linear commits. P0–P2 are implemented; P3–P9 remain pending.
+The bounded P2 ownership ends here, before P3.
+
+## P2.3 checkpoint — source-local independence and invalidation
+
+- Cold, warm and cache-disabled records match `parse_module` facts, body and
+  ordered statement ranges exactly, including ESM aliases/star/default exports,
+  destructuring, lexical shadows/forward references, TS declarations/import
+  types, Unicode, directives/hashbang and opaque CJS wrapper/deferred sites.
+- Same-length edits with explicitly restored identical mtime invalidate by
+  source hash. JS/TS/JSX/definition changes invalidate copied records. Effective
+  parser modes match pinned parsing for all 11 supported extension forms and
+  both package formats; package `type` changes reparse `.js`, while explicit
+  ESM/CJS extensions override package policy and stay hits when appropriate.
+- Relocated identical source/sidecars remain hits and re-resolve raw specifiers
+  through real `MonorepoResolver` instances under distinct roots. Neither root
+  appears in persisted bytes. Real resolver extension choices select different
+  targets without changing source facts; package exports/sideEffects, tsconfig
+  and external effects-policy edits leave cache bytes and mtime unchanged.
+  No P4 policy evaluator or P3 graph behavior is claimed.
+- Deleted source reads fail despite orphan caches; deleted dependencies fail
+  fresh resolution while the importing source remains a hit. Identical source
+  recreation may legitimately reuse its orphan cache. Diagnostics are never
+  persisted: current source/path/policy regenerates errors, including generated
+  markers, relocated ESM-as-CJS failure and non-UTF-8 source. Prior good sidecars
+  survive errors but cannot provide stale successful results.
+- Added a workspace OXC revision guard and kept decoder dependency-link checks
+  linear using a source-local lookup map (not persisted). No resolver crate or
+  legacy tracker behavior was modified. READMEs/TODO/PLAN document the public
+  projection and the end of P2; P3 remains pending.
+- Verification: `TMPDIR="$PWD/target/p1-test-tmp" cargo test -p segment_cache
+  -p ast-segmenter -p oxc_utils_parse -p import_resolver -p source_graph
+  -p tag_graph -p unused_finder -p good_fences` passes **267 tests**:
+  cache 25, parser/extractor 47+9, resolver 18, graph 21+17, consumers 70+60.
+  Both existing owned-DTO insta snapshots pass unchanged.
+  `cargo clippy -p segment_cache --all-targets --no-deps` passes with
+  only the existing ftree_cache lifetime warning. `./scripts/spot-check` passes
+  before every P2 milestone commit (47 parser tests and workspace compilation).
+  Linux runtime validation only; Windows replacement behavior was inspected in
+  pinned tempfile, not executed. Full-workspace tests/formatting are not claimed.
 
 ## P2.2 checkpoint — atomic source-adjacent sidecars
 

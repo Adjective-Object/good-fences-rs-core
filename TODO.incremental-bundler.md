@@ -5,8 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0 and P1 are complete; autonomous implementation proceeds through P2–P9 in
-narrow linear commits. P2–P9 remain pending.** Both
+**P0–P2 are complete. P3–P9 remain pending; P2 ownership stops before P3.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -149,11 +148,21 @@ workspace test success.
   publishers, interruption/unwind, corrupt/truncated/oversized caches, deletion/
   edit races, old success after parser/semantic/support failure and filesystem
   write failures. Managed directories and `./scripts/spot-check` pass.
-- [ ] **P2.3 — Prove cache independence and invalidation.** Depends: P2.2.
+- [x] **P2.3 — Prove cache independence and invalidation.** Depends: P2.2.
   Cold/warm parse products match; same-mtime source changes and parser options
   invalidate; relocation re-resolves without embedding absolute paths.
   Tests: package-type mode change, deletion/orphan cache, cached diagnostic
   policy, resolver/effect config changes not contaminating source-local DTOs.
+  **Verified:** 25 cache tests prove exact cold/warm/disabled facts/body/range
+  parity, same-length/same-mtime edits, all effective parser modes, package-type
+  changes and explicit extension overrides, relocated cache reuse with real
+  re-resolution, deleted-source/dependency orphan handling and regenerated
+  current-path diagnostics (including generated markers/invalid UTF-8).
+  Real resolver extension changes select different files while source cache
+  bytes/mtime stay unchanged; package exports/sideEffects, tsconfig and external
+  effects-policy edits do not enter source-local identity. The OXC pin has a
+  workspace identity guard. Targeted cache/parser/resolver/consumer tests,
+  cache clippy and `./scripts/spot-check` pass. No P3 graph work is included.
 
 ## P3 — Shared structural graph
 

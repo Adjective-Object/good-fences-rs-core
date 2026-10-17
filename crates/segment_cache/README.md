@@ -52,4 +52,21 @@ authoritative; callers own resolution/symlink/casing policy.
 Watchers should exclude `is_cache_artifact(path)` results. Deleted sources never
 load orphan records; the cache does not delete or enumerate orphan sidecars.
 
+## Invalidation boundaries
+
+Source hashes, not mtimes, decide hits. Relocating identical source/sidecar bytes
+is a hit when effective parser policy matches; consumers must resolve each raw
+dependency again using the new root. Package `type` is discovered by the caller
+and passed as `ModuleFormat`; `.mjs`/`.mts` and `.cjs`/`.cts` still override it.
+JS/TS/JSX/definition or effective module-mode changes miss even with identical
+source bytes. Resolver extensions/conditions, package exports, `sideEffects`
+metadata and effect DSL configuration are deliberately absent from this cache.
+Those changes invalidate derived resolution/effects later, not source facts.
+
+Cold/warm and disabled-cache results have identical owned facts/body/ranges;
+the warm API intentionally does not reconstruct legacy `Segment` name/tag maps.
+Legacy tracker parsing is untouched and does not automatically opt into this
+bundler-policy cache. There is no P3 graph integration or P4 effects evaluator
+in this crate.
+
 Run `cargo test -p segment_cache` for codec checks.

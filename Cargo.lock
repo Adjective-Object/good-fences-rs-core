@@ -1907,10 +1907,12 @@ version = "0.1.0"
 dependencies = [
  "ast-segmenter",
  "eyre",
+ "import_resolver",
  "logger",
  "oxc_span",
  "serde",
  "serde_cbor",
+ "serde_json",
  "sha2",
  "tempfile",
  "test_tmpdir",

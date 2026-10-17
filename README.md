@@ -134,6 +134,9 @@ tracker, not yet a working bundler. See the
 [phase checklist](TODO.incremental-bundler.md).
 Phase 0 establishes [portable upstream runtime fixtures](fixtures/bundler/README.md)
 from esbuild and rspack; their baseline execution is not bundler conformance.
+P1 provides checked owned parse facts; P2 adds the opt-in
+[`segment_cache` library](crates/segment_cache/README.md) with versioned CBOR and
+atomic source-adjacent sidecars. Existing tracker behavior is unchanged.
 
 ## Setting up the Development Environment
 1. Install a container engine:

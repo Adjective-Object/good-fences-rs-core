@@ -6,7 +6,8 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P1.1–P1.5 and P2.1–P2.2 are verified; P2.3–P9 remain pending. The checklist in
+commits: P0–P2 are verified; P3–P9 remain pending. P2 ownership stops before P3.
+The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
@@ -46,6 +47,7 @@ describes proposed contracts, not APIs that already exist.
 | `visitors/import_require_expr.rs`: `ImportsAndRequires`, `is_global_require`, `scan_import_expr`, `scan_call_expr` | Recognizes string-literal `require` and `import`; rejects shadowed `require` as a module dependency using semantic binding resolution; recognizes a `.then` destructuring pattern. | No source-site boundary IDs; nonliteral paths silently produce no dependency. `.then` name narrowing must be re-proven for rest/computed/default patterns and repeated sites before tree shaking; it is not an execution model. |
 | `crates/oxc_utils_parse/src/lib.rs`: `parse_file`, `parse_bundler_file` | Unchanged tracker compatibility mode parses TS, or TSX for JSX/TSX extensions. P1.3 adds extension-sensitive JS/TS/JSX parsing and explicit package format; `.mjs`/`.mts` and `.cjs`/`.cts` override it. | The tracker helper still does not classify `.cjs` as CJS. Bundler package discovery belongs to callers; parser validation alone does not replace semantic diagnostics, TS/JSX transformation or runtime policy. |
 | `crates/unused_finder/src/parse/exports_visitor_runner.rs`: `get_file_segments`, `PARSE_ARENA` | Reads source; reports parser errors; extracts owned data; resets a worker-local OXC arena. | Legacy tracker still skips an auto-generated-file marker and discards semantic-builder diagnostics. P1.3's separate `parse_module` does neither. No disk parse cache. |
+| `crates/segment_cache`: `CacheRecord`, `load_or_parse` | P2 deterministic bounded CBOR persistence of existing owned facts/body and ordered statement ranges; source/config identity, atomic sibling sidecars, explicit cache outcomes and opt-out. | Not automatically enabled for the legacy tracker; no persisted usage tags, resolved paths or derived effects. Source-adjacent IO is a snapshot API, not a cross-file transaction with external editors. |
 | `crates/source_graph/src/lib.rs`: `SourceGraph`, `SourceFileInput`, `resolve_import_across_files`, `patch_file` | Owns segments and path indexes; follows named/star re-exports with cycle detection; patches/rebuilds one file and clears all re-export cache entries. | No durable IDs, deletion API, typed adjacency, or incremental consumer invalidation. `patch_file` must not accept a mismatched path/input path as a rename. `RefCell` cache is not a ready concurrent linker cache. |
 | Same file: `resolve_symbol_in_file`, `resolve_import_inner`, `build_file` | Name/hoisting lookup and direct/named/star export search. | Let/const references before declaration return no target, although they still bind lexically and may trigger TDZ; `hoisting_for_flags` puts `var` in the fallback category. Namespace-under-name re-exports are explicitly deferred. Star search does not exclude `default` or diagnose ambiguity. Cycle termination is not ESM evaluation correctness. |
 | `crates/source_graph/src/edge.rs`: `SegmentEdge` | A public edge struct containing `from`, `to`, `is_type_only`. | The existence of this struct does not mean graph adjacency uses it. It has neither sync/async kind nor occurrence, evaluation, or boundary metadata. |
@@ -67,8 +69,8 @@ Additional compatibility gates:
   SWC documentation and test slicing without shifting existing OXC output.
 - Workspace OXC components are pinned together at
   `87f065ebf7cde21d1229322f4c7ee58baca5648e` in `Cargo.toml`.
-  There is no workspace `oxc_codegen`/transformer dependency or CBOR codec in the
-  inspected manifests. Check APIs at that revision, not current upstream docs.
+  There is no workspace `oxc_codegen`/transformer dependency. P2 adds the CBOR
+  codec separately from OXC. Check APIs at that revision, not current upstream docs.
   Workspace serde is constrained to `>=1.0.117, <1.0.219`; `segment_cache`
   uses serde_cbor 0.11.2 with locked serde 1.0.218 and SHA-256 0.10.9.
 
@@ -392,6 +394,11 @@ publishers are last-writer-wins with hash/config validation on every read.
 Cache failures are nonfatal, but source read/parse failures remain fatal.
 Pinned tempfile uses Unix rename / Windows MoveFileExW replacement; only Linux
 was executed here. Cache orphans are ignored, never automatically swept.
+P2.3 verifies exact cold/warm/disabled parse-fact parity, unchanged-mtime edits,
+effective parser/package modes, relocation with the real resolver, source and
+dependency deletion/orphans, current-path regenerated diagnostics and separation
+from resolver/effects configuration. The public API is documented in the
+[cache README](crates/segment_cache/README.md). P2 is complete; P3 is not begun.
 
 Implement deterministic DTO encoding/version checks separately from filesystem
 IO. Add atomic sidecars and cache hit/miss reasons. Cover cold/warm equivalence,

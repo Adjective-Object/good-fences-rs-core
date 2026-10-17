@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ast_segmenter::{owned::*, ModuleBody};
 use eyre::ensure;
@@ -83,7 +83,7 @@ impl CacheRecord {
         }
         let facts = &module.facts;
         let bindings: HashSet<_> = facts.bindings.iter().map(|b| b.id).collect();
-        let dependencies: HashSet<_> = facts.dependencies.iter().map(|d| d.id).collect();
+        let dependencies: HashMap<_, _> = facts.dependencies.iter().map(|d| (d.id, d)).collect();
         ensure!(
             bindings.len() == facts.bindings.len()
                 && dependencies.len() == facts.dependencies.len()
@@ -143,7 +143,7 @@ impl CacheRecord {
             span(source, i.span)?;
             span(source, i.imported_span)?;
             ensure!(bindings.contains(&i.binding), "dangling import binding");
-            let dependency = facts.dependencies.iter().find(|d| d.id == i.dependency);
+            let dependency = dependencies.get(&i.dependency);
             ensure!(
                 dependency
                     .is_some_and(|d| d.kind == DependencyKind::Import && contains(d.span, i.span)),
@@ -172,10 +172,9 @@ impl CacheRecord {
             match e.value {
                 ExportValue::Binding(id) => ensure!(bindings.contains(&id), "dangling export"),
                 ExportValue::ReExport { dependency, .. } => ensure!(
-                    facts
-                        .dependencies
-                        .iter()
-                        .any(|d| d.id == dependency && d.kind == DependencyKind::ReExport),
+                    dependencies
+                        .get(&dependency)
+                        .is_some_and(|d| d.kind == DependencyKind::ReExport),
                     "dangling re-export"
                 ),
                 ExportValue::Expression(s) => {
