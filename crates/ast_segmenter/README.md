@@ -13,4 +13,17 @@ The compatibility `SegmentGraph` follows resolved imports and re-exports by
 export name. Side-effect imports and opaque requires depend on every target
 statement, including files without exports; they do not model evaluation timing.
 
+`parse_module(logger, source, path, package_format)` is the fallible bundler
+entrypoint. It checks extension-sensitive parser and semantic diagnostics before
+extracting owned records. Generated-file markers do not skip source, and
+rejected statements fail the entire operation. `try_segment_file` is available
+for callers that already validated an AST and semantic model; `segment_file`
+retains the unused tracker's legacy behavior.
+
+These are parse records, not emitted JavaScript: accepting TS/JSX does not
+implement their transforms. CommonJS parsing is available in `oxc_utils_parse`,
+but `parse_module` explicitly rejects CommonJS extraction pending an opaque-body
+record. TS import/export assignments and namespace exports are also rejected.
+No source-file IO, cache, linking, effect analysis or emission is added here.
+
 Run `cargo test -p ast-segmenter` for extraction and scope regressions.

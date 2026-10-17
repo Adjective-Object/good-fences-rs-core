@@ -6,7 +6,7 @@ current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
 **P0 is complete; autonomous implementation now proceeds through P1–P9 in
-narrow linear commits. P1.1–P1.2 are verified; all other P1–P9 items remain pending.** Both
+narrow linear commits. P1.1–P1.3 are verified; all other P1–P9 items remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -76,12 +76,20 @@ workspace test success.
   requires reach every target statement, including no-export files. Regression
   tests reproduced both gaps before fixes; all 136 affected/dependent tests and
   `./scripts/spot-check` pass.
-- [ ] **P1.3 — Introduce explicit parse policy and diagnostics.** Depends: P0.1.
+- [x] **P1.3 — Introduce explicit parse policy and diagnostics.** Depends: P0.1.
   Add bundler parser mode/module classification contract alongside
   `oxc_utils_parse::parse_file` compatibility adapter; preserve existing tracker
   behavior. Surface semantic diagnostics and rejected statements, never partial
   executable output. Tests: JS/TS/JSX/CJS modes, parser/semantic failures, marker
   comments, unsupported syntax. Create/update crate README before package edits.
+  **Verified:** fallible `parse_bundler_file` takes explicit package format,
+  honors explicit ESM/CJS extensions, and rejects parser diagnostics.
+  `parse_module` validates semantic diagnostics and returns owned records or an
+  error; checked extraction cannot silently drop rejected statements. Legacy
+  tracker policy and generated-file skipping remain unchanged. CommonJS
+  extraction fails explicitly pending P1.5; TS/JSX parsing is not transformation.
+  All 211 tests across parser/extraction and immediate consumers and
+  `./scripts/spot-check` pass.
 - [ ] **P1.4 — Extract owned binding/occurrence IR.** Depends: P1.3.
   Extend extraction around `variables_for_top_level_statements` and
   `RawModuleDeps` with lexical IDs, declaration/reference spans, local import

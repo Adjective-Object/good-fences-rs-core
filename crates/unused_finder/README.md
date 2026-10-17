@@ -4,6 +4,9 @@ Finds unused JavaScript/TypeScript files, exports, and statement segments.
 Configuration selects search roots, entry packages, tests, ignored files/symbols,
 and whether unused types are allowed. The library resolves dependencies,
 propagates usage through `source_graph`/`tag_graph`, and produces reports.
+Its legacy parsing policy accepts TS syntax in JS files and skips files carrying
+the `// This file is auto-generated` marker; the separate bundler parser does not
+inherit that skip rule.
 
 Type-only references do not propagate entry, test, or ignored usage to their
 dependencies. Type exports receive `TypeOnly` metadata independently. An

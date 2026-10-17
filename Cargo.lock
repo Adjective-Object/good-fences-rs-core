@@ -134,6 +134,7 @@ version = "0.2.0-beta.1"
 dependencies = [
  "ahashmap",
  "compact_str",
+ "eyre",
  "logger",
  "logger_srcfile",
  "oxc_allocator",
@@ -576,6 +577,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "eyre"
+version = "0.6.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c08309dbcc659c5549a24ddb9b27027640641b282ef5768267c7e675558986a3"
+dependencies = [
+ "autocfg",
+ "indenter",
+ "once_cell",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -800,6 +812,12 @@ dependencies = [
  "tracing",
  "tsconfig_paths",
 ]
+
+[[package]]
+name = "indenter"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "964de6e86d545b246d84badc0fef527924ace5134f30641c203ef52ba83f58d5"
 
 [[package]]
 name = "indexmap"
@@ -1409,6 +1427,7 @@ dependencies = [
 name = "oxc_utils_parse"
 version = "0.1.0"
 dependencies = [
+ "eyre",
  "oxc_allocator",
  "oxc_ast",
  "oxc_parser",

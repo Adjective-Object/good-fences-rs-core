@@ -222,6 +222,40 @@ pub fn segment_file<'a>(
         .collect()
 }
 
+/// Fail rather than returning a partial statement list under bundler policy.
+/// Callers must first validate parser and semantic diagnostics, as `parse_module` does.
+pub fn try_segment_file<'a>(
+    logger: &impl SrcFileLogger,
+    program: &Program<'a>,
+    semantic: &Semantic<'a>,
+) -> eyre::Result<Vec<Segment>> {
+    for stmt in &program.body {
+        let rejected = match stmt {
+            Statement::WithStatement(_) => Some("with"),
+            Statement::ReturnStatement(_) => Some("top-level return"),
+            Statement::BreakStatement(_) => Some("top-level break"),
+            Statement::ContinueStatement(_) => Some("top-level continue"),
+            Statement::TSImportEqualsDeclaration(_) => Some("TypeScript import assignment"),
+            Statement::TSExportAssignment(_) => Some("TypeScript export assignment"),
+            Statement::TSNamespaceExportDeclaration(_) => Some("TypeScript namespace export"),
+            _ => None,
+        };
+        if let Some(kind) = rejected {
+            let span = stmt.span();
+            eyre::bail!(
+                "unsupported {kind} statement at bytes {}..{}",
+                span.start,
+                span.end
+            );
+        }
+    }
+    let segments = segment_file(logger, program, semantic);
+    eyre::ensure!(
+        segments.len() == program.body.len(),
+        "statement extraction rejected part of the program"
+    );
+    Ok(segments)
+}
 
 #[cfg(test)]
 mod test {

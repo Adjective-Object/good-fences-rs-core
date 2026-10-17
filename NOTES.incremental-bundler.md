@@ -3,8 +3,35 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P1.1–P1.2 are implemented; the remaining bundler
+onward in narrow linear commits. P1.1–P1.3 are implemented; the remaining bundler
 phases are pending.
+
+## P1.3 checkpoint — explicit parser policy and checked extraction
+
+- `oxc_utils_parse::parse_bundler_file` uses extension-sensitive JS/JSX/TS/TSX
+  syntax, an explicit package `ModuleFormat`, and explicit-extension overrides.
+  Unsupported extensions and parser errors/aborts return eyre diagnostics with
+  path and OXC diagnostic ranges. No package discovery or file IO is implied.
+- `ast_segmenter::parse_module` validates semantic early errors before checked
+  extraction and returns only owned `ParsedModule` records. A duplicate lexical
+  declaration is accepted by the low-level parser but rejected at this gate.
+  `try_segment_file` rejects unsupported statements and guards against partial
+  statement output; legacy `segment_file` remains available for tracker callers.
+- Generated markers do not skip bundler input, even when the source is invalid.
+  Tracker compatibility still accepts TS in JS/unknown extensions, uses content
+  module/script detection, and preserves its generated-file skip rule.
+- Low-level parsing supports CommonJS syntax including top-level return.
+  Bundler extraction explicitly rejects CommonJS pending P1.5's opaque body;
+  TS import/export assignments and namespace exports also fail explicitly.
+  Accepted TS/JSX records are not transformed/emitted JavaScript. Binding
+  occurrences, directives/hashbang records and the broader support matrix
+  remain P1.4/P1.5 work.
+- Added eyre at workspace level for the new fallible APIs. Parser README existed
+  before package edits; crate documentation records the separate policies.
+- Verification: all 211 tests across oxc_utils_parse, ast-segmenter,
+  source_graph, tag_graph, unused_finder and good_fences pass with managed
+  temporary directories; `./scripts/spot-check` passes. Existing
+  lifetime/dead-code warnings remain.
 
 ## P1.2 checkpoint — spans and resolved report dependencies
 

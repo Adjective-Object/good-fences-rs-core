@@ -35,3 +35,10 @@ references when merging names.
 Statement spans are zero-based, end-exclusive UTF-8 byte offsets. The legacy
 `SegmentGraph` treats execution-only imports and opaque requires as dependencies
 on all target statements, not only exports; this is not evaluation scheduling.
+
+## Bundler parse policy
+
+`parse_module` uses explicit package format and extension-sensitive language
+modes; validate parser and semantic diagnostics before extraction. It returns
+owned records or an error, never a skipped/partial executable program. Keep the
+legacy unused-tracker adapter separate. TS/JSX parsing is not transformation.
