@@ -13,6 +13,7 @@ use crate::{try_segment_file, Segment};
 pub struct ParsedModule {
     pub source_type: SourceType,
     pub segments: Vec<Segment>,
+    pub facts: crate::owned::ModuleFacts,
 }
 
 /// Parse and extract all statements, rejecting parser, semantic or extraction errors.
@@ -45,9 +46,12 @@ pub fn parse_module(
     let file_logger = WrapFileLogger::new(path.display().to_string(), source.to_owned(), logger);
     let segments = try_segment_file(&file_logger, &parsed.program, &semantic.semantic)
         .wrap_err_with(|| format!("{}: segment extraction failed", path.display()))?;
+    let facts = crate::owned::extract(&parsed.program, &semantic.semantic)
+        .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
     Ok(ParsedModule {
         source_type: parsed.program.source_type,
         segments,
+        facts,
     })
 }
 

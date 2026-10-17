@@ -42,3 +42,10 @@ on all target statements, not only exports; this is not evaluation scheduling.
 modes; validate parser and semantic diagnostics before extraction. It returns
 owned records or an error, never a skipped/partial executable program. Keep the
 legacy unused-tracker adapter separate. TS/JSX parsing is not transformation.
+
+`ParsedModule::facts` is the occurrence-preserving bundler IR; legacy
+`RawModuleDeps` remains a lossy compatibility adapter. Binding IDs are first
+declaration byte offsets and dependency IDs are site byte offsets, local to
+the exact source/configuration. Keep all declaration/reference spans and
+type/value metadata; never expose OXC IDs. Sort DTO collections by source
+position before returning.

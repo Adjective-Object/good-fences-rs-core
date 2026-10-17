@@ -2,6 +2,7 @@ use oxc_ast::ast::ModuleExportName;
 use raw_module_deps::Name;
 
 pub mod name_set;
+pub mod owned;
 pub mod parse;
 pub mod raw_module_deps;
 pub mod segment_graph;

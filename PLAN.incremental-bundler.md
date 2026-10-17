@@ -6,8 +6,14 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P1.1–P1.3 are verified; the rest of P1–P9 remains pending. The checklist in
+commits: P1.1–P1.4 are verified; the rest of P1–P9 remains pending. The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
+
+P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
+binding/declaration/reference records, import aliases and export mappings,
+individual dependency sites, directives and hashbang. IDs are source-local
+byte offsets, not OXC IDs. The legacy maps below remain lossy adapters and
+must not be used as the occurrence IR. CJS opaque extraction remains P1.5.
 
 This plan was grounded by reading the current sources, not by assuming checked
 historical TODOs prove correctness. No Rust tests were run for this documentation

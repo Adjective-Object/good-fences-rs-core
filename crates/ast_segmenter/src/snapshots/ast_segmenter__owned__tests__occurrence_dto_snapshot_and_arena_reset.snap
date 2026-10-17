@@ -1,0 +1,691 @@
+---
+source: crates/ast_segmenter/src/owned_tests.rs
+expression: facts
+---
+ModuleFacts {
+    bindings: [
+        Binding {
+            id: BindingId(
+                41,
+            ),
+            name: "main",
+            declarations: [
+                Span {
+                    start: 41,
+                    end: 45,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: true,
+            constant: false,
+            type_only: false,
+        },
+        Binding {
+            id: BindingId(
+                62,
+            ),
+            name: "alias",
+            declarations: [
+                Span {
+                    start: 62,
+                    end: 67,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: true,
+            constant: false,
+            type_only: false,
+        },
+        Binding {
+            id: BindingId(
+                74,
+            ),
+            name: "Shape",
+            declarations: [
+                Span {
+                    start: 74,
+                    end: 79,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: true,
+            constant: false,
+            type_only: true,
+        },
+        Binding {
+            id: BindingId(
+                108,
+            ),
+            name: "ns",
+            declarations: [
+                Span {
+                    start: 108,
+                    end: 110,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: true,
+            constant: false,
+            type_only: false,
+        },
+        Binding {
+            id: BindingId(
+                155,
+            ),
+            name: "T",
+            declarations: [
+                Span {
+                    start: 155,
+                    end: 156,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: false,
+            constant: false,
+            type_only: true,
+        },
+        Binding {
+            id: BindingId(
+                172,
+            ),
+            name: "value",
+            declarations: [
+                Span {
+                    start: 172,
+                    end: 177,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: false,
+            constant: true,
+            type_only: false,
+        },
+        Binding {
+            id: BindingId(
+                319,
+            ),
+            name: "renamed",
+            declarations: [
+                Span {
+                    start: 319,
+                    end: 326,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: false,
+            constant: true,
+            type_only: false,
+        },
+        Binding {
+            id: BindingId(
+                331,
+            ),
+            name: "rest",
+            declarations: [
+                Span {
+                    start: 331,
+                    end: 335,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: false,
+            constant: true,
+            type_only: false,
+        },
+        Binding {
+            id: BindingId(
+                367,
+            ),
+            name: "named",
+            declarations: [
+                Span {
+                    start: 367,
+                    end: 372,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: true,
+            import: false,
+            constant: false,
+            type_only: false,
+        },
+    ],
+    references: [
+        Reference {
+            name: "alias",
+            span: Span {
+                start: 143,
+                end: 148,
+            },
+            binding: Some(
+                BindingId(
+                    62,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+        },
+        Reference {
+            name: "Shape",
+            span: Span {
+                start: 159,
+                end: 164,
+            },
+            binding: Some(
+                BindingId(
+                    74,
+                ),
+            ),
+            read: false,
+            write: false,
+            type_only: true,
+        },
+        Reference {
+            name: "T",
+            span: Span {
+                start: 179,
+                end: 180,
+            },
+            binding: Some(
+                BindingId(
+                    155,
+                ),
+            ),
+            read: false,
+            write: false,
+            type_only: true,
+        },
+        Reference {
+            name: "main",
+            span: Span {
+                start: 183,
+                end: 187,
+            },
+            binding: Some(
+                BindingId(
+                    41,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+        },
+        Reference {
+            name: "alias",
+            span: Span {
+                start: 197,
+                end: 202,
+            },
+            binding: Some(
+                BindingId(
+                    62,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+        },
+        Reference {
+            name: "T",
+            span: Span {
+                start: 226,
+                end: 227,
+            },
+            binding: Some(
+                BindingId(
+                    155,
+                ),
+            ),
+            read: false,
+            write: false,
+            type_only: true,
+        },
+        Reference {
+            name: "ns",
+            span: Span {
+                start: 339,
+                end: 341,
+            },
+            binding: Some(
+                BindingId(
+                    108,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+        },
+        Reference {
+            name: "require",
+            span: Span {
+                start: 422,
+                end: 429,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+        },
+        Reference {
+            name: "require",
+            span: Span {
+                start: 441,
+                end: 448,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+        },
+    ],
+    dependencies: [
+        Dependency {
+            id: DependencyId(
+                34,
+            ),
+            kind: Import,
+            span: Span {
+                start: 34,
+                end: 95,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 86,
+                end: 94,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                96,
+            ),
+            kind: Import,
+            span: Span {
+                start: 96,
+                end: 125,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 116,
+                end: 124,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                126,
+            ),
+            kind: Import,
+            span: Span {
+                start: 126,
+                end: 142,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 133,
+                end: 141,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                230,
+            ),
+            kind: ReExport,
+            span: Span {
+                start: 230,
+                end: 270,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 261,
+                end: 269,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                271,
+            ),
+            kind: ReExport,
+            span: Span {
+                start: 271,
+                end: 301,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 292,
+                end: 300,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                384,
+            ),
+            kind: DynamicImport,
+            span: Span {
+                start: 384,
+                end: 400,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 391,
+                end: 399,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                404,
+            ),
+            kind: DynamicImport,
+            span: Span {
+                start: 404,
+                end: 420,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 411,
+                end: 419,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                422,
+            ),
+            kind: Require,
+            span: Span {
+                start: 422,
+                end: 439,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 430,
+                end: 438,
+            },
+            type_only: false,
+        },
+        Dependency {
+            id: DependencyId(
+                441,
+            ),
+            kind: Require,
+            span: Span {
+                start: 441,
+                end: 458,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 449,
+                end: 457,
+            },
+            type_only: false,
+        },
+    ],
+    imports: [
+        ImportBinding {
+            dependency: DependencyId(
+                34,
+            ),
+            binding: BindingId(
+                41,
+            ),
+            imported: Name(
+                "default",
+            ),
+            span: Span {
+                start: 41,
+                end: 45,
+            },
+            imported_span: Span {
+                start: 41,
+                end: 45,
+            },
+            type_only: false,
+        },
+        ImportBinding {
+            dependency: DependencyId(
+                34,
+            ),
+            binding: BindingId(
+                62,
+            ),
+            imported: Name(
+                "str name",
+            ),
+            span: Span {
+                start: 48,
+                end: 67,
+            },
+            imported_span: Span {
+                start: 48,
+                end: 58,
+            },
+            type_only: false,
+        },
+        ImportBinding {
+            dependency: DependencyId(
+                34,
+            ),
+            binding: BindingId(
+                74,
+            ),
+            imported: Name(
+                "Shape",
+            ),
+            span: Span {
+                start: 69,
+                end: 79,
+            },
+            imported_span: Span {
+                start: 74,
+                end: 79,
+            },
+            type_only: true,
+        },
+        ImportBinding {
+            dependency: DependencyId(
+                96,
+            ),
+            binding: BindingId(
+                108,
+            ),
+            imported: Namespace,
+            span: Span {
+                start: 103,
+                end: 110,
+            },
+            imported_span: Span {
+                start: 103,
+                end: 110,
+            },
+            type_only: false,
+        },
+    ],
+    exports: [
+        Export {
+            name: Some(
+                "public name",
+            ),
+            value: Binding(
+                BindingId(
+                    62,
+                ),
+            ),
+            span: Span {
+                start: 197,
+                end: 219,
+            },
+            name_span: Some(
+                Span {
+                    start: 206,
+                    end: 219,
+                },
+            ),
+            type_only: false,
+        },
+        Export {
+            name: Some(
+                "T",
+            ),
+            value: Binding(
+                BindingId(
+                    155,
+                ),
+            ),
+            span: Span {
+                start: 221,
+                end: 227,
+            },
+            name_span: Some(
+                Span {
+                    start: 226,
+                    end: 227,
+                },
+            ),
+            type_only: true,
+        },
+        Export {
+            name: Some(
+                "other",
+            ),
+            value: ReExport {
+                dependency: DependencyId(
+                    230,
+                ),
+                imported: Name(
+                    "default",
+                ),
+            },
+            span: Span {
+                start: 238,
+                end: 254,
+            },
+            name_span: Some(
+                Span {
+                    start: 249,
+                    end: 254,
+                },
+            ),
+            type_only: false,
+        },
+        Export {
+            name: Some(
+                "all",
+            ),
+            value: ReExport {
+                dependency: DependencyId(
+                    271,
+                ),
+                imported: Namespace,
+            },
+            span: Span {
+                start: 271,
+                end: 301,
+            },
+            name_span: Some(
+                Span {
+                    start: 283,
+                    end: 286,
+                },
+            ),
+            type_only: false,
+        },
+        Export {
+            name: Some(
+                "renamed",
+            ),
+            value: Binding(
+                BindingId(
+                    319,
+                ),
+            ),
+            span: Span {
+                start: 309,
+                end: 342,
+            },
+            name_span: Some(
+                Span {
+                    start: 319,
+                    end: 326,
+                },
+            ),
+            type_only: false,
+        },
+        Export {
+            name: Some(
+                "rest",
+            ),
+            value: Binding(
+                BindingId(
+                    331,
+                ),
+            ),
+            span: Span {
+                start: 309,
+                end: 342,
+            },
+            name_span: Some(
+                Span {
+                    start: 331,
+                    end: 335,
+                },
+            ),
+            type_only: false,
+        },
+        Export {
+            name: Some(
+                "default",
+            ),
+            value: Binding(
+                BindingId(
+                    367,
+                ),
+            ),
+            span: Span {
+                start: 343,
+                end: 403,
+            },
+            name_span: None,
+            type_only: false,
+        },
+    ],
+    directives: [
+        Directive {
+            value: "use strict",
+            span: Span {
+                start: 20,
+                end: 33,
+            },
+        },
+    ],
+    hashbang: Some(
+        Directive {
+            value: "/usr/bin/env node",
+            span: Span {
+                start: 0,
+                end: 19,
+            },
+        },
+    ),
+}

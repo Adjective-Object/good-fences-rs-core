@@ -3,8 +3,32 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P1.1–P1.3 are implemented; the remaining bundler
+onward in narrow linear commits. P1.1–P1.4 are implemented; the remaining bundler
 phases are pending.
+
+## P1.4 checkpoint — owned lexical and dependency occurrences
+
+- Added `ast_segmenter::owned` DTOs via `ParsedModule::facts`, leaving
+  `Segment`, `VariableScope`, `RawModuleDeps` and their legacy consumers intact.
+  Binding IDs identify first declaration byte positions; dependency IDs
+  identify expression/declaration byte positions within the exact source.
+  Resolved lexical references do not depend on statement order. No OXC IDs
+  or borrowed AST data escape.
+- Preserve all binding declarations (including var redeclarations), references
+  with read/write/type-only metadata, imported local aliases, local/default/
+  string-named/star/namespace exports, repeated static/dynamic/require sites,
+  directives and hashbang. Anonymous default expressions are not falsely
+  identified as live local bindings. Nonliteral dependency calls fail.
+- Tests cover lexical/var forward uses, nested closures, scope shadowing,
+  object/array/default/rest destructuring, catch and method parameters,
+  repeated imports/requires, type/runtime references and arena reset/reuse/
+  drop. An insta snapshot pins deterministic owned DTO output.
+- Verification: `TMPDIR="$PWD/target/p1-test-tmp" cargo test -p ast-segmenter
+  -p source_graph -p tag_graph -p unused_finder -p good_fences
+  -p oxc_utils_parse` passes 216 tests (39/21/17/70/60/9).
+  `TMPDIR="$PWD/target/p1-test-tmp" ./scripts/spot-check` passes, including
+  workspace compilation. Existing lifetime/dead-code warnings remain.
+  CJS opaque extraction and the executable support matrix remain P1.5.
 
 ## P1.3 checkpoint — explicit parser policy and checked extraction
 

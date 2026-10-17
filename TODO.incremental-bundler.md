@@ -6,7 +6,7 @@ current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
 **P0 is complete; autonomous implementation now proceeds through P1–P9 in
-narrow linear commits. P1.1–P1.3 are verified; all other P1–P9 items remain pending.** Both
+narrow linear commits. P1.1–P1.4 are verified; all other P1–P9 items remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -90,13 +90,21 @@ workspace test success.
   extraction fails explicitly pending P1.5; TS/JSX parsing is not transformation.
   All 211 tests across parser/extraction and immediate consumers and
   `./scripts/spot-check` pass.
-- [ ] **P1.4 — Extract owned binding/occurrence IR.** Depends: P1.3.
+- [x] **P1.4 — Extract owned binding/occurrence IR.** Depends: P1.3.
   Extend extraction around `variables_for_top_level_statements` and
   `RawModuleDeps` with lexical IDs, declaration/reference spans, local import
   aliases, export mappings and individual dynamic sites. Keep old adapters.
   Tests: forward lexical/var references, shadowing, nested functions,
   destructuring, repeated imports, string-named exports, arena reset; insta DTO
   snapshots with deterministic ordering. No OXC arena IDs escape.
+  **Verified:** additive `ParsedModule::facts` owns source-local binding IDs,
+  all declaration/reference spans, type/read/write flags, aliases and export
+  mappings (including destructuring, defaults, string names and re-exports).
+  Dependencies preserve individual static/dynamic/require sites. Tests cover
+  forward lexical/var resolution, redeclarations, nested/shadowed bindings,
+  repeated specifiers, directives/hashbang, exact UTF-8 slices and arena
+  reset/reuse/drop. Deterministic insta DTO snapshot and all 216 parser/consumer
+  tests plus `./scripts/spot-check` pass; legacy adapters remain unchanged.
 - [ ] **P1.5 — Add opaque CJS and support matrix.** Depends: P1.4.
   Represent one executable CJS body plus dependency occurrences; classify global
   versus shadowed require/module/exports. Test reassignment, nested require,
