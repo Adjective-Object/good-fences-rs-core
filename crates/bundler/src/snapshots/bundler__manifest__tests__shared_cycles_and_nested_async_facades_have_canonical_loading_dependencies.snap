@@ -1,0 +1,499 @@
+---
+source: crates/bundler/src/manifest_tests.rs
+expression: manifest
+---
+DiagnosticManifest {
+    revision: GraphRevision {
+        source: 0,
+        resolution: 0,
+    },
+    policy_fingerprint: [
+        134,
+        181,
+        48,
+        219,
+        60,
+        108,
+        153,
+        120,
+        249,
+        76,
+        127,
+        184,
+        159,
+        86,
+        100,
+        183,
+        166,
+        101,
+        224,
+        2,
+        160,
+        32,
+        77,
+        101,
+        241,
+        59,
+        2,
+        13,
+        230,
+        56,
+        232,
+        49,
+    ],
+    chunks: {
+        ChunkId(
+            {
+                Entry(
+                    "a",
+                ),
+            },
+        ): [
+            Module(
+                "a.ts",
+            ),
+            Segment {
+                module: "a.ts",
+                index: 1,
+            },
+        ],
+        ChunkId(
+            {
+                Entry(
+                    "a",
+                ),
+                Entry(
+                    "b",
+                ),
+                Async(
+                    AsyncSiteId {
+                        module: "a.ts",
+                        offset: 20,
+                    },
+                ),
+            },
+        ): [
+            Module(
+                "cycle.ts",
+            ),
+            Module(
+                "shared.ts",
+            ),
+            Segment {
+                module: "cycle.ts",
+                index: 1,
+            },
+            Segment {
+                module: "shared.ts",
+                index: 1,
+            },
+        ],
+        ChunkId(
+            {
+                Entry(
+                    "b",
+                ),
+            },
+        ): [
+            Module(
+                "b.ts",
+            ),
+        ],
+        ChunkId(
+            {
+                Async(
+                    AsyncSiteId {
+                        module: "a.ts",
+                        offset: 20,
+                    },
+                ),
+            },
+        ): [
+            Module(
+                "nested.ts",
+            ),
+            Segment {
+                module: "nested.ts",
+                index: 0,
+            },
+            Segment {
+                module: "nested.ts",
+                index: 1,
+            },
+        ],
+        ChunkId(
+            {
+                Async(
+                    AsyncSiteId {
+                        module: "nested.ts",
+                        offset: 20,
+                    },
+                ),
+            },
+        ): [
+            Module(
+                "empty.ts",
+            ),
+        ],
+    },
+    entries: {
+        "a": Facade {
+            synthetic: EntryFacade(
+                "a",
+            ),
+            demand: FacadeDemand {
+                evaluation_modules: {
+                    "a.ts",
+                },
+                binding_nodes: {},
+            },
+            load_chunks: {
+                ChunkId(
+                    {
+                        Entry(
+                            "a",
+                        ),
+                    },
+                ),
+                ChunkId(
+                    {
+                        Entry(
+                            "a",
+                        ),
+                        Entry(
+                            "b",
+                        ),
+                        Async(
+                            AsyncSiteId {
+                                module: "a.ts",
+                                offset: 20,
+                            },
+                        ),
+                    },
+                ),
+            },
+        },
+        "b": Facade {
+            synthetic: EntryFacade(
+                "b",
+            ),
+            demand: FacadeDemand {
+                evaluation_modules: {
+                    "b.ts",
+                },
+                binding_nodes: {},
+            },
+            load_chunks: {
+                ChunkId(
+                    {
+                        Entry(
+                            "a",
+                        ),
+                        Entry(
+                            "b",
+                        ),
+                        Async(
+                            AsyncSiteId {
+                                module: "a.ts",
+                                offset: 20,
+                            },
+                        ),
+                    },
+                ),
+                ChunkId(
+                    {
+                        Entry(
+                            "b",
+                        ),
+                    },
+                ),
+            },
+        },
+    },
+    async_facades: {
+        AsyncSiteId {
+            module: "a.ts",
+            offset: 20,
+        }: AsyncFacade {
+            consumer: Segment {
+                module: "a.ts",
+                index: 1,
+            },
+            target: Module(
+                "nested.ts",
+            ),
+            facade: Facade {
+                synthetic: AsyncFacade(
+                    AsyncSiteId {
+                        module: "a.ts",
+                        offset: 20,
+                    },
+                ),
+                demand: FacadeDemand {
+                    evaluation_modules: {
+                        "nested.ts",
+                    },
+                    binding_nodes: {
+                        Module(
+                            "nested.ts",
+                        ),
+                    },
+                },
+                load_chunks: {
+                    ChunkId(
+                        {
+                            Entry(
+                                "a",
+                            ),
+                            Entry(
+                                "b",
+                            ),
+                            Async(
+                                AsyncSiteId {
+                                    module: "a.ts",
+                                    offset: 20,
+                                },
+                            ),
+                        },
+                    ),
+                    ChunkId(
+                        {
+                            Async(
+                                AsyncSiteId {
+                                    module: "a.ts",
+                                    offset: 20,
+                                },
+                            ),
+                        },
+                    ),
+                },
+            },
+        },
+        AsyncSiteId {
+            module: "nested.ts",
+            offset: 20,
+        }: AsyncFacade {
+            consumer: Segment {
+                module: "nested.ts",
+                index: 1,
+            },
+            target: Module(
+                "empty.ts",
+            ),
+            facade: Facade {
+                synthetic: AsyncFacade(
+                    AsyncSiteId {
+                        module: "nested.ts",
+                        offset: 20,
+                    },
+                ),
+                demand: FacadeDemand {
+                    evaluation_modules: {
+                        "empty.ts",
+                    },
+                    binding_nodes: {
+                        Module(
+                            "empty.ts",
+                        ),
+                    },
+                },
+                load_chunks: {
+                    ChunkId(
+                        {
+                            Async(
+                                AsyncSiteId {
+                                    module: "nested.ts",
+                                    offset: 20,
+                                },
+                            ),
+                        },
+                    ),
+                },
+            },
+        },
+    },
+    chunk_dependencies: {
+        ChunkDependency {
+            from: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                },
+            ),
+            to: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                    Entry(
+                        "b",
+                    ),
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+        ChunkDependency {
+            from: ChunkId(
+                {
+                    Entry(
+                        "b",
+                    ),
+                },
+            ),
+            to: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                    Entry(
+                        "b",
+                    ),
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+        ChunkDependency {
+            from: ChunkId(
+                {
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+            to: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                    Entry(
+                        "b",
+                    ),
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+    },
+    synthetic_nodes: {
+        EntryFacade(
+            "a",
+        ),
+        EntryFacade(
+            "b",
+        ),
+        AsyncFacade(
+            AsyncSiteId {
+                module: "a.ts",
+                offset: 20,
+            },
+        ),
+        AsyncFacade(
+            AsyncSiteId {
+                module: "nested.ts",
+                offset: 20,
+            },
+        ),
+        ModuleIdentity {
+            module: "a.ts",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "b.ts",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "b",
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "cycle.ts",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                    Entry(
+                        "b",
+                    ),
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "empty.ts",
+            chunk: ChunkId(
+                {
+                    Async(
+                        AsyncSiteId {
+                            module: "nested.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "nested.ts",
+            chunk: ChunkId(
+                {
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "shared.ts",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "a",
+                    ),
+                    Entry(
+                        "b",
+                    ),
+                    Async(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                        },
+                    ),
+                },
+            ),
+        },
+    },
+}

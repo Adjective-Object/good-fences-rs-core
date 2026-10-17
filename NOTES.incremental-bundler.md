@@ -2,9 +2,42 @@
 
 ## Current scope
 
-P0–P4 and P5.1–P5.2 are complete; P5.3–P9 remain pending. This phase stops before P6, without
+P0–P5 are complete; P6–P9 remain pending. This phase stops before P6, without
 nested delegation. Effects/retention/recipes are library plans, not emitted
 JavaScript or runtime conformance evidence.
+
+## P5.3 checkpoint / P6–P8 integration
+
+- `crates/bundler/src/chunks.rs`: call `partition(graph, entry_RootSeeds, policy)`
+  after constructing the owned shared graph. `ChunkPlan` includes final P4
+  retention/recipes, exact roots, closures, node sets and chunks. There is no
+  parallel source graph or usage-tag dependency.
+- `crates/bundler/src/manifest.rs`: call `diagnostic_manifest(graph, plan, policy)`
+  for deterministic `DiagnosticManifest::{entries,async_facades,chunks,
+  chunk_dependencies,synthetic_nodes}`. Facades are separate artifacts, module
+  identities keep their existing chunk, and empty modules remain represented.
+- `Facade::{demand,load_chunks}` separates initial requested evaluation/bindings
+  from transitive code availability. Async sites preserve consumer/target
+  identity; source occurrence/function timing stays in the shared graph. No
+  async relationship becomes a synchronous chunk edge. `ChunkPlan::retention`
+  preserves effect order and source occurrence indices, not a total schedule.
+- Every module still needs a distinct runtime evaluation record even when its
+  code shares a chunk. Deferred CJS require regression proves only initial entry
+  identity is requested by the facade, not all available lazy module bodies.
+  Namespace-only pure bindings do not leak into evaluation-only root load sets.
+- Check partition/manifest `is_current(graph, policy)` on the same graph
+  instance; entry changes require recomputation too. Identity offsets and
+  graph-local indices are revision-local; chunk IDs are canonical root sets,
+  not content filenames. External nodes remain explicit occurrence placeholders
+  with no local evaluation demand or executable external policy.
+- Verified 37 bundler + 31 source_graph tests, three reviewed deterministic
+  manifest snapshots and order-invariance checks, targeted clippy and mandatory
+  `./scripts/spot-check`. P6 emitter, P7 registry/proxies and P8 loader/TLA remain
+  unimplemented; no emitted runtime fixture/conformance claim.
+- Final compatibility gate: all 264 tests pass across ast-segmenter (50),
+  bundler (37), import_resolver (18), oxc_utils_parse (9), segment_cache (25),
+  source_graph (31), tag_graph (22), unused_finder (72). Existing unrelated
+  warnings remain; targeted bundler clippy has no new warnings.
 
 ## P5.2 checkpoint
 
@@ -68,7 +101,7 @@ JavaScript or runtime conformance evidence.
   import_resolver 18. Targeted clippy and `./scripts/spot-check` pass; inspected
   reason, guard, policy-diagnostic and plan snapshots. Existing warnings remain.
 
-## P5/P6 handoff APIs (no implementation beyond P4)
+## Retention/emitter handoff APIs
 
 - Parse with `ast_segmenter::parse_module`, or get `CacheOutcome::record.module`
   from `segment_cache::load_or_parse`. Pass owned facts/ranges and current
@@ -82,7 +115,7 @@ JavaScript or runtime conformance evidence.
   StaticEvaluation, BindingEvaluation, ModuleEffect and EffectOrder edges are
   derived constraints; source_edge indexes the original shared occurrence.
   Consult that occurrence's activation/function/site metadata. Async indices
-  are retained boundaries, not yet P5 root identities. Do not eagerly execute
+  are retained boundaries; P5 maps them to separate `AsyncSiteId` roots. Do not eagerly execute
   deferred requires or interpret sorted plan edges as a total runtime schedule.
 - `RetentionPlan::effects` maps SegmentKey to derived `StatementEffects`,
   including exact source-range `InvocationRewrite` inputs and `ArgumentGuard`.
@@ -96,8 +129,9 @@ JavaScript or runtime conformance evidence.
   nested expression calls and segment-level binding dependencies are
   conservative. CJS stays opaque. The DSL intentionally has no arbitrary JS,
   dynamic-key inference or alias analysis. External edges are explicit but no
-  executable external/runtime policy exists yet. Root sets, chunking, source
-  rewriting, runtime wrappers and emitted conformance belong to P5 onward.
+  executable external/runtime policy exists yet. P5 now supplies exact root
+  sets, chunking and diagnostic manifests. Source rewriting, runtime wrappers
+  and emitted conformance belong to P6 onward.
 
 ## P4.3 checkpoint
 

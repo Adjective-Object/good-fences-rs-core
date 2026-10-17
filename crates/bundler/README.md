@@ -1,6 +1,6 @@
 # bundler
 
-Library-only effect/retention analysis over the checked owned `SourceGraph`.
+Library-only effect/retention and exact chunk planning over the checked owned `SourceGraph`.
 This is not a JavaScript emitter, runtime, or unused-report adapter.
 
 `retain(graph, evaluation_roots, binding_roots)` keeps module evaluation demand
@@ -56,6 +56,36 @@ before using the plan, and recompute when entry seeds change. Graph-local seeds
 and retention are revision-local; canonical diagnostic mappings are invariant
 under insertion order. This reference implementation prioritizes correctness,
 not a bitset/worklist optimization.
+
+## Diagnostic manifests (P6–P8 handoff)
+
+`manifest::diagnostic_manifest(graph, &ChunkPlan, policy)` checks freshness and
+returns a deterministic `DiagnosticManifest` (inspect with Rust Debug; no output
+files are emitted). `entries` and `async_facades` hold separate facade artifacts,
+each with initial `FacadeDemand` and transitive `load_chunks`. Async facades keep
+the original consumer/target identities; look up their `AsyncSiteId` in the
+owned facts/shared occurrences for source ranges and deferred timing.
+An async relationship is **not** a synchronous chunk dependency.
+
+`chunk_dependencies` is the deduplicated consumer→dependency code-availability
+graph derived from synchronous retention edges, including namespace binding
+expansion. Intra-chunk cycles remain inside their exact chunk; source evaluation
+constraints/occurrence metadata remain in `ChunkPlan::retention` and `SourceGraph`.
+`synthetic_nodes` explicitly lists entry/async facades outside logical chunks
+and module identities inside their existing module-node chunks, even for empty
+modules. These records do not manufacture eager evaluation edges or CJS proxies.
+External nodes are occurrence-based availability placeholders, not emitted code;
+resolve their external specifier through the shared graph.
+
+**Loading code is not evaluating it.** A facade's `evaluation_modules` lists
+only initial requested module identities; its `binding_nodes` preserves namespace
+or lexical demand. Neither chunks, sorted manifest edges, nor transitive load
+sets are a runtime schedule. Distinct module records in one chunk (including
+deferred CJS require targets) must retain separate once-only evaluation state.
+P6 supplies ESM rewriting/instantiation, P7 supplies factories/proxies/cache,
+and P8 supplies dynamic loading/TLA scheduling. No runtime conformance is claimed.
+Use manifests only with the same graph instance and after `is_current` succeeds;
+recompute the partition/manifest after entry, graph, or effect-policy changes.
 
 ## PURE analysis and rewrite contract
 
@@ -117,7 +147,7 @@ equal; pattern/annotation-policy changes change the SHA-256 fingerprint.
 
 `RetentionPlan::policy_fingerprint` and `is_current(graph, policy)` check derived
 state against both graph revision and effective policy. The caller must
-recompute effects/retention (and later chunks/output) on policy changes, never
+recompute effects/retention/chunks/manifests (and later output) on policy changes, never
 reparse solely for a DSL edit. Plan node/edge indices are local to the graph
 instance/revision. Source-local cache identity excludes this entire policy.
 The filesystem regression reanalyzes cache-built facts with the source absent

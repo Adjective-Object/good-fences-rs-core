@@ -1,6 +1,7 @@
-//! Derived effect/retention analysis, independent of usage reporting and emission.
+//! Derived retention and exact chunk planning, independent of usage reporting/emission.
 pub mod chunks;
 pub mod effects;
+pub mod manifest;
 pub mod policy;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};

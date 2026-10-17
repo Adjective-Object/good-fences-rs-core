@@ -5,7 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P4 and P5.1–P5.2 are complete. P5.3–P9 remain pending.** Both
+**P0–P5 are complete. P6–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -243,10 +243,14 @@ workspace test success.
   Compute reachable-site fixed point and canonical exact root sets. Snapshot
   every segment→set and set→chunk mapping; randomized insertion order must not
   change partitions. Assert equal sets iff same logical chunk; no merge/hoist.
-- [ ] **P5.3 — Plan chunk/facade dependencies.** Depends: P5.2, P3.2.
+- [x] **P5.3 — Plan chunk/facade dependencies.** Depends: P5.2, P3.2.
   Emit a diagnostic manifest of entry facades, async facades, chunk edges and
   synthetic nodes, separate from execution scheduling. Test shared cycles,
   nested boundaries and chunks containing separately evaluated modules.
+  Acceptance: 37 bundler + 31 source_graph tests, deterministic facade/chunk/
+  synthetic-node snapshots, targeted clippy and mandatory spot-check pass.
+  Final compatibility gate: all 264 tests across the eight scoped crates pass.
+  P5 produces diagnostic plans only; no emitted-runtime bundle claim.
 
 ## P6 — Correct ESM output
 

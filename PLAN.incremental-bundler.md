@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P4 and P5.1–P5.2 are verified; P5.3–P9 remain pending. This bounded phase
+commits: P0–P5 are verified; P6–P9 remain pending. This bounded phase
 stops before P6; no emission is implemented.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
@@ -486,7 +486,8 @@ binding-to-module evaluation edges make binding-root traversal complete for P5.
 Normalized optional-member shapes and concise-arrow result contexts require
 extractor 4 (schema remains 3); no caller policy enters source-cache identity.
 All 252 tests across the eight scoped crates, targeted clippy and spot-check
-pass. P5 root sets/partitioning and P6 emission remain unimplemented.
+pass. At that P4 checkpoint, P5 root sets/partitioning and P6 emission remained
+unimplemented; P5 evidence follows.
 
 ### P5 — Exact root-set partitioning
 
@@ -506,6 +507,19 @@ seeds, sync+async sharing and tombstone/stale-plan regressions pass (32 bundler
 + 31 source_graph tests), as do targeted clippy and spot-check.
 `SourceGraph::module_ids` enumerates live empty modules after tombstones; a live
 file count must not be treated as an ID upper bound.
+
+P5.3 adds `manifest::diagnostic_manifest`: deterministic entry/async facades,
+synchronous chunk dependencies and explicit synthetic facade/module-identity
+records. Facade initial evaluation/binding demands and code load sets stay
+separate; shared chunks cannot imply eager evaluation. Shared cycles, nested
+async boundaries, empty modules, external sites, deferred CJS code availability,
+namespace-vs-evaluation demand, insertion-order invariance and stale graph/policy
+checks pass (37 bundler + 31 source_graph tests). Three reviewed manifest
+snapshots, targeted clippy and spot-check pass. No source emitter, CJS runtime,
+proxy generation or async evaluator is implemented; stop before P6.
+Final compatibility validation passes all 264 tests across ast-segmenter,
+bundler, import_resolver, oxc_utils_parse, segment_cache, source_graph, tag_graph
+and unused_finder. Existing unrelated warnings remain; no bundler clippy warnings.
 
 Introduce stable entry/boundary identities and a straightforward flood-fill
 reference implementation first. Add reachable-boundary activation fixed point,

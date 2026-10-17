@@ -61,10 +61,19 @@ pub fn node_id(graph: &SourceGraph, node: GraphNode) -> eyre::Result<NodeId> {
                 index: key.segment_idx,
             }
         }
-        GraphNode::Unlinked { dependency, .. } => NodeId::External {
-            module,
-            offset: dependency.0,
-        },
+        GraphNode::Unlinked { dependency, .. } => {
+            ensure!(
+                matches!(
+                    graph.dependency_target(file, dependency),
+                    Some(source_graph::DependencyTarget::External(_))
+                ),
+                "chunk node is not a resolved external site"
+            );
+            NodeId::External {
+                module,
+                offset: dependency.0,
+            }
+        }
     })
 }
 
@@ -155,7 +164,11 @@ pub fn reference_reachability(
     Ok(result)
 }
 
-fn enqueue_binding(retention: &RetentionPlan, node: GraphNode, queue: &mut VecDeque<GraphNode>) {
+pub(crate) fn enqueue_binding(
+    retention: &RetentionPlan,
+    node: GraphNode,
+    queue: &mut VecDeque<GraphNode>,
+) {
     queue.push_back(node);
     if let GraphNode::Module(file) = node {
         // Namespace demand is conservative in P4; evaluation demand is not.
@@ -221,6 +234,13 @@ pub fn partition(
             "entry requires an evaluation or binding root"
         );
         ensure!(
+            !entry
+                .binding_roots
+                .iter()
+                .any(|n| matches!(n, GraphNode::Unlinked { .. })),
+            "entry cannot bind an external site"
+        );
+        ensure!(
             roots.insert(entry.id.clone(), entry.clone()).is_none(),
             "duplicate entry identity"
         );
@@ -235,14 +255,6 @@ pub fn partition(
             .flat_map(|r| r.binding_roots.iter().copied())
             .filter(|n| !matches!(n, GraphNode::Unlinked { .. }))
             .collect();
-        // User entries must not smuggle unlinked binding roots past P4 validation.
-        ensure!(
-            !entries
-                .iter()
-                .flat_map(|r| &r.binding_roots)
-                .any(|n| matches!(n, GraphNode::Unlinked { .. })),
-            "entry cannot bind an external site"
-        );
         let retention = crate::retain_with_policy(graph, &evaluation, &bindings, policy)?;
         let seeds: Vec<_> = roots.values().cloned().collect();
         let reached = reference_reachability(graph, &retention, policy, &seeds)?;

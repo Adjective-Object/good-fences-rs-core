@@ -1,0 +1,134 @@
+---
+source: crates/bundler/src/manifest_tests.rs
+expression: manifest
+---
+DiagnosticManifest {
+    revision: GraphRevision {
+        source: 0,
+        resolution: 0,
+    },
+    policy_fingerprint: [
+        134,
+        181,
+        48,
+        219,
+        60,
+        108,
+        153,
+        120,
+        249,
+        76,
+        127,
+        184,
+        159,
+        86,
+        100,
+        183,
+        166,
+        101,
+        224,
+        2,
+        160,
+        32,
+        77,
+        101,
+        241,
+        59,
+        2,
+        13,
+        230,
+        56,
+        232,
+        49,
+    ],
+    chunks: {
+        ChunkId(
+            {
+                Entry(
+                    "main",
+                ),
+            },
+        ): [
+            Module(
+                "eager.cjs",
+            ),
+            Module(
+                "entry.cjs",
+            ),
+            Module(
+                "lazy.cjs",
+            ),
+            Segment {
+                module: "eager.cjs",
+                index: 0,
+            },
+            Segment {
+                module: "entry.cjs",
+                index: 0,
+            },
+            Segment {
+                module: "lazy.cjs",
+                index: 0,
+            },
+        ],
+    },
+    entries: {
+        "main": Facade {
+            synthetic: EntryFacade(
+                "main",
+            ),
+            demand: FacadeDemand {
+                evaluation_modules: {
+                    "entry.cjs",
+                },
+                binding_nodes: {},
+            },
+            load_chunks: {
+                ChunkId(
+                    {
+                        Entry(
+                            "main",
+                        ),
+                    },
+                ),
+            },
+        },
+    },
+    async_facades: {},
+    chunk_dependencies: {},
+    synthetic_nodes: {
+        EntryFacade(
+            "main",
+        ),
+        ModuleIdentity {
+            module: "eager.cjs",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "main",
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "entry.cjs",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "main",
+                    ),
+                },
+            ),
+        },
+        ModuleIdentity {
+            module: "lazy.cjs",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "main",
+                    ),
+                },
+            ),
+        },
+    },
+}

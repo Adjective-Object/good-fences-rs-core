@@ -1,0 +1,231 @@
+---
+source: crates/bundler/src/manifest_tests.rs
+expression: manifest
+---
+DiagnosticManifest {
+    revision: GraphRevision {
+        source: 0,
+        resolution: 0,
+    },
+    policy_fingerprint: [
+        134,
+        181,
+        48,
+        219,
+        60,
+        108,
+        153,
+        120,
+        249,
+        76,
+        127,
+        184,
+        159,
+        86,
+        100,
+        183,
+        166,
+        101,
+        224,
+        2,
+        160,
+        32,
+        77,
+        101,
+        241,
+        59,
+        2,
+        13,
+        230,
+        56,
+        232,
+        49,
+    ],
+    chunks: {
+        ChunkId(
+            {
+                Entry(
+                    "main",
+                ),
+            },
+        ): [
+            Module(
+                "entry.ts",
+            ),
+            Segment {
+                module: "entry.ts",
+                index: 0,
+            },
+            Segment {
+                module: "entry.ts",
+                index: 1,
+            },
+        ],
+        ChunkId(
+            {
+                Async(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 0,
+                    },
+                ),
+            },
+        ): [
+            External {
+                module: "entry.ts",
+                offset: 0,
+            },
+        ],
+        ChunkId(
+            {
+                Async(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 20,
+                    },
+                ),
+            },
+        ): [
+            External {
+                module: "entry.ts",
+                offset: 20,
+            },
+        ],
+    },
+    entries: {
+        "main": Facade {
+            synthetic: EntryFacade(
+                "main",
+            ),
+            demand: FacadeDemand {
+                evaluation_modules: {
+                    "entry.ts",
+                },
+                binding_nodes: {},
+            },
+            load_chunks: {
+                ChunkId(
+                    {
+                        Entry(
+                            "main",
+                        ),
+                    },
+                ),
+            },
+        },
+    },
+    async_facades: {
+        AsyncSiteId {
+            module: "entry.ts",
+            offset: 0,
+        }: AsyncFacade {
+            consumer: Segment {
+                module: "entry.ts",
+                index: 0,
+            },
+            target: External {
+                module: "entry.ts",
+                offset: 0,
+            },
+            facade: Facade {
+                synthetic: AsyncFacade(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 0,
+                    },
+                ),
+                demand: FacadeDemand {
+                    evaluation_modules: {},
+                    binding_nodes: {
+                        External {
+                            module: "entry.ts",
+                            offset: 0,
+                        },
+                    },
+                },
+                load_chunks: {
+                    ChunkId(
+                        {
+                            Async(
+                                AsyncSiteId {
+                                    module: "entry.ts",
+                                    offset: 0,
+                                },
+                            ),
+                        },
+                    ),
+                },
+            },
+        },
+        AsyncSiteId {
+            module: "entry.ts",
+            offset: 20,
+        }: AsyncFacade {
+            consumer: Segment {
+                module: "entry.ts",
+                index: 1,
+            },
+            target: External {
+                module: "entry.ts",
+                offset: 20,
+            },
+            facade: Facade {
+                synthetic: AsyncFacade(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 20,
+                    },
+                ),
+                demand: FacadeDemand {
+                    evaluation_modules: {},
+                    binding_nodes: {
+                        External {
+                            module: "entry.ts",
+                            offset: 20,
+                        },
+                    },
+                },
+                load_chunks: {
+                    ChunkId(
+                        {
+                            Async(
+                                AsyncSiteId {
+                                    module: "entry.ts",
+                                    offset: 20,
+                                },
+                            ),
+                        },
+                    ),
+                },
+            },
+        },
+    },
+    chunk_dependencies: {},
+    synthetic_nodes: {
+        EntryFacade(
+            "main",
+        ),
+        AsyncFacade(
+            AsyncSiteId {
+                module: "entry.ts",
+                offset: 0,
+            },
+        ),
+        AsyncFacade(
+            AsyncSiteId {
+                module: "entry.ts",
+                offset: 20,
+            },
+        ),
+        ModuleIdentity {
+            module: "entry.ts",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "main",
+                    ),
+                },
+            ),
+        },
+    },
+}

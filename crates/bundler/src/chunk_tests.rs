@@ -93,6 +93,14 @@ fn oracle_rejects_stale_policy_revision_duplicate_and_unretained_roots() {
     )
     .is_err());
     assert!(async_seed(&graph, 99).is_err());
+    assert!(node_id(
+        &graph,
+        GraphNode::Unlinked {
+            file_id: 0,
+            dependency: ast_segmenter::owned::DependencyId(999)
+        }
+    )
+    .is_err());
     let mut invalid = entry(0);
     invalid
         .binding_roots

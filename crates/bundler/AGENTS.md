@@ -21,3 +21,6 @@ Root traversal follows synchronous retention constraints only; namespace
 binding demand differs from module evaluation. Empty modules keep identities.
 Partition only reachable async sites to a fixed point; chunks are exactly
 nonempty canonical root sets. Never merge or hoist. Dead nodes have empty sets.
+Manifest chunk edges/load sets describe availability, never evaluation order.
+Facades stay outside logical chunk equivalence; module records preserve separate
+evaluation identity within shared chunks. Async links never become sync edges.
