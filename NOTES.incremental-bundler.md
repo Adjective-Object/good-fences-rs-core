@@ -2,9 +2,17 @@
 
 ## Current scope
 
-P0–P5 are complete; P6–P9 remain pending. This phase stops before P6, without
-nested delegation. Effects/retention/recipes are library plans, not emitted
-JavaScript or runtime conformance evidence.
+P0–P5 and P6.1 are complete; P6.2–P9 remain pending. This phase targets
+P6.1–P6.3 without nested delegation and stops before P7.
+
+## P6.1 rewrite backend
+
+Checked original-source edits with pinned-OXC JS parser/semantic validation
+avoid whole-AST reconstruction and the printer's partial comment preservation.
+`rewrite::rename_private` uses owned lexical IDs and AST shorthand context;
+public bindings/capture are rejected. No source maps or TS/JSX lowering.
+Tests cover overlapping/invalid/UTF-8 spans, binding and assignment shorthand,
+lexical shadows, comments/directives/hashbang and invalid generated identifiers.
 
 ## P5.3 checkpoint / P6–P8 integration
 

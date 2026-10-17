@@ -28,6 +28,26 @@ walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
 
+## Rewrite backend
+
+`rewrite::{Edit, apply, validate, rename_private}` uses checked original-source
+byte ranges and reparses the result with the workspace-pinned OXC parser and
+semantic checker. UTF-8 boundaries, overlapping replacements and duplicate
+insertions are errors. Private lexical renames use owned binding identities,
+not textual matching; object/binding shorthand expands to preserve keys.
+Capture and public-binding renames are rejected rather than guessed.
+Unedited comments, directives and hashbangs remain byte-for-byte unchanged.
+
+At OXC revision `87f065ebf7cde21d1229322f4c7ee58baca5648e`,
+`Codegen::build(&Program)` prints a whole arena-owned AST and its options document
+only partial leading-comment preservation. Source edits fit our owned occurrence
+spans without reconstructing/rebinding an AST. We therefore use edits, not the
+printer/transformer. Reparse actual source on cache hits; source facts alone
+cannot validate the output. Output is JavaScript ESM only: no TypeScript or JSX
+lowering. The emitter must reject those language modes. No source maps are
+generated or advertised; generated offsets are not original-source positions.
+Diagnostics for rejected edits refer to original source bytes.
+
 ## Root reachability
 
 `chunks::{RootId, AsyncSiteId, RootSeed}` distinguishes caller-named entries from

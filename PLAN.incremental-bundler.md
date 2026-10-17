@@ -6,8 +6,8 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P5 are verified; P6–P9 remain pending. This bounded phase
-stops before P6; no emission is implemented.
+commits: P0–P5 and P6.1 are verified; P6.2–P9 remain pending. This bounded phase
+targets P6.1–P6.3 and stops before P7.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -528,6 +528,12 @@ exact sets, not merely expected chunk counts. A later bitset optimization must
 match the simple oracle. No physical emission or merge heuristics needed here.
 
 ### P6 — ESM rewriting and evaluation
+
+P6.1 chooses checked UTF-8 original-source edits and pinned-OXC JS
+parser/semantic validation. Whole-AST printing would reconstruct owned syntax
+and only partially preserve leading comments at the pinned revision.
+`bundler::rewrite` proves private lexical renames (including shorthand), overlap
+rejection and preamble preservation. No source maps or TS/JSX lowering.
 
 Choose the emitter strategy with a small pinned-OXC prototype; implement
 single-module rewriting before multi-module/cross-chunk linkage. Gate supported

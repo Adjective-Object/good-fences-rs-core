@@ -3,6 +3,7 @@ pub mod chunks;
 pub mod effects;
 pub mod manifest;
 pub mod policy;
+pub mod rewrite;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
