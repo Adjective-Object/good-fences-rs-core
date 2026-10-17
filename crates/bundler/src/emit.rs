@@ -30,6 +30,10 @@ pub fn single_module(
         "stale emission retention/policy"
     );
     let parsed = checked_source(graph, file, source)?;
+    ensure!(
+        parsed.body == ModuleBody::Esm,
+        "single-module emission requires ESM; use link::esm for CJS"
+    );
     if let Some(dependency) = parsed.facts.dependencies.iter().find(|d| !d.type_only) {
         eyre::bail!(
             "{}: dependency needs linked emission at bytes {}..{} ({:?})",
@@ -57,10 +61,8 @@ pub(crate) fn checked_source(
     let parsed =
         ast_segmenter::parse_module(&logger::StdioLogger::new(), source, path, ModuleFormat::Esm)?;
     ensure!(
-        parsed.body == ModuleBody::Esm
-            && !parsed.source_type.is_typescript()
-            && !parsed.source_type.is_jsx(),
-        "{}: emission supports JavaScript ESM only at bytes 0..{}; CJS/TS/JSX need later backends",
+        !parsed.source_type.is_typescript() && !parsed.source_type.is_jsx(),
+        "{}: emission supports JavaScript only at bytes 0..{}; TS/JSX need later backends",
         path.display(),
         source.len()
     );

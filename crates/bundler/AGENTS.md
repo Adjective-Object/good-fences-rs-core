@@ -17,6 +17,9 @@ Keep physical module_payloads separate from logical manifest load sets. Runtime
 URLs include the published bundle directory to isolate separate instances.
 loadEntry returns native namespaces; launchers export the namespace object.
 Source dynamic imports/TLA, CJS and externals remain explicit later gates.
+P7 CJS uses native createRequire + synchronous hooks, not the ESM CJS
+translator's separate require path. Native cache owns allocation-before-call,
+partial cycles, wrapper this, current exports and eviction/retry after throws.
 
 PURE recipes remove one invocation, never its callee/reference/argument/iteration
 effects. Preserve original optional-chain completion state, not just undefined.

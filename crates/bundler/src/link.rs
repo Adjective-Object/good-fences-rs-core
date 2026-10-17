@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use ast_segmenter::owned::{Dependency, DependencyKind, ExportValue, ImportedName};
-use ast_segmenter::ParsedModule;
+use ast_segmenter::{ModuleBody, ParsedModule};
 use eyre::{ensure, OptionExt, WrapErr};
 use oxc_span::Span;
 use sha2::{Digest, Sha256};
@@ -133,20 +133,28 @@ pub fn esm(
     let mut module_payloads = BTreeMap::new();
     for (&file, module) in &modules {
         let edits = dependency_edits(graph, plan, file, &modules)?;
-        let parts = crate::emit::project_parts(
-            graph,
-            &plan.retention,
-            file,
-            module.source,
-            &module.parsed,
-            &edits,
-        )
-        .wrap_err_with(|| {
-            format!(
-                "{}: linked emission",
-                graph.file_path(file).unwrap().display()
+        let parts = if matches!(module.parsed.body, ModuleBody::CommonJs { .. }) {
+            let source = rewrite::apply(module.source, &edits)?;
+            vec![crate::emit::SourcePart {
+                segment: Some(0),
+                source: rewrite::apply(&source, &rewrite::source_hint_edits(&source))?,
+            }]
+        } else {
+            crate::emit::project_parts(
+                graph,
+                &plan.retention,
+                file,
+                module.source,
+                &module.parsed,
+                &edits,
             )
-        })?;
+            .wrap_err_with(|| {
+                format!(
+                    "{}: linked emission",
+                    graph.file_path(file).unwrap().display()
+                )
+            })?
+        };
         let mut pieces = Vec::new();
         for (index, part) in parts.into_iter().enumerate() {
             if part.source.is_empty() {
@@ -211,7 +219,20 @@ pub fn esm(
         })
         .collect::<eyre::Result<_>>()?;
     let runtime = PathBuf::from("runtime.mjs");
-    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens });
+    let formats: BTreeMap<_, _> = modules
+        .values()
+        .map(|module| {
+            (
+                module.token.clone(),
+                if matches!(module.parsed.body, ModuleBody::CommonJs { .. }) {
+                    "commonjs"
+                } else {
+                    "module"
+                },
+            )
+        })
+        .collect();
+    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens, "formats": formats });
     let runtime_source = format!(
         "const config = JSON.parse({});\n{}",
         quote(&config.to_string()),
@@ -278,8 +299,8 @@ fn dependency_edits(
             continue;
         }
         ensure!(
-            is_static,
-            "{}: dynamic/CJS loading awaits P7/P8 at bytes {}..{}",
+            is_static || dependency.kind == DependencyKind::Require,
+            "{}: dynamic loading awaits P8 at bytes {}..{}",
             graph.file_path(file).unwrap().display(),
             dependency.span.start,
             dependency.span.end
@@ -289,6 +310,23 @@ fn dependency_edits(
             .get(&target)
             .ok_or_eyre("static target absent from retention")?;
         let target_specifier = quote(&target_module.token);
+        if dependency.kind == DependencyKind::Require {
+            ensure!(
+                matches!(module.parsed.body, ModuleBody::CommonJs { .. }),
+                "require in ESM needs an explicit wrapper policy"
+            );
+            edits.push(Edit {
+                span: dependency.specifier_span,
+                replacement: target_specifier,
+            });
+            continue;
+        }
+        ensure!(
+            target_module.parsed.body == ModuleBody::Esm,
+            "static CJS imports require P7.2 proxy demands at bytes {}..{}",
+            dependency.span.start,
+            dependency.span.end
+        );
         let mut replacement = format!("import {target_specifier};\n");
         if dependency.kind == DependencyKind::Import {
             for import in module

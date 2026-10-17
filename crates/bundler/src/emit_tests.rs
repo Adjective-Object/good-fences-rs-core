@@ -208,7 +208,7 @@ fn unsupported_modes_and_stale_sources_fail_without_artifacts() {
         assert!(single_module(&graph, &retention, &policy, 0, source)
             .unwrap_err()
             .to_string()
-            .contains("JavaScript ESM only"));
+            .contains("emission"));
     }
     let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", "console.log(1);")]);
     let retention = crate::retain(&graph, &[0], &[]).unwrap();

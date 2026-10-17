@@ -11,6 +11,11 @@ pending. This bounded phase completes P6.1–P6.3 and stops before P7.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
+P7.1 adopts Node createRequire + synchronous source hooks for opaque CJS,
+preserving native early cache insertion, partial cycles, wrapper aliases/this,
+replacement values and retry after factory throws. CJS/ESM proxy interop follows
+in P7.2; no hand-written competing require cache is introduced.
+
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
 binding/declaration/reference records, import aliases and export mappings,
 individual dependency sites, directives and hashbang. IDs are source-local

@@ -1,4 +1,4 @@
-import { registerHooks } from 'node:module';
+import { registerHooks, createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 
 const parse = JSON.parse, hasOwn = Object.hasOwn, Url = URL, LoadError = Error;
@@ -8,15 +8,17 @@ const has = Function.call.bind(Map.prototype.has);
 const set = Function.call.bind(Map.prototype.set);
 const modules = new Map(Object.entries(config.modules));
 const urls = new Map([...modules.keys()].map(token => [
-  token, `good-fences:${new Url(`native/${token.slice('good-fences:'.length)}.mjs`, import.meta.url).href}`,
+  token, new Url(`native/${token.slice('good-fences:'.length)}.${config.formats[token] === 'commonjs' ? 'cjs' : 'mjs'}`, import.meta.url).href,
 ]));
 const sources = new Map([...modules].map(([token, pieces]) => [get(urls, token), pieces]));
+const formats = new Map([...modules.keys()].map(token => [get(urls, token), config.formats[token]]));
 const payloads = new Map();
+const require = createRequire(import.meta.url);
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (has(sources, specifier)) return { url: specifier, shortCircuit: true };
-    if (has(urls, specifier) && has(sources, context.parentURL)) {
+    if (has(urls, specifier) && (has(sources, context.parentURL) || context.parentURL === import.meta.url)) {
       return { url: get(urls, specifier), shortCircuit: true };
     }
     return nextResolve(specifier, context);
@@ -36,7 +38,7 @@ registerHooks({
       }
       source += payload[key];
     }
-    return { format: 'module', source, shortCircuit: true };
+    return { format: get(formats, url), source, shortCircuit: true };
   },
 });
 
@@ -44,6 +46,15 @@ export async function loadEntry(name) {
   if (!hasOwn(config.entries, name)) throw new LoadError(`Unknown bundle entry: ${name}`);
   const result = [];
   const tokens = config.entries[name];
-  for (let i = 0; i < tokens.length; i++) result[result.length] = await import(get(urls, tokens[i]));
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    result[result.length] = config.formats[token] === 'commonjs'
+      ? { default: requireModule(token) }
+      : await import(get(urls, token));
+  }
   return result.length === 1 ? result[0] : result;
+}
+
+export function requireModule(token) {
+  return require(token);
 }

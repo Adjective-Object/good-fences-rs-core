@@ -126,6 +126,19 @@ fn compare(sources: &BTreeMap<PathBuf, String>, entry: &str) -> Artifacts {
 }
 
 #[test]
+fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
+    compare(&sources(&[
+        ("entry.cjs", "const a = require('./a.cjs'); console.log(a === require('./a.cjs'), a); const lazy = require('./lazy.cjs'); console.log('before'); console.log(lazy()); for(let i=0;i<2;i++) { try { require('./fail.cjs'); } catch(e) { console.log(e.message); } } console.log(require('./primitive.cjs'));"),
+        ("a.cjs", "exports.first = 1; console.log(this === exports); const b = require('./b.cjs'); exports.old = 3; module.exports = { seen: b.seen }; console.log(require('./a.cjs') === module.exports); exports.lost = 4;"),
+        ("b.cjs", "exports.seen = require('./a.cjs').first;"),
+        ("lazy.cjs", "module.exports = () => require('./deferred.cjs');"),
+        ("deferred.cjs", "console.log('deferred'); module.exports = 7;"),
+        ("primitive.cjs", "module.exports = 42; exports.ignored = true;"),
+        ("fail.cjs", "globalThis.attempt = (globalThis.attempt || 0) + 1; throw Error('attempt ' + globalThis.attempt);"),
+    ]), "entry.cjs");
+}
+
+#[test]
 fn native_cycle_instantiation_distinguishes_functions_var_and_lexical_tdz() {
     let output = compare(&sources(&[
         ("entry.mjs", "import {read, bump, value} from './a.mjs'; console.log(read(), value); bump(); console.log(read(), value);"),
@@ -258,7 +271,7 @@ fn rejected_partition_and_loading_cases_return_source_diagnostics() {
                 ("dep.mjs", "export const x = 1;"),
             ],
             vec![("entry.mjs", true)],
-            "awaits P7/P8",
+            "awaits P8",
         ),
         (
             vec![
@@ -266,7 +279,7 @@ fn rejected_partition_and_loading_cases_return_source_diagnostics() {
                 ("dep.mjs", "export const x = 1;"),
             ],
             vec![("entry.mjs", true)],
-            "awaits P7/P8",
+            "awaits P8",
         ),
     ] {
         let sources = sources(&items);

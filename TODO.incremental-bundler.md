@@ -287,11 +287,13 @@ workspace test success.
 
 ## P7 — CJS registry and interop
 
-- [ ] **P7.1 — Implement opaque factory/cache runtime.** Depends: P1.5, P6.1.
+- [x] **P7.1 — Implement opaque factory/cache runtime.** Depends: P1.5, P6.1.
   Cache module record before invocation; return current `module.exports`.
   Decide thrown-factory caching policy. Runtime tests: circular partial exports,
   exports alias, primitive/object reassignment, wrapper `this`, repeated
   require and failure/retry. Do not eagerly execute deferred require bodies.
+  Native createRequire/hook loading owns wrappers/cache; thrown factories evict
+  and retry. Real Node differential test covers every listed runtime behavior.
 - [ ] **P7.2 — Derive CJS proxy demands and policy.** Depends: P7.1, P3.2.
   Use reverse typed occurrences for static named/default/namespace requests;
   generate ESM proxy segments and runtime dependencies. Tests: renamed imports,

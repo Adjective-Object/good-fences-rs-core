@@ -28,6 +28,19 @@ walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
 
+## CommonJS runtime
+
+Linked opaque JavaScript CJS bodies use Node's native CommonJS loader through
+the same synchronous hooks and exact-set payloads. `runtime.mjs::requireModule`
+loads canonical bundle-local identities with `createRequire`, not Node's ESM
+CommonJS translator (whose private require bypasses these resolution hooks).
+Node allocates records before invoking wrappers, binds wrapper `this` to the
+initial exports object and returns the current `module.exports`. Recursive
+requires see partial exports; deferred sites execute only when called. Failed
+factories are removed from the require cache and retry on the next require.
+Successful modules execute once. Entry CJS loading currently returns an object
+with `default` holding the require result; static ESM proxy demand is P7.2.
+
 ## Rewrite backend
 
 `rewrite::{Edit, apply, validate, rename_private}` uses checked original-source

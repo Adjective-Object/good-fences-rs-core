@@ -2,6 +2,13 @@
 
 ## Current scope
 
+P7.1: opaque CJS bodies are rewritten only at checked require specifiers and
+source hints, then stored in their original exact-set segment payload. Runtime
+`requireModule(token)` uses Node createRequire and native cache, including
+eviction/retry after throws. Native ESM's CJS translator was experimentally
+rejected: its private require bypasses registered resolution hooks. Static
+ESM-to-CJS imports remain diagnosed until P7.2 proxies.
+
 P0–P6 are complete for the documented Node ESM target; P7–P9 remain pending.
 This phase completes P6.1–P6.3 without nested delegation and stops before P7.
 
