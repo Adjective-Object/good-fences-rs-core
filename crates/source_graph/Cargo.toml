@@ -12,7 +12,10 @@ crate-type = ["lib"]
 ahashmap = { version = "0.2.0", path = "../ahashmap" }
 ast-segmenter = { version = "0.2.0-beta.1", path = "../ast_segmenter" }
 compact_str = "0.9.0"
+oxc_span.workspace = true
 
 [dev-dependencies]
-oxc_span.workspace = true
 pretty_assertions.workspace = true
+oxc_allocator.workspace = true
+oxc_utils_parse = { path = "../oxc_utils_parse" }
+logger = { path = "../logger" }

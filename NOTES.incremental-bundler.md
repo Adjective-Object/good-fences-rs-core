@@ -2,6 +2,19 @@
 
 ## Current scope
 
+## P3.1 checkpoint
+
+- `source_graph::from_owned` consumes existing `ModuleFacts` and segments, with
+  per-`DependencyId` resolution inputs, never a second parse IR. Typed edges
+  distinguish binding/evaluation/execution, local references, activation,
+  source site, read/write/type flags and enclosing-function metadata.
+- Module nodes retain empty targets. Forward/reverse adjacency indexes the
+  identical edge records. Duplicate specifiers and dynamic sites stay distinct;
+  deferred CJS require stays synchronous with function containment recorded.
+- Verification: 23 source_graph tests (two new) and `./scripts/spot-check`
+  pass using repository-local TMPDIR. TagGraph/report migration is P3.4;
+  missing/external resolution diagnostics and revision APIs are P3.3.
+
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
 onward in narrow linear commits. P0–P2 are implemented; P3–P9 remain pending.
 The bounded P2 ownership ends here, before P3.

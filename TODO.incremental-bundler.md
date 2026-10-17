@@ -166,11 +166,16 @@ workspace test success.
 
 ## P3 — Shared structural graph
 
-- [ ] **P3.1 — Add typed occurrence edges and reverse index.** Depends: P1.4,
+- [x] **P3.1 — Add typed occurrence edges and reverse index.** Depends: P1.4,
   P1.5. Build authoritative consumer→dependency edges in `source_graph`,
   preserving sync/async, type-only, evaluation/reference kind and source site.
   Tests: duplicate specifier occurrences, forward/reverse equality, deferred
   require timing metadata, empty-module identity. No `UsedTag` coupling.
+  **Verified:** `from_owned` accepts existing parse/cache facts and per-site
+  resolutions. `edges`/`incoming`/`outgoing` share one indexed collection;
+  local references and import/re-export requests retain sites and flags.
+  Two focused regressions plus 21 existing graph tests and spot-check pass.
+  Legacy usage traversal migration remains P3.4.
 - [ ] **P3.2 — Correct lexical/export linking.** Depends: P3.1.
   Replace binding-by-statement-order assumptions for executable linking;
   implement namespace re-export, default exclusion from stars, explicit

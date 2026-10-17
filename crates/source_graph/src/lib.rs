@@ -1,5 +1,7 @@
 pub mod edge;
 pub mod segment_key;
+mod structure;
+pub use structure::*;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -24,6 +26,7 @@ struct ReExportEntry {
 /// Per-file data owned by the SourceGraph.
 /// Pre-built indexes enable fast intra-file name resolution.
 struct SourceGraphFile {
+    owned: Option<OwnedSourceFileInput>,
     path: PathBuf,
     segments: Vec<Segment>,
     /// Exported symbol → segment index that declares the export
@@ -44,6 +47,9 @@ struct SourceGraphFile {
 /// Maps files to their segments and provides indexes for resolving
 /// names to segments within and across files.
 pub struct SourceGraph {
+    edges: Vec<OccurrenceEdge>,
+    outgoing: AHashMap<GraphNode, Vec<usize>>,
+    incoming: AHashMap<GraphNode, Vec<usize>>,
     path_to_id: AHashMap<PathBuf, u32>,
     files: Vec<SourceGraphFile>,
     /// Cache for cross-file import resolution. Keyed by (file_id, symbol).
@@ -93,6 +99,9 @@ impl SourceGraph {
         }
 
         SourceGraph {
+            edges: Vec::new(),
+            outgoing: AHashMap::default(),
+            incoming: AHashMap::default(),
             path_to_id,
             files,
             reexport_cache: RefCell::new(AHashMap::default()),
@@ -178,6 +187,7 @@ impl SourceGraph {
         star_reexport_paths.dedup();
 
         SourceGraphFile {
+            owned: None,
             path,
             segments,
             symbol_to_segment,
