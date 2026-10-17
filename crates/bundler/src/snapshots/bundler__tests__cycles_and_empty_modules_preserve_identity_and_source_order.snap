@@ -1,0 +1,138 @@
+---
+source: crates/bundler/src/tests.rs
+expression: plan
+---
+RetentionPlan {
+    revision: GraphRevision {
+        source: 0,
+        resolution: 0,
+    },
+    modules: [
+        0,
+        1,
+        2,
+    ],
+    segments: [
+        RetainedSegment {
+            key: SegmentKey {
+                file_id: 0,
+                segment_idx: 2,
+            },
+            reasons: [
+                TopLevelEffect,
+            ],
+        },
+        RetainedSegment {
+            key: SegmentKey {
+                file_id: 0,
+                segment_idx: 3,
+            },
+            reasons: [
+                TopLevelEffect,
+            ],
+        },
+        RetainedSegment {
+            key: SegmentKey {
+                file_id: 1,
+                segment_idx: 1,
+            },
+            reasons: [
+                TopLevelEffect,
+            ],
+        },
+    ],
+    edges: [
+        RetentionEdge {
+            from: Module(
+                0,
+            ),
+            to: Segment(
+                SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+            ),
+            kind: ModuleEffect,
+            source_edge: None,
+        },
+        RetentionEdge {
+            from: Module(
+                0,
+            ),
+            to: Segment(
+                SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+            ),
+            kind: ModuleEffect,
+            source_edge: None,
+        },
+        RetentionEdge {
+            from: Module(
+                0,
+            ),
+            to: Module(
+                1,
+            ),
+            kind: StaticEvaluation,
+            source_edge: Some(
+                0,
+            ),
+        },
+        RetentionEdge {
+            from: Module(
+                0,
+            ),
+            to: Module(
+                2,
+            ),
+            kind: StaticEvaluation,
+            source_edge: Some(
+                1,
+            ),
+        },
+        RetentionEdge {
+            from: Segment(
+                SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+            ),
+            to: Segment(
+                SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+            ),
+            kind: EffectOrder,
+            source_edge: None,
+        },
+        RetentionEdge {
+            from: Module(
+                1,
+            ),
+            to: Module(
+                0,
+            ),
+            kind: StaticEvaluation,
+            source_edge: Some(
+                2,
+            ),
+        },
+        RetentionEdge {
+            from: Module(
+                1,
+            ),
+            to: Segment(
+                SegmentKey {
+                    file_id: 1,
+                    segment_idx: 1,
+                },
+            ),
+            kind: ModuleEffect,
+            source_edge: None,
+        },
+    ],
+    async_boundaries: [],
+}

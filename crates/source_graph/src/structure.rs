@@ -142,12 +142,34 @@ impl SourceGraph {
         &self.edges
     }
 
+    /// Checked consumers must distinguish owned inputs from lossy tracker adapters.
+    pub fn file_facts(&self, file_id: u32) -> Option<&ModuleFacts> {
+        self.file_path(file_id)?;
+        self.files
+            .get(file_id as usize)?
+            .owned
+            .as_ref()
+            .map(|i| &i.facts)
+    }
+
     pub fn outgoing(&self, node: GraphNode) -> impl Iterator<Item = &OccurrenceEdge> {
         self.outgoing
             .get(&node)
             .into_iter()
             .flatten()
             .map(|&i| &self.edges[i])
+    }
+
+    /// Indices are valid only at the current graph revision.
+    pub fn outgoing_indexed(
+        &self,
+        node: GraphNode,
+    ) -> impl Iterator<Item = (usize, &OccurrenceEdge)> {
+        self.outgoing
+            .get(&node)
+            .into_iter()
+            .flatten()
+            .map(|&i| (i, &self.edges[i]))
     }
 
     pub fn incoming(&self, node: GraphNode) -> impl Iterator<Item = &OccurrenceEdge> {

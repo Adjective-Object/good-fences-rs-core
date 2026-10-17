@@ -1,0 +1,34 @@
+---
+source: crates/bundler/src/tests.rs
+expression: "retained_sources(&graph, &plan, &sources)"
+---
+[
+    (
+        1,
+        "export const unused = initialize(helper);",
+        [
+            TopLevelEffect,
+        ],
+    ),
+    (
+        1,
+        "const helper = 1;",
+        [
+            Dependency,
+        ],
+    ),
+    (
+        2,
+        "first();",
+        [
+            TopLevelEffect,
+        ],
+    ),
+    (
+        2,
+        "second();",
+        [
+            TopLevelEffect,
+        ],
+    ),
+]

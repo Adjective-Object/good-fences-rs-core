@@ -2,8 +2,29 @@
 
 ## Current scope
 
-P0–P3 and P4.1 are complete; P4.2–P9 remain pending. This phase is limited to
+P0–P3 and P4.1–P4.2 are complete; P4.3–P9 remain pending. This phase is limited to
 P4, without nested delegation.
+
+## P4.2 checkpoint
+
+- Created `crates/bundler/README.md` before the package. `retain(graph,
+  evaluation_roots, binding_roots)` returns revision-stamped `RetentionPlan`,
+  deterministic retained segment reasons, required module bodies, async boundary
+  indices and additive consumer-to-dependency edges. Never consumes UsedTag.
+- Runtime static imports/re-exports demand target evaluation independent of
+  binding use; no-export/empty modules, transitive effects and cycles work.
+  Type-only occurrences do not demand evaluation. Effect order edges and lexical
+  dependencies survive; pure function/instance-field creation is not eager.
+- Required deferred-require bodies remain available, with original structural
+  occurrence/function metadata; this is not permission to hoist their execution.
+  Namespace demand conservatively retains all target statements. Explicit
+  external sites remain for P6 policy; no runtime/external support is claimed.
+- `SourceGraph::{file_facts,outgoing_indexed}` exposes existing owned facts and
+  revision-local shared edge indices. Checked export routes remain intact.
+  Missing/legacy/invalid roots and link failures are errors, not empty successes.
+- Verified: 8 bundler + 31 source_graph tests, cache-ranges/facts plan parity,
+  inspected retention snapshots, targeted clippy and `./scripts/spot-check`.
+  Existing dependency warnings are unchanged.
 
 ## P4.1 checkpoint
 

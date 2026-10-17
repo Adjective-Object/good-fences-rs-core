@@ -205,6 +205,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bundler"
+version = "0.1.0"
+dependencies = [
+ "ast-segmenter",
+ "eyre",
+ "insta",
+ "logger",
+ "oxc_span",
+ "segment_cache",
+ "source_graph",
+ "test_tmpdir",
+]
+
+[[package]]
 name = "castaway"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

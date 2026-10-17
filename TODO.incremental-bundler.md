@@ -219,7 +219,7 @@ workspace test success.
   Test pure function declaration creation versus effectful invocation, unknown
   expressions, getters/proxies, coercion, spread/iteration, computed class
   members/static blocks and unresolved reads. Snapshot reasons, not just bools.
-- [ ] **P4.2 — Separate evaluation and binding roots.** Depends: P3.2, P4.1.
+- [x] **P4.2 — Separate evaluation and binding roots.** Depends: P3.2, P4.1.
   Retain top-level effects when any runtime import evaluates a module, including
   unreferenced exporting declarations and modules with no exports. Test order,
   effect dependencies, nested body timing, type-only non-evaluation and cycles.

@@ -458,6 +458,12 @@ explicit deferred function/default-argument/instance-field timing. Cache
 schema/extractor 2 persists syntax facts only and validates their ranges.
 Reason snapshots plus all 75 parser/cache tests and `scripts/spot-check` pass.
 
+P4.2 adds library-only `bundler::retain` over owned `SourceGraph` inputs. Module
+evaluation, binding demand, source effect order and original occurrence/timing
+edges are separate plan data. Async boundaries are recorded, not crossed.
+Checked barrels/cache parity and evaluation/type-only/cycle/deferred regressions
+pass (8 bundler + 31 source_graph tests); spot-check and targeted clippy pass.
+
 ### P5 — Exact root-set partitioning
 
 Introduce stable entry/boundary identities and a straightforward flood-fill

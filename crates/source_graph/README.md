@@ -20,6 +20,11 @@ are distinct; this crate does not implement effects or runtime scheduling.
 
 Run `cargo test -p source_graph`.
 
+`file_facts` exposes owned syntax records (None for legacy/tombstoned modules).
+`outgoing_indexed` exposes shared occurrence indices for derived plans; indices
+are revision-local, not persistent IDs. The `bundler` library consumes these
+without adding effects policy or usage tags to the shared graph.
+
 `resolve_binding` uses lexical IDs, including forward TDZ-bound references.
 `resolve_export` takes an explicit value/type namespace and returns a canonical
 binding identity plus all intermediate barrel sites. Stars exclude default,
