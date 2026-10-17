@@ -91,6 +91,10 @@ an effect always executes or an effect-policy-derived purity result.
 
 There is no source-file IO, cache, linking, user effects policy or emission here.
 Target-dependent checks cannot be decided from source syntax alone.
+The separate `bundler` Node backend now executes the supported synchronous
+JavaScript ESM/CJS subset, including opaque CJS cycles and requested-name proxies.
+Its explicit namespace/snapshot policy is documented in that crate's README.
+Dynamic import/TLA, externals/assets, TS/JSX lowering and source maps remain gates.
 
 `facts.invocations` owns callee/receiver/argument ranges, spread iteration,
 optional-chain boundaries, lexical callee identity, syntactic result-use context

@@ -21,22 +21,34 @@ fn normalize(path: &Path) -> PathBuf {
 }
 
 fn graph(sources: &BTreeMap<PathBuf, String>, reverse: bool) -> SourceGraph {
+    graph_with_format(sources, reverse, ModuleFormat::Esm)
+}
+
+fn graph_with_format(
+    sources: &BTreeMap<PathBuf, String>,
+    reverse: bool,
+    format: ModuleFormat,
+) -> SourceGraph {
     let mut inputs: Vec<_> = sources
         .iter()
         .map(|(path, source)| {
-            let parsed =
-                parse_module(&logger::StdioLogger::new(), source, path, ModuleFormat::Esm).unwrap();
+            let parsed = parse_module(&logger::StdioLogger::new(), source, path, format).unwrap();
             let resolutions = parsed
                 .facts
                 .dependencies
                 .iter()
                 .map(|d| {
-                    (
-                        d.id,
-                        DependencyTarget::File(normalize(
-                            &path.parent().unwrap().join(&d.specifier),
-                        )),
-                    )
+                    let target = normalize(&path.parent().unwrap().join(&d.specifier));
+                    let target = if sources.contains_key(&target) {
+                        target
+                    } else {
+                        ["js", "cjs", "mjs"]
+                            .iter()
+                            .map(|ext| target.with_extension(ext))
+                            .find(|path| sources.contains_key(path))
+                            .unwrap_or(target)
+                    };
+                    (d.id, DependencyTarget::File(target))
                 })
                 .collect();
             OwnedSourceFileInput {
@@ -65,7 +77,16 @@ fn build(
     entries: &[(&str, bool)],
     reverse: bool,
 ) -> (ChunkPlan, Artifacts) {
-    let graph = graph(sources, reverse);
+    build_with_format(sources, entries, reverse, ModuleFormat::Esm)
+}
+
+fn build_with_format(
+    sources: &BTreeMap<PathBuf, String>,
+    entries: &[(&str, bool)],
+    reverse: bool,
+    format: ModuleFormat,
+) -> (ChunkPlan, Artifacts) {
+    let graph = graph_with_format(sources, reverse, format);
     let roots: Vec<_> = entries
         .iter()
         .map(|(entry, namespace)| {
@@ -128,8 +149,10 @@ fn compare(sources: &BTreeMap<PathBuf, String>, entry: &str) -> Artifacts {
 #[test]
 fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
     compare(&sources(&[
-        ("entry.cjs", "const a = require('./a.cjs'); console.log(a === require('./a.cjs'), a); const lazy = require('./lazy.cjs'); console.log('before'); console.log(lazy()); for(let i=0;i<2;i++) { try { require('./fail.cjs'); } catch(e) { console.log(e.message); } } console.log(require('./primitive.cjs'));"),
-        ("a.cjs", "exports.first = 1; console.log(this === exports); const b = require('./b.cjs'); exports.old = 3; module.exports = { seen: b.seen }; console.log(require('./a.cjs') === module.exports); exports.lost = 4;"),
+        ("entry.cjs", "const a = require('./a.cjs'); console.log(a === require('./a.cjs'), a); const lazy = require('./lazy.cjs'); console.log('before'); console.log(lazy()); for(let i=0;i<2;i++) { try { require('./fail.cjs'); } catch(e) { console.log(e.message); } } console.log(require('./primitive.cjs')); console.log(require('./return.cjs').value, require('./modulevar.cjs').kept);"),
+        ("modulevar.cjs", "exports.kept = 3; module = {exports: 99}; exports.after = 4;"),
+        ("return.cjs", "#!/usr/bin/env node\n'use strict'; exports.value = 4; console.log(this === exports); return; throw Error('after return');\n//# sourceMappingURL=obsolete.map"),
+        ("a.cjs", "exports.first = 1; console.log(this === exports); const b = require('./b.cjs'); exports.old = 3; module.exports = { seen: b.seen }; console.log(require('./a.cjs') === module.exports); exports.lost = 4; exports = { ignored: 5 }; console.log(this.first, module.exports.ignored);"),
         ("b.cjs", "exports.seen = require('./a.cjs').first;"),
         ("lazy.cjs", "module.exports = () => require('./deferred.cjs');"),
         ("deferred.cjs", "console.log('deferred'); module.exports = 7;"),
@@ -141,7 +164,7 @@ fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
 #[test]
 fn commonjs_proxy_static_requests_aliases_reexports_and_snapshot_policy() {
     let source = sources(&[
-        ("entry.mjs", "import value, {a as renamed, bump} from './dep.cjs'; import {again} from './barrel.mjs'; import * as ns from './dep.cjs'; import bridge from './bridge.cjs'; console.log(renamed, again, ns.a, ns.default === value, bridge === value); bump(); console.log(renamed, ns.a, value.a);"),
+        ("entry.mjs", "import value, {a as renamed, bump} from './dep.cjs'; import {again} from './barrel.mjs'; import * as ns from './dep.cjs'; import bridge from './bridge.cjs'; console.log(renamed, again, ns.a, ns.default === value, bridge === value); bump(); console.log(renamed, ns.default.a, value.a);"),
         ("bridge.cjs", "module.exports = require('./dep.cjs');"),
         ("barrel.mjs", "export {a as again} from './dep.cjs'; export * from './dep.cjs';"),
         ("dep.cjs", "exports.a = 1; exports.bump = () => { exports.a++; };"),
@@ -155,7 +178,8 @@ fn commonjs_proxy_static_requests_aliases_reexports_and_snapshot_policy() {
     // Deliberately not Node's guessed-exports interop: requested getters and
     // computed names work, __esModule never unwraps default.
     let source = sources(&[
-        ("entry.mjs", "import value, {computed as renamed, read, replace} from './dep.cjs'; import * as ns from './dep.cjs'; console.log(renamed, read, value.default, ns.unknown, ns.default.unknown); replace(); console.log(value.default, ns.default.default);"),
+        ("entry.mjs", "import value, {computed as renamed, read, replace} from './dep.cjs'; import * as ns from './dep.cjs'; import rerequire from './bridge.cjs'; console.log(renamed, read, value.default, ns.unknown, ns.default.unknown); replace(); console.log(value.default, ns.default.default, rerequire().default);"),
+        ("bridge.cjs", "module.exports = () => require('./dep.cjs');"),
         ("dep.cjs", "module.exports = { __esModule: true, default: 5, ['computed']: 7, unknown: 9, get read() { console.log('getter'); return 11; }, replace() { module.exports = {default: 99}; } };"),
     ]);
     let (_, output) = build(&source, &[("entry.mjs", false)], false);
@@ -167,8 +191,8 @@ fn commonjs_proxy_static_requests_aliases_reexports_and_snapshot_policy() {
     );
     insta::assert_snapshot!(String::from_utf8(actual.stdout).unwrap(), @"
     getter
-    7 11 5 undefined 9
-    5 5
+    7 11 5 9 9
+    5 5 99
     ");
 }
 
@@ -193,8 +217,8 @@ fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
         &graph,
         &[RootSeed {
             id: RootId::Entry("main".into()),
-            evaluation_roots: vec![0],
-            binding_roots: vec![],
+            evaluation_roots: vec![],
+            binding_roots: vec![GraphNode::Segment(SegmentKey::new(0, 0))],
         }],
         &policy,
     )
@@ -212,6 +236,187 @@ fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
         String::from_utf8_lossy(&actual.stderr)
     );
     assert_eq!(actual.stdout, b"17\n");
+}
+
+#[test]
+fn commonjs_exact_proxy_sets_share_one_native_registry_across_entries() {
+    let source = sources(&[
+        ("a.mjs", "export {a} from './shared.cjs';"),
+        ("b.mjs", "export {b} from './shared.cjs';"),
+        (
+            "lazy.cjs",
+            "module.exports = () => require('./shared.cjs');",
+        ),
+        (
+            "shared.cjs",
+            "console.log('shared once'); const cycle = require('./cycle-a.cjs'); exports.a = {partial: cycle.partial}; exports.b = {};",
+        ),
+        ("cycle-a.cjs", "exports.phase = 1; const b = require('./cycle-b.cjs'); module.exports = {partial: b.partial};"),
+        ("cycle-b.cjs", "exports.partial = require('./cycle-a.cjs').phase;"),
+    ]);
+    let entries = [("a.mjs", true), ("b.mjs", true), ("lazy.cjs", false)];
+    let (plan, output) = build(&source, &entries, false);
+    let a = NodeId::CommonJsProxy {
+        module: "shared.cjs".into(),
+        name: Some("a".into()),
+    };
+    let b = NodeId::CommonJsProxy {
+        module: "shared.cjs".into(),
+        name: Some("b".into()),
+    };
+    assert_ne!(plan.chunk_for(&a), plan.chunk_for(&b));
+    assert_eq!(
+        plan.node_roots[&a],
+        BTreeSet::from([RootId::Entry("a.mjs".into())])
+    );
+    assert_eq!(
+        plan.node_roots[&b],
+        BTreeSet::from([RootId::Entry("b.mjs".into())])
+    );
+    for (left, roots) in &plan.node_roots {
+        if roots.is_empty() {
+            continue;
+        }
+        for (right, other) in &plan.node_roots {
+            if !other.is_empty() {
+                assert_eq!(
+                    roots == other,
+                    plan.chunk_for(left) == plan.chunk_for(right)
+                );
+            }
+        }
+        assert!(
+            output.chunk_artifacts[&plan.chunk_for(left).unwrap()].contains(&output.members[left])
+        );
+    }
+    assert!(!output.files.keys().any(|path| path.starts_with("proxies")));
+    let (_, reversed) = build(&source, &entries, true);
+    assert_eq!(output.files, reversed.files);
+    let mut files = output.files;
+    files.insert("observe.mjs".into(), r#"
+import {loadEntry} from './runtime.mjs';
+const lazy = await loadEntry('lazy.cjs');
+console.log('not initialized');
+const [a, b, again] = await Promise.all([loadEntry('a.mjs'), loadEntry('b.mjs'), loadEntry('a.mjs')]);
+const common = lazy.default();
+console.log(a === again, a.a === common.a, b.b === common.b, common.a.partial);
+"#.into());
+    let actual = node(&files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    insta::assert_snapshot!(std::str::from_utf8(&actual.stdout).unwrap(), @"
+    not initialized
+    shared once
+    true true true 1
+    ");
+    let mut baseline = source;
+    baseline.insert(
+        "observe.mjs".into(),
+        r#"
+const lazy = await import('./lazy.cjs');
+console.log('not initialized');
+const [a, b, again] = await Promise.all([import('./a.mjs'), import('./b.mjs'), import('./a.mjs')]);
+const common = lazy.default();
+console.log(a === again, a.a === common.a, b.b === common.b, common.a.partial);
+"#
+        .into(),
+    );
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    assert!(
+        baseline.status.success(),
+        "{}",
+        String::from_utf8_lossy(&baseline.stderr)
+    );
+    assert_eq!(actual.stdout, baseline.stdout);
+    insta::assert_debug_snapshot!(plan
+        .node_roots
+        .iter()
+        .filter(|(node, _)| matches!(node, NodeId::CommonJsProxy { .. }))
+        .collect::<Vec<_>>());
+}
+
+#[test]
+fn commonjs_mixed_cycles_follow_native_partial_exports_and_deferred_timing() {
+    compare(&sources(&[
+        ("entry.mjs", "import value from './dep.cjs'; export function read() { return 5; } setTimeout(() => console.log(value.read()), 0);"),
+        ("dep.cjs", "module.exports = { read() { return require('./entry.mjs').read(); } };"),
+    ]), "entry.mjs");
+    compare(&sources(&[
+        ("entry.cjs", "exports.value = 3; const esm = require('./dep.mjs'); console.log(esm.read());"),
+        ("dep.mjs", "import readPartial from './partial.cjs'; export function read() { return readPartial(); }"),
+        ("partial.cjs", "module.exports = () => require('./entry.cjs').value;"),
+    ]), "entry.cjs");
+    let source = sources(&[
+        ("entry.mjs", "import './dep.cjs'; export const value = 3;"),
+        (
+            "dep.cjs",
+            "console.log('before native cycle error'); require('./entry.mjs');",
+        ),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    let baseline = node(&source, Path::new("entry.mjs"));
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(!baseline.status.success() && !actual.status.success());
+    assert_eq!(actual.stdout, baseline.stdout);
+    for result in [&baseline, &actual] {
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("ERR_REQUIRE_CYCLE_MODULE"),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}
+
+#[test]
+fn commonjs_unused_binding_keeps_evaluation_without_requesting_its_getter() {
+    let source = sources(&[
+            ("entry.mjs", "import {unused} from './dep.cjs'; console.log('entry');"),
+            ("dep.cjs", "console.log('dependency'); Object.defineProperty(exports, 'unused', {get() { throw Error('unused getter executed'); }});"),
+        ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    assert_eq!(
+        output.cjs_proxies[Path::new("dep.cjs")].1,
+        BTreeSet::from(["default".into()])
+    );
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"dependency\nentry\n");
+}
+
+#[test]
+fn commonjs_namespace_conservatively_captures_runtime_keys_and_live_properties() {
+    let source = sources(&[
+        ("entry.mjs", "import * as ns from './dep.cjs'; import {box} from './barrel.mjs'; export {ns}; const key = 'dynamic' + 'Name'; console.log(ns === box, Object.isFrozen(ns), ns[key], Object.keys(ns).sort().join(',')); console.log(ns.read); ns.bump(); console.log(ns[key], ns.read, ns.added, ns.default.added);"),
+        ("barrel.mjs", "export * as box from './dep.cjs';"),
+        ("dep.cjs", "let value = 1; module.exports = { ['dynamic' + 'Name']: value, get read() { console.log('getter'); return value; }, bump() { value++; module.exports.dynamicName = value; module.exports.added = 9; } };"),
+    ]);
+    let (_, mut output) = build(&source, &[("entry.mjs", true), ("dep.cjs", false)], false);
+    assert_eq!(
+        output.cjs_proxies[Path::new("dep.cjs")].1,
+        BTreeSet::from(["default".into()])
+    );
+    output.files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; const entry = await loadEntry('entry.mjs'); console.log(entry.ns === await loadEntry('dep.cjs'));".into());
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    insta::assert_snapshot!(String::from_utf8(actual.stdout).unwrap(), @"
+    true true 1 bump,default,dynamicName,read
+    getter
+    1
+    getter
+    2 2 undefined 9
+    true
+    ");
 }
 
 #[test]
@@ -512,8 +717,20 @@ fn linked_payloads_apply_pure_recipes_and_preserve_utf8_hashbang_directives() {
 
 #[test]
 fn separate_bundle_instances_do_not_share_virtual_module_state() {
-    let first = sources(&[("entry.mjs", "export let value = 1;")]);
-    let second = sources(&[("entry.mjs", "export let value = 2;")]);
+    let first = sources(&[
+        (
+            "entry.mjs",
+            "import counter from './counter.cjs'; export let value = counter.value;",
+        ),
+        ("counter.cjs", "module.exports = {value: 1};"),
+    ]);
+    let second = sources(&[
+        (
+            "entry.mjs",
+            "import counter from './counter.cjs'; export let value = counter.value;",
+        ),
+        ("counter.cjs", "module.exports = {value: 2};"),
+    ]);
     let (_, first) = build(&first, &[("entry.mjs", true)], false);
     let (_, second) = build(&second, &[("entry.mjs", true)], false);
     let mut files = BTreeMap::new();
@@ -548,7 +765,8 @@ console.log(a.value, b.value, a === b, a === await one('entry.mjs'));
 fn later_entries_load_after_user_code_changes_public_builtins() {
     let sources = sources(&[
         ("first.mjs", "const fail = () => { throw new Error('public builtin changed'); }; JSON.parse = fail; Object.hasOwn = fail; globalThis.URL = fail; Map.prototype.get = fail; Map.prototype.has = fail; Map.prototype.set = fail;"),
-        ("second.mjs", "export const value = 42;"),
+        ("second.mjs", "import * as ns from './constant.cjs'; export const value = ns.default;"),
+        ("constant.cjs", "module.exports = 42;"),
     ]);
     let (_, output) = build(
         &sources,
@@ -626,7 +844,7 @@ fn read_sources(directory: &Path, prefix: &Path, sources: &mut BTreeMap<PathBuf,
         } else if entry
             .path()
             .extension()
-            .is_some_and(|ext| ext == "js" || ext == "mjs")
+            .is_some_and(|ext| ext == "js" || ext == "mjs" || ext == "cjs")
         {
             sources.insert(
                 prefix.join(entry.file_name()),
@@ -637,7 +855,7 @@ fn read_sources(directory: &Path, prefix: &Path, sources: &mut BTreeMap<PathBuf,
 }
 
 #[test]
-fn portable_esm_fixture_observations_match_native_and_manifest_expectations() {
+fn portable_sync_fixture_observations_match_native_and_manifest_expectations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bundler");
     for fixture in [
         "esbuild/reexport-cycle",
@@ -645,6 +863,9 @@ fn portable_esm_fixture_observations_match_native_and_manifest_expectations() {
         "esbuild/unused-import-side-effects",
         "rspack/esm-effect-order",
         "rspack/esm-live-binding",
+        "rspack/cjs-default-export",
+        "rspack/cjs-named-reexport",
+        "rspack/cjs-self-cycle",
     ] {
         let directory = root.join(fixture);
         let manifest: serde_json::Value =
@@ -656,7 +877,7 @@ fn portable_esm_fixture_observations_match_native_and_manifest_expectations() {
         let mut baseline_files = sources.clone();
         baseline_files.insert(
             PathBuf::from("package.json"),
-            "{\"type\":\"module\"}".into(),
+            serde_json::json!({"type": manifest["moduleType"]}).to_string(),
         );
         let entries: Vec<_> = manifest["entryPoints"]
             .as_array()
@@ -664,7 +885,12 @@ fn portable_esm_fixture_observations_match_native_and_manifest_expectations() {
             .iter()
             .map(|entry| (entry.as_str().unwrap(), true))
             .collect();
-        let (_, output) = build(&sources, &entries, false);
+        let format = if manifest["moduleType"] == "commonjs" {
+            ModuleFormat::CommonJs
+        } else {
+            ModuleFormat::Esm
+        };
+        let (_, output) = build_with_format(&sources, &entries, false, format);
         let mut observed = String::new();
         for (entry, _) in entries {
             let baseline = node(&baseline_files, Path::new(entry));

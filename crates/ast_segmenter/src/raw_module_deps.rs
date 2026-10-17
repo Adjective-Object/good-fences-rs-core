@@ -1,11 +1,11 @@
 use std::convert::TryInto;
 
 use ahashmap::{AHashMap, AHashSet};
+use std::fmt::Debug;
 use oxc_ast::ast::ModuleExportName;
 use oxc_ast::{Comment, CommentKind};
 use oxc_span::Span;
 use oxc_utils_parse::leading_comments_at;
-use std::fmt::Debug;
 
 use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
 
@@ -20,12 +20,7 @@ pub struct SymbolTags {
 impl SymbolTags {
     const IGNORE_UNUSED_PREFIX: &str = "@ALLOW-UNUSED-EXPORT";
 
-    pub fn from_comments_parent(
-        parent: Self,
-        comments: &[Comment],
-        source: &str,
-        lo: u32,
-    ) -> SymbolTags {
+    pub fn from_comments_parent(parent: Self, comments: &[Comment], source: &str, lo: u32) -> SymbolTags {
         let mut tags = parent;
         let line_comments = leading_comments_at(comments, source, lo);
         if line_comments.is_empty() {
@@ -54,6 +49,7 @@ impl SymbolTags {
     pub fn from_comments(comments: &[Comment], source: &str, lo: u32) -> SymbolTags {
         SymbolTags::from_comments_parent(SymbolTags::default(), comments, source, lo)
     }
+
 }
 
 /// The interior representation of the name of a symbol.

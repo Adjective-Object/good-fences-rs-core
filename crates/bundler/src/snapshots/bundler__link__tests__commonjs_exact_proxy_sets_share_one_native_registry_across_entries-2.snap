@@ -1,0 +1,57 @@
+---
+source: crates/bundler/src/link_tests.rs
+expression: "plan.node_roots.iter().filter(|(node, _)|\nmatches!(node, NodeId::CommonJsProxy { .. })).collect::<Vec<_>>()"
+---
+[
+    (
+        CommonJsProxy {
+            module: "lazy.cjs",
+            name: None,
+        },
+        {
+            Entry(
+                "lazy.cjs",
+            ),
+        },
+    ),
+    (
+        CommonJsProxy {
+            module: "shared.cjs",
+            name: None,
+        },
+        {
+            Entry(
+                "a.mjs",
+            ),
+            Entry(
+                "b.mjs",
+            ),
+        },
+    ),
+    (
+        CommonJsProxy {
+            module: "shared.cjs",
+            name: Some(
+                "a",
+            ),
+        },
+        {
+            Entry(
+                "a.mjs",
+            ),
+        },
+    ),
+    (
+        CommonJsProxy {
+            module: "shared.cjs",
+            name: Some(
+                "b",
+            ),
+        },
+        {
+            Entry(
+                "b.mjs",
+            ),
+        },
+    ),
+]

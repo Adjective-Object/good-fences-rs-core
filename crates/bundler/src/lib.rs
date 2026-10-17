@@ -1,4 +1,5 @@
 //! Retention, exact chunks and native ESM emission, independent of usage reports.
+mod cjs;
 pub mod chunks;
 pub mod effects;
 pub mod emit;
@@ -351,7 +352,8 @@ impl Retention<'_, '_> {
                     kind: RetentionEdgeKind::Require,
                     source_edge: Some(index),
                 });
-                self.target(edge.to, false)?;
+                // Opaque require consumers can inspect any namespace property.
+                self.target(edge.to, true)?;
             }
         }
         Ok(())

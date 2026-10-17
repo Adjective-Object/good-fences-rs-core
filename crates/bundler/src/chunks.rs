@@ -25,8 +25,20 @@ pub enum RootId {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NodeId {
     Module(PathBuf),
-    Segment { module: PathBuf, index: u32 },
-    External { module: PathBuf, offset: u32 },
+    Segment {
+        module: PathBuf,
+        index: u32,
+    },
+    External {
+        module: PathBuf,
+        offset: u32,
+    },
+    /// None initializes the proxy/default; Some is one requested named snapshot.
+    CommonJsProxy {
+        module: PathBuf,
+        name: Option<String>,
+    },
+    CommonJsNamespace(PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +103,9 @@ pub fn async_seed(graph: &SourceGraph, edge_index: usize) -> eyre::Result<RootSe
         .ok_or_eyre("async occurrence has no site identity")?;
     let module = match node_id(graph, edge.from)? {
         NodeId::Module(path) | NodeId::Segment { module: path, .. } => path,
-        NodeId::External { .. } => eyre::bail!("async consumer cannot be external"),
+        NodeId::External { .. } | NodeId::CommonJsProxy { .. } | NodeId::CommonJsNamespace(_) => {
+            eyre::bail!("async consumer must be a source node")
+        }
     };
     Ok(RootSeed {
         id: RootId::Async(AsyncSiteId {
@@ -152,10 +166,60 @@ pub fn reference_reachability(
                         continue;
                     }
                 }
-                if edge.kind == RetentionEdgeKind::Binding {
+                if matches!(
+                    edge.kind,
+                    RetentionEdgeKind::Binding | RetentionEdgeKind::Require
+                ) {
                     enqueue_binding(retention, edge.to, &mut queue);
                 } else {
                     queue.push_back(edge.to);
+                }
+            }
+        }
+        for file in retention
+            .modules
+            .iter()
+            .copied()
+            .filter(|file| graph.file_facts(*file).is_some_and(|facts| facts.commonjs))
+        {
+            let module = graph.file_path(file).unwrap().to_owned();
+            let mut demanded = BTreeSet::new();
+            let direct_entry = root.evaluation_roots.contains(&file)
+                || root.binding_roots.iter().any(|node| match node {
+                    GraphNode::Module(target) => *target == file,
+                    GraphNode::Segment(key) => key.file_id == file,
+                    GraphNode::Unlinked { .. } => false,
+                });
+            let mut initialize = direct_entry;
+            let mut namespace = direct_entry;
+            for (from, request) in crate::cjs::requests(graph, retention, file) {
+                if !reached.contains(&node_id(graph, from)?) {
+                    continue;
+                }
+                initialize = true;
+                match request {
+                    ast_segmenter::owned::ImportedName::Name(name) => {
+                        demanded.insert(name);
+                    }
+                    ast_segmenter::owned::ImportedName::Namespace => namespace = true,
+                }
+            }
+            if initialize {
+                reached.insert(NodeId::CommonJsProxy {
+                    module: module.clone(),
+                    name: None,
+                });
+                reached.extend(
+                    demanded
+                        .into_iter()
+                        .filter(|name| name != "default")
+                        .map(|name| NodeId::CommonJsProxy {
+                            module: module.clone(),
+                            name: Some(name),
+                        }),
+                );
+                if namespace {
+                    reached.insert(NodeId::CommonJsNamespace(module.clone()));
                 }
             }
         }

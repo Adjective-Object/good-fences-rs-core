@@ -5,7 +5,8 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P6 are complete for the documented Node ESM target. P7–P9 remain pending.** Both
+**P0–P7 are complete for the documented synchronous Node ESM/CJS target.
+P8–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -301,13 +302,20 @@ workspace test success.
   mutation/reassignment under an explicitly chosen interop contract.
   Reverse typed edges and checked barrel identities derive original names.
   Native ESM proxies snapshot named properties/getters; default is the require
-  result, regardless of __esModule. Namespace keys are static demands + default;
-  unknown dynamic properties require namespace.default access. Format facts are
+  result, regardless of __esModule. P7.3 completes conservative runtime-key
+  namespace bridges (live reads, snapshot keys), not a finite static name list. Format facts are
   explicit; cache schema 4/extractor 5 validates their parser-mode identity.
-- [ ] **P7.3 — Integrate proxies across chunks.** Depends: P7.2, P6.3.
+- [x] **P7.3 — Integrate proxies across chunks.** Depends: P7.2, P6.3.
   Feed synthetic segments through exact-set partitioning and share one registry
   per runtime. Same-process multi-entry tests verify once-only execution and
   mixed ESM/CJS cycles. Separate-process P0 tests alone do not satisfy this.
+  Proxy initialization/default, runtime-key namespace and named snapshots are synthetic
+  nodes in exact-set reachability/chunks/manifests and rewritten JSON payloads.
+  One native registry/proxy identity survives concurrent same-process entries,
+  cross-file partial cycles, deferred requires and synchronous require-of-ESM.
+  Illegal evaluating-ESM require cycles preserve native error codes.
+  Eight portable sync fixtures/eleven executions match native stdout/contracts;
+  four async fixtures remain deferred to P8. No logical root-set relaxation.
 
 ## P8 — Dynamic import and async evaluation
 

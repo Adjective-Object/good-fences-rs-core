@@ -2,13 +2,92 @@
 
 ## Current scope
 
+P0–P7 are complete for the documented synchronous Node ESM/CJS target.
+P8–P9 remain pending; this phase stops before P8.
+
+## P7.3 runtime / P8–P9 handoff
+
+- Existing `link::esm` now accepts mixed JavaScript ESM/CJS graphs. `Artifacts`
+  retains all previous fields and adds `cjs_proxies: path -> (token, names)` and
+  `cjs_namespaces: path -> token`.
+  `modules[path]` is the raw canonical factory/module token. `cjs_proxies[path]`
+  is the static ESM proxy token; `cjs_namespaces[path]` is a native module whose
+  default is the canonical CJS namespace bridge. `requireModule(raw_token)`
+  returns native current require results. `loadEntry` returns native ESM
+  namespaces for ESM entries and the runtime-key bridge for CJS entries.
+- `ModuleFacts::commonjs` is the authoritative effective parser format, including
+  package-commonjs `.js`. `ExportIdentity::CommonJs(file,name)` is a dynamic
+  value request, not guessed export analysis. Cache schema 4/extractor 5 validates
+  this bit against the parser config/body; old sidecars safely miss.
+- `NodeId::CommonJsProxy { module, name: None }` initializes the proxy/default;
+  `Some(name)` owns a requested named snapshot. These live in ordinary exact
+  root-set payloads and manifest synthetic/dependency records.
+  `NodeId::CommonJsNamespace(path)` owns the runtime-key bridge. Namespace/root
+  demand includes that conservative bridge; require alone never demands a proxy.
+  Reverse typed requests resolve names through checked barrel identities.
+  Unused named imports preserve evaluation without invoking their getters.
+- One runtime's Node-native CJS cache supplies early records, partial cycles,
+  aliases/wrapper this, current replacement values and eviction/retry on throw.
+  Native ESM proxies supply immutable namespace identity; default captures the
+  complete require value ignoring __esModule, requested names/getters snapshot
+  once in sorted order. Unknown namespace demands enumerate the actual require
+  result's own string keys once, then forward reads/getters live without eager
+  getter execution. The frozen/null-prototype bridge is not an ESM exotic;
+  static ESM proxies remain native. New keys use ns.default; replacement affects
+  subsequent require, not captured values. Failed ESM proxy
+  evaluation remains cached by native ESM.
+- CJS entry facades require before importing the proxy, preserving CJS-first
+  cycles. Require-of-synchronous-ESM conservatively retains its whole namespace.
+  Static ESM routes use file-relative virtual identities: Node's synchronous
+  ESM job rejects custom-protocol specifiers before invoking resolution hooks.
+  Legal deferred mixed cycles pass; native ERR_REQUIRE_CYCLE_MODULE is preserved
+  when requiring a still-evaluating ESM. Source TLA remains rejected, not hidden.
+- Physical `module_payloads[path]` includes factory + proxy pieces for CJS.
+  Module/proxy assembly may read globally retained extra pieces without changing
+  logical facade load sets, merging lexical environments or evaluating unrelated
+  modules. A canonical proxy's named getters can therefore execute when first
+  loaded even when requested by a different entry, as documented static surface.
+- Eight portable synchronous fixtures/eleven executions now match native and
+  case.json stdout. Four dynamic/TLA fixtures remain unsupported for P8.
+  Same-process concurrent entry tests compare native observations, require/ESM
+  object and namespace identity, once-only cross-file cycles and deferred timing.
+- P7.1 pushed e345d78; P7.2 pushed 8ee7bc1. Each passed focused runtime,
+  graph/cache compatibility and mandatory spot-check before commit. P7.2 also
+  passed tracker/tag compatibility and local clippy. Formatter-only workspace
+  churn is removed in P7.3; no unrelated behavior is changed.
+
+## Final P7 verification
+
+- Node v22.22.2; real filesystem/runtime tests use managed `test_tmpdir::TmpDir`
+  under `TMPDIR="$PWD/target/p1-test-tmp"`.
+- `cargo test -p bundler -p ast-segmenter -p import_resolver -p oxc_utils_parse
+  -p segment_cache -p source_graph -p tag_graph -p unused_finder --quiet`:
+  **296 passed**, zero failed/ignored (69 bundler, 50 ast-segmenter, 18 resolver,
+  9 parser, 25 cache, 31 source graph, 22 tag graph, 72 tracker).
+- Eight portable sync fixtures/eleven entry executions match native stdout and
+  preserved fixture contracts. Seven dedicated CJS groups cover wrappers,
+  aliases/primitive/object reassignment, hashbang/directive/early return, thrown
+  retry, partial/self/cross-file/mixed cycles, getters/default/__esModule, named
+  snapshots, conservative dynamic namespaces, package format, unused requests,
+  exact synthetic sets and same-process concurrent multi-entry identity.
+- Local bundler all-target `clippy --no-deps -- -D warnings`, mandatory
+  `./scripts/spot-check` (ast compile/all 50 tests/full workspace check), and
+  `git diff --check` pass. Existing dependency lifetime warning remains.
+  Logs: ignored `target/p7-{1,2,3}-*.log`.
+- Four source-async/TLA fixtures are unsupported, not passes. No full workspace
+  test-suite, browser target, TS/JSX lowering, maps or transactional publication
+  claim. P8/P9 start from the APIs/policies above; no P8 work is implemented here.
+
+## Historical P7.1–P7.2 checkpoints
+
 P7.2: `Artifacts::cjs_proxies` records canonical native ESM proxy tokens/static
 surfaces. Reverse typed requests resolve original names through checked barrel
 routes; CommonJs export identity is dynamic value demand, never export guessing.
 Named/getter snapshots, full-result default ignoring __esModule, replacement
 and namespace.default dynamic access are tested. `ModuleFacts::commonjs` closes
 the package-format handoff gap; schema 4/extractor 5 rejects mismatched bits.
-P7.3 will move these generated proxy source pieces into exact-set payloads.
+P7.3 subsequently moves proxy pieces into exact-set payloads and replaces the
+intermediate finite namespace surface with conservative runtime-key bridges.
 
 P7.1: opaque CJS bodies are rewritten only at checked require specifiers and
 source hints, then stored in their original exact-set segment payload. Runtime
@@ -17,8 +96,7 @@ eviction/retry after throws. Native ESM's CJS translator was experimentally
 rejected: its private require bypasses registered resolution hooks. Static
 ESM-to-CJS imports remain diagnosed until P7.2 proxies.
 
-P0–P6 are complete for the documented Node ESM target; P7–P9 remain pending.
-This phase completes P6.1–P6.3 without nested delegation and stops before P7.
+The remaining P6 sections below are historical checkpoints, not current gates.
 
 ## P6.3 linker / P7–P9 handoff
 

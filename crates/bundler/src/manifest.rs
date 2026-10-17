@@ -16,7 +16,19 @@ use crate::{policy::EffectPolicy, RetentionEdgeKind};
 pub enum SyntheticNode {
     EntryFacade(String),
     AsyncFacade(AsyncSiteId),
-    ModuleIdentity { module: PathBuf, chunk: ChunkId },
+    ModuleIdentity {
+        module: PathBuf,
+        chunk: ChunkId,
+    },
+    CommonJsProxy {
+        module: PathBuf,
+        name: Option<String>,
+        chunk: ChunkId,
+    },
+    CommonJsNamespace {
+        module: PathBuf,
+        chunk: ChunkId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +135,23 @@ pub fn diagnostic_manifest(
         }
     }
     for (node, roots) in &plan.node_roots {
+        if let NodeId::CommonJsNamespace(module) = node {
+            manifest
+                .synthetic_nodes
+                .insert(SyntheticNode::CommonJsNamespace {
+                    module: module.clone(),
+                    chunk: ChunkId(roots.clone()),
+                });
+        }
+        if let NodeId::CommonJsProxy { module, name } = node {
+            manifest
+                .synthetic_nodes
+                .insert(SyntheticNode::CommonJsProxy {
+                    module: module.clone(),
+                    name: name.clone(),
+                    chunk: ChunkId(roots.clone()),
+                });
+        }
         if let NodeId::Module(module) = node {
             if !roots.is_empty() {
                 manifest
@@ -146,7 +175,10 @@ pub fn diagnostic_manifest(
             continue;
         };
         let mut targets = VecDeque::new();
-        if edge.kind == RetentionEdgeKind::Binding {
+        if matches!(
+            edge.kind,
+            RetentionEdgeKind::Binding | RetentionEdgeKind::Require
+        ) {
             enqueue_binding(&plan.retention, edge.to, &mut targets);
         } else {
             targets.push_back(edge.to);
@@ -160,6 +192,63 @@ pub fn diagnostic_manifest(
                     from: from.clone(),
                     to,
                 });
+            }
+        }
+    }
+    for file in plan
+        .retention
+        .modules
+        .iter()
+        .copied()
+        .filter(|file| graph.file_facts(*file).is_some_and(|facts| facts.commonjs))
+    {
+        let module = graph.file_path(file).unwrap().to_owned();
+        let initialize = NodeId::CommonJsProxy {
+            module: module.clone(),
+            name: None,
+        };
+        let namespace = NodeId::CommonJsNamespace(module.clone());
+        let mut dependencies = vec![
+            (initialize.clone(), NodeId::Module(module.clone())),
+            (namespace.clone(), initialize.clone()),
+        ];
+        let names = crate::cjs::names(graph, &plan.retention, file);
+        for name in names.iter().filter(|name| name.as_str() != "default") {
+            dependencies.push((
+                NodeId::CommonJsProxy {
+                    module: module.clone(),
+                    name: Some(name.clone()),
+                },
+                initialize.clone(),
+            ));
+        }
+        for (from, request) in crate::cjs::requests(graph, &plan.retention, file) {
+            let from = node_id(graph, from)?;
+            dependencies.push((from.clone(), initialize.clone()));
+            let requested = match request {
+                ast_segmenter::owned::ImportedName::Name(name) => BTreeSet::from([name]),
+                ast_segmenter::owned::ImportedName::Namespace => {
+                    dependencies.push((from.clone(), namespace.clone()));
+                    BTreeSet::new()
+                }
+            };
+            for name in requested.into_iter().filter(|name| name != "default") {
+                dependencies.push((
+                    from.clone(),
+                    NodeId::CommonJsProxy {
+                        module: module.clone(),
+                        name: Some(name),
+                    },
+                ));
+            }
+        }
+        for (from, to) in dependencies {
+            if let (Some(from), Some(to)) = (plan.chunk_for(&from), plan.chunk_for(&to)) {
+                if from != to {
+                    manifest
+                        .chunk_dependencies
+                        .insert(ChunkDependency { from, to });
+                }
             }
         }
     }
@@ -183,7 +272,9 @@ fn facade_demand(graph: &SourceGraph, seed: &RootSeed) -> eyre::Result<FacadeDem
             NodeId::Module(module) | NodeId::Segment { module, .. } => {
                 evaluation_modules.insert(module.clone());
             }
-            NodeId::External { .. } => {}
+            NodeId::External { .. }
+            | NodeId::CommonJsProxy { .. }
+            | NodeId::CommonJsNamespace(_) => {}
         }
         binding_nodes.insert(canonical);
     }

@@ -1,4 +1,4 @@
-//! Exact-chunk source payloads linked as native ESM through Node's loader hooks.
+//! Exact-chunk payloads linked through Node's native ESM and CommonJS loaders.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -20,7 +20,7 @@ mod tests;
 
 /// Owned staging result; no filesystem writes. Publish the complete relative
 /// artifact map together, then use runtime.mjs's loadEntry(name) for the native
-/// module namespace, or execute an entry launcher with Node >=22.15.
+/// module namespace (CJS runtime-key bridge), or execute a Node >=22.15 launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifacts {
     pub files: BTreeMap<PathBuf, String>,
@@ -36,6 +36,8 @@ pub struct Artifacts {
     pub manifest: DiagnosticManifest,
     /// CJS identity -> canonical native ESM proxy token and its static surface.
     pub cjs_proxies: BTreeMap<PathBuf, (String, BTreeSet<String>)>,
+    /// CJS identities with a conservative runtime-key namespace bridge.
+    pub cjs_namespaces: BTreeMap<PathBuf, String>,
 }
 
 struct Module<'a> {
@@ -45,9 +47,9 @@ struct Module<'a> {
     surface: BTreeSet<String>,
 }
 
-/// Native ESM owns scope, instantiation-before-evaluation, cycles, lexical TDZ
-/// and live exports. Chunks hold rewritten source pieces, never eager factories:
-/// the host loader joins one original lexical module before compiling it.
+/// Native ESM owns live bindings/TDZ and native CJS owns wrappers/cache. Chunks
+/// hold rewritten source pieces, never eager evaluators: the host loader joins
+/// one original lexical module or opaque factory before compiling it.
 pub fn esm(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -136,16 +138,24 @@ pub fn esm(
         payloads.insert(path, BTreeMap::new());
     }
     let mut module_pieces = BTreeMap::new();
-    let mut module_payloads = BTreeMap::new();
+    let mut module_payloads: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
     let mut cjs_proxies = BTreeMap::new();
+    let mut cjs_namespaces = BTreeMap::new();
     for (&file, module) in &modules {
         let edits = dependency_edits(graph, plan, file, &modules)?;
-        let parts = if matches!(module.parsed.body, ModuleBody::CommonJs { .. }) {
+        let parts = if let ModuleBody::CommonJs { span } = module.parsed.body {
             let source = rewrite::apply(module.source, &edits)?;
-            vec![crate::emit::SourcePart {
-                segment: Some(0),
-                source: rewrite::apply(&source, &rewrite::source_hint_edits(&source))?,
-            }]
+            let source = rewrite::apply(&source, &rewrite::source_hint_edits(&source))?;
+            vec![
+                crate::emit::SourcePart {
+                    segment: None,
+                    source: source[..span.start as usize].into(),
+                },
+                crate::emit::SourcePart {
+                    segment: Some(0),
+                    source: source[span.start as usize..].into(),
+                },
+            ]
         } else {
             crate::emit::project_parts(
                 graph,
@@ -184,30 +194,68 @@ pub fn esm(
             pieces.iter().map(|(path, _)| path.clone()).collect(),
         );
         module_pieces.insert(module.token.clone(), pieces);
-        if module.parsed.facts.commonjs {
+        let module_path = graph.file_path(file).unwrap().to_owned();
+        let initialize = NodeId::CommonJsProxy {
+            module: module_path.clone(),
+            name: None,
+        };
+        if module.parsed.facts.commonjs && members.contains_key(&initialize) {
             let proxy = proxy_token(module);
-            let mut source = format!(
+            let initialization = format!(
                 "import {{requireModule}} from '../runtime.mjs';\nconst value = requireModule({});\nexport default value;\n",
                 quote(&module.token)
             );
+            let mut parts = vec![(initialize, initialization)];
             for (index, name) in module
                 .surface
                 .iter()
                 .filter(|name| name.as_str() != "default")
                 .enumerate()
             {
-                source.push_str(&format!(
+                parts.push((NodeId::CommonJsProxy { module: module_path.clone(), name: Some(name.clone()) }, format!(
                     "const v{index} = value == null ? undefined : value[{}];\nexport {{v{index} as {}}};\n",
                     quote(name), quote(name)
-                ));
+                )));
             }
-            let path = PathBuf::from(format!("proxies/{}.mjs", digest(&proxy)));
-            rewrite::validate(&path, &source)?;
-            files.insert(path.clone(), source);
+            let joined: String = parts.iter().map(|(_, source)| source.as_str()).collect();
+            rewrite::validate(&module_path, &joined)?;
+            let mut pieces = Vec::new();
+            for (index, (node, source)) in parts.into_iter().enumerate() {
+                let path = members
+                    .get(&node)
+                    .ok_or_eyre("CJS proxy demand absent from exact partition")?;
+                let key = format!("{proxy}:{index}");
+                payloads.get_mut(path).unwrap().insert(key.clone(), source);
+                pieces.push((path.clone(), key));
+            }
+            module_payloads
+                .get_mut(&module_path)
+                .unwrap()
+                .extend(pieces.iter().map(|(path, _)| path.clone()));
+            module_pieces.insert(proxy.clone(), pieces);
             cjs_proxies.insert(
                 graph.file_path(file).unwrap().to_owned(),
                 (proxy, module.surface.clone()),
             );
+        }
+        let namespace_node = NodeId::CommonJsNamespace(module_path.clone());
+        if let Some(path) = members.get(&namespace_node) {
+            let token = namespace_token(module);
+            let source = format!(
+                "import value from {};\nimport {{commonjsNamespace}} from '../runtime.mjs';\nexport default commonjsNamespace(value);\n",
+                quote(&format!("./{}.mjs", proxy_token(module).strip_prefix("good-fences:").unwrap()))
+            );
+            rewrite::validate(&module_path, &source)?;
+            payloads
+                .get_mut(path)
+                .unwrap()
+                .insert(token.clone(), source);
+            module_pieces.insert(token.clone(), vec![(path.clone(), token.clone())]);
+            module_payloads
+                .get_mut(&module_path)
+                .unwrap()
+                .insert(path.clone());
+            cjs_namespaces.insert(module_path, token);
         }
     }
     for (path, payload) in payloads {
@@ -247,7 +295,7 @@ pub fn esm(
                     .into_iter()
                     .map(|file| {
                         if modules[&file].parsed.facts.commonjs {
-                            proxy_token(&modules[&file])
+                            namespace_token(&modules[&file])
                         } else {
                             modules[&file].token.clone()
                         }
@@ -257,7 +305,7 @@ pub fn esm(
         })
         .collect::<eyre::Result<_>>()?;
     let runtime = PathBuf::from("runtime.mjs");
-    let formats: BTreeMap<_, _> = modules
+    let mut formats: BTreeMap<_, _> = modules
         .values()
         .map(|module| {
             (
@@ -270,11 +318,13 @@ pub fn esm(
             )
         })
         .collect();
-    let proxies: BTreeMap<_, _> = cjs_proxies
-        .values()
-        .map(|(token, _)| (token.clone(), format!("proxies/{}.mjs", digest(token))))
-        .collect();
-    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens, "formats": formats, "proxies": proxies });
+    for (token, _) in cjs_proxies.values() {
+        formats.insert(token.clone(), "module");
+    }
+    for token in cjs_namespaces.values() {
+        formats.insert(token.clone(), "module");
+    }
+    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens, "formats": formats });
     let runtime_source = format!(
         "const config = JSON.parse({});\n{}",
         quote(&config.to_string()),
@@ -309,6 +359,7 @@ pub fn esm(
         chunk_artifacts,
         manifest,
         cjs_proxies,
+        cjs_namespaces,
     })
 }
 
@@ -352,13 +403,19 @@ fn dependency_edits(
         let target_module = modules
             .get(&target)
             .ok_or_eyre("static target absent from retention")?;
-        let target_specifier = quote(&if target_module.parsed.facts.commonjs
-            && dependency.kind != DependencyKind::Require
-        {
-            proxy_token(target_module)
+        let target_specifier = if dependency.kind == DependencyKind::Require {
+            quote(&target_module.token)
         } else {
-            target_module.token.clone()
-        });
+            let token = if target_module.parsed.facts.commonjs {
+                proxy_token(target_module)
+            } else {
+                target_module.token.clone()
+            };
+            quote(&format!(
+                "./{}.mjs",
+                token.strip_prefix("good-fences:").unwrap()
+            ))
+        };
         if dependency.kind == DependencyKind::Require {
             ensure!(
                 matches!(module.parsed.body, ModuleBody::CommonJs { .. }),
@@ -411,10 +468,20 @@ fn dependency_edits(
                             binding.name
                         ));
                     }
-                    ImportedName::Namespace => replacement.push_str(&format!(
-                        "import * as {} from {target_specifier};\n",
-                        binding.name
-                    )),
+                    ImportedName::Namespace => {
+                        if target_module.parsed.facts.commonjs {
+                            replacement.push_str(&format!(
+                                "import {} from {};\n",
+                                binding.name,
+                                namespace_specifier(target_module)
+                            ));
+                        } else {
+                            replacement.push_str(&format!(
+                                "import * as {} from {target_specifier};\n",
+                                binding.name
+                            ));
+                        }
+                    }
                 }
             }
         } else {
@@ -459,9 +526,20 @@ fn dependency_edits(
                             quote(name)
                         ));
                     }
-                    ImportedName::Namespace if export.name.is_some() => replacement.push_str(
-                        &format!("export * as {} from {target_specifier};\n", quote(name)),
-                    ),
+                    ImportedName::Namespace if export.name.is_some() => {
+                        if target_module.parsed.facts.commonjs {
+                            replacement.push_str(&format!(
+                                "export {{default as {}}} from {};\n",
+                                quote(name),
+                                namespace_specifier(target_module)
+                            ));
+                        } else {
+                            replacement.push_str(&format!(
+                                "export * as {} from {target_specifier};\n",
+                                quote(name)
+                            ));
+                        }
+                    }
                     ImportedName::Namespace => {
                         ensure!(
                             target_module.surface.contains(name),
@@ -504,42 +582,7 @@ fn export_names(graph: &SourceGraph, plan: &ChunkPlan) -> BTreeMap<u32, BTreeSet
             (
                 file,
                 if graph.file_facts(file).is_some_and(|facts| facts.commonjs) {
-                    let mut names = BTreeSet::from(["default".to_owned()]);
-                    for edge in graph.incoming(GraphNode::Module(file)).filter(|edge| {
-                        !edge.type_only
-                            && matches!(
-                                edge.kind,
-                                source_graph::EdgeKind::Import | source_graph::EdgeKind::ReExport
-                            )
-                            && retained(plan, edge.from)
-                    }) {
-                        if let Some(ImportedName::Name(name)) = &edge.imported {
-                            let from = match edge.from {
-                                GraphNode::Module(file) => file,
-                                GraphNode::Segment(key) => key.file_id,
-                                GraphNode::Unlinked { file_id, .. } => file_id,
-                            };
-                            let target = edge
-                                .dependency
-                                .and_then(|dependency| graph.dependency_target(from, dependency))
-                                .and_then(|target| match target {
-                                    DependencyTarget::File(path) => graph.file_id(path),
-                                    _ => None,
-                                });
-                            if let Some(source_graph::ExportIdentity::CommonJs(target, name)) =
-                                target
-                                    .and_then(|target| {
-                                        graph.resolve_export(target, name, Namespace::Value).ok()
-                                    })
-                                    .map(|linked| linked.identity)
-                            {
-                                if target == file {
-                                    names.insert(name);
-                                }
-                            }
-                        }
-                    }
-                    names
+                    crate::cjs::names(graph, &plan.retention, file)
                 } else {
                     graph
                         .file_facts(file)
@@ -585,6 +628,19 @@ fn export_names(graph: &SourceGraph, plan: &ChunkPlan) -> BTreeMap<u32, BTreeSet
 
 fn proxy_token(module: &Module<'_>) -> String {
     format!("{}:proxy", module.token)
+}
+
+fn namespace_token(module: &Module<'_>) -> String {
+    format!("{}:namespace", module.token)
+}
+
+fn namespace_specifier(module: &Module<'_>) -> String {
+    quote(&format!(
+        "./{}.mjs",
+        namespace_token(module)
+            .strip_prefix("good-fences:")
+            .unwrap()
+    ))
 }
 
 fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {

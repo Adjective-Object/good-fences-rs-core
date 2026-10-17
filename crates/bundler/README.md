@@ -1,6 +1,6 @@
 # bundler
 
-Library-only retention, exact chunk planning and JavaScript ESM emission over
+Library-only retention, exact chunk planning and JavaScript ESM/CJS emission over
 the checked owned `SourceGraph`. This is not an unused-report adapter.
 
 `retain(graph, evaluation_roots, binding_roots)` keeps module evaluation demand
@@ -38,8 +38,8 @@ Node allocates records before invoking wrappers, binds wrapper `this` to the
 initial exports object and returns the current `module.exports`. Recursive
 requires see partial exports; deferred sites execute only when called. Failed
 factories are removed from the require cache and retry on the next require.
-Successful modules execute once. Entry CJS loading returns a canonical native
-ESM proxy namespace, also used by static ESM imports/reexports.
+Successful modules execute once. Native ESM proxies carry static named/default
+requests; CJS namespace requests/entries use a canonical runtime-key bridge.
 
 ### Interop policy
 
@@ -53,14 +53,46 @@ Property mutation is visible through the default object's identity, not through
 named snapshots; later `module.exports` replacement affects subsequent require
 results but not the proxy's captured default or named values.
 
-A native namespace has `default` plus the bundle's statically requested names.
-Namespace-only access does not discover arbitrary dynamic keys: `ns.unknown` is
-undefined unless independently requested; use `ns.default.unknown` for dynamic
-CommonJS property access. Star reexports propagate requested names, excluding
-default. The proxy namespace is a real immutable ESM namespace, not a mutable
-object masquerading as one. Factory throws retry through require, but an ESM
+A named proxy's native namespace has `default` plus statically requested names.
+**Unknown namespace access is conservative, not that finite static list.**
+`Artifacts::cjs_namespaces` reports separate native module tokens whose default
+exports are canonical CJS namespace bridges. Static `import * as ns`,
+`export * as box`, and CJS `loadEntry` use the same bridge object. Its own string
+keys are discovered from the actual require result at bridge initialization;
+getters forward reads to the captured object, without eager getter invocation.
+Thus computed names and `ns[key]` work without source export inference.
+The bridge is frozen/null-prototype with a Module tag, not an ESM namespace exotic.
+Its `default` is the full original require result even with `__esModule` or a
+user `default` property. Keys snapshot once; later property mutations/getters
+remain visible, while new keys require `ns.default.newKey` and whole-exports
+replacement affects subsequent require only. Star reexports still propagate
+statically requested names (snapshots), excluding default.
+Factory throws retry through require, but an ESM
 proxy evaluation failure is cached by native ESM, as for any failed ESM module.
 Proxies and require share the same native CJS cache; no duplicate factories.
+
+### Exact-set proxy integration
+
+`chunks::NodeId::CommonJsProxy { module, name }` participates in ordinary exact
+reachability and partitioning: `None` owns initialization/default and `Some(name)`
+owns one named snapshot. `NodeId::CommonJsNamespace(path)` owns the conservative
+runtime-key bridge. Consumers demand their own names; namespace consumers and
+CJS entry facades demand that bridge, not a finite name list. Requires demand the opaque
+body/target namespace, not a proxy or eager execution. Manifest synthetic nodes
+and chunk dependencies expose proxy→factory and snapshot→initialization edges.
+There are no standalone proxy files and no proxy payload duplicated across sets.
+Like ESM lexical modules, a canonical proxy assembles all its globally retained
+pieces before native compilation. `module_payloads` for a CJS identity includes
+factory, named proxy and namespace bridge payloads, separate from logical root load sets.
+
+All chunks share one runtime's native CJS cache and canonical ESM proxy namespace.
+`loadEntry` initializes a CJS entry with native require before importing its proxy,
+preserving CJS-first mixed cycles. Opaque require of synchronous ESM conservatively
+retains the whole target namespace. Native Node owns sync require-of-ESM behavior:
+completed/deferred mixed cycles work, while requiring an evaluating ESM in a
+cycle throws `ERR_REQUIRE_CYCLE_MODULE`. TLA is still rejected before emission.
+Static ESM routes use canonical file-relative virtual URLs so native synchronous
+ESM linking does not encounter an unsupported custom protocol.
 
 ## Rewrite backend
 
@@ -77,7 +109,7 @@ At OXC revision `87f065ebf7cde21d1229322f4c7ee58baca5648e`,
 only partial leading-comment preservation. Source edits fit our owned occurrence
 spans without reconstructing/rebinding an AST. We therefore use edits, not the
 printer/transformer. Reparse actual source on cache hits; source facts alone
-cannot validate the output. Output is JavaScript ESM only: no TypeScript or JSX
+cannot validate the output. Output is JavaScript ESM/CJS only: no TypeScript or JSX
 lowering. The emitter must reject those language modes. No source maps are
 generated or advertised; generated offsets are not original-source positions.
 Emission removes stale `sourceMappingURL`/`sourceURL` comment directives; it
@@ -126,8 +158,8 @@ import {loadEntry} from './runtime.mjs';
 const namespace = await loadEntry('main');
 ```
 
-`loadEntry` returns the actual native module namespace for a single-module
-root, or an ordered array of namespaces for a multi-module root. Request
+`loadEntry` returns the actual native namespace for an ESM root, the documented
+runtime-key bridge for a CJS root, or an ordered array for multiple modules. Request
 namespace binding demand when all public exports must remain; evaluation-only
 or selected-binding roots intentionally do not retain a complete namespace.
 Launchers default-export that namespace object, **not** copied named bindings.
@@ -153,19 +185,21 @@ any root set or constitute a demand-minimal/async loader claim. Payload names
 derive from logical identity, not content; transactional/content-addressed
 publication remains P9. No files are written by the Rust library.
 
-Source dynamic imports, TLA, CJS, externals, TS/JSX and source-policy unsupported
+Source dynamic imports, TLA, externals, TS/JSX and source-policy unsupported
 forms fail with source diagnostics. Entry launchers' generated top-level await
 only bootstraps native entry import; it is not support for source TLA scheduling.
-P7 must integrate CJS factory/proxy identity without bypassing native ESM
+P7 integrates CJS factory/proxy identity without bypassing native ESM
 namespaces; P8 owns source async boundaries/TLA and any fetching optimization.
 This backend is not a browser/standalone-file target.
 
-Bundled-mode Node tests compare five portable ESM cases (eight entry executions)
+Bundled-mode Node tests compare eight portable synchronous cases (eleven entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover
 cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
 effect ordering, once-only/concurrent entry loading, bundle-instance isolation,
 equal-identity star diamonds, dead-code removal and composed PURE recipes.
-CJS/TLA fixture parity is not claimed.
+These include default/named CJS interop and a self-cycle. Four dynamic-import/TLA
+fixtures remain unsupported; no source-async parity is claimed. Same-process
+concurrent multi-entry CJS cycles/identity have independent differential evidence.
 
 ## Root reachability
 
@@ -212,7 +246,8 @@ expansion. Intra-chunk cycles remain inside their exact chunk; source evaluation
 constraints/occurrence metadata remain in `ChunkPlan::retention` and `SourceGraph`.
 `synthetic_nodes` explicitly lists entry/async facades outside logical chunks
 and module identities inside their existing module-node chunks, even for empty
-modules. These records do not manufacture eager evaluation edges or CJS proxies.
+modules. P7 also lists exact-chunk CJS proxy initialization/named snapshot and
+runtime-key namespace bridge nodes.
 External nodes are occurrence-based availability placeholders, not emitted code;
 resolve their external specifier through the shared graph.
 
@@ -222,8 +257,8 @@ or lexical demand. Neither chunks, sorted manifest edges, nor transitive load
 sets are a runtime schedule. Distinct module records in one chunk (including
 deferred CJS require targets) must retain separate once-only evaluation state.
 P6 supplies Node-native ESM rewriting/instantiation (above); P7 supplies CJS
-factories/proxies/cache and P8 supplies source dynamic loading/TLA scheduling.
-Only the documented ESM subset has emitted-runtime conformance evidence.
+factories/proxies/cache. P8 source dynamic loading/TLA scheduling remains pending.
+Only the documented synchronous ESM/CJS subset has emitted-runtime evidence.
 Use manifests only with the same graph instance and after `is_current` succeeds;
 recompute the partition/manifest after entry, graph, or effect-policy changes.
 

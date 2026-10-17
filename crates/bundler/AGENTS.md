@@ -16,10 +16,17 @@ compilation; never split its lexical environment or evaluate an entire payload.
 Keep physical module_payloads separate from logical manifest load sets. Runtime
 URLs include the published bundle directory to isolate separate instances.
 loadEntry returns native namespaces; launchers export the namespace object.
-Source dynamic imports/TLA, CJS and externals remain explicit later gates.
+Source dynamic imports/TLA and externals remain explicit later gates.
 P7 CJS uses native createRequire + synchronous hooks, not the ESM CJS
 translator's separate require path. Native cache owns allocation-before-call,
 partial cycles, wrapper this, current exports and eviction/retry after throws.
+Proxy initialization and named snapshots are exact-set synthetic nodes; never
+hide them in facade files. Reverse checked requests supply original names.
+Default captures full exports ignoring __esModule; names snapshot once. Unknown
+namespace demands use a separate exact-set runtime-key bridge, not finite names.
+Keys snapshot at initialization; property reads forward live to captured exports.
+Static ESM namespaces remain native; CJS bridges are frozen/null-prototype objects.
+Require-of-ESM retains namespace; native evaluating-ESM cycles still throw.
 
 PURE recipes remove one invocation, never its callee/reference/argument/iteration
 effects. Preserve original optional-chain completion state, not just undefined.

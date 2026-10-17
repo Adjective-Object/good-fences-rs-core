@@ -6,8 +6,8 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P6 are verified for the documented Node ESM target; P7–P9 remain
-pending. This bounded phase completes P6.1–P6.3 and stops before P7.
+commits: P0–P7 are verified for the documented synchronous Node ESM/CJS target;
+P8–P9 remain pending. This bounded phase completes P7.1–P7.3 and stops before P8.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -17,9 +17,17 @@ replacement values and retry after factory throws. CJS/ESM proxy interop follows
 in P7.2; no hand-written competing require cache is introduced.
 P7.2 supplies native ESM proxies using reverse typed requests/checked original
 barrel identities: named properties snapshot once, default captures full require
-result, __esModule is ignored, dynamic property access is via namespace.default.
+result, __esModule is ignored. P7.3 adds conservative runtime-key namespaces:
+keys snapshot at initialization, reads forward live to the captured exports.
 Format now survives owned graph/cache facts (schema 4/extractor 5), including
 package-commonjs `.js` files. No source assignment guessing defines exports.
+P7.3 integrates initializer/default, runtime-key namespace and named snapshot nodes
+into exact-root partitioning, manifests and JSON source payloads. No facade
+payload bypass, node duplication or root-set coalescing is introduced. Native
+require/ESM owns shared identities and legal mixed cycles; evaluating-ESM require
+cycles retain native errors. Eight portable sync fixtures/eleven executions and
+same-process concurrent-entry/cross-file-cycle observations have bundled evidence.
+Source async/TLA remains P8; publication/invalidation remains P9.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
 binding/declaration/reference records, import aliases and export mappings,

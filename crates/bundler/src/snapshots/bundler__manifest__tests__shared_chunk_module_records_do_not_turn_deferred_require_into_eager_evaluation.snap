@@ -70,6 +70,13 @@ DiagnosticManifest {
                 module: "lazy.cjs",
                 index: 0,
             },
+            CommonJsProxy {
+                module: "entry.cjs",
+                name: None,
+            },
+            CommonJsNamespace(
+                "entry.cjs",
+            ),
         ],
     },
     entries: {
@@ -122,6 +129,27 @@ DiagnosticManifest {
         },
         ModuleIdentity {
             module: "lazy.cjs",
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "main",
+                    ),
+                },
+            ),
+        },
+        CommonJsProxy {
+            module: "entry.cjs",
+            name: None,
+            chunk: ChunkId(
+                {
+                    Entry(
+                        "main",
+                    ),
+                },
+            ),
+        },
+        CommonJsNamespace {
+            module: "entry.cjs",
             chunk: ChunkId(
                 {
                     Entry(
