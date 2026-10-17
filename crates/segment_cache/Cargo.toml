@@ -13,6 +13,7 @@ oxc_span.workspace = true
 serde.workspace = true
 serde_cbor = "0.11.2"
 sha2 = "0.10.9"
+tempfile = "3.27.0"
 
 [dev-dependencies]
 test_tmpdir = { path = "../test_tmpdir" }

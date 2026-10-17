@@ -1,6 +1,12 @@
 //! Versioned source-local facts; no resolver or graph state.
 mod bounded;
+mod sidecar;
 mod validate;
+
+pub use sidecar::{
+    is_cache_artifact, load_or_parse, sidecar_path, CacheMode, CacheOutcome, CacheStatus,
+    CacheWrite, MissReason,
+};
 
 use std::path::Path;
 

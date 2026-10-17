@@ -3,8 +3,38 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P1.1–P1.5 and P2.1 are implemented;
-P2.2–P9 remain pending.
+onward in narrow linear commits. P1.1–P1.5 and P2.1–P2.2 are implemented;
+P2.3–P9 remain pending.
+
+## P2.2 checkpoint — atomic source-adjacent sidecars
+
+- `load_or_parse` reads exact source bytes, validates cache or parses, and
+  returns source/record plus explicit hit/miss and write outcomes. Cache IO
+  problems are nonfatal; source/parser/semantic/support errors are fatal.
+  `CacheMode` provides read-write, read-only and disabled behavior. Negative
+  diagnostics are not stored and old successes never bypass parse failures.
+- Unique sibling staging uses existing locked tempfile 3.27.0. Its pinned
+  implementation was inspected: overwrite uses Unix rename and Windows
+  MoveFileExW with MOVEFILE_REPLACE_EXISTING, not delete-before-replace.
+  Flush/sync precede publication; errors and unwinds clean staging files.
+  Crash staging orphans are ignored; no writer sweeps another writer's files.
+  This promises atomic visibility, not directory-fsync power-loss durability.
+- Independent publishers are last-writer-wins. Re-read source immediately
+  before publication and before returning both cold/warm results. Detected
+  edits/deletion cannot publish/return stale snapshots; no cross-file lock
+  transaction is claimed against noncooperating editors after the last check.
+- Source files are untouched. Read-only sources work with writable parents;
+  permission/replacement errors preserve previous records and return uncached
+  facts plus an explicit write error. Requested lexical paths own sidecars;
+  symlink source aliases have independent caches and symlink sidecar targets
+  are replaced, not overwritten. Watcher artifact exclusion helper is public.
+- Verification: `TMPDIR="$PWD/target/p1-test-tmp" cargo test -p segment_cache`
+  passes 15 tests. Added managed-directory coverage includes 64 concurrent
+  publications with reads, interruption/error/unwind cleanup, write failures,
+  source mutation/deletion races, stale parse success, cache modes, corruption/
+  truncation/oversize repairs, permissions and symlink behavior.
+  `./scripts/spot-check` passes (47 parser tests and full workspace check).
+  Windows semantics are pinned-API inspected, not runtime-tested on this Linux host.
 
 ## P2.1 checkpoint — deterministic bounded codec
 

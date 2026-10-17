@@ -17,4 +17,39 @@ CBOR items and 32 levels before serde allocates; indefinite lengths and trailing
 data are rejected. This is an untrusted cache, not an authenticated artifact.
 Diagnostics are not persisted. The codec is owned after parser arena drop.
 
+## Sidecar IO
+
+`load_or_parse(logger, path, package_format, CacheMode)` always reads the source,
+then checks `<source>.seg.cbor`. It returns the exact source snapshot, record,
+hit/miss reason and write outcome. Invalid/unreadable caches are misses. Source
+read/parse errors are fatal; old success records are never returned for failures.
+No negative diagnostics are cached: failures are regenerated with the current
+path. Cache read/write errors are nonfatal and explicitly reported in the
+outcome, not logged behind the caller's back. `ReadOnly` suppresses writes;
+`Disabled` suppresses both cache reads and writes.
+
+Writes use uniquely named sibling `.seg.cbor.stage-*` files, flush/sync before
+atomic replacement, and clean up staging files on errors/normal cancellation.
+The pinned tempfile implementation atomically overwrites on Unix and Windows;
+it never removes the old destination first. Unsupported-filesystem replacement
+errors preserve the previous cache and return an uncached parse. A crash may
+leave a staging orphan: readers ignore it, and no writer deletes another
+writer's staging file. This promises atomic visibility, not directory-fsync
+durability after power loss.
+
+Concurrent writers are independent, last successful atomic replacement wins.
+Hash/config validation makes stale publications safe misses, never stale hits.
+Source bytes are checked again before publication and before return; detected
+changes/deletion return an error and cannot publish the parsed snapshot. As
+with any filesystem snapshot API, a noncooperating editor may change the source
+after the last check; there is no cross-file transaction with external writers.
+No source is modified: read-only source files work when the parent is writable,
+and unwritable parents fall back to parsing with a reported cache-write error.
+Sidecars follow the requested lexical source path (including symlink aliases),
+not a canonicalized target. Caller-supplied effective package policy remains
+authoritative; callers own resolution/symlink/casing policy.
+
+Watchers should exclude `is_cache_artifact(path)` results. Deleted sources never
+load orphan records; the cache does not delete or enumerate orphan sidecars.
+
 Run `cargo test -p segment_cache` for codec checks.

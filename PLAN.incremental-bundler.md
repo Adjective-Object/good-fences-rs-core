@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P1.1–P1.5 and P2.1 are verified; P2.2–P9 remain pending. The checklist in
+commits: P1.1–P1.5 and P2.1–P2.2 are verified; P2.3–P9 remain pending. The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
@@ -383,7 +383,15 @@ P2.1 implements `segment_cache::{CacheRecord, CachedModule, ParserConfig}`.
 The deterministic CBOR envelope protects a versioned payload with SHA-256;
 preflight limits allocations before serde and validates every source-local
 range/link/order against the exact source. Existing owned facts/body are reused;
-legacy maps/tags are not serialized. Filesystem IO remains P2.2.
+legacy maps/tags are not serialized. P2.2 adds `load_or_parse`: bounded sidecar
+reads, explicit miss/write outcomes, optional read-only/disabled cache modes,
+unique sibling staging and atomic replacement. Source rechecks prevent
+detected edit/deletion races from publishing or returning stale success;
+uncooperative editors are not part of a cross-file transaction. Independent
+publishers are last-writer-wins with hash/config validation on every read.
+Cache failures are nonfatal, but source read/parse failures remain fatal.
+Pinned tempfile uses Unix rename / Windows MoveFileExW replacement; only Linux
+was executed here. Cache orphans are ignored, never automatically swept.
 
 Implement deterministic DTO encoding/version checks separately from filesystem
 IO. Add atomic sidecars and cache hit/miss reasons. Cover cold/warm equivalence,

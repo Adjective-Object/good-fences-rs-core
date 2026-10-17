@@ -7,3 +7,7 @@
   with workspace pins.
 - Preflight CBOR byte/item/depth limits before serde; validate source hash,
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
+- Sidecars use requested lexical source paths; unique sibling staging plus
+  tempfile atomic replacement, never unlink-before-rename. Last publisher wins;
+  recheck source before publish/return. Cache failures are reported nonfatally,
+  source/parse failures are fatal. Never clean another writer's staging files.

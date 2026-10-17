@@ -135,11 +135,20 @@ workspace test success.
   limits reject malformed records. Four codec tests include ESM/CJS/definition
   roundtrips after arena drop, every-byte corruption/truncation, invalid
   spans/links/versions and allocation bombs; `./scripts/spot-check` passes.
-- [ ] **P2.2 — Implement atomic sidecars.** Depends: P2.1.
+- [x] **P2.2 — Implement atomic sidecars.** Depends: P2.1.
   Write `<source>.seg.cbor` via sibling staging/atomic replacement, with defined
   concurrent-writer and read-only-source behavior. Tests: corruption,
   truncation, interrupted replacement, source-change race and stale prior
   success after parse failure. Use managed test directories.
+  **Verified:** `load_or_parse` reports hit/miss/write outcomes and supports
+  read-write/read-only/disabled modes. Bounded reads, sibling staging,
+  flush/sync/atomic replacement, source rechecks and RAII cleanup preserve old
+  records on failure. Last-writer-wins, lexical symlink paths, read-only source
+  and unwritable-parent behavior, Windows replacement semantics and crash
+  staging-orphan policy are documented. Fifteen cache tests cover concurrent
+  publishers, interruption/unwind, corrupt/truncated/oversized caches, deletion/
+  edit races, old success after parser/semantic/support failure and filesystem
+  write failures. Managed directories and `./scripts/spot-check` pass.
 - [ ] **P2.3 — Prove cache independence and invalidation.** Depends: P2.2.
   Cold/warm parse products match; same-mtime source changes and parser options
   invalidate; relocation re-resolves without embedding absolute paths.
