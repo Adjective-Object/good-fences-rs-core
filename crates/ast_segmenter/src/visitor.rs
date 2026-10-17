@@ -258,6 +258,24 @@ mod test {
     }
 
     #[test]
+    fn segment_spans_are_zero_based_end_exclusive_utf8_bytes() {
+        let statements = ["export const café = 'é';", "export const next = '🦀';"];
+        let source = statements.join("\n");
+        let segments = segment(&source);
+        assert_eq!(segments.len(), statements.len());
+
+        let mut start = 0;
+        for (seg, statement) in segments.iter().zip(statements) {
+            let end = start + statement.len();
+            assert_eq!(seg.span.start as usize, start);
+            assert_eq!(seg.span.end as usize, end);
+            assert_eq!(&source[start..end], statement);
+            start = end + 1;
+        }
+        assert_eq!(segments.last().unwrap().span.end as usize, source.len());
+    }
+
+    #[test]
     fn import_segment_has_correct_deps() {
         let segments = segment("import { foo, bar } from './foo';");
         assert_eq!(segments.len(), 1);

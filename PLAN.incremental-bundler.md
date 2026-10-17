@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P1.1 is verified; the rest of P1–P9 remains pending. The checklist in
+commits: P1.1–P1.2 are verified; the rest of P1–P9 remains pending. The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
 This plan was grounded by reading the current sources, not by assuming checked
@@ -41,7 +41,7 @@ describes proposed contracts, not APIs that already exist.
 | `crates/source_graph/src/edge.rs`: `SegmentEdge` | A public edge struct containing `from`, `to`, `is_type_only`. | The existence of this struct does not mean graph adjacency uses it. It has neither sync/async kind nor occurrence, evaluation, or boundary metadata. |
 | `crates/tag_graph/src/lib.rs`: `TagGraph`, `propagate_tags_to_used`, `propagate_tags_to_users`, private `build_reverse_edges` | Usage-specific BFS; type-only filtering; reverse traversal rebuilt from source data; explicit side-effect-only import traversal. | Dynamic imports and static imports are traversed alike. `UsedTag` is four usage flags, not an arbitrary root-identity set. Reverse edges are private, reconstructed separately, and do not constitute a shared occurrence-aware index. |
 | `crates/unused_finder/src/walked_file.rs`: `ResolvedSourceFile::specifier_to_resolved`; `unused_finder.rs`: `to_source_file_input`, `build_result_graph` | Adapter from unused-finder's resolved files into the source graph and report structures. | Resolution lives in an application pipeline, not a bundler-neutral persisted parse product. File-level and segment-level type hierarchies still coexist in `parse/data.rs`. |
-| `crates/unused_finder/src/report.rs`: `compute_unused_segments`; `crates/ast_segmenter/src/segment_graph.rs`: `SegmentGraph` | A second graph implementation still drives unused-segment reporting. It chains non-hoisted statements and propagates a `TagSet`. | This is not an effect analysis: side-effect import edges target export-map entries, not every statement; requires are absent from `add_edges_for_deps`. The report resolves raw segment specifiers by looking them up directly in `ResultGraph::path_to_id`, unlike the proper raw-to-resolved adapter. Relative specifiers can therefore miss edges. |
+| `crates/unused_finder/src/report.rs`: `compute_unused_segments`; `crates/ast_segmenter/src/segment_graph.rs`: `SegmentGraph` | A second graph implementation still drives unused-segment reporting. It chains non-hoisted statements and propagates a `TagSet`. P1.2 preserves the resolver mapping in results and connects execution-only imports/requires to every target statement. | This remains conservative compatibility analysis, not effect analysis or evaluation scheduling. Two graph implementations still need convergence in P3.4. |
 
 Additional compatibility gates:
 
@@ -52,10 +52,9 @@ Additional compatibility gates:
   type-reference metadata and intra-file tag traversal without changing the
   expected report. See the implementation checkpoint in NOTES for verification;
   this closes that compatibility gate, not the remaining graph/report gaps.
-- `SegmentReport.start` in `report.rs` still documents a 1-based SWC convention.
-  OXC spans are byte offsets; establish actual report compatibility in tests and
-  use an explicit 0-based, end-exclusive contract for new IR. Never use stale
-  documentation to shift OXC offsets.
+- P1.2 pins existing symbol/segment report ranges as zero-based, end-exclusive
+  UTF-8 byte offsets, including offset zero and multibyte source. Corrected stale
+  SWC documentation and test slicing without shifting existing OXC output.
 - Workspace OXC components are pinned together at
   `87f065ebf7cde21d1229322f4c7ee58baca5648e` in `Cargo.toml`.
   There is no workspace `oxc_codegen`/transformer dependency or CBOR codec in the

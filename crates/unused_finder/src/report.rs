@@ -21,7 +21,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq, Serialize, Deserialize)]
 pub struct SymbolReport {
     pub id: String,
+    /// Zero-based UTF-8 byte offset, inclusive.
     pub start: u32,
+    /// Zero-based UTF-8 byte offset, exclusive.
     pub end: u32,
 }
 
@@ -42,9 +44,9 @@ struct FileInfo {
 pub struct SegmentReport {
     /// Index of the segment within the file's segment list
     pub segment_idx: usize,
-    /// Byte offset of the segment start (1-based, matching SWC convention)
+    /// Zero-based UTF-8 byte offset, inclusive.
     pub start: u32,
-    /// Byte offset of the segment end
+    /// Zero-based UTF-8 byte offset, exclusive.
     pub end: u32,
 }
 
@@ -175,35 +177,11 @@ fn compute_unused_segments(graph: &ResultGraph, config: &UnusedFinderConfig) -> 
 
     let mut seg_graph = SegmentGraph::build(&file_segments);
 
-    // Build resolved_imports: (importing_file_id, specifier_string) → target_file_id.
-    // We can derive this from the existing resolved import_export_info, which stores
-    // resolved PathBuf keys in its import maps.
     let mut resolved_imports: AHashMap<(usize, String), usize> = AHashMap::default();
     for (file_id, graph_file) in graph.files.iter().enumerate() {
-        for seg in &graph_file.segments {
-            // Static imports
-            for specifier in seg.module_deps.imports.keys() {
-                if let Some(&target_id) = graph.path_to_id.get(std::path::Path::new(specifier)) {
-                    resolved_imports.insert((file_id, specifier.clone()), target_id);
-                }
-            }
-            // Dynamic imports
-            for specifier in seg.module_deps.dynamic_imports.keys() {
-                if let Some(&target_id) = graph.path_to_id.get(std::path::Path::new(specifier)) {
-                    resolved_imports.insert((file_id, specifier.clone()), target_id);
-                }
-            }
-            // Re-exports
-            for specifier in seg.module_deps.exports_from.keys() {
-                if let Some(&target_id) = graph.path_to_id.get(std::path::Path::new(specifier)) {
-                    resolved_imports.insert((file_id, specifier.clone()), target_id);
-                }
-            }
-            // Side-effect imports
-            for specifier in &seg.module_deps.executed_paths {
-                if let Some(&target_id) = graph.path_to_id.get(std::path::Path::new(specifier)) {
-                    resolved_imports.insert((file_id, specifier.clone()), target_id);
-                }
+        for (specifier, resolved_path) in &graph_file.specifier_to_resolved {
+            if let Some(&target_id) = graph.path_to_id.get(resolved_path) {
+                resolved_imports.insert((file_id, specifier.clone()), target_id);
             }
         }
     }
@@ -390,6 +368,56 @@ impl From<&UnusedFinderResult> for UnusedFinderReport {
             extra_file_tags,
             extra_symbol_tags,
             unused_segments,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::UnusedFinder;
+    use test_tmpdir::test_tmpdir;
+
+    #[test]
+    fn relative_dependency_segments_use_resolved_paths() {
+        for (entry, expected_unused) in [
+            ("import { live } from './dep.js';", vec![1]),
+            ("import('./dep.js').then(({ live }) => live);", vec![1]),
+            ("export { live } from './dep.js';", vec![1]),
+            ("import './dep.js';", vec![]),
+            ("require('./dep.js');", vec![]),
+        ] {
+            let tmpdir = test_tmpdir!(
+                "package.json" => r#"{"name":"entrypoint","main":"./main.js","exports":{}}"#,
+                "main.js" => entry,
+                "dep.js" => "export const live = 1;\nexport const dead = 2;"
+            );
+            let logger = logger::StdioLogger::new();
+            let config = UnusedFinderConfig {
+                repo_root: tmpdir.root().to_string_lossy().into_owned(),
+                root_paths: vec![".".to_owned()],
+                entry_packages: vec!["entrypoint"].try_into().unwrap(),
+                ..Default::default()
+            };
+            let mut finder = UnusedFinder::new_from_cfg(&logger, config).unwrap();
+            let mut result = finder.find_unused(&logger).unwrap();
+            let dep_path = tmpdir.root_join("dep.js");
+            let dep_id = result.graph.path_to_id[&dep_path];
+            assert!(is_used(
+                &result.graph.files[dep_id].file_tags,
+                &result.config
+            ));
+
+            // Isolate segment-edge propagation from the already computed symbol tags.
+            result.graph.files[dep_id].symbol_tags.clear();
+            let unused = compute_unused_segments(&result.graph, &result.config);
+            let actual: Vec<_> = unused
+                .get(dep_path.to_str().unwrap())
+                .into_iter()
+                .flatten()
+                .map(|seg| seg.segment_idx)
+                .collect();
+            assert_eq!(actual, expected_unused, "{entry}");
         }
     }
 }

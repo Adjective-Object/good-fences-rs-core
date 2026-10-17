@@ -6,7 +6,7 @@ current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
 **P0 is complete; autonomous implementation now proceeds through P1–P9 in
-narrow linear commits. P1.1 is verified; all other P1–P9 items remain pending.** Both
+narrow linear commits. P1.1–P1.2 are verified; all other P1–P9 items remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -64,12 +64,18 @@ workspace test success.
   filter intra-file edges in both tag traversal directions. Original assertions,
   mixed runtime references, entry roots, and import/re-export regressions pass;
   132 tests across affected/dependent packages and `./scripts/spot-check` pass.
-- [ ] **P1.2 — Pin span and report-path behavior.** Depends: P0.1.
+- [x] **P1.2 — Pin span and report-path behavior.** Depends: P0.1.
   Add UTF-8/0-offset/end-exclusive parse assertions and existing public-report
   compatibility assertions; reproduce/fix raw relative specifier misses in
   `report::compute_unused_segments` using resolved mapping. Check no-export
   effect imports and require dependencies. Acceptance: unused segment tests
   exercise real relative files, not only synthetic absolute paths.
+  **Verified:** parser and public-report ranges remain zero-based, end-exclusive
+  UTF-8 byte offsets, including offset zero and multibyte text. Reporting retains
+  the resolver mapping for all five dependency forms. Execution-only imports and
+  requires reach every target statement, including no-export files. Regression
+  tests reproduced both gaps before fixes; all 136 affected/dependent tests and
+  `./scripts/spot-check` pass.
 - [ ] **P1.3 — Introduce explicit parse policy and diagnostics.** Depends: P0.1.
   Add bundler parser mode/module classification contract alongside
   `oxc_utils_parse::parse_file` compatibility adapter; preserve existing tracker

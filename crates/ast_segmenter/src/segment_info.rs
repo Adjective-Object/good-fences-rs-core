@@ -9,6 +9,6 @@ pub struct Segment {
     pub module_deps: RawModuleDeps,
     // The name scope from traversing the segment
     pub variables: VariableScope,
-    /// The source span of the top-level ModuleItem this segment was created from.
+    /// Zero-based, end-exclusive UTF-8 byte range of the top-level statement.
     pub span: Span,
 }

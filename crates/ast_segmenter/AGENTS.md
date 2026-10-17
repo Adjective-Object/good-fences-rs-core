@@ -29,3 +29,9 @@ maps to `HoistingLevel` via `hoisting_for_flags()`.
 Escaped references retain OXC's type/value distinction; a name is type-only
 only if all its references in the segment are type-only. Do not discard runtime
 references when merging names.
+
+## Compatibility spans and graph
+
+Statement spans are zero-based, end-exclusive UTF-8 byte offsets. The legacy
+`SegmentGraph` treats execution-only imports and opaque requires as dependencies
+on all target statements, not only exports; this is not evaluation scheduling.

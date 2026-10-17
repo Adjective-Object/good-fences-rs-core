@@ -1002,6 +1002,7 @@ impl UnusedFinder {
                 file_tags,
                 symbol_tags,
                 import_export_info: source_file.import_export_info.clone(),
+                specifier_to_resolved: source_file.specifier_to_resolved.clone(),
                 segments: source_file.segments.clone(),
             });
         }

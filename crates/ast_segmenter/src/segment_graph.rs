@@ -86,6 +86,7 @@ pub struct SegmentGraph {
     id_to_index: AHashMap<SegmentId, usize>,
     /// For each file, maps exported symbol → node index of the segment that exports it.
     file_export_map: AHashMap<usize, AHashMap<ExportedLocal, usize>>,
+    file_node_ranges: AHashMap<usize, std::ops::Range<usize>>,
 }
 
 impl SegmentGraph {
@@ -100,9 +101,11 @@ impl SegmentGraph {
         let mut id_to_index = AHashMap::with_capacity_and_hasher(total_segments, Default::default());
         let mut file_export_map: AHashMap<usize, AHashMap<ExportedLocal, usize>> =
             AHashMap::default();
+        let mut file_node_ranges = AHashMap::default();
 
         // Phase 1: create nodes and build the export map.
         for &(file_id, segs) in file_segments {
+            let file_start = nodes.len();
             let mut file_exports: AHashMap<ExportedLocal, usize> = AHashMap::default();
             for (seg_idx, seg) in segs.iter().enumerate() {
                 let sid = SegmentId::new(file_id, seg_idx);
@@ -144,6 +147,7 @@ impl SegmentGraph {
                 }
             }
             file_export_map.insert(file_id, file_exports);
+            file_node_ranges.insert(file_id, file_start..nodes.len());
         }
 
         let mut graph = SegmentGraph {
@@ -151,6 +155,7 @@ impl SegmentGraph {
             edges,
             id_to_index,
             file_export_map,
+            file_node_ranges,
         };
 
         // Phase 2: add intra-file effect edges.
@@ -251,16 +256,11 @@ impl SegmentGraph {
             }
         }
 
-        // Side-effect imports: import './polyfill'
-        for specifier in &deps.executed_paths {
+        // Execution-only imports and opaque requires retain the whole target file.
+        for specifier in deps.executed_paths.iter().chain(&deps.requires) {
             if let Some(&target_file) = resolved_imports.get(&(file_id, specifier.clone())) {
-                // Effect import creates edges to ALL segments in the target file
-                // (the whole file is executed for its side effects).
-                if let Some(exports) = self.file_export_map.get(&target_file) {
-                    let target_indices: Vec<usize> = exports.values().copied().collect();
-                    for target_idx in target_indices {
-                        self.edges[from_idx].insert(target_idx);
-                    }
+                if let Some(range) = self.file_node_ranges.get(&target_file) {
+                    self.edges[from_idx].extend(range.clone());
                 }
             }
         }
@@ -470,6 +470,38 @@ mod test {
         // file1/seg1 should NOT be tagged (not seeded).
         let f1s1 = graph.node_index(&SegmentId::new(1, 1)).unwrap();
         assert!(!graph.nodes[f1s1].tags.contains(TagSet::REACHABLE));
+    }
+
+    #[test]
+    fn execution_dependencies_reach_every_target_statement() {
+        for require in [false, true] {
+            for exports in [false, true] {
+                let mut deps = RawModuleDeps::default();
+                if require {
+                    deps.requires.insert("./dependency".to_owned());
+                } else {
+                    deps.executed_paths.insert("./dependency".to_owned());
+                }
+                let entry = vec![seg(deps)];
+                let mut target = vec![stmt_seg(), stmt_seg()];
+                if exports {
+                    target.insert(0, exporting_seg("value"));
+                }
+                let files = vec![(0, entry.as_slice()), (1, target.as_slice())];
+                let mut graph = SegmentGraph::build(&files);
+                let mut resolved = AHashMap::default();
+                resolved.insert((0, "./dependency".to_owned()), 1);
+                graph.add_inter_file_edges(&files, &resolved);
+                graph.propagate_tags_from_ids(&[SegmentId::new(0, 0)], TagSet::REACHABLE);
+
+                assert!(
+                    graph.nodes_without_tag(TagSet::REACHABLE).is_empty(),
+                    "require={}, exports={}",
+                    require,
+                    exports
+                );
+            }
+        }
     }
 
     // ── Diamond dependency ────────────────────────────────────────────

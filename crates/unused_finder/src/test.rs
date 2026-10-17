@@ -107,7 +107,7 @@ fn run_unused_test(
         let content_bytes = std::fs::read(file_path).unwrap();
         for item in items.iter() {
             // check that the bytes in the slice match the expected symbol
-            let symbol_bytes = &content_bytes[(item.start - 1) as usize..item.end as usize];
+            let symbol_bytes = &content_bytes[item.start as usize..item.end as usize];
             let symbol_str = String::from_utf8(symbol_bytes.to_vec()).unwrap();
             if !symbol_str.contains(&item.id) {
                 panic!(
@@ -129,7 +129,7 @@ fn run_unused_test(
         for tagged_symbol in symbols.iter() {
             let symbol = &tagged_symbol.symbol;
             // check that the bytes in the slice match the expected symbol
-            let symbol_bytes = &content_bytes[(symbol.start - 1) as usize..symbol.end as usize];
+            let symbol_bytes = &content_bytes[symbol.start as usize..symbol.end as usize];
             let symbol_str = String::from_utf8(symbol_bytes.to_vec()).unwrap();
             if !symbol_str.contains(&symbol.id) {
                 panic!(
@@ -835,6 +835,70 @@ fn test_segment_one_used_one_unused_declaration() {
         1,
         "expected exactly 1 unused segment in lib.js, got: {:#?}",
         segs
+    );
+}
+
+#[test]
+fn test_report_spans_are_zero_based_end_exclusive_utf8_bytes() {
+    let lib = "export const used = 'é';\nexport const unused = '🦀';";
+    let orphan = "export const orphan = 'é';";
+    let entry = "import { used } from './lib.js';\nexport type Shape = { value: string };";
+    let tmpdir = test_tmpdir!(
+        "package.json" => r#"{"name":"entrypoint","main":"./main.js","exports":{}}"#,
+        "main.js" => entry,
+        "lib.js" => lib,
+        "orphan.js" => orphan
+    );
+    let logger = logger::StdioLogger::new();
+    let config = UnusedFinderConfig {
+        repo_root: tmpdir.root().to_string_lossy().into_owned(),
+        root_paths: vec![".".to_owned()],
+        entry_packages: vec!["entrypoint"].try_into().unwrap(),
+        allow_unused_types: true,
+        ..Default::default()
+    };
+    let mut finder = UnusedFinder::new_from_cfg(&logger, config).unwrap();
+    let report = normalize_test_report(&tmpdir, finder.find_unused(&logger).unwrap().get_report());
+    let start = lib.find("export const unused").unwrap() as u32;
+    assert_eq!(
+        report.unused_symbols["<root>/lib.js"],
+        vec![SymbolReport {
+            id: "unused".to_owned(),
+            start,
+            end: lib.len() as u32
+        }]
+    );
+    assert_eq!(
+        report.unused_segments["<root>/lib.js"],
+        vec![SegmentReport {
+            segment_idx: 1,
+            start,
+            end: lib.len() as u32
+        }]
+    );
+    assert_eq!(
+        report.unused_symbols["<root>/orphan.js"],
+        vec![SymbolReport {
+            id: "orphan".to_owned(),
+            start: 0,
+            end: orphan.len() as u32
+        }]
+    );
+    assert_eq!(report.unused_files, vec!["<root>/orphan.js"]);
+    assert!(!report.unused_segments.contains_key("<root>/orphan.js"));
+    let tagged = &report.extra_symbol_tags["<root>/main.js"];
+    assert_eq!(tagged.len(), 1);
+    assert_eq!(
+        tagged[0].symbol,
+        SymbolReport {
+            id: "Shape".to_owned(),
+            start: entry.find("export type").unwrap() as u32,
+            end: entry.len() as u32,
+        }
+    );
+    assert_eq!(
+        tagged[0].tags,
+        Vec::<crate::UsedTagEnum>::from(UsedTag::FROM_ENTRY | UsedTag::TYPE_ONLY)
     );
 }
 

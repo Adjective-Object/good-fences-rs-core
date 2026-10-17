@@ -21,6 +21,8 @@ pub struct ResultFile {
     pub symbol_tags: AHashMap<ExportedSymbol, UsedTag>,
     /// Import/export metadata from resolution.
     pub import_export_info: ResolvedImportExportInfo,
+    /// Raw dependency specifier to resolved file path, shared with segment reporting.
+    pub specifier_to_resolved: AHashMap<String, PathBuf>,
     /// Per-statement segments from ast_segmenter.
     pub segments: Vec<Segment>,
 }

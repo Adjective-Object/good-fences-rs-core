@@ -3,8 +3,29 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. This checkpoint implements only P1.1, not the
-remaining bundler phases.
+onward in narrow linear commits. P1.1–P1.2 are implemented; the remaining bundler
+phases are pending.
+
+## P1.2 checkpoint — spans and resolved report dependencies
+
+- Parser and public-report assertions pin zero-based, end-exclusive UTF-8 byte
+  ranges, including offset zero, multibyte source, unused files/symbols/segments,
+  and tagged type exports. Fixed the report test helper's stale `start - 1`
+  slicing; production offsets are unchanged.
+- Reproduced relative dependency reporting missing the first target segment:
+  expected unused `[1]`, actual `[0, 1]`. Preserve the existing resolver mapping
+  through `ResultFile` rather than looking raw specifiers up as absolute paths.
+  Filesystem tests cover static/dynamic imports, re-exports, execution-only
+  imports and require; clearing downstream symbol tags isolates segment edges
+  from upstream tag propagation.
+- Reproduced execution imports reaching no statements in no-export targets.
+  Index each file's contiguous node range so execution-only imports and opaque
+  requires reach all statements without scanning the whole graph per edge.
+  Tests cover targets with and without exports. This is conservative usage
+  analysis, not eager bundler evaluation of deferred require bodies.
+- Verification: all 136 tests across ast-segmenter, source_graph, tag_graph and
+  unused_finder and `./scripts/spot-check` pass. Filesystem tests use managed directories under
+  `target/p1-test-tmp`. Existing lifetime/dead-code warnings remain.
 
 ## P1.1 checkpoint — type-only compatibility
 
