@@ -6,8 +6,8 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P4 are verified; P5–P9 remain pending. This bounded phase stops
-before P5; no root partitioning or emission is implemented.
+commits: P0–P4 and P5.1 are verified; P5.2–P9 remain pending. This bounded phase
+stops before P6; no emission is implemented.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -489,6 +489,13 @@ All 252 tests across the eight scoped crates, targeted clippy and spot-check
 pass. P5 root sets/partitioning and P6 emission remain unimplemented.
 
 ### P5 — Exact root-set partitioning
+
+P5.1 adds `bundler::chunks` stable entry/site identities and an independent
+synchronous flood-fill reference oracle over existing retention constraints.
+Canonical path-based node sets include empty module identities; namespace
+binding demand stays separate from evaluation. Chain/diamond/SCC, repeated
+sites, sync+async targets, dead sites, invalid roots and stale policy/revision
+regressions pass (28 bundler tests); deterministic snapshots and spot-check pass.
 
 Introduce stable entry/boundary identities and a straightforward flood-fill
 reference implementation first. Add reachable-boundary activation fixed point,

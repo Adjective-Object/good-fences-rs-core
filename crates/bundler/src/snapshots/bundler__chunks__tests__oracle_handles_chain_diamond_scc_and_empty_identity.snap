@@ -1,0 +1,29 @@
+---
+source: crates/bundler/src/chunk_tests.rs
+expression: reached
+---
+{
+    Entry(
+        "main",
+    ): {
+        Module(
+            "a.ts",
+        ),
+        Module(
+            "b.ts",
+        ),
+        Module(
+            "c.ts",
+        ),
+        Module(
+            "d.ts",
+        ),
+        Module(
+            "empty.ts",
+        ),
+        Segment {
+            module: "a.ts",
+            index: 2,
+        },
+    },
+}

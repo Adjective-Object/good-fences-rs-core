@@ -1,7 +1,7 @@
 # bundler
 
 Library-only effect/retention analysis over the checked owned `SourceGraph`.
-This is not a JavaScript emitter, runtime, chunker, or unused-report adapter.
+This is not a JavaScript emitter, runtime, or unused-report adapter.
 
 `retain(graph, evaluation_roots, binding_roots)` keeps module evaluation demand
 separate from binding demand. Every runtime static import/re-export demands the
@@ -27,6 +27,21 @@ Binding-demand edges also reach their own module-evaluation node, so later root
 walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
+
+## Root reachability
+
+`chunks::{RootId, AsyncSiteId, RootSeed}` distinguishes caller-named entries from
+individual dynamic import occurrences (module path + source-local byte offset).
+Identity does not depend on graph file/edge insertion order. Offsets are not
+stable across source edits; all graph-local inputs belong to the current revision.
+`async_seed` converts a shared occurrence index, not a target path, into a root.
+`reference_reachability(graph, retention, policy, roots)` independently flood-fills
+each root over synchronous retention edges only and returns sorted path-based
+`NodeId` sets, including empty-module identities and explicit external sites.
+It rejects stale retention/policy and duplicate or unretained roots. Namespace
+binding roots/edges conservatively reach retained target statements; module
+evaluation alone does not imply namespace demand. This oracle describes code
+availability, not runtime evaluation, especially for deferred synchronous require.
 
 ## PURE analysis and rewrite contract
 

@@ -14,3 +14,8 @@ Known-effect patterns are bounded structural add-only rules. Exact globals
 exclude lexical shadows; wildcard receivers include them; never infer aliases.
 Fingerprints include canonical patterns and annotation policy, not source-cache
 identity. Check both graph revision and policy before reusing derived plans.
+
+Root identities use entry IDs or async source occurrences, never target paths.
+Canonical diagnostic nodes use paths, not insertion-dependent file numbers.
+Root traversal follows synchronous retention constraints only; namespace
+binding demand differs from module evaluation. Empty modules keep identities.

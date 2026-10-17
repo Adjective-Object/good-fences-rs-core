@@ -5,7 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P4 are complete. P5–P9 remain pending.** Both
+**P0–P4 and P5.1 are complete. P5.2–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -235,7 +235,7 @@ workspace test success.
 
 ## P5 — Exact chunk sets
 
-- [ ] **P5.1 — Establish root/boundary identities and oracle.** Depends: P3.1,
+- [x] **P5.1 — Establish root/boundary identities and oracle.** Depends: P3.1,
   P4.2. Add entry and per-occurrence async root IDs; reference flood-fill follows
   synchronous edges only. Tests: chain, diamond, SCC, two sites to one target,
   one target reached both sync and async, unreachable import sites.

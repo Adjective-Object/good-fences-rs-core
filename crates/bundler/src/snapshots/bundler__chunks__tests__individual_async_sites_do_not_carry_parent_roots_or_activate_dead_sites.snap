@@ -1,0 +1,56 @@
+---
+source: crates/bundler/src/chunk_tests.rs
+expression: reached
+---
+{
+    Entry(
+        "main",
+    ): {
+        Module(
+            "entry.ts",
+        ),
+        Module(
+            "shared.ts",
+        ),
+        Segment {
+            module: "entry.ts",
+            index: 1,
+        },
+        Segment {
+            module: "entry.ts",
+            index: 2,
+        },
+        Segment {
+            module: "shared.ts",
+            index: 0,
+        },
+    },
+    Async(
+        AsyncSiteId {
+            module: "entry.ts",
+            offset: 20,
+        },
+    ): {
+        Module(
+            "shared.ts",
+        ),
+        Segment {
+            module: "shared.ts",
+            index: 0,
+        },
+    },
+    Async(
+        AsyncSiteId {
+            module: "entry.ts",
+            offset: 41,
+        },
+    ): {
+        Module(
+            "shared.ts",
+        ),
+        Segment {
+            module: "shared.ts",
+            index: 0,
+        },
+    },
+}

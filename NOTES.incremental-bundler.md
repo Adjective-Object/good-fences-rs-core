@@ -2,9 +2,22 @@
 
 ## Current scope
 
-P0–P4 are complete; P5–P9 remain pending. This phase stops before P5, without
+P0–P4 and P5.1 are complete; P5.2–P9 remain pending. This phase stops before P6, without
 nested delegation. Effects/retention/recipes are library plans, not emitted
 JavaScript or runtime conformance evidence.
+
+## P5.1 checkpoint
+
+- `bundler::chunks::{RootId, AsyncSiteId, RootSeed, NodeId}` uses caller entry
+  names and individual module-path/source-offset occurrences, not target paths.
+  `async_seed` consumes a revision-local shared edge index.
+- `reference_reachability` is the deliberately simple independent per-root
+  synchronous flood fill over P4 retention edges; async/type-only edges are
+  excluded. Namespace binding demand expands retained target statements without
+  conflating ordinary module evaluation. Empty modules keep explicit identities.
+- Verified 28 bundler tests, two reviewed deterministic oracle snapshots and
+  `./scripts/spot-check`. Cases include chain/diamond/SCC, two sites to one target,
+  sync+async overlap, dead sites and invalid/stale inputs. No emitted code.
 
 ## P4.4 checkpoint
 

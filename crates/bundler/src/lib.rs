@@ -1,4 +1,5 @@
 //! Derived effect/retention analysis, independent of usage reporting and emission.
+pub mod chunks;
 pub mod effects;
 pub mod policy;
 
