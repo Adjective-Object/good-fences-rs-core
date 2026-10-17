@@ -1,0 +1,161 @@
+---
+source: crates/bundler/src/chunk_tests.rs
+expression: "(&plan.node_roots, &plan.chunks)"
+---
+(
+    {
+        Module(
+            "dead.ts",
+        ): {},
+        Module(
+            "empty.ts",
+        ): {
+            Entry(
+                "main",
+            ),
+        },
+        Module(
+            "entry.ts",
+        ): {
+            Entry(
+                "main",
+            ),
+        },
+        Module(
+            "leaf.ts",
+        ): {
+            Async(
+                AsyncSiteId {
+                    module: "nested.ts",
+                    offset: 0,
+                },
+            ),
+        },
+        Module(
+            "nested.ts",
+        ): {
+            Async(
+                AsyncSiteId {
+                    module: "entry.ts",
+                    offset: 19,
+                },
+            ),
+            Async(
+                AsyncSiteId {
+                    module: "leaf.ts",
+                    offset: 0,
+                },
+            ),
+        },
+        Segment {
+            module: "dead.ts",
+            index: 0,
+        }: {},
+        Segment {
+            module: "entry.ts",
+            index: 0,
+        }: {},
+        Segment {
+            module: "entry.ts",
+            index: 1,
+        }: {
+            Entry(
+                "main",
+            ),
+        },
+        Segment {
+            module: "entry.ts",
+            index: 2,
+        }: {},
+        Segment {
+            module: "leaf.ts",
+            index: 0,
+        }: {
+            Async(
+                AsyncSiteId {
+                    module: "nested.ts",
+                    offset: 0,
+                },
+            ),
+        },
+        Segment {
+            module: "nested.ts",
+            index: 0,
+        }: {
+            Async(
+                AsyncSiteId {
+                    module: "entry.ts",
+                    offset: 19,
+                },
+            ),
+            Async(
+                AsyncSiteId {
+                    module: "leaf.ts",
+                    offset: 0,
+                },
+            ),
+        },
+    },
+    {
+        ChunkId(
+            {
+                Entry(
+                    "main",
+                ),
+            },
+        ): [
+            Module(
+                "empty.ts",
+            ),
+            Module(
+                "entry.ts",
+            ),
+            Segment {
+                module: "entry.ts",
+                index: 1,
+            },
+        ],
+        ChunkId(
+            {
+                Async(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 19,
+                    },
+                ),
+                Async(
+                    AsyncSiteId {
+                        module: "leaf.ts",
+                        offset: 0,
+                    },
+                ),
+            },
+        ): [
+            Module(
+                "nested.ts",
+            ),
+            Segment {
+                module: "nested.ts",
+                index: 0,
+            },
+        ],
+        ChunkId(
+            {
+                Async(
+                    AsyncSiteId {
+                        module: "nested.ts",
+                        offset: 0,
+                    },
+                ),
+            },
+        ): [
+            Module(
+                "leaf.ts",
+            ),
+            Segment {
+                module: "leaf.ts",
+                index: 0,
+            },
+        ],
+    },
+)

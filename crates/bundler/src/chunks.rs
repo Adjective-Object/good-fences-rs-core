@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use eyre::{ensure, OptionExt};
-use source_graph::{Activation, GraphNode, SourceGraph};
+use source_graph::{Activation, GraphNode, GraphRevision, SourceGraph};
 
 use crate::{policy::EffectPolicy, RetentionEdgeKind, RetentionPlan};
 
@@ -167,6 +167,145 @@ fn enqueue_binding(retention: &RetentionPlan, node: GraphNode, queue: &mut VecDe
                 .map(|s| GraphNode::Segment(s.key)),
         );
     }
+}
+
+/// The exact nonempty root set is the logical identity, not a filename/ordinal.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ChunkId(pub BTreeSet<RootId>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkPlan {
+    pub revision: GraphRevision,
+    pub policy_fingerprint: [u8; 32],
+    pub retention: RetentionPlan,
+    /// Graph-local seeds, retained for facade construction at this revision.
+    pub roots: BTreeMap<RootId, RootSeed>,
+    pub reachability: BTreeMap<RootId, BTreeSet<NodeId>>,
+    /// Includes dead source modules/segments with empty sets.
+    pub node_roots: BTreeMap<NodeId, BTreeSet<RootId>>,
+    /// Exactly one chunk per nonempty set, without merging or hoisting.
+    pub chunks: BTreeMap<ChunkId, Vec<NodeId>>,
+}
+
+impl ChunkPlan {
+    pub fn is_current(&self, graph: &SourceGraph, policy: &EffectPolicy) -> bool {
+        self.revision == graph.revision()
+            && self.policy_fingerprint == policy.fingerprint()
+            && self.retention.is_current(graph, policy)
+    }
+
+    pub fn chunk_for(&self, node: &NodeId) -> Option<ChunkId> {
+        self.node_roots
+            .get(node)
+            .filter(|roots| !roots.is_empty())
+            .cloned()
+            .map(ChunkId)
+    }
+}
+
+/// Activate only reachable async occurrences, recomputing P4 retention as new
+/// namespace demands appear. No parent root crosses an asynchronous edge.
+pub fn partition(
+    graph: &SourceGraph,
+    entries: &[RootSeed],
+    policy: &EffectPolicy,
+) -> eyre::Result<ChunkPlan> {
+    let mut roots = BTreeMap::new();
+    for entry in entries {
+        ensure!(
+            matches!(entry.id, RootId::Entry(_)),
+            "initial roots must be entries"
+        );
+        ensure!(
+            !entry.evaluation_roots.is_empty() || !entry.binding_roots.is_empty(),
+            "entry requires an evaluation or binding root"
+        );
+        ensure!(
+            roots.insert(entry.id.clone(), entry.clone()).is_none(),
+            "duplicate entry identity"
+        );
+    }
+    let (retention, reachability) = loop {
+        let evaluation: Vec<_> = roots
+            .values()
+            .flat_map(|r| r.evaluation_roots.iter().copied())
+            .collect();
+        let bindings: Vec<_> = roots
+            .values()
+            .flat_map(|r| r.binding_roots.iter().copied())
+            .filter(|n| !matches!(n, GraphNode::Unlinked { .. }))
+            .collect();
+        // User entries must not smuggle unlinked binding roots past P4 validation.
+        ensure!(
+            !entries
+                .iter()
+                .flat_map(|r| &r.binding_roots)
+                .any(|n| matches!(n, GraphNode::Unlinked { .. })),
+            "entry cannot bind an external site"
+        );
+        let retention = crate::retain_with_policy(graph, &evaluation, &bindings, policy)?;
+        let seeds: Vec<_> = roots.values().cloned().collect();
+        let reached = reference_reachability(graph, &retention, policy, &seeds)?;
+        let mut added = false;
+        for &index in &retention.async_boundaries {
+            let consumer = node_id(graph, graph.edges()[index].from)?;
+            if !reached.values().any(|nodes| nodes.contains(&consumer)) {
+                continue;
+            }
+            let seed = async_seed(graph, index)?;
+            if let Some(existing) = roots.get(&seed.id) {
+                ensure!(*existing == seed, "conflicting async site identity");
+            } else {
+                roots.insert(seed.id.clone(), seed);
+                added = true;
+            }
+        }
+        if !added {
+            break (retention, reached);
+        }
+    };
+    let mut node_roots: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    for file in graph.module_ids() {
+        if let Some(segments) = graph.file_segments(file) {
+            node_roots
+                .entry(node_id(graph, GraphNode::Module(file))?)
+                .or_default();
+            for index in 0..segments.len() {
+                node_roots
+                    .entry(node_id(
+                        graph,
+                        GraphNode::Segment(source_graph::SegmentKey::new(file, index as u32)),
+                    )?)
+                    .or_default();
+            }
+        }
+    }
+    for (root, nodes) in &reachability {
+        for node in nodes {
+            node_roots
+                .entry(node.clone())
+                .or_default()
+                .insert(root.clone());
+        }
+    }
+    let mut chunks: BTreeMap<ChunkId, Vec<NodeId>> = BTreeMap::new();
+    for (node, roots) in &node_roots {
+        if !roots.is_empty() {
+            chunks
+                .entry(ChunkId(roots.clone()))
+                .or_default()
+                .push(node.clone());
+        }
+    }
+    Ok(ChunkPlan {
+        revision: graph.revision(),
+        policy_fingerprint: policy.fingerprint(),
+        retention,
+        roots,
+        reachability,
+        node_roots,
+        chunks,
+    })
 }
 
 #[cfg(test)]

@@ -174,6 +174,14 @@ impl SourceGraph {
         self.path_to_id.len()
     }
 
+    /// Live module identities, including empty modules and excluding tombstones.
+    pub fn module_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.files.iter().enumerate().filter_map(|(id, file)| {
+            let id = id as u32;
+            (self.file_id(&file.path) == Some(id)).then_some(id)
+        })
+    }
+
     /// Returns the path of a file by its id.
     pub fn file_path(&self, file_id: u32) -> Option<&Path> {
         self.files

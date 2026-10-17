@@ -13,8 +13,11 @@ and import lookups retain the tracker's type-inclusive compatibility policy.
 Use owned inputs for executable validation and precise occurrence metadata.
 `OwnedSourceFileInput::from_ranges` accepts decoded cache ranges/facts without
 reconstructing legacy dependency or variable maps.
-Module nodes preserve empty-file identity. Dependency sites retain source spans,
-binding requests, type namespace and sync/async/function-containment metadata.
+Module nodes preserve empty-file identity.
+`module_ids` enumerates live IDs including empty modules, skipping tombstones;
+`file_count` is a count, not an upper bound on IDs after removals.
+Dependency sites retain source spans, binding requests, type namespace and
+sync/async/function-containment metadata.
 Containment does not authorize eager execution. Evaluation and binding demand
 are distinct; this crate does not implement effects or runtime scheduling.
 

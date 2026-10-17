@@ -6,7 +6,7 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P4 and P5.1 are verified; P5.2–P9 remain pending. This bounded phase
+commits: P0–P4 and P5.1–P5.2 are verified; P5.3–P9 remain pending. This bounded phase
 stops before P6; no emission is implemented.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
@@ -496,6 +496,16 @@ Canonical path-based node sets include empty module identities; namespace
 binding demand stays separate from evaluation. Chain/diamond/SCC, repeated
 sites, sync+async targets, dead sites, invalid roots and stale policy/revision
 regressions pass (28 bundler tests); deterministic snapshots and spot-check pass.
+
+P5.2 adds `chunks::partition` reachable-site fixed point and exact canonical
+root-set chunk identities. Full node→set/set→chunk snapshots include dead
+segments/empty identities. 48 deterministic random small graphs match an
+independent module oracle and randomized module/entry/edge ordering, with
+pairwise equal-set iff same-chunk checks. Nested async cycles, namespace/binding
+seeds, sync+async sharing and tombstone/stale-plan regressions pass (32 bundler
++ 31 source_graph tests), as do targeted clippy and spot-check.
+`SourceGraph::module_ids` enumerates live empty modules after tombstones; a live
+file count must not be treated as an ID upper bound.
 
 Introduce stable entry/boundary identities and a straightforward flood-fill
 reference implementation first. Add reachable-boundary activation fixed point,

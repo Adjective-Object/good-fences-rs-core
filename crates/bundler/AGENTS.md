@@ -19,3 +19,5 @@ Root identities use entry IDs or async source occurrences, never target paths.
 Canonical diagnostic nodes use paths, not insertion-dependent file numbers.
 Root traversal follows synchronous retention constraints only; namespace
 binding demand differs from module evaluation. Empty modules keep identities.
+Partition only reachable async sites to a fixed point; chunks are exactly
+nonempty canonical root sets. Never merge or hoist. Dead nodes have empty sets.

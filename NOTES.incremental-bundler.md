@@ -2,9 +2,27 @@
 
 ## Current scope
 
-P0–P4 and P5.1 are complete; P5.2–P9 remain pending. This phase stops before P6, without
+P0–P4 and P5.1–P5.2 are complete; P5.3–P9 remain pending. This phase stops before P6, without
 nested delegation. Effects/retention/recipes are library plans, not emitted
 JavaScript or runtime conformance evidence.
+
+## P5.2 checkpoint
+
+- `bundler::chunks::partition(graph, entry_seeds, policy)` reuses P4 retention,
+  activating individual reached async sites to a fixed point. Parent roots never
+  cross async edges; namespace targets seed binding demand; externals stay explicit.
+- `ChunkPlan::{retention,roots,reachability,node_roots,chunks,chunk_for,is_current}`
+  exposes exact sorted sets. `ChunkId` is the nonempty root set, not an ordinal,
+  filename or heuristic grouping. Dead source nodes have empty sets; live empty
+  modules participate. Entry changes require recomputation, as do graph/policy.
+- Added `SourceGraph::module_ids` because `file_count` excludes tombstones and
+  cannot bound live IDs. Its regression removes an earlier empty module and
+  verifies later live identities still participate in partitioning.
+- Verified 32 bundler + 31 source_graph tests, reviewed exact mapping snapshot,
+  targeted clippy and `./scripts/spot-check`. 48 seeded random graph cases match
+  a separate module-level BFS/fixed point, random module/entry/retention-edge
+  ordering preserves exact partitions, and all live-node pairs satisfy set
+  equality iff chunk equality. This is diagnostic partitioning, not emission.
 
 ## P5.1 checkpoint
 

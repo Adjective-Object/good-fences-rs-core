@@ -14,7 +14,7 @@ consumer → dependency edges: static evaluation, module effects and effect orde
 Original structural edge indices retain exact occurrence/timing metadata.
 Required bodies are **available**, not scheduled eagerly: deferred requires
 keep their original call sites/timing. Async boundary edge indices are recorded
-but not crossed; root identities/partitioning belong to P5. Namespace demand
+but not crossed by retention; `chunks::partition` assigns separate roots. Namespace demand
 conservatively retains the entire target, not a guessed property subset.
 External edges remain explicit unlinked sites for later output policy.
 
@@ -42,6 +42,20 @@ It rejects stale retention/policy and duplicate or unretained roots. Namespace
 binding roots/edges conservatively reach retained target statements; module
 evaluation alone does not imply namespace demand. This oracle describes code
 availability, not runtime evaluation, especially for deferred synchronous require.
+
+`chunks::partition(graph, entries, policy)` accepts only `RootId::Entry` seeds.
+It recomputes existing P4 retention as reachable async sites activate namespace
+roots, to a fixed point (including nested sites/cycles). External async sites
+stay explicit, never become local evaluation demands. It returns a `ChunkPlan`
+containing the final retention, seeds, independent per-root reachability,
+`node_roots` (including empty dead sets), and sorted `chunks`. `ChunkId` is the
+exact nonempty canonical root set: two live nodes share a logical chunk iff
+their sets are equal. No coalescing/hoisting/physical filenames are involved.
+`chunk_for` returns None for dead/absent nodes. Call `is_current(graph, policy)`
+before using the plan, and recompute when entry seeds change. Graph-local seeds
+and retention are revision-local; canonical diagnostic mappings are invariant
+under insertion order. This reference implementation prioritizes correctness,
+not a bitset/worklist optimization.
 
 ## PURE analysis and rewrite contract
 
