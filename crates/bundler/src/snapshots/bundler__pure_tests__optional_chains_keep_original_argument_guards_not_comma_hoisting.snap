@@ -140,7 +140,22 @@ expression: snapshots
                     start: 16,
                     end: 32,
                 },
-                reference: Other,
+                reference: Member {
+                    receiver: Span {
+                        start: 17,
+                        end: 23,
+                    },
+                    receiver_identifier: Some(
+                        IdentifierCallee {
+                            name: "object",
+                            binding: None,
+                        },
+                    ),
+                    property: Some(
+                        "method",
+                    ),
+                    computed: false,
+                },
                 arguments: [
                     InvocationArgument {
                         span: Span {

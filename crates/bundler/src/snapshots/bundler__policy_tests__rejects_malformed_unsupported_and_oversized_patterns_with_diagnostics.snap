@@ -1,0 +1,78 @@
+---
+source: crates/bundler/src/policy_tests.rs
+expression: diagnostics
+---
+[
+    (
+        "",
+        "effect pattern 1: \"\": expected callee(...)",
+    ),
+    (
+        "*",
+        "effect pattern 1: \"*\": expected callee(...)",
+    ),
+    (
+        "f()",
+        "effect pattern 1: \"f()\": only the literal (...) argument wildcard is supported",
+    ),
+    (
+        "f(value)",
+        "effect pattern 1: \"f(value)\": only the literal (...) argument wildcard is supported",
+    ),
+    (
+        "f(...args)",
+        "effect pattern 1: \"f(...args)\": only the literal (...) argument wildcard is supported",
+    ),
+    (
+        "f(...);",
+        "effect pattern 1: \"f(...);\": only the literal (...) argument wildcard is supported",
+    ),
+    (
+        "a.b.c(...)",
+        "effect pattern 1: \"a.b.c(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "*.a?.(...)",
+        "effect pattern 1: \"*.a?.(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "*['appendChild'](...)",
+        "effect pattern 1: \"*['appendChild'](...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "f(...).g(...)",
+        "effect pattern 1: \"f(...).g(...)\": only the literal (...) argument wildcard is supported",
+    ),
+    (
+        "new F(...)",
+        "effect pattern 1: \"new F(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "*(...)",
+        "effect pattern 1: \"*(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "a..b(...)",
+        "effect pattern 1: \"a..b(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "a-b(...)",
+        "effect pattern 1: \"a-b(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "a b(...)",
+        "effect pattern 1: \"a b(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "名(...)",
+        "effect pattern 1: \"名(...)\": expected ASCII name(...), global.member(...), or *.member(...)",
+    ),
+    (
+        "f(...",
+        "effect pattern 1: \"f(...\": only the literal (...) argument wildcard is supported",
+    ),
+    (
+        "f(...))",
+        "effect pattern 1: \"f(...))\": only the literal (...) argument wildcard is supported",
+    ),
+]

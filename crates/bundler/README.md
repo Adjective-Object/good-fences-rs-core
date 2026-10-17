@@ -23,6 +23,8 @@ Construct inputs from `ParsedModule::facts` or decoded cache facts/ranges throug
 reached modules. Link diagnostics are errors, never success-shaped omissions.
 Plans carry the graph revision; recompute after source/resolution changes.
 Source order constraints are not a global runtime schedule (especially cycles).
+Binding-demand edges also reach their own module-evaluation node, so later root
+walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
 
@@ -46,5 +48,48 @@ state independently from its value and applying the original optional-call
 guard; do not hoist arguments or use an unconditional comma expression.
 `StatementValue` recipes discard only an unneeded value, not surrounding effects.
 Nested calls whose results feed other expressions stay conservative.
+Recipes are a containment tree, not a flat set of independent text edits:
+compose contained recipes within their enclosing callee/argument evaluation,
+inside its original guard. Never hoist a nested recipe out of an optional call.
 
 These are plans for the P6 emitter, not emitted JavaScript or runtime validation.
+
+## Known-effect policy
+
+`policy::EffectPolicy::parse(patterns)` validates a bounded structural DSL:
+
+- `name(...)`: an unresolved/global identifier callee.
+- `global.member(...)`: a terminal member on that exact unresolved/global
+  identifier receiver.
+- `*.member(...)`: that terminal member on **any** receiver expression, including
+  shadowed/aliased receivers. It does not match a standalone method alias.
+
+Names use ASCII identifier syntax (`A-Z`, `a-z`, `_`, `$`, then also digits).
+Whitespace around grammar tokens is accepted; the argument wildcard is literally
+`...`, not an argument expression. At most 128 patterns of 256 bytes each are
+accepted. Unsupported/malformed patterns return indexed `eyre` diagnostics;
+there is no JavaScript evaluation, regex or raw-source substring matching.
+Patterns describe invocation shape and apply to calls **and construction**.
+
+Static members and computed **string literals** match the same name. Dynamic
+keys/template keys are not inferred. Optional calls/members and parenthesized
+member references match the same shape without changing execution guards.
+Exact global rules exclude lexical shadows (including imports/parameters) and
+do not follow receiver/callee aliases or longer receiver chains. Wildcard rules
+deliberately include lexical shadows; they add retention, not assumed DOM types.
+Nonmatches leave conservative syntax effects/PURE handling unchanged.
+
+`effects::summarize_with_policy` and `retain_with_policy` use only owned facts,
+not source text or a parser. Matching rules add deterministic `KnownEffect`
+reasons and override PURE hints. Deferred bodies remain deferred; CJS remains
+opaque. `with_pure_annotations(false)` conservatively disables annotation
+rewrites. Canonical sorting/deduplication makes equivalent policy fingerprints
+equal; pattern/annotation-policy changes change the SHA-256 fingerprint.
+
+`RetentionPlan::policy_fingerprint` and `is_current(graph, policy)` check derived
+state against both graph revision and effective policy. The caller must
+recompute effects/retention (and later chunks/output) on policy changes, never
+reparse solely for a DSL edit. Plan node/edge indices are local to the graph
+instance/revision. Source-local cache identity excludes this entire policy.
+The filesystem regression reanalyzes cache-built facts with the source absent
+and verifies unchanged sidecar bytes/mtime plus a subsequent warm hit.

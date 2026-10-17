@@ -6,7 +6,8 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P3 are verified; P4–P9 remain pending.
+commits: P0–P4 are verified; P5–P9 remain pending. This bounded phase stops
+before P5; no root partitioning or emission is implemented.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -35,9 +36,13 @@ not bundler parity or a passing full workspace test suite.
 Persistent cross-cutting architecture decisions belong concisely in root
 `AGENTS.md`, and crate-specific decisions in crate-root `AGENTS.md`, when adopted.
 Work-in-progress findings belong in `NOTES.incremental-bundler*.md`. This plan
-describes proposed contracts, not APIs that already exist.
+describes contracts and their implementation checkpoints; it is not evidence of
+emitted runtime correctness.
 
-## 1. Current implementation: reusable pieces and correctness gaps
+## 1. P0 inventory: reusable pieces and compatibility gaps
+
+This inventory records the original legacy-path baseline. P1–P4 checkpoints
+below supersede the listed gaps for the separate owned bundler path.
 
 | Evidence | Exists now | Not a bundler guarantee |
 | --- | --- | --- |
@@ -470,6 +475,18 @@ explicit invocation-only recipes with original callee/reference, argument order,
 spread consumption and optional-chain guards. Value demand restores used calls;
 no source emission is claimed. All 122 parser/cache/graph/bundler tests, targeted
 clippy and spot-check pass, including deterministic reason/recipe snapshots.
+
+P4.4 adds bounded `bundler::policy::EffectPolicy`: validated canonical structural
+invocation rules, global-vs-wildcard shadow/alias/computed/optional semantics,
+add-only known-effect reasons with precedence over PURE, and SHA-256 effective
+policy fingerprints. `retain_with_policy` requires no source/parser; cache-built
+reanalysis works with source absent and preserves sidecar bytes/mtime/warm hits.
+`RetentionPlan::is_current(graph, policy)` checks both identities. Explicit
+binding-to-module evaluation edges make binding-root traversal complete for P5.
+Normalized optional-member shapes and concise-arrow result contexts require
+extractor 4 (schema remains 3); no caller policy enters source-cache identity.
+All 252 tests across the eight scoped crates, targeted clippy and spot-check
+pass. P5 root sets/partitioning and P6 emission remain unimplemented.
 
 ### P5 — Exact root-set partitioning
 

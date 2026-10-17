@@ -214,6 +214,7 @@ dependencies = [
  "logger",
  "oxc_span",
  "segment_cache",
+ "sha2",
  "source_graph",
  "test_tmpdir",
 ]

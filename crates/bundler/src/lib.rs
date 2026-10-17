@@ -1,5 +1,6 @@
 //! Derived effect/retention analysis, independent of usage reporting and emission.
 pub mod effects;
+pub mod policy;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
@@ -10,6 +11,8 @@ use source_graph::{
     SourceGraph,
 };
 
+#[cfg(test)]
+mod policy_tests;
 #[cfg(test)]
 mod pure_tests;
 #[cfg(test)]
@@ -38,6 +41,7 @@ pub struct SegmentEffects {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RetentionEdgeKind {
     StaticEvaluation,
+    BindingEvaluation,
     ModuleEffect,
     EffectOrder,
     Binding,
@@ -56,6 +60,7 @@ pub struct RetentionEdge {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetentionPlan {
     pub revision: GraphRevision,
+    pub policy_fingerprint: [u8; 32],
     /// Required evaluation bodies, not an eager-execution schedule.
     pub modules: Vec<u32>,
     pub segments: Vec<RetainedSegment>,
@@ -67,8 +72,8 @@ pub struct RetentionPlan {
 }
 
 impl RetentionPlan {
-    pub fn is_current(&self, graph: &SourceGraph) -> bool {
-        self.revision == graph.revision()
+    pub fn is_current(&self, graph: &SourceGraph, policy: &policy::EffectPolicy) -> bool {
+        self.revision == graph.revision() && self.policy_fingerprint == policy.fingerprint()
     }
 }
 
@@ -79,9 +84,24 @@ pub fn retain(
     evaluation_roots: &[u32],
     binding_roots: &[GraphNode],
 ) -> eyre::Result<RetentionPlan> {
+    retain_with_policy(
+        graph,
+        evaluation_roots,
+        binding_roots,
+        &policy::EffectPolicy::default(),
+    )
+}
+
+pub fn retain_with_policy(
+    graph: &SourceGraph,
+    evaluation_roots: &[u32],
+    binding_roots: &[GraphNode],
+    policy: &policy::EffectPolicy,
+) -> eyre::Result<RetentionPlan> {
     graph.validate_links()?;
     let mut analysis = Retention {
         graph,
+        policy,
         modules: BTreeSet::new(),
         namespaces: HashSet::new(),
         segments: BTreeMap::new(),
@@ -130,6 +150,7 @@ pub fn retain(
     edges.sort_by_key(|e| (node_key(e.from), node_key(e.to), e.kind, e.source_edge));
     Ok(RetentionPlan {
         revision: graph.revision(),
+        policy_fingerprint: policy.fingerprint(),
         modules: analysis.modules.into_iter().collect(),
         segments: analysis
             .segments
@@ -165,8 +186,9 @@ enum Demand {
     Binding(GraphNode, RetentionReason),
 }
 
-struct Retention<'g> {
+struct Retention<'g, 'p> {
     graph: &'g SourceGraph,
+    policy: &'p policy::EffectPolicy,
     modules: BTreeSet<u32>,
     namespaces: HashSet<u32>,
     segments: BTreeMap<SegmentKey, BTreeSet<RetentionReason>>,
@@ -177,7 +199,7 @@ struct Retention<'g> {
     values: HashSet<SegmentKey>,
 }
 
-impl Retention<'_> {
+impl Retention<'_, '_> {
     fn facts(&self, file: u32) -> eyre::Result<&ModuleFacts> {
         self.graph
             .file_facts(file)
@@ -195,10 +217,11 @@ impl Retention<'_> {
             .ok_or_eyre("missing module statements")?;
         for (index, statement) in statements.iter().enumerate() {
             let key = SegmentKey::new(file, index as u32);
-            let summary = effects::summarize(
+            let summary = effects::summarize_with_policy(
                 self.facts(file)?,
                 statement.span,
                 self.values.contains(&key),
+                self.policy,
             );
             if summary.is_effectful() {
                 let node = GraphNode::Segment(key);
@@ -288,12 +311,19 @@ impl Retention<'_> {
                 .file_segments(key.file_id)
                 .ok_or_eyre("missing binding statements")?[key.segment_idx as usize]
                 .span;
-            let summary = effects::summarize(self.facts(key.file_id)?, span, true);
+            let summary =
+                effects::summarize_with_policy(self.facts(key.file_id)?, span, true, self.policy);
             self.effects.insert(key, summary);
         }
         if !first {
             return Ok(());
         }
+        self.edges.insert(RetentionEdge {
+            from: node,
+            to: GraphNode::Module(key.file_id),
+            kind: RetentionEdgeKind::BindingEvaluation,
+            source_edge: None,
+        });
         self.queue.push_back(Demand::Evaluation(key.file_id));
         let graph = self.graph;
         for (index, edge) in graph.outgoing_indexed(node).filter(|(_, e)| !e.type_only) {

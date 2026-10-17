@@ -10,6 +10,7 @@ ast-segmenter = { path = "../ast_segmenter" }
 source_graph = { path = "../source_graph" }
 eyre.workspace = true
 oxc_span.workspace = true
+sha2 = "0.10.9"
 
 [dev-dependencies]
 insta = { version = "1", default-features = false }

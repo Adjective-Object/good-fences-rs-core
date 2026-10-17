@@ -216,3 +216,28 @@ fn late_binding_demand_restores_effect_order_and_opaque_cjs_ignores_hints() {
         EffectReason::OpaqueCommonJs
     );
 }
+
+#[test]
+fn nested_recipes_compose_inside_the_original_optional_argument_guard() {
+    let source = "/*@__PURE__*/ f?.((/*@__PURE__*/ g(), sideEffect()));";
+    let result = summary(source, false);
+    assert_eq!(result.rewrites.len(), 2);
+    let outer = &result.rewrites[0];
+    let inner = &result.rewrites[1];
+    assert!(effects::contains(outer.arguments[0].span, inner.invocation));
+    assert_eq!(
+        outer.guard,
+        ArgumentGuard::OriginalChain {
+            optional_call: true
+        }
+    );
+    assert_eq!(inner.guard, ArgumentGuard::Always);
+    let invocations: Vec<_> = result
+        .sites
+        .iter()
+        .filter(|s| s.reason == EffectReason::Invocation)
+        .map(|s| &source[s.span.start as usize..s.span.end as usize])
+        .collect();
+    assert_eq!(invocations, ["sideEffect()"]);
+    insta::assert_debug_snapshot!(result.rewrites);
+}

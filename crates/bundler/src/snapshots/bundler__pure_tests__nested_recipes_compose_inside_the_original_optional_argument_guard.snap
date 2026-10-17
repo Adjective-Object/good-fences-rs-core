@@ -1,0 +1,56 @@
+---
+source: crates/bundler/src/pure_tests.rs
+expression: result.rewrites
+---
+[
+    InvocationRewrite {
+        invocation: Span {
+            start: 14,
+            end: 52,
+        },
+        callee: Span {
+            start: 14,
+            end: 15,
+        },
+        reference: Identifier(
+            IdentifierCallee {
+                name: "f",
+                binding: None,
+            },
+        ),
+        arguments: [
+            InvocationArgument {
+                span: Span {
+                    start: 18,
+                    end: 51,
+                },
+                spread: false,
+            },
+        ],
+        guard: OriginalChain {
+            optional_call: true,
+        },
+        construct: false,
+        value_use: Discarded,
+    },
+    InvocationRewrite {
+        invocation: Span {
+            start: 33,
+            end: 36,
+        },
+        callee: Span {
+            start: 33,
+            end: 34,
+        },
+        reference: Identifier(
+            IdentifierCallee {
+                name: "g",
+                binding: None,
+            },
+        ),
+        arguments: [],
+        guard: Always,
+        construct: false,
+        value_use: Discarded,
+    },
+]

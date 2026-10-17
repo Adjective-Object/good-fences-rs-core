@@ -1,0 +1,85 @@
+---
+source: crates/bundler/src/policy_tests.rs
+expression: known
+---
+StatementEffects {
+    span: Span {
+        start: 16,
+        end: 60,
+    },
+    sites: [
+        EffectSite {
+            span: Span {
+                start: 16,
+                end: 20,
+            },
+            reason: UnresolvedRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 16,
+                end: 32,
+            },
+            reason: PropertyRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 16,
+                end: 59,
+            },
+            reason: Invocation,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 33,
+                end: 43,
+            },
+            reason: UnresolvedRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 33,
+                end: 45,
+            },
+            reason: Invocation,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 47,
+                end: 58,
+            },
+            reason: SpreadOrIteration,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 50,
+                end: 58,
+            },
+            reason: UnresolvedRead,
+            deferred: None,
+        },
+    ],
+    rewrites: [],
+    known_effects: [
+        KnownEffect {
+            invocation: Span {
+                start: 16,
+                end: 59,
+            },
+            pattern: "*.appendChild(...)",
+        },
+        KnownEffect {
+            invocation: Span {
+                start: 16,
+                end: 59,
+            },
+            pattern: "node.appendChild(...)",
+        },
+    ],
+}

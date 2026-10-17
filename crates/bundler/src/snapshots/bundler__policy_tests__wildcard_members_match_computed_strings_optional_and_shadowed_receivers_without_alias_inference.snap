@@ -1,0 +1,62 @@
+---
+source: crates/bundler/src/policy_tests.rs
+expression: results
+---
+[
+    (
+        "node.appendChild(child);",
+        true,
+    ),
+    (
+        "node['appendChild'](child);",
+        true,
+    ),
+    (
+        "node?.appendChild(child);",
+        true,
+    ),
+    (
+        "node.appendChild?.(child);",
+        true,
+    ),
+    (
+        "node?.['appendChild']?.(child);",
+        true,
+    ),
+    (
+        "(node?.appendChild)(child);",
+        true,
+    ),
+    (
+        "getNode().appendChild(child);",
+        true,
+    ),
+    (
+        "function local(node) { node.appendChild(child); }",
+        true,
+    ),
+    (
+        "const alias = node; alias.appendChild(child);",
+        true,
+    ),
+    (
+        "const appendChild = node.appendChild; appendChild(child);",
+        false,
+    ),
+    (
+        "node[key](child);",
+        false,
+    ),
+    (
+        "node[`appendChild`](child);",
+        false,
+    ),
+    (
+        "node.other('appendChild');",
+        false,
+    ),
+    (
+        "new node.appendChild(child);",
+        true,
+    ),
+]

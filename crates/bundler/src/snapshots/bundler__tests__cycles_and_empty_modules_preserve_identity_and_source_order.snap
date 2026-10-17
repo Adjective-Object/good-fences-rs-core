@@ -7,6 +7,40 @@ RetentionPlan {
         source: 0,
         resolution: 0,
     },
+    policy_fingerprint: [
+        134,
+        181,
+        48,
+        219,
+        60,
+        108,
+        153,
+        120,
+        249,
+        76,
+        127,
+        184,
+        159,
+        86,
+        100,
+        183,
+        166,
+        101,
+        224,
+        2,
+        160,
+        32,
+        77,
+        101,
+        241,
+        59,
+        2,
+        13,
+        230,
+        56,
+        232,
+        49,
+    ],
     modules: [
         0,
         1,
@@ -96,6 +130,32 @@ RetentionPlan {
             from: Segment(
                 SegmentKey {
                     file_id: 0,
+                    segment_idx: 2,
+                },
+            ),
+            to: Module(
+                0,
+            ),
+            kind: BindingEvaluation,
+            source_edge: None,
+        },
+        RetentionEdge {
+            from: Segment(
+                SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+            ),
+            to: Module(
+                0,
+            ),
+            kind: BindingEvaluation,
+            source_edge: None,
+        },
+        RetentionEdge {
+            from: Segment(
+                SegmentKey {
+                    file_id: 0,
                     segment_idx: 3,
                 },
             ),
@@ -133,6 +193,19 @@ RetentionPlan {
             kind: ModuleEffect,
             source_edge: None,
         },
+        RetentionEdge {
+            from: Segment(
+                SegmentKey {
+                    file_id: 1,
+                    segment_idx: 1,
+                },
+            ),
+            to: Module(
+                1,
+            ),
+            kind: BindingEvaluation,
+            source_edge: None,
+        },
     ],
     async_boundaries: [],
     effects: [
@@ -148,6 +221,7 @@ RetentionPlan {
                 },
                 sites: [],
                 rewrites: [],
+                known_effects: [],
             },
         },
         SegmentEffects {
@@ -162,6 +236,7 @@ RetentionPlan {
                 },
                 sites: [],
                 rewrites: [],
+                known_effects: [],
             },
         },
         SegmentEffects {
@@ -193,6 +268,7 @@ RetentionPlan {
                     },
                 ],
                 rewrites: [],
+                known_effects: [],
             },
         },
         SegmentEffects {
@@ -224,6 +300,7 @@ RetentionPlan {
                     },
                 ],
                 rewrites: [],
+                known_effects: [],
             },
         },
         SegmentEffects {
@@ -238,6 +315,7 @@ RetentionPlan {
                 },
                 sites: [],
                 rewrites: [],
+                known_effects: [],
             },
         },
         SegmentEffects {
@@ -269,6 +347,7 @@ RetentionPlan {
                     },
                 ],
                 rewrites: [],
+                known_effects: [],
             },
         },
     ],

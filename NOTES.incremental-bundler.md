@@ -2,8 +2,71 @@
 
 ## Current scope
 
-P0–P3 and P4.1–P4.3 are complete; P4.4–P9 remain pending. This phase is limited to
-P4, without nested delegation.
+P0–P4 are complete; P5–P9 remain pending. This phase stops before P5, without
+nested delegation. Effects/retention/recipes are library plans, not emitted
+JavaScript or runtime conformance evidence.
+
+## P4.4 checkpoint
+
+- `bundler::policy::EffectPolicy` parses at most 128 rules of 256 bytes each:
+  `name(...)`, `global.member(...)`, `*.member(...)`, ASCII identifiers and
+  literal argument wildcard only. Patterns are structural, never JS execution,
+  regex or source substring matches. Invalid grammar/limits return indexed eyre
+  diagnostics, with deterministic snapshots.
+- Exact global rules exclude lexical shadows/imports/parameters and do not
+  infer aliases. Wildcard member receivers include lexical/aliased receivers,
+  but do not follow standalone method aliases. Static/computed string literal
+  names normalize; dynamic/template keys are not inferred. Optional members/
+  calls and parenthesized member references preserve their original guards.
+  Rules apply to both call and construction; nonmatches leave baseline policy.
+- Matches add `KnownEffect` reasons and override PURE, never subtract syntax
+  effects. Deferred function creation remains pure. Annotation disabling is
+  explicit policy. Canonical sorting/deduplication plus a versioned SHA-256
+  fingerprint identifies effective configuration independent of pattern order.
+- `retain_with_policy` and `effects::summarize_with_policy` consume owned facts
+  only. `RetentionPlan::policy_fingerprint` and `is_current(graph, policy)`
+  invalidate derived results on policy-only changes. A managed filesystem test
+  builds from a warm sidecar, removes source, reanalyzes two policies, restores
+  source, and verifies another warm hit plus identical cache bytes/mtime/facts.
+- Extractor 4 (schema 3) normalizes parenthesized optional-member shapes and
+  preserves concise-arrow required return contexts. These are syntax changes,
+  not caller-policy conclusions. Synthetic `BindingEvaluation` edges connect
+  retained binding segments to their own module effects for later root walks.
+- Verified 252 tests: ast-segmenter 50, bundler 25, oxc_utils_parse 9,
+  segment_cache 25, source_graph 31, tag_graph 22, unused_finder 72,
+  import_resolver 18. Targeted clippy and `./scripts/spot-check` pass; inspected
+  reason, guard, policy-diagnostic and plan snapshots. Existing warnings remain.
+
+## P5/P6 handoff APIs (no implementation beyond P4)
+
+- Parse with `ast_segmenter::parse_module`, or get `CacheOutcome::record.module`
+  from `segment_cache::load_or_parse`. Pass owned facts/ranges and current
+  occurrence resolutions through `OwnedSourceFileInput::from_ranges` into
+  `SourceGraph::from_owned`; do not reconstruct legacy tracker maps or UsedTag.
+- Validate/resolve checked export routes with `SourceGraph::resolve_export`.
+  Call `bundler::retain_with_policy(graph, evaluation_module_ids,
+  binding_route_nodes, &EffectPolicy)`; `retain` uses the default policy.
+- `RetentionPlan::{modules,segments,edges,async_boundaries}` describes available
+  bodies, deterministic reasons and consumer-to-dependency structure.
+  StaticEvaluation, BindingEvaluation, ModuleEffect and EffectOrder edges are
+  derived constraints; source_edge indexes the original shared occurrence.
+  Consult that occurrence's activation/function/site metadata. Async indices
+  are retained boundaries, not yet P5 root identities. Do not eagerly execute
+  deferred requires or interpret sorted plan edges as a total runtime schedule.
+- `RetentionPlan::effects` maps SegmentKey to derived `StatementEffects`,
+  including exact source-range `InvocationRewrite` inputs and `ArgumentGuard`.
+  P6 must preserve callee/reference evaluation once, optional chain completion
+  separately from undefined, argument order and spread iteration. Recipes are
+  composed by source containment inside the original enclosing input guards,
+  not applied as independent overlapping text edits. They are not an emitted
+  program. Reuse only within the same graph instance and after
+  `is_current(graph, policy)` succeeds.
+- Genuine remaining limits: namespace demand keeps whole targets; required
+  nested expression calls and segment-level binding dependencies are
+  conservative. CJS stays opaque. The DSL intentionally has no arbitrary JS,
+  dynamic-key inference or alias analysis. External edges are explicit but no
+  executable external/runtime policy exists yet. Root sets, chunking, source
+  rewriting, runtime wrappers and emitted conformance belong to P5 onward.
 
 ## P4.3 checkpoint
 

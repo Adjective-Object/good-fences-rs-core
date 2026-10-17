@@ -1,4 +1,5 @@
 //! Policy-derived statement effects and source-preserving, non-emitting recipes.
+use crate::policy::EffectPolicy;
 use ast_segmenter::{
     effects::{EffectReason, EffectSite},
     invocation::{CalleeShape, Invocation, InvocationArgument, ValueUse},
@@ -37,11 +38,19 @@ pub struct StatementEffects {
     pub span: Span,
     pub sites: Vec<EffectSite>,
     pub rewrites: Vec<InvocationRewrite>,
+    pub known_effects: Vec<KnownEffect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownEffect {
+    pub invocation: Span,
+    /// Canonical structural rule, deterministic even if configuration order changes.
+    pub pattern: String,
 }
 
 impl StatementEffects {
     pub fn is_effectful(&self) -> bool {
-        !self.sites.is_empty()
+        !self.sites.is_empty() || !self.known_effects.is_empty()
     }
 }
 
@@ -49,9 +58,11 @@ pub(crate) fn contains(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
 
-fn removable(call: &Invocation, value_demanded: bool) -> bool {
+fn removable(call: &Invocation, value_demanded: bool, policy: &EffectPolicy) -> bool {
     call.deferred.is_none()
         && call.pure.is_some()
+        && policy.honors_pure_annotations()
+        && policy.matching_patterns(call).next().is_none()
         && match call.value_use {
             ValueUse::Discarded => true,
             ValueUse::StatementValue => !value_demanded,
@@ -60,13 +71,22 @@ fn removable(call: &Invocation, value_demanded: bool) -> bool {
 }
 
 pub fn summarize(facts: &ModuleFacts, statement: Span, value_demanded: bool) -> StatementEffects {
+    summarize_with_policy(facts, statement, value_demanded, &EffectPolicy::default())
+}
+
+pub fn summarize_with_policy(
+    facts: &ModuleFacts,
+    statement: Span,
+    value_demanded: bool,
+    policy: &EffectPolicy,
+) -> StatementEffects {
     let first = facts
         .invocations
         .partition_point(|c| c.span.start < statement.start);
     let calls: Vec<_> = facts.invocations[first..]
         .iter()
         .take_while(|c| c.span.start <= statement.end)
-        .filter(|c| contains(statement, c.span) && removable(c, value_demanded))
+        .filter(|c| contains(statement, c.span) && removable(c, value_demanded, policy))
         .collect();
     let start = facts
         .effects
@@ -101,9 +121,21 @@ pub fn summarize(facts: &ModuleFacts, statement: Span, value_demanded: bool) -> 
             value_use: call.value_use,
         })
         .collect();
+    let known_effects = facts.invocations[first..]
+        .iter()
+        .take_while(|c| c.span.start <= statement.end)
+        .filter(|c| c.deferred.is_none() && contains(statement, c.span))
+        .flat_map(|c| {
+            policy.matching_patterns(c).map(move |pattern| KnownEffect {
+                invocation: c.span,
+                pattern: pattern.to_owned(),
+            })
+        })
+        .collect();
     StatementEffects {
         span: statement,
         sites,
         rewrites,
+        known_effects,
     }
 }

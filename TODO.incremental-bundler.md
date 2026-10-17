@@ -5,7 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P3 are complete. P4–P9 remain pending.** Both
+**P0–P4 are complete. P5–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -227,7 +227,7 @@ workspace test success.
   Recognize precise comment attachment; preserve callee/argument/receiver effects
   when dropping an unused pure invocation. Test used results, spread arguments,
   optional calls, false attachment and `f(sideEffect())`; no substring shortcut.
-- [ ] **P4.4 — Add known-effectful structural DSL.** Depends: P4.3.
+- [x] **P4.4 — Add known-effectful structural DSL.** Depends: P4.3.
   Specify/parse a bounded grammar including `*.appendChild(...)`, add-only
   effect semantics and precedence over PURE hints. Test computed/optional/
   shadowed/aliased forms per documented policy, malformed patterns and config

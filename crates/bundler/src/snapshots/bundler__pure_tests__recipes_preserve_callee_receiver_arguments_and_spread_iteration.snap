@@ -104,4 +104,5 @@ StatementEffects {
             value_use: Discarded,
         },
     ],
+    known_effects: [],
 }

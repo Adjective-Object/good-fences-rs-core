@@ -93,6 +93,20 @@ pub(crate) fn shape(callee: &Expression<'_>, facts: &ModuleFacts) -> CalleeShape
             },
             true,
         )),
+        Expression::ChainExpression(chain) => match &chain.expression {
+            ChainElement::StaticMemberExpression(m) => {
+                Some((&m.object, Some(m.property.name.to_string()), false))
+            }
+            ChainElement::ComputedMemberExpression(m) => Some((
+                &m.object,
+                match m.expression.get_inner_expression() {
+                    Expression::StringLiteral(s) => Some(s.value.to_string()),
+                    _ => None,
+                },
+                true,
+            )),
+            _ => None,
+        },
         _ => None,
     };
     if let Some((receiver, property, computed)) = member {

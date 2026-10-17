@@ -99,5 +99,9 @@ contiguous trivia comments); declaration-leading comments, strings, trailing or
 prose substrings do not. These are hints, never unconditional purity facts.
 Function/instance-field records remain deferred. CommonJS has no internal
 invocation rewrite records because its body is opaque.
+Member shape normalizes parenthesized optional-chain references for structural
+matching without erasing the distinct original short-circuit boundary. Concise
+arrow expression bodies have required return values, not discarded statement
+results, even though OXC represents them internally as expression statements.
 
 Run `cargo test -p ast-segmenter` for extraction and scope regressions.

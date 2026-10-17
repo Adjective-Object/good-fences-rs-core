@@ -177,14 +177,14 @@ fn namespace_demand_is_conservative_and_plans_expire_on_mutation() {
         plan.segments.iter().filter(|s| s.key.file_id == 1).count(),
         2
     );
-    assert!(plan.is_current(&graph));
+    assert!(plan.is_current(&graph, &policy::EffectPolicy::default()));
     graph
         .patch_owned(
             Path::new("lib.ts"),
             input("lib.ts", "export const one = 3;"),
         )
         .unwrap();
-    assert!(!plan.is_current(&graph));
+    assert!(!plan.is_current(&graph, &policy::EffectPolicy::default()));
 }
 
 #[test]
