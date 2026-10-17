@@ -127,6 +127,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn rebuild_edges(&mut self) {
+        self.diagnostics.clear();
         let mut edges = Vec::new();
         for (file_id, file) in self.files.iter().enumerate() {
             let file_id = file_id as u32;
@@ -234,7 +235,42 @@ impl SourceGraph {
                 }
             }
         }
-        self.edges = edges;
+        let mut linked = Vec::new();
+        for edge in edges {
+            if let (GraphNode::Module(target), Some(ImportedName::Name(name))) =
+                (edge.to, &edge.imported)
+            {
+                let namespace = if edge.type_only {
+                    crate::Namespace::Type
+                } else {
+                    crate::Namespace::Value
+                };
+                match self.resolve_export(target, name, namespace) {
+                    Ok(export) => {
+                        for to in export.route {
+                            let mut edge = edge.clone();
+                            edge.to = to;
+                            linked.push(edge);
+                        }
+                    }
+                    Err(error) => {
+                        let file_id = match edge.from {
+                            GraphNode::Module(id) => id,
+                            GraphNode::Segment(key) => key.file_id,
+                        };
+                        self.diagnostics.push(crate::LinkDiagnostic {
+                            file_id,
+                            site: edge.site,
+                            message: error.to_string(),
+                        });
+                        linked.push(edge);
+                    }
+                }
+            } else {
+                linked.push(edge);
+            }
+        }
+        self.edges = linked;
         self.outgoing.clear();
         self.incoming.clear();
         for (i, edge) in self.edges.iter().enumerate() {
@@ -245,12 +281,12 @@ impl SourceGraph {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ast_segmenter::{parse_module, ModuleFormat};
     use std::path::Path;
 
-    pub(super) fn input(path: &str, source: &str) -> OwnedSourceFileInput {
+    pub(crate) fn input(path: &str, source: &str) -> OwnedSourceFileInput {
         let parsed = parse_module(
             &logger::StdioLogger::new(),
             source,

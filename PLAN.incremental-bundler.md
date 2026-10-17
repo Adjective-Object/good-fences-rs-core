@@ -414,6 +414,11 @@ reverse indexes. Tests pin duplicate sites, empty identity and deferred require
 metadata. Subsequent P3 items wire lexical/export linking, revision-aware
 resolution and legacy usage consumers; P3.1 alone does not migrate TagGraph.
 
+P3.2 delivers checked lexical/export resolution and canonical export identities
+with barrel routes, plus typed binding-edge linking and diagnostics. The legacy
+adapters retain their type-inclusive/empty-on-error API while correcting forward
+lexical binding; executable consumers use the explicit namespace/error API.
+
 Create canonical dependency occurrence edges and reverse index in
 `source_graph`, with resolver inputs kept outside parsing. Add export resolution
 correctness and generation-aware patch/add/remove. Resolve conditions for

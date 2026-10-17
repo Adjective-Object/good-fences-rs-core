@@ -176,12 +176,16 @@ workspace test success.
   local references and import/re-export requests retain sites and flags.
   Two focused regressions plus 21 existing graph tests and spot-check pass.
   Legacy usage traversal migration remains P3.4.
-- [ ] **P3.2 — Correct lexical/export linking.** Depends: P3.1.
+- [x] **P3.2 — Correct lexical/export linking.** Depends: P3.1.
   Replace binding-by-statement-order assumptions for executable linking;
   implement namespace re-export, default exclusion from stars, explicit
   precedence, ambiguity/missing-export diagnostics and cycle-safe lookup.
   Tests target `resolve_symbol_in_file`/`resolve_import_across_files` adapters
   plus new linker APIs: TDZ-bound references, diamonds, aliases and cycles.
+  **Verified:** explicit namespace linker returns canonical identities/routes
+  and source-site diagnostics. Owned binding IDs resolve forward/nested uses;
+  legacy forward lookup now binds lexicals. Three new focused linker tests,
+  all 26 graph/17 tag/70 unused tests and spot-check pass.
 - [ ] **P3.3 — Add resolution revision/add/remove contracts.** Depends: P3.1.
   Read import-resolver AGENTS before changing it; adapt resolver into shared
   graph inputs with import/require conditions and external policy. Add

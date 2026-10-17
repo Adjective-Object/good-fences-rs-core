@@ -4,6 +4,21 @@
 
 ## P3.1 checkpoint
 
+## P3.2 checkpoint
+
+- Checked `resolve_export` handles explicit/default/aliased/imported-local and
+  namespace exports, star default exclusion, same-identity diamonds, ambiguity,
+  missing exports and cycle termination. `LinkedExport::route` preserves barrel
+  segments, separately from canonical binding identity; owned binding edges use
+  these routes. `validate_links` returns source-site construction diagnostics.
+- `resolve_symbol_in_file` uses owned lexical reference IDs when present and
+  fixes forward var/lexical binding in the legacy adapter. TDZ remains runtime
+  behavior, not missing binding. The legacy import adapter intentionally returns
+  type-inclusive leaves/empty on error; checked callers use explicit namespaces.
+- Verification: 26 source_graph, 17 tag_graph and 70 unused_finder tests pass;
+  spot-check passes. The report barrel regression is still owned by P3.4:
+  old TagGraph does not yet consume the new routes.
+
 - `source_graph::from_owned` consumes existing `ModuleFacts` and segments, with
   per-`DependencyId` resolution inputs, never a second parse IR. Typed edges
   distinguish binding/evaluation/execution, local references, activation,

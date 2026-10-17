@@ -2,26 +2,22 @@ pub mod edge;
 pub mod segment_key;
 mod structure;
 pub use structure::*;
+mod linker;
+pub use linker::*;
+#[cfg(test)]
+mod linker_tests;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use ahashmap::{AHashMap, AHashSet};
+use ahashmap::AHashMap;
 use ast_segmenter::segment_info::Segment;
 use ast_segmenter::variables::HoistingLevel;
-use ast_segmenter::{ExportedSymbol, ImportTarget};
+use ast_segmenter::ExportedSymbol;
 use compact_str::CompactString;
 
 pub use edge::SegmentEdge;
 pub use segment_key::SegmentKey;
-
-/// A re-export target: the resolved path and symbol to look for in the target file.
-#[derive(Debug, Clone)]
-struct ReExportEntry {
-    target_path: PathBuf,
-    /// The symbol to resolve in the target file.
-    imported_symbol: ExportedSymbol,
-}
 
 /// Per-file data owned by the SourceGraph.
 /// Pre-built indexes enable fast intra-file name resolution.
@@ -33,10 +29,6 @@ struct SourceGraphFile {
     symbol_to_segment: AHashMap<ExportedSymbol, u32>,
     /// Local name → Vec<(segment_idx, HoistingLevel)> for intra-file lookup
     name_to_declaring_segments: AHashMap<CompactString, Vec<(u32, HoistingLevel)>>,
-    /// Named re-exports: exported symbol → list of (target path, symbol to look up in target)
-    named_reexports: AHashMap<ExportedSymbol, Vec<ReExportEntry>>,
-    /// Star re-export paths (`export * from`): resolved target paths
-    star_reexport_paths: Vec<PathBuf>,
     /// Resolved import paths: raw specifier → resolved file path.
     /// Used during tag propagation to follow inter-file import edges.
     resolved_import_paths: AHashMap<String, PathBuf>,
@@ -47,6 +39,7 @@ struct SourceGraphFile {
 /// Maps files to their segments and provides indexes for resolving
 /// names to segments within and across files.
 pub struct SourceGraph {
+    diagnostics: Vec<LinkDiagnostic>,
     edges: Vec<OccurrenceEdge>,
     outgoing: AHashMap<GraphNode, Vec<usize>>,
     incoming: AHashMap<GraphNode, Vec<usize>>,
@@ -99,6 +92,7 @@ impl SourceGraph {
         }
 
         SourceGraph {
+            diagnostics: Vec::new(),
             edges: Vec::new(),
             outgoing: AHashMap::default(),
             incoming: AHashMap::default(),
@@ -117,13 +111,14 @@ impl SourceGraph {
         let mut symbol_to_segment: AHashMap<ExportedSymbol, u32> = AHashMap::default();
         let mut name_to_declaring_segments: AHashMap<CompactString, Vec<(u32, HoistingLevel)>> =
             AHashMap::default();
-        let mut named_reexports: AHashMap<ExportedSymbol, Vec<ReExportEntry>> =
-            AHashMap::default();
-        let mut star_reexport_paths: Vec<PathBuf> = Vec::new();
 
         // Merge resolved import and reexport paths so TagGraph can resolve both
         let mut all_resolved_paths = resolved_import_paths;
-        all_resolved_paths.extend(resolved_reexport_paths.iter().map(|(k, v)| (k.clone(), v.clone())));
+        all_resolved_paths.extend(
+            resolved_reexport_paths
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
 
         for (seg_idx, seg) in segments.iter().enumerate() {
             let seg_idx = seg_idx as u32;
@@ -140,51 +135,7 @@ impl SourceGraph {
                     .or_default()
                     .push((seg_idx, hoisting));
             }
-
-            // Build re-export indexes from exports_from
-            for (specifier, reexports) in &seg.module_deps.exports_from {
-                let target_path = match resolved_reexport_paths.get(specifier) {
-                    Some(p) => p.clone(),
-                    None => continue,
-                };
-
-                for reexport in reexports {
-                    match (&reexport.imported_as, &reexport.exported_as) {
-                        // Star re-export: `export * from './b'`
-                        (ImportTarget::Namespace, None) => {
-                            star_reexport_paths.push(target_path.clone());
-                        }
-                        // Named passthrough: `export { foo } from './b'`
-                        (ImportTarget::ExportedSymbol(imported), None) => {
-                            named_reexports
-                                .entry(imported.clone())
-                                .or_default()
-                                .push(ReExportEntry {
-                                    target_path: target_path.clone(),
-                                    imported_symbol: imported.clone(),
-                                });
-                        }
-                        // Renamed re-export: `export { foo as bar } from './b'`
-                        (ImportTarget::ExportedSymbol(imported), Some(exported)) => {
-                            named_reexports
-                                .entry(exported.clone())
-                                .or_default()
-                                .push(ReExportEntry {
-                                    target_path: target_path.clone(),
-                                    imported_symbol: imported.clone(),
-                                });
-                        }
-                        // Namespace under a name: `export * as Foo from './b'`
-                        // Deferred — uncommon pattern, complex to resolve at segment level
-                        (ImportTarget::Namespace, Some(_)) => {}
-                    }
-                }
-            }
         }
-
-        // Deduplicate star re-export paths
-        star_reexport_paths.sort();
-        star_reexport_paths.dedup();
 
         SourceGraphFile {
             owned: None,
@@ -192,8 +143,6 @@ impl SourceGraph {
             segments,
             symbol_to_segment,
             name_to_declaring_segments,
-            named_reexports,
-            star_reexport_paths,
             resolved_import_paths: all_resolved_paths,
         }
     }
@@ -215,12 +164,16 @@ impl SourceGraph {
 
     /// Returns the segments for a file by its id.
     pub fn file_segments(&self, file_id: u32) -> Option<&[Segment]> {
-        self.files.get(file_id as usize).map(|f| f.segments.as_slice())
+        self.files
+            .get(file_id as usize)
+            .map(|f| f.segments.as_slice())
     }
 
     /// Returns the symbol_to_segment index for a file.
     pub fn file_symbol_to_segment(&self, file_id: u32) -> Option<&AHashMap<ExportedSymbol, u32>> {
-        self.files.get(file_id as usize).map(|f| &f.symbol_to_segment)
+        self.files
+            .get(file_id as usize)
+            .map(|f| &f.symbol_to_segment)
     }
 
     /// Returns the resolved import paths for a file.
@@ -232,14 +185,9 @@ impl SourceGraph {
 
     /// Resolve a name reference to the segment that declares it within the same file.
     ///
-    /// Hoisting rules:
-    /// - `ImportHoisting` / `FunctionHoisting`: visible to all segments in the file,
-    ///   so the declaring segment is always a valid resolution target.
-    /// - `LetConstHoisting`: visible only to segments at the same or later index.
-    ///   When multiple `LetConst` declarations exist, prefer the latest one at or
-    ///   before `referencing_segment_idx`.
-    ///
-    /// Returns `None` if the name is not declared in any reachable segment.
+    /// Owned inputs use lexical binding IDs (including nested shadows). Legacy
+    /// top-level names bind even before var/lexical declarations; TDZ is not
+    /// name-resolution failure.
     pub fn resolve_symbol_in_file(
         &self,
         file_id: u32,
@@ -247,12 +195,30 @@ impl SourceGraph {
         referencing_segment_idx: u32,
     ) -> Option<SegmentKey> {
         let file = self.files.get(file_id as usize)?;
+        if let Some(input) = &file.owned {
+            let span = file.segments.get(referencing_segment_idx as usize)?.span;
+            let binding = input
+                .facts
+                .references
+                .iter()
+                .find(|r| r.name == name && span.start <= r.span.start && r.span.end <= span.end)
+                .and_then(|r| r.binding)
+                .or_else(|| {
+                    input
+                        .facts
+                        .bindings
+                        .iter()
+                        .find(|b| b.top_level && b.name == name)
+                        .map(|b| b.id)
+                })?;
+            return match self.resolve_binding(file_id, binding)? {
+                GraphNode::Segment(key) => Some(key),
+                _ => None,
+            };
+        }
         let declarations = file.name_to_declaring_segments.get(name)?;
 
-        // Pick the best declaration according to hoisting rules.
-        // Hoisted declarations (Import/Function) are always visible — take the first.
-        // LetConst declarations are only visible at or after the declaring segment —
-        // take the latest one at or before referencing_segment_idx.
+        // TDZ constrains evaluation, not lexical binding.
         let mut best_hoisted: Option<u32> = None;
         let mut best_let_const: Option<u32> = None;
 
@@ -265,17 +231,13 @@ impl SourceGraph {
                     }
                 }
                 HoistingLevel::LetConstHoisting => {
-                    // Only visible from the declaring segment onward
-                    if seg_idx <= referencing_segment_idx {
-                        if best_let_const.map_or(true, |prev| seg_idx > prev) {
-                            best_let_const = Some(seg_idx);
-                        }
+                    if best_let_const.map_or(true, |prev| seg_idx < prev) {
+                        best_let_const = Some(seg_idx);
                     }
                 }
             }
         }
 
-        // LetConst shadows hoisted if both exist and LetConst is visible
         let chosen = best_let_const.or(best_hoisted)?;
         Some(SegmentKey::new(file_id, chosen))
     }
@@ -284,8 +246,8 @@ impl SourceGraph {
     /// that ultimately declare/export it. Follows re-export chains lazily,
     /// caching results. Returns empty Vec if the symbol is not found.
     ///
-    /// For star re-exports (`export * from`), fans out: returns a `SegmentKey`
-    /// for each matching segment in the re-exported file.
+    /// Compatibility adapter includes type exports and returns empty on errors.
+    /// Use `resolve_export` for explicit namespaces, routes and diagnostics.
     pub fn resolve_import_across_files(
         &self,
         target_file_id: u32,
@@ -297,8 +259,18 @@ impl SourceGraph {
             return cached.clone();
         }
 
-        let mut visited = AHashSet::default();
-        let result = self.resolve_import_inner(target_file_id, symbol, &mut visited);
+        let result = self
+            .resolve_export(target_file_id, exported_name(symbol), Namespace::Type)
+            .map(|resolved| match resolved.declaration {
+                GraphNode::Segment(key) => vec![key],
+                GraphNode::Module(id) => self.files[id as usize]
+                    .segments
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| SegmentKey::new(id, i as u32))
+                    .collect(),
+            })
+            .unwrap_or_default();
 
         // Cache the result
         self.reexport_cache
@@ -361,7 +333,8 @@ impl SourceGraph {
         } else {
             // New file: append and update path_to_id
             let file_id = self.files.len() as u32;
-            self.path_to_id.insert(input.source_file_path.clone(), file_id);
+            self.path_to_id
+                .insert(input.source_file_path.clone(), file_id);
             let new_file = Self::build_file(
                 input.source_file_path,
                 input.segments,
@@ -371,62 +344,14 @@ impl SourceGraph {
             self.files.push(new_file);
         }
     }
-
-    /// Inner recursive resolution with cycle detection.
-    fn resolve_import_inner(
-        &self,
-        target_file_id: u32,
-        symbol: &ExportedSymbol,
-        visited: &mut AHashSet<(u32, ExportedSymbol)>,
-    ) -> Vec<SegmentKey> {
-        // Cycle detection
-        if !visited.insert((target_file_id, symbol.clone())) {
-            return vec![];
-        }
-
-        let file = match self.files.get(target_file_id as usize) {
-            Some(f) => f,
-            None => return vec![],
-        };
-
-        // 1. Direct export: symbol found in this file's exports_locals
-        if let Some(&seg_idx) = file.symbol_to_segment.get(symbol) {
-            return vec![SegmentKey::new(target_file_id, seg_idx)];
-        }
-
-        // 2. Named re-exports: explicit `export { x } from` or `export { x as y } from`
-        if let Some(entries) = file.named_reexports.get(symbol) {
-            let mut results = Vec::new();
-            for entry in entries {
-                if let Some(&next_file_id) = self.path_to_id.get(&entry.target_path) {
-                    results.extend(self.resolve_import_inner(
-                        next_file_id,
-                        &entry.imported_symbol,
-                        visited,
-                    ));
-                }
-            }
-            if !results.is_empty() {
-                return results;
-            }
-        }
-
-        // 3. Star re-exports: `export * from` — try each star source
-        let mut results = Vec::new();
-        for star_path in &file.star_reexport_paths {
-            if let Some(&next_file_id) = self.path_to_id.get(star_path) {
-                results.extend(self.resolve_import_inner(next_file_id, symbol, visited));
-            }
-        }
-        results
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast_segmenter::variables::VariableScope;
     use ast_segmenter::raw_module_deps::RawModuleDeps;
+    use ast_segmenter::variables::VariableScope;
+    use ast_segmenter::ImportTarget;
     use oxc_span::Span;
 
     fn make_span(lo: u32, hi: u32) -> Span {
@@ -503,9 +428,8 @@ mod tests {
     #[test]
     fn test_new_single_file() {
         let path = PathBuf::from("/test/a.ts");
-        let graph = SourceGraph::new(
-            vec![simple_input(path.clone(), vec![simple_segment()])].into_iter(),
-        );
+        let graph =
+            SourceGraph::new(vec![simple_input(path.clone(), vec![simple_segment()])].into_iter());
 
         assert_eq!(graph.file_count(), 1);
         assert_eq!(graph.file_id(&path), Some(0));
@@ -611,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_let_const_not_visible_from_earlier_segment() {
+    fn test_resolve_let_const_is_bound_before_declaration() {
         let path = PathBuf::from("/test/a.ts");
         let graph = SourceGraph::new(
             vec![simple_input(
@@ -625,8 +549,14 @@ mod tests {
             .into_iter(),
         );
 
-        assert_eq!(graph.resolve_symbol_in_file(0, "baz", 0), None);
-        assert_eq!(graph.resolve_symbol_in_file(0, "baz", 1), None);
+        assert_eq!(
+            graph.resolve_symbol_in_file(0, "baz", 0),
+            Some(SegmentKey::new(0, 2))
+        );
+        assert_eq!(
+            graph.resolve_symbol_in_file(0, "baz", 1),
+            Some(SegmentKey::new(0, 2))
+        );
         assert_eq!(
             graph.resolve_symbol_in_file(0, "baz", 2),
             Some(SegmentKey::new(0, 2))
@@ -636,9 +566,7 @@ mod tests {
     #[test]
     fn test_resolve_name_not_found_returns_none() {
         let path = PathBuf::from("/test/a.ts");
-        let graph = SourceGraph::new(
-            vec![simple_input(path, vec![simple_segment()])].into_iter(),
-        );
+        let graph = SourceGraph::new(vec![simple_input(path, vec![simple_segment()])].into_iter());
 
         assert_eq!(graph.resolve_symbol_in_file(0, "nonexistent", 0), None);
         assert_eq!(graph.resolve_symbol_in_file(99, "anything", 0), None);
@@ -661,8 +589,7 @@ mod tests {
             .into_iter(),
         );
 
-        let result =
-            graph.resolve_import_across_files(1, &ExportedSymbol::from("foo"));
+        let result = graph.resolve_import_across_files(1, &ExportedSymbol::from("foo"));
         assert_eq!(result, vec![SegmentKey::new(1, 1)]);
     }
 
@@ -709,7 +636,10 @@ mod tests {
                     resolved_import_paths: AHashMap::default(),
                 },
                 // C: directly exports foo
-                simple_input(PathBuf::from("/test/c.ts"), vec![segment_with_export("foo")]),
+                simple_input(
+                    PathBuf::from("/test/c.ts"),
+                    vec![segment_with_export("foo")],
+                ),
             ]
             .into_iter(),
         );
@@ -731,11 +661,7 @@ mod tests {
                 // A: star re-export from B
                 SourceFileInput {
                     source_file_path: path_a,
-                    segments: vec![segment_with_reexport(
-                        "./b",
-                        ImportTarget::Namespace,
-                        None,
-                    )],
+                    segments: vec![segment_with_reexport("./b", ImportTarget::Namespace, None)],
                     resolved_reexport_paths: {
                         let mut m = AHashMap::default();
                         m.insert("./b".to_string(), PathBuf::from("/test/b.ts"));
@@ -753,18 +679,15 @@ mod tests {
         );
 
         // Resolving "foo" from A should find it in B
-        let result =
-            graph.resolve_import_across_files(0, &ExportedSymbol::from("foo"));
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("foo"));
         assert_eq!(result, vec![SegmentKey::new(1, 0)]);
 
         // Resolving "bar" from A should also find it in B
-        let result =
-            graph.resolve_import_across_files(0, &ExportedSymbol::from("bar"));
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("bar"));
         assert_eq!(result, vec![SegmentKey::new(1, 1)]);
 
         // Resolving "baz" (not exported by B) should return empty
-        let result =
-            graph.resolve_import_across_files(0, &ExportedSymbol::from("baz"));
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("baz"));
         assert_eq!(result, vec![]);
     }
 
@@ -862,13 +785,11 @@ mod tests {
         );
 
         // "bar" is not exported
-        let result =
-            graph.resolve_import_across_files(0, &ExportedSymbol::from("bar"));
+        let result = graph.resolve_import_across_files(0, &ExportedSymbol::from("bar"));
         assert_eq!(result, vec![]);
 
         // Invalid file_id
-        let result =
-            graph.resolve_import_across_files(99, &ExportedSymbol::from("foo"));
+        let result = graph.resolve_import_across_files(99, &ExportedSymbol::from("foo"));
         assert_eq!(result, vec![]);
     }
 
@@ -880,7 +801,10 @@ mod tests {
         let path_b = PathBuf::from("/test/b.ts");
         let graph = SourceGraph::new(
             vec![
-                simple_input(path_a.clone(), vec![simple_segment(), segment_with_export("foo")]),
+                simple_input(
+                    path_a.clone(),
+                    vec![simple_segment(), segment_with_export("foo")],
+                ),
                 simple_input(path_b.clone(), vec![segment_with_export("bar")]),
             ]
             .into_iter(),
@@ -905,7 +829,10 @@ mod tests {
     fn test_iter_segments() {
         let graph = SourceGraph::new(
             vec![
-                simple_input(PathBuf::from("/test/a.ts"), vec![simple_segment(), simple_segment()]),
+                simple_input(
+                    PathBuf::from("/test/a.ts"),
+                    vec![simple_segment(), simple_segment()],
+                ),
                 simple_input(PathBuf::from("/test/b.ts"), vec![simple_segment()]),
             ]
             .into_iter(),
@@ -1028,9 +955,8 @@ mod tests {
     #[test]
     fn test_patch_file_updates_iterators() {
         let path = PathBuf::from("/test/a.ts");
-        let mut graph = SourceGraph::new(
-            vec![simple_input(path.clone(), vec![simple_segment()])].into_iter(),
-        );
+        let mut graph =
+            SourceGraph::new(vec![simple_input(path.clone(), vec![simple_segment()])].into_iter());
 
         // Initially 1 segment
         assert_eq!(graph.iter_segments().count(), 1);
@@ -1039,7 +965,10 @@ mod tests {
         // Patch with 3 segments
         graph.patch_file(
             &path,
-            simple_input(path.clone(), vec![simple_segment(), simple_segment(), simple_segment()]),
+            simple_input(
+                path.clone(),
+                vec![simple_segment(), simple_segment(), simple_segment()],
+            ),
         );
 
         assert_eq!(graph.iter_segments().count(), 3);

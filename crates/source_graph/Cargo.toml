@@ -13,6 +13,7 @@ ahashmap = { version = "0.2.0", path = "../ahashmap" }
 ast-segmenter = { version = "0.2.0-beta.1", path = "../ast_segmenter" }
 compact_str = "0.9.0"
 oxc_span.workspace = true
+eyre.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true

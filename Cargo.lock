@@ -2074,6 +2074,7 @@ dependencies = [
  "ahashmap",
  "ast-segmenter",
  "compact_str",
+ "eyre",
  "logger",
  "oxc_allocator",
  "oxc_span",

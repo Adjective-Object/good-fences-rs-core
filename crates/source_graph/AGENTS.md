@@ -5,3 +5,8 @@ occurrence collection. Reuse ast_segmenter owned facts; do not reconstruct a
 second binding IR or put usage tags/effects/runtime scheduling in structure.
 Module nodes preserve empty-file identity; enclosing-function metadata is not
 permission to execute a require eagerly.
+
+Lexical binding is independent of TDZ evaluation. Checked export resolution
+returns canonical identity plus barrel route; stars exclude default, explicit
+exports win, and ambiguous distinct identities fail. Legacy adapters include
+types/return empty on failure; do not use them for executable validation.
