@@ -16,9 +16,10 @@ statement, including files without exports; they do not model evaluation timing.
 `parse_module(logger, source, path, package_format)` is the fallible bundler
 entrypoint. It checks extension-sensitive parser and semantic diagnostics before
 extracting owned records. Generated-file markers do not skip source, and
-rejected statements fail the entire operation. `try_segment_file` is available
-for callers that already validated an AST and semantic model; `segment_file`
-retains the unused tracker's legacy behavior.
+rejected statements fail the entire operation. `try_segment_file` checks legacy
+statement extraction for callers that already validated an AST and semantic
+model; it does not perform the full bundler support-policy/occurrence checks.
+`segment_file` retains the unused tracker's legacy behavior.
 
 `ParsedModule::facts` contains the owned occurrence IR in `owned`: bindings,
 declaration and reference ranges, import aliases, export mappings, directives,
@@ -27,16 +28,54 @@ dependency IDs are source byte offsets (first declaration and dependency site,
 respectively), meaningful only within the exact source and parse policy.
 Semantic resolution links forward references and nested/shadowed bindings;
 unresolved globals have no binding ID. Repeated specifiers are not coalesced.
-Reference read/write and type-only flags survive independently of legacy name
-sets. Collections have deterministic source ordering; no OXC IDs or arena
+Reference read/write and type-only flags, ambient declarations and merged
+type/value bindings survive independently of legacy name sets. Collections
+have deterministic source ordering; no OXC IDs or arena
 borrows escape. Nonliteral dependencies fail instead of disappearing.
 `function_scoped` includes both `var` and parameters, as in OXC's binding flags;
 the occurrence IR does not infer evaluation timing or TDZ safety.
 
-These are parse records, not emitted JavaScript: accepting TS/JSX does not
-implement their transforms. CommonJS parsing is available in `oxc_utils_parse`,
-but `parse_module` explicitly rejects CommonJS extraction pending an opaque-body
-record. TS import/export assignments and namespace exports are also rejected.
-No source-file IO, cache, linking, effect analysis or emission is added here.
+`ParsedModule::body` distinguishes ESM from CommonJS. CommonJS has exactly one
+opaque `Segment`, including directives, comments and whitespace, excluding the
+hashbang. Its internals must not be independently retained or tree-shaken.
+Dependencies remain individual occurrences in `facts`; each has its nearest
+lexically enclosing function span, if any. This is not an eagerness flag:
+conditions, class fields, unreachable code and function calls retain their
+original execution timing inside the opaque body. The segment's legacy
+dependency sets are only a conservative projection.
+
+`Reference::commonjs` classifies unresolved `require`, `module` and `exports`
+wrapper references; lexical shadows are ordinary bindings. `module.exports`
+replacement, `exports` alias replacement and `module` assignment remain in the
+body verbatim. No static list of CommonJS named exports is guessed.
+
+## Source-local support matrix
+
+These are **parse records**, not emitted JavaScript or runtime conformance.
+Low-level `oxc_utils_parse` accepts broader syntax; this bundler gate deliberately
+rejects unsupported constructs with path and source ranges. Legacy adapters are
+unchanged.
+
+| Construct | `parse_module` policy |
+| --- | --- |
+| ESM imports/exports, aliases, defaults, string names, namespace/star re-exports | Owned mappings and dependency sites; export linking is a later gate |
+| Literal dynamic `import()` | One dependency per site; no loading/runtime implementation |
+| Literal global CJS `require()` | Exactly one string-literal argument; parenthesized expressions accepted; shadowed calls are ordinary code |
+| Nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
+| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct literal loader calls and `module.exports` member reads are supported |
+| CJS runtime wrapper-name declarations at module scope | Diagnostic (wrapper parameters and var/function redeclarations must not be misidentified as independent locals); nested shadows and pure type-space declarations supported |
+| CJS `module`/`exports` reassignment | Preserved verbatim with reference write flags; no alias or named-export inference |
+| CJS directives/hashbang/top-level return | Preserved; hashbang recorded separately; one opaque body even when empty |
+| CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |
+| Mixed-file static ESM/CJS syntax or unshadowed ESM references to CJS wrapper names | Diagnostic; explicit extension/package format is never guessed from content |
+| Unshadowed eval, nested `with`, `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
+| Top-level await/for-await | Diagnostic; await within async functions supported as syntax |
+| Import attributes/options/phases (including type import options) | Diagnostic |
+| Erasable TS annotations/types/assertions, TS import types | Owned syntax facts and type-only references/dependencies; **not erased or executable output** |
+| JSX, decorators, auto-accessors, TS enums/namespaces/parameter properties, TS import/export assignments and namespace exports, resource management | Unsupported-transform diagnostic |
+| Native-addon/asset specifiers, external/builtin specifiers, require-of-ESM targets | Raw target string and occurrence preserved, **not resolved, externalized, transformed or validated for execution**; these need resolver/linker policy, including require-of-async-ESM diagnostics |
+
+There is no source-file IO, cache, linking, effect analysis or emission here.
+Target-dependent checks cannot be decided from source syntax alone.
 
 Run `cargo test -p ast-segmenter` for extraction and scope regressions.

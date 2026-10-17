@@ -5,8 +5,8 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0 is complete; autonomous implementation now proceeds through P1–P9 in
-narrow linear commits. P1.1–P1.4 are verified; all other P1–P9 items remain pending.** Both
+**P0 and P1 are complete; autonomous implementation proceeds through P2–P9 in
+narrow linear commits. P2–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -105,11 +105,22 @@ workspace test success.
   repeated specifiers, directives/hashbang, exact UTF-8 slices and arena
   reset/reuse/drop. Deterministic insta DTO snapshot and all 216 parser/consumer
   tests plus `./scripts/spot-check` pass; legacy adapters remain unchanged.
-- [ ] **P1.5 — Add opaque CJS and support matrix.** Depends: P1.4.
+- [x] **P1.5 — Add opaque CJS and support matrix.** Depends: P1.4.
   Represent one executable CJS body plus dependency occurrences; classify global
   versus shadowed require/module/exports. Test reassignment, nested require,
   directives and top-level return policy. Nonliteral paths, mixed modules and
   unsupported transforms get tested diagnostics, not silently absent edges.
+  **Verified:** `ModuleBody::CommonJs` has exactly one opaque body segment,
+  excluding hashbang and preserving directives, reassignment and returns.
+  Per-reference wrapper classification distinguishes lexical/type-only shadows;
+  repeated/deferred sites retain source spans and enclosing-function metadata.
+  Unsupported loader aliases/reassignment/module access/wrapper redeclarations,
+  mixed modules, nonliteral paths, eval/with/import.meta/TLA, attributes/phases,
+  JSX and runtime TS/decorator/resource transforms return span-bearing errors.
+  Source-local matrix explicitly separates parse support from deferred
+  resolution/runtime/TS-erasure checks. Type import sites, ambient bindings and
+  merged type/value export metadata have regression coverage. Both insta DTO
+  snapshots, all 224 parser/consumer tests and `./scripts/spot-check` pass.
 
 ## P2 — Versioned `.seg.cbor` cache
 

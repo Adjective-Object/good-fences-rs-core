@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
-use oxc_semantic::{Semantic, SymbolFlags, SymbolId};
+use oxc_semantic::{ScopeFlags, Semantic, SymbolFlags, SymbolId};
 use oxc_span::{GetSpan, Span};
 
 /// The byte offset of a binding's first declaration, not an OXC symbol ID.
@@ -29,6 +29,7 @@ pub struct Binding {
     pub import: bool,
     pub constant: bool,
     pub type_only: bool,
+    pub ambient: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +40,15 @@ pub struct Reference {
     pub read: bool,
     pub write: bool,
     pub type_only: bool,
+    /// Wrapper parameter in CommonJS; never set for a lexical shadow.
+    pub commonjs: Option<CommonJsGlobal>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommonJsGlobal {
+    Require,
+    Module,
+    Exports,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +57,7 @@ pub enum DependencyKind {
     ReExport,
     DynamicImport,
     Require,
+    ImportType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +68,8 @@ pub struct Dependency {
     pub specifier: String,
     pub specifier_span: Span,
     pub type_only: bool,
+    /// Lexical containment only, not a claim that a module-level site runs eagerly.
+    pub enclosing_function: Option<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,7 +146,8 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
                 function: flags.contains(SymbolFlags::Function),
                 import: flags.intersects(SymbolFlags::Import | SymbolFlags::TypeImport),
                 constant: flags.contains(SymbolFlags::ConstVariable),
-                type_only: flags.is_type(),
+                type_only: flags.is_type() && !flags.is_value(),
+                ambient: flags.contains(SymbolFlags::Ambient),
             }
         })
         .collect();
@@ -163,6 +177,8 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         },
         errors: Vec::new(),
         exported_declaration: None,
+        commonjs: program.source_type.is_commonjs(),
+        enclosing_function: None,
     };
     visitor.visit_program(program);
     eyre::ensure!(visitor.errors.is_empty(), "{}", visitor.errors.join("; "));
@@ -188,6 +204,8 @@ struct Extractor<'s, 'a> {
     facts: ModuleFacts,
     errors: Vec<String>,
     exported_declaration: Option<(Span, bool)>,
+    commonjs: bool,
+    enclosing_function: Option<Span>,
 }
 
 impl Extractor<'_, '_> {
@@ -218,6 +236,7 @@ impl Extractor<'_, '_> {
             specifier: source.value.to_string(),
             specifier_span: source.span,
             type_only,
+            enclosing_function: self.enclosing_function,
         });
         id
     }
@@ -255,13 +274,25 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             .semantic
             .scoping()
             .get_reference(id.reference_id.get().expect("validated reference"));
+        let type_only = reference.is_type() && !reference.is_value();
+        let commonjs = if self.commonjs && reference.symbol_id().is_none() && !type_only {
+            match id.name.as_str() {
+                "require" => Some(CommonJsGlobal::Require),
+                "module" => Some(CommonJsGlobal::Module),
+                "exports" => Some(CommonJsGlobal::Exports),
+                _ => None,
+            }
+        } else {
+            None
+        };
         self.facts.references.push(Reference {
             name: id.name.to_string(),
             span: id.span,
             binding: reference.symbol_id().map(|s| self.ids[&s]),
             read: reference.is_read(),
             write: reference.is_write(),
-            type_only: reference.is_type() && !reference.is_value(),
+            type_only,
+            commonjs,
         });
     }
 
@@ -321,19 +352,34 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                 self.reject(specifier.span, "unresolved local export");
                 continue;
             };
+            let local_type_only = match &value {
+                ExportValue::Binding(binding) => {
+                    self.facts.bindings[self.binding_indices[binding]].type_only
+                }
+                _ => false,
+            };
             self.facts.exports.push(Export {
                 name: Some(specifier.exported.name().to_string()),
                 value,
                 span: specifier.span,
                 name_span: Some(specifier.exported.span()),
-                type_only: decl.export_kind.is_type() || specifier.export_kind.is_type(),
+                type_only: decl.export_kind.is_type()
+                    || specifier.export_kind.is_type()
+                    || local_type_only,
             });
         }
         let previous = self.exported_declaration;
-        self.exported_declaration = decl
-            .declaration
-            .as_ref()
-            .map(|d| (d.span(), decl.export_kind.is_type()));
+        self.exported_declaration = decl.declaration.as_ref().map(|d| {
+            (
+                d.span(),
+                decl.export_kind.is_type()
+                    || matches!(
+                        d,
+                        Declaration::TSInterfaceDeclaration(_)
+                            | Declaration::TSTypeAliasDeclaration(_)
+                    ),
+            )
+        });
         walk::walk_export_named_declaration(self, decl);
         self.exported_declaration = previous;
     }
@@ -349,6 +395,17 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => Some(self.binding(&i.id)),
             _ => None,
         };
+        let type_only = match &decl.declaration {
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(_) => true,
+            ExportDefaultDeclarationKind::Identifier(id) => {
+                let reference = self
+                    .semantic
+                    .scoping()
+                    .get_reference(id.reference_id.get().expect("validated default reference"));
+                reference.is_type() && !reference.is_value()
+            }
+            _ => false,
+        };
         self.facts.exports.push(Export {
             name: Some("default".into()),
             value: binding.map_or(
@@ -357,10 +414,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             ),
             span: decl.span,
             name_span: None,
-            type_only: matches!(
-                decl.declaration,
-                ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
-            ),
+            type_only,
         });
         walk::walk_export_default_declaration(self, decl);
     }
@@ -386,7 +440,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     }
 
     fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
-        if let Expression::StringLiteral(source) = &expr.source {
+        if let Expression::StringLiteral(source) = expr.source.get_inner_expression() {
             self.dependency(DependencyKind::DynamicImport, expr.span, source, false);
         } else {
             self.reject(expr.span, "nonliteral dynamic import");
@@ -395,13 +449,20 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     }
 
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
-        if let Expression::Identifier(id) = &expr.callee {
+        if let Expression::Identifier(id) = expr.callee.get_inner_expression() {
             let reference = self
                 .semantic
                 .scoping()
                 .get_reference(id.reference_id.get().expect("validated reference"));
             if id.name == "require" && reference.symbol_id().is_none() {
-                if let Some(Argument::StringLiteral(source)) = expr.arguments.first() {
+                if expr.optional || expr.arguments.len() != 1 {
+                    self.reject(expr.span, "unsupported require call (expected one literal argument, no optional call)");
+                } else if let Some(Expression::StringLiteral(source)) = expr
+                    .arguments
+                    .first()
+                    .and_then(Argument::as_expression)
+                    .map(Expression::get_inner_expression)
+                {
                     self.dependency(DependencyKind::Require, expr.span, source, false);
                 } else {
                     self.reject(expr.span, "nonliteral require");
@@ -409,5 +470,22 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             }
         }
         walk::walk_call_expression(self, expr);
+    }
+
+    fn visit_ts_import_type(&mut self, expr: &TSImportType<'a>) {
+        self.dependency(DependencyKind::ImportType, expr.span, &expr.source, true);
+        walk::walk_ts_import_type(self, expr);
+    }
+
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        let previous = self.enclosing_function.replace(function.span);
+        walk::walk_function(self, function, flags);
+        self.enclosing_function = previous;
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        let previous = self.enclosing_function.replace(function.span);
+        walk::walk_arrow_function_expression(self, function);
+        self.enclosing_function = previous;
     }
 }

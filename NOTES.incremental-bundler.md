@@ -3,8 +3,42 @@
 ## Current scope
 
 Phase 0 is historical planning/fixture work. Current scope is autonomous P1
-onward in narrow linear commits. P1.1–P1.4 are implemented; the remaining bundler
-phases are pending.
+onward in narrow linear commits. P1.1–P1.5 are implemented; P2–P9 remain pending.
+
+## P1.5 checkpoint — opaque CommonJS and explicit support gate
+
+- `ParsedModule::body` / `ModuleBody::CommonJs { span }` identifies exactly
+  one executable segment, spanning the complete body except hashbang, including
+  directives, comments, whitespace and top-level returns. Even an empty CJS
+  module has one opaque segment. No inferred CJS named export list or
+  independently removable internal segments are returned.
+- `Reference::commonjs` classifies unresolved require/module/exports wrapper
+  occurrences independently of lexical shadows. `Dependency::enclosing_function`
+  records lexical containment, not eager execution permission; after-return,
+  repeated and nested dependencies remain separate. `DependencyKind::ImportType`
+  retains TS type import sites without turning them into execution edges.
+- Preserve `module.exports`, `exports` alias and module-variable reassignment
+  verbatim. Reject require reassignment/aliases/indirect loaders, unsupported
+  module member/escape accesses, wrapper-scope redeclarations and wrapper
+  arguments escapes rather than guessing missing dependencies. Nested lexical
+  and var shadows and type-space-only wrapper names have regression tests.
+- `policy` rejects mixed ESM/CJS, nonliteral/unsupported loader shapes,
+  unshadowed eval, nested with, import.meta, TLA/for-await, import attributes/
+  options/phases, JSX and TS/decorator/auto-accessor/resource-management runtime
+  transforms with path/range diagnostics. Erasable TS remains parse-only;
+  ambient and merged type/value bindings and implicit type-only local/default
+  exports retain accurate metadata.
+- The ast-segmenter README support matrix explicitly leaves target-dependent
+  asset/native-addon/external/require-of-ESM checks to later resolution/linking.
+  Those raw specifiers are retained and tested, never silently omitted or
+  claimed executable. Low-level parser and legacy adapters retain their broader
+  policies. No P2 or later implementation was started.
+- Verification: `TMPDIR="$PWD/target/p1-test-tmp" cargo test -p ast-segmenter
+  -p oxc_utils_parse -p source_graph -p tag_graph -p unused_finder
+  -p good_fences` passes 224 tests (47/9/21/17/70/60), including both insta
+  snapshots and UTF-8 declaration/reference/dependency spans.
+  `TMPDIR="$PWD/target/p1-test-tmp" ./scripts/spot-check` passes, including
+  workspace compilation. Existing unrelated lifetime/dead-code warnings remain.
 
 ## P1.4 checkpoint — owned lexical and dependency occurrences
 

@@ -6,14 +6,18 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P1.1–P1.4 are verified; the rest of P1–P9 remains pending. The checklist in
+commits: P1.1–P1.5 are verified; P2–P9 remain pending. The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
 binding/declaration/reference records, import aliases and export mappings,
 individual dependency sites, directives and hashbang. IDs are source-local
-byte offsets, not OXC IDs. The legacy maps below remain lossy adapters and
-must not be used as the occurrence IR. CJS opaque extraction remains P1.5.
+byte offsets, not OXC IDs. P1.5 adds `ModuleBody::CommonJs`, one opaque
+executable body, wrapper-reference classification and checked source-local
+support policy. The [crate support matrix](crates/ast_segmenter/README.md#source-local-support-matrix)
+distinguishes syntax support/rejection from deferred target resolution and
+runtime/transform gates. The legacy maps below remain lossy adapters and
+must not be used as the occurrence IR.
 
 This plan was grounded by reading the current sources, not by assuming checked
 historical TODOs prove correctness. No Rust tests were run for this documentation
@@ -36,7 +40,7 @@ describes proposed contracts, not APIs that already exist.
 
 | Evidence | Exists now | Not a bundler guarantee |
 | --- | --- | --- |
-| `crates/ast_segmenter/src/visitor.rs`: `segment_file`, `variables_for_top_level_statements`, `statement_to_segment`; `parse.rs`: `parse_module` | One owned `Segment` per accepted top-level statement; OXC semantic analysis buckets declarations and references by statement. P1.3 adds strict parser/semantic validation and checked extraction alongside the legacy adapter. | Legacy `segment_file` can log and skip rejected statements; bundler callers must use `parse_module` or validated ASTs with `try_segment_file`. Parse records are not transformed output; CommonJS extraction is rejected pending its opaque representation. |
+| `crates/ast_segmenter/src/visitor.rs`: `segment_file`, `variables_for_top_level_statements`, `statement_to_segment`; `parse.rs`: `parse_module` | One owned `Segment` per accepted ESM top-level statement; one opaque body for CJS. `parse_module` checks parser/semantic diagnostics and source-local support policy, and extracts occurrence facts alongside legacy statement buckets. | Legacy `segment_file` can log and skip rejected statements. `try_segment_file` checks legacy statement coverage, not the full bundler subset; use `parse_module` for owned bundler facts. Parse records are not transformed output, linked modules or runtime support. |
 | `segment_info.rs`: `Segment`; `variables.rs`: `VariableScope` | Owned module dependencies, name/hoisting sets, and an OXC statement `Span`; arena lifetime does not escape. | No serialized IR, module classification, effect summary, reference occurrence ranges, stable lexical binding IDs, or rewrite recipe. Names alone cannot support renaming or live bindings. |
 | `raw_module_deps.rs`: `RawModuleDeps`, `TaggedSymbol`, `SymbolTags`; `visitors/import_export_statement.rs`: `ExportsVisitor` | Static imports, local exports, re-exports, dynamic imports, require paths, execution-only imports, and type/allow-unused tags. | Maps/sets collapse occurrences. Static import records do not provide a full local-binding-to-import-target rewrite table. Do not confuse comments allowing unused exports with purity annotations. |
 | `visitors/import_require_expr.rs`: `ImportsAndRequires`, `is_global_require`, `scan_import_expr`, `scan_call_expr` | Recognizes string-literal `require` and `import`; rejects shadowed `require` as a module dependency using semantic binding resolution; recognizes a `.then` destructuring pattern. | No source-site boundary IDs; nonliteral paths silently produce no dependency. `.then` name narrowing must be re-proven for rest/computed/default patterns and repeated sites before tree shaking; it is not an execution model. |

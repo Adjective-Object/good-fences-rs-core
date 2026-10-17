@@ -9,6 +9,6 @@ pub struct Segment {
     pub module_deps: RawModuleDeps,
     // The name scope from traversing the segment
     pub variables: VariableScope,
-    /// Zero-based, end-exclusive UTF-8 byte range of the top-level statement.
+    /// Zero-based, end-exclusive UTF-8 byte range of the statement or opaque CJS body.
     pub span: Span,
 }

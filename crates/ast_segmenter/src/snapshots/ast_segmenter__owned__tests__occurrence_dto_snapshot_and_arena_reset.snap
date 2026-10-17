@@ -21,6 +21,7 @@ ModuleFacts {
             import: true,
             constant: false,
             type_only: false,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -39,6 +40,7 @@ ModuleFacts {
             import: true,
             constant: false,
             type_only: false,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -57,6 +59,7 @@ ModuleFacts {
             import: true,
             constant: false,
             type_only: true,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -75,6 +78,7 @@ ModuleFacts {
             import: true,
             constant: false,
             type_only: false,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -93,6 +97,7 @@ ModuleFacts {
             import: false,
             constant: false,
             type_only: true,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -111,6 +116,7 @@ ModuleFacts {
             import: false,
             constant: true,
             type_only: false,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -129,6 +135,7 @@ ModuleFacts {
             import: false,
             constant: true,
             type_only: false,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -147,6 +154,7 @@ ModuleFacts {
             import: false,
             constant: true,
             type_only: false,
+            ambient: false,
         },
         Binding {
             id: BindingId(
@@ -165,6 +173,7 @@ ModuleFacts {
             import: false,
             constant: false,
             type_only: false,
+            ambient: false,
         },
     ],
     references: [
@@ -182,6 +191,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            commonjs: None,
         },
         Reference {
             name: "Shape",
@@ -197,6 +207,7 @@ ModuleFacts {
             read: false,
             write: false,
             type_only: true,
+            commonjs: None,
         },
         Reference {
             name: "T",
@@ -212,6 +223,7 @@ ModuleFacts {
             read: false,
             write: false,
             type_only: true,
+            commonjs: None,
         },
         Reference {
             name: "main",
@@ -227,6 +239,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            commonjs: None,
         },
         Reference {
             name: "alias",
@@ -242,6 +255,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            commonjs: None,
         },
         Reference {
             name: "T",
@@ -257,6 +271,7 @@ ModuleFacts {
             read: false,
             write: false,
             type_only: true,
+            commonjs: None,
         },
         Reference {
             name: "ns",
@@ -272,28 +287,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
-        },
-        Reference {
-            name: "require",
-            span: Span {
-                start: 422,
-                end: 429,
-            },
-            binding: None,
-            read: true,
-            write: false,
-            type_only: false,
-        },
-        Reference {
-            name: "require",
-            span: Span {
-                start: 441,
-                end: 448,
-            },
-            binding: None,
-            read: true,
-            write: false,
-            type_only: false,
+            commonjs: None,
         },
     ],
     dependencies: [
@@ -312,6 +306,7 @@ ModuleFacts {
                 end: 94,
             },
             type_only: false,
+            enclosing_function: None,
         },
         Dependency {
             id: DependencyId(
@@ -328,6 +323,7 @@ ModuleFacts {
                 end: 124,
             },
             type_only: false,
+            enclosing_function: None,
         },
         Dependency {
             id: DependencyId(
@@ -344,6 +340,7 @@ ModuleFacts {
                 end: 141,
             },
             type_only: false,
+            enclosing_function: None,
         },
         Dependency {
             id: DependencyId(
@@ -360,6 +357,7 @@ ModuleFacts {
                 end: 269,
             },
             type_only: false,
+            enclosing_function: None,
         },
         Dependency {
             id: DependencyId(
@@ -376,6 +374,7 @@ ModuleFacts {
                 end: 300,
             },
             type_only: false,
+            enclosing_function: None,
         },
         Dependency {
             id: DependencyId(
@@ -392,6 +391,12 @@ ModuleFacts {
                 end: 399,
             },
             type_only: false,
+            enclosing_function: Some(
+                Span {
+                    start: 358,
+                    end: 403,
+                },
+            ),
         },
         Dependency {
             id: DependencyId(
@@ -408,38 +413,7 @@ ModuleFacts {
                 end: 419,
             },
             type_only: false,
-        },
-        Dependency {
-            id: DependencyId(
-                422,
-            ),
-            kind: Require,
-            span: Span {
-                start: 422,
-                end: 439,
-            },
-            specifier: "./same",
-            specifier_span: Span {
-                start: 430,
-                end: 438,
-            },
-            type_only: false,
-        },
-        Dependency {
-            id: DependencyId(
-                441,
-            ),
-            kind: Require,
-            span: Span {
-                start: 441,
-                end: 458,
-            },
-            specifier: "./same",
-            specifier_span: Span {
-                start: 449,
-                end: 457,
-            },
-            type_only: false,
+            enclosing_function: None,
         },
     ],
     imports: [

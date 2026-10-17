@@ -1,0 +1,299 @@
+---
+source: crates/ast_segmenter/src/commonjs_tests.rs
+expression: module.facts
+---
+ModuleFacts {
+    bindings: [
+        Binding {
+            id: BindingId(
+                40,
+            ),
+            name: "café",
+            declarations: [
+                Span {
+                    start: 40,
+                    end: 45,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: false,
+            constant: true,
+            type_only: false,
+            ambient: false,
+        },
+        Binding {
+            id: BindingId(
+                131,
+            ),
+            name: "load",
+            declarations: [
+                Span {
+                    start: 131,
+                    end: 135,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: true,
+            import: false,
+            constant: false,
+            type_only: false,
+            ambient: false,
+        },
+        Binding {
+            id: BindingId(
+                174,
+            ),
+            name: "lazy",
+            declarations: [
+                Span {
+                    start: 174,
+                    end: 178,
+                },
+            ],
+            top_level: true,
+            function_scoped: false,
+            function: false,
+            import: false,
+            constant: true,
+            type_only: false,
+            ambient: false,
+        },
+    ],
+    references: [
+        Reference {
+            name: "require",
+            span: Span {
+                start: 48,
+                end: 55,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: Some(
+                Require,
+            ),
+        },
+        Reference {
+            name: "module",
+            span: Span {
+                start: 67,
+                end: 73,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: Some(
+                Module,
+            ),
+        },
+        Reference {
+            name: "café",
+            span: Span {
+                start: 84,
+                end: 89,
+            },
+            binding: Some(
+                BindingId(
+                    40,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: None,
+        },
+        Reference {
+            name: "exports",
+            span: Span {
+                start: 91,
+                end: 98,
+            },
+            binding: None,
+            read: false,
+            write: true,
+            type_only: false,
+            commonjs: Some(
+                Exports,
+            ),
+        },
+        Reference {
+            name: "require",
+            span: Span {
+                start: 147,
+                end: 154,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: Some(
+                Require,
+            ),
+        },
+        Reference {
+            name: "module",
+            span: Span {
+                start: 206,
+                end: 212,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: Some(
+                Module,
+            ),
+        },
+        Reference {
+            name: "load",
+            span: Span {
+                start: 231,
+                end: 235,
+            },
+            binding: Some(
+                BindingId(
+                    131,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: None,
+        },
+        Reference {
+            name: "café",
+            span: Span {
+                start: 241,
+                end: 246,
+            },
+            binding: Some(
+                BindingId(
+                    40,
+                ),
+            ),
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: None,
+        },
+        Reference {
+            name: "require",
+            span: Span {
+                start: 256,
+                end: 263,
+            },
+            binding: None,
+            read: true,
+            write: false,
+            type_only: false,
+            commonjs: Some(
+                Require,
+            ),
+        },
+    ],
+    dependencies: [
+        Dependency {
+            id: DependencyId(
+                48,
+            ),
+            kind: Require,
+            span: Span {
+                start: 48,
+                end: 65,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 56,
+                end: 64,
+            },
+            type_only: false,
+            enclosing_function: None,
+        },
+        Dependency {
+            id: DependencyId(
+                147,
+            ),
+            kind: Require,
+            span: Span {
+                start: 147,
+                end: 164,
+            },
+            specifier: "./same",
+            specifier_span: Span {
+                start: 155,
+                end: 163,
+            },
+            type_only: false,
+            enclosing_function: Some(
+                Span {
+                    start: 122,
+                    end: 167,
+                },
+            ),
+        },
+        Dependency {
+            id: DependencyId(
+                187,
+            ),
+            kind: DynamicImport,
+            span: Span {
+                start: 187,
+                end: 204,
+            },
+            specifier: "./async",
+            specifier_span: Span {
+                start: 194,
+                end: 203,
+            },
+            type_only: false,
+            enclosing_function: Some(
+                Span {
+                    start: 181,
+                    end: 204,
+                },
+            ),
+        },
+        Dependency {
+            id: DependencyId(
+                256,
+            ),
+            kind: Require,
+            span: Span {
+                start: 256,
+                end: 281,
+            },
+            specifier: "./after-return",
+            specifier_span: Span {
+                start: 264,
+                end: 280,
+            },
+            type_only: false,
+            enclosing_function: None,
+        },
+    ],
+    imports: [],
+    exports: [],
+    directives: [
+        Directive {
+            value: "use strict",
+            span: Span {
+                start: 20,
+                end: 33,
+            },
+        },
+    ],
+    hashbang: Some(
+        Directive {
+            value: "/usr/bin/env node",
+            span: Span {
+                start: 0,
+                end: 19,
+            },
+        },
+    ),
+}

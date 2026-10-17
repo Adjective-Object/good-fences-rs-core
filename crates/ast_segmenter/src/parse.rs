@@ -1,26 +1,39 @@
-use std::path::Path;
+use std::{convert::TryInto, path::Path};
 
 use eyre::{ensure, WrapErr};
 use logger_srcfile::WrapFileLogger;
 use oxc_allocator::Allocator;
-use oxc_span::SourceType;
+use oxc_span::{SourceType, Span};
 use oxc_utils_parse::ModuleFormat;
 
 use crate::{try_segment_file, Segment};
+
+#[cfg(test)]
+#[path = "commonjs_tests.rs"]
+mod commonjs_tests;
 
 /// Owned parse facts, not transformed JavaScript or an executable bundle.
 #[derive(Debug, Clone)]
 pub struct ParsedModule {
     pub source_type: SourceType,
+    pub body: ModuleBody,
     pub segments: Vec<Segment>,
     pub facts: crate::owned::ModuleFacts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleBody {
+    Esm,
+    /// One indivisible executable segment, excluding the hashbang.
+    CommonJs {
+        span: Span,
+    },
 }
 
 /// Parse and extract all statements, rejecting parser, semantic or extraction errors.
 ///
 /// Unlike the unused-tracker adapter, generated-file marker comments do not skip
-/// source. CommonJS extraction is rejected until its opaque-body representation
-/// is implemented; the low-level parser already supports its syntax.
+/// source. CommonJS internals remain one opaque executable body.
 pub fn parse_module(
     logger: &impl logger::Logger,
     source: &str,
@@ -38,18 +51,52 @@ pub fn parse_module(
         path.display(),
         semantic.errors
     );
-    ensure!(
-        !parsed.program.source_type.is_commonjs(),
-        "{}: CommonJS segment extraction is not supported yet",
-        path.display()
-    );
-    let file_logger = WrapFileLogger::new(path.display().to_string(), source.to_owned(), logger);
-    let segments = try_segment_file(&file_logger, &parsed.program, &semantic.semantic)
-        .wrap_err_with(|| format!("{}: segment extraction failed", path.display()))?;
     let facts = crate::owned::extract(&parsed.program, &semantic.semantic)
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
+    crate::policy::check(&parsed.program, &facts)
+        .wrap_err_with(|| format!("{}: unsupported bundler syntax", path.display()))?;
+    let (body, segments) = if parsed.program.source_type.is_commonjs() {
+        let span = Span::new(
+            parsed.program.hashbang.as_ref().map_or(0, |h| h.span.end),
+            source
+                .len()
+                .try_into()
+                .wrap_err("source exceeds span range")?,
+        );
+        let mut module_deps = crate::raw_module_deps::RawModuleDeps::default();
+        for dependency in &facts.dependencies {
+            match dependency.kind {
+                crate::owned::DependencyKind::Require => {
+                    module_deps.requires.insert(dependency.specifier.clone());
+                }
+                crate::owned::DependencyKind::DynamicImport => {
+                    module_deps
+                        .dynamic_imports
+                        .entry(dependency.specifier.clone())
+                        .or_default()
+                        .insert(crate::raw_module_deps::Symbol::Namespace);
+                }
+                _ => {}
+            }
+        }
+        (
+            ModuleBody::CommonJs { span },
+            vec![Segment {
+                span,
+                module_deps,
+                variables: Default::default(),
+            }],
+        )
+    } else {
+        let file_logger =
+            WrapFileLogger::new(path.display().to_string(), source.to_owned(), logger);
+        let segments = try_segment_file(&file_logger, &parsed.program, &semantic.semantic)
+            .wrap_err_with(|| format!("{}: segment extraction failed", path.display()))?;
+        (ModuleBody::Esm, segments)
+    };
     Ok(ParsedModule {
         source_type: parsed.program.source_type,
+        body,
         segments,
         facts,
     })
@@ -73,8 +120,8 @@ mod tests {
         for (path, source) in [
             ("file.js", "export const value = 1;"),
             ("file.ts", "export const value: number = 1;"),
-            ("file.jsx", "export const value = <div />;"),
-            ("file.tsx", "export const value: unknown = <div />;"),
+            ("file.jsx", "export const value = 1;"),
+            ("file.tsx", "export const value: unknown = 1;"),
         ] {
             let module = parse(source, path).unwrap();
             assert_eq!(module.segments.len(), 1);
@@ -121,16 +168,6 @@ mod tests {
     #[test]
     fn unsupported_module_forms_return_diagnostics() {
         for (path, source, diagnostic) in [
-            (
-                "file.cjs",
-                "module.exports = 1; return;",
-                "CommonJS segment extraction",
-            ),
-            (
-                "file.cts",
-                "const value: number = 1;",
-                "CommonJS segment extraction",
-            ),
             (
                 "file.ts",
                 "const value = 1; export = value;",

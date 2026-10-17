@@ -17,4 +17,9 @@ The tracker adapter is unchanged: it accepts TS syntax in `.js` and unknown
 extensions, uses OXC's content-based module/script detection, and does not
 interpret `.cjs` as CommonJS. Neither API skips generated-file marker comments.
 
+The bundler consumer in `ast-segmenter::parse_module` applies a stricter,
+documented source-local support gate after semantic analysis, including opaque
+CommonJS extraction. Parser acceptance alone is not support for JSX/TS runtime
+transforms, mixed modules, top-level await, attributes or eval.
+
 Run `cargo test -p oxc_utils_parse` for parser and comment-attachment tests.

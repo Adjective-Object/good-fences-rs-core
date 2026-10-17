@@ -49,3 +49,11 @@ declaration byte offsets and dependency IDs are site byte offsets, local to
 the exact source/configuration. Keep all declaration/reference spans and
 type/value metadata; never expose OXC IDs. Sort DTO collections by source
 position before returning.
+
+`ModuleBody::CommonJs` always has one opaque executable segment excluding
+hashbang, never independently tree-shakable internal statements. Classify
+unresolved wrapper references separately from lexical shadows; dependency
+function containment is syntax metadata, not eager evaluation permission.
+`policy` is the checked source-local support gate; target format, assets and
+externals remain resolver/linker checks. Low-level parsing and legacy adapters
+intentionally accept a broader syntax set.

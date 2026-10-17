@@ -77,7 +77,7 @@ fn occurrence_dto_snapshot_and_arena_reset() {
         export {default as other} from './same'; export * as all from './same';\n\
         export const {x: renamed, ...rest} = ns;\n\
         export default function named() { return import('./same'); }\n\
-        import('./same'); require('./same'); require('./same');";
+        import('./same');";
     let mut arena = Allocator::default();
     let facts = {
         let parsed = oxc_utils_parse::parse_bundler_file(
@@ -97,7 +97,7 @@ fn occurrence_dto_snapshot_and_arena_reset() {
     let _reuse = oxc_utils_parse::parse_ts(&arena, "const unrelated = 0;");
     assert_eq!(facts, parse(source));
     assert_eq!(facts, parse(source));
-    assert_eq!(facts.dependencies.len(), 9);
+    assert_eq!(facts.dependencies.len(), 7);
     assert_eq!(facts.imports.len(), 4);
     assert_eq!(
         facts
@@ -113,7 +113,7 @@ fn occurrence_dto_snapshot_and_arena_reset() {
             .iter()
             .filter(|d| d.kind == DependencyKind::Require)
             .count(),
-        2
+        0
     );
     insta::assert_debug_snapshot!(facts);
     drop(arena);
@@ -142,6 +142,20 @@ fn type_and_runtime_references_are_not_collapsed() {
         .iter()
         .any(|r| r.name == "value" && r.type_only));
     assert!(facts.exports[0].type_only);
+    let facts = parse("type T = string; export {T}; export default T;");
+    assert!(facts.exports.iter().all(|e| e.type_only));
+    let facts = parse("export class C {} export interface C {x: number}");
+    assert!(!facts.bindings[0].type_only);
+    assert_eq!(
+        facts
+            .exports
+            .iter()
+            .map(|e| e.type_only)
+            .collect::<Vec<_>>(),
+        [false, true]
+    );
+    let facts = parse("export declare const value: number;");
+    assert!(facts.bindings[0].ambient);
 }
 
 #[test]

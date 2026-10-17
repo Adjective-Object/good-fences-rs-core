@@ -4,6 +4,7 @@ use raw_module_deps::Name;
 pub mod name_set;
 pub mod owned;
 pub mod parse;
+mod policy;
 pub mod raw_module_deps;
 pub mod segment_graph;
 pub mod segment_info;
@@ -12,7 +13,7 @@ pub mod visitor;
 pub mod visitors;
 
 pub use oxc_utils_parse::ModuleFormat;
-pub use parse::{parse_module, ParsedModule};
+pub use parse::{parse_module, ModuleBody, ParsedModule};
 pub use segment_info::Segment;
 pub use visitor::{segment_file, try_segment_file};
 
