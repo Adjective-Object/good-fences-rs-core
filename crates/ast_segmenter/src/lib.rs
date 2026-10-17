@@ -1,6 +1,7 @@
 use oxc_ast::ast::ModuleExportName;
 use raw_module_deps::Name;
 
+pub mod effects;
 pub mod name_set;
 pub mod owned;
 pub mod parse;

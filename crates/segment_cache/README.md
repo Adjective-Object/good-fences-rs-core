@@ -3,7 +3,9 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-No resolver, usage, effects-policy, graph, absolute path or arena IDs are stored.
+Syntax-local effect reasons/timing are persisted and range-checked (schema and
+extractor version 2). No resolver, usage, effects-policy, graph, absolute path or
+arena IDs are stored.
 
 P2.1 provides a deterministic versioned CBOR codec. SHA-256 identifies the exact
 source bytes and protects the payload against accidental corruption. Identity

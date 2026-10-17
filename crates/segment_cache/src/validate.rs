@@ -82,6 +82,26 @@ impl CacheRecord {
             }
         }
         let facts = &module.facts;
+        ensure!(
+            sorted(
+                facts
+                    .effects
+                    .iter()
+                    .map(|s| (s.span.start, s.span.end, s.reason))
+            ),
+            "unordered effects"
+        );
+        for effect in &facts.effects {
+            span(source, effect.span)?;
+            ensure!(
+                module.segments.iter().any(|s| contains(*s, effect.span)),
+                "effect outside statement"
+            );
+            if let Some(deferred) = effect.deferred {
+                span(source, deferred)?;
+                ensure!(contains(deferred, effect.span), "invalid deferred effect");
+            }
+        }
         let bindings: HashSet<_> = facts.bindings.iter().map(|b| b.id).collect();
         let dependencies: HashMap<_, _> = facts.dependencies.iter().map(|d| (d.id, d)).collect();
         ensure!(

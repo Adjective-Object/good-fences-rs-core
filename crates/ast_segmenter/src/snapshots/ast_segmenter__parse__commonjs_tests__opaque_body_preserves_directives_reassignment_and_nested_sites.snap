@@ -3,6 +3,16 @@ source: crates/ast_segmenter/src/commonjs_tests.rs
 expression: module.facts
 ---
 ModuleFacts {
+    effects: [
+        EffectSite {
+            span: Span {
+                start: 19,
+                end: 282,
+            },
+            reason: OpaqueCommonJs,
+            deferred: None,
+        },
+    ],
     bindings: [
         Binding {
             id: BindingId(

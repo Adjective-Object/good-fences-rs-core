@@ -215,7 +215,7 @@ workspace test success.
 
 ## P4 — Effects and retention
 
-- [ ] **P4.1 — Add conservative syntax effect summaries.** Depends: P1.4.
+- [x] **P4.1 — Add conservative syntax effect summaries.** Depends: P1.4.
   Test pure function declaration creation versus effectful invocation, unknown
   expressions, getters/proxies, coercion, spread/iteration, computed class
   members/static blocks and unresolved reads. Snapshot reasons, not just bools.

@@ -2,9 +2,23 @@
 
 ## Current scope
 
-P0–P3 are complete; P4–P9 remain pending. This recovery finished only P3.4,
-preserving the cancelled agent's uncommitted implementation. No P4 policy work
-or nested delegation was performed.
+P0–P3 and P4.1 are complete; P4.2–P9 remain pending. This phase is limited to
+P4, without nested delegation.
+
+## P4.1 checkpoint
+
+- `ast_segmenter::effects::{EffectReason, EffectSite}` supplies deterministic
+  source-local reason sites through `ModuleFacts::effects`, independent of
+  caller policy. None/deferred ranges separate creation from function/default
+  argument/instance initialization. Opaque CJS always retains its whole body.
+- Covers unknown calls/construction/control, getter/proxy reads, potential
+  TDZ/unresolved reads, coercions, spread/iteration/destructuring, class heritage,
+  computed keys/static blocks. This is conservative evidence, not execution
+  scheduling or emitted runtime correctness.
+- Cache schema/extractor 2 validates effect ordering, UTF-8 ranges and deferred
+  containment; old sidecars miss. Cold/warm deterministic roundtrips still pass.
+- Verified: 50 ast-segmenter + 25 segment_cache tests; reason/DTO snapshots
+  inspected; `./scripts/spot-check` passes. Existing unrelated warnings remain.
 
 ## P3.4 checkpoint
 

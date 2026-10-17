@@ -80,6 +80,9 @@ fn rejects_impossible_spans_ids_and_order() {
             r.module.facts.references[0].binding = Some(ast_segmenter::owned::BindingId(999))
         },
         |r: &mut CacheRecord| r.module.segments.reverse(),
+        |r: &mut CacheRecord| r.module.facts.effects[0].span.end = u32::MAX,
+        |r: &mut CacheRecord| r.module.facts.effects.reverse(),
+        |r: &mut CacheRecord| r.module.facts.effects[0].deferred = Some(Span::new(0, 1)),
     ] {
         let mut modified = original.clone();
         mutate(&mut modified);

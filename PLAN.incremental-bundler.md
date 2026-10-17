@@ -453,6 +453,11 @@ dependencies of retained effects. Add PURE annotation support only after base
 tests; then add the effectful pattern DSL/config fingerprint. Distinguish
 parser-derived facts from linker-derived conclusions in all snapshots.
 
+P4.1 implemented in `ast_segmenter::effects`: ordered owned reason sites with
+explicit deferred function/default-argument/instance-field timing. Cache
+schema/extractor 2 persists syntax facts only and validates their ranges.
+Reason snapshots plus all 75 parser/cache tests and `scripts/spot-check` pass.
+
 ### P5 — Exact root-set partitioning
 
 Introduce stable entry/boundary identities and a straightforward flood-fill

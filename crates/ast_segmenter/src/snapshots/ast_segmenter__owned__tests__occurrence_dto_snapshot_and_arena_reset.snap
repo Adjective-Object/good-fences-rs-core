@@ -3,6 +3,82 @@ source: crates/ast_segmenter/src/owned_tests.rs
 expression: facts
 ---
 ModuleFacts {
+    effects: [
+        EffectSite {
+            span: Span {
+                start: 143,
+                end: 148,
+            },
+            reason: BindingRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 183,
+                end: 187,
+            },
+            reason: BindingRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 197,
+                end: 202,
+            },
+            reason: BindingRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 315,
+                end: 336,
+            },
+            reason: Destructuring,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 339,
+                end: 341,
+            },
+            reason: BindingRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 377,
+                end: 401,
+            },
+            reason: UnknownControl,
+            deferred: Some(
+                Span {
+                    start: 358,
+                    end: 403,
+                },
+            ),
+        },
+        EffectSite {
+            span: Span {
+                start: 384,
+                end: 400,
+            },
+            reason: UnknownExpression,
+            deferred: Some(
+                Span {
+                    start: 358,
+                    end: 403,
+                },
+            ),
+        },
+        EffectSite {
+            span: Span {
+                start: 404,
+                end: 420,
+            },
+            reason: UnknownExpression,
+            deferred: None,
+        },
+    ],
     bindings: [
         Binding {
             id: BindingId(

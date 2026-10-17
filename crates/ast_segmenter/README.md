@@ -80,7 +80,15 @@ Owned occurrence records and `ModuleBody` support serde for the versioned
 arena identity. The codec validates these offsets against the exact source.
 Legacy statement dependency/name sets are deliberately not serialized.
 
-There is no source-file IO, cache, linking, effect analysis or emission here.
+`facts.effects` records conservative, deterministic `EffectSite` reasons and
+byte ranges. `deferred = None` means module evaluation; a function/instance-field
+range defers execution (including default arguments). Ordinary function/getter
+creation is not invocation. Unknown syntax, reads that may throw, getters/proxies,
+coercions, spreads/destructuring, class heritage/computed keys/static blocks and
+opaque CJS remain conservative. This is syntax-local evidence, not a claim that
+an effect always executes or an effect-policy-derived purity result.
+
+There is no source-file IO, cache, linking, user effects policy or emission here.
 Target-dependent checks cannot be decided from source syntax alone.
 
 Run `cargo test -p ast-segmenter` for extraction and scope regressions.
