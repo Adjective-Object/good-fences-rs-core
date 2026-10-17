@@ -128,8 +128,8 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
 
 ## Incremental bundler
 
-The incremental bundler is a phased project built on the segment-aware unused
-tracker, not yet a working bundler. See the
+The incremental bundler is a library-only phased project built on the
+segment-aware unused tracker, not yet a complete bundler product. See the
 [implementation plan](PLAN.incremental-bundler.md) and
 [phase checklist](TODO.incremental-bundler.md).
 Phase 0 establishes [portable upstream runtime fixtures](fixtures/bundler/README.md)
@@ -137,7 +137,12 @@ from esbuild and rspack; their baseline execution is not bundler conformance.
 P1–P5 now provide owned/cacheable facts, the shared typed graph, effect retention,
 exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
-P6 emission and P7–P8 runtime/loading semantics remain unimplemented.
+P6 adds validated source rewrites, retention/PURE-driven ESM emission and linked
+exact-chunk artifacts using Node 22.15+ native ESM loader hooks. Five portable
+ESM cases now pass in bundled mode, alongside independent cycle/TDZ/live-binding
+runtime tests. CJS interop (P7), source dynamic loading/TLA (P8), and transactional
+incremental publication (P9) remain unimplemented. This does not change the
+tracker/CLI's Node requirements.
 P1 provides checked owned parse facts; P2 adds the opt-in
 [`segment_cache` library](crates/segment_cache/README.md) with versioned CBOR and
 atomic source-adjacent sidecars. Existing tracker behavior is unchanged.

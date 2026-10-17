@@ -10,6 +10,14 @@ Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
 validation. Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 
+Node ESM output stores rewritten source parts in exact-root-set JSON payloads.
+Synchronous host hooks assemble one original lexical module before native
+compilation; never split its lexical environment or evaluate an entire payload.
+Keep physical module_payloads separate from logical manifest load sets. Runtime
+URLs include the published bundle directory to isolate separate instances.
+loadEntry returns native namespaces; launchers export the namespace object.
+Source dynamic imports/TLA, CJS and externals remain explicit later gates.
+
 PURE recipes remove one invocation, never its callee/reference/argument/iteration
 effects. Preserve original optional-chain completion state, not just undefined.
 Late value demand restores calls; source hints and derived decisions stay apart.

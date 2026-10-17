@@ -219,6 +219,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "segment_cache",
+ "serde_json",
  "sha2",
  "source_graph",
  "test_tmpdir",

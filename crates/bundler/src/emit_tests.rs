@@ -47,6 +47,9 @@ fn compare(source: &str, observer: &str, namespace: bool) -> String {
             "{}",
             String::from_utf8_lossy(&bundled.stderr)
         );
+        if String::from_utf8_lossy(&baseline.stderr).contains("before initialization") {
+            assert!(String::from_utf8_lossy(&bundled.stderr).contains("before initialization"));
+        }
     }
     output
 }
@@ -68,9 +71,11 @@ function hoisted() { return 7; }
 let x = 1;
 { let x = 2; console.log(x); }
 console.log(x, before);
+//# sourceMappingURL=obsolete.map
 "#;
     let output = compare(source, "import './input.mjs';", false);
     assert!(!output.contains("must disappear"));
+    assert!(!output.contains("obsolete.map"));
     assert!(output.starts_with("#!/usr/bin/env node\n// copyright é\n'use strict';"));
     assert!(output.len() < source.len());
 }
@@ -229,4 +234,15 @@ fn unsupported_modes_and_stale_sources_fail_without_artifacts() {
         )
         .is_err());
     }
+    let source = "const obj = {}; function side() {} /*#__PURE__*/ obj.method?.().field(side());";
+    let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", source)]);
+    let retention = crate::retain(&graph, &[0], &[]).unwrap();
+    let error = format!(
+        "{:#}",
+        single_module(&graph, &retention, &policy, 0, source).unwrap_err()
+    );
+    assert!(
+        error.contains("input.mjs") && error.contains("bytes") && error.contains("optional"),
+        "{error}"
+    );
 }

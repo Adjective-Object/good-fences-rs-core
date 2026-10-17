@@ -5,7 +5,7 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P5 and P6.1–P6.2 are complete. P6.3–P9 remain pending.** Both
+**P0–P6 are complete for the documented Node ESM target. P7–P9 remain pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -269,11 +269,21 @@ workspace test success.
   tree-shakes statements and composes effect-preserving PURE recipes. Real Node
   tests exercise scopes/hoisting/TDZ/live exports and optional-chain/getter/spread
   order. Unsupported modes/dependencies/callee chains return source diagnostics.
-- [ ] **P6.3 — Link multi-module and cross-chunk ESM.** Depends: P6.2, P5.3.
+- [x] **P6.3 — Link multi-module and cross-chunk ESM.** Depends: P6.2, P5.3.
   Preserve instantiation versus evaluation, cycles and live exported bindings;
   resolve/emit namespaces and cross-chunk imports. Compare portable fixtures
   in bundled mode after P0.5. Acceptance: cycle/TDZ tests pass, not merely
   acyclic value snapshots; TLA remains explicitly rejected pending P8.
+  `link::esm` returns staged artifacts: exact-set rewritten-source payloads,
+  native Node ESM host hooks, launchers and physical assembly dependencies.
+  The host compiles each original lexical module after source-order assembly;
+  chunks never become eager evaluators or collapsed lexical scopes.
+  Five portable ESM cases/eight executions match native and manifest stdout.
+  Independent cross-chunk cycles/TDZ/hoisting, live namespaces/mutation,
+  once-only/concurrent loading and instance-isolation tests pass.
+  Node 22.15+ only; source async/CJS/externals, browser output, source maps and
+  TS/JSX lowering remain explicit gates. Physical module assembly is not
+  demand-minimal chunk fetching; no exact logical root assignments change.
 
 ## P7 — CJS registry and interop
 

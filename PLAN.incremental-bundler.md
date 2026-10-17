@@ -6,8 +6,8 @@ The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
-commits: P0–P5 and P6.1–P6.2 are verified; P6.3–P9 remain pending. This bounded phase
-targets P6.1–P6.3 and stops before P7.
+commits: P0–P6 are verified for the documented Node ESM target; P7–P9 remain
+pending. This bounded phase completes P6.1–P6.3 and stops before P7.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -541,12 +541,26 @@ ESM, preserving scope/hoisting/TDZ/live exports. Node tests validate runtime
 observations and measurable tree shaking. Guarded PURE callee chains with
 nested optional calls/private fields are diagnosed, not incorrectly rewritten.
 
-Choose the emitter strategy with a small pinned-OXC prototype; implement
-single-module rewriting before multi-module/cross-chunk linkage. Gate supported
-output on name hygiene, live binding mutation, forward references/TDZ, cycles,
-namespace shape, directives, and effect order. Use explicit unsupported
-diagnostics where semantic support is not yet implemented; passing simple
-acyclic fixtures is not completion of this phase.
+P6.3 exposes `link::esm` over the existing ChunkPlan and graph. Exact root-set
+JSON payloads contain rewritten source parts, not copied unshaken inputs.
+Node 22.15+ synchronous host hooks assemble the retained parts of each original
+lexical module in source order and compile it as native ESM. This avoids unsafe
+cross-chunk lexical splitting, preserves instantiation/TDZ/live-binding/cycle
+semantics and never evaluates all modules sharing a payload. Entry launchers
+default-export the real namespace; runtime `loadEntry` preserves canonical native
+namespace identity. Separate published directories have separate identities.
+The returned owned artifact map includes the logical manifest and exact member
+mapping. Physical `module_payloads` separately records whole-lexical-module
+assembly reads; these may exceed a root's diagnostic load set without moving,
+duplicating, merging or hoisting any node. Demand-minimal/async fetching is not
+claimed. Source dynamic imports/TLA/CJS/externals remain explicit P7/P8 gates;
+browser output and source maps are unsupported.
+
+Five portable ESM fixtures/eight executions match native baselines and manifest
+stdout. Independent tests cover cross-root lexical mutation, cycle hoisting and
+forward TDZ, namespace exotic behavior/identity, once-only concurrent loading,
+bundle isolation, effect order, measurable removal and linked PURE recipes.
+P6 does not claim the remaining CJS/TLA fixture corpus or P9 publication.
 
 ### P7 — CJS registry and ESM proxy interop
 
@@ -625,10 +639,11 @@ reparses, resolutions, and re-emissions. Optimization is deferred until measured
 These decisions govern subsequent implementation phases; none blocks the
 completed P0 fixture baseline.
 
-1. **Runtime target and interop:** Node-compatible versus bundler-conventional
-   named CJS exports, `__esModule`, error caching, and require-of-ESM.
-2. **Emitter:** matching OXC printer/transform dependencies versus a checked
-   source-edit pipeline; how source maps and TS/JSX are supported.
+1. **Runtime target and interop:** P6 selects Node 22.15+ native ESM hooks.
+   CJS named exports, `__esModule`, error caching and require-of-ESM remain P7.
+2. **Emitter:** P6 selects checked source edits and native per-module compilation.
+   No source maps or TS/JSX lowering; a browser/portable target needs a separate
+   implementation, not silently different lexical or partition semantics.
 3. **Module identity:** symlinks/casing/package context and mixed ESM/CJS policy;
    stable logical keys versus in-memory graph generations.
 4. **Persistence:** codec/hash/version ownership, atomic replacement portability,

@@ -1,7 +1,8 @@
-//! Derived retention and exact chunk planning, independent of usage reporting/emission.
+//! Retention, exact chunks and native ESM emission, independent of usage reports.
 pub mod chunks;
 pub mod effects;
 pub mod emit;
+pub mod link;
 pub mod manifest;
 pub mod policy;
 pub mod rewrite;

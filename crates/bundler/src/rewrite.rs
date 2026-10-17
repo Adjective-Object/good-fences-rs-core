@@ -73,6 +73,31 @@ pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
     Ok(())
 }
 
+pub(crate) fn source_hint_edits(source: &str) -> Vec<Edit> {
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
+    parsed
+        .program
+        .comments
+        .iter()
+        .filter_map(|comment| {
+            let text = &source[comment.span.start as usize..comment.span.end as usize];
+            let body = text
+                .strip_prefix("//")
+                .or_else(|| text.strip_prefix("/*").and_then(|t| t.strip_suffix("*/")))?;
+            let directive = body
+                .strip_prefix('#')
+                .or_else(|| body.strip_prefix('@'))?
+                .trim_start();
+            (directive.starts_with("sourceMappingURL=") || directive.starts_with("sourceURL="))
+                .then(|| Edit {
+                    span: comment.span,
+                    replacement: String::new(),
+                })
+        })
+        .collect()
+}
+
 /// Rename private lexical bindings only. Public import/export rewrites belong
 /// to the linker; reject capture rather than guessing scope ancestry.
 pub fn rename_private(
@@ -259,5 +284,16 @@ mod tests {
             output,
             "let renamed; ({x: renamed = 1} = {}); globalThis.result = renamed;"
         );
+    }
+
+    #[test]
+    fn source_hints_are_comments_not_matching_strings_or_ordinary_prose() {
+        let source = "const keep = '//# sourceMappingURL=inside'; // ordinary sourceMappingURL=keep\n//# sourceMappingURL=old.map\n/*@ sourceURL=old.js */\n";
+        let output = apply(source, &source_hint_edits(source)).unwrap();
+        assert_eq!(
+            output,
+            "const keep = '//# sourceMappingURL=inside'; // ordinary sourceMappingURL=keep\n\n\n"
+        );
+        validate(Path::new("output.mjs"), &output).unwrap();
     }
 }

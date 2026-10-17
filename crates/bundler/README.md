@@ -46,6 +46,8 @@ printer/transformer. Reparse actual source on cache hits; source facts alone
 cannot validate the output. Output is JavaScript ESM only: no TypeScript or JSX
 lowering. The emitter must reject those language modes. No source maps are
 generated or advertised; generated offsets are not original-source positions.
+Emission removes stale `sourceMappingURL`/`sourceURL` comment directives; it
+does not mistake matching string literals or ordinary comments for directives.
 Diagnostics for rejected edits refer to original source bytes.
 
 ## Single-module emission
@@ -67,6 +69,69 @@ explicitly rejected; ordinary optional terminal calls are supported.
 The current single-module API rejects runtime dependencies (use linked emission),
 CJS/TS/JSX modes, and source-policy unsupported syntax such as TLA/import.meta.
 No externals, implicit TS stripping, source maps or filesystem publication.
+
+## Linked ESM artifacts (Node target)
+
+`link::esm(graph, &ChunkPlan, policy, &BTreeMap<PathBuf, String>)` returns
+`Artifacts` containing the complete owned relative `files` map, executable
+`entries`, `runtime`, canonical virtual `modules`, exact node-to-payload
+`members`, `chunk_artifacts`, physical `module_payloads`, and the unchanged
+logical diagnostic `manifest`. It checks freshness and owned source facts,
+uses P4 retention/PURE recipes, and rewrites checked static import/re-export
+routes. Unused import bindings/re-exports disappear when their statement-level
+retention permits it; their dependencies still evaluate. Star ambiguity,
+explicit precedence, default exclusion and namespace/live aliases remain ESM
+semantics, not object snapshots.
+
+**Target: Node with synchronous `node:module.registerHooks` (22.15+).** Publish
+the entire returned map without changing its relative layout. Run an entry
+launcher with `node <artifacts.entries[name]>`, or import the generated runtime:
+
+```js
+import {loadEntry} from './runtime.mjs';
+const namespace = await loadEntry('main');
+```
+
+`loadEntry` returns the actual native module namespace for a single-module
+root, or an ordered array of namespaces for a multi-module root. Request
+namespace binding demand when all public exports must remain; evaluation-only
+or selected-binding roots intentionally do not retain a complete namespace.
+Launchers default-export that namespace object, **not** copied named bindings.
+Repeated/concurrent entries and static namespace re-exports share one canonical
+native identity per module. Separate published bundle directories have isolated
+native identities.
+
+Each logical chunk is one JSON payload of **rewritten** source parts. No
+segments are merged, hoisted or duplicated across root sets. Preamble/trivia
+and otherwise-unretained static evaluation imports belong to the module-identity
+node's existing chunk. The synchronous host hook assembles the retained parts
+of one original lexical module, in source order, and returns `format: 'module'`
+to Node. Node—not concatenation into a shared scope, `eval`, factories, snapshots
+or hand-written binding cells—instantiates and evaluates that real ESM module.
+This preserves arbitrary cross-chunk lexical scopes, forward TDZ, function/var
+hoisting, cycles, mutation and namespace exotic behavior. Reading a payload
+never evaluates another module whose code happens to share that payload.
+
+Physical assembly can synchronously read **all globally retained pieces of a
+requested lexical module**, beyond one root's logical diagnostic `load_chunks`.
+`module_payloads` reports this distinct physical requirement. It does not change
+any root set or constitute a demand-minimal/async loader claim. Payload names
+derive from logical identity, not content; transactional/content-addressed
+publication remains P9. No files are written by the Rust library.
+
+Source dynamic imports, TLA, CJS, externals, TS/JSX and source-policy unsupported
+forms fail with source diagnostics. Entry launchers' generated top-level await
+only bootstraps native entry import; it is not support for source TLA scheduling.
+P7 must integrate CJS factory/proxy identity without bypassing native ESM
+namespaces; P8 owns source async boundaries/TLA and any fetching optimization.
+This backend is not a browser/standalone-file target.
+
+Bundled-mode Node tests compare five portable ESM cases (eight entry executions)
+against native baselines **and** fixture stdout contracts. Independent tests cover
+cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
+effect ordering, once-only/concurrent entry loading, bundle-instance isolation,
+equal-identity star diamonds, dead-code removal and composed PURE recipes.
+CJS/TLA fixture parity is not claimed.
 
 ## Root reachability
 
@@ -122,8 +187,9 @@ only initial requested module identities; its `binding_nodes` preserves namespac
 or lexical demand. Neither chunks, sorted manifest edges, nor transitive load
 sets are a runtime schedule. Distinct module records in one chunk (including
 deferred CJS require targets) must retain separate once-only evaluation state.
-P6 supplies ESM rewriting/instantiation, P7 supplies factories/proxies/cache,
-and P8 supplies dynamic loading/TLA scheduling. No runtime conformance is claimed.
+P6 supplies Node-native ESM rewriting/instantiation (above); P7 supplies CJS
+factories/proxies/cache and P8 supplies source dynamic loading/TLA scheduling.
+Only the documented ESM subset has emitted-runtime conformance evidence.
 Use manifests only with the same graph instance and after `is_current` succeeds;
 recompute the partition/manifest after entry, graph, or effect-policy changes.
 
@@ -151,7 +217,9 @@ Recipes are a containment tree, not a flat set of independent text edits:
 compose contained recipes within their enclosing callee/argument evaluation,
 inside its original guard. Never hoist a nested recipe out of an optional call.
 
-These are plans for the P6 emitter, not emitted JavaScript or runtime validation.
+These analysis recipes are consumed and runtime-tested by `emit` and `link`;
+the guarded-callee support restriction above is diagnosed rather than lowered
+incorrectly.
 
 ## Known-effect policy
 
@@ -187,7 +255,7 @@ equal; pattern/annotation-policy changes change the SHA-256 fingerprint.
 
 `RetentionPlan::policy_fingerprint` and `is_current(graph, policy)` check derived
 state against both graph revision and effective policy. The caller must
-recompute effects/retention/chunks/manifests (and later output) on policy changes, never
+recompute effects/retention/chunks/manifests/output on policy changes, never
 reparse solely for a DSL edit. Plan node/edge indices are local to the graph
 instance/revision. Source-local cache identity excludes this entire policy.
 The filesystem regression reanalyzes cache-built facts with the source absent

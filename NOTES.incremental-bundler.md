@@ -2,8 +2,66 @@
 
 ## Current scope
 
-P0–P5 and P6.1–P6.2 are complete; P6.3–P9 remain pending. This phase targets
-P6.1–P6.3 without nested delegation and stops before P7.
+P0–P6 are complete for the documented Node ESM target; P7–P9 remain pending.
+This phase completes P6.1–P6.3 without nested delegation and stops before P7.
+
+## P6.3 linker / P7–P9 handoff
+
+- `link::esm(graph, plan, policy, sources)` returns `Artifacts::{files,entries,
+  runtime,modules,members,chunk_artifacts,module_payloads,manifest}`. Caller owns
+  publication; no output filesystem writes occur in the Rust library.
+- Every live P5 node stays in its exact root-set payload. Checked static
+  import/re-export routes and P4 retention/PURE recipes produce actual rewritten
+  source parts; dead code is removed. Structural preamble/trivia/evaluation-only
+  imports live in the existing module-identity chunk.
+- Node 22.15+ synchronous `registerHooks` compiles source-order assembled
+  original lexical modules as **native ESM**. Arbitrary root-set splits do not
+  split lexical environments or replace live bindings with snapshots. Instantiation,
+  cycles, lexical TDZ, hoisting and namespace exotic behavior remain host-owned.
+  Reading a payload never evaluates other modules sharing it.
+- Physical assembly reads all globally retained pieces of a requested lexical
+  module. `module_payloads` records these reads separately from logical
+  `manifest.load_chunks`. This is not demand-minimal/async fetching; no node is
+  moved/duplicated/hoisted to manufacture a smaller partition.
+- Generated `runtime.mjs::loadEntry(name)` returns the native namespace (or an
+  ordered array for multiple evaluation modules). Launchers default-export that
+  namespace object, not named snapshots. Use namespace binding roots for a full
+  public namespace; selected roots intentionally retain less.
+- Canonical virtual URLs include the published directory. Repeated/concurrent
+  loads share one module identity; separate bundles do not share mutable state.
+- P7 must supply CJS factory/cache/proxy policies without bypassing native ESM
+  identity. P8 must implement source dynamic boundaries/TLA and any optimized
+  fetching policy. Both remain explicit source diagnostics. P9 owns transactional
+  publication/content hashes/invalidation; output filenames currently identify
+  logical chunks, not content. No browser target, source maps or TS/JSX lowering.
+- Five portable ESM fixtures/eight entry executions match native observations
+  and case.json stdout; seven CJS/async fixtures are outside the declared target.
+  Independent tests include cross-chunk lexical mutation, adversarial cycle
+  TDZ/hoisting, namespace identity/shape, once-only/concurrent loading, runtime
+  isolation, source effects, dead-code removal and linked PURE behavior.
+- P6.1 pushed `6620eb0`; P6.2 pushed `a343238`. Both passed their targeted
+  tests and mandatory spot-check before committing.
+
+## Final P6 validation
+
+- Real runtime: Node `v22.22.2`; managed `test_tmpdir::TmpDir` directories under
+  `TMPDIR="$PWD/target/p1-test-tmp"` (no OS `/tmp` output).
+- `cargo test -p bundler -p ast-segmenter -p import_resolver -p oxc_utils_parse
+  -p segment_cache -p source_graph -p tag_graph -p unused_finder --quiet`:
+  **289 passed**, zero failed/ignored. Counts respectively 62, 50, 18, 9, 25,
+  31, 22, 72. Includes five bundled portable cases/eight executions, measured
+  removal, equal-identity diamonds, adversarial cycle TDZ and builtin-mutation
+  resilience. Stale source mapping/debugger hints are removed as comment
+  metadata, without stripping matching strings or ordinary comments.
+- `cargo clippy -p bundler --all-targets --no-deps -- -D warnings`: passed.
+  Existing dependency lifetime warning remains; no bundler lint warnings.
+- `TMPDIR="$PWD/target/p1-test-tmp" ./scripts/spot-check`: passed
+  ast-segmenter check, all 50 ast-segmenter tests and full workspace check.
+- `git diff --check`: passed. Logs are ignored artifacts:
+  `target/p6-3-{compatibility,clippy,spot-check}.log`.
+- P6.1 separately passed three rewrite tests and spot-check; P6.2 separately
+  passed all 46 then-current bundler tests, targeted lint and spot-check.
+  No full workspace test-suite, CJS/async bundled parity or P7–P9 claim.
 
 ## P6.1 rewrite backend
 
@@ -29,7 +87,7 @@ order, late demand, nested recipes and unsupported/stale inputs.
 Dependency-wide clippy finds existing ast-segmenter lint failures; use
 `cargo clippy -p bundler --all-targets --no-deps -- -D warnings` for local lint.
 
-## P5.3 checkpoint / P6–P8 integration
+## Historical P5.3 checkpoint / P6–P8 integration
 
 - `crates/bundler/src/chunks.rs`: call `partition(graph, entry_RootSeeds, policy)`
   after constructing the owned shared graph. `ChunkPlan` includes final P4

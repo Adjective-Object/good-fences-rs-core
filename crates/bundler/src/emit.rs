@@ -29,10 +29,6 @@ pub fn single_module(
         retention.is_current(graph, policy),
         "stale emission retention/policy"
     );
-    ensure!(
-        retention.modules == [file],
-        "single-module emission needs one evaluated module"
-    );
     let parsed = checked_source(graph, file, source)?;
     if let Some(dependency) = parsed.facts.dependencies.iter().find(|d| !d.type_only) {
         eyre::bail!(
@@ -43,6 +39,10 @@ pub fn single_module(
             dependency.kind
         );
     }
+    ensure!(
+        retention.modules == [file],
+        "single-module emission needs one evaluated module"
+    );
     project(graph, retention, file, source, &parsed, &[])
 }
 
@@ -84,6 +84,92 @@ pub(crate) fn project(
     parsed: &ParsedModule,
     dependency_edits: &[Edit],
 ) -> eyre::Result<String> {
+    let edits = projection_edits(graph, retention, file, source, parsed, dependency_edits)?;
+    let output = rewrite::apply(source, &edits)?;
+    rewrite::validate(graph.file_path(file).unwrap(), &output)?;
+    rewrite::apply(&output, &rewrite::source_hint_edits(&output))
+}
+
+pub(crate) struct SourcePart {
+    /// None is structural source (preamble, trivia or evaluation-only imports).
+    pub segment: Option<u32>,
+    pub source: String,
+}
+
+/// Keep one lexical module while storing its rewritten pieces in exact chunks.
+pub(crate) fn project_parts(
+    graph: &SourceGraph,
+    retention: &RetentionPlan,
+    file: u32,
+    source: &str,
+    parsed: &ParsedModule,
+    dependency_edits: &[Edit],
+) -> eyre::Result<Vec<SourcePart>> {
+    let edits = projection_edits(graph, retention, file, source, parsed, dependency_edits)?;
+    let mut parts = Vec::new();
+    let mut end = 0;
+    for (index, segment) in parsed.segments.iter().enumerate() {
+        parts.push(SourcePart {
+            segment: None,
+            source: source[end..segment.span.start as usize].into(),
+        });
+        let local: Vec<_> = edits
+            .iter()
+            .filter(|e| contains(segment.span, e.span))
+            .map(|e| Edit {
+                span: Span::new(
+                    e.span.start - segment.span.start,
+                    e.span.end - segment.span.start,
+                ),
+                replacement: e.replacement.clone(),
+            })
+            .collect();
+        let code = rewrite::apply(
+            &source[segment.span.start as usize..segment.span.end as usize],
+            &local,
+        )?;
+        parts.push(SourcePart {
+            segment: retention
+                .segments
+                .iter()
+                .any(|s| s.key == SegmentKey::new(file, index as u32))
+                .then_some(index as u32),
+            source: code,
+        });
+        end = segment.span.end as usize;
+    }
+    parts.push(SourcePart {
+        segment: None,
+        source: source[end..].into(),
+    });
+    let joined = parts.iter().map(|p| p.source.as_str()).collect::<String>();
+    rewrite::validate(graph.file_path(file).unwrap(), &joined)?;
+    let hints = rewrite::source_hint_edits(&joined);
+    let mut start = 0;
+    for part in &mut parts {
+        let end = start + part.source.len() as u32;
+        let local: Vec<_> = hints
+            .iter()
+            .filter(|e| contains(Span::new(start, end), e.span))
+            .map(|e| Edit {
+                span: Span::new(e.span.start - start, e.span.end - start),
+                replacement: e.replacement.clone(),
+            })
+            .collect();
+        part.source = rewrite::apply(&part.source, &local)?;
+        start = end;
+    }
+    Ok(parts)
+}
+
+fn projection_edits(
+    graph: &SourceGraph,
+    retention: &RetentionPlan,
+    file: u32,
+    source: &str,
+    parsed: &ParsedModule,
+    dependency_edits: &[Edit],
+) -> eyre::Result<Vec<Edit>> {
     let path = graph.file_path(file).ok_or_eyre("missing emission path")?;
     let live: BTreeSet<_> = retention
         .segments
@@ -95,6 +181,10 @@ pub(crate) fn project(
     let mut fresh = Fresh::new(&parsed.facts);
     for (index, segment) in parsed.segments.iter().enumerate() {
         let key = SegmentKey::new(file, index as u32);
+        if let Some(edit) = dependency_edits.iter().find(|e| e.span == segment.span) {
+            edits.push(edit.clone());
+            continue;
+        }
         let dependencies: Vec<_> = parsed
             .facts
             .dependencies
@@ -158,9 +248,7 @@ pub(crate) fn project(
             });
         }
     }
-    let output = rewrite::apply(source, &edits)?;
-    rewrite::validate(path, &output)?;
-    Ok(output)
+    Ok(edits)
 }
 
 fn contains(outer: Span, inner: Span) -> bool {
