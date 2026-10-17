@@ -464,6 +464,13 @@ edges are separate plan data. Async boundaries are recorded, not crossed.
 Checked barrels/cache parity and evaluation/type-only/cycle/deferred regressions
 pass (8 bundler + 31 source_graph tests); spot-check and targeted clippy pass.
 
+P4.3 persists syntax-only invocation/attachment/input facts (cache versions 3).
+`bundler::effects::summarize` and `RetentionPlan::effects` derive reason sites and
+explicit invocation-only recipes with original callee/reference, argument order,
+spread consumption and optional-chain guards. Value demand restores used calls;
+no source emission is claimed. All 122 parser/cache/graph/bundler tests, targeted
+clippy and spot-check pass, including deterministic reason/recipe snapshots.
+
 ### P5 — Exact root-set partitioning
 
 Introduce stable entry/boundary identities and a straightforward flood-fill

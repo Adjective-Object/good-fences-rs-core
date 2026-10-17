@@ -223,7 +223,7 @@ workspace test success.
   Retain top-level effects when any runtime import evaluates a module, including
   unreferenced exporting declarations and modules with no exports. Test order,
   effect dependencies, nested body timing, type-only non-evaluation and cycles.
-- [ ] **P4.3 — Add PURE annotation semantics.** Depends: P4.2.
+- [x] **P4.3 — Add PURE annotation semantics.** Depends: P4.2.
   Recognize precise comment attachment; preserve callee/argument/receiver effects
   when dropping an unused pure invocation. Test used results, spread arguments,
   optional calls, false attachment and `f(sideEffect())`; no substring shortcut.

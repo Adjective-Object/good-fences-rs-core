@@ -1,4 +1,6 @@
 //! Derived effect/retention analysis, independent of usage reporting and emission.
+pub mod effects;
+
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use ast_segmenter::owned::ModuleFacts;
@@ -8,6 +10,8 @@ use source_graph::{
     SourceGraph,
 };
 
+#[cfg(test)]
+mod pure_tests;
 #[cfg(test)]
 mod tests;
 
@@ -23,6 +27,12 @@ pub enum RetentionReason {
 pub struct RetainedSegment {
     pub key: SegmentKey,
     pub reasons: Vec<RetentionReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentEffects {
+    pub key: SegmentKey,
+    pub summary: effects::StatementEffects,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -52,6 +62,8 @@ pub struct RetentionPlan {
     pub edges: Vec<RetentionEdge>,
     /// Retained async occurrences, not traversed until P5 assigns boundary roots.
     pub async_boundaries: Vec<usize>,
+    /// All evaluated-module statements, including recipes for otherwise dead ones.
+    pub effects: Vec<SegmentEffects>,
 }
 
 impl RetentionPlan {
@@ -76,6 +88,8 @@ pub fn retain(
         edges: HashSet::new(),
         async_boundaries: BTreeSet::new(),
         queue: VecDeque::new(),
+        effects: BTreeMap::new(),
+        values: HashSet::new(),
     };
     for &file in evaluation_roots {
         analysis.queue.push_back(Demand::Evaluation(file));
@@ -89,6 +103,27 @@ pub fn retain(
         match demand {
             Demand::Evaluation(file) => analysis.evaluate(file)?,
             Demand::Binding(node, reason) => analysis.binding(node, reason)?,
+        }
+    }
+    let mut previous = BTreeMap::new();
+    for (&key, summary) in &analysis.effects {
+        if !summary.is_effectful() {
+            continue;
+        }
+        let node = GraphNode::Segment(key);
+        analysis.edges.insert(RetentionEdge {
+            from: GraphNode::Module(key.file_id),
+            to: node,
+            kind: RetentionEdgeKind::ModuleEffect,
+            source_edge: None,
+        });
+        if let Some(previous) = previous.insert(key.file_id, node) {
+            analysis.edges.insert(RetentionEdge {
+                from: node,
+                to: previous,
+                kind: RetentionEdgeKind::EffectOrder,
+                source_edge: None,
+            });
         }
     }
     let mut edges: Vec<_> = analysis.edges.into_iter().collect();
@@ -106,6 +141,11 @@ pub fn retain(
             .collect(),
         edges,
         async_boundaries: analysis.async_boundaries.into_iter().collect(),
+        effects: analysis
+            .effects
+            .into_iter()
+            .map(|(key, summary)| SegmentEffects { key, summary })
+            .collect(),
     })
 }
 
@@ -133,6 +173,8 @@ struct Retention<'g> {
     edges: HashSet<RetentionEdge>,
     async_boundaries: BTreeSet<usize>,
     queue: VecDeque<Demand>,
+    effects: BTreeMap<SegmentKey, effects::StatementEffects>,
+    values: HashSet<SegmentKey>,
 }
 
 impl Retention<'_> {
@@ -148,42 +190,22 @@ impl Retention<'_> {
             return Ok(());
         }
         let graph = self.graph;
-        let mut previous = None;
         let statements = graph
             .file_segments(file)
             .ok_or_eyre("missing module statements")?;
         for (index, statement) in statements.iter().enumerate() {
             let key = SegmentKey::new(file, index as u32);
-            let sites = &self.facts(file)?.effects;
-            let start = sites.partition_point(|s| s.span.start < statement.span.start);
-            let effectful = sites[start..]
-                .iter()
-                .take_while(|s| s.span.start <= statement.span.end)
-                .any(|s| {
-                    s.deferred.is_none()
-                        && statement.span.start <= s.span.start
-                        && s.span.end <= statement.span.end
-                });
-            if effectful {
+            let summary = effects::summarize(
+                self.facts(file)?,
+                statement.span,
+                self.values.contains(&key),
+            );
+            if summary.is_effectful() {
                 let node = GraphNode::Segment(key);
-                self.edges.insert(RetentionEdge {
-                    from: GraphNode::Module(file),
-                    to: node,
-                    kind: RetentionEdgeKind::ModuleEffect,
-                    source_edge: None,
-                });
-                if let Some(previous) = previous {
-                    self.edges.insert(RetentionEdge {
-                        from: node,
-                        to: previous,
-                        kind: RetentionEdgeKind::EffectOrder,
-                        source_edge: None,
-                    });
-                }
-                previous = Some(node);
                 self.queue
                     .push_back(Demand::Binding(node, RetentionReason::TopLevelEffect));
             }
+            self.effects.insert(key, summary);
             for (index, edge) in graph.outgoing_indexed(GraphNode::Segment(key)) {
                 if matches!(edge.kind, EdgeKind::Import | EdgeKind::ReExport)
                     && edge.purpose != EdgePurpose::Binding
@@ -260,6 +282,15 @@ impl Retention<'_> {
         let reasons = self.segments.entry(key).or_default();
         let first = reasons.is_empty();
         reasons.insert(reason);
+        if reason != RetentionReason::TopLevelEffect && self.values.insert(key) {
+            let span = self
+                .graph
+                .file_segments(key.file_id)
+                .ok_or_eyre("missing binding statements")?[key.segment_idx as usize]
+                .span;
+            let summary = effects::summarize(self.facts(key.file_id)?, span, true);
+            self.effects.insert(key, summary);
+        }
         if !first {
             return Ok(());
         }

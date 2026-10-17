@@ -1,0 +1,159 @@
+---
+source: crates/bundler/src/pure_tests.rs
+expression: snapshots
+---
+[
+    (
+        "/* @__PURE__ */ f?.(side());",
+        [
+            InvocationRewrite {
+                invocation: Span {
+                    start: 16,
+                    end: 27,
+                },
+                callee: Span {
+                    start: 16,
+                    end: 17,
+                },
+                reference: Identifier(
+                    IdentifierCallee {
+                        name: "f",
+                        binding: None,
+                    },
+                ),
+                arguments: [
+                    InvocationArgument {
+                        span: Span {
+                            start: 20,
+                            end: 26,
+                        },
+                        spread: false,
+                    },
+                ],
+                guard: OriginalChain {
+                    optional_call: true,
+                },
+                construct: false,
+                value_use: Discarded,
+            },
+        ],
+    ),
+    (
+        "/* @__PURE__ */ object?.method(side());",
+        [
+            InvocationRewrite {
+                invocation: Span {
+                    start: 16,
+                    end: 38,
+                },
+                callee: Span {
+                    start: 16,
+                    end: 30,
+                },
+                reference: Member {
+                    receiver: Span {
+                        start: 16,
+                        end: 22,
+                    },
+                    receiver_identifier: Some(
+                        IdentifierCallee {
+                            name: "object",
+                            binding: None,
+                        },
+                    ),
+                    property: Some(
+                        "method",
+                    ),
+                    computed: false,
+                },
+                arguments: [
+                    InvocationArgument {
+                        span: Span {
+                            start: 31,
+                            end: 37,
+                        },
+                        spread: false,
+                    },
+                ],
+                guard: OriginalChain {
+                    optional_call: false,
+                },
+                construct: false,
+                value_use: Discarded,
+            },
+        ],
+    ),
+    (
+        "/* @__PURE__ */ object.method?.(...iterable);",
+        [
+            InvocationRewrite {
+                invocation: Span {
+                    start: 16,
+                    end: 44,
+                },
+                callee: Span {
+                    start: 16,
+                    end: 29,
+                },
+                reference: Member {
+                    receiver: Span {
+                        start: 16,
+                        end: 22,
+                    },
+                    receiver_identifier: Some(
+                        IdentifierCallee {
+                            name: "object",
+                            binding: None,
+                        },
+                    ),
+                    property: Some(
+                        "method",
+                    ),
+                    computed: false,
+                },
+                arguments: [
+                    InvocationArgument {
+                        span: Span {
+                            start: 35,
+                            end: 43,
+                        },
+                        spread: true,
+                    },
+                ],
+                guard: OriginalChain {
+                    optional_call: true,
+                },
+                construct: false,
+                value_use: Discarded,
+            },
+        ],
+    ),
+    (
+        "/* @__PURE__ */ (object?.method)(side());",
+        [
+            InvocationRewrite {
+                invocation: Span {
+                    start: 16,
+                    end: 40,
+                },
+                callee: Span {
+                    start: 16,
+                    end: 32,
+                },
+                reference: Other,
+                arguments: [
+                    InvocationArgument {
+                        span: Span {
+                            start: 33,
+                            end: 39,
+                        },
+                        spread: false,
+                    },
+                ],
+                guard: Always,
+                construct: false,
+                value_use: Discarded,
+            },
+        ],
+    ),
+]

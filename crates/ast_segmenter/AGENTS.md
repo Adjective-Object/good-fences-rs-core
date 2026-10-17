@@ -62,3 +62,7 @@ intentionally accept a broader syntax set.
 argument and instance-field timing. Never turn annotations or caller policy into
 cached unconditional purity. Unknown syntax/TDZ/property operations stay
 conservative; opaque CJS is always one effectful body.
+
+`invocation` owns call/new inputs, chain/reference shape, syntax value-use context
+and precisely attached PURE hint spans. Only the derived bundler evaluator may
+discard an unused invocation; input effects and optional guards must survive.

@@ -2,8 +2,32 @@
 
 ## Current scope
 
-P0–P3 and P4.1–P4.2 are complete; P4.3–P9 remain pending. This phase is limited to
+P0–P3 and P4.1–P4.3 are complete; P4.4–P9 remain pending. This phase is limited to
 P4, without nested delegation.
+
+## P4.3 checkpoint
+
+- `ast_segmenter::invocation` owns invocation/callee/reference/receiver/argument
+  ranges, spread flags, original optional-chain boundaries, lexical callee IDs,
+  syntactic `ValueUse` and exact attached PURE block-comment spans. Pinned OXC
+  attachment plus exact comment-token matching rejects strings, prose, trailing,
+  declaration-leading and separated false hints. Parentheses/trivia work.
+- Cache schema/extractor 3 persists these syntax facts, never the decision to
+  remove a call. It validates ranges, argument order, hint tokens, containment
+  and binding links. Opaque CJS deliberately has no internal rewrite records.
+- `bundler::effects::summarize` derives reason sites and `InvocationRewrite`.
+  Recipes evaluate the original callee/reference once, then arguments in order
+  with actual spread iteration and the original optional-chain/call guard.
+  Chain completion state is distinct from a getter returning undefined.
+- Only the unused invocation is discarded; used initializers/default exports,
+  required argument/destructuring results and deferred bodies stay intact.
+  Demand promotion restores calls and recomputes effect-order constraints.
+  `RetentionPlan::effects` exposes all demanded-module statement summaries,
+  including recipes for dead statements; P6 must consume these rather than
+  treating an annotated whole statement as pure.
+- Verified 50 ast-segmenter + 25 cache + 31 source_graph + 16 bundler tests,
+  inspected optional/receiver/spread plan snapshots, targeted clippy and
+  `./scripts/spot-check`. No emitter/runtime correctness claim.
 
 ## P4.2 checkpoint
 

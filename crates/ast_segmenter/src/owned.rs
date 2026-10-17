@@ -130,6 +130,7 @@ pub struct Directive {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleFacts {
     pub effects: Vec<crate::effects::EffectSite>,
+    pub invocations: Vec<crate::invocation::Invocation>,
     pub bindings: Vec<Binding>,
     pub references: Vec<Reference>,
     pub dependencies: Vec<Dependency>,
@@ -252,7 +253,7 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
     facts
         .exports
         .sort_by_key(|e| (e.span.start, e.name_span.map(|s| s.start)));
-    facts.effects = crate::effects::extract(program, &facts);
+    (facts.effects, facts.invocations) = crate::effects::extract(program, &facts);
     Ok(facts)
 }
 

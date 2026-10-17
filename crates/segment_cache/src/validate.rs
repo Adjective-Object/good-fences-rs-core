@@ -102,6 +102,54 @@ impl CacheRecord {
                 ensure!(contains(deferred, effect.span), "invalid deferred effect");
             }
         }
+        ensure!(
+            sorted(facts.invocations.iter().map(|c| (c.span.start, c.span.end))),
+            "unordered invocations"
+        );
+        for call in &facts.invocations {
+            span(source, call.span)?;
+            span(source, call.callee)?;
+            ensure!(
+                call.span.start < call.span.end
+                    && call.callee.start < call.callee.end
+                    && contains(call.span, call.callee)
+                    && module.segments.iter().any(|s| contains(*s, call.span)),
+                "invalid invocation range"
+            );
+            if let Some(deferred) = call.deferred {
+                span(source, deferred)?;
+                ensure!(contains(deferred, call.span), "invalid deferred invocation");
+            }
+            if let Some(pure) = call.pure {
+                span(source, pure)?;
+                let text = &source[pure.start as usize..pure.end as usize];
+                let marker = text
+                    .strip_prefix("/*")
+                    .and_then(|s| s.strip_suffix("*/"))
+                    .map(str::trim);
+                ensure!(
+                    pure.end <= call.span.start
+                        && matches!(marker, Some("@__PURE__" | "#__PURE__")),
+                    "invalid PURE attachment"
+                );
+            }
+            let mut previous = call.callee.end;
+            for argument in &call.arguments {
+                span(source, argument.span)?;
+                ensure!(
+                    argument.span.start < argument.span.end
+                        && contains(call.span, argument.span)
+                        && previous <= argument.span.start,
+                    "invalid invocation argument"
+                );
+                previous = argument.span.end;
+            }
+            use ast_segmenter::invocation::CalleeShape;
+            if let CalleeShape::Member { receiver, .. } = &call.shape {
+                span(source, *receiver)?;
+                ensure!(contains(call.callee, *receiver), "invalid callee receiver");
+            }
+        }
         let bindings: HashSet<_> = facts.bindings.iter().map(|b| b.id).collect();
         let dependencies: HashMap<_, _> = facts.dependencies.iter().map(|d| (d.id, d)).collect();
         ensure!(
@@ -111,6 +159,21 @@ impl CacheRecord {
                 && sorted(facts.dependencies.iter().map(|d| d.id.0)),
             "duplicate/unordered local IDs"
         );
+        for call in &facts.invocations {
+            use ast_segmenter::invocation::CalleeShape;
+            let identifier = match &call.shape {
+                CalleeShape::Identifier(id) => Some(id),
+                CalleeShape::Member {
+                    receiver_identifier,
+                    ..
+                } => receiver_identifier.as_ref(),
+                CalleeShape::Other => None,
+            };
+            ensure!(
+                identifier.is_none_or(|id| id.binding.is_none_or(|b| bindings.contains(&b))),
+                "dangling callee binding"
+            );
+        }
         for b in &facts.bindings {
             ensure!(!b.declarations.is_empty(), "binding without declarations");
             ensure!(b.id.0 == b.declarations[0].start, "invalid binding ID");

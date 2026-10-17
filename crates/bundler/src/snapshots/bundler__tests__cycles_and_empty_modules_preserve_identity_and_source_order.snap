@@ -135,4 +135,141 @@ RetentionPlan {
         },
     ],
     async_boundaries: [],
+    effects: [
+        SegmentEffects {
+            key: SegmentKey {
+                file_id: 0,
+                segment_idx: 0,
+            },
+            summary: StatementEffects {
+                span: Span {
+                    start: 0,
+                    end: 14,
+                },
+                sites: [],
+                rewrites: [],
+            },
+        },
+        SegmentEffects {
+            key: SegmentKey {
+                file_id: 0,
+                segment_idx: 1,
+            },
+            summary: StatementEffects {
+                span: Span {
+                    start: 15,
+                    end: 33,
+                },
+                sites: [],
+                rewrites: [],
+            },
+        },
+        SegmentEffects {
+            key: SegmentKey {
+                file_id: 0,
+                segment_idx: 2,
+            },
+            summary: StatementEffects {
+                span: Span {
+                    start: 34,
+                    end: 42,
+                },
+                sites: [
+                    EffectSite {
+                        span: Span {
+                            start: 34,
+                            end: 39,
+                        },
+                        reason: UnresolvedRead,
+                        deferred: None,
+                    },
+                    EffectSite {
+                        span: Span {
+                            start: 34,
+                            end: 41,
+                        },
+                        reason: Invocation,
+                        deferred: None,
+                    },
+                ],
+                rewrites: [],
+            },
+        },
+        SegmentEffects {
+            key: SegmentKey {
+                file_id: 0,
+                segment_idx: 3,
+            },
+            summary: StatementEffects {
+                span: Span {
+                    start: 43,
+                    end: 52,
+                },
+                sites: [
+                    EffectSite {
+                        span: Span {
+                            start: 43,
+                            end: 49,
+                        },
+                        reason: UnresolvedRead,
+                        deferred: None,
+                    },
+                    EffectSite {
+                        span: Span {
+                            start: 43,
+                            end: 51,
+                        },
+                        reason: Invocation,
+                        deferred: None,
+                    },
+                ],
+                rewrites: [],
+            },
+        },
+        SegmentEffects {
+            key: SegmentKey {
+                file_id: 1,
+                segment_idx: 0,
+            },
+            summary: StatementEffects {
+                span: Span {
+                    start: 0,
+                    end: 14,
+                },
+                sites: [],
+                rewrites: [],
+            },
+        },
+        SegmentEffects {
+            key: SegmentKey {
+                file_id: 1,
+                segment_idx: 1,
+            },
+            summary: StatementEffects {
+                span: Span {
+                    start: 15,
+                    end: 23,
+                },
+                sites: [
+                    EffectSite {
+                        span: Span {
+                            start: 15,
+                            end: 20,
+                        },
+                        reason: UnresolvedRead,
+                        deferred: None,
+                    },
+                    EffectSite {
+                        span: Span {
+                            start: 15,
+                            end: 22,
+                        },
+                        reason: Invocation,
+                        deferred: None,
+                    },
+                ],
+                rewrites: [],
+            },
+        },
+    ],
 }

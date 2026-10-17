@@ -1,0 +1,107 @@
+---
+source: crates/bundler/src/pure_tests.rs
+expression: result
+---
+StatementEffects {
+    span: Span {
+        start: 16,
+        end: 57,
+    },
+    sites: [
+        EffectSite {
+            span: Span {
+                start: 16,
+                end: 22,
+            },
+            reason: UnresolvedRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 16,
+                end: 29,
+            },
+            reason: PropertyRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 30,
+                end: 40,
+            },
+            reason: UnresolvedRead,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 30,
+                end: 42,
+            },
+            reason: Invocation,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 44,
+                end: 55,
+            },
+            reason: SpreadOrIteration,
+            deferred: None,
+        },
+        EffectSite {
+            span: Span {
+                start: 47,
+                end: 55,
+            },
+            reason: UnresolvedRead,
+            deferred: None,
+        },
+    ],
+    rewrites: [
+        InvocationRewrite {
+            invocation: Span {
+                start: 16,
+                end: 56,
+            },
+            callee: Span {
+                start: 16,
+                end: 29,
+            },
+            reference: Member {
+                receiver: Span {
+                    start: 16,
+                    end: 22,
+                },
+                receiver_identifier: Some(
+                    IdentifierCallee {
+                        name: "object",
+                        binding: None,
+                    },
+                ),
+                property: Some(
+                    "method",
+                ),
+                computed: false,
+            },
+            arguments: [
+                InvocationArgument {
+                    span: Span {
+                        start: 30,
+                        end: 42,
+                    },
+                    spread: false,
+                },
+                InvocationArgument {
+                    span: Span {
+                        start: 47,
+                        end: 55,
+                    },
+                    spread: true,
+                },
+            ],
+            guard: Always,
+            construct: false,
+            value_use: Discarded,
+        },
+    ],
+}

@@ -4,7 +4,8 @@ Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
 Syntax-local effect reasons/timing are persisted and range-checked (schema and
-extractor version 2). No resolver, usage, effects-policy, graph, absolute path or
+extractor version 3, including invocation inputs/annotation sites). No resolver,
+usage, effects-policy, graph, absolute path or
 arena IDs are stored.
 
 P2.1 provides a deterministic versioned CBOR codec. SHA-256 identifies the exact
@@ -64,6 +65,8 @@ JS/TS/JSX/definition or effective module-mode changes miss even with identical
 source bytes. Resolver extensions/conditions, package exports, `sideEffects`
 metadata and effect DSL configuration are deliberately absent from this cache.
 Those changes invalidate derived resolution/effects later, not source facts.
+PURE hint spans and syntactic value-use contexts are source facts; whether a
+hint permits an invocation rewrite is derived and is never persisted here.
 
 Cold/warm and disabled-cache results have identical owned facts/body/ranges;
 the warm API intentionally does not reconstruct legacy `Segment` name/tag maps.

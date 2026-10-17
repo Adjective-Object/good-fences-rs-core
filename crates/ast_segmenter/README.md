@@ -91,4 +91,13 @@ an effect always executes or an effect-policy-derived purity result.
 There is no source-file IO, cache, linking, user effects policy or emission here.
 Target-dependent checks cannot be decided from source syntax alone.
 
+`facts.invocations` owns callee/receiver/argument ranges, spread iteration,
+optional-chain boundaries, lexical callee identity, syntactic result-use context
+and exact PURE comment sites. Only exact block-comment `@__PURE__`/`#__PURE__`
+markers with pinned-OXC call/new attachment qualify (including parentheses and
+contiguous trivia comments); declaration-leading comments, strings, trailing or
+prose substrings do not. These are hints, never unconditional purity facts.
+Function/instance-field records remain deferred. CommonJS has no internal
+invocation rewrite records because its body is opaque.
+
 Run `cargo test -p ast-segmenter` for extraction and scope regressions.

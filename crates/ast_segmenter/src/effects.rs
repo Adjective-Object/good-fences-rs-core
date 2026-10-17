@@ -9,6 +9,7 @@ use oxc_semantic::ScopeFlags;
 use oxc_span::{GetSpan, Span};
 use serde::{Deserialize, Serialize};
 
+use crate::invocation::{self, Invocation, ValueUse};
 use crate::owned::ModuleFacts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -41,11 +42,18 @@ pub struct EffectSite {
     pub deferred: Option<Span>,
 }
 
-pub(crate) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> Vec<EffectSite> {
+pub(crate) fn extract(
+    program: &Program<'_>,
+    facts: &ModuleFacts,
+) -> (Vec<EffectSite>, Vec<Invocation>) {
     let mut visitor = Effects {
         facts,
         sites: Vec::new(),
         deferred: None,
+        comments: &program.comments,
+        source: program.source_text,
+        invocations: Vec::new(),
+        value_use: ValueUse::Required,
     };
     if program.source_type.is_commonjs() {
         visitor.add(
@@ -62,13 +70,20 @@ pub(crate) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> Vec<EffectS
         .sites
         .sort_by_key(|s| (s.span.start, s.span.end, s.reason));
     visitor.sites.dedup();
-    visitor.sites
+    visitor
+        .invocations
+        .sort_by_key(|c| (c.span.start, c.span.end));
+    (visitor.sites, visitor.invocations)
 }
 
 struct Effects<'f> {
     facts: &'f ModuleFacts,
     sites: Vec<EffectSite>,
     deferred: Option<Span>,
+    comments: &'f [oxc_ast::Comment],
+    source: &'f str,
+    invocations: Vec<Invocation>,
+    value_use: ValueUse,
 }
 
 impl Effects<'_> {
@@ -122,7 +137,24 @@ impl<'a> Visit<'a> for Effects<'_> {
         if let Some(reason) = reason {
             self.add(expression.span(), reason);
         }
+        let previous = self.value_use;
+        if !matches!(
+            expression,
+            Expression::CallExpression(_)
+                | Expression::NewExpression(_)
+                | Expression::ChainExpression(_)
+                | Expression::ParenthesizedExpression(_)
+                | Expression::SequenceExpression(_)
+                | Expression::TSAsExpression(_)
+                | Expression::TSSatisfiesExpression(_)
+                | Expression::TSTypeAssertion(_)
+                | Expression::TSNonNullExpression(_)
+                | Expression::TSInstantiationExpression(_)
+        ) {
+            self.value_use = ValueUse::Required;
+        }
         walk::walk_expression(self, expression);
+        self.value_use = previous;
     }
 
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
@@ -156,12 +188,40 @@ impl<'a> Visit<'a> for Effects<'_> {
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         self.add(call.span, EffectReason::Invocation);
+        self.invocations.push(Invocation {
+            span: call.span,
+            callee: call.callee.span(),
+            shape: invocation::shape(&call.callee, self.facts),
+            arguments: invocation::arguments(&call.arguments),
+            construct: false,
+            optional_call: call.optional,
+            optional_chain: invocation::optional_chain(&call.callee),
+            pure: invocation::pure_comment(self.comments, self.source, call.span.start, call.pure),
+            deferred: self.deferred,
+            value_use: self.value_use,
+        });
+        let previous = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_call_expression(self, call);
+        self.value_use = previous;
     }
 
     fn visit_new_expression(&mut self, call: &NewExpression<'a>) {
         self.add(call.span, EffectReason::Construction);
+        self.invocations.push(Invocation {
+            span: call.span,
+            callee: call.callee.span(),
+            shape: invocation::shape(&call.callee, self.facts),
+            arguments: invocation::arguments(&call.arguments),
+            construct: true,
+            optional_call: false,
+            optional_chain: false,
+            pure: invocation::pure_comment(self.comments, self.source, call.span.start, call.pure),
+            deferred: self.deferred,
+            value_use: self.value_use,
+        });
+        let previous = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_new_expression(self, call);
+        self.value_use = previous;
     }
 
     fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
@@ -198,15 +258,58 @@ impl<'a> Visit<'a> for Effects<'_> {
         walk::walk_statement(self, statement);
     }
 
+    fn visit_expression_statement(&mut self, statement: &ExpressionStatement<'a>) {
+        let previous = std::mem::replace(&mut self.value_use, ValueUse::Discarded);
+        self.visit_expression(&statement.expression);
+        self.value_use = previous;
+    }
+
+    fn visit_variable_declarator(&mut self, declaration: &VariableDeclarator<'a>) {
+        self.visit_binding_pattern(&declaration.id);
+        if let Some(initializer) = &declaration.init {
+            let usage = if matches!(declaration.id, BindingPattern::BindingIdentifier(_)) {
+                ValueUse::StatementValue
+            } else {
+                ValueUse::Required
+            };
+            let previous = std::mem::replace(&mut self.value_use, usage);
+            self.visit_expression(initializer);
+            self.value_use = previous;
+        }
+    }
+
+    fn visit_export_default_declaration(&mut self, declaration: &ExportDefaultDeclaration<'a>) {
+        let previous = std::mem::replace(&mut self.value_use, ValueUse::StatementValue);
+        walk::walk_export_default_declaration(self, declaration);
+        self.value_use = previous;
+    }
+
+    fn visit_sequence_expression(&mut self, expression: &SequenceExpression<'a>) {
+        let previous = self.value_use;
+        for (index, child) in expression.expressions.iter().enumerate() {
+            self.value_use = if index + 1 == expression.expressions.len() {
+                previous
+            } else {
+                ValueUse::Discarded
+            };
+            self.visit_expression(child);
+        }
+        self.value_use = previous;
+    }
+
     fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
         let previous = self.deferred.replace(function.span);
+        let usage = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_function(self, function, flags);
+        self.value_use = usage;
         self.deferred = previous;
     }
 
     fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
         let previous = self.deferred.replace(function.span);
+        let usage = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_arrow_function_expression(self, function);
+        self.value_use = usage;
         self.deferred = previous;
     }
 
@@ -237,7 +340,9 @@ impl<'a> Visit<'a> for Effects<'_> {
         if let Some(super_class) = &class.super_class {
             self.add(super_class.span(), EffectReason::ClassHeritage);
         }
+        let previous = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_class(self, class);
+        self.value_use = previous;
     }
 
     fn visit_property_key(&mut self, key: &PropertyKey<'a>) {

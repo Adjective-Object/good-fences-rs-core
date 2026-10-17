@@ -13,6 +13,7 @@ ModuleFacts {
             deferred: None,
         },
     ],
+    invocations: [],
     bindings: [
         Binding {
             id: BindingId(

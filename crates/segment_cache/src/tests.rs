@@ -24,6 +24,7 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("file.d.ts", "export interface A { value: string }", ModuleFormat::Esm),
         ("empty.cjs", "", ModuleFormat::CommonJs),
         ("file.js", "export * from './a'; export * as ns from './b'; export default 1;", ModuleFormat::Esm),
+        ("pure.js", "/* @__PURE__ */ object?.method?.(sideEffect(), ...iterable); const value = /*#__PURE__*/ new C(arg());", ModuleFormat::Esm),
     ] {
         let first = record(source, path, format);
         let bytes = first.encode(source).unwrap();
@@ -83,6 +84,10 @@ fn rejects_impossible_spans_ids_and_order() {
         |r: &mut CacheRecord| r.module.facts.effects[0].span.end = u32::MAX,
         |r: &mut CacheRecord| r.module.facts.effects.reverse(),
         |r: &mut CacheRecord| r.module.facts.effects[0].deferred = Some(Span::new(0, 1)),
+        |r: &mut CacheRecord| r.module.facts.invocations[0].callee = Span::new(0, 1),
+        |r: &mut CacheRecord| r.module.facts.invocations[0].arguments[0].span.end = u32::MAX,
+        |r: &mut CacheRecord| r.module.facts.invocations[0].pure = Some(Span::new(0, 6)),
+        |r: &mut CacheRecord| r.module.facts.invocations[0].deferred = Some(Span::new(0, 1)),
     ] {
         let mut modified = original.clone();
         mutate(&mut modified);

@@ -25,3 +25,26 @@ Plans carry the graph revision; recompute after source/resolution changes.
 Source order constraints are not a global runtime schedule (especially cycles).
 
 Run `cargo test -p bundler`.
+
+## PURE analysis and rewrite contract
+
+`effects::summarize(facts, statement_span, value_demanded)` derives eager reason
+sites and `InvocationRewrite` recipes. Only the annotated invocation disappears,
+and only if its result is discarded or its initializer/default-export result
+is not demanded. Needed results, arguments to other calls, and destructuring
+stay conservative. Late binding demand restores the invocation and effect-order
+constraints. Deferred function bodies and opaque CJS are not rewritten.
+
+`RetentionPlan::effects` includes summaries for every statement in demanded
+modules, even dead statements. An empty summary can drop the unused statement;
+a residual-effect summary must apply its recipes, not retain the original call
+as an alleged pure statement. Recipes identify the invocation replacement range,
+evaluate the original callee/reference once (receiver, computed key and getter
+included), then evaluate arguments in order, consuming spreads as iterators.
+`ArgumentGuard::OriginalChain` requires preserving the callee's chain-completion
+state independently from its value and applying the original optional-call
+guard; do not hoist arguments or use an unconditional comma expression.
+`StatementValue` recipes discard only an unneeded value, not surrounding effects.
+Nested calls whose results feed other expressions stay conservative.
+
+These are plans for the P6 emitter, not emitted JavaScript or runtime validation.
