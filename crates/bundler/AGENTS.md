@@ -55,6 +55,8 @@ Require-of-ESM retains namespace; native evaluating-ESM cycles still throw.
 
 PURE recipes remove one invocation, never its callee/reference/argument/iteration
 effects. Preserve original optional-chain completion state, not just undefined.
+Keep a guarded invocation when lowering would move source await into a generated
+arrow; never make that arrow async. Await in the unguarded receiver stays eligible.
 Late value demand restores calls; source hints and derived decisions stay apart.
 
 Known-effect patterns are bounded structural add-only rules. Exact globals

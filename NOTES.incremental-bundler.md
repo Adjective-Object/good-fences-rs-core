@@ -22,15 +22,34 @@ differential conformance, measured benchmarks and a repeatable release gate.
   Mandatory `./scripts/spot-check` passed (51 parser tests + workspace check).
   Evidence: `target/review-binding-{graph,build}-{red,green}.log` and
   `target/review-binding-spot-check.log`. Full release gate follows the second
-  final-review fix; benchmark/support limits below remain unchanged.
+  final-review fix (now passed below); benchmark/support limits remain unchanged.
 
-- `./scripts/bundler-release-check` passed **383 scoped Rust tests**:
-  bundler94, ast-segmenter51, good_fences60, import_resolver18, parse-utils9,
-  segment_cache26, source_graph31, tag_graph22, unused_finder72. Also passed
+### Final-review await checkpoint and complete release gate
+
+- Guarded PURE calls remain intact only if lowering would move source await
+  into a generated arrow. Unguarded awaited receivers and existing async-function
+  bodies still optimize; no generated async arrows or timing approximations.
+  Deferred function bodies (including generator/yield bodies) remain outside
+  PURE rewriting, so no yield-policy expansion was needed.
+- Before the fix, both direct emitter and public BuildSession regressions failed
+  generated validation: "`await` is only allowed within async functions and at
+  the top levels of modules." Afterward, four focused tests pass, including
+  14 real native/generated guard/effect/microtask cases (optional calls, members,
+  computed keys, intermediate receivers and nullish branches), plus safe-erasure
+  checks. Full bundler suite: 98 passed. Focused clippy and spot-check passed.
+  Evidence: `target/review-await-{red,green,bundler,clippy,spot-check}.log`.
+- The entire `./scripts/bundler-release-check` passed after both fixes:
+  **389 scoped Rust tests**:
+  bundler98, ast-segmenter51, good_fences60, import_resolver18, parse-utils9,
+  segment_cache26, source_graph33, tag_graph22, unused_finder72. Also passed
   **43 harness regressions**, native12, differential12 / emitted15, same-runtime
   concurrent-entry identity, four source diagnostic cases, local all-target
   clippy `--no-deps -- -D warnings`, and mandatory spot-check (parser51 +
   workspace check). Zero failed/ignored/unsupported cases.
+  Evidence: `target/review-final-release-check.log`.
+
+### Prior P9.4 performance and release implementation
+
 - Real `cargo bench -p bundler --bench incremental`, seven fresh managed roots
   per cold/warm/no-op/local/export/config scenario, 66 reached sources/65 requests.
   Median total ms: **127.282 / 72.650 / 4.824 / 73.442 / 76.044 / 75.966**.

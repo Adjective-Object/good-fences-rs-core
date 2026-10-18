@@ -385,7 +385,9 @@ workspace test success.
   resolution/link/output-parse/artifact-write counters in the library README.
   Redundant source re-extraction during session emission was removed using the
   existing checked cache facts; full disabled-cache and original checked-emitter
-  parity is tested after edits. `./scripts/bundler-release-check` passes 383
+  parity is tested after edits. Final review fixes all-declaration binding demand
+  and guarded PURE/await lexical boundaries, with native/generated regressions.
+  `./scripts/bundler-release-check` passes 389
   scoped Rust tests, 43 harness regressions, 12 native + 12 differential cases/
   15 emitted executions, same-runtime identity, four diagnostics, focused clippy
   and mandatory spot-check. Limits are explicit: coarse later layers, bounded

@@ -106,6 +106,47 @@ fn binding_demand_retains_all_redeclaration_initializers() {
 }
 
 #[test]
+fn optional_pure_await_preserves_native_guards_and_microtask_timing() {
+    for (invocation, expected) in [
+        ("globalThis.run?.(await value())", "value,microtask,call,after"),
+        ("obj?.run(await value())", "get,value,microtask,call,after"),
+        ("obj.run?.(await value())", "get,value,microtask,call,after"),
+        ("obj?.run?.(await value())", "get,value,microtask,call,after"),
+        ("obj?.[await Promise.resolve(key())](await value())", "key,microtask,get,value,call,after"),
+        ("obj?.[await Promise.resolve(key())](1)", "key,microtask,get,call,after"),
+        ("(await Promise.resolve(receiver()))?.run(await value())", "receiver,microtask,get,value,call,after"),
+        ("obj?.run(await value()).run(1)", "get,value,microtask,call,get,call,after"),
+        ("absent?.run(await value())", "after,microtask"),
+        ("absent?.[await Promise.resolve(key())](await value())", "after,microtask"),
+        ("absent?.run?.(await value())", "after,microtask"),
+        ("absent?.run(await value()).run(1)", "after,microtask"),
+        ("missing?.(await value())", "after,microtask"),
+        ("obj?.missing?.(await value())", "after,microtask"),
+    ] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", &format!(r#"
+const log = [];
+globalThis.run = () => {{ log.push('call'); return obj; }};
+const obj = {{ get run() {{ log.push('get'); return globalThis.run; }} }};
+const absent = null;
+const missing = undefined;
+function receiver() {{ log.push('receiver'); return obj; }}
+function key() {{ log.push('key'); return 'run'; }}
+function value() {{ log.push('value'); return Promise.resolve(1); }}
+queueMicrotask(() => log.push('microtask'));
+/*#__PURE__*/ {invocation};
+log.push('after');
+await Promise.resolve();
+console.log(log.join(','));
+"#));
+        let expected = format!("{expected}\n");
+        assert_eq!(observe_entry(&dir.root().join("main.mjs")), expected.as_bytes(), "{invocation}");
+        let build = parity(&mut BuildSession::new(dir.root()).unwrap(), &options());
+        assert_eq!(observe(&build.product.artifacts), expected.as_bytes(), "{invocation}");
+    }
+}
+
+#[test]
 fn no_op_policy_roots_source_export_and_warm_counters() {
     let dir = TmpDir::new();
     let root = dir.root();

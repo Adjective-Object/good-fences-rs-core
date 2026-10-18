@@ -171,7 +171,7 @@ The release script tests bundler/parser/resolver/cache/shared graphs/tracker/
 good-fences compatibility, builds the public driver, runs both harness regression
 suites, native baselines, public-pipeline differential mode, focused all-target
 clippy and mandatory `spot-check` (including a workspace **check**, not a full
-workspace test suite). Final local evidence: **383 scoped Rust tests** (94
+workspace test suite). Final local evidence: **389 scoped Rust tests** (98
 bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 15 emitted executions**, concurrent-entry identity and four diagnostic cases.
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
@@ -340,6 +340,10 @@ live bindings and default/alias exports; no wrapper snapshots are introduced.
 PURE erasure evaluates callee/reference and arguments in order, consumes spread
 iterators, preserves optional-chain completion separately from an undefined
 getter value, and composes nested recipes. Fresh arrow parameters avoid capture.
+Guarded invocations remain intact when lowering would move top-level `await`
+across a generated arrow boundary; making the arrow async would change timing.
+Await in an unguarded receiver and awaits inside existing async functions do not
+disable otherwise safe PURE erasure.
 Optional calls/private fields **inside an optional PURE callee chain** are
 explicitly rejected; ordinary optional terminal calls are supported.
 The current single-module API rejects runtime dependencies (use linked emission),

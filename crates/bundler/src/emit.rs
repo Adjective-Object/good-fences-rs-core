@@ -263,6 +263,7 @@ fn contains(outer: Span, inner: Span) -> bool {
 
 struct Fresh {
     names: BTreeSet<String>,
+    awaits: Vec<Span>,
     next: usize,
 }
 
@@ -275,6 +276,7 @@ impl Fresh {
                 .map(|b| b.name.clone())
                 .chain(facts.references.iter().map(|r| r.name.clone()))
                 .collect(),
+            awaits: facts.top_level_await.clone(),
             next: 0,
         }
     }
@@ -300,6 +302,11 @@ fn render_range(
     let mut end = range.start;
     for recipe in recipes.iter().filter(|r| contains(range, r.invocation)) {
         if recipe.invocation.start < end {
+            continue;
+        }
+        if crosses_await_guard(source, recipe, &fresh.awaits)? {
+            // Keep the invocation rather than introduce a function boundary or async timing.
+            end = recipe.invocation.end;
             continue;
         }
         let callee = render_range(source, recipe.callee, recipes, fresh)?;
@@ -330,6 +337,51 @@ fn render_range(
         end = recipe.invocation.end;
     }
     rewrite::apply(&source[range.start as usize..range.end as usize], &edits)
+}
+
+fn crosses_await_guard(
+    source: &str,
+    recipe: &crate::effects::InvocationRewrite,
+    awaits: &[Span],
+) -> eyre::Result<bool> {
+    let crate::effects::ArgumentGuard::OriginalChain { optional_call } = recipe.guard else {
+        return Ok(false);
+    };
+    if !awaits.iter().any(|&span| contains(recipe.invocation, span)) {
+        return Ok(false);
+    }
+    let allocator = oxc_allocator::Allocator::default();
+    let callee = &source[recipe.callee.start as usize..recipe.callee.end as usize];
+    rewrite::count_output_parse();
+    let expression = oxc_parser::Parser::new(&allocator, callee, oxc_span::SourceType::mjs())
+        .parse_expression()
+        .map_err(|e| eyre::eyre!("PURE callee parser diagnostics: {e:?}"))?;
+    let boundary = chain_guard_start(&expression)
+        .map(|offset| recipe.callee.start + offset)
+        .or_else(|| optional_call.then_some(recipe.callee.end));
+    Ok(boundary.is_some_and(|start| {
+        awaits
+            .iter()
+            .any(|span| start <= span.start && span.end <= recipe.invocation.end)
+    }))
+}
+
+fn chain_guard_start(expression: &oxc_ast::ast::Expression<'_>) -> Option<u32> {
+    use oxc_ast::ast::*;
+    use oxc_span::GetSpan;
+    // Match chain's lowering path; parentheses keep their own native chain boundary.
+    let (object, optional) = match expression {
+        Expression::ChainExpression(c) => match &c.expression {
+            ChainElement::StaticMemberExpression(m) => (&m.object, m.optional),
+            ChainElement::ComputedMemberExpression(m) => (&m.object, m.optional),
+            _ => return None,
+        },
+        Expression::StaticMemberExpression(m) => (&m.object, m.optional),
+        Expression::ComputedMemberExpression(m) => (&m.object, m.optional),
+        Expression::CallExpression(c) if !c.optional => return chain_guard_start(&c.callee),
+        _ => return None,
+    };
+    chain_guard_start(object).or_else(|| optional.then_some(object.span().end))
 }
 
 fn pure_chain(callee: &str, optional: bool, tail: &str, fresh: &mut Fresh) -> eyre::Result<String> {

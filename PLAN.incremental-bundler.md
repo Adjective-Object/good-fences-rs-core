@@ -655,7 +655,10 @@ warm72.650, no-op4.824, local73.442, export76.044, config75.966. No-op has
 zero parse/resolution/link/output-parse/artifact writes; each edit extracts one
 source. Later layers remain deliberately coarse and measured. Library README
 contains min/max, counters, reproduction commands and all supported-target limits.
-Final release gates: 383 scoped Rust tests (94 bundler), 43 harness regressions,
+Final review retains all contributing lexical declarations and preserves guarded
+PURE calls only where lowering would capture source await in a generated arrow.
+Native/generated regressions cover redeclarations and guarded microtask timing.
+Final release gates: 389 scoped Rust tests (98 bundler), 43 harness regressions,
 12 native + 12 differential contracts/15 emitted executions, same-runtime
 multi-entry identity, four diagnostics, focused all-target clippy and spot-check
 (51 parser tests + workspace check), with zero failures/ignored/unsupported cases.

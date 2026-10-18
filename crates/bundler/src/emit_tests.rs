@@ -171,6 +171,33 @@ console.log(log.join(','));
 }
 
 #[test]
+fn optional_pure_keeps_await_in_its_original_lexical_context() {
+    for invocation in [
+        "globalThis.run?.(await Promise.resolve(1))",
+        "globalThis?.[await Promise.resolve('run')](1)",
+    ] {
+        let source = format!("globalThis.run = () => {{}}; /*#__PURE__*/ {invocation};");
+        let output = compare(&source, "import './input.mjs';", false);
+        assert!(output.contains(invocation), "{output}");
+    }
+}
+
+#[test]
+fn optional_pure_still_optimizes_when_await_does_not_cross_a_guard() {
+    for invocation in [
+        "(await Promise.resolve(globalThis))?.run(1)",
+        "(await Promise.resolve(globalThis)).run?.(1)",
+        "globalThis.run?.(async () => { await Promise.resolve(1); })",
+        "(globalThis?.run)(await Promise.resolve(1))",
+    ] {
+        let source = format!("globalThis.run = () => {{}}; /*#__PURE__*/ {invocation};");
+        let output = compare(&source, "import './input.mjs';", false);
+        assert!(!output.contains(invocation), "{output}");
+        assert!(output.contains("void 0"), "{output}");
+    }
+}
+
+#[test]
 fn late_binding_demand_restores_pure_results_and_nested_recipes_compose() {
     let source = "function make() { console.log('called'); return 42; } export const value = /*#__PURE__*/ make();";
     compare(
