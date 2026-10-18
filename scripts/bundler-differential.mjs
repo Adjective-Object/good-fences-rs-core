@@ -58,6 +58,7 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   const result = execute(driver, [root, path.join(root, '.bundler-output'), ...entries], root, timeoutMs);
   const build = JSON.parse(successful(result, 'public build pipeline'));
   assert.deepEqual(build.warnings, [], 'cache write warnings');
+  assert.deepEqual(build.publicationWarnings, [], 'publication warnings');
   for (const entry of entries) {
     assert.equal(typeof build.entries[entry], 'string', 'missing generated launcher');
     assert(build.entries[entry].startsWith(`${build.directory}${path.sep}`), 'launcher escaped generation');

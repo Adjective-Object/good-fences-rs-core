@@ -3,8 +3,55 @@
 ## Current scope
 
 P0–P8 are complete for the documented Node 22.15+ ESM/CJS target.
-P9.1–P9.3 add public build/session, transactional publication and public-pipeline
-differential conformance. P9.4 remains in progress.
+P0–P9 are complete for the documented Node 22.15+ support matrix.
+P9 adds public build/session, transactional publication, public-pipeline
+differential conformance, measured benchmarks and a repeatable release gate.
+
+## P9.4 final verification
+
+- `./scripts/bundler-release-check` passed **383 scoped Rust tests**:
+  bundler94, ast-segmenter51, good_fences60, import_resolver18, parse-utils9,
+  segment_cache26, source_graph31, tag_graph22, unused_finder72. Also passed
+  **43 harness regressions**, native12, differential12 / emitted15, same-runtime
+  concurrent-entry identity, four source diagnostic cases, local all-target
+  clippy `--no-deps -- -D warnings`, and mandatory spot-check (parser51 +
+  workspace check). Zero failed/ignored/unsupported cases.
+- Real `cargo bench -p bundler --bench incremental`, seven fresh managed roots
+  per cold/warm/no-op/local/export/config scenario, 66 reached sources/65 requests.
+  Median total ms: **127.282 / 72.650 / 4.824 / 73.442 / 76.044 / 75.966**.
+  Source extractions: **66/0/0/1/1/1**; resolutions **65/65/0/1/0/65**;
+  link calls **1/1/0/1/1/1**; generated-output/recipe parses
+  **134/134/0/134/134/134**; artifact writes **3/0/0/3/3/3**.
+  Actual min/max/build-time portions and hardware/reproduction are in README.
+- The initial benchmark exposed 66 redundant emitter source re-extractions.
+  BuildSession now reuses its own hash-checked existing CacheRecord projection
+  through the same linker; public low-level `link::esm` remains source-checking.
+  Generated code is still reparsed/semantically checked, with real parser
+  call-site counters. No inflated/hidden source parse counts. Expanded tests
+  compare disabled-cache full rebuilds, exact graph/root sets/artifact maps,
+  runtime observations and the original checked emitter after every edit.
+- Additional gates reject excluded-directory sources, browser build targets,
+  tsconfig extends/references and ambiguous/unsupported wildcard mappings rather
+  than silently ignoring config or exposing compatibility-resolver panics.
+  Successful products carry session-local monotonic generations; graph handles
+  never cross snapshots and no-op retains product identity. Writer ownership
+  now spans the whole `build_and_publish` operation, with busy rejection tested
+  before parsing as well as overlapping publication. Offline explicit snapshot
+  publication follows commit order, not source-event chronology.
+  Final parallel testing exposed an inherited-file-descriptor lock lifetime race
+  after close; explicit unlock on success/error/unwind fixes it. A deterministic
+  duplicated-descriptor + unwind regression now covers that case. Unlock errors
+  after commit are returned warnings, not misleading rollback-shaped failures.
+- Linux7.2.8 x86_64, Ryzen7 7840U, Rust1.97.0-nightly
+  (f53b654a8 2026-04-30), Cargo1.97.0-nightly, Node22.22.2.
+  Logs: `target/p9-4-{release-check,bench-final,invalidation,clippy}.log`.
+  Earlier measurement: `target/p9-4-bench.log`.
+- True limits, not failing/ignored acceptance cases: coarse config inventory and
+  later-layer rebuilds; Node native synchronous physical reads; deliberate CJS
+  bridge semantics; no browser/TS/JSX/assets/externals/import.meta/maps; canonical
+  bounded projects and direct strict-JSON tsconfig subset; Windows unexecuted;
+  old-reader quiescence before bounded prune; atomic visibility, not power-loss
+  durability. No full-workspace test suite or unrelated CI repair claim.
 
 ## P9.3
 
@@ -46,6 +93,9 @@ checkpoints, stale async removal, symlink/modified/user-file protection and
 no-op byte/mtime equality. Logs: `target/p9-2-{tests,clippy,spot-check}.log`.
 
 ## P9.1
+
+Historical checkpoint: P9.4 above removes the duplicate emitter source checks
+described here, retaining only real generated-output/recipe validation parsing.
 
 `BuildSession::build` uses source cache → StructuralResolver → owned shared
 SourceGraph → effects/partition → link::esm. Separate parse/resolution/effects/

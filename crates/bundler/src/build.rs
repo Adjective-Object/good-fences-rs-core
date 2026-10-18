@@ -70,12 +70,16 @@ pub struct Counters {
     pub disk_hits: usize,
     pub resolutions: usize,
     pub emissions: usize,
-    /// link::esm validates each retained source once, even on policy-only edits.
-    pub emission_source_parses: usize,
+    /// Generated output validation/comment scans and PURE callee parsing.
+    /// These are not source fact extraction and do not populate sidecars.
+    pub output_parses: usize,
     pub elapsed: Duration,
 }
 
 pub struct BuildProduct {
+    /// Monotonic successful snapshot identity within this session. Graph-local
+    /// handles/plans must never be transferred between product generations.
+    pub generation: u64,
     pub graph: SourceGraph,
     pub plan: ChunkPlan,
     pub artifacts: Artifacts,
@@ -137,6 +141,10 @@ impl BuildSession {
             !options.resolver.preserve_symlinks,
             "build supports canonical module identities only"
         );
+        ensure!(
+            options.resolver.target_env == TargetEnv::Node,
+            "public build target is Node only"
+        );
         let mut counters = Counters::default();
         let mut warnings = Vec::new();
         let inventory = inventory(&self.root)?;
@@ -187,6 +195,11 @@ impl BuildSession {
             ensure!(
                 path.starts_with(&self.root),
                 "resolved source outside build root: {}",
+                path.display()
+            );
+            ensure!(
+                inventory.contains_key(path.strip_prefix(&self.root)?),
+                "source is inside a reserved/excluded build directory: {}",
                 path.display()
             );
             let format = package_format(&self.root, &path)?;
@@ -297,9 +310,23 @@ impl BuildSession {
             )
             .as_bytes(),
         );
+        let resolution_inputs: Vec<_> = self
+            .resolutions
+            .iter()
+            .map(|(path, targets)| {
+                let mut targets: Vec<_> =
+                    targets.iter().map(|(id, target)| (id.0, target)).collect();
+                targets.sort_by_key(|(id, _)| *id);
+                (
+                    path,
+                    &self.sources[path].record.module.facts.dependencies,
+                    targets,
+                )
+            })
+            .collect();
         let mut fingerprints = Fingerprints {
             parse,
-            resolution: resolution_key,
+            resolution: hash(format!("{resolution_key:?}:{resolution_inputs:?}").as_bytes()),
             effects: options.effects.fingerprint(),
             roots: hash(format!("{entries:?}").as_bytes()),
             runtime: hash(include_str!("esm_loader.mjs").as_bytes()),
@@ -348,11 +375,53 @@ impl BuildSession {
             })
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
-        let artifacts = link::esm(&graph, &plan, &options.effects, &sources)?;
+        let before = crate::rewrite::output_parse_count();
+        let artifacts = link::esm_with_source_checker(
+            &graph,
+            &plan,
+            &options.effects,
+            &sources,
+            |file, text| {
+                let path = graph.file_path(file).expect("retained module");
+                let source = &self.sources[path];
+                ensure!(
+                    source.record.source_hash == hash(text.as_bytes()),
+                    "cached source digest mismatch"
+                );
+                let config = source.record.config;
+                ensure!(!config.typescript && !config.jsx, "{}: emission supports JavaScript only at bytes 0..{}; TS/JSX need later backends", path.display(), text.len());
+                ensure!(
+                    graph.file_facts(file) == Some(&source.record.module.facts),
+                    "cached graph facts mismatch"
+                );
+                let source_type = oxc_span::SourceType::from_path(path)?;
+                Ok(ast_segmenter::ParsedModule {
+                    source_type: if config.commonjs {
+                        source_type.with_commonjs(true)
+                    } else {
+                        source_type.with_module(true)
+                    },
+                    body: source.record.module.body,
+                    segments: graph
+                        .file_segments(file)
+                        .expect("retained segments")
+                        .to_vec(),
+                    facts: source.record.module.facts.clone(),
+                })
+            },
+        )?;
         Self::recheck(&self.root, &sources, &inventory)?;
         counters.emissions = 1;
-        counters.emission_source_parses = plan.retention.modules.len();
+        counters.output_parses = crate::rewrite::output_parse_count() - before;
+        let generation = match &self.last {
+            Some(last) => last
+                .generation
+                .checked_add(1)
+                .ok_or_else(|| eyre::eyre!("build generation exhausted"))?,
+            None => 1,
+        };
         let product = Rc::new(BuildProduct {
+            generation,
             graph,
             plan,
             artifacts,
@@ -451,7 +520,8 @@ fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
 }
 
 /// Conservative resolver dependency inventory: all file names and all JSON
-/// config bytes, including package trees and tsconfig extends/references.
+/// config bytes, including package trees. Unsupported tsconfig forms are gated
+/// here instead of silently ignored (or panicking in the compatibility resolver).
 fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
     fn visit(
         root: &Path,
@@ -478,6 +548,9 @@ fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
             if ty.is_dir() {
                 visit(root, &path, out)?;
             } else if ty.is_file() {
+                if name == "tsconfig.json" {
+                    check_tsconfig(&path)?;
+                }
                 out.insert(
                     path.strip_prefix(root)?.to_owned(),
                     if path
@@ -496,6 +569,46 @@ fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
     let mut result = BTreeMap::new();
     visit(root, root, &mut result)?;
     Ok(result)
+}
+
+fn check_tsconfig(path: &Path) -> eyre::Result<()> {
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(path)?)
+        .wrap_err_with(|| format!("{}: tsconfig requires strict JSON", path.display()))?;
+    ensure!(
+        json.get("extends").is_none() && json.get("references").is_none(),
+        "{}: tsconfig extends/references are unsupported by the structural resolver",
+        path.display()
+    );
+    if let Some(paths) = json
+        .pointer("/compilerOptions/paths")
+        .and_then(|v| v.as_object())
+    {
+        let patterns: Vec<_> = paths.keys().collect();
+        for pattern in &patterns {
+            ensure!(pattern.matches('*').count() <= 1 && (!pattern.contains('*') || pattern.ends_with('*')),
+                "{}: unsupported tsconfig path pattern {pattern:?}; only a single terminal wildcard is supported", path.display());
+            if let Some(prefix) = pattern.strip_suffix('*') {
+                ensure!(
+                    !patterns
+                        .iter()
+                        .any(|other| *other != *pattern && other.starts_with(prefix)),
+                    "{}: overlapping tsconfig path patterns are unsupported: {pattern:?}",
+                    path.display()
+                );
+            }
+            if let Some(targets) = paths[*pattern].as_array() {
+                for target in targets.iter().filter_map(serde_json::Value::as_str) {
+                    let maximum = usize::from(pattern.contains('*'));
+                    ensure!(
+                        target.matches('*').count() <= maximum,
+                        "{}: unsupported tsconfig wildcard target {target:?} for {pattern:?}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

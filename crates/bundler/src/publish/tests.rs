@@ -65,6 +65,8 @@ fn publication_noop_mtimes_generation_identity_and_bounded_stale_cleanup() {
         .build_and_publish(&options, &output, &cancel)
         .unwrap();
     assert!(!second.changed);
+    assert_eq!(second.files_written, 0);
+    assert!(first.files_written > 0);
     assert_eq!(same.counters.emissions, 0);
     assert_eq!(snapshot(&output), before);
     assert_eq!(current_directory(&output).unwrap(), first.directory);
@@ -152,7 +154,14 @@ fn cancellation_failure_and_busy_writer_leave_previous_outputs_intact() {
         .unwrap();
     lock.try_lock().unwrap();
     assert!(publish(&output, &build.product.artifacts, &Cancellation::default()).is_err());
+    fs::write(dir.root().join("main.mjs"), "export const broken = ;").unwrap();
+    let busy = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .err()
+        .unwrap();
+    assert!(busy.to_string().contains("another publisher"), "{busy:#}");
     assert_eq!(snapshot(&output), previous);
+    lock.unlock().unwrap();
     drop(lock);
     fs::write(dir.root().join("main.mjs"), "export const broken = ;").unwrap();
     assert!(session
@@ -258,4 +267,23 @@ fn cleanup_never_follows_owned_file_or_directory_symlinks() {
         .unwrap()
         .file_type()
         .is_symlink());
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_unlock_releases_lock_even_while_a_fork_style_descriptor_survives() {
+    let dir = TmpDir::new();
+    let (_, lock) = lock_output(dir.root()).unwrap();
+    let inherited = lock.0.as_ref().unwrap().try_clone().unwrap();
+    lock.release().unwrap();
+    let (_, next) = lock_output(dir.root()).unwrap();
+    next.release().unwrap();
+    drop(inherited);
+    let unwind = std::panic::catch_unwind(|| {
+        let (_, _lock) = lock_output(dir.root()).unwrap();
+        panic!("abort before commit");
+    });
+    assert!(unwind.is_err());
+    let (_, after_unwind) = lock_output(dir.root()).unwrap();
+    after_unwind.release().unwrap();
 }

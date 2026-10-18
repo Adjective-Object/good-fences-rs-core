@@ -54,25 +54,34 @@ let artifacts = &result.product.artifacts;
 ```
 
 The canonical project root is a bounded dependency/configuration boundary.
-All resolved sources must remain inside it. Symlinks (including directory
+All resolved sources must remain inside it. In-tree symlinks (including directory
 symlinks) are explicitly rejected by this orchestration API; the lower-level
 resolver retains its separate policy. Nearest package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
 supported package/tsconfig forms (not every Node resolver feature; e.g. bare
 string `exports` is currently rejected). JSON/JSONC bytes and all file names
 under the root conservatively invalidate resolution, including package trees,
-config ancestry, new files and deleted targets. `.git`, `target`, sidecars and
+config ancestry, new files and deleted targets. The public API gates unsupported
+tsconfig forms instead of silently ignoring them: use strict `tsconfig.json`
+JSON with direct `compilerOptions.baseUrl`/`paths`; no extends/references,
+overlapping mappings, multiple wildcards or nonterminal wildcard patterns.
+Other TypeScript compiler options are not runtime transforms.
+`.git`, `target`, sidecars and
 reserved `.bundler-*` publication directories are excluded. Keep unrelated large
 trees outside the project root; this is measured coarse inventory, not a watcher.
+Source entries/dependencies inside excluded directories are rejected.
 
 Source bytes and effective parser config key in-memory and disk parse reuse.
 `Fingerprints` independently identifies parse, resolution, effects, entry roots,
 fixed Node runtime and emitter/output inputs. Source caches never contain policy.
 The session reports actual extraction misses, memory/disk hits, dependency
-resolution calls, linker calls and linker source-check parses separately.
-Policy-only changes perform **zero extraction/resolution**, but deliberately
-revalidate retained source in the emitter. No-op builds reuse the successful
-product and perform zero parsing/resolution/emission. Changed/deleted modules'
+resolution calls, linker calls and generated-output/recipe parse calls separately.
+It passes hash-checked existing owned cache facts/ranges into the same linker,
+not a competing IR/pipeline; unchanged sources are **not re-extracted** for
+emission. Policy-only changes perform **zero source parsing/resolution**.
+Generated output is still parsed/semantically validated after transforms.
+No-op builds reuse the successful product and perform zero JavaScript parsing,
+dependency resolution or emission. Changed/deleted modules'
 transitive prior users come from the shared reverse index. Resolution changes
 conservatively invalidate all prior modules. Derived graph/effects/partition/
 emission currently rebuild wholesale on any changed key; no fine-grained
@@ -84,6 +93,10 @@ later valid builds, not as an error fallback. Cache-write failures are explicit
 `warnings`. Sources and config inventory are rechecked before success, not
 locked against noncooperating editors. A session has one mutable owner and its
 shared products use `Rc` (not cross-thread sharing).
+Each changed successful snapshot has a monotonic session-local
+`BuildProduct::generation`; no-op results share the same product/generation.
+Graph-local nodes, handles and plans belong to one immutable product: do not
+transfer them between generations or independent sessions.
 
 ## Transactional publication
 
@@ -94,6 +107,7 @@ let mut options = BuildOptions::default();
 options.entries.insert("main".into(), Entry { path: "main.mjs".into(), namespace: true });
 let output = session.root().join(".bundler-output");
 let (build, published) = session.build_and_publish(&options, &output, &Cancellation::default())?;
+for warning in build.warnings.iter().chain(&published.warnings) { eprintln!("{warning}"); }
 // Run: node <published.entries["main"]>
 assert_eq!(current_directory(&output)?, published.directory);
 // Only after runtimes using PRIOR generations have stopped:
@@ -111,12 +125,20 @@ there is deliberately no set of independently overwritten public launcher files.
 No-op publication verifies bytes and preserves artifact and pointer mtimes.
 Concurrent publishers use a nonblocking OS file lock: the loser gets an `eyre`
 error and may retry; a crashed process releases its lock automatically.
+Locks explicitly unlock before close (and during unwinding), so fork-inherited
+descriptors cannot transiently retain a completed writer's lock.
+`build_and_publish` holds that lock across the entire build, rejecting overlapping
+builds for the same output before source parsing. Separate `build`/`publish`
+calls intentionally permit offline snapshots; sequential snapshot publications
+follow commit order, not a source-event freshness ordering.
 
 Errors/cancellation before the pointer commit leave the prior generation and
 pointer intact. Cancellation is checked before/after building, per staged file
 and before commit, not an interrupt inside parsing. Cancellation arriving after
 commit cannot roll back success. Publication is atomic visibility, **not**
 directory-fsync/power-loss durability or an adversarial-filesystem transaction.
+An OS unlock failure after success is an explicit `Published::warnings` entry,
+not a failed transaction that misleadingly implies rollback.
 Crash/unwind staging orphans are excluded from watching and never guessed/swept.
 Detected cleanup failures are attached to the publication error.
 
@@ -134,6 +156,83 @@ Use `publish::is_generated_artifact(path, output)` in watchers. In-project outpu
 for `build_and_publish` must live under `.bundler-*` or `target`, to match source
 inventory exclusions. A standalone `publish` can use any explicitly supplied
 output directory. No user files beside generated generations are removed.
+
+## Release gates and measured performance
+
+From the repository root (Node 22.15+, repository Rust toolchain):
+
+```sh
+./scripts/bundler-release-check
+mkdir -p target/p1-test-tmp
+TMPDIR="$PWD/target/p1-test-tmp" cargo bench -p bundler --bench incremental
+```
+
+The release script tests bundler/parser/resolver/cache/shared graphs/tracker/
+good-fences compatibility, builds the public driver, runs both harness regression
+suites, native baselines, public-pipeline differential mode, focused all-target
+clippy and mandatory `spot-check` (including a workspace **check**, not a full
+workspace test suite). Final local evidence: **383 scoped Rust tests** (94
+bundler), **43 harness regressions**, **12 native + 12 differential contracts /
+15 emitted executions**, concurrent-entry identity and four diagnostic cases.
+Zero failed/ignored/unsupported cases in these gates. Existing dependency
+lifetime/dead-code warnings remain; no unrelated CI/toolchain health claim.
+
+`cargo bench` uses a custom standard benchmark executable, not criterion. Seven
+fresh managed project roots per scenario contain a 64-module `export *` chain,
+an entry and a tsconfig-selected dependency (**66 reached sources / 65 requests**).
+Each sample runs cold parse-cache → new-session warm disk cache → same-session
+no-op → one local declaration edit → one added public export → tsconfig target
+switch. Timings include actual source/config IO, the full public pipeline and
+transactional publication; compilation, fixture setup and runtime execution are
+outside the timed section. “Cold” means no source sidecars/session/output,
+**not** flushed OS caches. Warm output already exists. Source/derived caches are
+not faked; assertions verify actual public counters.
+
+Measured on Linux 7.2.8 x86_64, AMD Ryzen 7 7840U (8 cores / 16 threads),
+Rust `1.97.0-nightly (f53b654a8 2026-04-30)`, Cargo `1.97.0-nightly`, bench
+profile optimized + debuginfo; Node conformance runtime v22.22.2:
+
+| Scenario | Median total ms | Min–max ms | Build portion at median ms |
+| --- | ---: | ---: | ---: |
+| Cold | 127.282 | 122.986–134.909 | 121.837 |
+| Warm | 72.650 | 70.344–76.839 | 70.382 |
+| No-op | 4.824 | 4.766–5.058 | 2.600 |
+| Local edit | 73.442 | 70.536–76.229 | 66.042 |
+| Export edit | 76.044 | 74.555–82.988 | 70.314 |
+| Config edit | 75.966 | 74.153–77.682 | 70.011 |
+
+| Scenario | Source parses | Resolutions | Link calls | Output/recipe parses | Artifact writes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cold | 66 | 65 | 1 | 134 | 3 |
+| Warm | 0 | 65 | 1 | 134 | 0 |
+| No-op | 0 | 0 | 0 | 0 | 0 |
+| Local edit | 1 | 1 | 1 | 134 | 3 |
+| Export edit | 1 | 0 | 1 | 134 | 3 |
+| Config edit | 1 | 65 | 1 | 134 | 3 |
+
+Warm has 66 disk hits; no-op has 66 memory hits; each edit has 65 memory hits.
+Artifact writes count actual staged files, excluding atomic pointer metadata.
+The first measurement exposed 66 redundant emitter source re-extractions;
+P9.4 removed those using the already checked cached facts, with exact artifact/
+runtime parity against the original source-checking linker. Remaining 134 output
+validation/comment scans are real and separately counted. No timing improvement
+percentage is inferred from these small hardware-dependent samples.
+
+This is a correctness-first baseline, not fine-grained later-layer incrementality:
+config changes re-resolve all requests and any derived key change rebuilds the
+whole graph/effects/partition/output, while source parsing stays selective.
+Inventory and success rechecks walk the bounded project twice. Generated-output
+validation and ownership verification remain whole-product operations.
+No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
+
+**Limits:** Linux was executed; Windows atomic replacement/OS locks rely on
+standard-library/tempfile contracts but were not runtime-tested. No browser,
+standalone single-file output, TS/JSX lowering, assets/native addons, executable
+externals, import.meta or source maps. Native host hooks use synchronous JSON
+payload reads rather than demand-minimal asynchronous fetching. CJS bridge
+semantics intentionally differ from native namespace exotica as documented below.
+Old-reader quiescence is mandatory before pruning immutable prior generations;
+publication promises atomic visibility, not power-loss durability.
 
 ## CommonJS runtime
 
@@ -216,8 +315,11 @@ At OXC revision `87f065ebf7cde21d1229322f4c7ee58baca5648e`,
 `Codegen::build(&Program)` prints a whole arena-owned AST and its options document
 only partial leading-comment preservation. Source edits fit our owned occurrence
 spans without reconstructing/rebinding an AST. We therefore use edits, not the
-printer/transformer. Reparse actual source on cache hits; source facts alone
-cannot validate the output. Output is JavaScript ESM/CJS only: no TypeScript or JSX
+printer/transformer. Low-level `emit::single_module` / `link::esm` reparse source
+to check caller-supplied graph facts. `BuildSession` instead reuses its own
+hash-checked validated source-cache records. Both paths parse/semantically check
+generated output; source facts alone cannot validate transformed code.
+Output is JavaScript ESM/CJS only: no TypeScript or JSX
 lowering. The emitter must reject those language modes. No source maps are
 generated or advertised; generated offsets are not original-source positions.
 Emission removes stale `sourceMappingURL`/`sourceURL` comment directives; it
@@ -304,8 +406,9 @@ Nested sites stay deferred; unreachable sites emit nothing. Successfully read
 JSON payloads are cached per runtime, without evaluating co-located modules.
 Missing/read/JSON failures retry on subsequent native loads; successfully cached
 payload text is immutable for that artifact instance. Compilation errors reject,
-and execution errors remain cached by native ESM; rebuilding requires a new
-published bundle directory, not in-place repair of cached payloads.
+and execution errors remain cached by native ESM. Changed artifacts produce a
+new immutable published generation; unchanged content intentionally keeps the
+same directory/native jobs, not an in-place repair of cached payloads.
 Externals, TS/JSX and other source-policy unsupported forms still fail with
 diagnostics. Fetching optimization is not claimed.
 This backend is not a browser/standalone-file target.
@@ -405,7 +508,7 @@ sets are a runtime schedule. Distinct module records in one chunk (including
 deferred CJS require targets) must retain separate once-only evaluation state.
 P6 supplies Node-native ESM rewriting/instantiation (above); P7 supplies CJS
 factories/proxies/cache. P8 supplies source dynamic loading and native TLA scheduling.
-Only the documented synchronous ESM/CJS subset has emitted-runtime evidence.
+The documented ESM/CJS, dynamic-import and TLA subset has emitted-runtime evidence.
 Use manifests only with the same graph instance and after `is_current` succeeds;
 recompute the partition/manifest after entry, graph, or effect-policy changes.
 

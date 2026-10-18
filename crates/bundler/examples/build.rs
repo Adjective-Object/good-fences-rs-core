@@ -39,11 +39,15 @@ fn main() -> eyre::Result<()> {
             "entries": published.entries,
             "runtime": published.runtime,
             "directory": published.directory,
+            "generation": build.product.generation,
             "sourceParses": build.counters.source_parses,
             "diskHits": build.counters.disk_hits,
             "resolutions": build.counters.resolutions,
             "emissions": build.counters.emissions,
+            "outputParses": build.counters.output_parses,
+            "artifactWrites": published.files_written,
             "warnings": build.warnings,
+            "publicationWarnings": published.warnings,
         })
     );
     Ok(())

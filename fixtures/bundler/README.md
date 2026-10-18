@@ -97,7 +97,7 @@ Node preload/search/coverage environment overrides are removed. Each entrypoint
 has a five-second timeout and a 1 MiB output-buffer limit; nonzero exits, signals,
 stderr, and output mismatches fail the case.
 
-Future adapters must separately bundle these sources and execute the resulting
+Bundler adapters must separately bundle these sources and execute the resulting
 entrypoints, comparing the same observable output. They must explicitly declare
 unsupported capabilities, not count skipped fixtures as passes. Linking,
 chunking, diagnostics, incremental invalidation, and bundler-only behavior need

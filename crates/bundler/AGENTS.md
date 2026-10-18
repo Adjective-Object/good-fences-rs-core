@@ -4,11 +4,20 @@ Consume owned syntax facts and checked shared graph edges, never UsedTag.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
 separate layer fingerprints, inventory config/add/delete changes, and derive
 affected users from the existing reverse index. Never return old success on error.
-Later-layer invalidation is deliberately coarse; counters separate extraction
-from required emitter source validation. Project roots are bounded/canonical;
+Later-layer invalidation is deliberately coarse; counters separate source
+extraction from generated-output/recipe parsing. Reuse hash-checked cache records
+in session emission; public low-level link::esm still validates caller source.
+Project roots are bounded/canonical;
 symlinks and resolved sources outside the root are rejected.
+Product generations are session-local immutable snapshots; never transfer
+graph-local handles/plans between products. No-op retains the same generation.
+Gate unsupported tsconfig forms rather than silently ignoring extends/references
+or allowing nondeterministic overlapping patterns/compatibility-resolver panics.
 Publish immutable generations through one atomic ownership pointer; OS locking
-rejects competing publishers. Never overwrite active generations. Stale cleanup
+rejects competing publishers and spans the whole build_and_publish operation.
+Explicitly unlock before closing descriptors, including unwind; forked child
+descriptor copies must not keep a completed writer locked. Report release errors.
+Never overwrite active generations. Stale cleanup
 is explicit after reader quiescence and touches only validated named unmodified
 owned files/empty parents, never recursive directory deletion. Source inventory
 and watchers exclude reserved .bundler-* paths and source sidecars.

@@ -6,7 +6,8 @@ current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
 **P0–P8 are complete for the documented Node 22.15+ ESM/CJS target, including
-source dynamic imports and native TLA scheduling. P9 remains pending.** Both
+source dynamic imports and native TLA scheduling. P9.1–P9.4 are now complete
+for the documented support matrix.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -353,7 +354,8 @@ workspace test success.
   identities/counters, no-op reuse, warm parse reuse, reverse-user invalidation,
   deletion/recreation/rename, package exports/type and tsconfig edits are tested.
   Later graph/retention/output rebuilding and JSON/file-name inventory are
-  deliberately coarse; emitter source validation is separately counted.
+  deliberately coarse; generated-output validation is separately counted
+  (P9.4 removes redundant emitter source re-extraction).
 - [x] **P9.2 — Publish transactional outputs.** Depends: P9.1.
   Stage only owned generated artifacts and publish after success; clean stale
   chunks safely. Tests: cancellation/failure, stale async chunks, source/cache
@@ -373,9 +375,21 @@ workspace test success.
   same-runtime concurrent multi-entry case and four bundler-only diagnostics.
   Explicit unsupported results are not passes. Baseline behavior/provenance/
   licenses are unchanged; Node 22 + repository-toolchain CI is wired separately.
-- [ ] **P9.4 — Benchmark and release-gate.** Depends: P9.3, P3.4.
+- [x] **P9.4 — Benchmark and release-gate.** Depends: P9.3, P3.4.
   `cargo bench` cold/warm/no-op/local/export/config edits with parse/resolution/
   emit counters; no criterion. Update library READMEs, concise adopted AGENTS
   contracts and support matrix. Run targeted tests and repository-required
   `./scripts/spot-check` before future commits. No heuristic chunk optimization
   until correctness is established and a separate plan authorizes it.
+  Seven real `cargo bench` samples/scenario publish timings and extraction/
+  resolution/link/output-parse/artifact-write counters in the library README.
+  Redundant source re-extraction during session emission was removed using the
+  existing checked cache facts; full disabled-cache and original checked-emitter
+  parity is tested after edits. `./scripts/bundler-release-check` passes 383
+  scoped Rust tests, 43 harness regressions, 12 native + 12 differential cases/
+  15 emitted executions, same-runtime identity, four diagnostics, focused clippy
+  and mandatory spot-check. Limits are explicit: coarse later layers, bounded
+  canonical roots/limited direct tsconfig forms, Node-only synchronous payload
+  reads/intentional CJS bridge policy, untested Windows publication, quiescent
+  cleanup and atomic visibility (not power-loss durability). No full-workspace
+  test suite, browser/transform/asset/externals or heuristic optimization claim.

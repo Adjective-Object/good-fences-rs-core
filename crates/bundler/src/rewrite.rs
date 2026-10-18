@@ -10,6 +10,18 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
 
+thread_local! {
+    static OUTPUT_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn output_parse_count() -> usize {
+    OUTPUT_PARSES.with(std::cell::Cell::get)
+}
+
+pub(crate) fn count_output_parse() {
+    OUTPUT_PARSES.with(|count| count.set(count.get() + 1));
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edit {
     pub span: Span,
@@ -53,6 +65,7 @@ pub fn apply(source: &str, edits: &[Edit]) -> eyre::Result<String> {
 
 /// Validate both parser and early semantic errors as JavaScript ESM, not TS/JSX.
 pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
+    count_output_parse();
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
     ensure!(
@@ -74,6 +87,7 @@ pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
 }
 
 pub(crate) fn source_hint_edits(source: &str) -> Vec<Edit> {
+    count_output_parse();
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
     parsed

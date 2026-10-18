@@ -22,9 +22,11 @@ fn options() -> BuildOptions {
 
 fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
     let incremental = session.build(options).unwrap();
+    let mut full_options = options.clone();
+    full_options.cache = CacheMode::Disabled;
     let full = BuildSession::new(session.root())
         .unwrap()
-        .build(options)
+        .build(&full_options)
         .unwrap();
     assert_eq!(incremental.product.fingerprints, full.product.fingerprints);
     assert_eq!(incremental.product.artifacts, full.product.artifacts);
@@ -36,6 +38,21 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         format!("{:?}", incremental.product.graph.edges()),
         format!("{:?}", full.product.graph.edges())
     );
+    assert_eq!(
+        observe(&incremental.product.artifacts),
+        observe(&full.product.artifacts)
+    );
+    let graph = &incremental.product.graph;
+    let sources = graph
+        .module_ids()
+        .map(|file| {
+            let path = graph.file_path(file).unwrap().to_owned();
+            let source = fs::read_to_string(&path).unwrap();
+            (path, source)
+        })
+        .collect();
+    let checked = link::esm(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
+    assert_eq!(incremental.product.artifacts, checked);
     incremental
 }
 
@@ -77,14 +94,29 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     assert_eq!(same.counters.source_parses, 0);
     assert_eq!(same.counters.resolutions, 0);
     assert_eq!(same.counters.emissions, 0);
+    assert_eq!(same.counters.output_parses, 0);
     assert!(Rc::ptr_eq(&same.product, &cold.product));
+    assert_eq!(same.product.generation, cold.product.generation);
     let warm = BuildSession::new(root).unwrap().build(&options).unwrap();
     assert_eq!(warm.counters.source_parses, 0);
     assert_eq!(warm.counters.disk_hits, 2);
     options.effects = EffectPolicy::parse(["*.appendChild(...)"]).unwrap();
+    let sidecar = segment_cache::sidecar_path(&root.join("dep.mjs"));
+    let cache_before = (
+        fs::read(&sidecar).unwrap(),
+        fs::metadata(&sidecar).unwrap().modified().unwrap(),
+    );
     let policy = parity(&mut session, &options);
     assert_eq!(policy.counters.source_parses, 0);
     assert_eq!(policy.counters.resolutions, 0);
+    assert!(policy.counters.output_parses > 0);
+    assert_eq!(
+        (
+            fs::read(&sidecar).unwrap(),
+            fs::metadata(&sidecar).unwrap().modified().unwrap()
+        ),
+        cache_before
+    );
     assert_eq!(
         policy.product.fingerprints.parse,
         cold.product.fingerprints.parse
@@ -101,6 +133,10 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     let roots = parity(&mut session, &options);
     assert_eq!(roots.counters.source_parses, 0);
     assert_eq!(roots.counters.resolutions, 0);
+    assert_eq!(
+        roots.product.fingerprints.runtime,
+        cold.product.fingerprints.runtime
+    );
     assert_ne!(
         roots.product.fingerprints.roots,
         policy.product.fingerprints.roots
@@ -108,6 +144,7 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     write(root, "dep.mjs", "export const value = 2;");
     let local = parity(&mut session, &options);
     assert_eq!(local.counters.source_parses, 1);
+    assert!(local.product.generation > roots.product.generation);
     assert_eq!(observe(&local.product.artifacts), b"2\n");
     assert!(local.invalidated.contains(&root.join("main.mjs")));
     write(root, "dep.mjs", "export const renamed = 2;");
@@ -155,6 +192,7 @@ fn delete_recreate_rename_and_old_success_after_failure() {
         "import {value} from './renamed.mjs'; console.log(value);",
     );
     let renamed = parity(&mut session, &options);
+    assert!(renamed.product.generation > first.product.generation);
     assert!(renamed.invalidated.contains(&dir.root().join("dep.mjs")));
     assert!(renamed
         .product
@@ -238,4 +276,117 @@ fn package_exports_type_tsconfig_and_options_invalidate_independently() {
         config.product.fingerprints.resolution,
         tsconfig.product.fingerprints.resolution
     );
+}
+
+#[test]
+fn unsupported_configuration_is_fallible_not_silently_ignored() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "console.log('valid');");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let options = options();
+    let valid = session.build(&options).unwrap();
+    for json in [
+        r#"{"extends":"./base.json","compilerOptions":{}}"#,
+        r#"{"references":[],"compilerOptions":{}}"#,
+        r#"{"compilerOptions":{"paths":{"a*b*c":["x"]}}}"#,
+        r#"{"compilerOptions":{"paths":{"a*b":["x"]}}}"#,
+        r#"{"compilerOptions":{"paths":{"a/*":["x"],"a/sub/*":["y"]}}}"#,
+        r#"{"compilerOptions":{"paths":{"a/*":["x/*/*"]}}}"#,
+        r#"{"compilerOptions":{"paths":{"exact":["x/*"]}}}"#,
+    ] {
+        write(dir.root(), "tsconfig.json", json);
+        assert!(session.build(&options).is_err(), "{json}");
+    }
+
+    fs::remove_file(dir.root().join("tsconfig.json")).unwrap();
+    assert_eq!(
+        session.build(&options).unwrap().product.artifacts,
+        valid.product.artifacts
+    );
+    write(
+        dir.root(),
+        ".bundler-hidden/entry.mjs",
+        "console.log('hidden');",
+    );
+    let mut hidden = options.clone();
+    hidden.entries.get_mut("main").unwrap().path = ".bundler-hidden/entry.mjs".into();
+    assert!(session.build(&hidden).is_err());
+    let mut browser = options.clone();
+    browser.resolver.target_env = TargetEnv::Browser;
+    assert!(session.build(&browser).is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("main.mjs", dir.root().join("alias.mjs")).unwrap();
+        assert!(session.build(&options).is_err());
+    }
+}
+
+#[test]
+fn async_root_add_remove_and_entry_replacement_match_full_rebuild() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const load = () => import('./lazy.mjs');",
+    );
+    write(
+        dir.root(),
+        "lazy.mjs",
+        "export const nested = () => import('./nested.mjs');",
+    );
+    write(dir.root(), "nested.mjs", "export const value = 1;");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut options = options();
+    let first = parity(&mut session, &options);
+    assert_eq!(first.product.artifacts.async_facades.len(), 2);
+    options.entries.insert(
+        "second".into(),
+        Entry {
+            path: "lazy.mjs".into(),
+            namespace: true,
+        },
+    );
+    let entries = parity(&mut session, &options);
+    assert_eq!(entries.counters.source_parses, 0);
+    assert_eq!(entries.counters.resolutions, 0);
+    assert_ne!(
+        entries.product.plan.node_roots,
+        first.product.plan.node_roots
+    );
+    options.entries.remove("second");
+    write(dir.root(), "main.mjs", "export const value = 2;");
+    fs::remove_file(dir.root().join("lazy.mjs")).unwrap();
+    fs::remove_file(dir.root().join("nested.mjs")).unwrap();
+    let removed = parity(&mut session, &options);
+    assert!(removed.product.artifacts.async_facades.is_empty());
+    assert_eq!(removed.product.graph.file_count(), 1);
+    assert!(removed.invalidated.contains(&dir.root().join("lazy.mjs")));
+}
+
+#[test]
+fn package_classification_only_edit_reparses_only_effective_mode_change() {
+    let dir = TmpDir::new();
+    write(dir.root(), "package.json", r#"{"type":"module"}"#);
+    write(dir.root(), "main.mjs", "import './dep.js';");
+    write(dir.root(), "dep.js", "console.log('format');");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let options = options();
+    let esm = parity(&mut session, &options);
+    let sidecar = segment_cache::sidecar_path(&dir.root().join("dep.js"));
+    let previous = fs::read(&sidecar).unwrap();
+    write(dir.root(), "package.json", r#"{"type":"commonjs"}"#);
+    let cjs = parity(&mut session, &options);
+    assert_eq!(cjs.counters.source_parses, 1);
+    assert_eq!(cjs.counters.memory_hits, 1);
+    assert_ne!(
+        cjs.product.fingerprints.parse,
+        esm.product.fingerprints.parse
+    );
+    let dep = cjs
+        .product
+        .graph
+        .file_id(&dir.root().join("dep.js"))
+        .unwrap();
+    assert!(cjs.product.graph.file_facts(dep).unwrap().commonjs);
+    assert_ne!(fs::read(sidecar).unwrap(), previous);
 }

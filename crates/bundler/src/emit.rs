@@ -337,6 +337,7 @@ fn pure_chain(callee: &str, optional: bool, tail: &str, fresh: &mut Fresh) -> ey
     use oxc_parser::Parser;
     use oxc_span::SourceType;
     let allocator = Allocator::default();
+    rewrite::count_output_parse();
     let expression = Parser::new(&allocator, callee, SourceType::mjs())
         .parse_expression()
         .map_err(|e| eyre::eyre!("PURE callee parser diagnostics: {e:?}"))?;

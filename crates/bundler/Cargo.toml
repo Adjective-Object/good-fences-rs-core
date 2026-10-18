@@ -26,3 +26,7 @@ tempfile = "3.27.0"
 [dev-dependencies]
 insta = { version = "1", default-features = false }
 test_tmpdir = { path = "../test_tmpdir" }
+
+[[bench]]
+name = "incremental"
+harness = false

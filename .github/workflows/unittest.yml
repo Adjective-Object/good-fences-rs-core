@@ -33,12 +33,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-05-01
-      - name: Build the public library driver
-        run: cargo build -p bundler --example build
-      - name: Test baseline and differential harnesses
-        run: node --test scripts/bundler-fixtures.test.mjs scripts/bundler-differential.test.mjs
-      - name: Compare native and emitted portable fixtures
-        run: node scripts/bundler-differential.mjs
+      - name: Run bundler and source-analysis release gates
+        run: ./scripts/bundler-release-check
   checks:
     strategy:
       fail-fast: false

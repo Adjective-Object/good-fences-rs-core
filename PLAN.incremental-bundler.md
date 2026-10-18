@@ -8,8 +8,10 @@ increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
 commits: P0–P7 are verified for the documented synchronous Node ESM/CJS target;
 P8.1 source dynamic loading and P8.2 native TLA scheduling are verified;
-P9 remains pending.
-This bounded phase completes P8.1–P8.2 and stops before P9.
+P9.1–P9.4 now complete public incremental orchestration, immutable transactional
+publication, differential conformance and measured release gates for that
+documented target/support matrix. No browser, TS/JSX transform, asset/external
+emission, universal Node resolution or fine-grained later-layer speedup is claimed.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -638,6 +640,27 @@ baseline semantics. Twelve cases/fifteen executions, concurrent multi-entry
 identity and four diagnostic cases are verified without modifying upstream
 sources or provenance. Unsupported results require explicit ID/reason mappings;
 unexpected failures never become skips.
+P9.4 adds `cargo bench -p bundler --bench incremental` (seven real end-to-end
+samples per cold/warm/no-op/local/export/config scenario), and
+`./scripts/bundler-release-check`. First measurements exposed redundant emitter
+source reparsing: the session now passes its hash-checked owned cached records
+through the same linker, while low-level `link::esm` keeps caller-source checks.
+Generated-output validation remains mandatory and explicitly counted. Full
+cache-disabled reconstruction, exact graphs/root sets/artifacts, native emitted
+observations and the original source-checking emitter agree after edits.
+Unsupported config forms are explicit errors: strict direct tsconfig paths only,
+no extends/references, overlapping/nonterminal/multiple-wildcard patterns.
+Bench medians (ms, Linux Ryzen7840U/Rust nightly2026-05-01) are cold127.282,
+warm72.650, no-op4.824, local73.442, export76.044, config75.966. No-op has
+zero parse/resolution/link/output-parse/artifact writes; each edit extracts one
+source. Later layers remain deliberately coarse and measured. Library README
+contains min/max, counters, reproduction commands and all supported-target limits.
+Final release gates: 383 scoped Rust tests (94 bundler), 43 harness regressions,
+12 native + 12 differential contracts/15 emitted executions, same-runtime
+multi-entry identity, four diagnostics, focused all-target clippy and spot-check
+(51 parser tests + workspace check), with zero failures/ignored/unsupported cases.
+Linux was executed; Windows publication was not runtime-tested. Old-reader
+quiescence is required for stale pruning; no power-loss durability is promised.
 
 Build layer-specific fingerprints and invalidation:
 

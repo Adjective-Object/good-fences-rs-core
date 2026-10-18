@@ -128,8 +128,9 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
 
 ## Incremental bundler
 
-The incremental bundler is a library-only phased project built on the
-segment-aware unused tracker, not yet a complete bundler product. See the
+The incremental bundler is a library-only Node 22.15+ implementation built on the
+segment-aware shared source graph. P0–P9 are complete for its documented support
+matrix; it is not a browser/general-purpose transpiling bundler. See the
 [implementation plan](PLAN.incremental-bundler.md) and
 [phase checklist](TODO.incremental-bundler.md).
 Phase 0 establishes [portable upstream runtime fixtures](fixtures/bundler/README.md)
@@ -144,7 +145,19 @@ runtime tests. P7 adds opaque CJS interop/cache and P8.1 connects literal source
 dynamic imports to canonical native module identities. P8.2 preserves source TLA
 using native dependency/SCC scheduling, with diagnostics for require of async ESM.
 All twelve portable fixtures now execute generated artifacts (fifteen entries).
-Transactional incremental publication/orchestration (P9) remains unimplemented.
+P9 adds public `BuildSession::{build,build_and_publish}`, independent layer keys
+and real counters, selective parse reuse, immutable transactional generations
+with ownership-bounded quiescent cleanup, and a separate public-pipeline
+differential harness. No-op builds perform zero source/output JavaScript parses,
+dependency resolutions, links or artifact writes; config
+edits conservatively re-resolve and rebuild later layers.
+Run `./scripts/bundler-release-check` for the scoped release gates,
+`cargo build -p bundler --example build && node scripts/bundler-differential.mjs`
+for differential conformance, and
+`mkdir -p target/p1-test-tmp && TMPDIR="$PWD/target/p1-test-tmp" cargo bench -p bundler --bench incremental`
+for reproducible cold/warm/no-op/local/export/config measurements.
+The [bundler README](crates/bundler/README.md#release-gates-and-measured-performance)
+records actual timings, counters, public usage and support/interop/platform limits.
 This does not change the
 tracker/CLI's Node requirements.
 P1 provides checked owned parse facts; P2 adds the opt-in

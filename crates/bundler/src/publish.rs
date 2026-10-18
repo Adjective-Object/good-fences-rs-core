@@ -46,6 +46,10 @@ pub struct Published {
     pub runtime: PathBuf,
     pub entries: BTreeMap<String, PathBuf>,
     pub changed: bool,
+    /// Successfully staged artifact files; excludes the atomic pointer metadata.
+    pub files_written: usize,
+    /// Commit succeeded; an OS lock-release failure is reported, not rolled back.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,8 +67,8 @@ enum Phase {
     BeforeCommit,
 }
 
-/// Publication is nonblocking single-writer: a competing publisher receives an
-/// error, not last-writer-wins. Lock lifetime is the OS file-handle lifetime.
+/// Publication is nonblocking single-writer: an overlapping publisher receives
+/// an error. Sequential explicit snapshots follow commit order.
 pub fn publish(
     output: &Path,
     artifacts: &Artifacts,
@@ -104,10 +108,17 @@ impl BuildSession {
                 "in-project output must be inside a reserved .bundler-* or target directory"
             );
         }
-        let build = self.build(options)?;
-        cancel.check()?;
-        let published = publish(output, &build.product.artifacts, cancel)?;
-        Ok((build, published))
+        let (output, lock) = lock_output(&absolute)?;
+        let result = (|| {
+            let build = self.build(options)?;
+            cancel.check()?;
+            let published = publish_locked(&output, &build.product.artifacts, cancel, |_| Ok(()))
+                .wrap_err_with(|| {
+                format!("publication failed; cache warnings: {:?}", build.warnings)
+            })?;
+            Ok((build, published))
+        })();
+        finish_lock(lock, result, |(_, published)| &mut published.warnings)
     }
 }
 
@@ -125,7 +136,7 @@ fn publish_inner(
     output: &Path,
     artifacts: &Artifacts,
     cancel: &Cancellation,
-    mut hook: impl FnMut(Phase) -> eyre::Result<()>,
+    hook: impl FnMut(Phase) -> eyre::Result<()>,
 ) -> eyre::Result<Published> {
     cancel.check()?;
     ensure!(
@@ -145,6 +156,54 @@ fn publish_inner(
             "entry is not an owned artifact"
         );
     }
+    let (output, lock) = lock_output(output)?;
+    let result = publish_locked(&output, artifacts, cancel, hook);
+    finish_lock(lock, result, |published| &mut published.warnings)
+}
+
+struct OutputLock(Option<File>);
+
+impl OutputLock {
+    fn release(mut self) -> eyre::Result<()> {
+        self.0
+            .take()
+            .expect("held output lock")
+            .unlock()
+            .wrap_err("output lock release failed")
+    }
+}
+
+impl Drop for OutputLock {
+    fn drop(&mut self) {
+        if let Some(file) = &self.0 {
+            if let Err(error) = file.unlock() {
+                eprintln!("bundler: output lock release during unwind failed: {error}");
+            }
+        }
+    }
+}
+
+fn finish_lock<T>(
+    lock: OutputLock,
+    result: eyre::Result<T>,
+    warnings: impl FnOnce(&mut T) -> &mut Vec<String>,
+) -> eyre::Result<T> {
+    let release = lock.release();
+    match result {
+        Ok(mut value) => {
+            if let Err(error) = release {
+                warnings(&mut value).push(format!("{error:#}"));
+            }
+            Ok(value)
+        }
+        Err(error) => Err(match release {
+            Ok(()) => error,
+            Err(release) => error.wrap_err(format!("output lock cleanup also failed: {release:#}")),
+        }),
+    }
+}
+
+fn lock_output(output: &Path) -> eyre::Result<(PathBuf, OutputLock)> {
     fs::create_dir_all(output)?;
     let output = output.canonicalize()?;
     no_symlink(&output.join(LOCK))?;
@@ -156,7 +215,17 @@ fn publish_inner(
         .open(output.join(LOCK))?;
     lock.try_lock()
         .wrap_err("another publisher owns this output directory")?;
-    let previous = read_state(&output)?;
+    Ok((output, OutputLock(Some(lock))))
+}
+
+fn publish_locked(
+    output: &Path,
+    artifacts: &Artifacts,
+    cancel: &Cancellation,
+    mut hook: impl FnMut(Phase) -> eyre::Result<()>,
+) -> eyre::Result<Published> {
+    cancel.check()?;
+    let previous = read_state(output)?;
     let owned: BTreeMap<_, _> = artifacts
         .files
         .iter()
@@ -167,6 +236,7 @@ fn publish_inner(
         hex(&hash(&serde_json::to_vec(&owned)?))
     );
     let destination = output.join(&generation);
+    let mut files_written = 0;
     let mut state = previous.clone().unwrap_or(State {
         owner: OWNER.into(),
         current: generation.clone(),
@@ -181,7 +251,7 @@ fn publish_inner(
             "refusing to adopt unowned generation {}",
             destination.display()
         );
-        let stage = create_stage(&output)?;
+        let stage = create_stage(output)?;
         let staged = (|| {
             for (path, text) in &artifacts.files {
                 cancel.check()?;
@@ -190,6 +260,7 @@ fn publish_inner(
                 let mut file = OpenOptions::new().write(true).create_new(true).open(file)?;
                 file.write_all(text.as_bytes())?;
                 file.sync_all()?;
+                files_written += 1;
             }
             hook(Phase::Staged)?;
             cancel.check()?;
@@ -225,7 +296,7 @@ fn publish_inner(
     state.current = generation.clone();
     let changed = previous.as_ref() != Some(&state);
     if changed {
-        if let Err(error) = write_state(&output, &state) {
+        if let Err(error) = write_state(output, &state) {
             if previous
                 .as_ref()
                 .is_none_or(|s| !s.generations.contains_key(&generation))
@@ -244,6 +315,8 @@ fn publish_inner(
             .map(|(n, p)| (n.clone(), destination.join(p)))
             .collect(),
         changed,
+        files_written,
+        warnings: vec![],
     })
 }
 
@@ -267,16 +340,13 @@ pub struct Cleanup {
 /// would break deferred imports in still-running old runtimes.
 pub fn prune_stale(output: &Path) -> eyre::Result<Cleanup> {
     let output = output.canonicalize()?;
-    no_symlink(&output.join(LOCK))?;
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(output.join(LOCK))?;
-    lock.try_lock()
-        .wrap_err("another publisher owns this output directory")?;
-    let Some(mut state) = read_state(&output)? else {
+    let (output, lock) = lock_output(&output)?;
+    let result = prune_locked(&output);
+    finish_lock(lock, result, |cleanup| &mut cleanup.warnings)
+}
+
+fn prune_locked(output: &Path) -> eyre::Result<Cleanup> {
+    let Some(mut state) = read_state(output)? else {
         return Ok(Cleanup::default());
     };
     let mut result = Cleanup::default();
@@ -294,7 +364,7 @@ pub fn prune_stale(output: &Path) -> eyre::Result<Cleanup> {
         }
     }
     if !result.removed.is_empty() {
-        write_state(&output, &state)?;
+        write_state(output, &state)?;
     }
     Ok(result)
 }

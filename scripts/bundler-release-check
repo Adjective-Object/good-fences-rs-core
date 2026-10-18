@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+mkdir -p target/p1-test-tmp
+export TMPDIR="$PWD/target/p1-test-tmp"
+cargo test -p bundler -p ast-segmenter -p import_resolver -p oxc_utils_parse \
+  -p segment_cache -p source_graph -p tag_graph -p unused_finder -p good_fences --quiet
+cargo build -p bundler --example build --quiet
+node --test scripts/bundler-fixtures.test.mjs scripts/bundler-differential.test.mjs
+node scripts/bundler-fixtures.mjs
+node scripts/bundler-differential.mjs
+cargo clippy -p bundler --all-targets --no-deps -- -D warnings
+./scripts/spot-check
