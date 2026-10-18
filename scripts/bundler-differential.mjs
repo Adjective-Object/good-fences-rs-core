@@ -58,7 +58,7 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   const build = JSON.parse(successful(result, 'public build pipeline'));
   assert.deepEqual(build.warnings, [], 'cache write warnings');
   assert.deepEqual(build.publicationWarnings, [], 'publication warnings');
-  assert.equal(build.layout, 'native-original-modules-v1', 'physical layout must be explicit');
+  assert.equal(build.layout, 'exact-root-set-chunks-v1', 'physical layout must be explicit');
   for (const file of readdirSync(build.directory, { recursive: true, withFileTypes: true })) {
     if (file.isDirectory()) continue;
     assert(file.isFile(), 'generation contains a nonregular artifact');

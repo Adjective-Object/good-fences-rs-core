@@ -220,6 +220,15 @@ impl Fresh {
     }
 }
 
+pub(crate) fn render_segment(
+    source: &str,
+    range: Span,
+    recipes: &[crate::effects::InvocationRewrite],
+    facts: &ast_segmenter::owned::ModuleFacts,
+) -> eyre::Result<String> {
+    render_range(source, range, recipes, &mut Fresh::new(facts))
+}
+
 fn render_range(
     source: &str,
     range: Span,

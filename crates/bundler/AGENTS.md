@@ -30,29 +30,38 @@ Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
 validation. Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 
-Emit ordinary executable files, one retained original lexical module per
-modules/<path-hash>.mjs or .cjs. Rewrite dependencies to relative file paths.
-No source loaders, code JSON, hooks, custom protocols or runtime compilation.
-Exact root sets remain logical diagnostics, not physical partitions:
-members/chunk_artifacts can overlap files across logical chunks. Never claim
-demand-minimal fetching. Entries point directly to original native module files
-and expose static ESM exports; multi-module low-level roots are evaluation-only
-static-import files with no namespace merge. Directory URLs isolate instances.
-Source literal dynamic imports route directly to canonical native identities;
-CJS promises unwrap the shared namespace bridge. No facade evaluation copies.
-Native ESM jobs own TLA dependency/SCC scheduling and rejection. Derive async
-status only over runtime static dependencies; reject all requires of async ESM
-with original require/TLA spans, including deferred sites. Never persist this
-derived status or add an eager/manual scheduler. Externals remain gated.
-Opaque CJS emits .cjs; ESM proxies use native createRequire. Native cache owns allocation-before-call,
-partial cycles, wrapper this, current exports and eviction/retry after throws.
-Proxy initialization and named snapshots remain exact-set logical synthetic
-nodes, physically together in a .proxy.mjs file. Reverse checked requests supply original names.
-Default captures full exports ignoring __esModule; names snapshot once. Unknown
-namespace demands use a separate exact-set runtime-key bridge, not finite names.
-Keys snapshot at initialization in .namespace.mjs; property reads forward live to captured exports.
-Static ESM namespaces remain native; CJS bridges are frozen/null-prototype objects.
-Require-of-ESM retains namespace; native evaluating-ESM cycles still throw.
+Emit one executable registration chunk per exact nonempty root set. Each real
+or synthetic node has exactly one physical owner; chunk_artifacts never overlap.
+Original bodies live only in chunks, not evaluation/entry/namespace facades.
+Relative standard imports/requires are the loader. No hooks, code JSON, source
+loading/assembly, custom protocols, eval or runtime compilation.
+Binding cells enforce lexical TDZ, const writes and aliases. Native facade
+storage is initialized by synchronous binding events, including between
+destructuring elements; subscribers are installed through an instantiation
+cycle before source dependencies execute. Helper exports stay out of public
+namespaces. Do not turn binding events into awaits.
+Native ESM jobs still own dependency/SCC scheduling and rejection. Only source
+await/for-await events suspend evaluation; never wrap every module in async.
+Derive async status over static runtime dependencies and reject all requires of
+async ESM with original require/TLA spans, including deferred sites.
+Do not persist derived async status. Never run a not-yet-evaluated module from a
+namespace facade; late completion may only finish newly available binding parts
+of an already evaluated module. Externals remain gated.
+Opaque CJS has one assigned factory; the shared runtime allocates its cache
+record before call, preserves wrapper this/exports aliases/current exports,
+and evicts thrown factories for retry. Chunk helper identifiers must avoid all
+source bindings and free references, including in opaque factories.
+Proxy initialization, individual named
+snapshots and runtime-key bridges each live in their assigned synthetic chunk.
+Reverse checked requests supply original names; default is full exports,
+__esModule never unwraps, names snapshot once. Namespace keys snapshot once
+and reads forward to captured exports. Require-of-ESM uses native evaluation
+facades and retains native evaluating-cycle errors.
+Physical ownership alone is not fetching correctness. Root-specific hoisted
+capture cycles expose actual native namespaces before source bodies run.
+Capture follows static execution closure, not deferred require availability.
+Never import namespace facades for globally retained but inactive bindings.
+Keep real Node import-closure/deleted-async-chunk and late-identity regressions.
 
 PURE recipes remove one invocation, never its callee/reference/argument/iteration
 effects. Preserve original optional-chain completion state, not just undefined.

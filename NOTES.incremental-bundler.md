@@ -1,6 +1,77 @@
 # Incremental bundler implementation handoff
 
-## Native-file replacement
+## Physical exact-root-set linker
+
+Active source: `link.rs` delegates after checked source/surface construction to
+`physical.rs`; `physical_lower.rs` composes retained PURE statements before
+lowering bindings. `chunk_runtime.cjs` is executable syntax, never source data.
+`members` is one node → one exact chunk; `chunk_artifacts` has one disjoint file
+per nonempty canonical root set. Modules/segments/proxy initialization/each
+snapshot/runtime-key namespaces are registered only in their owning chunks.
+Chunk requires express manifest synchronous edges after registration, so SCC
+loading never executes original module bodies. Native facade jobs schedule them.
+
+ESM refs become TDZ/const-checked cell reads/writes; shorthand keys are preserved.
+Hoisted functions instantiate in strict IIFEs before any body runs. Native
+facades export real live variables and direct reexports; hidden setter functions
+are omitted from public namespace facades. A separate native instantiation cycle
+installs subscribers before dependencies execute. Lowered lexical declarations
+yield synchronous initialization events between individual destructuring
+bindings; facade lexical declarations initialize at those points. No await is
+added for an initialization event. Source awaits yield tagged await operations;
+native top-level awaits drive only those operations. Native module jobs retain
+static SCC/rejection behavior. Opaque CJS factories use one runtime cache, insert
+records before invocation, preserve aliases/this/reassignment and evict on throw.
+Require of ESM enters native namespace facade jobs. Existing require-of-async
+diagnostics are retained. For-await helpers cache next, validate results, read
+return once and preserve abrupt close precedence.
+
+Root-specific capture facades first load exact chunk registrations, then enter
+a hoisted registration cycle that returns actual imported native namespace
+objects before source bodies run. Original evaluation dependencies come before
+namespace facade jobs. Capture includes only loaded namespace-binding consumers
+in the root's static execution closure, not deferred-require availability.
+Native namespace identities are not custom object substitutes. Namespace export
+slots subscribe before original dependencies run; no unconditional namespace
+reexport adds an inactive fetch edge. Source ESM dynamic imports target canonical
+namespace facades without promise unwrap reactions; CJS retains its bridge unwrap.
+
+The deleted-async-chunk regression is now green, including namespace reexports,
+unused mixed imports, a separate public target entry and direct dynamic target
+imports. Complete late execution verifies canonical identity. Statement sentinel
+red/green evidence ran against the old native-module binary and rebuilt public
+driver: the old binary put three exact-set statements in one file; the new binary
+put them in three distinct files. Real relative import closure is checked.
+Other probes cover namespace forward TDZ, destructuring initialization, function/
+var cycles, class inner names/this, function names, global arguments, mutated error
+constructors, helper-name collisions and labeled for-await close/continue.
+Chunk runtime names avoid every source binding/free reference, including opaque
+CJS: a red/green probe verifies missing-global errors, typeof and later global
+assignment without leaking the runtime through a generated lexical name.
+
+An adversarial deferred CJS→ESM→CJS probe caught eager synthetic initialization
+after initial source evaluation. Only previously evaluated native proxy facades
+may request late completion; downloading a factory never requests execution.
+The same deferred chain with an ESM namespace target remains dormant.
+Public CJS module/proxy paths are directly executable without running co-located
+entries; aggregate static surfaces reexport individual native snapshot slots.
+
+Final release gate passes 398 scoped Rust tests (107 bundler), 43 harness
+regressions, 12 native and 12 differential contracts/15 emitted executions,
+concurrent-entry identity, four diagnostics, focused all-target clippy and
+mandatory spot-check (51 parser tests plus full workspace check).
+Zero failures, ignored tests or unsupported portable contracts.
+The final incremental benchmark passes all six scenarios/seven samples. Its 66
+sources produce one exact body chunk, 332 total files and 796 output/recipe
+parses per rebuild; no-op has zero parses/resolutions/links/writes. Median total
+milliseconds: cold 802.276, warm 448.768, no-op 19.123, local 747.366, export
+998.810, config 753.231. Facade/validation overhead is higher than the old
+native-module baseline, not a claimed optimization. Full counters are in README.
+Local evidence: `target/physical-release-check.log`, `physical-ownership-{red,green}.log`,
+`physical-label-red.log`, `physical-proxy-red.log`, `physical-intrinsics-{red,green}.log`,
+`physical-cjs-capture-red.log` and `physical-bench.log`; logs are not committed artifacts.
+
+## Historical native-file replacement — superseded physical layout
 
 The user revoked the previous hook/payload output architecture. It is removed
 entirely. The replacement keeps the existing checked source edits, retention,

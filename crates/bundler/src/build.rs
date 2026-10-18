@@ -331,7 +331,8 @@ impl BuildSession {
             roots: hash(format!("{entries:?}").as_bytes()),
             runtime: hash(
                 concat!(
-                    "native-node-original-modules-v1\n",
+                    "native-node-exact-chunks-v1\n",
+                    include_str!("chunk_runtime.cjs"),
                     include_str!("commonjs_namespace.mjs")
                 )
                 .as_bytes(),
@@ -342,6 +343,8 @@ impl BuildSession {
         let emitter = hash(
             concat!(
                 include_str!("link.rs"),
+                include_str!("physical.rs"),
+                include_str!("physical_lower.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs")
             )

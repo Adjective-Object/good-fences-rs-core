@@ -534,7 +534,7 @@ fn drops_unused_import_bindings_and_reexports_but_not_static_effects() {
 }
 
 #[test]
-fn exact_logical_chunks_share_native_files_without_claiming_physical_partition() {
+fn exact_root_sets_own_distinct_physical_files() {
     let sources = sources(&[
         ("a.mjs", "export {a} from './common.mjs';"),
         ("b.mjs", "export {b} from './common.mjs';"),
@@ -557,10 +557,10 @@ fn exact_logical_chunks_share_native_files_without_claiming_physical_partition()
     };
     let second = NodeId::Segment { module, index: 1 };
     assert_ne!(plan.chunk_for(&first), plan.chunk_for(&second));
-    assert_eq!(output.members[&first], output.members[&second]);
+    assert_ne!(output.members[&first], output.members[&second]);
     assert!(output.members[&first]
         .extension()
-        .is_some_and(|e| e == "mjs"));
+        .is_some_and(|e| e == "cjs"));
     for (chunk, members) in &plan.chunks {
         for member in members {
             assert!(output.chunk_artifacts[chunk].contains(&output.members[member]));
@@ -580,6 +580,330 @@ fn exact_logical_chunks_share_native_files_without_claiming_physical_partition()
     assert_eq!(output.files, reversed.files);
     assert_eq!(output.entries, reversed.entries);
     assert_eq!(output.members, reversed.members);
+}
+
+#[test]
+fn physical_statement_sentinels_follow_exact_roots_and_async_load_closure() {
+    let source = sources(&[
+        ("a.mjs", "export {a} from './parts.mjs';"),
+        ("b.mjs", "export {b} from './parts.mjs';"),
+        ("main.mjs", "export const later = () => import('./parts.mjs'); console.log('ready');"),
+        ("parts.mjs", "export const a = 'physical-sentinel-A'; export const b = 'physical-sentinel-B'; export const c = 'physical-sentinel-C'; console.log('parts effect');"),
+    ]);
+    let (plan, mut output) = build(
+        &source,
+        &[("a.mjs", true), ("b.mjs", true), ("main.mjs", true)],
+        false,
+    );
+    let paths: Vec<_> = (0..3)
+        .map(|index| {
+            output.members[&NodeId::Segment {
+                module: "parts.mjs".into(),
+                index,
+            }]
+                .clone()
+        })
+        .collect();
+    assert_eq!(paths.iter().collect::<BTreeSet<_>>().len(), 3);
+    for (index, sentinel) in [
+        "physical-sentinel-A",
+        "physical-sentinel-B",
+        "physical-sentinel-C",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let owners: Vec<_> = output
+            .files
+            .iter()
+            .filter(|(_, body)| body.contains(sentinel))
+            .map(|(path, _)| path)
+            .collect();
+        assert_eq!(owners, vec![&paths[index]]);
+    }
+    for (node, roots) in plan
+        .node_roots
+        .iter()
+        .filter(|(_, roots)| !roots.is_empty())
+    {
+        for (other, other_roots) in plan
+            .node_roots
+            .iter()
+            .filter(|(_, roots)| !roots.is_empty())
+        {
+            assert_eq!(
+                roots == other_roots,
+                output.members[node] == output.members[other]
+            );
+        }
+    }
+    fn closure(output: &Artifacts, entry: &Path) -> BTreeSet<PathBuf> {
+        use oxc_ast::ast::*;
+        use oxc_ast_visit::{walk, Visit};
+        #[derive(Default)]
+        struct Edges(Vec<String>);
+        impl<'a> Visit<'a> for Edges {
+            fn visit_import_declaration(&mut self, import: &ImportDeclaration<'a>) {
+                self.0.push(import.source.value.to_string());
+            }
+            fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'a>) {
+                if let Some(source) = &export.source {
+                    self.0.push(source.value.to_string());
+                }
+            }
+            fn visit_export_all_declaration(&mut self, export: &ExportAllDeclaration<'a>) {
+                self.0.push(export.source.value.to_string());
+            }
+            fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+                if matches!(&call.callee,Expression::Identifier(i) if i.name == "require") {
+                    if let Some(Argument::StringLiteral(source)) = call.arguments.first() {
+                        self.0.push(source.value.to_string());
+                    }
+                }
+                walk::walk_call_expression(self, call);
+            }
+            fn visit_import_expression(&mut self, _: &ImportExpression<'a>) {}
+            fn visit_function(&mut self, _: &Function<'a>, _: oxc_semantic::ScopeFlags) {}
+            fn visit_arrow_function_expression(&mut self, _: &ArrowFunctionExpression<'a>) {}
+        }
+        let mut found = BTreeSet::new();
+        let mut todo = vec![entry.to_owned()];
+        while let Some(path) = todo.pop() {
+            if !found.insert(path.clone()) {
+                continue;
+            }
+            let allocator = oxc_allocator::Allocator::default();
+            let parsed = oxc_parser::Parser::new(
+                &allocator,
+                &output.files[&path],
+                oxc_span::SourceType::mjs(),
+            )
+            .parse();
+            let mut edges = Edges::default();
+            edges.visit_program(&parsed.program);
+            todo.extend(
+                edges
+                    .0
+                    .iter()
+                    .filter(|s| s.starts_with('.'))
+                    .map(|s| normalize(&path.parent().unwrap().join(s))),
+            );
+        }
+        found
+    }
+    let initial = closure(&output, &output.entries["main.mjs"]);
+    assert!(paths.iter().all(|p| !initial.contains(p)));
+    let a_load = closure(&output, &output.entries["a.mjs"]);
+    assert!(a_load.contains(&paths[0]));
+    assert!(!a_load.contains(&paths[1]) && !a_load.contains(&paths[2]));
+    let observer = observation(&output,"const main = await import('./main.mjs'); console.log('invoke'); const [a,b] = await Promise.all([main.later(),main.later()]); console.log(a === b,a.a,a.b,a.c);");
+    output.files.insert("observe.mjs".into(), observer);
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout,b"ready\ninvoke\nparts effect\ntrue physical-sentinel-A physical-sentinel-B physical-sentinel-C\n");
+}
+
+#[test]
+fn physical_binding_operations_preserve_keys_names_strict_this_and_const_errors() {
+    compare(&sources(&[
+        ("entry.mjs","import value, {a, next, C, read} from './state.mjs'; console.log(value.name, C.self === C, C.name, read() === undefined, a.name); next(); console.log(a.name);"),
+        ("state.mjs","export let {a = () => 1} = {}; export function next() { ({a = () => 2} = {}); } export class C { static self = this; } export function read() { return this; } export default () => 3;"),
+    ]),"entry.mjs");
+    compare(&sources(&[
+        ("entry.mjs","import {test} from './state.mjs'; console.log(test());"),
+        ("state.mjs","const fixed = 1; export function test() { try { fixed++; } catch(e) { return e.name; } }"),
+    ]),"entry.mjs");
+    compare(&sources(&[
+        ("entry.mjs","console.log(typeof arguments, typeof __gf_runtime); try { arguments; } catch(e) { console.log(e.name); } const fn = () => typeof arguments; console.log(fn()); class C { [String(this)]() { return 1; } static value = this; instance = this; } const value = new C(); console.log(value.undefined(),C.value === C,value.instance === value); export const __gf_setter_0 = 7; console.log(__gf_setter_0);"),
+    ]),"entry.mjs");
+    compare(&sources(&[
+        ("entry.mjs","import './cycle.mjs'; import * as self from './entry.mjs'; export var value = 1; export function bump() { value++; } console.log(self.value);"),
+        ("cycle.mjs","import * as ns from './entry.mjs'; console.log(typeof ns.bump,ns.value); ns.bump(); console.log(ns.value);"),
+    ]),"entry.mjs");
+    compare(&sources(&[
+        ("entry.mjs","export class C {static own=C; static make(){return new C();}} const original = C; C = 1; console.log(original.own === original,original.make() instanceof original);"),
+    ]),"entry.mjs");
+    compare(&sources(&[
+        ("entry.mjs","const Ref = ReferenceError, Type = TypeError; globalThis.ReferenceError = Error; globalThis.TypeError = Error; try {value;} catch(e) {console.log(e instanceof Ref);} let value = 1; const fixed = 2; try {fixed++;} catch(e) {console.log(e instanceof Type);}"),
+    ]),"entry.mjs");
+    compare(&sources(&[
+        ("entry.cjs","console.log(typeof __gf_runtime,typeof __gf_runtime$); try {__gf_runtime;} catch(e) {console.log(e.name);} globalThis.__gf_runtime = 3; console.log(__gf_runtime);"),
+    ]),"entry.cjs");
+}
+
+#[test]
+fn physical_for_await_preserves_cached_next_and_close_completion() {
+    for body in [
+        "let n=0; const iterator = { [Symbol.asyncIterator]() {return this;}, next() {this.next = () => {throw Error('replaced next');}; return Promise.resolve({value:++n,done:n>2});}, get return() {console.log('return getter'); return () => {console.log('close'); return Promise.resolve({done:true});};} }; for await (const value of iterator) {console.log(value); if(value===2) break;}",
+        "const error = Error('original'); const iterator = {[Symbol.asyncIterator]() {return this;}, next() {return Promise.resolve({value:1,done:false});}, return() {console.log('close'); return Promise.reject(Error('close failure'));}}; try {for await(const value of iterator) {throw error;}} catch(e) {console.log(e === error);}",
+        "const iterator = {[Symbol.iterator]() {return this;}, next() {return {value:Promise.resolve(1),done:false};}, return() {console.log('sync close'); return {done:true,value:Promise.resolve(2)};}}; for await(const value of iterator) {console.log(value); break;} console.log('after');",
+        "let count=0; const iterator = {[Symbol.asyncIterator]() {return this;}, next() {return Promise.resolve({value:++count,done:count>3});}, return() {console.log('close');return Promise.resolve({done:true});}}; outer: inner: for await(const value of iterator) {if(value===1) continue outer; console.log(value); break inner;} console.log('after');",
+    ] {
+        compare(&sources(&[("entry.mjs",body)]),"entry.mjs");
+    }
+}
+
+#[test]
+fn namespace_forward_tdz_and_same_statement_initialization_are_native_observable() {
+    compare(&sources(&[
+        ("entry.mjs","import * as self from './entry.mjs'; try { console.log(self.value); } catch(e) { console.log(e.name); } export let value = 1; console.log(self.value);"),
+    ]),"entry.mjs");
+    compare(
+        &sources(&[(
+            "entry.mjs",
+            "import * as self from './entry.mjs'; export let [a,b = self.a] = [1]; console.log(b);",
+        )]),
+        "entry.mjs",
+    );
+}
+
+#[test]
+fn deferred_namespace_binding_does_not_eagerly_fetch_its_exclusive_parts() {
+    for owner in [
+        "import * as ns from './target.mjs'; export const value = 1; export function read() { return ns.extra; }",
+        "import value, * as unused from './target.mjs'; export const valueForEntry = 1; export {valueForEntry as value}; export function read() { return value; }",
+        "export * as ns from './target.mjs'; export const value = 1; export function read() { return 'namespace-deferred-sentinel'; }",
+    ] {
+    let source = sources(&[
+        ("entry.mjs","import {value} from './owner.mjs'; console.log(value); export const later = () => import('./owner.mjs'); export const target = () => import('./target.mjs');"),
+        ("owner.mjs",owner),
+        ("target.mjs","export const extra = 'namespace-deferred-sentinel'; export default 'namespace-deferred-sentinel';"),
+    ]);
+    let (plan, mut output) = build(&source, &[("entry.mjs", true),("target.mjs",true)], false);
+    let target = NodeId::Segment {
+        module: "target.mjs".into(),
+        index: 0,
+    };
+    assert!(plan.node_roots[&target]
+        .iter()
+        .all(|r| !matches!(r, RootId::Entry(name) if name == "entry.mjs")));
+    let observer = observation(&output,"const entry = await import('./entry.mjs'); const owner = await entry.later(); const target = await entry.target(); console.log(target === await import('./target.mjs'), owner.ns ? owner.ns === target : true,owner.read());");
+    output.files.insert("observe.mjs".into(),observer);
+    let complete = node(&output.files,Path::new("observe.mjs"));
+    assert!(complete.status.success(),"{}",String::from_utf8_lossy(&complete.stderr));
+    assert_eq!(complete.stdout,b"1\ntrue true namespace-deferred-sentinel\n");
+    let directory = TmpDir::new();
+    for (path, body) in &output.files {
+        let file = directory.root().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, body).unwrap();
+    }
+    // Removing an async-only code file must not affect initial evaluation.
+    std::fs::remove_file(directory.root().join(&output.members[&target])).unwrap();
+    let actual = Command::new("node")
+        .arg(directory.root().join(&output.entries["entry.mjs"]))
+        .current_dir(directory.root())
+        .output()
+        .unwrap();
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"1\n");
+    }
+}
+
+#[test]
+fn commonjs_snapshot_subscription_does_not_resnapshot_on_later_namespace_load() {
+    compare(
+        &sources(&[
+            (
+                "entry.mjs",
+                "export {read} from './loader.cjs'; console.log('ready');",
+            ),
+            (
+                "loader.cjs",
+                "exports.read = () => require('./bridge.mjs').value;",
+            ),
+            (
+                "bridge.mjs",
+                "import {value} from './dep.cjs'; export {value}; console.log('bridge');",
+            ),
+            (
+                "dep.cjs",
+                "console.log('deferred factory'); exports.value = 2;",
+            ),
+        ]),
+        "entry.mjs",
+    );
+    compare(&sources(&[
+        ("entry.mjs","export {read} from './loader.cjs'; console.log('ready');"),
+        ("loader.cjs","exports.read = () => require('./bridge.mjs').value;"),
+        ("bridge.mjs","import * as ns from './target.mjs'; export const value = ns.value; console.log('bridge');"),
+        ("target.mjs","console.log('deferred target'); export const value = 2;"),
+    ]),"entry.mjs");
+    let source = sources(&[
+        ("entry.mjs","import {value} from './owner.mjs'; console.log(value); export const later = () => import('./owner.mjs');"),
+        ("owner.mjs","import value from './dep.cjs'; import {late} from './dep.cjs'; export const valueForEntry = value.ready; export {valueForEntry as value}; export {late}; export function read() {return late;}"),
+        ("dep.cjs","module.exports = {ready:1,get late(){console.log('late getter');return 2;}};"),
+    ]);
+    let (_, mut output) = build(&source, &[("entry.mjs", true)], false);
+    let initial = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        initial.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initial.stderr)
+    );
+    assert_eq!(initial.stdout, b"late getter\n1\n");
+    let observer = observation(&output,"const e = await import('./entry.mjs'); const owner = await e.later(); console.log(owner.late,owner.read());");
+    output.files.insert("observe.mjs".into(), observer);
+    let complete = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        complete.status.success(),
+        "{}",
+        String::from_utf8_lossy(&complete.stderr)
+    );
+    assert_eq!(complete.stdout, b"late getter\n1\n2 2\n");
+}
+
+#[test]
+fn commonjs_public_artifact_paths_are_executable_without_evaluating_colocated_entries() {
+    let source = sources(&[
+        (
+            "entry.mjs",
+            "import {x} from './dep.cjs'; console.log('entry',x);",
+        ),
+        ("dep.cjs", "exports.x = 2;"),
+    ]);
+    let (_, mut output) = build(&source, &[("entry.mjs", true)], false);
+    let proxy = &output.cjs_proxies[Path::new("dep.cjs")].0;
+    output.files.insert("observe.mjs".into(),format!("const ns = await import({}); console.log(Object.keys(ns).join(','),ns.x,ns.default.x === ns.x);",quote(&format!("./{}",proxy.display()))));
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"default,x 2 true\n");
+    let source = sources(&[
+        (
+            "entry.cjs",
+            "console.log('entry'); exports.read = () => require('./dep.cjs');",
+        ),
+        ("dep.cjs", "module.exports = {value:2};"),
+    ]);
+    let (_, mut output) = build(&source, &[("entry.cjs", false)], false);
+    let module = &output.modules[Path::new("dep.cjs")];
+    assert!(output.files.contains_key(module));
+    output.files.insert(
+        "observe.mjs".into(),
+        format!(
+            "console.log((await import({})).default.value);",
+            quote(&format!("./{}", module.display()))
+        ),
+    );
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"2\n");
 }
 
 #[test]
@@ -788,7 +1112,9 @@ fn tla_dynamic_commonjs_keeps_deferred_factory_in_a_separate_native_file() {
         module: "b.cjs".into(),
         index: 0,
     };
-    assert_ne!(output.members[&a], output.members[&b]);
+    // Deferred synchronous require supplies code under the same async root,
+    // but loading their shared chunk must not invoke the deferred factory.
+    assert_eq!(output.members[&a], output.members[&b]);
     let actual = node(&output.files, &output.entries["entry.mjs"]);
     assert_eq!(actual.stdout, b"before\nfactory a\nafter 1\n");
 }

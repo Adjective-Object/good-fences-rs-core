@@ -1,6 +1,21 @@
 # Incremental bundler execution checklist
 
-## Native-file replacement
+## Physical exact-set emission
+
+- [x] Move real/synthetic executable registrations into their one exact chunk.
+- [x] Separate binding storage/instantiation from original module execution;
+  retain native dependency/TLA jobs and shared opaque CJS factory identity.
+- [x] Add statement-sentinel, exact-file equivalence, import-closure, namespace
+  TDZ/destructuring and iterator/global-scope probes alongside existing tests.
+- [x] Fix deferred namespace initial fetching with native root capture cycles;
+  verify unused mixed imports, namespace reexports, separate public target
+  entries, direct dynamic target imports and deferred mixed-module requires.
+- [x] Preserve labeled for-await continue/close and executable public CJS
+  artifact paths without evaluating co-located entry bodies.
+- [x] Revalidate the entire release gate and benchmark, and review executable
+  output on adversarial root combinations. No per-module body fallback remains.
+
+## Historical native-file replacement
 
 - [x] Delete the revoked P6–P8 loader backend and source-payload APIs entirely.
 - [x] Emit native per-original-module `.mjs`/`.cjs` files, relative dependencies,
@@ -19,7 +34,7 @@ The checked items below record the prior implementation only. Its P6–P8
 hook/payload architecture was revoked and replaced above; those old checks are
 **not** evidence of current exact physical chunking or current runtime APIs.
 Old benchmark/test counts are historical. Current contracts/evidence are in
-the bundler README and the native-file section of NOTES.
+the bundler README and the physical-linker section of NOTES.
 
 This is the current ledger; historical completed migration TODOs are not
 acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise

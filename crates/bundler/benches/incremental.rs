@@ -28,14 +28,19 @@ fn run(session: &mut BuildSession, options: &BuildOptions, output: &Path) -> eyr
     );
     let artifacts = &build.product.artifacts;
     assert_eq!(artifacts.modules.len(), MODULES + 2);
-    assert_eq!(artifacts.files.len(), MODULES + 2);
+    assert_eq!(build.product.plan.chunks.len(), 1);
+    assert_eq!(artifacts.files.len(), 5 * (MODULES + 2) + 2);
     assert_eq!(
         build.counters.output_parses,
-        build.counters.emissions * 2 * (MODULES + 2),
+        build.counters.emissions * 2 * (MODULES + 2 + artifacts.files.len()),
     );
     assert_eq!(
         published.files_written,
-        if published.changed { MODULES + 2 } else { 0 },
+        if published.changed {
+            artifacts.files.len()
+        } else {
+            0
+        },
     );
     Ok(Sample {
         total_ms: start.elapsed().as_secs_f64() * 1000.0,

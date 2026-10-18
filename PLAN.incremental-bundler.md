@@ -1,25 +1,37 @@
 # Incremental JavaScript bundler plan
 
-## Current replacement: native JavaScript files
+## Current implementation: physical exact-set linker
+
+Executable bodies now move into exact root-set registration chunks, with shared
+binding/CJS storage and body-free native module evaluation/namespace facades.
+Root-specific hoisted capture cycles expose actual native namespace objects
+before evaluation without fetching inactive namespace parts. Capture follows
+static execution closure, not deferred require availability. Initialization
+events preserve native facade lexical TDZ, while only source await operations
+suspend native module jobs. Real Node tests inspect exact ownership, remove
+deferred-only code before initial load, then exercise complete late-load
+identity. No unsupported-source gate or per-module fallback was added.
+Current evidence and architecture are in NOTES and the bundler README.
+
+## Historical replacement baseline: native JavaScript files
 
 The prior P6–P8 hook/source-payload output architecture was rejected and has
 been deleted, not retained behind a switch. Parser/cache/graph, effects/PURE,
 exact logical roots, BuildSession and immutable publication remain reusable.
-The current backend emits retained original lexical modules as actual
+That baseline emitted retained original lexical modules as actual
 `modules/<path-sha256>.mjs`/`.cjs` files with ordinary relative imports/requires.
 Named/default ESM exports are static native exports. CJS has native early cache,
 cycles and retry; `.proxy.mjs` snapshots requested names and `.namespace.mjs`
 provides the documented runtime-key bridge. Node owns ESM instantiation/TLA.
 
-P5's exact root-set equivalence remains diagnostic analysis only. Physical files
-preserve original lexical scopes and may overlap across logical chunks. This is
-the chosen complete native-file baseline, **not exact physical segment chunks**.
-A future physical segment linker would need separate proof of lexical/TDZ/cycle
-semantics; no such linker or demand-minimal fetching is claimed.
-`Artifacts::members/chunk_artifacts` truthfully project logical nodes to files;
-`entries/modules/async_facades` contain executable paths. There is no runtime
+P5's exact root-set equivalence was diagnostic analysis only. Physical files
+preserved original lexical scopes and overlapped across logical chunks. This was
+the native-file baseline, **not exact physical segment chunks**.
+It is superseded by the physical segment linker above.
+`Artifacts::members/chunk_artifacts` projected logical nodes to files;
+`entries/modules/async_facades` contained executable paths. There was no runtime
 launcher API, virtual identity, code JSON, source assembly or loader registration.
-See the bundler README for current contracts, measurements and release evidence.
+These historical paths are not current output APIs; see the bundler README.
 
 ## Historical P0–P9 plan and checkpoints — replaced output architecture
 

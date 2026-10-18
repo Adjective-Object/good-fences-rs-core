@@ -138,14 +138,14 @@ from esbuild and rspack; their baseline execution is not bundler conformance.
 P1–P5 now provide owned/cacheable facts, the shared typed graph, effect retention,
 exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
-Validated source rewrites and retention/PURE recipes produce one ordinary
-`.mjs`/`.cjs` file per original lexical module, with relative dependencies.
-Exact root sets remain logical diagnostic chunks, **not physical partitions**;
-no source-loading runtime is used. Native CJS supplies wrappers/cache, explicit
-ESM bridges supply interop, and literal source
-dynamic imports to canonical native module identities. P8.2 preserves source TLA
-using native dependency/SCC scheduling, with diagnostics for require of async ESM.
-All twelve portable fixtures now execute generated artifacts (fifteen entries).
+The physical-linker work now places executable registrations in exact root-set
+`.cjs` chunks, with separate native ESM storage/evaluation facades and a real
+JavaScript binding/factory runtime. No loader hooks or executable source payloads
+are used. Every retained real/synthetic node has one physical owner; equal
+nonempty root sets share a file, distinct sets do not. Root-specific native
+namespace capture keeps deferred-only chunks out of initial import closures,
+while shared chunk registration does not execute unrelated module bodies.
+The previous per-original-module physical fallback is removed.
 P9 adds public `BuildSession::{build,build_and_publish}`, independent layer keys
 and real counters, selective parse reuse, immutable transactional generations
 with ownership-bounded quiescent cleanup, and a separate public-pipeline
