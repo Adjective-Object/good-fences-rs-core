@@ -60,7 +60,7 @@ unchanged.
 | Construct | `parse_module` policy |
 | --- | --- |
 | ESM imports/exports, aliases, defaults, string names, namespace/star re-exports | Owned mappings and dependency sites; export linking is a later gate |
-| Literal dynamic `import()` | One dependency per site; no loading/runtime implementation |
+| Literal dynamic `import()` | One dependency per site; loading belongs to bundler |
 | Literal global CJS `require()` | Exactly one string-literal argument; parenthesized expressions accepted; shadowed calls are ordinary code |
 | Nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
 | Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct literal loader calls and `module.exports` member reads are supported |
@@ -70,7 +70,7 @@ unchanged.
 | CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |
 | Mixed-file static ESM/CJS syntax or unshadowed ESM references to CJS wrapper names | Diagnostic; explicit extension/package format is never guessed from content |
 | Unshadowed eval, nested `with`, `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
-| Top-level await/for-await | Diagnostic; await within async functions supported as syntax |
+| Top-level await/for-await | ESM source spans in `facts.top_level_await`, excluding nested functions; CJS diagnostic. Dependency/SCC scheduling belongs to the native bundler host |
 | Import attributes/options/phases (including type import options) | Diagnostic |
 | Erasable TS annotations/types/assertions, TS import types | Owned syntax facts and type-only references/dependencies; **not erased or executable output** |
 | JSX, decorators, auto-accessors, TS enums/namespaces/parameter properties, TS import/export assignments and namespace exports, resource management | Unsupported-transform diagnostic |
@@ -92,9 +92,10 @@ an effect always executes or an effect-policy-derived purity result.
 There is no source-file IO, cache, linking, user effects policy or emission here.
 Target-dependent checks cannot be decided from source syntax alone.
 The separate `bundler` Node backend now executes the supported synchronous
-JavaScript ESM/CJS subset, including opaque CJS cycles and requested-name proxies.
+JavaScript ESM/CJS subset, including opaque CJS cycles, requested-name proxies,
+literal dynamic imports and native ESM TLA/for-await scheduling.
 Its explicit namespace/snapshot policy is documented in that crate's README.
-Dynamic import/TLA, externals/assets, TS/JSX lowering and source maps remain gates.
+Require-of-async-ESM, externals/assets, TS/JSX lowering and source maps remain gates.
 
 `facts.invocations` owns callee/receiver/argument ranges, spread iteration,
 optional-chain boundaries, lexical callee identity, syntactic result-use context

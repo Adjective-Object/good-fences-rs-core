@@ -87,6 +87,18 @@ impl CacheRecord {
             "facts parser format mismatch"
         );
         ensure!(
+            (!facts.commonjs || facts.top_level_await.is_empty())
+                && sorted(facts.top_level_await.iter().map(|s| (s.start, s.end))),
+            "invalid top-level await facts"
+        );
+        for site in &facts.top_level_await {
+            span(source, *site)?;
+            ensure!(
+                site.start < site.end && module.segments.iter().any(|s| contains(*s, *site)),
+                "top-level await outside statement"
+            );
+        }
+        ensure!(
             sorted(
                 facts
                     .effects

@@ -647,6 +647,252 @@ fn dynamic_payload_load_and_parse_failures_reject_without_eager_execution() {
 }
 
 #[test]
+fn tla_static_dependency_chains_diamonds_and_for_await_use_native_order() {
+    let output = compare(&sources(&[
+        ("entry.mjs", "console.log('entry'); Promise.all([import('./a.mjs'), import('./a.mjs'), import('./b.mjs')]).then(([a, again, b]) => console.log(a === again, a.value, b.value, globalThis.count));"),
+        ("a.mjs", "import {value} from './barrel.mjs'; console.log('a', value); export {value};"),
+        ("b.mjs", "import {value} from './leaf.mjs'; await 0; console.log('b', value); export {value};"),
+        ("barrel.mjs", "export {value} from './leaf.mjs'; console.log('barrel');"),
+        ("leaf.mjs", "console.log('leaf before'); globalThis.count = (globalThis.count || 0) + 1; export let value = await Promise.resolve(7); for await (const x of [1,2]) { console.log('iterate', x); } console.log('leaf after');"),
+    ]), "entry.mjs");
+    assert_eq!(
+        output.async_modules,
+        BTreeSet::from([
+            "a.mjs".into(),
+            "b.mjs".into(),
+            "barrel.mjs".into(),
+            "leaf.mjs".into()
+        ])
+    );
+}
+
+#[test]
+fn tla_cycles_preserve_hoisting_suspension_order_and_tdz_errors() {
+    let output = compare(&sources(&[
+        ("entry.mjs", "import {value} from './a.mjs'; console.log('entry', value);"),
+        ("a.mjs", "import {other} from './b.mjs'; console.log('a before', other); export function read() { return 'hoisted'; } export const value = await Promise.resolve(other + 1); console.log('a after');"),
+        ("b.mjs", "import {read} from './a.mjs'; console.log('b before', read()); await 0; console.log('b after'); export const other = 4;"),
+    ]), "entry.mjs");
+    assert_eq!(output.async_modules.len(), 3);
+    compare(
+        &sources(&[
+            ("entry.mjs", "import './a.mjs';"),
+            (
+                "a.mjs",
+                "import './b.mjs'; export const value = await Promise.resolve(1);",
+            ),
+            (
+                "b.mjs",
+                "import {value} from './a.mjs'; await 0; console.log(value);",
+            ),
+        ]),
+        "entry.mjs",
+    );
+}
+
+#[test]
+fn tla_rejection_is_shared_and_propagates_through_static_cycles() {
+    compare(&sources(&[
+        ("entry.mjs", "Promise.allSettled([import('./a.mjs'), import('./b.mjs'), import('./a.mjs')]).then(async results => { console.log(results.every(r => r.status === 'rejected'), results[0].reason === results[1].reason, results[0].reason === results[2].reason, results[0].reason.message, globalThis.attempt); try { await import('./a.mjs'); } catch(e) { console.log(e === results[0].reason); } });"),
+        ("a.mjs", "import './b.mjs'; console.log('unreachable a'); export const value = 1;"),
+        ("b.mjs", "import './a.mjs'; globalThis.attempt = (globalThis.attempt || 0) + 1; await Promise.reject(Error('async failure')); console.log('unreachable b');"),
+    ]), "entry.mjs");
+}
+
+#[test]
+fn tla_dynamic_commonjs_does_not_evaluate_a_deferred_factory_in_the_same_payload() {
+    let source = sources(&[
+        ("entry.mjs", "console.log('before'); const ns = await import('./a.cjs'); console.log('after', ns.default.value);"),
+        ("a.cjs", "console.log('factory a'); exports.value = 1; exports.later = () => require('./b.cjs');"),
+        ("b.cjs", "console.log('must not execute'); module.exports = 2;"),
+    ]);
+    let output = compare(&source, "entry.mjs");
+    let a = NodeId::Segment {
+        module: "a.cjs".into(),
+        index: 0,
+    };
+    let b = NodeId::Segment {
+        module: "b.cjs".into(),
+        index: 0,
+    };
+    assert_eq!(output.members[&a], output.members[&b]);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert_eq!(actual.stdout, b"before\nfactory a\nafter 1\n");
+}
+
+#[test]
+fn tla_dynamic_commonjs_proxy_failure_is_cached_but_native_require_can_retry() {
+    let source = sources(&[
+        ("entry.mjs", "import retry from './retry.cjs'; const first = await import('./fail.cjs').catch(e => e); const second = await import('./fail.cjs').catch(e => e); console.log(first === second, first.message, globalThis.attempt); console.log(retry());"),
+        ("retry.cjs", "module.exports = () => { try { require('./fail.cjs'); } catch(e) { return e.message; } };"),
+        ("fail.cjs", "globalThis.attempt = (globalThis.attempt || 0) + 1; throw Error('attempt ' + globalThis.attempt);"),
+    ]);
+    let output = compare(&source, "entry.mjs");
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert_eq!(actual.stdout, b"true attempt 1 1\nattempt 2\n");
+}
+
+#[test]
+fn tla_concurrent_entries_and_dynamic_sites_evaluate_once_and_share_namespace() {
+    let source = sources(&[
+        ("a.mjs", "export * as shared from './leaf.mjs';"),
+        ("b.mjs", "export * as shared from './leaf.mjs';"),
+        ("lazy.mjs", "export function later() { return import('./leaf.mjs'); }"),
+        ("leaf.mjs", "globalThis.count = (globalThis.count || 0) + 1; console.log('before await'); await Promise.resolve(); console.log('after await'); export const count = globalThis.count;"),
+    ]);
+    let (_, mut output) = build(
+        &source,
+        &[("a.mjs", true), ("b.mjs", true), ("lazy.mjs", true)],
+        false,
+    );
+    output.files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; const [a,b,lazy] = await Promise.all([loadEntry('a.mjs'),loadEntry('b.mjs'),loadEntry('lazy.mjs')]); const [x,y] = await Promise.all([lazy.later(),lazy.later()]); console.log(a.shared === b.shared, a.shared === x, x === y, x.count);".into());
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        b"before await\nafter await\ntrue true true 1\n"
+    );
+}
+
+#[test]
+fn tla_awaited_dynamic_cycle_preserves_native_unsettled_evaluation_exit() {
+    let source = sources(&[
+        (
+            "entry.mjs",
+            "console.log('entry'); await import('./a.mjs'); console.log('unreachable');",
+        ),
+        ("a.mjs", "console.log('a'); await import('./entry.mjs');"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    let baseline = node(&source, Path::new("entry.mjs"));
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert_eq!(baseline.status.code(), Some(13));
+    assert_eq!(actual.status.code(), baseline.status.code());
+    assert_eq!(actual.stdout, baseline.stdout);
+    assert!(String::from_utf8_lossy(&actual.stderr).contains("unsettled top-level await"));
+}
+
+#[test]
+fn cached_async_facts_flow_through_graph_retention_chunks_and_native_output() {
+    let source = sources(&[
+        ("entry.mjs", "const [a,b] = await Promise.all([import('./a.mjs'),import('./a.mjs')]); console.log(a === b, a.value);"),
+        ("a.mjs", "export {value} from './leaf.mjs';"),
+        ("leaf.mjs", "console.log('async once'); export const value = await Promise.resolve(3);"),
+    ]);
+    let inputs = source
+        .iter()
+        .map(|(path, text)| {
+            let parsed =
+                parse_module(&logger::StdioLogger::new(), text, path, ModuleFormat::Esm).unwrap();
+            let record = segment_cache::CacheRecord::from_parsed(text, &parsed).unwrap();
+            let bytes = record.encode(text).unwrap();
+            let decoded = segment_cache::CacheRecord::decode(&bytes, text, record.config).unwrap();
+            let resolutions = decoded
+                .module
+                .facts
+                .dependencies
+                .iter()
+                .map(|d| {
+                    (
+                        d.id,
+                        DependencyTarget::File(normalize(
+                            &path.parent().unwrap().join(&d.specifier),
+                        )),
+                    )
+                })
+                .collect();
+            OwnedSourceFileInput::from_ranges(
+                path.clone(),
+                decoded.module.segments,
+                decoded.module.facts,
+                resolutions,
+            )
+        })
+        .collect::<Vec<_>>();
+    let graph = SourceGraph::from_owned(inputs);
+    let policy = EffectPolicy::default();
+    let plan = partition(
+        &graph,
+        &[RootSeed {
+            id: RootId::Entry("entry.mjs".into()),
+            evaluation_roots: vec![graph.file_id(Path::new("entry.mjs")).unwrap()],
+            binding_roots: vec![],
+        }],
+        &policy,
+    )
+    .unwrap();
+    let output = esm(&graph, &plan, &policy, &source).unwrap();
+    let (_, cold) = build(&source, &[("entry.mjs", false)], false);
+    assert_eq!(output.files, cold.files);
+    assert_eq!(output.async_modules, cold.async_modules);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"async once\ntrue 3\n");
+}
+
+#[test]
+fn require_of_direct_transitive_and_cyclic_async_esm_has_source_diagnostics() {
+    for target in ["leaf.mjs", "barrel.mjs", "a.mjs"] {
+        let source = sources(&[
+            (
+                "entry.cjs",
+                &format!("module.exports = () => require('./{target}');"),
+            ),
+            ("barrel.mjs", "export * from './leaf.mjs';"),
+            ("leaf.mjs", "export const value = await Promise.resolve(1);"),
+            ("a.mjs", "import './b.mjs'; export const value = 1;"),
+            ("b.mjs", "import './a.mjs'; import './barrel.mjs';"),
+        ]);
+        let graph = graph(&source, false);
+        let policy = EffectPolicy::default();
+        let plan = partition(
+            &graph,
+            &[RootSeed {
+                id: RootId::Entry("entry.cjs".into()),
+                evaluation_roots: vec![graph.file_id(Path::new("entry.cjs")).unwrap()],
+                binding_roots: vec![],
+            }],
+            &policy,
+        )
+        .unwrap();
+        let error = format!("{:#}", esm(&graph, &plan, &policy, &source).unwrap_err());
+        assert!(
+            error.contains("entry.cjs")
+                && error.contains(target)
+                && error.contains("require of async ESM")
+                && error.contains("leaf.mjs")
+                && error.contains("bytes"),
+            "{error}"
+        );
+    }
+    compare(
+        &sources(&[
+            (
+                "entry.cjs",
+                "const ns = require('./sync.mjs'); ns.later().then(ns => console.log(ns.value));",
+            ),
+            (
+                "sync.mjs",
+                "export async function later() { return import('./async.mjs'); }",
+            ),
+            (
+                "async.mjs",
+                "export const value = await Promise.resolve(8);",
+            ),
+        ]),
+        "entry.cjs",
+    );
+}
+
+#[test]
 fn split_lexical_scopes_keep_mutation_and_initialization_order_across_roots() {
     let sources = sources(&[
         ("a.mjs", "export {x} from './shared.mjs';"),
@@ -927,6 +1173,9 @@ fn portable_fixture_observations_match_native_and_manifest_expectations() {
         "rspack/cjs-named-reexport",
         "rspack/cjs-self-cycle",
         "rspack/dynamic-import-cjs",
+        "esbuild/cjs-sync-async-once",
+        "esbuild/esm-sync-async",
+        "esbuild/dynamic-import-tla-order",
     ] {
         let directory = root.join(fixture);
         let manifest: serde_json::Value =

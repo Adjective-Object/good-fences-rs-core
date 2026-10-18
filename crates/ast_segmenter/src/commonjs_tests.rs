@@ -207,6 +207,34 @@ fn mixed_modules_are_errors_not_partial_records() {
 }
 
 #[test]
+fn esm_top_level_await_facts_exclude_function_bodies_and_cjs_remains_sync() {
+    let source = "await (await 1); for await (const x of stream) { await x; } async function f() { await 2; for await (const y of stream) {} } const g = async () => await 3;";
+    let parsed = parse(source, "async.mjs").unwrap();
+    let sites: Vec<_> = parsed
+        .facts
+        .top_level_await
+        .iter()
+        .map(|s| &source[s.start as usize..s.end as usize])
+        .collect();
+    assert_eq!(
+        sites,
+        [
+            "await (await 1)",
+            "await 1",
+            "for await (const x of stream) { await x; }",
+            "await x"
+        ]
+    );
+    assert!(parse("await 1;", "async.cjs").is_err());
+    assert!(parse("for await (const x of stream) {}", "async.cjs").is_err());
+    assert!(parse("async function f() { await 1; }", "sync.cjs")
+        .unwrap()
+        .facts
+        .top_level_await
+        .is_empty());
+}
+
+#[test]
 fn unsupported_transforms_and_execution_features_are_diagnostics() {
     for (path, source, expected) in [
         ("test.jsx", "export const x = <div/>;", "JSX transform"),
@@ -234,12 +262,6 @@ fn unsupported_transforms_and_execution_features_are_diagnostics() {
             "test.mjs",
             "await using x = resource();",
             "resource-management",
-        ),
-        ("test.mjs", "await import('./x');", "top-level await"),
-        (
-            "test.mjs",
-            "for await (const x of stream) {}",
-            "top-level for-await",
         ),
         ("test.mjs", "console.log(import.meta.url);", "import.meta"),
         (

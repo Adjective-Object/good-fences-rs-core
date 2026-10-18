@@ -90,7 +90,8 @@ All chunks share one runtime's native CJS cache and canonical ESM proxy namespac
 preserving CJS-first mixed cycles. Opaque require of synchronous ESM conservatively
 retains the whole target namespace. Native Node owns sync require-of-ESM behavior:
 completed/deferred mixed cycles work, while requiring an evaluating ESM in a
-cycle throws `ERR_REQUIRE_CYCLE_MODULE`. TLA is still rejected before emission.
+cycle throws `ERR_REQUIRE_CYCLE_MODULE`. Require of async ESM is rejected before
+emission, even for deferred require sites; use dynamic import instead.
 Static ESM routes use canonical file-relative virtual URLs so native synchronous
 ESM linking does not encounter an unsupported custom protocol.
 
@@ -133,7 +134,8 @@ getter value, and composes nested recipes. Fresh arrow parameters avoid capture.
 Optional calls/private fields **inside an optional PURE callee chain** are
 explicitly rejected; ordinary optional terminal calls are supported.
 The current single-module API rejects runtime dependencies (use linked emission),
-CJS/TS/JSX modes, and source-policy unsupported syntax such as TLA/import.meta.
+CJS/TS/JSX modes, and source-policy unsupported syntax such as import.meta.
+Source TLA/for-await remains native ESM syntax, including suspension timing.
 No externals, implicit TS stripping, source maps or filesystem publication.
 
 ## Linked ESM artifacts (Node target)
@@ -197,17 +199,46 @@ Missing/read/JSON failures retry on subsequent native loads; successfully cached
 payload text is immutable for that artifact instance. Compilation errors reject,
 and execution errors remain cached by native ESM; rebuilding requires a new
 published bundle directory, not in-place repair of cached payloads.
-Source TLA, externals, TS/JSX and other source-policy unsupported forms still fail
-with diagnostics. Source TLA scheduling is P8.2; fetching optimization is not claimed.
+Externals, TS/JSX and other source-policy unsupported forms still fail with
+diagnostics. Fetching optimization is not claimed.
 This backend is not a browser/standalone-file target.
 
-Bundled-mode Node tests compare nine portable cases (twelve entry executions)
+### Async evaluation and support
+
+Source ESM TLA and top-level for-await remain intact. Node's native module jobs
+schedule static dependency SCCs, suspend importers, deduplicate concurrent jobs,
+and propagate rejection; there is no competing Rust/JavaScript scheduler.
+`ModuleFacts::top_level_await` records only source-local suspension ranges
+(nested functions are excluded). The linker derives `Artifacts::async_modules`
+by closing those facts over runtime static import/re-export dependencies,
+including cycles. Dynamic imports, type-only edges and async function bodies do
+not make their consumer async. This derived set is not persisted in parse caches.
+
+Every require of a directly or transitively async ESM target is a link error with
+the require's original path/range and an originating TLA path/range, including
+deferred/conditional requires. It is never approximated synchronously.
+Awaited dynamic cycles retain native deadlock behavior: with no pending work,
+Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
+
+| Source construct | Node 22.15+ linked target |
+| --- | --- |
+| Literal dynamic ESM import | Native namespace promise, shared evaluation |
+| Literal dynamic CJS import | Shared frozen runtime-key bridge; extra promise reaction |
+| ESM TLA / top-level for-await | Native host dependency/SCC scheduling and rejection |
+| Synchronous require of sync ESM | Native namespace and evaluating-cycle errors |
+| Require of async ESM (including static transitive dependencies) | Source diagnostic before emission |
+| CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
+| Nonliteral imports/requires, options/attributes, externals/assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
+
+Bundled-mode Node tests compare all twelve portable cases (fifteen entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover
 cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
 effect ordering, once-only/concurrent entry loading, bundle-instance isolation,
 equal-identity star diamonds, dead-code removal and composed PURE recipes.
-These include default/named CJS interop, a self-cycle and dynamic CJS import. Three
-source-TLA fixtures remain unsupported. Same-process
+These include default/named CJS interop, a self-cycle, dynamic CJS import and TLA.
+Independent generated-artifact tests cover async chains, SCC order/hoisting/TDZ,
+rejection identity, once-only concurrent entry/dynamic evaluation, unsettled TLA,
+and cache-facts → graph → retention → chunks → runtime equivalence. Same-process
 concurrent multi-entry CJS cycles/identity have independent differential evidence.
 
 ## Root reachability
@@ -266,7 +297,7 @@ or lexical demand. Neither chunks, sorted manifest edges, nor transitive load
 sets are a runtime schedule. Distinct module records in one chunk (including
 deferred CJS require targets) must retain separate once-only evaluation state.
 P6 supplies Node-native ESM rewriting/instantiation (above); P7 supplies CJS
-factories/proxies/cache. P8.1 source dynamic loading is implemented; TLA is P8.2.
+factories/proxies/cache. P8 supplies source dynamic loading and native TLA scheduling.
 Only the documented synchronous ESM/CJS subset has emitted-runtime evidence.
 Use manifests only with the same graph instance and after `is_current` succeeds;
 recompute the partition/manifest after entry, graph, or effect-policy changes.

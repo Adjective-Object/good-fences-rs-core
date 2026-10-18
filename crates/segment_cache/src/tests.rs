@@ -25,6 +25,7 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("empty.cjs", "", ModuleFormat::CommonJs),
         ("file.js", "export * from './a'; export * as ns from './b'; export default 1;", ModuleFormat::Esm),
         ("pure.js", "/* @__PURE__ */ object?.method?.(sideEffect(), ...iterable); const value = /*#__PURE__*/ new C(arg());", ModuleFormat::Esm),
+        ("async.mjs", "export const value = await Promise.resolve(1); for await (const x of [1]) { await x; } async function deferred() { await 2; }", ModuleFormat::Esm),
     ] {
         let first = record(source, path, format);
         let bytes = first.encode(source).unwrap();
@@ -107,5 +108,23 @@ fn bounded_decoder_rejects_allocation_and_depth_bombs() {
         [vec![0x9a, 0, 4, 0, 0], vec![0; 262_144]].concat(),
     ] {
         assert!(bounded::check(&bytes).is_err());
+    }
+}
+
+#[test]
+fn rejects_invalid_async_syntax_sites() {
+    let source = "await 1; await 2;";
+    let original = record(source, "async.mjs", ModuleFormat::Esm);
+    assert_eq!(original.module.facts.top_level_await.len(), 2);
+    for mutate in [
+        |r: &mut CacheRecord| r.module.facts.top_level_await.reverse(),
+        |r: &mut CacheRecord| r.module.facts.top_level_await[0].end = u32::MAX,
+        |r: &mut CacheRecord| r.module.facts.top_level_await[0] = Span::new(8, 8),
+        |r: &mut CacheRecord| r.schema = 4,
+        |r: &mut CacheRecord| r.extractor = 5,
+    ] {
+        let mut modified = original.clone();
+        mutate(&mut modified);
+        assert!(CacheRecord::decode(&envelope(&modified), source, original.config).is_err());
     }
 }

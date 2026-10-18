@@ -4,6 +4,7 @@ expression: module.facts
 ---
 ModuleFacts {
     commonjs: true,
+    top_level_await: [],
     effects: [
         EffectSite {
             span: Span {

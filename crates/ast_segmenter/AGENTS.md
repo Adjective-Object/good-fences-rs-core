@@ -59,6 +59,8 @@ function containment is syntax metadata, not eager evaluation permission.
 `policy` is the checked source-local support gate; target format, assets and
 externals remain resolver/linker checks. Low-level parsing and legacy adapters
 intentionally accept a broader syntax set.
+`top_level_await` owns ESM await/for-await source spans outside functions;
+it is not async dependency/SCC status. CJS TLA stays rejected.
 
 `effects` stores syntax-only reason sites, including deferred function/default-
 argument and instance-field timing. Never turn annotations or caller policy into

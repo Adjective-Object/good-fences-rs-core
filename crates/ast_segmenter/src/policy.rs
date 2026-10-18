@@ -188,14 +188,14 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {
-        if self.function_depth == 0 {
+        if self.commonjs && self.function_depth == 0 {
             self.reject(expression.span, "unsupported top-level await");
         }
         walk::walk_await_expression(self, expression);
     }
 
     fn visit_for_of_statement(&mut self, statement: &ForOfStatement<'a>) {
-        if statement.r#await && self.function_depth == 0 {
+        if self.commonjs && statement.r#await && self.function_depth == 0 {
             self.reject(statement.span, "unsupported top-level for-await");
         }
         walk::walk_for_of_statement(self, statement);

@@ -7,7 +7,8 @@ esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
 commits: P0–P7 are verified for the documented synchronous Node ESM/CJS target;
-P8.1 source dynamic loading is verified; P8.2 TLA and P9 remain pending.
+P8.1 source dynamic loading and P8.2 native TLA scheduling are verified;
+P9 remains pending.
 This bounded phase completes P8.1–P8.2 and stops before P9.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
@@ -28,7 +29,8 @@ payload bypass, node duplication or root-set coalescing is introduced. Native
 require/ESM owns shared identities and legal mixed cycles; evaluating-ESM require
 cycles retain native errors. Eight portable sync fixtures/eleven executions and
 same-process concurrent-entry/cross-file-cycle observations have bundled evidence.
-Source async/TLA remains P8; publication/invalidation remains P9.
+P8 now connects source dynamic imports and native TLA scheduling (below);
+publication/invalidation remains P9.
 
 P1.4 adds `ParsedModule::facts` (`ast_segmenter::owned`): owned lexical
 binding/declaration/reference records, import aliases and export mappings,
@@ -139,8 +141,8 @@ passed the integrated shared runner. The shared-entrypoint case includes
 an explicit `node.js` driver importing the entries together, so its identity
 assertion does exercise one process even though manifest entries are otherwise
 separate processes. The CJS once-only log is a documented added observation.
-TLA is a future capability gate and an early unsupported diagnostic, not a
-requirement silently waived by a passing Node baseline. None of these cases
+TLA began as an explicit capability gate, not a requirement silently waived by
+a passing Node baseline; P8.2 now executes its generated artifacts. None of these cases
 validates PURE hints, chunk layout, or tree-shaking optimizations by itself.
 
 ### Pinned rspack grounding
@@ -340,8 +342,9 @@ filename are separate concepts.
   CJS property does not become a live ESM binding automatically.
 - Top-level await requires async evaluation scheduling across static dependency
   SCCs, shared evaluation promises, dynamic-import timing, and rejection
-  propagation. Reject TLA/require-of-async-ESM with clear diagnostics until the
-  relevant policy is implemented; never silently lower to synchronous code.
+  propagation. P8.2 delegates those contracts to native Node ESM jobs, retaining
+  TLA syntax. Require-of-async-ESM still gets source diagnostics; never silently
+  lower to synchronous code.
 - Maintain a tested support matrix: nonliteral import/require, direct eval,
   `with`, mixed ESM/CJS, import attributes, `import.meta`, top-level return,
   TS/JSX transforms, native addons/assets, externals, and require-of-ESM.
@@ -604,7 +607,17 @@ CJS routes resolve to the existing bridge via a promise continuation. Successful
 payload reads are cached once; load errors can retry, immutable cached text is
 not hot-repaired, and native ESM owns compilation/evaluation failure semantics.
 Generated Node evidence covers identity, timing, nested activation and failures;
-TLA remains gated until P8.2.
+P8.2 retains ESM await/for-await in native lexical modules. Owned source facts
+record only suspension spans; schema 5/extractor 6 invalidates previous caches.
+`Artifacts::async_modules` is the derived runtime-static dependency closure,
+including SCCs, not source truth. Require sites targeting that closure fail with
+both require and originating TLA source ranges, including deferred requires.
+Node's module jobs own scheduling, concurrent shared evaluation and rejection;
+there is no synchronous TLA approximation or second registry. Generated Node
+tests demonstrate chain/diamond and SCC order, hoisting/TDZ, shared rejection,
+concurrent identity and native exit 13 for awaited dynamic deadlocks. All twelve
+portable cases/fifteen executions now match native and manifest observations.
+P9 orchestration, invalidation keys and transactional publication are not added.
 
 ### P9 — Incremental end-to-end builds and conformance
 

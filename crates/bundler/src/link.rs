@@ -41,6 +41,9 @@ pub struct Artifacts {
     /// Reached source occurrences -> canonical native namespace module tokens.
     /// Facades are logical routes, not extra evaluation identities.
     pub async_facades: BTreeMap<AsyncSiteId, String>,
+    /// ESM modules with source TLA or a transitive static async dependency.
+    /// Native ESM owns SCC evaluation jobs, suspension and rejection propagation.
+    pub async_modules: BTreeSet<PathBuf>,
 }
 
 struct Module<'a> {
@@ -114,6 +117,7 @@ pub fn esm(
             }
         }
     }
+    let async_modules = async_modules(graph, &modules)?;
     let mut files = BTreeMap::new();
     let mut members = BTreeMap::new();
     let mut chunk_artifacts = BTreeMap::new();
@@ -383,7 +387,75 @@ pub fn esm(
         cjs_proxies,
         cjs_namespaces,
         async_facades,
+        async_modules,
     })
+}
+
+fn async_modules(
+    graph: &SourceGraph,
+    modules: &BTreeMap<u32, Module<'_>>,
+) -> eyre::Result<BTreeSet<PathBuf>> {
+    let mut asynchronous: BTreeMap<_, _> = modules
+        .iter()
+        .filter_map(|(&file, module)| {
+            module
+                .parsed
+                .facts
+                .top_level_await
+                .first()
+                .map(|&span| (file, (file, span)))
+        })
+        .collect();
+    // Static dependency closure also propagates async status around SCCs.
+    // Dynamic imports and deferred requires never make their consumer async.
+    loop {
+        let mut changed = false;
+        for (&file, module) in modules {
+            if asynchronous.contains_key(&file) {
+                continue;
+            }
+            for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
+                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            }) {
+                let target = target_file(graph, file, dependency)?;
+                if let Some(&origin) = asynchronous.get(&target) {
+                    asynchronous.insert(file, origin);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for (&file, module) in modules {
+        for dependency in module
+            .parsed
+            .facts
+            .dependencies
+            .iter()
+            .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+        {
+            let target = target_file(graph, file, dependency)?;
+            if let Some(&(origin, span)) = asynchronous.get(&target) {
+                eyre::bail!(
+                    "{}: require of async ESM {} at bytes {}..{} (top-level await in {} at bytes {}..{})",
+                    graph.file_path(file).unwrap().display(),
+                    graph.file_path(target).unwrap().display(),
+                    dependency.span.start,
+                    dependency.span.end,
+                    graph.file_path(origin).unwrap().display(),
+                    span.start,
+                    span.end
+                );
+            }
+        }
+    }
+    Ok(asynchronous
+        .keys()
+        .map(|&file| graph.file_path(file).unwrap().to_owned())
+        .collect())
 }
 
 fn dependency_edits(

@@ -137,7 +137,7 @@ fn parse_failure_never_resurrects_prior_success() {
     for broken in [
         "const = ;",
         "const a = 1; const a = 2;",
-        "export const x = await foo();",
+        "export const x = import.meta.url;",
     ] {
         fs::write(&path, broken).unwrap();
         assert!(run(&path).is_err());

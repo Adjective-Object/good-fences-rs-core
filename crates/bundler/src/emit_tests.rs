@@ -221,11 +221,7 @@ fn unsupported_modes_and_stale_sources_fail_without_artifacts() {
         "console.log(1);"
     )
     .is_err());
-    for source in [
-        "await 1;",
-        "console.log(import.meta.url);",
-        "const x = <div/>;",
-    ] {
+    for source in ["console.log(import.meta.url);", "const x = <div/>;"] {
         assert!(ast_segmenter::parse_module(
             &logger::StdioLogger::new(),
             source,
@@ -234,6 +230,7 @@ fn unsupported_modes_and_stale_sources_fail_without_artifacts() {
         )
         .is_err());
     }
+
     let source = "const obj = {}; function side() {} /*#__PURE__*/ obj.method?.().field(side());";
     let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", source)]);
     let retention = crate::retain(&graph, &[0], &[]).unwrap();
@@ -245,4 +242,17 @@ fn unsupported_modes_and_stale_sources_fail_without_artifacts() {
         error.contains("input.mjs") && error.contains("bytes") && error.contains("optional"),
         "{error}"
     );
+}
+
+#[test]
+fn single_module_preserves_top_level_suspension() {
+    let source = "console.log('before'); await Promise.resolve(); console.log('after');";
+    let output = emit(source, false);
+    let actual = node(&output, "await import('./input.mjs'); console.log('done');");
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"before\nafter\ndone\n");
 }

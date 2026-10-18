@@ -131,6 +131,9 @@ pub struct Directive {
 pub struct ModuleFacts {
     /// Effective parser format, including package policy for extensionless/.js input.
     pub commonjs: bool,
+    /// Syntax-local await/for-await sites outside functions, not a schedule.
+    #[serde(with = "span_serde::list")]
+    pub top_level_await: Vec<Span>,
     pub effects: Vec<crate::effects::EffectSite>,
     pub invocations: Vec<crate::invocation::Invocation>,
     pub bindings: Vec<Binding>,
@@ -252,6 +255,7 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
     }
     facts.references.sort_by_key(|r| (r.span.start, r.span.end));
     facts.dependencies.sort_by_key(|d| d.id.0);
+    facts.top_level_await.sort_by_key(|s| (s.start, s.end));
     facts.imports.sort_by_key(|i| i.span.start);
     facts
         .exports
@@ -311,6 +315,20 @@ impl Extractor<'_, '_> {
 }
 
 impl<'a> Visit<'a> for Extractor<'_, 'a> {
+    fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {
+        if self.enclosing_function.is_none() {
+            self.facts.top_level_await.push(expression.span);
+        }
+        walk::walk_await_expression(self, expression);
+    }
+
+    fn visit_for_of_statement(&mut self, statement: &ForOfStatement<'a>) {
+        if statement.r#await && self.enclosing_function.is_none() {
+            self.facts.top_level_await.push(statement.span);
+        }
+        walk::walk_for_of_statement(self, statement);
+    }
+
     fn visit_binding_identifier(&mut self, id: &BindingIdentifier<'a>) {
         if let Some(symbol) = id.symbol_id.get() {
             let binding = self.ids[&symbol];

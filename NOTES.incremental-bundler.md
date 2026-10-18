@@ -2,8 +2,54 @@
 
 ## Current scope
 
-P0–P7 are complete for the documented synchronous Node ESM/CJS target.
-P8.1 is implemented; P8.2 and P9 remain pending.
+P0–P8 are complete for the documented Node 22.15+ ESM/CJS target, including
+source dynamic imports and native TLA. Stop before P9.
+
+## P8.2 / P9 handoff
+
+- `ModuleFacts::top_level_await` contains ordered source await/for-await spans
+  outside functions. CJS stays synchronous. Cache schema **5** / extractor **6**
+  persists/validates these facts; all old sidecars miss. No async dependency/SCC
+  state or target policy is cached as source truth.
+- `link::Artifacts::async_modules` derives source-TLA + static dependency closure
+  through cycles. Type-only/dynamic edges and async function bodies do not mark
+  importers async. Every direct/transitive/deferred require of async ESM fails
+  with require and originating TLA paths/ranges.
+- Native Node ESM jobs schedule suspension/dependency SCCs and cache execution
+  failures. Tests exercise chains/diamonds, cycle order/hoisting/TDZ, shared
+  rejection, concurrent entries/imports and once-only evaluation. Awaited dynamic
+  deadlocks retain Node's unsettled-TLA exit 13; no timers/cycle breaking.
+- All **12 portable fixtures / 15 generated-artifact entry executions** match
+  native stdout and manifest contracts, with zero skipped async fixtures.
+  Cached owned facts → SourceGraph → retention → exact chunks → linked runtime
+  produces identical output to cold parsing. A dynamic CJS factory and its
+  deferred target demonstrably share one payload without executing the target.
+- P9 starts from `segment_cache::load_or_parse`, `OwnedSourceFileInput::from_ranges`,
+  graph revision/resolution APIs, `chunks::partition`, and `link::esm`. Existing
+  `Artifacts::{files,entries,runtime,modules,module_payloads,members,
+  chunk_artifacts,manifest,cjs_proxies,cjs_namespaces}` now also expose
+  `async_facades` (per-site namespace tokens) and `async_modules` (derived paths).
+  Native runtime exports remain `loadEntry`, `requireModule`, `commonjsNamespace`.
+  The Rust library stages only an owned artifact map: no public build/watch/CLI
+  orchestration, publication transaction, reverse invalidation, performance
+  baseline or content-addressed outputs have been implemented for P9.
+- Limits: Node 22.15+ only; synchronous physical JSON reads (not demand-minimal
+  async fetching), immutable successful payload cache, deliberate CJS namespace
+  bridge/extra promise reaction, conservative deferred require rejection.
+  Externals/assets, import.meta, TS/JSX lowering and source maps stay gated.
+  Existing tracker behavior and tracker/CLI runtime requirements are unchanged.
+- Final verification on Node **v22.22.2**, with managed test directories under
+  `TMPDIR="$PWD/target/p1-test-tmp"`:
+  - `cargo test -p bundler -p ast-segmenter -p import_resolver -p oxc_utils_parse
+    -p segment_cache -p source_graph -p tag_graph -p unused_finder --quiet`:
+    **311 passed**, zero failed/ignored (82 bundler, 51 parser, 18 resolver,
+    9 parse-utils, 26 cache, 31 source-graph, 22 tag-graph, 72 tracker).
+  - `node scripts/bundler-fixtures.mjs`: **12 native contracts passed**;
+    separately, bundled-mode Rust tests execute all 15 emitted entry artifacts.
+  - `cargo clippy -p bundler -p ast-segmenter -p segment_cache --all-targets
+    --no-deps --quiet`: passed; only pre-existing parser/ftree warnings.
+  - `./scripts/spot-check`: passed parser check, **51 parser tests**, full
+    workspace check. No full workspace test-suite or performance claim.
 
 ## P8.1 dynamic loading
 

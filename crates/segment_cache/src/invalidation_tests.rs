@@ -51,6 +51,7 @@ fn cold_warm_and_disabled_match_every_owned_fact_and_segment() {
     for (name, source, format) in [
         ("facts.ts", "#!/bin/node\n'use strict'; import main, {value as local} from './dep'; import * as ns from './other'; export {local as '名'}; export * from './star'; export * as space from './space'; export const {a: [first], ...rest} = ns; const later = () => forward; var forward = main; function shadow(local: number) { return local + first; } export default shadow; import('./lazy'); type T = import('./types').T; const café = local; café;", ModuleFormat::Esm),
         ("facts.cjs", "#!/bin/node\n'use strict'; exports.value = 1; module.exports = { value: 2 }; exports = {}; module = {}; require('./dep'); function deferred(){ return require('./dep'); } function shadow(require){ return require('not-a-dependency'); } return;", ModuleFormat::CommonJs),
+        ("async.mjs", "await 1; export const value = await Promise.resolve(2); for await (const x of [1]) { await x; }", ModuleFormat::Esm),
         ("empty.js", "// no statements\n", ModuleFormat::Esm),
         ("declarations.d.ts", "export interface Value { name: string } export declare const value: Value; export type { Value as Renamed };", ModuleFormat::Esm),
     ] {

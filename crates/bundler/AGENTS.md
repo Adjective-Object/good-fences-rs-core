@@ -18,7 +18,10 @@ URLs include the published bundle directory to isolate separate instances.
 loadEntry returns native namespaces; launchers export the namespace object.
 Source literal dynamic imports route directly to canonical native identities;
 CJS promises unwrap the shared namespace bridge. No facade evaluation copies.
-TLA and externals remain explicit later gates.
+Native ESM jobs own TLA dependency/SCC scheduling and rejection. Derive async
+status only over runtime static dependencies; reject all requires of async ESM
+with original require/TLA spans, including deferred sites. Never persist this
+derived status or add an eager/manual scheduler. Externals remain gated.
 P7 CJS uses native createRequire + synchronous hooks, not the ESM CJS
 translator's separate require path. Native cache owns allocation-before-call,
 partial cycles, wrapper this, current exports and eviction/retry after throws.

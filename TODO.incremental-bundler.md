@@ -5,8 +5,8 @@ acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means
 all listed prerequisites, not merely the preceding item.
 
-**P0–P7 are complete for the documented synchronous Node ESM/CJS target.
-P8–P9 remain pending.** Both
+**P0–P8 are complete for the documented Node 22.15+ ESM/CJS target, including
+source dynamic imports and native TLA scheduling. P9 remains pending.** Both
 completed upstream research notes are incorporated in PLAN. Integration verified
 12 runtime contracts (six esbuild and six rspack; 15 entrypoint executions),
 31 harness regressions, and `./scripts/spot-check`. All P0 tasks are complete.
@@ -329,10 +329,19 @@ workspace test success.
   identity, CJS-source imports, microtask order, read/compile/execute failures,
   read retry and immutable cached payload text. Nine portable cases/twelve entry
   executions pass; three source-TLA fixtures await P8.2.
-- [ ] **P8.2 — Add TLA scheduling.** Depends: P8.1.
+- [x] **P8.2 — Add TLA scheduling.** Depends: P8.1.
   Model async dependency/SCC evaluation and rejection propagation. Test async
   chains/cycles, concurrent requests, once-only evaluation and require of
   async ESM diagnostics. Never replace TLA with a synchronous approximation.
+  ESM await/for-await spans survive owned/cache/graph inputs (schema 5/extractor 6).
+  The linker derives static async closure through cycles and rejects direct,
+  transitive and deferred requires of async ESM with original source sites.
+  Native Node jobs provide SCC suspension/order and shared rejection without a
+  competing scheduler. Generated-artifact tests verify chains/diamonds/cycles,
+  hoisting/TDZ, once-only concurrent entries/imports, rejection identity, exit 13
+  for unsettled TLA, and cached-facts/cold-output equivalence.
+  All twelve portable cases/fifteen executions pass native + generated output +
+  manifest stdout checks; no async fixture skips or ignored failures.
 
 ## P9 — Incrementality, conformance and measured performance
 
