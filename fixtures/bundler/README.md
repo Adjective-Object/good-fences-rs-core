@@ -85,7 +85,7 @@ or invokes scripts; missing runtime dependencies fail execution. Node built-ins
 are available. Only trusted, reviewed fixtures should be run: Node execution is
 **not a sandbox**, and this runner does not enforce a network or filesystem jail.
 
-## Execution and future adapters
+## Execution and differential adapter
 
 Cases are discovered in deterministic ID order and all manifests are validated
 before execution. Each case's `files/` tree is copied into a fresh managed
@@ -106,3 +106,42 @@ snapshots, and incidental formatting are not this corpus's semantic contracts.
 
 Runner regression tests use synthetic fixtures only:
 `node --test scripts/bundler-fixtures.test.mjs`.
+
+## Public-pipeline differential mode (Node 22.15+)
+
+The original baseline command above is unchanged. A separate harness now builds
+through the public Rust library and transactional publisher:
+
+```sh
+cargo build -p bundler --example build
+node scripts/bundler-differential.mjs
+node --test scripts/bundler-differential.test.mjs
+```
+
+It validates the same manifests/provenance first, makes **separate** native and
+bundler source copies, and compares original manifest stdout, native stdout and
+emitted launcher stdout for every entry. All twelve portable cases/fifteen
+emitted entry executions pass, with zero unsupported skips. It additionally
+executes an authored same-runtime concurrent multi-entry CJS/ESM identity case
+and four bundler-only source-range diagnostic cases (nonliteral import,
+unconfigured external, require-of-async-ESM, TS emission).
+No upstream files, provenance or licenses are changed.
+
+`runDifferential(root, {driver, tempRoot, timeoutMs, unsupported})` is the small
+programmatic harness API. `unsupported` must explicitly map known case IDs to
+nonempty reasons; results say `unsupported`, with zero emitted executions, never
+`passed`. Unexpected build failures remain failures, not inferred skips.
+`buildProject` invokes `bundler`'s `examples/build.rs` library driver; there is no
+competing JS resolver/graph/emitter or handwritten CLI framework.
+
+Managed copies default to project-local `target/p1-test-tmp`. Runtime invocations
+have five-second timeouts, bounded output, sanitized Node preload environment,
+checked stderr/exit/signal policy and synchronous child kill/reaping on timeout.
+Build invocations have a separate 30-second timeout after compiling the driver.
+The runner removes managed copies on every failure. Trusted fixture code must
+not launch detached descendants; this is not a sandbox/process-tree jail.
+The regression suite checks actual emitted mismatch/stderr/nonzero/timeout
+failures, output bounds, cleanup, unsupported reporting and child reaping.
+Dedicated Node 22/current repository Rust CI builds/runs this separate mode;
+native baseline CI remains Rust-free. Runtime/interop/platform limits are in
+[`bundler/README.md`](../../crates/bundler/README.md).

@@ -39,4 +39,5 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
 - `fixtures/bundler/` holds portable runtime contracts, not generated-code snapshots.
   Preserve pinned upstream provenance, adaptation notes, and all applicable licenses.
 - `node scripts/bundler-fixtures.mjs` validates native Node baselines only.
-  Bundler conformance and incremental invalidation require separate future drivers.
+  `cargo build -p bundler --example build && node scripts/bundler-differential.mjs`
+  exercises public build/publication, separately from the native baseline.

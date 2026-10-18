@@ -22,6 +22,23 @@ jobs:
         run: node --test scripts/bundler-fixtures.test.mjs
       - name: Validate portable runtime fixtures
         run: node scripts/bundler-fixtures.mjs
+  bundler-conformance:
+    runs-on: ubuntu-24.04
+    name: "bundler public-pipeline differential"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-01
+      - name: Build the public library driver
+        run: cargo build -p bundler --example build
+      - name: Test baseline and differential harnesses
+        run: node --test scripts/bundler-fixtures.test.mjs scripts/bundler-differential.test.mjs
+      - name: Compare native and emitted portable fixtures
+        run: node scripts/bundler-differential.mjs
   checks:
     strategy:
       fail-fast: false

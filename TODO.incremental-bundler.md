@@ -363,11 +363,16 @@ workspace test success.
   precommit phase and unchanged bytes/mtimes are implemented. Old generations
   remain valid for running lazy loaders; explicit quiescent `prune_stale` removes
   only known unmodified files/empty parents, preserving foreign/modified files.
-- [ ] **P9.3 — Complete differential fixture mode.** Depends: P0.5, P9.2.
+- [x] **P9.3 — Complete differential fixture mode.** Depends: P0.5, P9.2.
   Run native baseline and emitted artifacts with explicit support/interop
   policies; add same-runtime multi-entry and bundler-only diagnostics cases.
   Report skips as unsupported, not passes; preserve original upstream
   provenance when adding adaptations.
+  Separate Node harness invokes a minimal Rust public-library driver and the
+  transactional publisher: all 12 cases/15 emitted executions, one additional
+  same-runtime concurrent multi-entry case and four bundler-only diagnostics.
+  Explicit unsupported results are not passes. Baseline behavior/provenance/
+  licenses are unchanged; Node 22 + repository-toolchain CI is wired separately.
 - [ ] **P9.4 — Benchmark and release-gate.** Depends: P9.3, P3.4.
   `cargo bench` cold/warm/no-op/local/export/config edits with parse/resolution/
   emit counters; no criterion. Update library READMEs, concise adopted AGENTS

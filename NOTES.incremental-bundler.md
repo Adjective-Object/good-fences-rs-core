@@ -3,8 +3,27 @@
 ## Current scope
 
 P0–P8 are complete for the documented Node 22.15+ ESM/CJS target.
-P9.1–P9.2 add public build/session and transactional publication APIs;
-P9.3–P9.4 remain in progress.
+P9.1–P9.3 add public build/session, transactional publication and public-pipeline
+differential conformance. P9.4 remains in progress.
+
+## P9.3
+
+The `build` Rust example is a thin invocation of BuildSession/build_and_publish,
+returning generation paths/counters as JSON. Separate Node differential mode
+reuses baseline manifest validation, copies native/source trees independently,
+builds all entries together, then compares all native/generated/manifest output.
+All 12 cases/15 emitted entry executions pass with zero unsupported cases.
+An authored same-process concurrent-entry CJS/ESM identity check and four
+bundler-only source-range diagnostics pass. Unexpected build failures fail;
+explicit capability skips report unsupported with reasons and zero executions.
+Original baseline runner/fixtures/provenance/licenses remain untouched.
+Runtime timeouts/output bounds/stderr/exit failures clean managed copies; the
+runtime child is synchronously killed/reaped. Detached descendants are outside
+the trusted fixture contract. CI adds an isolated Node22/repository-Rust job.
+Verification: 43 harness regressions (31 unchanged baseline + 12 differential),
+12 native contracts, 12 differential contracts/15 emitted executions + identity/
+4 diagnostics, all 90 bundler tests and `./scripts/spot-check` pass on Node
+v22.22.2. Logs: `target/p9-3-{build,harness,baseline,differential,tests,spot-check}.log`.
 
 ## P9.2
 

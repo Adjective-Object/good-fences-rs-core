@@ -632,6 +632,12 @@ one atomically replaced ownership pointer with a nonblocking OS writer lock.
 Explicit stale pruning requires old-reader quiescence so lazy runtimes retain
 valid payloads across successful rebuilds; only listed unmodified files and
 empty known directories can be removed.
+P9.3's `scripts/bundler-differential.mjs` invokes the small Rust `build` example
+through the public build/publish APIs. Separate native/generated copies preserve
+baseline semantics. Twelve cases/fifteen executions, concurrent multi-entry
+identity and four diagnostic cases are verified without modifying upstream
+sources or provenance. Unsupported results require explicit ID/reason mappings;
+unexpected failures never become skips.
 
 Build layer-specific fingerprints and invalidation:
 

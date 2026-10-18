@@ -28,6 +28,14 @@ walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
 
+Public-pipeline conformance (separate from the native-only fixture baseline):
+`cargo build -p bundler --example build && node scripts/bundler-differential.mjs`.
+Harness regressions: `node --test scripts/bundler-differential.test.mjs`.
+The minimal driver can also build a project directly:
+`cargo run -p bundler --example build -- PROJECT OUTPUT ENTRY...`; it prints
+generation-specific `entries`/`runtime` paths and actual build counters as JSON.
+Use an absolute OUTPUT, or note that it is relative to the process cwd.
+
 ## Public build session
 
 `build::{BuildSession, BuildOptions, Entry}` joins the existing source cache,
