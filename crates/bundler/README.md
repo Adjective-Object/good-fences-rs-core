@@ -28,6 +28,55 @@ walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
 
+## Public build session
+
+`build::{BuildSession, BuildOptions, Entry}` joins the existing source cache,
+structural resolver, shared graph, effects, exact partition and native linker:
+
+```rust,no_run
+use bundler::build::{BuildOptions, BuildSession, Entry};
+let mut session = BuildSession::new("project")?;
+let mut options = BuildOptions::default();
+options.entries.insert("main".into(), Entry {
+    path: "src/main.mjs".into(), namespace: true,
+});
+let result = session.build(&options)?;
+let artifacts = &result.product.artifacts;
+# Ok::<(), eyre::Report>(())
+```
+
+The canonical project root is a bounded dependency/configuration boundary.
+All resolved sources must remain inside it. Symlinks (including directory
+symlinks) are explicitly rejected by this orchestration API; the lower-level
+resolver retains its separate policy. Nearest package metadata determines `.js`
+format; explicit extensions override it. Resolution uses the existing resolver's
+supported package/tsconfig forms (not every Node resolver feature; e.g. bare
+string `exports` is currently rejected). JSON/JSONC bytes and all file names
+under the root conservatively invalidate resolution, including package trees,
+config ancestry, new files and deleted targets. `.git`, `target`, sidecars and
+reserved `.bundler-*` publication directories are excluded. Keep unrelated large
+trees outside the project root; this is measured coarse inventory, not a watcher.
+
+Source bytes and effective parser config key in-memory and disk parse reuse.
+`Fingerprints` independently identifies parse, resolution, effects, entry roots,
+fixed Node runtime and emitter/output inputs. Source caches never contain policy.
+The session reports actual extraction misses, memory/disk hits, dependency
+resolution calls, linker calls and linker source-check parses separately.
+Policy-only changes perform **zero extraction/resolution**, but deliberately
+revalidate retained source in the emitter. No-op builds reuse the successful
+product and perform zero parsing/resolution/emission. Changed/deleted modules'
+transitive prior users come from the shared reverse index. Resolution changes
+conservatively invalidate all prior modules. Derived graph/effects/partition/
+emission currently rebuild wholesale on any changed key; no fine-grained
+later-layer speedup is claimed.
+
+`build` returns `eyre::Result`; failed parsing/resolution/linking/rechecks never
+return the prior success. The session retains its last successful product for
+later valid builds, not as an error fallback. Cache-write failures are explicit
+`warnings`. Sources and config inventory are rechecked before success, not
+locked against noncooperating editors. A session has one mutable owner and its
+shared products use `Rc` (not cross-thread sharing).
+
 ## CommonJS runtime
 
 Linked opaque JavaScript CJS bodies use Node's native CommonJS loader through

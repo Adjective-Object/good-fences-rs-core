@@ -1,6 +1,7 @@
 //! Retention, exact chunks and native ESM emission, independent of usage reports.
-mod cjs;
+pub mod build;
 pub mod chunks;
+mod cjs;
 pub mod effects;
 pub mod emit;
 pub mod link;

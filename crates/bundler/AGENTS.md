@@ -1,6 +1,12 @@
 # bundler
 
 Consume owned syntax facts and checked shared graph edges, never UsedTag.
+BuildSession is the public orchestration boundary: reuse source-local cache facts,
+separate layer fingerprints, inventory config/add/delete changes, and derive
+affected users from the existing reverse index. Never return old success on error.
+Later-layer invalidation is deliberately coarse; counters separate extraction
+from required emitter source validation. Project roots are bounded/canonical;
+symlinks and resolved sources outside the root are rejected.
 Keep evaluation demand and binding demand distinct. Plans are derived state;
 source caches must not contain policy conclusions. Consumer → dependency edges
 preserve source order and original deferred/async timing; they are not permission

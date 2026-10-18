@@ -18,8 +18,9 @@ oxc_semantic.workspace = true
 logger = { path = "../logger" }
 serde_json.workspace = true
 sha2 = "0.10.9"
+segment_cache = { path = "../segment_cache" }
+import_resolver = { path = "../import_resolver" }
 
 [dev-dependencies]
 insta = { version = "1", default-features = false }
-segment_cache = { path = "../segment_cache" }
 test_tmpdir = { path = "../test_tmpdir" }

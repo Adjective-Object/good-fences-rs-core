@@ -621,6 +621,14 @@ P9 orchestration, invalidation keys and transactional publication are not added.
 
 ### P9 — Incremental end-to-end builds and conformance
 
+P9.1 now exposes `bundler::build::BuildSession`. Independent layer keys and
+actual extraction/resolution/link counters preserve source-local cache identity.
+The initial implementation intentionally uses conservative JSON/file-name
+inventory and full later-layer rebuilding after changes, while reusing unchanged
+parse products and per-source resolutions. Canonical bounded roots reject
+symlinks/out-of-root targets. Publication and public-pipeline differential/
+benchmark gates follow in P9.2–P9.4.
+
 Build layer-specific fingerprints and invalidation:
 
 | Changed input | Minimum invalidation |

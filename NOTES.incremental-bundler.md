@@ -2,8 +2,29 @@
 
 ## Current scope
 
-P0–P8 are complete for the documented Node 22.15+ ESM/CJS target, including
-source dynamic imports and native TLA. Stop before P9.
+P0–P8 are complete for the documented Node 22.15+ ESM/CJS target.
+P9.1 adds public `bundler::build` orchestration; P9.2–P9.4 remain in progress.
+
+## P9.1
+
+`BuildSession::build` uses source cache → StructuralResolver → owned shared
+SourceGraph → effects/partition → link::esm. Separate parse/resolution/effects/
+roots/runtime/output keys; source extraction, cache hits, resolver calls,
+linker calls and required emitter source-check parses have distinct counters.
+No-op has no parsing/resolution/emission; policy/root edits reuse source facts
+and occurrence resolutions. Config inventory hashes JSON/JSONC bytes plus file
+names under a canonical bounded project root, excluding reserved generated/cache
+paths. This intentionally over-invalidates resolution; later layers rebuild
+coarsely. Reverse users come from the shared graph, including deletion.
+Symlinks/out-of-root targets are explicitly rejected. Existing resolver syntax
+limits apply (bare-string exports rejected); no new resolution implementation.
+Failed builds do not return previous successes; source/config rechecks precede
+successful results. Tests cover cold/warm/no-op/policy/root/local/export edits,
+package exports/type/tsconfig/options, deletion/recreate/rename and failure repair,
+comparing graph, exact sets, diagnostics and complete artifact maps to fresh builds.
+Verification: 85 bundler tests pass (including native emitted observations after
+local edits); `./scripts/spot-check` passes 51 parser tests and workspace check.
+Logs: `target/p9-1-{tests,spot-check}.log`. No full-workspace test claim.
 
 ## P8.2 / P9 handoff
 

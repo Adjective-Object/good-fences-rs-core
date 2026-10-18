@@ -345,10 +345,15 @@ workspace test success.
 
 ## P9 — Incrementality, conformance and measured performance
 
-- [ ] **P9.1 — Connect layer fingerprints/invalidation.** Depends: P2.3,
+- [x] **P9.1 — Connect layer fingerprints/invalidation.** Depends: P2.3,
   P3.3, P4.4, P8.2. Implement parse/resolution/effects/roots/runtime/output keys
   separately and reverse invalidation including deletion. Tests compare full
   versus incremental graph, root sets, diagnostics and emitted observations.
+  Public `BuildSession::build` integrates the existing pipeline; distinct layer
+  identities/counters, no-op reuse, warm parse reuse, reverse-user invalidation,
+  deletion/recreation/rename, package exports/type and tsconfig edits are tested.
+  Later graph/retention/output rebuilding and JSON/file-name inventory are
+  deliberately coarse; emitter source validation is separately counted.
 - [ ] **P9.2 — Publish transactional outputs.** Depends: P9.1.
   Stage only owned generated artifacts and publish after success; clean stale
   chunks safely. Tests: cancellation/failure, stale async chunks, source/cache
