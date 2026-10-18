@@ -7,7 +7,8 @@ esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent
 increments follow P1–P9 toward the full bundler epic. P0 is not a bundler
 implementation. Autonomous implementation now proceeds in narrow linear
 commits: P0–P7 are verified for the documented synchronous Node ESM/CJS target;
-P8–P9 remain pending. This bounded phase completes P7.1–P7.3 and stops before P8.
+P8.1 source dynamic loading is verified; P8.2 TLA and P9 remain pending.
+This bounded phase completes P8.1–P8.2 and stops before P9.
 The checklist in
 `TODO.incremental-bundler.md` is the execution ledger.
 
@@ -595,6 +596,15 @@ shared load/evaluation promises. Preserve import promise timing and error
 behavior. Add TLA scheduling including dependency cycles, rejection, concurrent
 imports, and require/async incompatibility. Loading and evaluating are separate;
 one shared chunk cannot create extra module evaluations.
+
+P8.1 uses native source `import()` of canonical virtual module URLs, not new
+wrapper modules or an eager chunk evaluator. `Artifacts::async_facades` exposes
+the per-site namespace routes already represented in the partition manifest.
+CJS routes resolve to the existing bridge via a promise continuation. Successful
+payload reads are cached once; load errors can retry, immutable cached text is
+not hot-repaired, and native ESM owns compilation/evaluation failure semantics.
+Generated Node evidence covers identity, timing, nested activation and failures;
+TLA remains gated until P8.2.
 
 ### P9 — Incremental end-to-end builds and conformance
 

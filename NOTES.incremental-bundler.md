@@ -3,7 +3,23 @@
 ## Current scope
 
 P0–P7 are complete for the documented synchronous Node ESM/CJS target.
-P8–P9 remain pending; this phase stops before P8.
+P8.1 is implemented; P8.2 and P9 remain pending.
+
+## P8.1 dynamic loading
+
+- `Artifacts::async_facades` maps reached occurrence IDs to canonical namespace
+  tokens. Native source imports preserve ESM promises/namespace identity; CJS
+  imports resolve the existing runtime-key bridge with one extra reaction.
+- One runtime caches successful payload reads. Load/read failures retry; cached
+  payload text is immutable. Compilation rejects and native execution failures
+  remain cached. No new evaluation registry or per-site wrapper modules.
+- Real Node v22.22.2 tests cover concurrent/distinct/nested/dead sites, sync+async
+  sharing, CJS-source imports, microtasks, missing payload retry, bad JavaScript
+  rejection and shared execution failures. Portable coverage is nine cases /
+  twelve executions; three TLA cases remain for P8.2.
+- Validation: scoped parser/bundler/resolver/cache/graph/tag/tracker tests:
+  **299 passed**, zero failed/ignored (72 bundler); `./scripts/spot-check`
+  passed ast-segmenter check/tests and the full workspace check.
 
 ## P7.3 runtime / P8–P9 handoff
 

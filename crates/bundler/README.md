@@ -185,20 +185,29 @@ any root set or constitute a demand-minimal/async loader claim. Payload names
 derive from logical identity, not content; transactional/content-addressed
 publication remains P9. No files are written by the Rust library.
 
-Source dynamic imports, TLA, externals, TS/JSX and source-policy unsupported
-forms fail with source diagnostics. Entry launchers' generated top-level await
-only bootstraps native entry import; it is not support for source TLA scheduling.
-P7 integrates CJS factory/proxy identity without bypassing native ESM
-namespaces; P8 owns source async boundaries/TLA and any fetching optimization.
+Literal source dynamic imports use the same native identities as static imports
+and entries. `Artifacts::async_facades` maps each reached source occurrence to
+its canonical namespace token; these logical facades add no module wrappers or
+evaluation identities. Native import promises preserve microtask scheduling and
+deduplicate module evaluation. CJS imports unwrap the existing namespace bridge
+with a promise continuation (one extra reaction, not a synchronous require).
+Nested sites stay deferred; unreachable sites emit nothing. Successfully read
+JSON payloads are cached per runtime, without evaluating co-located modules.
+Missing/read/JSON failures retry on subsequent native loads; successfully cached
+payload text is immutable for that artifact instance. Compilation errors reject,
+and execution errors remain cached by native ESM; rebuilding requires a new
+published bundle directory, not in-place repair of cached payloads.
+Source TLA, externals, TS/JSX and other source-policy unsupported forms still fail
+with diagnostics. Source TLA scheduling is P8.2; fetching optimization is not claimed.
 This backend is not a browser/standalone-file target.
 
-Bundled-mode Node tests compare eight portable synchronous cases (eleven entry executions)
+Bundled-mode Node tests compare nine portable cases (twelve entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover
 cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
 effect ordering, once-only/concurrent entry loading, bundle-instance isolation,
 equal-identity star diamonds, dead-code removal and composed PURE recipes.
-These include default/named CJS interop and a self-cycle. Four dynamic-import/TLA
-fixtures remain unsupported; no source-async parity is claimed. Same-process
+These include default/named CJS interop, a self-cycle and dynamic CJS import. Three
+source-TLA fixtures remain unsupported. Same-process
 concurrent multi-entry CJS cycles/identity have independent differential evidence.
 
 ## Root reachability
@@ -257,7 +266,7 @@ or lexical demand. Neither chunks, sorted manifest edges, nor transitive load
 sets are a runtime schedule. Distinct module records in one chunk (including
 deferred CJS require targets) must retain separate once-only evaluation state.
 P6 supplies Node-native ESM rewriting/instantiation (above); P7 supplies CJS
-factories/proxies/cache. P8 source dynamic loading/TLA scheduling remains pending.
+factories/proxies/cache. P8.1 source dynamic loading is implemented; TLA is P8.2.
 Only the documented synchronous ESM/CJS subset has emitted-runtime evidence.
 Use manifests only with the same graph instance and after `is_current` succeeds;
 recompute the partition/manifest after entry, graph, or effect-policy changes.

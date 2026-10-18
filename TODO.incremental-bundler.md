@@ -319,10 +319,16 @@ workspace test success.
 
 ## P8 — Dynamic import and async evaluation
 
-- [ ] **P8.1 — Load chunks with shared evaluation identity.** Depends: P6.3,
+- [x] **P8.1 — Load chunks with shared evaluation identity.** Depends: P6.3,
   P7.3. Implement dynamic facades, deduplicated loading/evaluation and namespace
   promises. Test repeated/concurrent imports, nested sites, sync+async reach,
   load failures, microtask timing and no extra execution from shared chunks.
+  Literal source imports now route through per-site logical namespace facades to
+  the shared native loader; ESM namespaces and CJS bridges retain canonical identity.
+  Generated-artifact tests cover concurrent/distinct/nested/dead sites, sync+async
+  identity, CJS-source imports, microtask order, read/compile/execute failures,
+  read retry and immutable cached payload text. Nine portable cases/twelve entry
+  executions pass; three source-TLA fixtures await P8.2.
 - [ ] **P8.2 — Add TLA scheduling.** Depends: P8.1.
   Model async dependency/SCC evaluation and rejection propagation. Test async
   chains/cycles, concurrent requests, once-only evaluation and require of

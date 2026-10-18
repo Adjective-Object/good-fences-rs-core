@@ -541,47 +541,107 @@ fn same_logical_chunk_does_not_flatten_static_evaluation_order() {
 }
 
 #[test]
-fn rejected_partition_and_loading_cases_return_source_diagnostics() {
-    for (items, entries, diagnostic) in [
+fn dynamic_sites_share_native_namespaces_and_preserve_nested_activation_and_timing() {
+    let output = compare(&sources(&[
+        ("entry.mjs", "import * as sync from './shared.mjs'; console.log('before'); const first = import('./shared.mjs'); const second = import('./shared.mjs'); console.log(first !== second); Promise.resolve().then(() => console.log('microtask')); Promise.all([first, second, import('./outer.mjs')]).then(async ([a,b,outer]) => { console.log(a === b, a === sync, a.count); console.log((await outer.later()).value); console.log((await import('./outer.mjs')) === outer); }); function dead() { return import('./dead.mjs'); }"),
+        ("shared.mjs", "console.log('shared'); export const count = (globalThis.count = (globalThis.count || 0) + 1);"),
+        ("outer.mjs", "console.log('outer'); export function later() { return import('./inner.mjs'); }"),
+        ("inner.mjs", "console.log('inner'); export const value = 7;"),
+        ("dead.mjs", "console.log('must not execute');"),
+    ]), "entry.mjs");
+    assert_eq!(output.async_facades.len(), 5);
+    assert!(!output.modules.contains_key(Path::new("dead.mjs")));
+    assert_eq!(
+        output
+            .files
+            .keys()
+            .filter(|p| p.as_path() == Path::new("runtime.mjs"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn dynamic_commonjs_uses_the_same_conservative_namespace_as_static_and_entry_loads() {
+    let source = sources(&[
+        ("entry.mjs", "import * as sync from './dep.cjs'; export async function check() { const [a,b] = await Promise.all([import('./dep.cjs'), import('./dep.cjs')]); console.log(a === b, a === sync, a.default === sync.default, a.computedName); a.bump(); console.log(a.computedName); return a; }"),
+        ("dep.cjs", "console.log('factory once'); let value = 1; module.exports = {['computed' + 'Name']: value, bump() { module.exports.computedName = ++value; }};"),
+    ]);
+    let (_, mut output) = build(&source, &[("entry.mjs", true), ("dep.cjs", false)], false);
+    output.files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; const entry = await loadEntry('entry.mjs'); const ns = await entry.check(); console.log(ns === await loadEntry('dep.cjs'));".into());
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    insta::assert_snapshot!(String::from_utf8(actual.stdout).unwrap(), @"
+    factory once
+    true true true 1
+    2
+    true
+    ");
+}
+
+#[test]
+fn dynamic_failures_are_asynchronous_shared_and_cached_by_native_esm() {
+    compare(&sources(&[
+        ("entry.mjs", "console.log('before'); const a = import('./fail.mjs'); console.log('after'); Promise.allSettled([a, import('./fail.mjs')]).then(async ([a,b]) => { console.log(a.status, a.reason === b.reason, a.reason.message); try { await import('./fail.mjs'); } catch(e) { console.log(e === a.reason, globalThis.attempt); } });"),
+        ("fail.mjs", "globalThis.attempt = (globalThis.attempt || 0) + 1; throw Error('execute failure');"),
+    ]), "entry.mjs");
+    compare(&sources(&[
+        ("entry.cjs", "console.log('sync'); module.exports = () => import('./dep.mjs'); Promise.all([module.exports(), module.exports()]).then(([a,b]) => console.log(a === b, a.value));"),
+        ("dep.mjs", "console.log('esm once'); export const value = 9;"),
+    ]), "entry.cjs");
+}
+
+#[test]
+fn dynamic_payload_load_and_parse_failures_reject_without_eager_execution() {
+    let source = sources(&[
         (
-            vec![
-                (
-                    "entry.mjs",
-                    "export function later() { return import('./dep.mjs'); }",
-                ),
-                ("dep.mjs", "export const x = 1;"),
-            ],
-            vec![("entry.mjs", true)],
-            "awaits P8",
+            "entry.mjs",
+            "export function later() { return import('./dep.mjs'); }",
         ),
         (
-            vec![
-                ("entry.mjs", "import('./dep.mjs').then(console.log);"),
-                ("dep.mjs", "export const x = 1;"),
-            ],
-            vec![("entry.mjs", true)],
-            "awaits P8",
+            "dep.mjs",
+            "console.log('unexpected evaluation'); export const value = 1;",
         ),
-    ] {
-        let sources = sources(&items);
-        let graph = graph(&sources, false);
-        let roots: Vec<_> = entries
-            .iter()
-            .map(|(name, _)| {
-                let file = graph.file_id(Path::new(name)).unwrap();
-                RootSeed {
-                    id: RootId::Entry((*name).into()),
-                    evaluation_roots: vec![file],
-                    binding_roots: vec![GraphNode::Module(file)],
+    ]);
+    for malformed in [false, true] {
+        let (_, mut output) = build(&source, &[("entry.mjs", true)], false);
+        let paths = output.module_payloads[Path::new("dep.mjs")].clone();
+        let mut restore = BTreeMap::new();
+        for path in paths {
+            let original = output.files.remove(&path).unwrap();
+            restore.insert(path.clone(), original.clone());
+            if malformed {
+                let mut payload: BTreeMap<String, String> =
+                    serde_json::from_str(&original).unwrap();
+                for piece in payload.values_mut() {
+                    *piece = "invalid syntax !!!".into();
                 }
-            })
-            .collect();
-        let policy = EffectPolicy::default();
-        let plan = partition(&graph, &roots, &policy).unwrap();
-        let error = format!("{:#}", esm(&graph, &plan, &policy, &sources).unwrap_err());
+                output
+                    .files
+                    .insert(path, serde_json::to_string(&payload).unwrap());
+            }
+        }
+        output.files.insert("observe.mjs".into(), format!(
+            "import {{writeFileSync}} from 'node:fs'; import {{loadEntry}} from './runtime.mjs'; const entry = await loadEntry('entry.mjs'); console.log('entry ready'); const results = await Promise.allSettled([entry.later(), entry.later()]); console.log(results.every(r => r.status === 'rejected'), results[0].reason.name); const restore = {}; for (const [path,source] of Object.entries(restore)) writeFileSync(new URL(path, import.meta.url), source); try {{ await entry.later(); console.log('retry succeeded'); }} catch(e) {{ console.log('rejected', e.name); }}",
+            serde_json::to_string(&restore).unwrap()
+        ));
+        let actual = node(&output.files, Path::new("observe.mjs"));
         assert!(
-            error.contains(diagnostic) && error.contains("bytes"),
-            "{error}"
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(
+            actual.stdout,
+            if malformed {
+                b"entry ready\ntrue SyntaxError\nrejected SyntaxError\n".as_slice()
+            } else {
+                b"entry ready\ntrue Error\nunexpected evaluation\nretry succeeded\n".as_slice()
+            }
         );
     }
 }
@@ -855,7 +915,7 @@ fn read_sources(directory: &Path, prefix: &Path, sources: &mut BTreeMap<PathBuf,
 }
 
 #[test]
-fn portable_sync_fixture_observations_match_native_and_manifest_expectations() {
+fn portable_fixture_observations_match_native_and_manifest_expectations() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bundler");
     for fixture in [
         "esbuild/reexport-cycle",
@@ -866,6 +926,7 @@ fn portable_sync_fixture_observations_match_native_and_manifest_expectations() {
         "rspack/cjs-default-export",
         "rspack/cjs-named-reexport",
         "rspack/cjs-self-cycle",
+        "rspack/dynamic-import-cjs",
     ] {
         let directory = root.join(fixture);
         let manifest: serde_json::Value =

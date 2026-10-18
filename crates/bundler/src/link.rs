@@ -9,7 +9,7 @@ use oxc_span::Span;
 use sha2::{Digest, Sha256};
 use source_graph::{DependencyTarget, GraphNode, Namespace, SegmentKey, SourceGraph};
 
-use crate::chunks::{node_id, ChunkId, ChunkPlan, NodeId, RootId};
+use crate::chunks::{node_id, AsyncSiteId, ChunkId, ChunkPlan, NodeId, RootId};
 use crate::manifest::{diagnostic_manifest, DiagnosticManifest};
 use crate::policy::EffectPolicy;
 use crate::rewrite::{self, Edit};
@@ -38,6 +38,9 @@ pub struct Artifacts {
     pub cjs_proxies: BTreeMap<PathBuf, (String, BTreeSet<String>)>,
     /// CJS identities with a conservative runtime-key namespace bridge.
     pub cjs_namespaces: BTreeMap<PathBuf, String>,
+    /// Reached source occurrences -> canonical native namespace module tokens.
+    /// Facades are logical routes, not extra evaluation identities.
+    pub async_facades: BTreeMap<AsyncSiteId, String>,
 }
 
 struct Module<'a> {
@@ -346,6 +349,25 @@ pub fn esm(
         files.insert(path.clone(), source);
         entries.insert(name.clone(), path);
     }
+    let async_facades = manifest
+        .async_facades
+        .iter()
+        .map(|(site, facade)| {
+            let NodeId::Module(path) = &facade.target else {
+                eyre::bail!("async facade target must be a linked module");
+            };
+            let file = graph.file_id(path).ok_or_eyre("missing async target")?;
+            let module = &modules[&file];
+            Ok((
+                site.clone(),
+                if module.parsed.facts.commonjs {
+                    namespace_token(module)
+                } else {
+                    module.token.clone()
+                },
+            ))
+        })
+        .collect::<eyre::Result<_>>()?;
     Ok(Artifacts {
         files,
         entries,
@@ -360,6 +382,7 @@ pub fn esm(
         manifest,
         cjs_proxies,
         cjs_namespaces,
+        async_facades,
     })
 }
 
@@ -392,17 +415,29 @@ fn dependency_edits(
         if !is_static && !live(dependency.span) {
             continue;
         }
-        ensure!(
-            is_static || dependency.kind == DependencyKind::Require,
-            "{}: dynamic loading awaits P8 at bytes {}..{}",
-            graph.file_path(file).unwrap().display(),
-            dependency.span.start,
-            dependency.span.end
-        );
         let target = target_file(graph, file, dependency)?;
         let target_module = modules
             .get(&target)
             .ok_or_eyre("static target absent from retention")?;
+        if dependency.kind == DependencyKind::DynamicImport {
+            let specifier = if target_module.parsed.facts.commonjs {
+                namespace_specifier(target_module)
+            } else {
+                quote(&format!(
+                    "./{}.mjs",
+                    target_module.token.strip_prefix("good-fences:").unwrap()
+                ))
+            };
+            edits.push(Edit {
+                span: dependency.span,
+                replacement: if target_module.parsed.facts.commonjs {
+                    format!("import({specifier}).then(namespace => namespace.default)")
+                } else {
+                    format!("import({specifier})")
+                },
+            });
+            continue;
+        }
         let target_specifier = if dependency.kind == DependencyKind::Require {
             quote(&target_module.token)
         } else {
