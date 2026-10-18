@@ -6,8 +6,10 @@ second binding IR or put usage tags/effects/runtime scheduling in structure.
 Module nodes preserve empty-file identity; enclosing-function metadata is not
 permission to execute a require eagerly.
 
-Lexical binding is independent of TDZ evaluation. Checked export resolution
-returns canonical identity plus barrel route; stars exclude default, explicit
+Lexical binding is independent of TDZ evaluation. Local references and checked
+export routes demand all declaration segments of one lexical identity, not only
+its representative first declaration. Checked export resolution returns canonical
+identity plus barrel route; stars exclude default, explicit
 exports win, and ambiguous distinct identities fail. Legacy adapters include
 types/return empty on failure; do not use them for executable validation.
 

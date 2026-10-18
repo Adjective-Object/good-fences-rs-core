@@ -9,6 +9,21 @@ differential conformance, measured benchmarks and a repeatable release gate.
 
 ## P9.4 final verification
 
+### Final-review binding checkpoint
+
+- Local-reference edges and checked export routes now retain every declaration
+  segment for the demanded lexical identity, including later `var` initializers.
+  Same-segment declarations are deduplicated; unrelated variables remain dead.
+- Reconstructed first-only behavior failed both the graph regression (one
+  target instead of three) and real public BuildSession output (native `2`,
+  generated `1`). Restoring the fix passes all 33 source-graph tests and the
+  nine-case generated-output regression (direct/indirect exports, shadowing,
+  no-initializer redeclarations and nested function/var merges).
+  Mandatory `./scripts/spot-check` passed (51 parser tests + workspace check).
+  Evidence: `target/review-binding-{graph,build}-{red,green}.log` and
+  `target/review-binding-spot-check.log`. Full release gate follows the second
+  final-review fix; benchmark/support limits below remain unchanged.
+
 - `./scripts/bundler-release-check` passed **383 scoped Rust tests**:
   bundler94, ast-segmenter51, good_fences60, import_resolver18, parse-utils9,
   segment_cache26, source_graph31, tag_graph22, unused_finder72. Also passed

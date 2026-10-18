@@ -61,9 +61,13 @@ fn observe(artifacts: &Artifacts) -> Vec<u8> {
     for (path, text) in &artifacts.files {
         write(dir.root(), path.to_str().unwrap(), text);
     }
+    observe_entry(&dir.root().join(&artifacts.entries["main"]))
+}
+
+fn observe_entry(entry: &Path) -> Vec<u8> {
     let output = std::process::Command::new("node")
         .args(["-e", "const {spawnSync}=require('node:child_process'); const r=spawnSync(process.execPath,[process.argv[1]],{timeout:5000,killSignal:'SIGKILL'}); if(r.error||r.status!==0||r.stderr.length) {console.error(r.error||r.stderr.toString());process.exit(1)} process.stdout.write(r.stdout)"])
-        .arg(dir.root().join(&artifacts.entries["main"]))
+        .arg(entry)
         .output().unwrap();
     assert!(
         output.status.success(),
@@ -71,6 +75,34 @@ fn observe(artifacts: &Artifacts) -> Vec<u8> {
         String::from_utf8_lossy(&output.stderr)
     );
     output.stdout
+}
+
+#[test]
+fn binding_demand_retains_all_redeclaration_initializers() {
+    for (imported, dependency, expected) in [
+        ("get", "var value = 1; var value = 2; export function get() { return value; }", "2\n"),
+        ("get", "var value; var value = 1; var value; var value = 2; var value; export function get() { return value; }", "2\n"),
+        ("value", "var value = 1; var value = 2; var value; export {value};", "2\n"),
+        ("value", "export var value = 1; var value = 2; var value;", "2\n"),
+        ("value", "var value = 1; export var value = 2; var value;", "2\n"),
+        ("value", "export var value = 1; var value;", "1\n"),
+        ("get", "var value = 1; var value = 2; function shadow() { let value = 3; return value; } export function get() { return [value, shadow()].join(','); }", "2,3\n"),
+        ("get", "export function get() { var value; function value() { return 1; } var value = 2; var value; return value; }", "2\n"),
+        ("get", "export function get() { var value; function value() { return 1; } var value; return value(); }", "1\n"),
+    ] {
+        let dir = TmpDir::new();
+        let expression = if imported == "get" { "get()" } else { "value" };
+        write(
+            dir.root(),
+            "main.mjs",
+            &format!("import {{ {imported} }} from './dep.mjs'; console.log({expression});"),
+        );
+        write(dir.root(), "dep.mjs", &format!("{dependency} var unrelated = 99;"));
+        assert_eq!(observe_entry(&dir.root().join("main.mjs")), expected.as_bytes());
+        let build = parity(&mut BuildSession::new(dir.root()).unwrap(), &options());
+        assert_eq!(observe(&build.product.artifacts), expected.as_bytes(), "{dependency}");
+        assert!(build.product.artifacts.files.values().all(|text| !text.contains("unrelated")));
+    }
 }
 
 #[test]

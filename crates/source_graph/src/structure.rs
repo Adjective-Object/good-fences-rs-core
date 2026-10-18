@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ahashmap::AHashMap;
+use ahashmap::{AHashMap, AHashSet};
 use ast_segmenter::owned::{
     BindingId, DependencyId, DependencyKind, ExportValue, ImportedName, ModuleFacts,
 };
@@ -207,26 +207,28 @@ impl SourceGraph {
                 else {
                     continue;
                 };
-                let Some(&span) = declaration.declarations.first() else {
-                    continue;
-                };
                 let from = self.segment_at(file_id, reference.span);
-                let to = self.segment_at(file_id, span);
-                edges.push(OccurrenceEdge {
-                    from,
-                    to,
-                    kind: EdgeKind::LocalReference,
-                    purpose: EdgePurpose::Binding,
-                    activation: Activation::Synchronous,
-                    type_only: reference.type_only,
-                    site: reference.span,
-                    dependency: None,
-                    enclosing_function: None,
-                    imported: None,
-                    binding: Some(binding),
-                    read: reference.read,
-                    write: reference.write,
-                });
+                let mut targets = AHashSet::default();
+                for &span in &declaration.declarations {
+                    let to = self.segment_at(file_id, span);
+                    if targets.insert(to) {
+                        edges.push(OccurrenceEdge {
+                            from,
+                            to,
+                            kind: EdgeKind::LocalReference,
+                            purpose: EdgePurpose::Binding,
+                            activation: Activation::Synchronous,
+                            type_only: reference.type_only,
+                            site: reference.span,
+                            dependency: None,
+                            enclosing_function: None,
+                            imported: None,
+                            binding: Some(binding),
+                            read: reference.read,
+                            write: reference.write,
+                        });
+                    }
+                }
             }
             for dependency in &input.facts.dependencies {
                 let unresolved = GraphNode::Unlinked {
@@ -410,6 +412,84 @@ pub(crate) mod tests {
             segments: parsed.segments,
             facts: parsed.facts,
             resolutions,
+        }
+    }
+
+    #[test]
+    fn local_and_export_demands_include_every_declaration_without_crossing_shadows() {
+        let graph = SourceGraph::from_owned([
+            input(
+                "dep.mjs",
+                "var value = 1; var value = 2; var value; function get() { return value; } function shadow() { let value = 3; return value; } var unrelated = 99; export {value, get};",
+            ),
+            input("main.mjs", "import {value} from 'dep.mjs'; console.log(value);"),
+        ]);
+        graph.validate_links().unwrap();
+        let targets = |segment| {
+            graph
+                .outgoing(GraphNode::Segment(SegmentKey::new(0, segment)))
+                .filter(|edge| edge.kind == EdgeKind::LocalReference)
+                .map(|edge| edge.to)
+                .collect::<Vec<_>>()
+        };
+        let declarations: Vec<_> = (0..3)
+            .map(|index| GraphNode::Segment(SegmentKey::new(0, index)))
+            .collect();
+        assert_eq!(targets(3), declarations);
+        assert_eq!(targets(4), vec![GraphNode::Segment(SegmentKey::new(0, 4))]);
+        let export = graph
+            .resolve_export(0, "value", crate::Namespace::Value)
+            .unwrap();
+        for declaration in declarations {
+            assert!(export.route.contains(&declaration));
+            assert!(graph
+                .outgoing(GraphNode::Segment(SegmentKey::new(1, 0)))
+                .any(|edge| edge.purpose == EdgePurpose::Binding && edge.to == declaration));
+        }
+        assert!(!export
+            .route
+            .contains(&GraphNode::Segment(SegmentKey::new(0, 5))));
+    }
+
+    #[test]
+    fn merged_function_var_declarations_and_same_segment_redeclarations() {
+        for (format, source, consumer, targets) in [
+            (
+                ModuleFormat::Esm,
+                "export function get() { var value; function value() { return 1; } var value = 2; var value; return value; }",
+                0,
+                vec![0],
+            ),
+            (
+                ModuleFormat::Esm,
+                "function get() { var value = 1; var value = 2; var value; return value; } get();",
+                0,
+                vec![0],
+            ),
+        ] {
+            let parsed = parse_module(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new("input.js"),
+                format,
+            )
+            .unwrap();
+            let graph = SourceGraph::from_owned([OwnedSourceFileInput::from_ranges(
+                "input.js".into(),
+                parsed.segments.iter().map(|s| s.span),
+                parsed.facts,
+                Default::default(),
+            )]);
+            let edges: Vec<_> = graph
+                .outgoing(GraphNode::Segment(SegmentKey::new(0, consumer)))
+                .filter(|e| e.kind == EdgeKind::LocalReference)
+                .map(|e| e.to)
+                .collect();
+            assert_eq!(
+                edges,
+                targets.into_iter().map(|i| GraphNode::Segment(SegmentKey::new(0, i))).collect::<Vec<_>>(),
+                "{source}",
+            );
         }
     }
 

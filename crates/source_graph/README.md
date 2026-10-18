@@ -29,6 +29,9 @@ are revision-local, not persistent IDs. The `bundler` library consumes these
 without adding effects policy or usage tags to the shared graph.
 
 `resolve_binding` uses lexical IDs, including forward TDZ-bound references.
+It returns a representative declaration; local-reference edges and checked export
+routes retain every declaration of that identity, including later `var`
+initializers, without crossing lexical shadows.
 `resolve_export` takes an explicit value/type namespace and returns a canonical
 binding identity plus all intermediate barrel sites. Stars exclude default,
 explicit exports take precedence, equal-identity diamonds merge, and ambiguous/

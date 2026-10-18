@@ -59,6 +59,7 @@ impl SourceGraph {
         Ok(())
     }
 
+    /// Representative declaration; checked export routes include every declaration.
     pub fn resolve_binding(&self, file_id: u32, id: BindingId) -> Option<GraphNode> {
         let input = self.files.get(file_id as usize)?.owned.as_ref()?;
         let binding = input.facts.bindings.iter().find(|b| b.id == id)?;
@@ -158,7 +159,17 @@ impl SourceGraph {
                             explicit.push(Candidate::Local(LinkedExport {
                                 identity: ExportIdentity::Binding(file_id, *binding),
                                 declaration,
-                                route: vec![node, declaration],
+                                route: std::iter::once(node)
+                                    .chain(
+                                        input
+                                            .facts
+                                            .bindings
+                                            .iter()
+                                            .filter(|b| b.id == *binding)
+                                            .flat_map(|b| &b.declarations)
+                                            .map(|&span| self.segment_at(file_id, span)),
+                                    )
+                                    .collect(),
                             }));
                         }
                     }
