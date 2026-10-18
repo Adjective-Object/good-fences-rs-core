@@ -63,11 +63,16 @@ pub fn apply(source: &str, edits: &[Edit]) -> eyre::Result<String> {
     Ok(result)
 }
 
-/// Validate both parser and early semantic errors as JavaScript ESM, not TS/JSX.
+/// Validate JavaScript parser/early errors; explicit `.cjs` uses wrapper grammar.
 pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
     count_output_parse();
     let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
+    let source_type = if path.extension().is_some_and(|e| e == "cjs") {
+        SourceType::mjs().with_commonjs(true)
+    } else {
+        SourceType::mjs()
+    };
+    let parsed = Parser::new(&allocator, source, source_type).parse();
     ensure!(
         !parsed.panicked && parsed.errors.is_empty(),
         "{}: emitted JavaScript parser diagnostics: {:?}",

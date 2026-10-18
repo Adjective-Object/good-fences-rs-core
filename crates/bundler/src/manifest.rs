@@ -1,4 +1,4 @@
-//! Diagnostic loading/identity manifest. This is not an evaluation schedule.
+//! Logical availability/identity manifest, not physical files or an evaluation schedule.
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 
@@ -10,7 +10,7 @@ use crate::chunks::{
 };
 use crate::{policy::EffectPolicy, RetentionEdgeKind};
 
-/// Facades are separate artifacts, not additional members of logical chunks.
+/// Facades are logical routes, not additional members of logical chunks.
 /// Module identities occupy the same chunk as the corresponding module node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SyntheticNode {
@@ -42,7 +42,7 @@ pub struct FacadeDemand {
 pub struct Facade {
     pub synthetic: SyntheticNode,
     pub demand: FacadeDemand,
-    /// Code that must be available. Loading it must not evaluate every module.
+    /// Logical code availability, not a demand-minimal physical file load set.
     pub load_chunks: BTreeSet<ChunkId>,
 }
 

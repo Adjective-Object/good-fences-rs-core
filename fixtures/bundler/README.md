@@ -107,7 +107,7 @@ snapshots, and incidental formatting are not this corpus's semantic contracts.
 Runner regression tests use synthetic fixtures only:
 `node --test scripts/bundler-fixtures.test.mjs`.
 
-## Public-pipeline differential mode (Node 22.15+)
+## Public-pipeline differential mode (native Node 22)
 
 The original baseline command above is unchanged. A separate harness now builds
 through the public Rust library and transactional publisher:
@@ -120,7 +120,8 @@ node --test scripts/bundler-differential.test.mjs
 
 It validates the same manifests/provenance first, makes **separate** native and
 bundler source copies, and compares original manifest stdout, native stdout and
-emitted launcher stdout for every entry. All twelve portable cases/fifteen
+emitted JavaScript-file stdout for every entry, using Node's normal loader
+without preload or loader flags. All twelve portable cases/fifteen
 emitted entry executions pass, with zero unsupported skips. It additionally
 executes an authored same-runtime concurrent multi-entry CJS/ESM identity case
 and four bundler-only source-range diagnostic cases (nonliteral import,

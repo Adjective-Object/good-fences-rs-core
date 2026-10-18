@@ -41,3 +41,6 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
 - `node scripts/bundler-fixtures.mjs` validates native Node baselines only.
   `cargo build -p bundler --example build && node scripts/bundler-differential.mjs`
   exercises public build/publication, separately from the native baseline.
+- Bundler output is native per-original-module `.mjs`/`.cjs` files with relative
+  dependencies. Exact root-set chunks/manifests are logical diagnostics, not
+  exact physical partitions; never reintroduce source-loading runtimes.

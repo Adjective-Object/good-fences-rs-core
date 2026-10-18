@@ -1,5 +1,26 @@
 # Incremental bundler execution checklist
 
+## Native-file replacement
+
+- [x] Delete the revoked P6–P8 loader backend and source-payload APIs entirely.
+- [x] Emit native per-original-module `.mjs`/`.cjs` files, relative dependencies,
+  direct static ESM entry exports, explicit CJS proxy/namespace files.
+- [x] Keep exact logical roots; report overlapping physical module files honestly
+  instead of claiming exact physical per-segment chunks.
+- [x] Migrate public artifacts, publication, driver, harness and runtime tests
+  to ordinary Node loading. Retain selective caches and immutable generations.
+- [x] Revalidate native/differential contracts, live exports/TDZ/cycles/TLA,
+  CJS cache/retry/deferred behavior, prior var/PURE-await fixes, no-op and
+  running old-generation lazy loads. Rerun release gates and benchmark.
+
+## Historical P0–P9 ledger — not the current output contract
+
+The checked items below record the prior implementation only. Its P6–P8
+hook/payload architecture was revoked and replaced above; those old checks are
+**not** evidence of current exact physical chunking or current runtime APIs.
+Old benchmark/test counts are historical. Current contracts/evidence are in
+the bundler README and the native-file section of NOTES.
+
 This is the current ledger; historical completed migration TODOs are not
 acceptance evidence. See `PLAN.incremental-bundler.md` for contracts and precise
 current-code findings. Each ID is a narrow commit/review unit. `Depends` means

@@ -1,6 +1,34 @@
 # Incremental JavaScript bundler plan
 
-## Scope and status
+## Current replacement: native JavaScript files
+
+The prior P6–P8 hook/source-payload output architecture was rejected and has
+been deleted, not retained behind a switch. Parser/cache/graph, effects/PURE,
+exact logical roots, BuildSession and immutable publication remain reusable.
+The current backend emits retained original lexical modules as actual
+`modules/<path-sha256>.mjs`/`.cjs` files with ordinary relative imports/requires.
+Named/default ESM exports are static native exports. CJS has native early cache,
+cycles and retry; `.proxy.mjs` snapshots requested names and `.namespace.mjs`
+provides the documented runtime-key bridge. Node owns ESM instantiation/TLA.
+
+P5's exact root-set equivalence remains diagnostic analysis only. Physical files
+preserve original lexical scopes and may overlap across logical chunks. This is
+the chosen complete native-file baseline, **not exact physical segment chunks**.
+A future physical segment linker would need separate proof of lexical/TDZ/cycle
+semantics; no such linker or demand-minimal fetching is claimed.
+`Artifacts::members/chunk_artifacts` truthfully project logical nodes to files;
+`entries/modules/async_facades` contain executable paths. There is no runtime
+launcher API, virtual identity, code JSON, source assembly or loader registration.
+See the bundler README for current contracts, measurements and release evidence.
+
+## Historical P0–P9 plan and checkpoints — replaced output architecture
+
+Everything below records earlier research/checkpoints, **not current backend
+requirements or acceptance evidence**. In particular, historical P6–P8
+hook/payload/launcher claims were revoked; they do not establish physical chunk
+completion. Historical timings/counts apply only to that removed implementation.
+
+### Historical scope and status
 
 The planning increment delivered **P0**: this grounded plan, a small portable
 esbuild/rspack fixture corpus, and a baseline execution driver. Subsequent

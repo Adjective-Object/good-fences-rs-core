@@ -128,9 +128,9 @@ good-fences src --ignoredDirs ignored1 ignored2 ...
 
 ## Incremental bundler
 
-The incremental bundler is a library-only Node 22.15+ implementation built on the
-segment-aware shared source graph. P0–P9 are complete for its documented support
-matrix; it is not a browser/general-purpose transpiling bundler. See the
+The incremental bundler is a library-only native Node 22 implementation built on
+the segment-aware shared source graph. Its output backend emits actual JavaScript
+files; it is not a browser/general-purpose transpiling bundler. See the
 [implementation plan](PLAN.incremental-bundler.md) and
 [phase checklist](TODO.incremental-bundler.md).
 Phase 0 establishes [portable upstream runtime fixtures](fixtures/bundler/README.md)
@@ -138,10 +138,11 @@ from esbuild and rspack; their baseline execution is not bundler conformance.
 P1–P5 now provide owned/cacheable facts, the shared typed graph, effect retention,
 exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
-P6 adds validated source rewrites, retention/PURE-driven ESM emission and linked
-exact-chunk artifacts using Node 22.15+ native ESM loader hooks. Five portable
-ESM cases now pass in bundled mode, alongside independent cycle/TDZ/live-binding
-runtime tests. P7 adds opaque CJS interop/cache and P8.1 connects literal source
+Validated source rewrites and retention/PURE recipes produce one ordinary
+`.mjs`/`.cjs` file per original lexical module, with relative dependencies.
+Exact root sets remain logical diagnostic chunks, **not physical partitions**;
+no source-loading runtime is used. Native CJS supplies wrappers/cache, explicit
+ESM bridges supply interop, and literal source
 dynamic imports to canonical native module identities. P8.2 preserves source TLA
 using native dependency/SCC scheduling, with diagnostics for require of async ESM.
 All twelve portable fixtures now execute generated artifacts (fifteen entries).

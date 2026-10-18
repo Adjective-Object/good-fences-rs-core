@@ -80,21 +80,21 @@ fn publication_noop_mtimes_generation_identity_and_bounded_stale_cleanup() {
     assert!(build.product.artifacts.async_facades.is_empty());
     assert_ne!(new.directory, first.directory);
     assert!(
-        first.runtime.is_file(),
+        first.entries["main"].is_file(),
         "old runtime remains usable until explicit quiescent prune"
     );
     let cleaned = prune_stale(&output).unwrap();
     assert!(cleaned.warnings.is_empty(), "{:?}", cleaned.warnings);
     assert_eq!(cleaned.removed, vec![first.directory.clone()]);
     assert!(!first.directory.exists());
-    assert!(new.runtime.is_file());
+    assert!(new.entries["main"].is_file());
     assert_eq!(
         fs::read_to_string(output.join("user.txt")).unwrap(),
         "do not touch"
     );
     assert!(prune_stale(&output).unwrap().removed.is_empty());
     assert!(is_generated_artifact(
-        &output.join("chunks/x.json"),
+        &output.join("modules/x.mjs"),
         &output
     ));
     assert!(is_generated_artifact(
@@ -221,10 +221,14 @@ fn ownership_rejects_traversal_collisions_modified_files_and_foreign_metadata() 
         .insert("../escape".into(), "bad".into());
     assert!(publish(&output, &unsafe_artifacts, &Cancellation::default()).is_err());
     unsafe_artifacts.files.remove(Path::new("../escape"));
+    let missing = unsafe_artifacts.modules.values().next().unwrap().clone();
+    let code = unsafe_artifacts.files.remove(&missing).unwrap();
+    assert!(publish(&output, &unsafe_artifacts, &Cancellation::default()).is_err());
+    unsafe_artifacts.files.insert(missing, code);
     unsafe_artifacts.files.insert(PathBuf::new(), "bad".into());
     assert!(publish(&output, &unsafe_artifacts, &Cancellation::default()).is_err());
     fs::write(first.directory.join("user-extra"), "mine").unwrap();
-    fs::write(&first.runtime, "user-modified").unwrap();
+    fs::write(&first.entries["main"], "user-modified").unwrap();
     assert!(publish(&output, &build.product.artifacts, &Cancellation::default()).is_err());
     fs::write(dir.root().join("main.mjs"), "console.log('new');").unwrap();
     let (_, new) = session
@@ -232,16 +236,85 @@ fn ownership_rejects_traversal_collisions_modified_files_and_foreign_metadata() 
         .unwrap();
     let cleanup = prune_stale(&output).unwrap();
     assert!(!cleanup.warnings.is_empty());
-    assert_eq!(fs::read(&first.runtime).unwrap(), b"user-modified");
+    assert_eq!(fs::read(&first.entries["main"]).unwrap(), b"user-modified");
     assert_eq!(
         fs::read(first.directory.join("user-extra")).unwrap(),
         b"mine"
     );
-    assert!(new.runtime.is_file());
+    assert!(new.entries["main"].is_file());
     let state = fs::read(output.join(STATE)).unwrap();
     fs::write(output.join(STATE), r#"{"owner":"foreign"}"#).unwrap();
     assert!(publish(&output, &build.product.artifacts, &Cancellation::default()).is_err());
     fs::write(output.join(STATE), state).unwrap();
+}
+
+#[test]
+fn old_running_entry_keeps_lazy_native_files_until_quiescent_prune() {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+
+    let (dir, mut session, options) = fixture();
+    let output = dir.root().join(".bundler-output");
+    let (_, old) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let script = format!(
+        "setTimeout(() => process.exit(99), 5000).unref(); const entry = await import({}); console.log('ready'); process.stdin.once('data', async () => {{ console.log('old', (await entry.load()).value); process.stdin.pause(); }});",
+        serde_json::to_string(old.entries["main"].to_str().unwrap()).unwrap()
+    );
+    let mut child = Command::new("node")
+        .args(["--input-type=module", "-e", &script])
+        .current_dir(dir.root())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(line, "main\n");
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(line, "ready\n");
+    fs::write(dir.root().join("lazy.mjs"), "export const value = 2;").unwrap();
+    let (_, new) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    assert_ne!(new.directory, old.directory);
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"continue\n")
+        .unwrap();
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(line, "old 1\n");
+    assert!(child.wait().unwrap().success());
+    let fresh = Command::new("node")
+        .args([
+            "--input-type=module",
+            "-e",
+            &format!(
+                "const entry = await import({}); console.log('new', (await entry.load()).value);",
+                serde_json::to_string(new.entries["main"].to_str().unwrap()).unwrap()
+            ),
+        ])
+        .current_dir(dir.root())
+        .output()
+        .unwrap();
+    assert!(
+        fresh.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    assert_eq!(fresh.stdout, b"main\nnew 2\n");
+    let (_, same) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    assert!(!same.changed);
+    assert_eq!(same.files_written, 0);
+    assert_eq!(prune_stale(&output).unwrap().removed, vec![old.directory]);
 }
 
 #[cfg(unix)]
@@ -254,8 +327,8 @@ fn cleanup_never_follows_owned_file_or_directory_symlinks() {
         .unwrap();
     let user = dir.root().join("user.txt");
     fs::write(&user, "mine").unwrap();
-    fs::remove_file(&first.runtime).unwrap();
-    std::os::unix::fs::symlink(&user, &first.runtime).unwrap();
+    fs::remove_file(&first.entries["main"]).unwrap();
+    std::os::unix::fs::symlink(&user, &first.entries["main"]).unwrap();
     fs::write(dir.root().join("main.mjs"), "console.log('new');").unwrap();
     session
         .build_and_publish(&options, &output, &Cancellation::default())
@@ -263,7 +336,7 @@ fn cleanup_never_follows_owned_file_or_directory_symlinks() {
     let cleanup = prune_stale(&output).unwrap();
     assert!(!cleanup.warnings.is_empty());
     assert_eq!(fs::read(user).unwrap(), b"mine");
-    assert!(fs::symlink_metadata(first.runtime)
+    assert!(fs::symlink_metadata(&first.entries["main"])
         .unwrap()
         .file_type()
         .is_symlink());

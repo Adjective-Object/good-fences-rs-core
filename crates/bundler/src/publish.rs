@@ -43,7 +43,6 @@ impl Cancellation {
 #[derive(Debug)]
 pub struct Published {
     pub directory: PathBuf,
-    pub runtime: PathBuf,
     pub entries: BTreeMap<String, PathBuf>,
     pub changed: bool,
     /// Successfully staged artifact files; excludes the atomic pointer metadata.
@@ -139,6 +138,13 @@ fn publish_inner(
     hook: impl FnMut(Phase) -> eyre::Result<()>,
 ) -> eyre::Result<Published> {
     cancel.check()?;
+    validate_artifacts(artifacts)?;
+    let (output, lock) = lock_output(output)?;
+    let result = publish_locked(&output, artifacts, cancel, hook);
+    finish_lock(lock, result, |published| &mut published.warnings)
+}
+
+fn validate_artifacts(artifacts: &Artifacts) -> eyre::Result<()> {
     ensure!(
         !artifacts.files.is_empty(),
         "cannot publish an empty artifact map"
@@ -146,19 +152,24 @@ fn publish_inner(
     for path in artifacts.files.keys() {
         relative(path)?;
     }
-    ensure!(
-        artifacts.files.contains_key(&artifacts.runtime),
-        "runtime is not an owned artifact"
-    );
-    for path in artifacts.entries.values() {
+    for path in artifacts
+        .modules
+        .values()
+        .chain(artifacts.entries.values())
+        .chain(artifacts.members.values())
+        .chain(artifacts.chunk_artifacts.values().flatten())
+        .chain(artifacts.cjs_proxies.values().map(|(path, _)| path))
+        .chain(artifacts.cjs_namespaces.values())
+        .chain(artifacts.async_facades.values())
+    {
         ensure!(
-            artifacts.files.contains_key(path),
-            "entry is not an owned artifact"
+            artifacts.files.contains_key(path)
+                && path.extension().is_some_and(|e| e == "mjs" || e == "cjs"),
+            "module route is not an owned executable JavaScript file: {}",
+            path.display()
         );
     }
-    let (output, lock) = lock_output(output)?;
-    let result = publish_locked(&output, artifacts, cancel, hook);
-    finish_lock(lock, result, |published| &mut published.warnings)
+    Ok(())
 }
 
 struct OutputLock(Option<File>);
@@ -225,6 +236,7 @@ fn publish_locked(
     mut hook: impl FnMut(Phase) -> eyre::Result<()>,
 ) -> eyre::Result<Published> {
     cancel.check()?;
+    validate_artifacts(artifacts)?;
     let previous = read_state(output)?;
     let owned: BTreeMap<_, _> = artifacts
         .files
@@ -308,7 +320,6 @@ fn publish_locked(
     }
     Ok(Published {
         directory: destination.clone(),
-        runtime: destination.join(&artifacts.runtime),
         entries: artifacts
             .entries
             .iter()

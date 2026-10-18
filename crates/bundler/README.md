@@ -33,7 +33,7 @@ Public-pipeline conformance (separate from the native-only fixture baseline):
 Harness regressions: `node --test scripts/bundler-differential.test.mjs`.
 The minimal driver can also build a project directly:
 `cargo run -p bundler --example build -- PROJECT OUTPUT ENTRY...`; it prints
-generation-specific `entries`/`runtime` paths and actual build counters as JSON.
+generation-specific `entries`, the physical `layout` and actual build counters as JSON.
 Use an absolute OUTPUT, or note that it is relative to the process cwd.
 
 ## Public build session
@@ -159,7 +159,7 @@ output directory. No user files beside generated generations are removed.
 
 ## Release gates and measured performance
 
-From the repository root (Node 22.15+, repository Rust toolchain):
+From the repository root (Node 22, tested v22.22.2; repository Rust toolchain):
 
 ```sh
 ./scripts/bundler-release-check
@@ -171,7 +171,7 @@ The release script tests bundler/parser/resolver/cache/shared graphs/tracker/
 good-fences compatibility, builds the public driver, runs both harness regression
 suites, native baselines, public-pipeline differential mode, focused all-target
 clippy and mandatory `spot-check` (including a workspace **check**, not a full
-workspace test suite). Final local evidence: **389 scoped Rust tests** (98
+workspace test suite). Native-file replacement evidence: **391 scoped Rust tests** (100
 bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 15 emitted executions**, concurrent-entry identity and four diagnostic cases.
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
@@ -194,29 +194,31 @@ profile optimized + debuginfo; Node conformance runtime v22.22.2:
 
 | Scenario | Median total ms | Min–max ms | Build portion at median ms |
 | --- | ---: | ---: | ---: |
-| Cold | 127.282 | 122.986–134.909 | 121.837 |
-| Warm | 72.650 | 70.344–76.839 | 70.382 |
-| No-op | 4.824 | 4.766–5.058 | 2.600 |
-| Local edit | 73.442 | 70.536–76.229 | 66.042 |
-| Export edit | 76.044 | 74.555–82.988 | 70.314 |
-| Config edit | 75.966 | 74.153–77.682 | 70.011 |
+| Cold | 184.201 | 179.289–190.387 | 132.764 |
+| Warm | 77.091 | 75.599–82.806 | 73.466 |
+| No-op | 6.144 | 5.745–7.528 | 2.702 |
+| Local edit | 125.373 | 120.308–153.486 | 69.335 |
+| Export edit | 129.172 | 126.104–135.278 | 78.425 |
+| Config edit | 131.053 | 128.304–140.599 | 73.409 |
 
 | Scenario | Source parses | Resolutions | Link calls | Output/recipe parses | Artifact writes |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Cold | 66 | 65 | 1 | 134 | 3 |
-| Warm | 0 | 65 | 1 | 134 | 0 |
+| Cold | 66 | 65 | 1 | 132 | 66 |
+| Warm | 0 | 65 | 1 | 132 | 0 |
 | No-op | 0 | 0 | 0 | 0 | 0 |
-| Local edit | 1 | 1 | 1 | 134 | 3 |
-| Export edit | 1 | 0 | 1 | 134 | 3 |
-| Config edit | 1 | 65 | 1 | 134 | 3 |
+| Local edit | 1 | 1 | 1 | 132 | 66 |
+| Export edit | 1 | 0 | 1 | 132 | 66 |
+| Config edit | 1 | 65 | 1 | 132 | 66 |
 
 Warm has 66 disk hits; no-op has 66 memory hits; each edit has 65 memory hits.
 Artifact writes count actual staged files, excluding atomic pointer metadata.
-The first measurement exposed 66 redundant emitter source re-extractions;
-P9.4 removed those using the already checked cached facts, with exact artifact/
-runtime parity against the original source-checking linker. Remaining 134 output
-validation/comment scans are real and separately counted. No timing improvement
-percentage is inferred from these small hardware-dependent samples.
+These measurements replace the deleted backend's results. Each generation now
+contains 66 actual native module files; changes stage a complete immutable
+generation, not just the changed file. The two scans per module are generated
+JavaScript validation and source-hint removal, with no runtime launcher scans.
+Cached source-fact reuse still avoids redundant emitter source re-extraction.
+No timing improvement percentage is inferred from these small hardware-dependent
+samples. Evidence: `target/native-files-bench.log` (not a committed artifact).
 
 This is a correctness-first baseline, not fine-grained later-layer incrementality:
 config changes re-resolve all requests and any derived key change rebuilds the
@@ -228,18 +230,17 @@ No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
 **Limits:** Linux was executed; Windows atomic replacement/OS locks rely on
 standard-library/tempfile contracts but were not runtime-tested. No browser,
 standalone single-file output, TS/JSX lowering, assets/native addons, executable
-externals, import.meta or source maps. Native host hooks use synchronous JSON
-payload reads rather than demand-minimal asynchronous fetching. CJS bridge
+externals, import.meta or source maps. Physical files preserve original lexical
+modules, not exact per-segment root sets or demand-minimal fetching. CJS bridge
 semantics intentionally differ from native namespace exotica as documented below.
 Old-reader quiescence is mandatory before pruning immutable prior generations;
 publication promises atomic visibility, not power-loss durability.
 
 ## CommonJS runtime
 
-Linked opaque JavaScript CJS bodies use Node's native CommonJS loader through
-the same synchronous hooks and exact-set payloads. `runtime.mjs::requireModule`
-loads canonical bundle-local identities with `createRequire`, not Node's ESM
-CommonJS translator (whose private require bypasses these resolution hooks).
+Linked opaque JavaScript CJS bodies are ordinary `.cjs` files with relative
+requires. Native `.proxy.mjs` modules use `createRequire(import.meta.url)` to load
+those same files, without source loading or compilation helpers.
 Node allocates records before invoking wrappers, binds wrapper `this` to the
 initial exports object and returns the current `module.exports`. Recursive
 requires see partial exports; deferred sites execute only when called. Failed
@@ -249,7 +250,7 @@ requests; CJS namespace requests/entries use a canonical runtime-key bridge.
 
 ### Interop policy
 
-`Artifacts::cjs_proxies` reports canonical proxy tokens and static surfaces.
+`Artifacts::cjs_proxies` reports relative executable proxy paths and static surfaces.
 Reverse typed occurrences supply requested **original** names, including
 renamed imports and barrel routes; no CommonJS assignment/export guessing.
 Default is always the complete require result; `__esModule` never unwraps it.
@@ -261,9 +262,9 @@ results but not the proxy's captured default or named values.
 
 A named proxy's native namespace has `default` plus statically requested names.
 **Unknown namespace access is conservative, not that finite static list.**
-`Artifacts::cjs_namespaces` reports separate native module tokens whose default
+`Artifacts::cjs_namespaces` reports separate `.namespace.mjs` files whose default
 exports are canonical CJS namespace bridges. Static `import * as ns`,
-`export * as box`, and CJS `loadEntry` use the same bridge object. Its own string
+`export * as box`, and rewritten dynamic CJS imports use the same bridge object. Its own string
 keys are discovered from the actual require result at bridge initialization;
 getters forward reads to the captured object, without eager getter invocation.
 Thus computed names and `ns[key]` work without source export inference.
@@ -286,20 +287,22 @@ runtime-key bridge. Consumers demand their own names; namespace consumers and
 CJS entry facades demand that bridge, not a finite name list. Requires demand the opaque
 body/target namespace, not a proxy or eager execution. Manifest synthetic nodes
 and chunk dependencies expose proxy→factory and snapshot→initialization edges.
-There are no standalone proxy files and no proxy payload duplicated across sets.
-Like ESM lexical modules, a canonical proxy assembles all its globally retained
-pieces before native compilation. `module_payloads` for a CJS identity includes
-factory, named proxy and namespace bridge payloads, separate from logical root load sets.
+These remain **logical** assignments. All requested named snapshots and proxy
+initialization for one CJS module share one actual `.proxy.mjs` file; its
+runtime-key bridge is a `.namespace.mjs` file, and its opaque body a `.cjs` file.
+Physical file sets may overlap across logical chunks; no exact physical
+partition or per-root getter-demand isolation is claimed.
 
-All chunks share one runtime's native CJS cache and canonical ESM proxy namespace.
-`loadEntry` initializes a CJS entry with native require before importing its proxy,
-preserving CJS-first mixed cycles. Opaque require of synchronous ESM conservatively
+All routes share the generation directory's native CJS cache and canonical ESM proxy.
+CJS entries point directly to `.cjs` files, preserving CJS-first mixed cycles.
+Importing a CJS entry directly uses Node's native CJS interop; use the path in
+`cjs_namespaces` and its default export for the bundler's runtime-key bridge.
+Opaque require of synchronous ESM conservatively
 retains the whole target namespace. Native Node owns sync require-of-ESM behavior:
 completed/deferred mixed cycles work, while requiring an evaluating ESM in a
 cycle throws `ERR_REQUIRE_CYCLE_MODULE`. Require of async ESM is rejected before
 emission, even for deferred require sites; use dynamic import instead.
-Static ESM routes use canonical file-relative virtual URLs so native synchronous
-ESM linking does not encounter an unsupported custom protocol.
+All static and dynamic routes use ordinary relative file paths.
 
 ## Rewrite backend
 
@@ -355,8 +358,8 @@ No externals, implicit TS stripping, source maps or filesystem publication.
 
 `link::esm(graph, &ChunkPlan, policy, &BTreeMap<PathBuf, String>)` returns
 `Artifacts` containing the complete owned relative `files` map, executable
-`entries`, `runtime`, canonical virtual `modules`, exact node-to-payload
-`members`, `chunk_artifacts`, physical `module_payloads`, and the unchanged
+`entries`, source-to-executable `modules`, logical-node-to-file
+`members`, `chunk_artifacts`, and the unchanged
 logical diagnostic `manifest`. It checks freshness and owned source facts,
 uses P4 retention/PURE recipes, and rewrites checked static import/re-export
 routes. Unused import bindings/re-exports disappear when their statement-level
@@ -364,55 +367,55 @@ retention permits it; their dependencies still evaluate. Star ambiguity,
 explicit precedence, default exclusion and namespace/live aliases remain ESM
 semantics, not object snapshots.
 
-**Target: Node with synchronous `node:module.registerHooks` (22.15+).** Publish
-the entire returned map without changing its relative layout. Run an entry
-launcher with `node <artifacts.entries[name]>`, or import the generated runtime:
+**Target: normal Node 22 (tested v22.22.2).** Publish the entire returned map
+without changing its relative layout. Run `node <artifacts.entries[name]>`
+or import that file directly:
 
 ```js
-import {loadEntry} from './runtime.mjs';
-const namespace = await loadEntry('main');
+import value, {namedExport} from './modules/<entry-path-hash>.mjs';
 ```
 
-`loadEntry` returns the actual native namespace for an ESM root, the documented
-runtime-key bridge for a CJS root, or an ordered array for multiple modules. Request
-namespace binding demand when all public exports must remain; evaluation-only
+Entries point to the **same** native module files used by dependencies, not to
+namespace-object launchers. ESM exposes actual static named/default exports;
+CJS executes directly as CJS. Request namespace binding demand when all public
+exports must remain; evaluation-only
 or selected-binding roots intentionally do not retain a complete namespace.
-Launchers default-export that namespace object, **not** copied named bindings.
 Repeated/concurrent entries and static namespace re-exports share one canonical
 native identity per module. Separate published bundle directories have isolated
 native identities.
 
-Each logical chunk is one JSON payload of **rewritten** source parts. No
-segments are merged, hoisted or duplicated across root sets. Preamble/trivia
-and otherwise-unretained static evaluation imports belong to the module-identity
-node's existing chunk. The synchronous host hook assembles the retained parts
-of one original lexical module, in source order, and returns `format: 'module'`
-to Node. Node—not concatenation into a shared scope, `eval`, factories, snapshots
-or hand-written binding cells—instantiates and evaluates that real ESM module.
-This preserves arbitrary cross-chunk lexical scopes, forward TDZ, function/var
-hoisting, cycles, mutation and namespace exotic behavior. Reading a payload
-never evaluates another module whose code happens to share that payload.
+Physical layout is `modules/<sha256-original-path>.mjs` for ESM and `.cjs` for
+CJS, independent of the original extension or nearest package type. Each file
+contains retained, rewritten JavaScript in its original lexical scope. Every
+checked import/re-export/require/dynamic-import occurrence resolves to another
+ordinary relative `.mjs`/`.cjs` path. No code JSON, loader registration, preload,
+custom protocol, source-text IO, runtime assembly or compilation is used.
+CJS bridge files add `.proxy.mjs` and `.namespace.mjs` suffixes.
 
-Physical assembly can synchronously read **all globally retained pieces of a
-requested lexical module**, beyond one root's logical diagnostic `load_chunks`.
-`module_payloads` reports this distinct physical requirement. It does not change
-any root set or constitute a demand-minimal/async loader claim. Payload names
-derive from logical identity, not content; transactional/content-addressed
-publication is provided by `publish` above. `link::esm` itself writes no files.
+**Exact logical root sets are preserved, but are not a physical partition.**
+Distinct logical chunks can map to the same physical file, and one chunk can
+map to several files. `members` and `chunk_artifacts` report that overlapping
+projection; `manifest.load_chunks` remains logical availability analysis only.
+Loading a module includes all globally retained statements of that original
+module, beyond any one root's logical demand. This is an intentional native
+JavaScript-file baseline, not exact per-segment code splitting.
+Node directly parses files and owns instantiation, forward TDZ, function/var
+hoisting, live bindings, cycles and namespace exotic behavior. Logical grouping
+never eagerly evaluates another original module. Low-level roots naming multiple
+modules emit a static-import evaluation-only file, with no invented namespace
+merge or exported array. `link::esm` itself writes no files.
 
 Literal source dynamic imports use the same native identities as static imports
 and entries. `Artifacts::async_facades` maps each reached source occurrence to
-its canonical namespace token; these logical facades add no module wrappers or
+its canonical executable target path; these logical facades add no ESM wrappers or
 evaluation identities. Native import promises preserve microtask scheduling and
 deduplicate module evaluation. CJS imports unwrap the existing namespace bridge
 with a promise continuation (one extra reaction, not a synchronous require).
-Nested sites stay deferred; unreachable sites emit nothing. Successfully read
-JSON payloads are cached per runtime, without evaluating co-located modules.
-Missing/read/JSON failures retry on subsequent native loads; successfully cached
-payload text is immutable for that artifact instance. Compilation errors reject,
-and execution errors remain cached by native ESM. Changed artifacts produce a
+Nested sites stay deferred; unreachable sites emit nothing. File resolution,
+parse failures and retry follow Node's native loader behavior (not a separate
+bundler cache); evaluation errors remain cached by native ESM. Changed artifacts produce a
 new immutable published generation; unchanged content intentionally keeps the
-same directory/native jobs, not an in-place repair of cached payloads.
+same directory/native jobs, never an in-place repair of failed jobs.
 Externals, TS/JSX and other source-policy unsupported forms still fail with
 diagnostics. Fetching optimization is not claimed.
 This backend is not a browser/standalone-file target.
@@ -434,7 +437,7 @@ deferred/conditional requires. It is never approximated synchronously.
 Awaited dynamic cycles retain native deadlock behavior: with no pending work,
 Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 
-| Source construct | Node 22.15+ linked target |
+| Source construct | Native Node 22 linked target |
 | --- | --- |
 | Literal dynamic ESM import | Native namespace promise, shared evaluation |
 | Literal dynamic CJS import | Shared frozen runtime-key bridge; extra promise reaction |
@@ -488,7 +491,7 @@ not a bitset/worklist optimization.
 
 `manifest::diagnostic_manifest(graph, &ChunkPlan, policy)` checks freshness and
 returns a deterministic `DiagnosticManifest` (inspect with Rust Debug; no output
-files are emitted). `entries` and `async_facades` hold separate facade artifacts,
+files are emitted). `entries` and `async_facades` hold logical facade records,
 each with initial `FacadeDemand` and transitive `load_chunks`. Async facades keep
 the original consumer/target identities; look up their `AsyncSiteId` in the
 owned facts/shared occurrences for source ranges and deferred timing.

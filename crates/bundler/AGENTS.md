@@ -30,26 +30,27 @@ Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
 validation. Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 
-Node ESM output stores rewritten source parts in exact-root-set JSON payloads.
-Synchronous host hooks assemble one original lexical module before native
-compilation; never split its lexical environment or evaluate an entire payload.
-Keep physical module_payloads separate from logical manifest load sets. Runtime
-URLs include the published bundle directory to isolate separate instances.
-loadEntry returns native namespaces; launchers export the namespace object.
+Emit ordinary executable files, one retained original lexical module per
+modules/<path-hash>.mjs or .cjs. Rewrite dependencies to relative file paths.
+No source loaders, code JSON, hooks, custom protocols or runtime compilation.
+Exact root sets remain logical diagnostics, not physical partitions:
+members/chunk_artifacts can overlap files across logical chunks. Never claim
+demand-minimal fetching. Entries point directly to original native module files
+and expose static ESM exports; multi-module low-level roots are evaluation-only
+static-import files with no namespace merge. Directory URLs isolate instances.
 Source literal dynamic imports route directly to canonical native identities;
 CJS promises unwrap the shared namespace bridge. No facade evaluation copies.
 Native ESM jobs own TLA dependency/SCC scheduling and rejection. Derive async
 status only over runtime static dependencies; reject all requires of async ESM
 with original require/TLA spans, including deferred sites. Never persist this
 derived status or add an eager/manual scheduler. Externals remain gated.
-P7 CJS uses native createRequire + synchronous hooks, not the ESM CJS
-translator's separate require path. Native cache owns allocation-before-call,
+Opaque CJS emits .cjs; ESM proxies use native createRequire. Native cache owns allocation-before-call,
 partial cycles, wrapper this, current exports and eviction/retry after throws.
-Proxy initialization and named snapshots are exact-set synthetic nodes; never
-hide them in facade files. Reverse checked requests supply original names.
+Proxy initialization and named snapshots remain exact-set logical synthetic
+nodes, physically together in a .proxy.mjs file. Reverse checked requests supply original names.
 Default captures full exports ignoring __esModule; names snapshot once. Unknown
 namespace demands use a separate exact-set runtime-key bridge, not finite names.
-Keys snapshot at initialization; property reads forward live to captured exports.
+Keys snapshot at initialization in .namespace.mjs; property reads forward live to captured exports.
 Static ESM namespaces remain native; CJS bridges are frozen/null-prototype objects.
 Require-of-ESM retains namespace; native evaluating-ESM cycles still throw.
 

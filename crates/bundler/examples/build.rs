@@ -37,7 +37,7 @@ fn main() -> eyre::Result<()> {
         "{}",
         serde_json::json!({
             "entries": published.entries,
-            "runtime": published.runtime,
+            "layout": "native-original-modules-v1",
             "directory": published.directory,
             "generation": build.product.generation,
             "sourceParses": build.counters.source_parses,

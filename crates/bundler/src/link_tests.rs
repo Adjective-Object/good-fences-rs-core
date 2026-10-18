@@ -122,6 +122,25 @@ fn node(files: &BTreeMap<PathBuf, String>, entry: &Path) -> Output {
         .unwrap()
 }
 
+fn observation(output: &Artifacts, source: &str) -> String {
+    let mut source = source.to_owned();
+    for (name, entry) in &output.entries {
+        let namespace = output
+            .cjs_namespaces
+            .iter()
+            .find(|(module, _)| output.modules.get(*module) == Some(entry));
+        let expression = match namespace {
+            Some((_, path)) => format!(
+                "import({}).then(ns => ns.default)",
+                quote(&format!("./{}", path.display()))
+            ),
+            None => format!("import({})", quote(&format!("./{}", entry.display()))),
+        };
+        source = source.replace(&format!("import('./{name}')"), &expression);
+    }
+    source
+}
+
 fn compare(sources: &BTreeMap<PathBuf, String>, entry: &str) -> Artifacts {
     let (_, output) = build(sources, &[(entry, false)], false);
     let baseline = node(sources, Path::new(entry));
@@ -144,6 +163,52 @@ fn compare(sources: &BTreeMap<PathBuf, String>, entry: &str) -> Artifacts {
         }
     }
     output
+}
+
+#[test]
+fn executable_files_expose_static_exports_without_any_source_loader() {
+    let source = sources(&[
+        ("src/main.js", "export {value, bump, default} from './state.js';"),
+        ("src/state.js", "export var value = 1; var value; export function bump() { value++; } export default 7; const dead = 'must disappear';"),
+    ]);
+    let (_, mut output) = build(&source, &[("src/main.js", true)], false);
+    assert!(output
+        .files
+        .keys()
+        .all(|path| path.extension().is_some_and(|e| e == "mjs" || e == "cjs")));
+    for text in output.files.values() {
+        for forbidden in [
+            "registerHooks",
+            "experimental-loader",
+            "good-fences:",
+            "readFileSync",
+            "JSON.parse",
+            "new Function",
+            "eval(",
+        ] {
+            assert!(!text.contains(forbidden), "{forbidden}");
+        }
+    }
+    assert_eq!(
+        output.entries["src/main.js"],
+        output.modules[Path::new("src/main.js")]
+    );
+    let entry = quote(&format!("./{}", output.entries["src/main.js"].display()));
+    output.files.insert("observe.mjs".into(), format!(
+        "import value, {{value as live, bump}} from {entry}; import * as ns from {entry}; console.log(value, live, ns.value); bump(); console.log(live, ns.value, ns === await import({entry}));"
+    ));
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"7 1 1\n2 2 true\n");
+
+    compare(&sources(&[
+        ("entry.mjs", "import './dep.mjs';"),
+        ("dep.mjs", "const obj = { method(value) { console.log('call', value); } }; Promise.resolve().then(() => console.log('microtask')); /*#__PURE__*/ obj?.method(await Promise.resolve('argument')); console.log('done');"),
+    ]), "entry.mjs");
 }
 
 #[test]
@@ -226,8 +291,7 @@ fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
     let mut output = esm(&graph, &plan, &policy, &sources(&[("dep.js", source)])).unwrap();
     output.files.insert(
         "observe.mjs".into(),
-        "import {loadEntry} from './runtime.mjs'; console.log((await loadEntry('main')).default);"
-            .into(),
+        observation(&output, "console.log((await import('./main')).default);"),
     );
     let actual = node(&output.files, Path::new("observe.mjs"));
     assert!(
@@ -292,15 +356,15 @@ fn commonjs_exact_proxy_sets_share_one_native_registry_across_entries() {
     assert!(!output.files.keys().any(|path| path.starts_with("proxies")));
     let (_, reversed) = build(&source, &entries, true);
     assert_eq!(output.files, reversed.files);
-    let mut files = output.files;
-    files.insert("observe.mjs".into(), r#"
-import {loadEntry} from './runtime.mjs';
-const lazy = await loadEntry('lazy.cjs');
+    let mut files = output.files.clone();
+    let observer = r#"
+const lazy = await import('./lazy.cjs');
 console.log('not initialized');
-const [a, b, again] = await Promise.all([loadEntry('a.mjs'), loadEntry('b.mjs'), loadEntry('a.mjs')]);
+const [a, b, again] = await Promise.all([import('./a.mjs'), import('./b.mjs'), import('./a.mjs')]);
 const common = lazy.default();
 console.log(a === again, a.a === common.a, b.b === common.b, common.a.partial);
-"#.into());
+"#;
+    files.insert("observe.mjs".into(), observation(&output, observer));
     let actual = node(&files, Path::new("observe.mjs"));
     assert!(
         actual.status.success(),
@@ -402,7 +466,8 @@ fn commonjs_namespace_conservatively_captures_runtime_keys_and_live_properties()
         output.cjs_proxies[Path::new("dep.cjs")].1,
         BTreeSet::from(["default".into()])
     );
-    output.files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; const entry = await loadEntry('entry.mjs'); console.log(entry.ns === await loadEntry('dep.cjs'));".into());
+    let observer = observation(&output, "const entry = await import('./entry.mjs'); console.log(entry.ns === await import('./dep.cjs'));");
+    output.files.insert("observe.mjs".into(), observer);
     let actual = node(&output.files, Path::new("observe.mjs"));
     assert!(
         actual.status.success(),
@@ -469,7 +534,7 @@ fn drops_unused_import_bindings_and_reexports_but_not_static_effects() {
 }
 
 #[test]
-fn exact_cross_chunk_artifacts_share_identity_without_merging_or_eager_eval() {
+fn exact_logical_chunks_share_native_files_without_claiming_physical_partition() {
     let sources = sources(&[
         ("a.mjs", "export {a} from './common.mjs';"),
         ("b.mjs", "export {b} from './common.mjs';"),
@@ -492,7 +557,10 @@ fn exact_cross_chunk_artifacts_share_identity_without_merging_or_eager_eval() {
     };
     let second = NodeId::Segment { module, index: 1 };
     assert_ne!(plan.chunk_for(&first), plan.chunk_for(&second));
-    assert_ne!(output.members[&first], output.members[&second]);
+    assert_eq!(output.members[&first], output.members[&second]);
+    assert!(output.members[&first]
+        .extension()
+        .is_some_and(|e| e == "mjs"));
     for (chunk, members) in &plan.chunks {
         for member in members {
             assert!(output.chunk_artifacts[chunk].contains(&output.members[member]));
@@ -551,14 +619,10 @@ fn dynamic_sites_share_native_namespaces_and_preserve_nested_activation_and_timi
     ]), "entry.mjs");
     assert_eq!(output.async_facades.len(), 5);
     assert!(!output.modules.contains_key(Path::new("dead.mjs")));
-    assert_eq!(
-        output
-            .files
-            .keys()
-            .filter(|p| p.as_path() == Path::new("runtime.mjs"))
-            .count(),
-        1
-    );
+    assert!(output
+        .files
+        .keys()
+        .all(|p| p.extension().is_some_and(|e| e == "mjs" || e == "cjs")));
 }
 
 #[test]
@@ -568,7 +632,8 @@ fn dynamic_commonjs_uses_the_same_conservative_namespace_as_static_and_entry_loa
         ("dep.cjs", "console.log('factory once'); let value = 1; module.exports = {['computed' + 'Name']: value, bump() { module.exports.computedName = ++value; }};"),
     ]);
     let (_, mut output) = build(&source, &[("entry.mjs", true), ("dep.cjs", false)], false);
-    output.files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; const entry = await loadEntry('entry.mjs'); const ns = await entry.check(); console.log(ns === await loadEntry('dep.cjs'));".into());
+    let observer = observation(&output, "const entry = await import('./entry.mjs'); const ns = await entry.check(); console.log(ns === await import('./dep.cjs'));");
+    output.files.insert("observe.mjs".into(), observer);
     let actual = node(&output.files, Path::new("observe.mjs"));
     assert!(
         actual.status.success(),
@@ -596,7 +661,13 @@ fn dynamic_failures_are_asynchronous_shared_and_cached_by_native_esm() {
 }
 
 #[test]
-fn dynamic_payload_load_and_parse_failures_reject_without_eager_execution() {
+fn dynamic_native_file_load_and_parse_failures_reject_without_eager_execution() {
+    let driver = |restore: &BTreeMap<PathBuf, String>| {
+        format!(
+        "import {{writeFileSync}} from 'node:fs'; const entry = await import('./entry.mjs'); console.log('entry ready'); const results = await Promise.allSettled([entry.later(), entry.later()]); console.log(results.every(r => r.status === 'rejected'), results[0].reason.name); const restore = {}; for (const [path,source] of Object.entries(restore)) writeFileSync(new URL(path, import.meta.url), source); try {{ await entry.later(); console.log('retry succeeded'); }} catch(e) {{ console.log('rejected', e.name); }}",
+        serde_json::to_string(restore).unwrap()
+    )
+    };
     let source = sources(&[
         (
             "entry.mjs",
@@ -608,41 +679,43 @@ fn dynamic_payload_load_and_parse_failures_reject_without_eager_execution() {
         ),
     ]);
     for malformed in [false, true] {
-        let (_, mut output) = build(&source, &[("entry.mjs", true)], false);
-        let paths = output.module_payloads[Path::new("dep.mjs")].clone();
-        let mut restore = BTreeMap::new();
-        for path in paths {
-            let original = output.files.remove(&path).unwrap();
-            restore.insert(path.clone(), original.clone());
-            if malformed {
-                let mut payload: BTreeMap<String, String> =
-                    serde_json::from_str(&original).unwrap();
-                for piece in payload.values_mut() {
-                    *piece = "invalid syntax !!!".into();
-                }
-                output
-                    .files
-                    .insert(path, serde_json::to_string(&payload).unwrap());
-            }
+        let mut native = source.clone();
+        let original = native.remove(Path::new("dep.mjs")).unwrap();
+        if malformed {
+            native.insert("dep.mjs".into(), "invalid syntax !!!".into());
         }
-        output.files.insert("observe.mjs".into(), format!(
-            "import {{writeFileSync}} from 'node:fs'; import {{loadEntry}} from './runtime.mjs'; const entry = await loadEntry('entry.mjs'); console.log('entry ready'); const results = await Promise.allSettled([entry.later(), entry.later()]); console.log(results.every(r => r.status === 'rejected'), results[0].reason.name); const restore = {}; for (const [path,source] of Object.entries(restore)) writeFileSync(new URL(path, import.meta.url), source); try {{ await entry.later(); console.log('retry succeeded'); }} catch(e) {{ console.log('rejected', e.name); }}",
-            serde_json::to_string(&restore).unwrap()
-        ));
+        native.insert(
+            "observe.mjs".into(),
+            driver(&BTreeMap::from([("dep.mjs".into(), original)])),
+        );
+        let baseline = node(&native, Path::new("observe.mjs"));
+        assert!(
+            baseline.status.success(),
+            "{}",
+            String::from_utf8_lossy(&baseline.stderr)
+        );
+        let (_, mut output) = build(&source, &[("entry.mjs", true)], false);
+        let path = output.modules[Path::new("dep.mjs")].clone();
+        let mut restore = BTreeMap::new();
+        let original = output.files.remove(&path).unwrap();
+        restore.insert(path.clone(), original);
+        if malformed {
+            output.files.insert(path, "invalid syntax !!!".into());
+        }
+        let observer = observation(&output, &driver(&restore));
+        output.files.insert("observe.mjs".into(), observer);
         let actual = node(&output.files, Path::new("observe.mjs"));
         assert!(
             actual.status.success(),
             "{}",
             String::from_utf8_lossy(&actual.stderr)
         );
-        assert_eq!(
-            actual.stdout,
-            if malformed {
-                b"entry ready\ntrue SyntaxError\nrejected SyntaxError\n".as_slice()
-            } else {
-                b"entry ready\ntrue Error\nunexpected evaluation\nretry succeeded\n".as_slice()
-            }
-        );
+        assert_eq!(actual.stdout, baseline.stdout);
+        assert!(actual.stdout.starts_with(if malformed {
+            b"entry ready\ntrue SyntaxError\n".as_slice()
+        } else {
+            b"entry ready\ntrue Error\n".as_slice()
+        }));
     }
 }
 
@@ -700,7 +773,7 @@ fn tla_rejection_is_shared_and_propagates_through_static_cycles() {
 }
 
 #[test]
-fn tla_dynamic_commonjs_does_not_evaluate_a_deferred_factory_in_the_same_payload() {
+fn tla_dynamic_commonjs_keeps_deferred_factory_in_a_separate_native_file() {
     let source = sources(&[
         ("entry.mjs", "console.log('before'); const ns = await import('./a.cjs'); console.log('after', ns.default.value);"),
         ("a.cjs", "console.log('factory a'); exports.value = 1; exports.later = () => require('./b.cjs');"),
@@ -715,7 +788,7 @@ fn tla_dynamic_commonjs_does_not_evaluate_a_deferred_factory_in_the_same_payload
         module: "b.cjs".into(),
         index: 0,
     };
-    assert_eq!(output.members[&a], output.members[&b]);
+    assert_ne!(output.members[&a], output.members[&b]);
     let actual = node(&output.files, &output.entries["entry.mjs"]);
     assert_eq!(actual.stdout, b"before\nfactory a\nafter 1\n");
 }
@@ -745,7 +818,8 @@ fn tla_concurrent_entries_and_dynamic_sites_evaluate_once_and_share_namespace() 
         &[("a.mjs", true), ("b.mjs", true), ("lazy.mjs", true)],
         false,
     );
-    output.files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; const [a,b,lazy] = await Promise.all([loadEntry('a.mjs'),loadEntry('b.mjs'),loadEntry('lazy.mjs')]); const [x,y] = await Promise.all([lazy.later(),lazy.later()]); console.log(a.shared === b.shared, a.shared === x, x === y, x.count);".into());
+    let observer = observation(&output, "const [a,b,lazy] = await Promise.all([import('./a.mjs'),import('./b.mjs'),import('./lazy.mjs')]); const [x,y] = await Promise.all([lazy.later(),lazy.later()]); console.log(a.shared === b.shared, a.shared === x, x === y, x.count);");
+    output.files.insert("observe.mjs".into(), observer);
     let actual = node(&output.files, Path::new("observe.mjs"));
     assert!(
         actual.status.success(),
@@ -910,13 +984,14 @@ fn split_lexical_scopes_keep_mutation_and_initialization_order_across_roots() {
     let mut files = output.files.clone();
     files.insert(
         "observe.mjs".into(),
-        r#"
-import {loadEntry} from './runtime.mjs';
-const a = await loadEntry('a.mjs');
-const b = await loadEntry('b.mjs');
+        observation(
+            &output,
+            r#"
+const a = await import('./a.mjs');
+const b = await import('./b.mjs');
 console.log(a.x, b.read()); b.bump(); console.log(a.x, b.read());
-"#
-        .into(),
+"#,
+        ),
     );
     let result = node(&files, Path::new("observe.mjs"));
     assert!(
@@ -940,14 +1015,13 @@ fn canonical_native_namespaces_and_once_only_evaluation_survive_entry_facades() 
         ("b.mjs", "export * as original from './a.mjs';"),
     ]);
     let (_, output) = build(&sources, &[("a.mjs", true), ("b.mjs", true)], false);
-    let mut files = output.files;
-    files.insert("observe.mjs".into(), r#"
-import {loadEntry} from './runtime.mjs';
-const [a, again, b] = await Promise.all([loadEntry('a.mjs'), loadEntry('a.mjs'), loadEntry('b.mjs')]);
+    let mut files = output.files.clone();
+    files.insert("observe.mjs".into(), observation(&output, r#"
+const [a, again, b] = await Promise.all([import('./a.mjs'), import('./a.mjs'), import('./b.mjs')]);
 console.log(a === again, a === b.original, Object.isExtensible(a), Object.prototype.toString.call(a));
 a.bump(); console.log(again.value, b.original.value);
 try { a.value = 9; } catch (error) { console.log(error.name); }
-"#.into());
+"#));
     let result = node(&files, Path::new("observe.mjs"));
     assert!(
         result.status.success(),
@@ -979,7 +1053,7 @@ fn cross_chunk_cycle_keeps_forward_tdz_and_hoisted_function_instantiation() {
 }
 
 #[test]
-fn loading_payloads_never_evaluates_another_module_in_the_same_chunk() {
+fn logical_grouping_does_not_evaluate_later_modules_after_a_throw() {
     let sources = sources(&[
         ("a.mjs", "console.log('a'); throw new Error('stop');"),
         ("b.mjs", "console.log('WRONG');"),
@@ -996,15 +1070,21 @@ fn loading_payloads_never_evaluates_another_module_in_the_same_chunk() {
     let plan = partition(&graph, &roots, &policy).unwrap();
     assert_eq!(plan.chunks.len(), 1);
     let output = esm(&graph, &plan, &policy, &sources).unwrap();
-    let mut files = output.files;
-    files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; try { await loadEntry('combined'); } catch { console.log('caught'); }".into());
+    let mut files = output.files.clone();
+    files.insert(
+        "observe.mjs".into(),
+        observation(
+            &output,
+            "try { await import('./combined'); } catch { console.log('caught'); }",
+        ),
+    );
     let result = node(&files, Path::new("observe.mjs"));
     assert!(result.status.success());
     assert_eq!(String::from_utf8(result.stdout).unwrap(), "a\ncaught\n");
 }
 
 #[test]
-fn linked_payloads_apply_pure_recipes_and_preserve_utf8_hashbang_directives() {
+fn linked_files_apply_pure_recipes_and_preserve_utf8_hashbang_directives() {
     let sources = sources(&[
         ("entry.mjs", "import './dep.mjs';"),
         ("dep.mjs", "#!/usr/bin/env node\n// legal é\n'use strict';\nfunction dead() { return 'must disappear'; }\nconst obj = {get method() { console.log('get'); return undefined; }}; function arg() { console.log('arg'); }\n/*#__PURE__*/ obj?.method(arg());\n//# sourceMappingURL=obsolete.map"),
@@ -1022,7 +1102,7 @@ fn linked_payloads_apply_pure_recipes_and_preserve_utf8_hashbang_directives() {
 }
 
 #[test]
-fn separate_bundle_instances_do_not_share_virtual_module_state() {
+fn separate_bundle_directories_do_not_share_native_module_state() {
     let first = sources(&[
         (
             "entry.mjs",
@@ -1039,22 +1119,18 @@ fn separate_bundle_instances_do_not_share_virtual_module_state() {
     ]);
     let (_, first) = build(&first, &[("entry.mjs", true)], false);
     let (_, second) = build(&second, &[("entry.mjs", true)], false);
+    let observer = format!(
+        "const one = () => import({}); const two = () => import({}); const a = await one(), b = await two(); console.log(a.value, b.value, a === b, a === await one());",
+        quote(&format!("./one/{}", first.entries["entry.mjs"].display())),
+        quote(&format!("./two/{}", second.entries["entry.mjs"].display())),
+    );
     let mut files = BTreeMap::new();
     for (directory, output) in [("one", first), ("two", second)] {
         for (path, source) in output.files {
             files.insert(Path::new(directory).join(path), source);
         }
     }
-    files.insert(
-        "observe.mjs".into(),
-        r#"
-import {loadEntry as one} from './one/runtime.mjs';
-import {loadEntry as two} from './two/runtime.mjs';
-const a = await one('entry.mjs'), b = await two('entry.mjs');
-console.log(a.value, b.value, a === b, a === await one('entry.mjs'));
-"#
-        .into(),
-    );
+    files.insert("observe.mjs".into(), observer);
     let result = node(&files, Path::new("observe.mjs"));
     assert!(
         result.status.success(),
@@ -1079,8 +1155,14 @@ fn later_entries_load_after_user_code_changes_public_builtins() {
         &[("first.mjs", false), ("second.mjs", true)],
         false,
     );
-    let mut files = output.files;
-    files.insert("observe.mjs".into(), "import {loadEntry} from './runtime.mjs'; await loadEntry('first.mjs'); console.log((await loadEntry('second.mjs')).value);".into());
+    let mut files = output.files.clone();
+    files.insert(
+        "observe.mjs".into(),
+        observation(
+            &output,
+            "await import('./first.mjs'); console.log((await import('./second.mjs')).value);",
+        ),
+    );
     let result = node(&files, Path::new("observe.mjs"));
     assert!(
         result.status.success(),

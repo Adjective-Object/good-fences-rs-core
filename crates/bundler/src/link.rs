@@ -1,4 +1,4 @@
-//! Exact-chunk payloads linked through Node's native ESM and CommonJS loaders.
+//! Retained original lexical modules linked as ordinary native JavaScript files.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -9,7 +9,7 @@ use oxc_span::Span;
 use sha2::{Digest, Sha256};
 use source_graph::{DependencyTarget, GraphNode, Namespace, SegmentKey, SourceGraph};
 
-use crate::chunks::{node_id, AsyncSiteId, ChunkId, ChunkPlan, NodeId, RootId};
+use crate::chunks::{AsyncSiteId, ChunkId, ChunkPlan, NodeId, RootId};
 use crate::manifest::{diagnostic_manifest, DiagnosticManifest};
 use crate::policy::EffectPolicy;
 use crate::rewrite::{self, Edit};
@@ -19,28 +19,27 @@ use crate::rewrite::{self, Edit};
 mod tests;
 
 /// Owned staging result; no filesystem writes. Publish the complete relative
-/// artifact map together, then use runtime.mjs's loadEntry(name) for the native
-/// module namespace (CJS runtime-key bridge), or execute a Node >=22.15 launcher.
+/// map together and execute/import `entries` with Node's ordinary loader.
+/// Exact logical chunks are diagnostic: physical files preserve original
+/// lexical modules and can therefore belong to several logical chunks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifacts {
     pub files: BTreeMap<PathBuf, String>,
+    /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
-    pub runtime: PathBuf,
-    /// Source identities to canonical virtual-module tokens, not physical files.
-    pub modules: BTreeMap<PathBuf, String>,
-    /// Physical assembly dependencies, distinct from logical root reachability.
-    pub module_payloads: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
-    /// Exactly the P5 nonempty members, each assigned to its exact chunk payload.
+    /// Source identities to canonical executable relative paths.
+    pub modules: BTreeMap<PathBuf, PathBuf>,
+    /// Logical members to physical files; this mapping is deliberately many-to-one.
     pub members: BTreeMap<NodeId, PathBuf>,
+    /// Physical projections of logical chunks, which may overlap each other.
     pub chunk_artifacts: BTreeMap<ChunkId, BTreeSet<PathBuf>>,
     pub manifest: DiagnosticManifest,
-    /// CJS identity -> canonical native ESM proxy token and its static surface.
-    pub cjs_proxies: BTreeMap<PathBuf, (String, BTreeSet<String>)>,
-    /// CJS identities with a conservative runtime-key namespace bridge.
-    pub cjs_namespaces: BTreeMap<PathBuf, String>,
-    /// Reached source occurrences -> canonical native namespace module tokens.
-    /// Facades are logical routes, not extra evaluation identities.
-    pub async_facades: BTreeMap<AsyncSiteId, String>,
+    /// CJS identity -> native ESM proxy file and its static snapshot surface.
+    pub cjs_proxies: BTreeMap<PathBuf, (PathBuf, BTreeSet<String>)>,
+    /// Files whose default export is the conservative runtime-key CJS bridge.
+    pub cjs_namespaces: BTreeMap<PathBuf, PathBuf>,
+    /// Reached source occurrences -> canonical executable target files.
+    pub async_facades: BTreeMap<AsyncSiteId, PathBuf>,
     /// ESM modules with source TLA or a transitive static async dependency.
     /// Native ESM owns SCC evaluation jobs, suspension and rejection propagation.
     pub async_modules: BTreeSet<PathBuf>,
@@ -49,13 +48,12 @@ pub struct Artifacts {
 struct Module<'a> {
     source: &'a str,
     parsed: ParsedModule,
-    token: String,
+    path: PathBuf,
     surface: BTreeSet<String>,
 }
 
-/// Native ESM owns live bindings/TDZ and native CJS owns wrappers/cache. Chunks
-/// hold rewritten source pieces, never eager evaluators: the host loader joins
-/// one original lexical module or opaque factory before compiling it.
+/// Native ESM owns live bindings/TDZ and native CJS owns wrappers/cache.
+/// Retained statements remain together in their original lexical environment.
 pub fn esm(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -90,8 +88,12 @@ pub(crate) fn esm_with_source_checker(
             file,
             Module {
                 source,
+                path: PathBuf::from(format!(
+                    "modules/{}.{}",
+                    digest(identity),
+                    if parsed.facts.commonjs { "cjs" } else { "mjs" }
+                )),
                 parsed,
-                token: format!("good-fences:{}", digest(identity)),
                 surface: BTreeSet::new(),
             },
         );
@@ -133,9 +135,8 @@ pub(crate) fn esm_with_source_checker(
     let mut files = BTreeMap::new();
     let mut members = BTreeMap::new();
     let mut chunk_artifacts = BTreeMap::new();
-    let mut payloads: BTreeMap<PathBuf, BTreeMap<String, String>> = BTreeMap::new();
     for (chunk, nodes) in &plan.chunks {
-        let path = PathBuf::from(format!("chunks/{}.json", digest(&format!("{chunk:?}"))));
+        let mut paths = BTreeSet::new();
         for node in nodes {
             if let NodeId::External { module, offset } = node {
                 let span = graph
@@ -151,32 +152,37 @@ pub(crate) fn esm_with_source_checker(
                     span.end
                 );
             }
-            members.insert(node.clone(), path.clone());
+            let path = match node {
+                NodeId::Module(path) | NodeId::Segment { module: path, .. } => modules
+                    [&graph.file_id(path).ok_or_eyre("missing member module")?]
+                    .path
+                    .clone(),
+                NodeId::CommonJsProxy { module, .. } => {
+                    proxy_path(&modules[&graph.file_id(module).ok_or_eyre("missing proxy module")?])
+                }
+                NodeId::CommonJsNamespace(module) => namespace_path(
+                    &modules[&graph
+                        .file_id(module)
+                        .ok_or_eyre("missing namespace module")?],
+                ),
+                NodeId::External { .. } => unreachable!(),
+            };
+            paths.insert(path.clone());
+            members.insert(node.clone(), path);
         }
-        chunk_artifacts.insert(chunk.clone(), BTreeSet::from([path.clone()]));
-        payloads.insert(path, BTreeMap::new());
+        chunk_artifacts.insert(chunk.clone(), paths);
     }
-    let mut module_pieces = BTreeMap::new();
-    let mut module_payloads: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
     let mut cjs_proxies = BTreeMap::new();
     let mut cjs_namespaces = BTreeMap::new();
     for (&file, module) in &modules {
         let edits = dependency_edits(graph, plan, file, &modules)?;
-        let parts = if let ModuleBody::CommonJs { span } = module.parsed.body {
+        let source = if matches!(module.parsed.body, ModuleBody::CommonJs { .. }) {
             let source = rewrite::apply(module.source, &edits)?;
             let source = rewrite::apply(&source, &rewrite::source_hint_edits(&source))?;
-            vec![
-                crate::emit::SourcePart {
-                    segment: None,
-                    source: source[..span.start as usize].into(),
-                },
-                crate::emit::SourcePart {
-                    segment: Some(0),
-                    source: source[span.start as usize..].into(),
-                },
-            ]
+            rewrite::validate(&module.path, &source)?;
+            source
         } else {
-            crate::emit::project_parts(
+            crate::emit::project(
                 graph,
                 &plan.retention,
                 file,
@@ -191,67 +197,31 @@ pub(crate) fn esm_with_source_checker(
                 )
             })?
         };
-        let mut pieces = Vec::new();
-        for (index, part) in parts.into_iter().enumerate() {
-            if part.source.is_empty() {
-                continue;
-            }
-            let node = match part.segment {
-                Some(index) => GraphNode::Segment(SegmentKey::new(file, index)),
-                None => GraphNode::Module(file),
-            };
-            let path = &members[&node_id(graph, node)?];
-            let key = format!("{}:{index}", module.token);
-            payloads
-                .get_mut(path)
-                .unwrap()
-                .insert(key.clone(), part.source);
-            pieces.push((path.clone(), key));
-        }
-        module_payloads.insert(
-            graph.file_path(file).unwrap().to_owned(),
-            pieces.iter().map(|(path, _)| path.clone()).collect(),
-        );
-        module_pieces.insert(module.token.clone(), pieces);
+        files.insert(module.path.clone(), source);
         let module_path = graph.file_path(file).unwrap().to_owned();
         let initialize = NodeId::CommonJsProxy {
             module: module_path.clone(),
             name: None,
         };
         if module.parsed.facts.commonjs && members.contains_key(&initialize) {
-            let proxy = proxy_token(module);
-            let initialization = format!(
-                "import {{requireModule}} from '../runtime.mjs';\nconst value = requireModule({});\nexport default value;\n",
-                quote(&module.token)
+            let proxy = proxy_path(module);
+            let mut source = format!(
+                "import {{createRequire}} from 'node:module';\nconst value = createRequire(import.meta.url)({});\nexport default value;\n",
+                specifier(&module.path)
             );
-            let mut parts = vec![(initialize, initialization)];
             for (index, name) in module
                 .surface
                 .iter()
                 .filter(|name| name.as_str() != "default")
                 .enumerate()
             {
-                parts.push((NodeId::CommonJsProxy { module: module_path.clone(), name: Some(name.clone()) }, format!(
+                source.push_str(&format!(
                     "const v{index} = value == null ? undefined : value[{}];\nexport {{v{index} as {}}};\n",
                     quote(name), quote(name)
-                )));
+                ));
             }
-            let joined: String = parts.iter().map(|(_, source)| source.as_str()).collect();
-            rewrite::validate(&module_path, &joined)?;
-            let mut pieces = Vec::new();
-            for (index, (node, source)) in parts.into_iter().enumerate() {
-                let path = members
-                    .get(&node)
-                    .ok_or_eyre("CJS proxy demand absent from exact partition")?;
-                let key = format!("{proxy}:{index}");
-                payloads.get_mut(path).unwrap().insert(key.clone(), source);
-                pieces.push((path.clone(), key));
-            }
-            module_payloads
-                .get_mut(&module_path)
-                .unwrap()
-                .extend(pieces.iter().map(|(path, _)| path.clone()));
-            module_pieces.insert(proxy.clone(), pieces);
+            rewrite::validate(&proxy, &source)?;
+            files.insert(proxy.clone(), source);
             cjs_proxies.insert(
                 graph.file_path(file).unwrap().to_owned(),
                 (proxy, module.surface.clone()),
@@ -259,110 +229,53 @@ pub(crate) fn esm_with_source_checker(
         }
         let namespace_node = NodeId::CommonJsNamespace(module_path.clone());
         if let Some(path) = members.get(&namespace_node) {
-            let token = namespace_token(module);
             let source = format!(
-                "import value from {};\nimport {{commonjsNamespace}} from '../runtime.mjs';\nexport default commonjsNamespace(value);\n",
-                quote(&format!("./{}.mjs", proxy_token(module).strip_prefix("good-fences:").unwrap()))
+                "import value from {};\n{}\nexport default commonjsNamespace(value);\n",
+                specifier(&proxy_path(module)),
+                include_str!("commonjs_namespace.mjs")
             );
-            rewrite::validate(&module_path, &source)?;
-            payloads
-                .get_mut(path)
-                .unwrap()
-                .insert(token.clone(), source);
-            module_pieces.insert(token.clone(), vec![(path.clone(), token.clone())]);
-            module_payloads
-                .get_mut(&module_path)
-                .unwrap()
-                .insert(path.clone());
-            cjs_namespaces.insert(module_path, token);
+            rewrite::validate(path, &source)?;
+            files.insert(path.clone(), source);
+            cjs_namespaces.insert(module_path, path.clone());
         }
     }
-    for (path, payload) in payloads {
-        files.insert(path, serde_json::to_string(&payload)?);
-    }
-    let entry_tokens: BTreeMap<_, _> = plan
-        .roots
-        .iter()
-        .filter_map(|(root, seed)| {
-            let RootId::Entry(name) = root else {
-                return None;
-            };
-            Some((name, seed))
-        })
-        .map(|(name, seed)| {
-            let mut evaluation: BTreeSet<_> = seed.evaluation_roots.iter().copied().collect();
-            for node in &seed.binding_roots {
-                match node {
-                    GraphNode::Module(file) => {
-                        evaluation.insert(*file);
-                    }
-                    GraphNode::Segment(key) => {
-                        evaluation.insert(key.file_id);
-                    }
-                    GraphNode::Unlinked { .. } => {
-                        eyre::bail!("external entry emission is unsupported")
-                    }
+    let mut entries = BTreeMap::new();
+    for (name, seed) in plan.roots.iter().filter_map(|(root, seed)| {
+        let RootId::Entry(name) = root else {
+            return None;
+        };
+        Some((name, seed))
+    }) {
+        let mut evaluation: BTreeSet<_> = seed.evaluation_roots.iter().copied().collect();
+        for node in &seed.binding_roots {
+            match node {
+                GraphNode::Module(file) => {
+                    evaluation.insert(*file);
+                }
+                GraphNode::Segment(key) => {
+                    evaluation.insert(key.file_id);
+                }
+                GraphNode::Unlinked { .. } => {
+                    eyre::bail!("external entry emission is unsupported")
                 }
             }
-            // A facade can evaluate several modules, but has no invented namespace
-            // merge policy. loadEntry returns namespaces in this canonical order.
-            let mut evaluation: Vec<_> = evaluation.into_iter().collect();
-            evaluation.sort_by_key(|file| graph.file_path(*file));
-            Ok((
-                name.clone(),
-                evaluation
-                    .into_iter()
-                    .map(|file| {
-                        if modules[&file].parsed.facts.commonjs {
-                            namespace_token(&modules[&file])
-                        } else {
-                            modules[&file].token.clone()
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            ))
-        })
-        .collect::<eyre::Result<_>>()?;
-    let runtime = PathBuf::from("runtime.mjs");
-    let mut formats: BTreeMap<_, _> = modules
-        .values()
-        .map(|module| {
-            (
-                module.token.clone(),
-                if matches!(module.parsed.body, ModuleBody::CommonJs { .. }) {
-                    "commonjs"
-                } else {
-                    "module"
-                },
-            )
-        })
-        .collect();
-    for (token, _) in cjs_proxies.values() {
-        formats.insert(token.clone(), "module");
-    }
-    for token in cjs_namespaces.values() {
-        formats.insert(token.clone(), "module");
-    }
-    let config = serde_json::json!({ "modules": module_pieces, "entries": entry_tokens, "formats": formats });
-    let runtime_source = format!(
-        "const config = JSON.parse({});\n{}",
-        quote(&config.to_string()),
-        include_str!("esm_loader.mjs")
-    );
-    rewrite::validate(&runtime, &runtime_source)?;
-    files.insert(runtime.clone(), runtime_source);
-    let mut entries = BTreeMap::new();
-    for root in plan.roots.keys() {
-        let RootId::Entry(name) = root else {
-            continue;
+        }
+        let mut evaluation: Vec<_> = evaluation.into_iter().collect();
+        evaluation.sort_by_key(|file| graph.file_path(*file));
+        let path = if evaluation.len() == 1 {
+            modules[&evaluation[0]].path.clone()
+        } else {
+            // Multi-module low-level roots have evaluation demand but no
+            // invented namespace merge. Native static imports preserve order.
+            let path = PathBuf::from(format!("modules/entry-{}.mjs", digest(name)));
+            let source: String = evaluation
+                .iter()
+                .map(|file| format!("import {};\n", specifier(&modules[file].path)))
+                .collect();
+            rewrite::validate(&path, &source)?;
+            files.insert(path.clone(), source);
+            path
         };
-        let path = PathBuf::from(format!("entries/{}.mjs", digest(name)));
-        let source = format!(
-            "import {{loadEntry}} from '../runtime.mjs';\nexport default await loadEntry({});\n",
-            quote(name)
-        );
-        rewrite::validate(&path, &source)?;
-        files.insert(path.clone(), source);
         entries.insert(name.clone(), path);
     }
     let async_facades = manifest
@@ -377,9 +290,9 @@ pub(crate) fn esm_with_source_checker(
             Ok((
                 site.clone(),
                 if module.parsed.facts.commonjs {
-                    namespace_token(module)
+                    namespace_path(module)
                 } else {
-                    module.token.clone()
+                    module.path.clone()
                 },
             ))
         })
@@ -387,12 +300,10 @@ pub(crate) fn esm_with_source_checker(
     Ok(Artifacts {
         files,
         entries,
-        runtime,
         modules: modules
             .into_iter()
-            .map(|(file, m)| (graph.file_path(file).unwrap().to_owned(), m.token))
+            .map(|(file, m)| (graph.file_path(file).unwrap().to_owned(), m.path))
             .collect(),
-        module_payloads,
         members,
         chunk_artifacts,
         manifest,
@@ -507,10 +418,7 @@ fn dependency_edits(
             let specifier = if target_module.parsed.facts.commonjs {
                 namespace_specifier(target_module)
             } else {
-                quote(&format!(
-                    "./{}.mjs",
-                    target_module.token.strip_prefix("good-fences:").unwrap()
-                ))
+                specifier(&target_module.path)
             };
             edits.push(Edit {
                 span: dependency.span,
@@ -523,17 +431,14 @@ fn dependency_edits(
             continue;
         }
         let target_specifier = if dependency.kind == DependencyKind::Require {
-            quote(&target_module.token)
+            specifier(&target_module.path)
         } else {
-            let token = if target_module.parsed.facts.commonjs {
-                proxy_token(target_module)
+            let path = if target_module.parsed.facts.commonjs {
+                proxy_path(target_module)
             } else {
-                target_module.token.clone()
+                target_module.path.clone()
             };
-            quote(&format!(
-                "./{}.mjs",
-                token.strip_prefix("good-fences:").unwrap()
-            ))
+            specifier(&path)
         };
         if dependency.kind == DependencyKind::Require {
             ensure!(
@@ -745,20 +650,22 @@ fn export_names(graph: &SourceGraph, plan: &ChunkPlan) -> BTreeMap<u32, BTreeSet
     }
 }
 
-fn proxy_token(module: &Module<'_>) -> String {
-    format!("{}:proxy", module.token)
+fn proxy_path(module: &Module<'_>) -> PathBuf {
+    module.path.with_extension("proxy.mjs")
 }
 
-fn namespace_token(module: &Module<'_>) -> String {
-    format!("{}:namespace", module.token)
+fn namespace_path(module: &Module<'_>) -> PathBuf {
+    module.path.with_extension("namespace.mjs")
 }
 
 fn namespace_specifier(module: &Module<'_>) -> String {
+    specifier(&namespace_path(module))
+}
+
+fn specifier(path: &std::path::Path) -> String {
     quote(&format!(
-        "./{}.mjs",
-        namespace_token(module)
-            .strip_prefix("good-fences:")
-            .unwrap()
+        "./{}",
+        path.file_name().unwrap().to_str().unwrap()
     ))
 }
 

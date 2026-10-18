@@ -1,6 +1,41 @@
 # Incremental bundler implementation handoff
 
-## Current scope
+## Native-file replacement
+
+The user revoked the previous hook/payload output architecture. It is removed
+entirely. The replacement keeps the existing checked source edits, retention,
+logical roots, cache/session and immutable publication, emitting one original
+lexical module as a real `.mjs`/`.cjs` file. `.proxy.mjs` captures CJS named/default
+requests; `.namespace.mjs` supplies runtime-key bridges. Ordinary relative file
+imports/requires and native Node own identity, scope, TDZ, cycles and TLA.
+Entries directly expose native exports, not a namespace-object launcher.
+
+Logical exact chunks and physical files are deliberately distinct: all retained
+statements in one lexical module share a physical file, even across root sets.
+`members/chunk_artifacts` are overlapping projections, not exact physical
+partitions. No segment-linker or demand-minimal physical fetching is claimed.
+The previous all-var-contributions and guarded-PURE-await correctness fixes
+remain covered by the existing public-pipeline regressions.
+
+Native-file verification: `./scripts/bundler-release-check` passes 391 scoped
+Rust tests (100 bundler), 43 harness regressions, all 12 native and 12 differential
+contracts / 15 emitted executions, concurrent-entry static-export/identity and
+four diagnostic cases, focused clippy and mandatory spot-check (51 parser tests
+plus workspace check). Zero failures/ignored/unsupported cases. Old-reader
+regression keeps a Node process running across rebuild/publication, then lazily
+imports its original dependency before quiescent prune.
+`cargo bench -p bundler --bench incremental` passes all six scenarios/seven
+samples with native-file count/output-scan assertions: 66 files and 132 scans
+per rebuild, zero writes/scans on no-op. Updated timings are in the bundler README.
+Logs: `target/native-files-{release-check,bench}.log` (uncommitted local evidence).
+
+## Historical P0–P9 handoff — superseded backend and measurements
+
+Everything below is an archived checkpoint, not current architecture or current
+acceptance evidence. All hook/code-payload/runtime-launcher statements and old
+timings/counts describe the deleted backend only.
+
+### Historical scope
 
 P0–P8 are complete for the documented Node 22.15+ ESM/CJS target.
 P0–P9 are complete for the documented Node 22.15+ support matrix.

@@ -329,7 +329,13 @@ impl BuildSession {
             resolution: hash(format!("{resolution_key:?}:{resolution_inputs:?}").as_bytes()),
             effects: options.effects.fingerprint(),
             roots: hash(format!("{entries:?}").as_bytes()),
-            runtime: hash(include_str!("esm_loader.mjs").as_bytes()),
+            runtime: hash(
+                concat!(
+                    "native-node-original-modules-v1\n",
+                    include_str!("commonjs_namespace.mjs")
+                )
+                .as_bytes(),
+            ),
             output: [0; 32],
         };
         // Include emitter implementation, not user-chosen cache-busting strings.
