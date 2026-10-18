@@ -77,6 +77,56 @@ later valid builds, not as an error fallback. Cache-write failures are explicit
 locked against noncooperating editors. A session has one mutable owner and its
 shared products use `Rc` (not cross-thread sharing).
 
+## Transactional publication
+
+```rust,no_run
+use bundler::{build::{BuildOptions, BuildSession, Entry}, publish::{Cancellation, current_directory, prune_stale}};
+let mut session = BuildSession::new("project")?;
+let mut options = BuildOptions::default();
+options.entries.insert("main".into(), Entry { path: "main.mjs".into(), namespace: true });
+let output = session.root().join(".bundler-output");
+let (build, published) = session.build_and_publish(&options, &output, &Cancellation::default())?;
+// Run: node <published.entries["main"]>
+assert_eq!(current_directory(&output)?, published.directory);
+// Only after runtimes using PRIOR generations have stopped:
+let cleanup = prune_stale(&output)?;
+for warning in cleanup.warnings { eprintln!("{warning}"); }
+# Ok::<(), eyre::Report>(())
+```
+
+`publish(output, &Artifacts, &Cancellation)` also accepts a successful lower-level
+artifact map. It creates unique reserved staging directories, writes/syncs the
+complete map, installs an immutable content-identified generation, then atomically
+replaces **one** `.bundler-current.json` ownership/current pointer. Callers use
+returned generation paths or resolve the current pointer for each fresh runtime;
+there is deliberately no set of independently overwritten public launcher files.
+No-op publication verifies bytes and preserves artifact and pointer mtimes.
+Concurrent publishers use a nonblocking OS file lock: the loser gets an `eyre`
+error and may retry; a crashed process releases its lock automatically.
+
+Errors/cancellation before the pointer commit leave the prior generation and
+pointer intact. Cancellation is checked before/after building, per staged file
+and before commit, not an interrupt inside parsing. Cancellation arriving after
+commit cannot roll back success. Publication is atomic visibility, **not**
+directory-fsync/power-loss durability or an adversarial-filesystem transaction.
+Crash/unwind staging orphans are excluded from watching and never guessed/swept.
+Detected cleanup failures are attached to the publication error.
+
+Publishing retains prior immutable generations so an existing runtime's lazy
+imports continue working. `prune_stale` is an explicit **quiescent-reader** action.
+It removes only validated metadata-listed, hash-unmodified regular files under
+known generation names and then empty known parents; never recursive deletion.
+Unknown files, modified owned files and symlinks are retained with warnings.
+Metadata is bounded and version/owner/path/content-identity checked. Prune errors
+may follow partial cleanup of retired generations, never the current generation.
+Keep output metadata intact; unowned/colliding generations are not adopted.
+The 4 MiB metadata bound can require pruning before many further publications.
+
+Use `publish::is_generated_artifact(path, output)` in watchers. In-project output
+for `build_and_publish` must live under `.bundler-*` or `target`, to match source
+inventory exclusions. A standalone `publish` can use any explicitly supplied
+output directory. No user files beside generated generations are removed.
+
 ## CommonJS runtime
 
 Linked opaque JavaScript CJS bodies use Node's native CommonJS loader through
@@ -234,7 +284,7 @@ requested lexical module**, beyond one root's logical diagnostic `load_chunks`.
 `module_payloads` reports this distinct physical requirement. It does not change
 any root set or constitute a demand-minimal/async loader claim. Payload names
 derive from logical identity, not content; transactional/content-addressed
-publication remains P9. No files are written by the Rust library.
+publication is provided by `publish` above. `link::esm` itself writes no files.
 
 Literal source dynamic imports use the same native identities as static imports
 and entries. `Artifacts::async_facades` maps each reached source occurrence to

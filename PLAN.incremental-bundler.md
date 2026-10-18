@@ -627,7 +627,11 @@ The initial implementation intentionally uses conservative JSON/file-name
 inventory and full later-layer rebuilding after changes, while reusing unchanged
 parse products and per-source resolutions. Canonical bounded roots reject
 symlinks/out-of-root targets. Publication and public-pipeline differential/
-benchmark gates follow in P9.2–P9.4.
+benchmark gates follow in P9.3–P9.4. P9.2 publishes immutable generations behind
+one atomically replaced ownership pointer with a nonblocking OS writer lock.
+Explicit stale pruning requires old-reader quiescence so lazy runtimes retain
+valid payloads across successful rebuilds; only listed unmodified files and
+empty known directories can be removed.
 
 Build layer-specific fingerprints and invalidation:
 

@@ -1,0 +1,261 @@
+use super::*;
+use crate::build::Entry;
+use test_tmpdir::TmpDir;
+
+fn fixture() -> (TmpDir, BuildSession, BuildOptions) {
+    let dir = TmpDir::new();
+    fs::write(
+        dir.root().join("main.mjs"),
+        "export const load = () => import('./lazy.mjs'); console.log('main');",
+    )
+    .unwrap();
+    fs::write(dir.root().join("lazy.mjs"), "export const value = 1;").unwrap();
+    let session = BuildSession::new(dir.root()).unwrap();
+    let options = BuildOptions {
+        entries: BTreeMap::from([(
+            "main".into(),
+            Entry {
+                path: "main.mjs".into(),
+                namespace: true,
+            },
+        )]),
+        ..Default::default()
+    };
+    (dir, session, options)
+}
+
+fn snapshot(directory: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)> {
+    let mut result = BTreeMap::new();
+    fn visit(
+        root: &Path,
+        path: &Path,
+        result: &mut BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)>,
+    ) {
+        for entry in fs::read_dir(path).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(root, &path, result);
+            } else {
+                result.insert(
+                    path.strip_prefix(root).unwrap().into(),
+                    (
+                        fs::read(&path).unwrap(),
+                        fs::metadata(path).unwrap().modified().unwrap(),
+                    ),
+                );
+            }
+        }
+    }
+    visit(directory, directory, &mut result);
+    result
+}
+
+#[test]
+fn publication_noop_mtimes_generation_identity_and_bounded_stale_cleanup() {
+    let (dir, mut session, options) = fixture();
+    let output = dir.root().join(".bundler-output");
+    fs::create_dir(&output).unwrap();
+    fs::write(output.join("user.txt"), "do not touch").unwrap();
+    let cancel = Cancellation::default();
+    let (_, first) = session
+        .build_and_publish(&options, &output, &cancel)
+        .unwrap();
+    let before = snapshot(&output);
+    let (same, second) = session
+        .build_and_publish(&options, &output, &cancel)
+        .unwrap();
+    assert!(!second.changed);
+    assert_eq!(same.counters.emissions, 0);
+    assert_eq!(snapshot(&output), before);
+    assert_eq!(current_directory(&output).unwrap(), first.directory);
+    let old_facades = same.product.artifacts.async_facades.clone();
+    assert!(!old_facades.is_empty());
+    fs::write(dir.root().join("main.mjs"), "export const value = 2;").unwrap();
+    let (build, new) = session
+        .build_and_publish(&options, &output, &cancel)
+        .unwrap();
+    assert!(new.changed);
+    assert!(build.product.artifacts.async_facades.is_empty());
+    assert_ne!(new.directory, first.directory);
+    assert!(
+        first.runtime.is_file(),
+        "old runtime remains usable until explicit quiescent prune"
+    );
+    let cleaned = prune_stale(&output).unwrap();
+    assert!(cleaned.warnings.is_empty(), "{:?}", cleaned.warnings);
+    assert_eq!(cleaned.removed, vec![first.directory.clone()]);
+    assert!(!first.directory.exists());
+    assert!(new.runtime.is_file());
+    assert_eq!(
+        fs::read_to_string(output.join("user.txt")).unwrap(),
+        "do not touch"
+    );
+    assert!(prune_stale(&output).unwrap().removed.is_empty());
+    assert!(is_generated_artifact(
+        &output.join("chunks/x.json"),
+        &output
+    ));
+    assert!(is_generated_artifact(
+        Path::new("foo.mjs.seg.cbor.stage-ab"),
+        &output
+    ));
+    assert!(is_generated_artifact(
+        Path::new("other/.bundler-stage-1/x"),
+        &output
+    ));
+    assert!(!is_generated_artifact(
+        &dir.root().join("main.mjs"),
+        &output
+    ));
+}
+
+#[test]
+fn cancellation_failure_and_busy_writer_leave_previous_outputs_intact() {
+    let (dir, mut session, options) = fixture();
+    let output = dir.root().join(".bundler-output");
+    let (_, first) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let previous = snapshot(&output);
+    fs::write(dir.root().join("main.mjs"), "export const changed = 2;").unwrap();
+    let build = session.build(&options).unwrap();
+    for phase in [Phase::Staged, Phase::Installed, Phase::BeforeCommit] {
+        let cancellation = Cancellation::default();
+        let result = publish_inner(&output, &build.product.artifacts, &cancellation, |at| {
+            if std::mem::discriminant(&phase) == std::mem::discriminant(&at) {
+                cancellation.cancel();
+            }
+
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(snapshot(&output), previous);
+        let failed = publish_inner(
+            &output,
+            &build.product.artifacts,
+            &Cancellation::default(),
+            |at| {
+                ensure!(
+                    std::mem::discriminant(&phase) != std::mem::discriminant(&at),
+                    "injected publication failure"
+                );
+                Ok(())
+            },
+        );
+        assert!(failed.is_err());
+        assert_eq!(snapshot(&output), previous);
+    }
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(output.join(LOCK))
+        .unwrap();
+    lock.try_lock().unwrap();
+    assert!(publish(&output, &build.product.artifacts, &Cancellation::default()).is_err());
+    assert_eq!(snapshot(&output), previous);
+    drop(lock);
+    fs::write(dir.root().join("main.mjs"), "export const broken = ;").unwrap();
+    assert!(session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .is_err());
+    assert_eq!(snapshot(&output), previous);
+    assert_eq!(current_directory(&output).unwrap(), first.directory);
+}
+
+#[test]
+fn concurrent_publishers_are_rejected_until_the_first_commits() {
+    let (dir, mut session, options) = fixture();
+    let output = dir.root().join(".bundler-output");
+    let build = session.build(&options).unwrap();
+    let artifacts = build.product.artifacts.clone();
+    let other_output = output.clone();
+    let other_artifacts = artifacts.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (continue_tx, continue_rx) = std::sync::mpsc::channel();
+    let publisher = std::thread::spawn(move || {
+        publish_inner(
+            &other_output,
+            &other_artifacts,
+            &Cancellation::default(),
+            |phase| {
+                if matches!(phase, Phase::Staged) {
+                    ready_tx.send(()).unwrap();
+                    continue_rx.recv().unwrap();
+                }
+                Ok(())
+            },
+        )
+        .unwrap()
+    });
+    ready_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(publish(&output, &artifacts, &Cancellation::default()).is_err());
+    continue_tx.send(()).unwrap();
+    let first = publisher.join().unwrap();
+    assert!(first.changed);
+    let same = publish(&output, &artifacts, &Cancellation::default()).unwrap();
+    assert!(!same.changed);
+    assert_eq!(same.directory, first.directory);
+}
+
+#[test]
+fn ownership_rejects_traversal_collisions_modified_files_and_foreign_metadata() {
+    let (dir, mut session, options) = fixture();
+    let output = dir.root().join(".bundler-output");
+    let (build, first) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let mut unsafe_artifacts = build.product.artifacts.clone();
+    unsafe_artifacts
+        .files
+        .insert("../escape".into(), "bad".into());
+    assert!(publish(&output, &unsafe_artifacts, &Cancellation::default()).is_err());
+    unsafe_artifacts.files.remove(Path::new("../escape"));
+    unsafe_artifacts.files.insert(PathBuf::new(), "bad".into());
+    assert!(publish(&output, &unsafe_artifacts, &Cancellation::default()).is_err());
+    fs::write(first.directory.join("user-extra"), "mine").unwrap();
+    fs::write(&first.runtime, "user-modified").unwrap();
+    assert!(publish(&output, &build.product.artifacts, &Cancellation::default()).is_err());
+    fs::write(dir.root().join("main.mjs"), "console.log('new');").unwrap();
+    let (_, new) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let cleanup = prune_stale(&output).unwrap();
+    assert!(!cleanup.warnings.is_empty());
+    assert_eq!(fs::read(&first.runtime).unwrap(), b"user-modified");
+    assert_eq!(
+        fs::read(first.directory.join("user-extra")).unwrap(),
+        b"mine"
+    );
+    assert!(new.runtime.is_file());
+    let state = fs::read(output.join(STATE)).unwrap();
+    fs::write(output.join(STATE), r#"{"owner":"foreign"}"#).unwrap();
+    assert!(publish(&output, &build.product.artifacts, &Cancellation::default()).is_err());
+    fs::write(output.join(STATE), state).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cleanup_never_follows_owned_file_or_directory_symlinks() {
+    let (dir, mut session, options) = fixture();
+    let output = dir.root().join(".bundler-output");
+    let (_, first) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let user = dir.root().join("user.txt");
+    fs::write(&user, "mine").unwrap();
+    fs::remove_file(&first.runtime).unwrap();
+    std::os::unix::fs::symlink(&user, &first.runtime).unwrap();
+    fs::write(dir.root().join("main.mjs"), "console.log('new');").unwrap();
+    session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let cleanup = prune_stale(&output).unwrap();
+    assert!(!cleanup.warnings.is_empty());
+    assert_eq!(fs::read(user).unwrap(), b"mine");
+    assert!(fs::symlink_metadata(first.runtime)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}

@@ -354,10 +354,15 @@ workspace test success.
   deletion/recreation/rename, package exports/type and tsconfig edits are tested.
   Later graph/retention/output rebuilding and JSON/file-name inventory are
   deliberately coarse; emitter source validation is separately counted.
-- [ ] **P9.2 — Publish transactional outputs.** Depends: P9.1.
+- [x] **P9.2 — Publish transactional outputs.** Depends: P9.1.
   Stage only owned generated artifacts and publish after success; clean stale
   chunks safely. Tests: cancellation/failure, stale async chunks, source/cache
   watcher exclusions, no-op output stability and concurrent-build policy.
+  Immutable content-identified generations + one atomic ownership pointer,
+  nonblocking OS single-writer locks, cancellation/failure tests at every
+  precommit phase and unchanged bytes/mtimes are implemented. Old generations
+  remain valid for running lazy loaders; explicit quiescent `prune_stale` removes
+  only known unmodified files/empty parents, preserving foreign/modified files.
 - [ ] **P9.3 — Complete differential fixture mode.** Depends: P0.5, P9.2.
   Run native baseline and emitted artifacts with explicit support/interop
   policies; add same-runtime multi-entry and bundler-only diagnostics cases.

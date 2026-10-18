@@ -3,7 +3,28 @@
 ## Current scope
 
 P0–P8 are complete for the documented Node 22.15+ ESM/CJS target.
-P9.1 adds public `bundler::build` orchestration; P9.2–P9.4 remain in progress.
+P9.1–P9.2 add public build/session and transactional publication APIs;
+P9.3–P9.4 remain in progress.
+
+## P9.2
+
+`BuildSession::build_and_publish` and `publish::publish` install immutable
+content-identified generations and atomically replace one bounded ownership/
+current pointer. Source/build errors and checked cancellation before commit
+preserve previous bytes/mtimes. OS locks reject concurrent publishers.
+`current_directory` resolves fresh runtime paths; returned Published paths are
+generation-specific, not mutable public launcher aliases.
+Old generations survive publishing because running runtimes can lazily import
+later. Explicit `prune_stale` requires quiescent old readers, removes only named
+hash-unmodified owned regular files and empty known parents, and reports errors/
+warnings while preserving user files, modified artifacts and symlinks.
+No recursive cleanup, crash-orphan sweeping or power-loss durability claim.
+All reserved staging/output/metadata and source sidecars are watcher-excluded.
+Verification: all 90 bundler tests, focused all-target clippy (`--no-deps --
+-D warnings`) and mandatory `./scripts/spot-check` pass. Publication tests include
+actual overlapping threads/OS lock contention, all three cancellation/error
+checkpoints, stale async removal, symlink/modified/user-file protection and
+no-op byte/mtime equality. Logs: `target/p9-2-{tests,clippy,spot-check}.log`.
 
 ## P9.1
 

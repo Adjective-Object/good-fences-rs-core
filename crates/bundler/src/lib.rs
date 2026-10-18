@@ -7,6 +7,7 @@ pub mod emit;
 pub mod link;
 pub mod manifest;
 pub mod policy;
+pub mod publish;
 pub mod rewrite;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};

@@ -7,6 +7,11 @@ affected users from the existing reverse index. Never return old success on erro
 Later-layer invalidation is deliberately coarse; counters separate extraction
 from required emitter source validation. Project roots are bounded/canonical;
 symlinks and resolved sources outside the root are rejected.
+Publish immutable generations through one atomic ownership pointer; OS locking
+rejects competing publishers. Never overwrite active generations. Stale cleanup
+is explicit after reader quiescence and touches only validated named unmodified
+owned files/empty parents, never recursive directory deletion. Source inventory
+and watchers exclude reserved .bundler-* paths and source sidecars.
 Keep evaluation demand and binding demand distinct. Plans are derived state;
 source caches must not contain policy conclusions. Consumer → dependency edges
 preserve source order and original deferred/async timing; they are not permission

@@ -220,9 +220,11 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "segment_cache",
+ "serde",
  "serde_json",
  "sha2",
  "source_graph",
+ "tempfile",
  "test_tmpdir",
 ]
 
