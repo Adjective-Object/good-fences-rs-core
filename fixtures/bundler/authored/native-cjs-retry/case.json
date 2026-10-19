@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-cjs-retry",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["before", "attempt 1", "true true 1", "attempt 2", "require attempt 2"]
+  },
+  "goals": [
+    "Concurrent and repeated dynamic facade failures share one native cached rejection.",
+    "A later require retries the failed opaque factory rather than caching its failed early record."
+  ]
+}

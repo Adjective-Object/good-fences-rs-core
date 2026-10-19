@@ -139,19 +139,17 @@ P1–P5 now provide owned/cacheable facts, the shared typed graph, effect retent
 exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
 The target is scope-hoisted direct ESM bindings with native cross-chunk links.
-Checked canonical symbols now feed a staged single-entry native concatenator:
-eligible synchronous acyclic ESM builds emit one ordinary lexical `native.mjs`.
-The precise temporary gate and remaining name-sensitive/default/namespace cases
-are documented in the crate README. Other builds still use the following legacy
-physical backend, pending staged replacement and independent review.
-The physical-linker work now places executable registrations in exact root-set
-`.cjs` chunks, with separate native ESM storage/evaluation facades and a real
-JavaScript binding/factory runtime. No loader hooks or executable source payloads
-are used. Every retained real/synthetic node has one physical owner; equal
-nonempty root sets share a file, distinct sets do not. Root-specific native
-namespace capture keeps deferred-only chunks out of initial import closures,
-while shared chunk registration does not execute unrelated module bodies.
-The previous per-original-module physical fallback is removed.
+Checked canonical symbols feed native static/dynamic ESM chunks and original
+TLA jobs; eligible synchronous single-entry trees still emit one lexical
+`native.mjs`. CJS inputs contribute one opaque factory each, grouped into pure
+availability chunks with per-initializer lexical caches. Demanded native ESM
+facade parts provide default, named snapshots and canonical runtime-key bridges;
+loading a factory chunk never executes a deferred factory. Ordinary ESM bindings
+have no cells, registry or scheduler. All **30 portable contracts / 41 executions**
+select native (27 explicitly require it). Only selected-binding/multi-evaluation low-level
+roots still use the rejected legacy registration/cell backend. That final
+cutover and legacy deletion come next, after independent review and before
+upstream parity. No loader hooks or executable source payloads are used.
 P9 adds public `BuildSession::{build,build_and_publish}`, independent layer keys
 and real counters, selective parse reuse, immutable transactional generations
 with ownership-bounded quiescent cleanup, and a public-pipeline

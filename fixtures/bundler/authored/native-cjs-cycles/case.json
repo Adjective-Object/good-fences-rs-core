@@ -1,0 +1,17 @@
+{
+  "id": "authored/native-cjs-cycles",
+  "moduleType": "module",
+  "entryPoints": ["cjs-first.cjs", "esm-first.mjs", "direct.cjs"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["cjs before", "esm", "true 3", "esm first", "direct before"],
+    "errors": {
+      "esm-first.mjs": {"name": "Error", "code": "ERR_REQUIRE_CYCLE_MODULE"},
+      "direct.cjs": {"name": "Error", "code": "ERR_REQUIRE_CYCLE_MODULE"}
+    }
+  },
+  "goals": [
+    "CJS-first entry evaluation can require ESM whose CJS dependency later reads the partial entry through require.",
+    "ESM-first require of an evaluating ESM and direct ESM import of a running CJS retain Node 22 cycle errors."
+  ]
+}

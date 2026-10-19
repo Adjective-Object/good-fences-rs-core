@@ -56,8 +56,9 @@ source order. Propagate source TLA over static dependencies; omit async subtree
 completion chains. The scalar DAG is a partial order, not an async scheduler.
 Cache first-effect projections, including empties, on iterative connector SCCs;
 share chain results rather than copying transitive closures per segment.
-The old backend is still active until staged replacement; preserve its runtime
-behavior while replacing analysis in small independently reviewed increments.
+The old backend remains only for special low-level roots until cutover/deletion;
+public module roots, including CJS, use native chunks. Preserve supported behavior
+while replacing analysis in small independently reviewed increments.
 Artifacts report the actual selected Backend from the emitting branch; derive
 driver layout from it, never filenames. Native-required fixture contracts must
 reject legacy fallback; passing unmarked legacy cases is not native coverage.
@@ -80,8 +81,11 @@ native .cjs-per-input fallback. Preserve early cache allocation, wrapper
 this/exports aliases/current exports and retry after throws.
 Chunk helper identifiers must avoid all
 source bindings and free references, including in opaque factories.
-Proxy initialization, individual named
-snapshots and runtime-key bridges each live in their assigned synthetic chunk.
+Pure CJS factories group by availability roots, with one lexical cache per
+initializer, never a global ESM table. Facade parts group only at equal consumer
+evaluation seams; adjacent sorted snapshots may share a native job. Namespace
+bridges keep their canonical default-export seam. Public CJS entries alone need
+real CJS wrappers; internal sources have no fake independent module path.
 Reverse checked requests supply original names; default is full exports,
 __esModule never unwraps, names snapshot once. Namespace keys snapshot once
 and reads forward to captured exports. Require-of-ESM uses native evaluation

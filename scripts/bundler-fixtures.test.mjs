@@ -28,7 +28,7 @@ const entries = Object.fromEntries(names.map((name, i) => {
   writeFileSync(filename, 'import ' + JSON.stringify(pathToFileURL(path.join(root, name)).href));
   return [name, filename];
 }));
-console.log(JSON.stringify({directory, entries, backend:'native', layout:'native-esm-chunks-v1', warnings:[], publicationWarnings:[]}));
+console.log(JSON.stringify({directory, entries, backend:'native', layout:'native-chunks-v1', warnings:[], publicationWarnings:[]}));
 `);
     chmodSync(driver, 0o755);
     callback({ root, tempRoot, driver, builds, run: (options = {}) => runFixtures(root, { driver, tempRoot, ...options }) });
@@ -389,7 +389,7 @@ test('native requirements use the driver backend, not successful runtime observa
     addCase(root, 'unmarked');
     writeFileSync(driver, readFileSync(driver, 'utf8')
       .replace("backend:'native'", "backend:'legacy'")
-      .replace("layout:'native-esm-chunks-v1'", "layout:'exact-root-set-chunks-v1'"));
+      .replace("layout:'native-chunks-v1'", "layout:'exact-root-set-chunks-v1'"));
     const [failure, pass] = run();
     assert.equal(failure.stage, 'backend');
     assert.equal(failure.status, 'failed');
@@ -424,29 +424,27 @@ test('planning diagnostics remain visible and never admit unrelated build warnin
   });
 });
 
-test('CLI reports all phases and honors forced color and NO_COLOR without coloring whole lines', () => {
+test('CLI reports input/build/output failures and native CJS, honoring forced color and NO_COLOR', () => {
   withCorpus(({ root }) => {
     addCase(root, 'a-input', { sources: { 'entry.js': "console.log('wrong');" } });
     addCase(root, 'b-build', {
       sources: { 'entry.js': "const name='./dep.js'; await import(name); console.log('hello');", 'dep.js': '' },
     });
-    addCase(root, 'c-backend', {
-      sources: { 'entry.js': "import './dep.cjs'; console.log('hello');", 'dep.cjs': 'module.exports = 1;' },
-      expectations: { stdout: ['hello'], backend: 'native' },
-    });
     addCase(root, 'd-output', {
       sources: { 'entry.js': "console.log(process.argv[1].includes('.bundler-generation-') ? 'wrong' : 'hello');" },
     });
-    addCase(root, 'y-legacy', { sources: { 'entry.js': "import './dep.cjs'; console.log('hello');", 'dep.cjs': 'module.exports = 1;' } });
+    addCase(root, 'y-cjs', {
+      sources: { 'entry.js': "import './dep.cjs'; console.log('hello');", 'dep.cjs': 'module.exports = 1;' },
+      expectations: { stdout: ['hello'], backend: 'native' },
+    });
     addCase(root, 'z-valid');
     const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
     const env = { ...process.env, FORCE_COLOR: '1' };
     delete env.NO_COLOR;
     const colored = spawnSync(process.execPath, [runner, root], { encoding: 'utf8', env });
     assert.equal(colored.status, 1, colored.stderr);
-    assert(colored.stdout.includes('\x1b[32mPASS\x1b[0m synthetic/y-legacy \x1b[31mbackend=legacy\x1b[0m'));
+    assert(colored.stdout.includes('\x1b[32mPASS\x1b[0m synthetic/y-cjs backend=native\n'));
     assert(colored.stdout.includes('\x1b[32mPASS\x1b[0m synthetic/z-valid backend=native\n'));
-    assert(colored.stdout.includes('\x1b[31mFAIL\x1b[0m BACKEND synthetic/c-backend \x1b[31mbackend=legacy\x1b[0m'));
     assert(!colored.stdout.includes('\x1b[31mbackend=native'));
     const result = spawnSync(process.execPath, [runner, root], {
       encoding: 'utf8', env: { ...env, NO_COLOR: '1' },
@@ -454,11 +452,11 @@ test('CLI reports all phases and honors forced color and NO_COLOR without colori
     assert.equal(result.status, 1, result.stderr);
     assert(!result.stdout.includes('\x1b['));
     assert.equal(colored.stdout.replace(/\x1b\[\d+m/gu, ''), result.stdout);
-    for (const [stage, name] of [['INPUT', 'a-input'], ['BUILD', 'b-build'], ['BACKEND', 'c-backend'], ['OUTPUT', 'd-output']]) {
+    for (const [stage, name] of [['INPUT', 'a-input'], ['BUILD', 'b-build'], ['OUTPUT', 'd-output']]) {
       assert.match(result.stdout, new RegExp(`FAIL ${stage} synthetic/${name}`, 'u'));
     }
     assert.match(result.stdout, /PASS synthetic\/z-valid backend=native/u);
-    assert.match(result.stdout, /2 passed \(1 native, 1 legacy\), 4 failed, 0 unsupported/u);
+    assert.match(result.stdout, /2 passed \(2 native, 0 legacy\), 3 failed, 0 unsupported/u);
     assert.match(result.stderr, /public build pipeline.*exit 1/su);
     assert.match(result.stdout, /Bundler checks: 1 same-runtime identity case; 4 diagnostic cases/u);
   });

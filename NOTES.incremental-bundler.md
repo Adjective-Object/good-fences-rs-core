@@ -1,6 +1,93 @@
 # Incremental bundler implementation handoff
 
-## Current increment: native dynamic imports and async module jobs
+## Current increment: native opaque CJS integration (uncommitted; review pending)
+
+Public module roots now use native ESM/CJS emission; CJS is no longer a legacy
+eligibility gate. Special selected-binding/multi-evaluation low-level roots
+remain explicitly legacy until the next cutover/deletion increment. No parity
+work, source-format/cache schema change, dependency, commit or push was added.
+The user-owned `crates/ftree_cache/src/context_data.rs` change is untouched.
+
+Design:
+
+- `native_cjs.rs` consumes the existing opaque/synthetic nodes and checked
+  reverse requests. Each CJS input contributes exactly one real function body.
+  Pure availability chunks group factories by their existing root sets; they
+  export direct initializer bindings before loading other pure factory chunks.
+  Co-location/loading never invokes a factory.
+- Each initializer owns a lexical early-allocated record, not a global module
+  table. It calls the factory with the original exports object as wrapper `this`
+  and exports alias, returns current `module.exports`, marks successful completion,
+  and evicts its record on throws. CJS requires see partial exports; an ESM seam
+  importing a currently running CJS reports Node 22's cycle code.
+- Owned literal require spans call the CJS initializer directly, or lazily
+  invoke native require on the actual synchronous ESM output chunk. They never
+  add an evaluating ESM import for a deferred require. Require targets keep
+  executable namespace boundaries. Existing async-ESM require diagnostics retain
+  require/TLA spans. Public CJS entries alone get real body-free CJS wrappers,
+  avoiding false evaluating-ESM errors in legal CJS-first mixed cycles. Their
+  exports accessor forwards to the initializer record so later native requires
+  of the public path also observe current `module.exports` replacement.
+- Logical facade parts use native ESM constants/jobs. Adjacent sorted
+  default/named parts merge only at equal direct consumer evaluation seams.
+  Canonical routes through a barrel demand original property names but do not
+  move their snapshots to an earlier direct-default consumer. Runtime-key
+  bridges keep canonical default-export jobs and reuse `commonjs_namespace.mjs`.
+  Captured defaults ignore `__esModule`; names snapshot once; bridges forward
+  captured-object reads. Late jobs never resnapshot prior names.
+- Retained reads/exports filter unused import specifiers even when a neighboring
+  specifier is live. No unused getter is requested; the opaque source body is
+  still retained whole. Helpers avoid all original bindings/free references.
+- Ordinary ESM symbols/jobs remain unchanged. CJS-touching ESM sources keep
+  conservative native body seams. `members`/`chunk_artifacts` project actual
+  owners, `modules` omits internal CJS factories, public entries retain executable
+  CJS values, and proxy/namespace/async maps name executable native boundaries.
+  A split static proxy surface alone needs an aggregate reexport helper; ordinary
+  consumers load only their own jobs. Layout is `native-chunks-v1`; runtime/output
+  fingerprints include the new emitter and checked CJS-demand code.
+
+Graduated to required native: `esbuild/cjs-sync-async-once`,
+`rspack/cjs-default-export`, `rspack/cjs-named-reexport`,
+`rspack/cjs-self-cycle`, `rspack/dynamic-import-cjs`.
+Added native-required authored `native-cjs-activation`, `native-cjs-retry` and
+`native-cjs-cycles`: ambient once/deferred effects, object/namespace identity,
+wrapper aliases, cached ESM failure versus require retry, legal CJS-first cycles,
+and normalized ESM-first/direct mixed-cycle errors. Existing 22 native cases stay
+native: **30 contracts / 41 executions, 30 native / zero legacy/unsupported**.
+Inline Rust regressions retain the non-Node runtime-key/named-getter policy:
+late/sorted/getter-once behavior, barrel evaluation seams, unused names beside
+live specifiers, default replacement and capture-free factory names.
+
+Red/green: five existing CJS tests first failed native backend requirements.
+New focused variants separately failed for an unused getter beside a live import,
+an eager snapshot through a later barrel, duplicate availability imports from
+co-located factories, and stale public-wrapper exports after replacement; all
+now pass. Full validation:
+**148 bundler tests**, **99 tests across both harness unit files**, unified public
+driver/corpus and same-runtime/four-diagnostic checks, focused rustfmt, strict
+all-target bundler clippy, and mandatory `./scripts/spot-check` (workspace check,
+not full workspace tests). Logs: `target/native-cjs-{red,unused-red,seam-red,tests,build,fixtures,harness,clippy,spot-check}.log`.
+Additional red logs: `target/native-cjs-{availability-red,public-red}.log`.
+All filesystem tests use project-local `TMPDIR=$PWD/target/p1-test-tmp`.
+The 66-source ESM fast path is unchanged; its benchmark was not rerun.
+
+Final verification commands (all passed):
+
+```sh
+export TMPDIR="$PWD/target/p1-test-tmp"
+rustfmt --check --edition 2021 crates/bundler/src/link.rs crates/bundler/src/build.rs crates/bundler/src/cjs.rs
+cargo test -p bundler
+cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs
+node --test scripts/bundler-fixtures.test.mjs scripts/bundler-fixtures-build.test.mjs
+cargo clippy -p bundler --all-targets --no-deps -- -D warnings
+./scripts/spot-check
+git diff --check
+```
+
+Independent review is still required; no independent-review claim is made.
+Next: special low-level root cutover and deletion of the rejected backend.
+
+## Previous increment: native dynamic imports and async module jobs
 
 The existing Symbol/group planner now admits literal ESM dynamic imports and
 source TLA/for-await. Static edges alone participate in grouping/DFS and SCCs.

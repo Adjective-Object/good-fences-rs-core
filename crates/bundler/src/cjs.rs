@@ -1,7 +1,7 @@
 //! Interop demands come from the checked reverse occurrence index, not source guesses.
 use std::collections::BTreeSet;
 
-use ast_segmenter::owned::ImportedName;
+use ast_segmenter::owned::{BindingId, ExportValue, ImportedName};
 use source_graph::{DependencyTarget, ExportIdentity, GraphNode, Namespace, SourceGraph};
 
 use crate::RetentionPlan;
@@ -39,6 +39,12 @@ pub(crate) fn requests(
                 GraphNode::Segment(key) => key.file_id,
                 GraphNode::Unlinked { .. } => return None,
             };
+            if edge
+                .binding
+                .is_some_and(|binding| !binding_used(graph, retention, from, binding))
+            {
+                return None;
+            }
             let DependencyTarget::File(path) = graph.dependency_target(from, edge.dependency?)?
             else {
                 return None;
@@ -65,6 +71,33 @@ pub(crate) fn requests(
             Some((demand_from, imported))
         })
         .collect()
+}
+
+pub(crate) fn binding_used(
+    graph: &SourceGraph,
+    retention: &RetentionPlan,
+    file: u32,
+    binding: BindingId,
+) -> bool {
+    let Some(facts) = graph.file_facts(file) else {
+        return false;
+    };
+    let segments = graph.file_segments(file).unwrap();
+    let live = |span: oxc_span::Span| {
+        let index = segments.partition_point(|s| s.span.end <= span.start);
+        retained(
+            retention,
+            GraphNode::Segment(source_graph::SegmentKey::new(file, index as u32)),
+        )
+    };
+    facts
+        .references
+        .iter()
+        .any(|r| !r.type_only && r.binding == Some(binding) && live(r.span))
+        || facts
+            .exports
+            .iter()
+            .any(|e| !e.type_only && e.value == ExportValue::Binding(binding) && live(e.span))
 }
 
 fn retained(retention: &RetentionPlan, node: GraphNode) -> bool {

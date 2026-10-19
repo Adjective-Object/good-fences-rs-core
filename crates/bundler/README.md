@@ -6,11 +6,11 @@ The target is a symbol linker with scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries
 constrain output; pure segments may move according to binding dependencies.
-Each CJS input will remain one opaque segment plus a logical ESM facade, both
+Each CJS input contributes one opaque segment plus a logical ESM facade, both
 subject to normal usage/linking/grouping, not a native `.cjs`-per-input fallback.
 
 The registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend
-below is **still active but rejected as the target architecture**.
+below remains **only for special low-level roots, pending cutover/deletion**.
 The internal `symbols::Symbols::link` increment now builds checked canonical
 `(file, BindingId)` definitions and import/export routes using the shared graph
 resolver. Production surface construction and legacy import/export emission reuse
@@ -21,8 +21,8 @@ remain separate from those allocations. Namespace,
 default-expression/anonymous-declaration and opaque CJS values retain typed graph
 identities, not invented lexical binding IDs; checked syntax still owns default
 hoisting/initialization semantics. No public product field or dependency was added.
-The native foundation below is implemented for independent review, not completion
-of scope hoisting, CJS integration or removal of the legacy backend.
+Native ESM/CJS integration below is implemented for independent review; special
+low-level root cutover and removal of the legacy backend are still pending.
 
 ## Staged native ESM chunks
 
@@ -91,18 +91,26 @@ siblings interleave natively, never through scalar effect-order dispatch,
 generators or universal async wrappers. Compatible synchronous subgraphs still
 use the existing grouping/lexical-rewrite path.
 
-The remaining **temporary legacy staging gate** is CJS/require dependencies and
-low-level roots with multiple evaluation files or selected non-module binding
-roots. Require-of-async diagnostics still apply before legacy emission. One
-opaque CJS segment/logical-facade integration and legacy deletion come next,
-before deferred upstream parity work.
+Opaque CJS factories now participate through the existing typed body/proxy/
+namespace nodes. Pure factory chunks group by availability roots, never execute
+their factories on load, and contain one lexical cached initializer per input.
+Native interop jobs group adjacent sorted facade parts only when their consumer
+evaluation demands agree; require-only availability cannot activate these jobs.
+ESM sources touching CJS retain native body seams rather than concatenating
+across the format boundary. Other ESM groups/jobs are unchanged.
+
+The remaining **temporary legacy staging gate** is low-level roots with multiple
+evaluation files or selected non-module binding roots. No public CJS/require
+build falls back to legacy. Require-of-async diagnostics retain original source
+spans. Special-root cutover and legacy deletion come next, before upstream parity.
 
 `members` points to actual body owners. A logical `chunk_artifacts` projection
 can contain several physical paths and overlap another projection when physical
 groups merge; the manifest/reference reachability oracle is unchanged.
-`modules` contains only independently executable source namespace surfaces,
-not fake paths for merged private modules. `async_facades` maps reached source
-sites to their canonical target chunks, not generated facade files;
+`modules` contains only independently executable source namespace surfaces and
+public CJS entry wrappers, not fake paths for merged private modules or internal
+CJS factories. `async_facades` maps reached source sites to their canonical
+target chunks (CJS targets use the canonical runtime-key bridge job);
 `async_modules` reports source paths with transitive static async status.
 The 66-source star-chain benchmark
 still asserts one ordinary `native.mjs`, without runtime/helpers.
@@ -213,7 +221,7 @@ generation-specific `entries`, the selected `backend`, physical `layout` and
 actual build counters as JSON. `link::Artifacts::backend` is the authoritative
 `link::Backend::{Native, Legacy}` value assigned by the emitter that produced the
 artifacts, never inferred from filenames. It serializes as `"native"` or
-`"legacy"`; `Backend::layout()` currently returns `"native-esm-chunks-v1"` or
+`"legacy"`; `Backend::layout()` currently returns `"native-chunks-v1"` or
 `"exact-root-set-chunks-v1"` respectively. This reports the temporary staging
 selection; it is not a new backend option.
 Fixture `expectations.backend: "native"` rejects legacy fallback in the unified
@@ -365,23 +373,25 @@ bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
 lifetime/dead-code warnings remain; no unrelated CI/toolchain health claim.
 
-Current native async-chunk validation (not a full workspace test rerun):
-**147 bundler tests**, **99 harness regressions**, **27 source/emitted contracts /
-36 emitted executions**, same-runtime identity and four diagnostics, format,
+Current native CJS-chunk validation (not a full workspace test rerun):
+**148 bundler tests**, **99 harness regressions**, **30 source/emitted contracts /
+41 emitted executions**, same-runtime identity and four diagnostics, focused format,
 all-target bundler clippy (`--no-deps`, warnings denied) and mandatory spot-check pass.
-**Twenty-two contracts select native, five select legacy**. The original fourteen
-native contracts stay native. Both ambient async cases, runtime outcomes,
-dynamic-import/TLA order and ESM sync/async now require native. Three new portable
-cases cover TLA siblings/nested activation, cycle TDZ/shared rejection/dedup and
-exported-then assimilation with default snapshots/live aliases. Only the five
-CJS corpus cases remain legacy coverage. The driver exposes planning warnings
+**All thirty contracts select native (27 required); zero legacy/unsupported**.
+The previous twenty-two native cases stay native; all five existing CJS cases
+graduate. Three new authored cases cover ambient static/dynamic/require
+once-only identity and deferred effects, ESM-cached failure versus require retry,
+and legal CJS-first versus rejected evaluating mixed cycles with normalized
+error codes. Focused Rust regressions cover late/sorted getters, unused names
+beside live specifiers, runtime-key bridges and source identifier capture.
+The driver exposes planning warnings
 separately; the harness reports known effect-order-cycle warnings while still
 rejecting cache/publication/unknown warnings.
 See the [authored backend baseline](../../fixtures/bundler/README.md#authored-migration-baseline)
 and exact retirement mapping in NOTES. Each subsequent linker stage must graduate
 applicable legacy fixtures to required-native coverage and/or add meaningful
-regressions for its new behavior. Independent review of this async increment
-is pending; CJS integration and legacy deletion are not claimed.
+regressions for its new behavior. Independent review of this CJS increment
+is pending; special-root cutover and legacy deletion are not claimed.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
@@ -445,10 +455,14 @@ publication promises atomic visibility, not power-loss durability.
 
 ## CommonJS runtime
 
-Linked opaque JavaScript CJS bodies are registered once as real function syntax
-in their exact `.cjs` chunks. Body-free CJS facades and native ESM proxy facades
-use the same generation-local `runtime.cjs` identity.
-The runtime allocates records before invoking factories, binds wrapper `this` to the
+Linked opaque JavaScript CJS bodies appear once as real function syntax in pure
+availability `.cjs` chunks. These chunks group factories by existing root sets;
+they are not copies of input modules that Node executes/caches as source.
+Each exported initializer owns one lexical record, allocated before invoking its
+factory. Source requires call checked initializer bindings directly, including
+across availability chunks. Requires of synchronous ESM remain lazy native
+requires of the actual ESM chunk path, not eager ESM imports.
+The initializer binds wrapper `this` to the
 initial exports object and returns the current `module.exports`. Recursive
 requires see partial exports; deferred sites execute only when called. Failed
 factories are removed from the require cache and retry on the next require.
@@ -469,7 +483,7 @@ results but not the proxy's captured default or named values.
 
 A named proxy's native namespace has `default` plus statically requested names.
 **Unknown namespace access is conservative, not that finite static list.**
-`Artifacts::cjs_namespaces` reports separate `.namespace.mjs` files whose default
+`Artifacts::cjs_namespaces` reports separate native jobs whose default
 exports are canonical CJS namespace bridges. Static `import * as ns`,
 `export * as box`, and rewritten dynamic CJS imports use the same bridge object. Its own string
 keys are discovered from the actual require result at bridge initialization;
@@ -483,9 +497,11 @@ replacement affects subsequent require only. Star reexports still propagate
 statically requested names (snapshots), excluding default.
 Factory throws retry through require, but an ESM
 proxy evaluation failure is cached by native ESM, as for any failed ESM module.
-Proxies and require share that runtime cache; no duplicate factories.
+Proxies and requires share the same initializer record; no duplicate factories.
+ESM interop cannot import a still-running CJS factory, retaining Node 22's
+`ERR_REQUIRE_CYCLE_MODULE`; CJS requires can still read its partial exports.
 
-### Exact-set proxy integration
+### Logical proxy integration
 
 `chunks::NodeId::CommonJsProxy { module, name }` participates in ordinary exact
 reachability and partitioning: `None` owns initialization/default and `Some(name)`
@@ -494,14 +510,23 @@ runtime-key bridge. Consumers demand their own names; namespace consumers and
 CJS entry facades demand that bridge, not a finite name list. Requires demand the opaque
 body/target namespace, not a proxy or eager execution. Manifest synthetic nodes
 and chunk dependencies expose proxy→factory and snapshot→initialization edges.
-These are physical assignments: each snapshot/factory/bridge implementation
-occurs only in its assigned chunk. Individual body-free snapshot facades keep
-native storage. The public `.proxy.mjs` facade loads the requested static surface;
-ordinary source imports load only their assigned requests, not that aggregate.
-Unrelated opaque factories remain dormant even in a shared chunk.
+Every implementation has one physical owner, but logical partitions need not
+be files. Adjacent default/named parts with equal consumer evaluation seams share
+a native ESM job; other names keep separate jobs so a late consumer cannot
+resnapshot an earlier name or trigger an unsolicited getter. Unused import
+specifiers do not demand named getters even beside live specifiers. Namespace
+bridges keep their own canonical default-export job. Static dependencies load
+initialization/sorted demanded snapshots in source dependency order.
+`cjs_proxies` points directly to a complete native static surface where possible;
+only split surfaces need an aggregate reexport boundary. Ordinary imports load
+their own requests, not that aggregate. `cjs_namespaces` points directly to
+the bridge job; static/dynamic/reexport-as consumers use that same bridge.
 
-All routes share the generation directory's runtime cache and canonical ESM proxy.
-CJS entries point to body-free `.cjs` dispatch files, preserving CJS-first mixed cycles.
+All routes share lexical initializer records and canonical native interop jobs.
+Only public CJS entries need body-free `.cjs` format wrappers, preserving legal
+CJS-first mixed cycles without turning them into evaluating-ESM require errors.
+Their exports accessor forwards to the initializer's current result, so repeated
+native requires of a public path observe later `module.exports` replacement.
 Importing a CJS entry directly uses Node's native CJS interop; use the path in
 `cjs_namespaces` and its default export for the bundler's runtime-key bridge.
 Opaque require of synchronous ESM conservatively
@@ -510,6 +535,10 @@ completed/deferred mixed cycles work, while requiring an evaluating ESM in a
 cycle throws `ERR_REQUIRE_CYCLE_MODULE`. Require of async ESM is rejected before
 emission, even for deferred require sites; use dynamic import instead.
 All static and dynamic routes use ordinary relative file paths.
+
+The staged special-root legacy backend still uses `runtime.cjs`, registration
+chunks and per-part storage facades. Those are not used by native CJS emission
+and are scheduled for deletion with the low-level root cutover.
 
 ## Rewrite backend
 
@@ -665,7 +694,7 @@ Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 | CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
 | Nonliteral imports/requires, options/attributes, externals/assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
 
-The unified public-build Node runner compares all 27 portable cases (36 entry executions)
+The unified public-build Node runner compares all 30 portable cases (41 entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover
 cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
 effect ordering, once-only/concurrent entry loading, bundle-instance isolation,

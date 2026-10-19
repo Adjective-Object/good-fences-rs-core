@@ -21,6 +21,7 @@
   "moduleType": "module",
   "entryPoints": ["index.js"],
   "expectations": {
+    "backend": "native",
     "stdout": ["sync-before", "sync-after", "evaluate", "default:2"]
   },
   "goals": [

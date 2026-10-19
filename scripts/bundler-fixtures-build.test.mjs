@@ -81,7 +81,7 @@ for (const [name, source, expected, options] of [
   });
 }
 
-test('native-required cases pass only on the authoritative native backend; fallback is reported otherwise', () => {
+test('native-required cases use the authoritative native backend for ESM and opaque CJS', () => {
   withCorpus("console.log('hello');", ({ run, configure }) => {
     configure({ expectations: { stdout: ['hello'], backend: 'native' } });
     const [result] = run();
@@ -91,10 +91,11 @@ test('native-required cases pass only on the authoritative native backend; fallb
   withCorpus("import './dep.cjs'; console.log('hello');", ({ run, configure }) => {
     const [result] = run();
     assert.equal(result.status, 'passed');
-    assert.equal(result.backend, 'legacy');
+    assert.equal(result.backend, 'native');
     configure({ expectations: { stdout: ['hello'], backend: 'native' } });
-    const failure = assertFailure(run, 'backend', /native backend required; legacy fallback selected/u);
-    assert.equal(failure.backend, 'legacy');
+    const [required] = run();
+    assert.equal(required.status, 'passed');
+    assert.equal(required.backend, 'native');
   }, { 'dep.cjs': 'module.exports = 1;' });
 });
 

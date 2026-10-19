@@ -332,7 +332,8 @@ impl BuildSession {
             roots: hash(format!("{entries:?}").as_bytes()),
             runtime: hash(
                 concat!(
-                    "native-node-exact-chunks-v1\n",
+                    "native-node-cjs-initializers-v1\n",
+                    include_str!("native_cjs.rs"),
                     include_str!("chunk_runtime.cjs"),
                     include_str!("commonjs_namespace.mjs")
                 )
@@ -347,6 +348,8 @@ impl BuildSession {
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
                 include_str!("native_chunks.rs"),
+                include_str!("native_cjs.rs"),
+                include_str!("cjs.rs"),
                 include_str!("physical.rs"),
                 include_str!("physical_lower.rs"),
                 include_str!("emit.rs"),

@@ -54,8 +54,14 @@
   exported-then/default/live observations.
 - [ ] Independently review the native async increment before committing.
   Selected-binding/multi-evaluation low-level roots remain staged.
-- [ ] Integrate one opaque CJS segment and logical ESM facade per input into
+- [x] Integrate one opaque CJS segment and logical ESM facade per input into
   normal usage/link/grouping, not standalone native `.cjs` fallback files.
+  Pure availability groups use lexical cached initializers; facade jobs preserve
+  demanded sorted snapshots, canonical bridges, deferred timing and mixed cycles.
+  Graduate all five CJS cases and add activation/retry/cycle contracts:
+  30 cases / 41 executions, all native (27 required), zero legacy/unsupported.
+- [ ] Independently review native CJS integration before committing. Validate
+  special low-level root cutover, then delete the old backend; no parity diversion.
 - [ ] Remove legacy registrations/cells/aliases/watchers/generator dispatch,
   capture cycles and ESM per-source facade families, then delete the native
   staging gate. It is not a permanent fallback or public feature flag.

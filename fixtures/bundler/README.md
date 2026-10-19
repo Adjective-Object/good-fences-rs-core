@@ -23,15 +23,16 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **27 cases / 36 entry executions**: six esbuild cases,
-six rspack cases and fifteen authored cases. The upstream cases cover
+The corpus contains **30 cases / 41 entry executions**: six esbuild cases,
+six rspack cases and eighteen authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
 hoisting, default snapshots/live aliases, inferred names, `__proto__` shorthand
 and destructuring, reverse-path static import ordering, namespace observations,
 ambient deferred effects and once-only shared identity, native TLA sibling/SCC
-jobs, cached rejection/TDZ and dynamic exported-then assimilation.
+jobs, cached rejection/TDZ, dynamic exported-then assimilation, and native CJS
+ambient activation/identity, failure retry and mixed-cycle error contracts.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -173,18 +174,19 @@ Runner regression tests use synthetic fixtures only:
 The single command above validates manifests/provenance first and compares
 manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
-All **27 contracts / 36 emitted entry executions** pass, with zero
+All **30 contracts / 41 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
-- **Native (22):** all fifteen authored cases,
+- **Native (30, 27 explicitly required):** all eighteen authored cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
   `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
   `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
-  `esbuild/esm-sync-async`. All authored cases and both newly graduated esbuild
-  async cases explicitly require native selection.
-- **Legacy (5):** `esbuild/cjs-sync-async-once`, `rspack/cjs-default-export`,
+  `esbuild/esm-sync-async`, `esbuild/cjs-sync-async-once`, `rspack/cjs-default-export`,
   `rspack/cjs-named-reexport`, `rspack/cjs-self-cycle` and
-  `rspack/dynamic-import-cjs`. These passes are not native-backend coverage.
+  `rspack/dynamic-import-cjs`. The last five are graduated native CJS coverage.
+- **Legacy (0):** special low-level roots remain staged in Rust, not covered
+  by portable public-build fixtures. Cutover and legacy deletion come next;
+  no upstream parity is claimed.
 
 The public driver also returns the plan's effect-order-cycle diagnostics in
 `planWarnings`. These must exactly match the build warnings and be known cycle
@@ -216,6 +218,9 @@ linker-shape assertions. No upstream provenance is fabricated for local inputs.
 | `native-async-order` | native, required | Success; `a-before,b,a-after,job` sibling interleaving, deferred outer/inner effects and repeated namespace identity |
 | `native-async-cycles` | native, required | Hoisted cyclic functions and suspension; uncaught cycle `ReferenceError`; shared cached rejection across concurrent imports and retries |
 | `native-dynamic-then` | native, required | Native microtasks/exported-then assimilation, exact namespace keys, default snapshot and live mutation |
+| `native-cjs-activation` | native, required | Shared static/named/dynamic/require identity, ambient once-only effects, deferred require and wrapper this/exports replacement |
+| `native-cjs-retry` | native, required | Concurrent/repeated dynamic facade failures share a cached error; a later require retries the failed factory |
+| `native-cjs-cycles` | native, required | Legal CJS-first require through ESM, shared partial-object identity, and ESM-first/direct mixed-cycle `ERR_REQUIRE_CYCLE_MODULE` outcomes |
 
 The existing `authored/native-tdz` remains an uncaught `ReferenceError` contract
 after `before TDZ`; `authored/runtime-outcomes` now requires native with successful,

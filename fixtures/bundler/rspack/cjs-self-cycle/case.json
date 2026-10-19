@@ -19,6 +19,7 @@
   "moduleType": "commonjs",
   "entryPoints": ["index.js"],
   "expectations": {
+    "backend": "native",
     "stdout": ["1"]
   },
   "goals": [

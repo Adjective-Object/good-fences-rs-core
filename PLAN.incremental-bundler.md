@@ -12,7 +12,7 @@ Replace the linker entirely, in independently reviewed committable increments:
    checked canonical symbol planning and production resolution reuse are now
    implemented. Synchronous native concatenation/group emission now uses direct
    lexical bindings and real native seams; native dynamic imports/TLA now use
-   those chunks. Opaque CJS integration remains pending.
+   those chunks. Opaque CJS integration is now implemented for review.
 2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
    preserve observable effects/activation and native binding/TDZ semantics.
    Native imports/exports cross actual output chunks only. Public entry/export
@@ -26,17 +26,18 @@ Replace the linker entirely, in independently reviewed committable increments:
 5. **Release:** independent reviews, runtime/differential regressions, incremental
    invalidation/determinism and mandatory spot-check before release evidence.
 
-The current increment extends the shared native planner to literal dynamic
-imports and original TLA/for-await. Source-occurrence async roots map to canonical
-target namespace chunks, with only import specifiers rewritten. Async static
-closures/SCCs retain native source jobs and wait bounds; synchronous compatible
-groups still concatenate. Node, not the scalar effect DAG, schedules suspension,
-sibling interleaving, cached rejection and namespace/thenable behavior.
-Default snapshots/names and the eligible 66-source one-file path remain intact.
-CJS/require dependencies and non-module/multi-evaluation low-level root shapes
-remain explicitly legacy. The crate README defines the precise gate. This is
-not CJS integration or legacy removal; those come before deferred upstream parity.
-Independent review is required before committing this async increment.
+The current increment integrates one opaque CJS factory per input, grouped by
+availability roots with lexical cached initializers. Logical facade parts use
+native jobs at their demand seams: default captures the full result, requested
+names snapshot once in sorted order, and canonical bridges capture runtime keys.
+Rewritten requires call native CJS initializers directly or lazily require the
+actual synchronous ESM chunk. Ordinary ESM linkage/jobs remain unchanged.
+All 30 portable cases / 41 executions select native (27 explicitly require it); three new
+ambient activation/retry/mixed-cycle contracts supplement the five graduated
+CJS cases. The eligible 66-source one-file ESM path stays intact.
+Only selected-binding/multi-evaluation low-level roots remain legacy. Independent
+review is required before committing; low-root cutover and legacy deletion are
+the next increment, before any deferred upstream parity.
 
 ## Rejected architecture, still-current legacy implementation: physical exact-set linker
 

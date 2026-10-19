@@ -821,7 +821,7 @@ fn executable_files_expose_static_exports_without_any_source_loader() {
 
 #[test]
 fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
-    compare(&sources(&[
+    let output = compare(&sources(&[
         ("entry.cjs", "const a = require('./a.cjs'); console.log(a === require('./a.cjs'), a); const lazy = require('./lazy.cjs'); console.log('before'); console.log(lazy()); for(let i=0;i<2;i++) { try { require('./fail.cjs'); } catch(e) { console.log(e.message); } } console.log(require('./primitive.cjs')); console.log(require('./return.cjs').value, require('./modulevar.cjs').kept);"),
         ("modulevar.cjs", "exports.kept = 3; module = {exports: 99}; exports.after = 4;"),
         ("return.cjs", "#!/usr/bin/env node\n'use strict'; exports.value = 4; console.log(this === exports); return; throw Error('after return');\n//# sourceMappingURL=obsolete.map"),
@@ -832,6 +832,7 @@ fn commonjs_native_cache_cycles_aliases_replacement_and_retry() {
         ("primitive.cjs", "module.exports = 42; exports.ignored = true;"),
         ("fail.cjs", "globalThis.attempt = (globalThis.attempt || 0) + 1; throw Error('attempt ' + globalThis.attempt);"),
     ]), "entry.cjs");
+    assert_eq!(output.backend, Backend::Native);
 }
 
 #[test]
@@ -843,6 +844,7 @@ fn commonjs_proxy_static_requests_aliases_reexports_and_snapshot_policy() {
         ("dep.cjs", "exports.a = 1; exports.bump = () => { exports.a++; };"),
     ]);
     let output = compare(&source, "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
     assert_eq!(
         output.cjs_proxies[Path::new("dep.cjs")].1,
         BTreeSet::from(["a".into(), "bump".into(), "default".into()])
@@ -1012,6 +1014,19 @@ console.log(a === again, a.a === common.a, b.b === common.b, common.a.partial);
 
 #[test]
 fn commonjs_mixed_cycles_follow_native_partial_exports_and_deferred_timing() {
+    let direct_cycle = sources(&[
+        ("entry.cjs", "exports.value = 3; const esm = require('./dep.mjs'); console.log(esm.partial === exports, esm.partial.value);"),
+        ("dep.mjs", "import partial from './entry.cjs'; export {partial};"),
+    ]);
+    let (_, output) = build(&direct_cycle, &[("entry.cjs", false)], false);
+    assert_eq!(output.backend, Backend::Native);
+    for actual in [
+        node(&direct_cycle, Path::new("entry.cjs")),
+        node(&output.files, &output.entries["entry.cjs"]),
+    ] {
+        assert!(!actual.status.success());
+        assert!(String::from_utf8_lossy(&actual.stderr).contains("ERR_REQUIRE_CYCLE_MODULE"));
+    }
     compare(&sources(&[
         ("entry.mjs", "import value from './dep.cjs'; export function read() { return 5; } setTimeout(() => console.log(value.read()), 0);"),
         ("dep.cjs", "module.exports = { read() { return require('./entry.mjs').read(); } };"),
@@ -1029,7 +1044,7 @@ fn commonjs_mixed_cycles_follow_native_partial_exports_and_deferred_timing() {
         ),
     ]);
     let (_, output) = build(&source, &[("entry.mjs", false)], false);
-    assert_eq!(output.backend, Backend::Legacy);
+    assert_eq!(output.backend, Backend::Native);
     let baseline = node(&source, Path::new("entry.mjs"));
     let actual = node(&output.files, &output.entries["entry.mjs"]);
     assert!(!baseline.status.success() && !actual.status.success());
@@ -1041,6 +1056,64 @@ fn commonjs_mixed_cycles_follow_native_partial_exports_and_deferred_timing() {
             String::from_utf8_lossy(&result.stderr)
         );
     }
+}
+
+#[test]
+fn commonjs_native_getters_follow_demand_seams_and_static_order() {
+    let source = sources(&[
+        ("a.mjs", "export {a} from './dep.cjs';"),
+        ("b.mjs", "export {b} from './dep.cjs';"),
+        ("dep.cjs", "console.log('factory'); const __gf_cjs_0_reserved = 1; module.exports = {get a() {console.log('a getter');return __gf_cjs_0_reserved;}, get b() {console.log('b getter');return 2;}};"),
+    ]);
+    let (_, mut output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    assert_eq!(output.backend, Backend::Native);
+    let observer = observation(&output, "const a = await import('./a.mjs'); console.log('a ready',a.a); const b = await import('./b.mjs'); console.log('b ready',b.b); console.log(a === await import('./a.mjs'));");
+    output.files.insert("observe.mjs".into(), observer);
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        b"factory\na getter\na ready 1\nb getter\nb ready 2\ntrue\n"
+    );
+
+    let source = sources(&[
+        ("entry.mjs", "import {z} from './dep.cjs'; import './sibling.mjs'; import {a} from './dep.cjs'; console.log(a,z);"),
+        ("dep.cjs", "console.log('factory'); Object.defineProperties(exports,{z:{get(){console.log('z getter');return 2;}}, a:{get(){console.log('a getter');return 1;}}, unused:{get(){throw Error('unused');}}});"),
+        ("sibling.mjs", "console.log('sibling');"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    assert_eq!(output.backend, Backend::Native);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        b"factory\na getter\nz getter\nsibling\n1 2\n"
+    );
+    let source = sources(&[
+        ("entry.mjs", "import value from './dep.cjs'; import {a} from './barrel.mjs'; console.log('entry',value.a,a);"),
+        ("barrel.mjs", "import './sibling.mjs'; export {a} from './dep.cjs';"),
+        ("sibling.mjs", "console.log('sibling');"),
+        ("dep.cjs", "console.log('factory'); Object.defineProperty(exports,'a',{get(){console.log('a getter');return 1;}});"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        b"factory\nsibling\na getter\na getter\nentry 1 1\n"
+    );
 }
 
 #[test]
@@ -1061,6 +1134,19 @@ fn commonjs_unused_binding_keeps_evaluation_without_requesting_its_getter() {
         String::from_utf8_lossy(&actual.stderr)
     );
     assert_eq!(actual.stdout, b"dependency\nentry\n");
+    let source = sources(&[
+        ("entry.mjs", "import {used, unused} from './dep.cjs'; console.log('entry',used);"),
+        ("dep.cjs", "console.log('dependency'); exports.used = 3; Object.defineProperty(exports, 'unused', {get() { throw Error('unused getter executed'); }});"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    assert_eq!(output.backend, Backend::Native);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"dependency\nentry 3\n");
 }
 
 #[test]
@@ -1668,6 +1754,26 @@ fn commonjs_snapshot_subscription_does_not_resnapshot_on_later_namespace_load() 
 
 #[test]
 fn commonjs_public_artifact_paths_are_executable_without_evaluating_colocated_entries() {
+    let source = sources(&[(
+        "entry.cjs",
+        "module.exports = {value:1, replace() {module.exports = {value:2};}};",
+    )]);
+    let (_, mut output) = build(&source, &[("entry.cjs", false)], false);
+    assert_eq!(output.backend, Backend::Native);
+    output.files.insert(
+        "observe.cjs".into(),
+        format!(
+        "const value = require({0}); value.replace(); console.log(value.value,require({0}).value);",
+        quote(&format!("./{}", output.entries["entry.cjs"].display()))
+    ),
+    );
+    let actual = node(&output.files, Path::new("observe.cjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"1 2\n");
     let source = sources(&[
         (
             "entry.mjs",
@@ -1692,7 +1798,7 @@ fn commonjs_public_artifact_paths_are_executable_without_evaluating_colocated_en
         ),
         ("dep.cjs", "module.exports = {value:2};"),
     ]);
-    let (_, mut output) = build(&source, &[("entry.cjs", false)], false);
+    let (_, mut output) = build(&source, &[("entry.cjs", false), ("dep.cjs", false)], false);
     let module = &output.modules[Path::new("dep.cjs")];
     assert!(output.files.contains_key(module));
     output.files.insert(
@@ -1913,7 +2019,7 @@ fn tla_dynamic_commonjs_keeps_deferred_factory_in_a_separate_native_file() {
         ("b.cjs", "console.log('must not execute'); module.exports = 2;"),
     ]);
     let output = compare(&source, "entry.mjs");
-    assert_eq!(output.backend, Backend::Legacy);
+    assert_eq!(output.backend, Backend::Native);
     let a = NodeId::Segment {
         module: "a.cjs".into(),
         index: 0,
@@ -1937,6 +2043,7 @@ fn tla_dynamic_commonjs_proxy_failure_is_cached_but_native_require_can_retry() {
         ("fail.cjs", "globalThis.attempt = (globalThis.attempt || 0) + 1; throw Error('attempt ' + globalThis.attempt);"),
     ]);
     let output = compare(&source, "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
     let actual = node(&output.files, &output.entries["entry.mjs"]);
     assert_eq!(actual.stdout, b"true attempt 1 1\nattempt 2\n");
 }

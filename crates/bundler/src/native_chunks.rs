@@ -2,6 +2,9 @@
 use super::*;
 use ast_segmenter::owned::ImportedName;
 
+#[path = "native_cjs.rs"]
+mod commonjs;
+
 pub(super) fn emit(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -9,21 +12,6 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Option<Artifacts>> {
-    // shortcut: opaque CJS integration remains the next native increment.
-    if modules.values().any(|m| {
-        m.parsed.facts.commonjs
-            || m.parsed.facts.dependencies.iter().any(|d| {
-                !d.type_only
-                    && !matches!(
-                        d.kind,
-                        DependencyKind::Import
-                            | DependencyKind::ReExport
-                            | DependencyKind::DynamicImport
-                    )
-            })
-    }) {
-        return Ok(None);
-    }
     let mut entries = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
@@ -50,6 +38,7 @@ pub(super) fn emit(
             }
         }
     }
+    let mut cjs = commonjs::CommonJs::new(graph, plan, modules)?;
     let async_modules = super::super::async_modules(graph, modules)?;
     let asynchronous: BTreeSet<_> = async_modules
         .iter()
@@ -58,6 +47,10 @@ pub(super) fn emit(
     let mut edges = BTreeMap::new();
     let mut connectors = BTreeSet::new();
     for (&file, module) in modules {
+        if module.parsed.facts.commonjs {
+            edges.insert(file, Vec::new());
+            continue;
+        }
         let allocator = Allocator::default();
         rewrite::count_output_parse();
         let parsed = Parser::new(&allocator, module.source, SourceType::mjs()).parse();
@@ -89,6 +82,18 @@ pub(super) fn emit(
     boundaries.extend(async_targets.values().copied());
     // Keep source wait bounds and sibling interleaving in native module jobs.
     boundaries.extend(&asynchronous);
+    boundaries.extend(modules.keys().filter(|&&f| cjs.contains(f)).copied());
+    for (&file, module) in modules {
+        for dependency in module
+            .parsed
+            .facts
+            .dependencies
+            .iter()
+            .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+        {
+            boundaries.insert(target_file(graph, file, dependency)?);
+        }
+    }
     for linked in symbols
         .imports
         .values()
@@ -119,6 +124,7 @@ pub(super) fn emit(
         };
         // Redirect only identical surfaces: a later export-star observes extras.
         if connectors.contains(&file)
+            && !cjs.contains(target)
             && !boundaries.contains(&file)
             && !cycles.contains(&file)
             && symbols.exports[&file].len() == symbols.exports[&target].len()
@@ -165,7 +171,7 @@ pub(super) fn emit(
             let Some(group) = groups.get(&root) else {
                 continue;
             };
-            if cycles.contains(&root) || asynchronous.contains(&root) {
+            if cycles.contains(&root) || asynchronous.contains(&root) || cjs.contains(root) {
                 continue;
             }
             let dependencies: BTreeSet<_> = group
@@ -193,7 +199,7 @@ pub(super) fn emit(
             };
             let joined = group.union(&groups[&dependency]).copied().collect();
             if concatenate(
-                graph, root, &joined, &owners, &redirects, modules, symbols, &live, &recipes,
+                graph, root, &joined, &owners, &redirects, modules, symbols, &live, &recipes, &cjs,
             )?
             .is_none()
             {
@@ -214,11 +220,15 @@ pub(super) fn emit(
     }
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
+    cjs.emit(graph, modules, &owners, &entries)?;
     for (&root, group) in &groups {
+        if cjs.contains(root) {
+            continue;
+        }
         let path = path(graph, root);
         let output = if group.len() > 1 {
             concatenate(
-                graph, root, group, &owners, &redirects, modules, symbols, &live, &recipes,
+                graph, root, group, &owners, &redirects, modules, symbols, &live, &recipes, &cjs,
             )?
             .ok_or_eyre("native group became incompatible")?
         } else {
@@ -244,16 +254,39 @@ pub(super) fn emit(
                         .iter()
                         .find(|o| o.specifier == d.specifier && o.kind == d.kind)
                         .ok_or_eyre("missing retained native dependency")?;
-                    Ok(Edit {
-                        span: d.specifier_span,
-                        replacement: request(graph, owners[&target_file(graph, root, original)?]),
-                    })
+                    let target = target_file(graph, root, original)?;
+                    if cjs.contains(target) {
+                        Ok(Edit {
+                            span: d.span,
+                            replacement: if d.kind == DependencyKind::DynamicImport {
+                                cjs.dynamic(graph, target)?
+                            } else {
+                                cjs.static_dependency(
+                                    graph,
+                                    root,
+                                    target,
+                                    d,
+                                    &parsed.facts,
+                                    symbols,
+                                )?
+                            },
+                        })
+                    } else {
+                        Ok(Edit {
+                            span: d.specifier_span,
+                            replacement: request(graph, owners[&target]),
+                        })
+                    }
                 })
                 .collect::<eyre::Result<Vec<_>>>()?;
             let mut imports = String::new();
             // Evaluation-only connectors need not own a retained statement.
             for &target in &edges[&root] {
-                imports.push_str(&format!("import {};\n", request(graph, owners[&target])));
+                if cjs.contains(target) {
+                    imports.push_str(&cjs.evaluate(graph, root, target)?);
+                } else {
+                    imports.push_str(&format!("import {};\n", request(graph, owners[&target])));
+                }
             }
             imports.push_str(&rewrite::apply(&source, &edits)?);
             imports
@@ -263,11 +296,24 @@ pub(super) fn emit(
         namespaces.insert(graph.file_path(root).unwrap().to_owned(), path.clone());
         files.insert(path, output);
     }
+    for (&file, path) in &cjs.entries {
+        namespaces.insert(graph.file_path(file).unwrap().to_owned(), path.clone());
+    }
+    for (path, output) in &cjs.files {
+        let output = rewrite::apply(output, &rewrite::source_hint_edits(output))?;
+        rewrite::validate(path, &output)?;
+        files.insert(path.clone(), output);
+    }
     let mut members = BTreeMap::new();
     let mut chunk_artifacts = BTreeMap::new();
     for (chunk, nodes) in &plan.chunks {
         let mut paths = BTreeSet::new();
         for node in nodes {
+            if let Some(owner) = cjs.members.get(node) {
+                paths.insert(owner.clone());
+                members.insert(node.clone(), owner.clone());
+                continue;
+            }
             let module = match node {
                 NodeId::Module(p) | NodeId::Segment { module: p, .. } => p,
                 _ => eyre::bail!("non-ESM node in native plan"),
@@ -283,17 +329,33 @@ pub(super) fn emit(
         files,
         entries: entries
             .into_iter()
-            .map(|(entry, file)| (entry, path(graph, owners[&file])))
+            .map(|(entry, file)| {
+                (
+                    entry,
+                    cjs.entries
+                        .get(&file)
+                        .cloned()
+                        .unwrap_or_else(|| path(graph, owners[&file])),
+                )
+            })
             .collect(),
         modules: namespaces,
         members,
         chunk_artifacts,
         manifest: manifest.clone(),
-        cjs_proxies: BTreeMap::new(),
-        cjs_namespaces: BTreeMap::new(),
+        cjs_proxies: cjs.proxies,
+        cjs_namespaces: cjs.namespaces.clone(),
         async_facades: async_targets
             .into_iter()
-            .map(|(site, file)| (site, path(graph, owners[&file])))
+            .map(|(site, file)| {
+                (
+                    site,
+                    cjs.namespaces
+                        .get(graph.file_path(file).unwrap())
+                        .cloned()
+                        .unwrap_or_else(|| path(graph, owners[&file])),
+                )
+            })
             .collect(),
         async_modules,
     }))
@@ -324,7 +386,19 @@ fn concatenate(
     symbols: &Symbols,
     live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
+    cjs: &commonjs::CommonJs,
 ) -> eyre::Result<Option<String>> {
+    if group.iter().any(|f| {
+        cjs.contains(*f)
+            || modules[f]
+                .parsed
+                .facts
+                .dependencies
+                .iter()
+                .any(|d| !d.type_only && target_file(graph, *f, d).is_ok_and(|t| cjs.contains(t)))
+    }) {
+        return Ok(None);
+    }
     let mut values = Values::new(graph, modules, symbols);
     values.requests = owners
         .iter()

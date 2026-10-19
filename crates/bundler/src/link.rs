@@ -1,4 +1,4 @@
-//! Staged native ESM concatenation and the pending-replacement legacy emitter.
+//! Native ESM/CJS chunks and the pending special-root legacy cutover.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -32,7 +32,7 @@ pub enum Backend {
 impl Backend {
     pub fn layout(self) -> &'static str {
         match self {
-            Self::Native => "native-esm-chunks-v1",
+            Self::Native => "native-chunks-v1",
             Self::Legacy => "exact-root-set-chunks-v1",
         }
     }
@@ -73,7 +73,7 @@ struct Module<'a> {
     surface: BTreeSet<String>,
 }
 
-/// Emit a native concatenation when eligible, otherwise staged legacy chunks.
+/// Emit native chunks, or staged legacy chunks for special low-level roots.
 pub fn esm(
     graph: &SourceGraph,
     plan: &ChunkPlan,

@@ -264,7 +264,7 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   assert.deepEqual(build.warnings, planWarnings, 'cache write warnings');
   assert.deepEqual(build.publicationWarnings, [], 'publication warnings');
   assert(['native', 'legacy'].includes(build.backend), 'driver must report its selected backend');
-  assert.equal(build.layout, build.backend === 'native' ? 'native-esm-chunks-v1' : 'exact-root-set-chunks-v1',
+  assert.equal(build.layout, build.backend === 'native' ? 'native-chunks-v1' : 'exact-root-set-chunks-v1',
     'physical layout must match the reported backend');
   for (const file of readdirSync(build.directory, { recursive: true, withFileTypes: true })) {
     if (file.isDirectory()) continue;

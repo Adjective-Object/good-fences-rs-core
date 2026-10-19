@@ -17,6 +17,7 @@
   "moduleType": "module",
   "entryPoints": ["node.js"],
   "expectations": {
+    "backend": "native",
     "stdout": ["cjs evaluated", "123 -123"]
   },
   "goals": [
