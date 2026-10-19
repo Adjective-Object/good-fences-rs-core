@@ -344,6 +344,7 @@ impl BuildSession {
         let emitter = hash(
             concat!(
                 include_str!("link.rs"),
+                include_str!("symbols.rs"),
                 include_str!("physical.rs"),
                 include_str!("physical_lower.rs"),
                 include_str!("emit.rs"),

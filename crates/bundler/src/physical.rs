@@ -1,5 +1,6 @@
 //! Physical ownership and native evaluation jobs are deliberately separate.
 use super::*;
+use crate::symbols::Symbols;
 use ast_segmenter::owned::ImportedName;
 use source_graph::ExportIdentity;
 
@@ -16,56 +17,37 @@ fn key(graph: &SourceGraph, file: u32, name: &str) -> String {
     quote(&format!("{}:{name}", id(graph, file)))
 }
 
-fn binding(graph: &SourceGraph, file: u32, name: &str) -> String {
-    format!("{RUNTIME}.cell({}).v", key(graph, file, name))
-}
-
-fn export_value(graph: &SourceGraph, file: u32, name: &str) -> eyre::Result<String> {
-    let identity = graph.resolve_export(file, name, Namespace::Value)?.identity;
+fn link_value(
+    graph: &SourceGraph,
+    symbols: &Symbols,
+    identity: &ExportIdentity,
+    runtime: &str,
+) -> eyre::Result<String> {
+    let binding = |file, name: &str| format!("{runtime}.cell({}).v", key(graph, file, name));
     Ok(match identity {
         ExportIdentity::Binding(file, binding_id) => {
-            let definition = graph
-                .file_facts(file)
-                .unwrap()
-                .bindings
-                .iter()
-                .find(|b| b.id == binding_id)
-                .ok_or_eyre("missing export binding")?;
-            binding(graph, file, &definition.name)
+            let planned = symbols
+                .definitions
+                .get(&(*file, *binding_id))
+                .ok_or_eyre("canonical binding has no retained definition")?;
+            ensure!(
+                !planned.declarations.is_empty(),
+                "no declaration for {}",
+                planned.name
+            );
+            binding(*file, &planned.source_name)
         }
-        ExportIdentity::Expression(segment) => binding(graph, segment.file_id, "*default*"),
+        ExportIdentity::Expression(segment) => binding(segment.file_id, "*default*"),
         ExportIdentity::Namespace(file) => {
-            format!("{RUNTIME}.namespace({})", quote(&id(graph, file)))
+            format!("{runtime}.namespace({})", quote(&id(graph, *file)))
         }
         ExportIdentity::CommonJs(file, name) => format!(
-            "{RUNTIME}.proxy({}, {})",
-            quote(&id(graph, file)),
-            quote(if name == "default" { "" } else { &name })
+            "{runtime}.proxy({}, {})",
+            quote(&id(graph, *file)),
+            quote(if name == "default" { "" } else { name })
         ),
         ExportIdentity::External(..) => eyre::bail!("external export emission has no policy"),
     })
-}
-
-fn imported_value(
-    graph: &SourceGraph,
-    file: u32,
-    import: &ast_segmenter::owned::ImportBinding,
-) -> eyre::Result<String> {
-    let dependency = graph
-        .file_facts(file)
-        .unwrap()
-        .dependencies
-        .iter()
-        .find(|d| d.id == import.dependency)
-        .unwrap();
-    let target = target_file(graph, file, dependency)?;
-    match &import.imported {
-        ImportedName::Name(name) => export_value(graph, target, name),
-        ImportedName::Namespace => Ok(format!(
-            "{RUNTIME}.namespace({})",
-            quote(&id(graph, target))
-        )),
-    }
 }
 
 fn proxy_facade(file: u32, name: &str, graph: &SourceGraph) -> PathBuf {
@@ -209,6 +191,7 @@ pub(super) fn emit(
     plan: &ChunkPlan,
     modules: BTreeMap<u32, Module<'_>>,
     manifest: DiagnosticManifest,
+    symbols: &Symbols,
 ) -> eyre::Result<Artifacts> {
     let async_modules = super::async_modules(graph, &modules)?;
     let mut chunk_runtime = RUNTIME.to_owned();
@@ -352,7 +335,7 @@ pub(super) fn emit(
                 }
             }
         } else {
-            let lowered = lower::lower(graph, plan, file, module, &chunk_runtime)?;
+            let lowered = lower::lower(graph, plan, file, module, &chunk_runtime, symbols)?;
             if lowered.hoisted_default {
                 hoisted_defaults.insert(file);
             }
@@ -484,16 +467,19 @@ pub(super) fn emit(
         let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for name in &module.surface {
             groups
-                .entry(export_value(graph, file, name)?)
+                .entry(link_value(
+                    graph,
+                    symbols,
+                    &symbols.exports[&file][name].identity,
+                    RUNTIME,
+                )?)
                 .or_default()
                 .push(name.clone());
         }
         let mut lexical = Vec::new();
         let mut subscriptions = format!("import {RUNTIME} from '../runtime.cjs';\n");
         for (index, (expression, names)) in groups.into_iter().enumerate() {
-            let identity = graph
-                .resolve_export(file, &names[0], Namespace::Value)?
-                .identity;
+            let identity = symbols.exports[&file][&names[0]].identity.clone();
             let (owner, own) = match &identity {
                 ExportIdentity::Binding(owner, binding_id) => {
                     let definition = graph
@@ -543,11 +529,7 @@ pub(super) fn emit(
                 let original = modules[&owner]
                     .surface
                     .iter()
-                    .find(|name| {
-                        graph
-                            .resolve_export(owner, name, Namespace::Value)
-                            .is_ok_and(|e| e.identity == identity)
-                    })
+                    .find(|name| symbols.exports[&owner][*name].identity == identity)
                     .ok_or_eyre("export identity has no original public name")?;
                 for name in names {
                     source.push_str(&format!(

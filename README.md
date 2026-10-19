@@ -138,6 +138,10 @@ from esbuild and rspack; their baseline execution is not bundler conformance.
 P1–P5 now provide owned/cacheable facts, the shared typed graph, effect retention,
 exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
+The target is scope-hoisted direct ESM bindings with native cross-chunk links.
+Checked canonical symbol planning now feeds production import/export resolution;
+generated lexical names are planned, not yet emitted. The following physical
+backend remains active legacy, pending staged replacement and independent review.
 The physical-linker work now places executable registrations in exact root-set
 `.cjs` chunks, with separate native ESM storage/evaluation facades and a real
 JavaScript binding/factory runtime. No loader hooks or executable source payloads

@@ -1,5 +1,51 @@
 # Incremental bundler implementation handoff
 
+## Current replacement increment: canonical symbols, not direct lexical emission
+
+Recovered and integrated the interrupted uncommitted symbol work.
+`symbols::Symbols::link(graph, plan)` is an internal checked plan:
+`definitions[(file, BindingId)]` owns allocated/source names and retained
+declaration segments; `imports` maps local import IDs to shared `LinkedExport`
+identities/routes; `exports` maps public spellings to those same checked results.
+The shared resolver supplies canonical identities, ambiguity/default-star rules,
+all var contributions and intermediate barrels. Import routes must remain
+retained; invalid declaration spans fail rather than disappearing.
+
+`link::esm_with_source_checker` constructs the plan once and uses its public
+surfaces; `physical::emit`/`physical_lower::lower` consume it for legacy export
+values, import aliases and forwarding rather than re-resolving by spelling.
+The emitter fingerprint includes `symbols.rs`. No public API/product field,
+dependency, native emitter or CJS fallback was added.
+
+Allocation orders files by source path and bindings by owned declaration ID,
+reserves all nested/import/CJS bindings and unresolved references in retained
+modules, and avoids JS keywords/helper prefixes and future original names.
+Generated lexical names remain metadata, NOT permission to change observable
+function/class/inferred names; `source_name` remains separate and drives current
+emission. Namespace, default expressions/anonymous declarations and CJS bridges
+keep distinct typed graph identities. Checked syntax continues to distinguish
+anonymous hoisted default functions from evaluation-time expressions/classes.
+Import writes still target read-only import aliases, never defining bindings.
+
+Focused tests cover multiple aliases/multihop barrels/public spellings, all var
+contributions and rejected incomplete retention, capture/shorthand/observed names,
+namespace/default/CJS boundaries, star ambiguity/explicit precedence/no default
+star, import writes, default hoisting/TDZ and reversed-input plan/output equality.
+The allocator test was recovered from inside a production loop, where it never
+ran. The capture probe exposed hard-coded runtime helper use in import aliases:
+values now use the actual collision-safe lowering parameter. Its failing output
+was observed before the fix in the focused run.
+
+Validation: focused canonical cases plus allocator; all 128 bundler tests;
+`cargo fmt -p bundler -- --check`; focused all-target `clippy --no-deps`;
+mandatory `./scripts/spot-check` (51 parser tests and full workspace check).
+Commands use `TMPDIR=$PWD/target/p1-test-tmp`; uncommitted logs are
+`target/symbols-{focused,bundler-tests,fmt,clippy,spot-check}.log`.
+Existing dependency/workspace warnings remain; bundler clippy is clean.
+No commit/push. Ready for independent review, not independently reviewed.
+Scope-hoisted native chunks, opaque-CJS integration and legacy deletion remain
+separate increments; no claim that the whole symbol-linker stage is finished.
+
 ## Current replacement increment: effect dependencies, not a new emitter
 
 `RetentionPlan` now keeps effect retention separate from effect order.
@@ -63,7 +109,7 @@ Activation metadata remains authoritative: dynamic imports and deferred requires
 do not acquire static effect-order edges. Available effects in `effect_order`
 are not an eager global execution schedule.
 
-Still pending: direct-symbol linker, scope-hoisted native chunks, opaque CJS
+Still pending: direct lexical emission, scope-hoisted native chunks, opaque CJS
 segment/logical-facade integration, legacy deletion and release. The old emitter
 continues using native module jobs; it does not yet execute the new planned SCC
 order. Namespace conservative liveness and old physical partitioning are

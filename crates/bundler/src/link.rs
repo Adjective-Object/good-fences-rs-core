@@ -7,7 +7,7 @@ use ast_segmenter::ParsedModule;
 use eyre::{ensure, OptionExt};
 use oxc_span::Span;
 use sha2::{Digest, Sha256};
-use source_graph::{DependencyTarget, GraphNode, Namespace, SegmentKey, SourceGraph};
+use source_graph::{DependencyTarget, GraphNode, SegmentKey, SourceGraph};
 
 use crate::chunks::{AsyncSiteId, ChunkId, ChunkPlan, NodeId, RootId};
 use crate::manifest::{diagnostic_manifest, DiagnosticManifest};
@@ -97,40 +97,11 @@ pub(crate) fn esm_with_source_checker(
             },
         );
     }
-    let names = export_names(graph, plan);
+    let symbols = crate::symbols::Symbols::link(graph, plan)?;
     for (&file, module) in &mut modules {
-        if module.parsed.facts.commonjs {
-            module.surface = names[&file].clone();
-            continue;
-        }
-        for name in &names[&file] {
-            let linked = match graph.resolve_export(file, name, Namespace::Value) {
-                Ok(linked) => linked,
-                Err(error)
-                    if !module
-                        .parsed
-                        .facts
-                        .exports
-                        .iter()
-                        .any(|e| e.name.as_ref() == Some(name)) =>
-                {
-                    // ResolveExport excludes ambiguous/cycle-only star names from
-                    // namespaces. Explicit/imported names are checked, never skipped.
-                    ensure!(
-                        error.to_string().starts_with("ambiguous ")
-                            || error.to_string().starts_with("missing "),
-                        "{error:#}"
-                    );
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            if linked.route.iter().all(|node| retained(plan, *node)) {
-                module.surface.insert(name.clone());
-            }
-        }
+        module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    physical::emit(graph, plan, modules, manifest)
+    physical::emit(graph, plan, modules, manifest, &symbols)
 }
 
 fn async_modules(
@@ -200,7 +171,11 @@ fn async_modules(
         .collect())
 }
 
-fn target_file(graph: &SourceGraph, file: u32, dependency: &Dependency) -> eyre::Result<u32> {
+pub(super) fn target_file(
+    graph: &SourceGraph,
+    file: u32,
+    dependency: &Dependency,
+) -> eyre::Result<u32> {
     match graph.dependency_target(file, dependency.id) {
         Some(DependencyTarget::File(path)) => {
             graph.file_id(path).ok_or_eyre("resolved target is absent")
@@ -214,7 +189,10 @@ fn target_file(graph: &SourceGraph, file: u32, dependency: &Dependency) -> eyre:
     }
 }
 
-fn export_names(graph: &SourceGraph, plan: &ChunkPlan) -> BTreeMap<u32, BTreeSet<String>> {
+pub(super) fn export_names(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+) -> BTreeMap<u32, BTreeSet<String>> {
     let mut names: BTreeMap<_, BTreeSet<_>> = graph
         .module_ids()
         .map(|file| {
@@ -272,7 +250,7 @@ fn specifier(path: &std::path::Path) -> String {
     ))
 }
 
-fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {
+pub(super) fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {
     match node {
         GraphNode::Module(file) => plan.retention.modules.contains(&file),
         GraphNode::Segment(key) => plan.retention.segments.iter().any(|s| s.key == key),
@@ -280,7 +258,7 @@ fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {
     }
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
+pub(super) fn contains(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
 

@@ -8,8 +8,9 @@ Replace the linker entirely, in independently reviewed committable increments:
 1. **Symbol linker:** distinguish effect retention from effect-order scheduling,
    project through pure/static-import connectors to actual effects, break
    order-only SCCs deterministically with public warnings; then link direct
-   lexical identities without runtime cells/aliases. Analysis increment first;
-   symbol linking itself remains pending.
+   lexical identities without runtime cells/aliases. Effect analysis is delivered;
+   checked canonical symbol planning and production resolution reuse are now
+   implemented for independent review. Direct lexical emission remains pending.
 2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
    preserve observable effects/activation and native binding/TDZ semantics.
    Native imports/exports cross actual output chunks only. Public entry/export
@@ -23,8 +24,11 @@ Replace the linker entirely, in independently reviewed committable increments:
 5. **Release:** independent reviews, runtime/differential regressions, incremental
    invalidation/determinism and mandatory spot-check before release evidence.
 
-Only the first effect-dependency analysis increment is being implemented here.
-The existing emitter remains active; this is not completed symbol linking or
+The current increment adds canonical owned binding identities, retained checked
+import/export routes and deterministic capture-safe lexical name allocation.
+Names remain metadata, separate from observable source names; typed boundary
+values are not guessed lexical IDs. The existing emitter consumes canonical
+resolution but remains active; this is not completed direct lexical linking or
 scope hoisting. Order-cycle policy applies to planning, not suppressed binding
 errors or a claim that the legacy runtime already uses the new order.
 

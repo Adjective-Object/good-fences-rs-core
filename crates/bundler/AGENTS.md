@@ -47,6 +47,9 @@ Cache first-effect projections, including empties, on iterative connector SCCs;
 share chain results rather than copying transitive closures per segment.
 The old backend is still active until staged replacement; preserve its runtime
 behavior while replacing analysis in small independently reviewed increments.
+Canonical symbols use owned (file, BindingId) identities and checked export routes,
+including barrels/redeclarations. Allocated lexical names are not observable source
+names or rewrite instructions; boundary values retain typed graph identities.
 No hooks, code JSON, source loading/assembly, eval or runtime compilation.
 Keep native live bindings, TDZ and const semantics. Only source await/for-await
 events suspend evaluation; never wrap every module in async.

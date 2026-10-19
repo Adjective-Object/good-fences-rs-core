@@ -18,6 +18,7 @@ pub(super) fn lower(
     file: u32,
     module: &Module<'_>,
     chunk_runtime: &str,
+    symbols: &Symbols,
 ) -> eyre::Result<Lowered> {
     let mut source = String::new();
     let mut ranges = Vec::new();
@@ -142,17 +143,14 @@ pub(super) fn lower(
                 .find(|v| v.top_level && v.name == b.name);
             if b.import {
                 let original = original.ok_or_eyre("missing source import binding")?;
-                let import = module
-                    .parsed
-                    .facts
+                let linked = symbols
                     .imports
-                    .iter()
-                    .find(|i| i.binding == original.id)
-                    .unwrap();
+                    .get(&(file, original.id))
+                    .ok_or_eyre("missing canonical import")?;
                 instantiate.push_str(&format!(
                     "{runtime}.alias({}, ()=>({}));\n",
                     key(graph, file, &b.name),
-                    imported_value(graph, file, import)?
+                    link_value(graph, symbols, &linked.identity, &runtime)?
                 ));
             } else {
                 let kind = if b.function_scoped || b.function {

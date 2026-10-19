@@ -108,6 +108,251 @@ fn build_with_format(
     (plan, output)
 }
 
+fn canonical(
+    sources: &BTreeMap<PathBuf, String>,
+    reverse: bool,
+) -> (SourceGraph, ChunkPlan, crate::symbols::Symbols) {
+    let graph = graph(sources, reverse);
+    let file = graph.file_id(Path::new("entry.mjs")).unwrap();
+    let plan = partition(
+        &graph,
+        &[RootSeed {
+            id: RootId::Entry("entry".into()),
+            evaluation_roots: vec![file],
+            binding_roots: vec![GraphNode::Module(file)],
+        }],
+        &EffectPolicy::default(),
+    )
+    .unwrap();
+    let symbols = crate::symbols::Symbols::link(&graph, &plan).unwrap();
+    (graph, plan, symbols)
+}
+
+#[test]
+fn canonical_imports_and_public_aliases_share_definitions_not_names() {
+    use source_graph::ExportIdentity;
+    let sources = sources(&[
+        ("leaf.mjs", "var value = 1; var value = 2; export {value as original};"),
+        ("barrel.mjs", "export {original as renamed} from './leaf.mjs';"),
+        ("outer.mjs", "export {renamed as twice} from './barrel.mjs';"),
+        ("entry.mjs", "import {twice as local} from './outer.mjs'; import {original as alias} from './leaf.mjs'; export {local as public, alias as other};"),
+    ]);
+    let (graph, mut plan, symbols) = canonical(&sources, false);
+    let leaf = graph.file_id(Path::new("leaf.mjs")).unwrap();
+    let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+    let binding = graph
+        .file_facts(leaf)
+        .unwrap()
+        .bindings
+        .iter()
+        .find(|b| b.name == "value")
+        .unwrap();
+    let imported = &graph.file_facts(entry).unwrap().imports[0];
+    let identity = ExportIdentity::Binding(leaf, binding.id);
+    assert_eq!(
+        symbols.imports[&(entry, imported.binding)].identity,
+        identity
+    );
+    assert!(graph
+        .file_facts(entry)
+        .unwrap()
+        .imports
+        .iter()
+        .all(|import| { symbols.imports[&(entry, import.binding)].identity == identity }));
+    assert!(symbols.imports[&(entry, imported.binding)]
+        .route
+        .iter()
+        .all(|&node| retained(&plan, node)));
+    assert_eq!(symbols.exports[&entry]["public"].identity, identity);
+    assert_eq!(symbols.exports[&entry]["other"].identity, identity);
+    let definition = &symbols.definitions[&(leaf, binding.id)];
+    assert_eq!(definition.name, "value");
+    assert_eq!(
+        definition.declarations,
+        [SegmentKey::new(leaf, 0), SegmentKey::new(leaf, 1)]
+    );
+    let route = &symbols.exports[&entry]["public"].route;
+    assert!(definition
+        .declarations
+        .iter()
+        .all(|&key| route.contains(&GraphNode::Segment(key))));
+    assert!(route.iter().all(|&node| retained(&plan, node)));
+    assert!(route.iter().any(|node| matches!(node, GraphNode::Segment(key) if key.file_id == graph.file_id(Path::new("barrel.mjs")).unwrap())));
+    let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+    let mut files = output.files;
+    files.insert(
+        "check.mjs".into(),
+        format!(
+            "import {{public as value, other}} from './{}'; console.log(value, other);",
+            output.entries["entry.mjs"].display()
+        ),
+    );
+    let observed = node(&files, Path::new("check.mjs"));
+    assert!(
+        observed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&observed.stderr)
+    );
+    assert_eq!(observed.stdout, b"2 2\n");
+    let mut reordered = graph_with_format(&sources, true, ModuleFormat::Esm);
+    assert!(reordered.remove_file(Path::new("leaf.mjs")));
+    let error = crate::symbols::Symbols::link(&reordered, &plan)
+        .err()
+        .unwrap();
+    assert!(error
+        .to_string()
+        .contains("stale symbol partition revision"));
+    plan.retention
+        .segments
+        .retain(|segment| segment.key != SegmentKey::new(leaf, 1));
+    let error = crate::symbols::Symbols::link(&graph, &plan).err().unwrap();
+    assert!(error.to_string().contains("import route is not retained"));
+}
+
+#[test]
+fn canonical_names_avoid_shadowing_globals_and_reordered_inputs() {
+    let sources = sources(&[
+        ("a.mjs", "export const same = 1, global = 2, shadow = 3, __gf_link_0 = 4, __gf_runtime = 5; export function named() {} export class Model {} export const arrow = () => 0;"),
+        ("b.mjs", "export const same = 6; export function named(shadow) { return {same, shadow, global: typeof global}; } export class Model {}"),
+        ("entry.mjs", "import * as a from './a.mjs'; import * as b from './b.mjs'; export {a,b}; console.log(a.named.name, b.named.name, a.Model.name, b.Model.name, a.arrow.name, JSON.stringify(b.named(a.same)));"),
+    ]);
+    let summary = |reverse| {
+        let (graph, _, symbols) = canonical(&sources, reverse);
+        let mut definitions: Vec<_> = symbols
+            .definitions
+            .iter()
+            .map(|(&(file, binding), definition)| {
+                let original = graph
+                    .file_facts(file)
+                    .unwrap()
+                    .bindings
+                    .iter()
+                    .find(|b| b.id == binding)
+                    .unwrap();
+                (
+                    graph.file_path(file).unwrap().to_owned(),
+                    binding.0,
+                    original.name.clone(),
+                    definition.name.clone(),
+                )
+            })
+            .collect();
+        definitions.sort();
+        let names: BTreeSet<_> = definitions.iter().map(|d| &d.3).collect();
+        assert_eq!(names.len(), definitions.len());
+        assert!(!names
+            .iter()
+            .any(|name| ["global", "shadow", "__gf_runtime"].contains(&name.as_str())));
+        assert!(definitions
+            .iter()
+            .any(|d| d.2 == "__gf_link_0" && d.3 == "__gf_link_0"));
+        assert_eq!(definitions.iter().filter(|d| d.2 == "same").count(), 2);
+        assert_eq!(definitions.iter().filter(|d| d.3 == "same").count(), 1);
+        definitions
+    };
+    assert_eq!(summary(false), summary(true));
+    let (_, forward) = build(&sources, &[("entry.mjs", true)], false);
+    let (_, reversed) = build(&sources, &[("entry.mjs", true)], true);
+    assert_eq!(forward, reversed);
+    compare(&sources, "entry.mjs");
+}
+
+#[test]
+fn canonical_values_preserve_namespace_default_and_cjs_boundaries() {
+    use source_graph::ExportIdentity;
+    let sources = sources(&[
+        ("esm.mjs", "export default function () {} export const value = 1;"),
+        ("expression.mjs", "export default () => 3;"),
+        ("class.mjs", "export default class {}"),
+        ("opaque.cjs", "exports.value = 2;"),
+        ("entry.mjs", "import * as ns from './esm.mjs'; import value, {value as named} from './opaque.cjs'; import * as cjs from './opaque.cjs'; export {ns, value, named, cjs}; export {default as anonymous} from './esm.mjs'; export {default as expression} from './expression.mjs'; export {default as klass} from './class.mjs';"),
+    ]);
+    let (graph, _, symbols) = canonical(&sources, false);
+    let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+    let esm = graph.file_id(Path::new("esm.mjs")).unwrap();
+    let cjs = graph.file_id(Path::new("opaque.cjs")).unwrap();
+    let exports = &symbols.exports[&entry];
+    assert_eq!(exports["ns"].identity, ExportIdentity::Namespace(esm));
+    assert_eq!(exports["cjs"].identity, ExportIdentity::Namespace(cjs));
+    assert_eq!(
+        exports["value"].identity,
+        ExportIdentity::CommonJs(cjs, "default".into())
+    );
+    assert_eq!(
+        exports["named"].identity,
+        ExportIdentity::CommonJs(cjs, "value".into())
+    );
+    assert!(
+        matches!(exports["anonymous"].identity, ExportIdentity::Expression(key) if key.file_id == esm)
+    );
+    assert_ne!(
+        exports["anonymous"].identity,
+        exports["expression"].identity
+    );
+    assert_ne!(exports["anonymous"].identity, exports["klass"].identity);
+    assert!(!symbols.definitions.keys().any(|(file, _)| *file == cjs));
+    assert!(!symbols.definitions.keys().any(|(file, _)| *file == entry));
+}
+
+#[test]
+fn canonical_surface_reuses_checked_star_ambiguity_and_explicit_precedence() {
+    let sources = sources(&[
+        (
+            "a.mjs",
+            "export const conflict = 1, explicit = 2, unique = 3; export default 4;",
+        ),
+        ("b.mjs", "export const conflict = 5, explicit = 6;"),
+        (
+            "entry.mjs",
+            "export * from './a.mjs'; export * from './b.mjs'; export {explicit} from './a.mjs';",
+        ),
+    ]);
+    let (graph, _, symbols) = canonical(&sources, false);
+    let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+    assert_eq!(
+        symbols.exports[&entry]
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["explicit", "unique"]
+    );
+    let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+    assert!(output.files[&output.entries["entry.mjs"]].contains("\"unique\""));
+}
+
+#[test]
+fn canonical_linking_preserves_import_writes_and_default_initialization() {
+    compare(
+        &sources(&[
+            ("leaf.mjs", "export const unused = 1;"),
+            ("entry.mjs", "import {unused} from './leaf.mjs'; console.log('ready'); try { unused = 2; } catch(e) { console.log(e.name); } console.log(unused);"),
+        ]),
+        "entry.mjs",
+    );
+    compare(
+        &sources(&[
+            (
+                "entry.mjs",
+                "import './probe.mjs'; export default function () {}",
+            ),
+            (
+                "probe.mjs",
+                "import fn from './entry.mjs'; console.log(fn.name, typeof fn);",
+            ),
+        ]),
+        "entry.mjs",
+    );
+    for declaration in ["() => 3", "class {}"] {
+        compare(
+            &sources(&[
+                ("entry.mjs", &format!("import {{read}} from './probe.mjs'; export default {declaration}; read();")),
+                ("probe.mjs", "import value from './entry.mjs'; try { console.log(value); } catch(e) { console.log(e.name); } export function read() { console.log(value.name); }"),
+            ]),
+            "entry.mjs",
+        );
+    }
+}
+
 fn node(files: &BTreeMap<PathBuf, String>, entry: &Path) -> Output {
     let dir = TmpDir::new();
     for (path, source) in files {

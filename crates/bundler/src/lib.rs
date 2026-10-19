@@ -10,6 +10,7 @@ pub mod manifest;
 pub mod policy;
 pub mod publish;
 pub mod rewrite;
+mod symbols;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 

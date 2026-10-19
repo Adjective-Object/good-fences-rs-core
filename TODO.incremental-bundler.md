@@ -2,8 +2,10 @@
 
 ## Active replacement — pending review/implementation
 
-- [ ] Symbol linker: first effect-retention/order projection increment implemented
-  for review; verify and commit independently. Direct-symbol linking still pending.
+- [ ] Symbol linker: effect-retention/order analysis delivered; checked canonical
+  symbols, production import/export resolution reuse and capture-safe name
+  allocation implemented and validated. Independent review still required;
+  direct lexical emission is not implemented.
 - [ ] Scope-hoist direct bindings and native imports/exports across actual output
   chunks; public entry/export boundaries only, no forced root-set partition.
 - [ ] Integrate one opaque CJS segment and logical ESM facade per input into

@@ -10,8 +10,19 @@ Each CJS input will remain one opaque segment plus a logical ESM facade, both
 subject to normal usage/linking/grouping, not a native `.cjs`-per-input fallback.
 
 The registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend
-below is **still active but rejected as the target architecture**. Symbol linking,
-scope hoisting, CJS integration and removal of that backend are pending.
+below is **still active but rejected as the target architecture**.
+The internal `symbols::Symbols::link` increment now builds checked canonical
+`(file, BindingId)` definitions and import/export routes using the shared graph
+resolver. Production surface construction and legacy import/export emission reuse
+that plan, preserving intermediate barrels and every retained var declaration.
+Lexical names are allocated in path/declaration order, avoiding nested bindings,
+free references, keywords and helpers. Allocated names are not source rewrites:
+original observable function/class/inferred names remain separate. Namespace,
+default-expression/anonymous-declaration and opaque CJS values retain typed graph
+identities, not invented lexical binding IDs; checked syntax still owns default
+hoisting/initialization semantics. No public product field or dependency was added.
+Independent review, direct lexical emission, scope hoisting, CJS integration and
+removal of the legacy backend remain pending.
 
 ## Current legacy exact physical code splitting
 
