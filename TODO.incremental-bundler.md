@@ -2,6 +2,14 @@
 
 ## Active replacement — pending review/implementation
 
+- [x] Unify the baseline/build corpus runner on base `ec0a859`: one
+  `bundler-fixtures.mjs` command/API, input/build/backend/output failure results,
+  continuation without building bad inputs, token-only status/legacy colors,
+  and one corpus invocation in release/CI. Validated: 97 harness tests, public
+  driver build, 23 contracts / 28 executions (10 native / 13 legacy / zero
+  unsupported), and spot-check.
+- [ ] Independently review the unified runner increment before committing or
+  resuming the paused native cross-chunk work; no linker/backend gate changed.
 - [x] Independently review the first harness diversion: authoritative production
   backend/layout reporting, native-required case metadata, optional fully checked
   upstream provenance, shared normalized runtime outcomes and preceding effects.

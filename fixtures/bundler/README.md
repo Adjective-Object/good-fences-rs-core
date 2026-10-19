@@ -1,20 +1,27 @@
 # Portable bundler semantic fixtures
 
 These small upstream adaptations and locally authored cases describe observable
-JavaScript runtime semantics. **The baseline validates the fixtures using Node; it
-does not run or establish conformance of any bundler.** There is no bundler
-implementation behind this command.
+JavaScript runtime semantics. One runner validates the inputs using Node, builds
+through the public Rust library/publisher, and compares emitted observations.
 
-From the repository root, with Node.js 18 or newer:
+From the repository root, with Node.js 22 and the repository Rust toolchain:
 
 ```sh
+cargo build -p bundler --example build
 node scripts/bundler-fixtures.mjs
 ```
 
-No package installation, build, upstream engine, or network access is needed.
+After building the driver, no package installation, upstream engine, or network
+access is needed. `yarn test:bundler-fixtures` builds the driver and runs the same
+command.
 An optional positional argument selects a different corpus root. The runner
 fails for missing/empty corpora, malformed or unsupported metadata, execution
 errors, timeouts, stderr, or output differences; it never silently skips cases.
+Input, build, required-backend and output failures are reported separately.
+Bad inputs are not built; unexpected failures do not stop later valid cases.
+TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
+passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
+disables it (taking precedence). Structured API results remain uncolored.
 
 The corpus contains **23 cases / 28 entry executions**: six esbuild cases,
 six rspack cases and eleven authored cases. The upstream cases cover
@@ -25,7 +32,8 @@ hoisting, default snapshots/live aliases, inferred names, `__proto__` shorthand
 and destructuring, reverse-path static import ordering, namespace observations,
 ambient deferred effects and once-only shared identity.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
-The dedicated Node 22 CI job runs both this corpus and the runner's own tests.
+The conformance CI job builds the driver and runs this corpus and the runner's
+tests.
 
 ## Layout and manifest
 
@@ -118,10 +126,10 @@ missing throw, unexpected stderr, nonzero exit, signal, timeout or output overfl
 always fails. Parse errors in expected-failure source cases are rejected by
 Node syntax checks; build failures are never accepted as runtime failures.
 
-The only accepted `backend` requirement is `"native"`. The baseline validates
-that field but makes **no bundler-backend claim**. Differential mode checks the
-actual production selection and fails if such a case falls back to legacy.
-Unmarked cases may currently pass on legacy; that is not native-linker coverage.
+The only accepted `backend` requirement is `"native"`. The runner checks the
+actual production selection and reports a backend failure if such a case falls
+back to legacy. Unmarked cases may currently pass on legacy; that is not
+native-linker coverage.
 
 Sources must be self-contained JavaScript and local data. No external packages,
 `node_modules`, project sources, downloads, Jest, webpack/rspack globals, or
@@ -130,16 +138,17 @@ or invokes scripts; missing runtime dependencies fail execution. Node built-ins
 are available. Only trusted, reviewed fixtures should be run: Node execution is
 **not a sandbox**, and this runner does not enforce a network or filesystem jail.
 
-## Execution and differential adapter
+## Unified execution and reporting
 
 Cases are discovered in deterministic ID order and all manifests are validated
 before execution. Each case's `files/` tree is copied into a fresh managed
-directory under project-local `target/p1-test-tmp` by default. Each
-entrypoint runs in a separate Node process with that directory as its cwd,
+directory under project-local `target/p1-test-tmp` by default, with separate
+source-observation and build copies. Each entrypoint runs in a separate Node
+process with that directory as its cwd,
 in manifest order. Entrypoints share the case's copied filesystem, not process
 state. The runner removes the copy in `finally` on success and failure.
-Node preload/search overrides are removed and coverage is disabled. Each entrypoint
-has a five-second timeout and a 1 MiB output-buffer limit.
+Node preload/search and forced-color overrides are removed and coverage is
+disabled. Each entrypoint has a five-second timeout and a 1 MiB output-buffer limit.
 
 For both successful and expected-failure entries, one shared ESM observation
 driver imports the absolute entry path through Node's normal file loader.
@@ -148,31 +157,21 @@ or stacks. Premature exit, including exit zero, cannot count as completion.
 This observes imported module execution, not CLI-only `require.main` semantics.
 It uses no preload or custom loader hooks. Fixture code remains trusted, not jailed.
 
-Bundler adapters must separately bundle these sources and execute the resulting
-entrypoints, comparing the same per-entry stdout and normalized error observations.
-They must explicitly declare
-unsupported capabilities, not count skipped fixtures as passes. Linking,
+The runner builds the independent copy and executes its resulting entrypoints,
+comparing the same per-entry stdout and normalized error observations.
+Explicit unsupported capabilities are visible, never counted as passes. Linking,
 chunking, diagnostics, incremental invalidation, and bundler-only behavior need
 their own drivers and expectations. Chunk names, chunk counts, generated-code
 snapshots, and incidental formatting are not this corpus's semantic contracts.
 
 Runner regression tests use synthetic fixtures only:
-`node --test scripts/bundler-fixtures.test.mjs`.
+`node --test scripts/bundler-fixtures.test.mjs scripts/bundler-fixtures-build.test.mjs`.
 
-## Public-pipeline differential mode (native Node 22)
+## Public-pipeline results (Node 22)
 
-The original baseline command above is unchanged. A separate harness now builds
-through the public Rust library and transactional publisher:
-
-```sh
-cargo build -p bundler --example build
-node scripts/bundler-differential.mjs
-node --test scripts/bundler-differential.test.mjs
-```
-
-It validates the same manifests/provenance first, makes **separate** source and
-bundler copies, and compares manifest expectations with source and emitted
-per-entry stdout and normalized runtime outcomes through the shared observer.
+The single command above validates manifests/provenance first and compares
+manifest expectations with source and emitted per-entry stdout and normalized
+runtime outcomes through the shared observer.
 All **23 contracts / 28 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
@@ -211,7 +210,7 @@ not inspect source counts, generated code, chunks or import closures.
 Four redundant inline Rust tests are retired; exact mappings and reasons for
 retaining broader/private-API tests are in
 [`NOTES.incremental-bundler.md`](../../NOTES.incremental-bundler.md).
-`scripts/bundler-release-check` already runs both corpus commands, so these
+`scripts/bundler-release-check` runs the unified corpus command once, so these
 contracts remain release-gated. Every subsequent linker stage must either
 graduate applicable legacy fixtures to required native coverage, add meaningful
 regressions for its new behavior, or both. Compare actual reported backends with
@@ -223,14 +222,23 @@ and four bundler-only source-range diagnostic cases (nonliteral import,
 unconfigured external, require-of-async-ESM, TS emission).
 No upstream files, provenance or licenses are changed.
 
-`runDifferential(root, {driver, tempRoot, timeoutMs, unsupported})` is the small
+`runFixtures(root, {driver, tempRoot, timeoutMs, unsupported})` is the single
 programmatic harness API. `unsupported` must explicitly map known case IDs to
 nonempty reasons; results say `unsupported`, with zero emitted executions, never
 `passed`. Unexpected build failures remain failures, not inferred skips.
 Passed results contain `{id, status: "passed", backend: "native" | "legacy",
-executions}`. The baseline API `runFixtures(root, {timeoutMs, tempRoot})` keeps
-returning `{id, stdout}` and never reports a bundler backend. The shared
-`observeEntries` helper returns `{stdout, outcomes}`, where each ordered outcome
+executions, stdout}`. Failed results contain `{id, status: "failed", stage,
+executions: 0, error}`, with the actual `backend` when the build succeeded.
+`stage` is `input` (source observations/syntax), `build` (build/publication/artifact
+checks), `backend` (required-native mismatch), or `output` (emitted runtime or
+observation comparison). `error` retains the original error and its causes.
+Execution totals count entries in passing cases. Malformed metadata throws an
+`INPUT metadata` error before any source runs, rather than executing a partially
+valid corpus. Invalid runner configuration/infrastructure errors throw instead
+of becoming fixture passes. The CLI prints all case results and native/legacy
+pass, failure, unsupported and execution totals, then exits nonzero for any
+unexpected failure. Fatal runner errors include causes in diagnostics.
+The shared `observeEntries` helper returns `{stdout, outcomes}`, where each ordered outcome
 is `{entry, stdout, error}` and `error` is null or `{name, code?}`. Differential
 comparison includes observed codes even when the manifest does not constrain
 them, and compares stdout per entry as well as the manifest's concatenated lines.
@@ -245,6 +253,6 @@ The runner removes managed copies on every failure. Trusted fixture code must
 not launch detached descendants; this is not a sandbox/process-tree jail.
 The regression suite checks actual emitted mismatch/stderr/nonzero/timeout
 failures, output bounds, cleanup, unsupported reporting and child reaping.
-Dedicated Node 22/current repository Rust CI builds/runs this separate mode;
-native baseline CI remains Rust-free. Runtime/interop/platform limits are in
+Node 22/current repository Rust CI builds/runs this unified command.
+Runtime/interop/platform limits are in
 [`bundler/README.md`](../../crates/bundler/README.md).

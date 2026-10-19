@@ -161,9 +161,15 @@ walks cannot omit effects merely because their initial root is a binding.
 
 Run `cargo test -p bundler`.
 
-Public-pipeline conformance (separate from the native-only fixture baseline):
-`cargo build -p bundler --example build && node scripts/bundler-differential.mjs`.
-Harness regressions: `node --test scripts/bundler-differential.test.mjs`.
+Unified source and public-pipeline conformance:
+`cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs`.
+Harness regressions:
+`node --test scripts/bundler-fixtures.test.mjs scripts/bundler-fixtures-build.test.mjs`.
+The runner validates the entire corpus before execution, skips builds for bad
+inputs, and collects input/build/required-backend/output failures without stopping
+later cases. It reports native and legacy passes separately; unexpected failures
+make the CLI exit nonzero after reporting all cases. The same command retains
+the same-runtime identity and source-range diagnostic checks.
 The minimal driver can also build a project directly:
 `cargo run -p bundler --example build -- PROJECT OUTPUT ENTRY...`; it prints
 generation-specific `entries`, the selected `backend`, physical `layout` and
@@ -173,8 +179,8 @@ artifacts, never inferred from filenames. It serializes as `"native"` or
 `"legacy"`; `Backend::layout()` currently returns `"native-single-chunk-v1"` or
 `"exact-root-set-chunks-v1"` respectively. This reports the temporary staging
 selection; it is not a new backend option.
-Fixture `expectations.backend: "native"` rejects legacy fallback in differential
-mode, while the Node-only baseline only validates that requirement's schema.
+Fixture `expectations.backend: "native"` rejects legacy fallback in the unified
+runner, separately from input observation and output comparison failures.
 Expected runtime failures use normalized names/types and optional codes with
 preceding stdout, not unstable stacks/messages; both successful and failing
 entries use the same import observer. See the

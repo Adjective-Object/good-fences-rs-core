@@ -38,9 +38,10 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
 
 - `fixtures/bundler/` holds portable runtime contracts, not generated-code snapshots.
   Preserve pinned upstream provenance, adaptation notes, and all applicable licenses.
-- `node scripts/bundler-fixtures.mjs` validates native Node baselines only.
-  `cargo build -p bundler --example build && node scripts/bundler-differential.mjs`
-  exercises public build/publication, separately from the native baseline.
+- `cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs`
+  validates all corpus metadata, then source observations and public build/output
+  in one run. Report input/build/backend/output failures separately, continue
+  later cases, and never build invalid inputs or count legacy passes as native.
 - Bundler target: scope-hoisted direct ESM bindings with native imports/exports
   only between actual output chunks; root sets describe reachability, not a
   mandatory physical partition. Public entry/export boundaries constrain output.

@@ -154,13 +154,14 @@ while shared chunk registration does not execute unrelated module bodies.
 The previous per-original-module physical fallback is removed.
 P9 adds public `BuildSession::{build,build_and_publish}`, independent layer keys
 and real counters, selective parse reuse, immutable transactional generations
-with ownership-bounded quiescent cleanup, and a separate public-pipeline
-differential harness. No-op builds perform zero source/output JavaScript parses,
+with ownership-bounded quiescent cleanup, and a public-pipeline
+fixture harness. No-op builds perform zero source/output JavaScript parses,
 dependency resolutions, links or artifact writes; config
 edits conservatively re-resolve and rebuild later layers.
 Run `./scripts/bundler-release-check` for the scoped release gates,
-`cargo build -p bundler --example build && node scripts/bundler-differential.mjs`
-for differential conformance, and
+`cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs`
+for unified input/build/output conformance (input, build, required-backend and
+output failures are reported separately), and
 `mkdir -p target/p1-test-tmp && TMPDIR="$PWD/target/p1-test-tmp" cargo bench -p bundler --bench incremental`
 for reproducible cold/warm/no-op/local/export/config measurements.
 The [bundler README](crates/bundler/README.md#release-gates-and-measured-performance)

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -14,8 +14,32 @@ function withCorpus(callback) {
     mkdirSync(path.join(root, 'synthetic'), { recursive: true });
     mkdirSync(tempRoot);
     writeFileSync(path.join(root, 'synthetic', 'LICENSE'), 'Synthetic test license, not upstream test data.');
-    callback({ root, tempRoot, run: (options = {}) => runFixtures(root, { tempRoot, ...options }) });
+    const driver = path.join(directory, 'driver.mjs');
+    const builds = path.join(directory, 'builds.jsonl');
+    writeFileSync(driver, `#!${process.execPath}
+import {mkdirSync, writeFileSync, appendFileSync} from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const [root, directory, ...names] = process.argv.slice(2);
+appendFileSync(${JSON.stringify(builds)}, JSON.stringify(root) + '\\n');
+mkdirSync(directory, {recursive:true});
+const entries = Object.fromEntries(names.map((name, i) => {
+  const filename = path.join(directory, i + '.mjs');
+  writeFileSync(filename, 'import ' + JSON.stringify(pathToFileURL(path.join(root, name)).href));
+  return [name, filename];
+}));
+console.log(JSON.stringify({directory, entries, backend:'native', layout:'native-single-chunk-v1', warnings:[], publicationWarnings:[]}));
+`);
+    chmodSync(driver, 0o755);
+    callback({ root, tempRoot, driver, builds, run: (options = {}) => runFixtures(root, { driver, tempRoot, ...options }) });
   });
+}
+
+function assertFailure(run, expected, options = {}) {
+  const [result] = run(options);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.stage, 'input');
+  assert.match(result.error.message, expected);
 }
 
 function addCase(root, name = 'example', { sources, ...overrides } = {}) {
@@ -60,7 +84,9 @@ test('deterministic cases, ESM default, isolated copy/cwd, and cleanup on succes
         'data.txt': 'hello',
       },
     });
-    assert.deepEqual(run().map(({ id }) => id), ['synthetic/a-first', 'synthetic/z-last']);
+    assert.deepEqual(run().map(({ id, status }) => [id, status]), [
+      ['synthetic/a-first', 'passed'], ['synthetic/z-last', 'passed'],
+    ]);
     assert.equal(readFileSync(path.join(directory, 'files/data.txt'), 'utf8'), 'hello');
     assert.deepEqual(readdirSync(tempRoot), []);
   });
@@ -92,7 +118,7 @@ test('CommonJS default and supplied package metadata are respected without scrip
         'entry.js': "require('node:assert').equal(require('./package.json').marker, 42); console.log('hello');",
       },
     });
-    assert.equal(run().length, 2);
+    assert.deepEqual(run().map(({ status }) => status), ['passed', 'passed']);
   });
 });
 
@@ -110,7 +136,7 @@ for (const [name, source, expected] of [
   test(`${name} fails and cleans the copied case`, () => {
     withCorpus(({ root, tempRoot, run }) => {
       addCase(root, 'failure', { sources: { 'entry.js': source } });
-      assert.throws(() => run({ timeoutMs: name === 'timeout' ? 100 : 5000 }), expected);
+      assertFailure(run, expected, { timeoutMs: name === 'timeout' ? 100 : 5000 });
       assert.deepEqual(readdirSync(tempRoot), []);
     });
   });
@@ -130,7 +156,9 @@ test('silent contracts are valid but an empty corpus never passes, including CLI
     });
     assert.equal(success.status, 0, success.stderr);
     assert.equal(success.stderr, '');
-    assert.equal(success.stdout, 'PASS baseline synthetic/silent\nValidated 1 runtime semantic contracts; no bundler conformance tested.\n');
+    assert.match(success.stdout, /PASS synthetic\/silent backend=native/u);
+    assert.match(success.stdout, /Fixtures: 1 passed \(1 native, 0 legacy\), 0 failed, 0 unsupported, 1 emitted executions\./u);
+    assert.match(success.stdout, /Bundler checks: 1 same-runtime identity case; 4 diagnostic cases\./u);
     assert.deepEqual(readdirSync(tempRoot), []);
   });
 });
@@ -176,7 +204,7 @@ for (const [name, mutate, expected] of [
   });
 }
 
-test('authored cases omit provenance and licenses; native baseline only validates backend requirements', () => {
+test('authored cases omit provenance and licenses; native backend requirements are enforced', () => {
   withCorpus(({ root, run }) => {
     const directory = addCase(root);
     const filename = path.join(directory, 'case.json');
@@ -236,7 +264,7 @@ test('Node preload, search and coverage overrides are disabled for normal and ex
     const previous = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
     try {
       Object.assign(process.env, overrides);
-      assert.equal(run().length, 2);
+      assert.deepEqual(run().map(({ status }) => status), ['passed', 'passed']);
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key];
@@ -267,7 +295,7 @@ for (const [name, source, expected] of [
         sources: { 'entry.js': source },
         expectations: { stdout: ['before'], errors: { 'entry.js': { name: 'TypeError', code: 'FAIL' } } },
       });
-      assert.throws(() => run({ timeoutMs: name === 'timeout stays fatal' ? 100 : 5000 }), expected);
+      assertFailure(run, expected, { timeoutMs: name === 'timeout stays fatal' ? 100 : 5000 });
       assert.deepEqual(readdirSync(tempRoot), []);
     });
   });
@@ -327,6 +355,103 @@ test('validates all metadata before running any entrypoint', () => {
     addCase(root, 'a-valid', { sources: { 'entry.js': "throw Error('must not run');" } });
     addCase(root, 'z-invalid', { entryPoints: [] });
     assert.throws(run, /entryPoints/u);
+    assert.deepEqual(readdirSync(tempRoot), []);
+  });
+});
+
+for (const [name, source, expectations, expected] of [
+  ['stdout', "console.log('wrong');", { stdout: ['hello'] }, /stdout mismatch/u],
+  ['error', "throw new RangeError();", { stdout: [], errors: { 'entry.js': { name: 'TypeError' } } }, /error name mismatch/u],
+  ['missing-error', '', { stdout: [], errors: { 'entry.js': { name: 'TypeError' } } }, /expected runtime failure did not occur/u],
+  ['stderr', "console.error('warning'); console.log('hello');", { stdout: ['hello'] }, /unexpected stderr/u],
+  ['timeout', 'while(true) {}', { stdout: [] }, /ETIMEDOUT/u],
+]) {
+  test(`input ${name} failure skips its build and continues to the next case`, () => {
+    withCorpus(({ root, run, builds, tempRoot }) => {
+      addCase(root, 'a-bad', { sources: { 'entry.js': source }, expectations });
+      addCase(root, 'z-valid');
+      const [failure, pass] = run({ timeoutMs: name === 'timeout' ? 1000 : 5000 });
+      assert.equal(failure.id, 'synthetic/a-bad');
+      assert.equal(failure.status, 'failed');
+      assert.equal(failure.stage, 'input');
+      assert.match(failure.error.message, expected);
+      assert.equal(pass.status, 'passed');
+      assert.equal(pass.id, 'synthetic/z-valid');
+      assert.equal(readFileSync(builds, 'utf8').trim().split('\n').length, 1, 'invalid input must not build');
+      assert.deepEqual(readdirSync(tempRoot), []);
+    });
+  });
+}
+
+test('native requirements use the driver backend, not successful runtime observations', () => {
+  withCorpus(({ root, run, driver }) => {
+    addCase(root, 'required', { expectations: { stdout: ['hello'], backend: 'native' } });
+    addCase(root, 'unmarked');
+    writeFileSync(driver, readFileSync(driver, 'utf8')
+      .replace("backend:'native'", "backend:'legacy'")
+      .replace("layout:'native-single-chunk-v1'", "layout:'exact-root-set-chunks-v1'"));
+    const [failure, pass] = run();
+    assert.equal(failure.stage, 'backend');
+    assert.equal(failure.status, 'failed');
+    assert.equal(failure.backend, 'legacy');
+    assert.match(failure.error.message, /native backend required/u);
+    assert.equal(pass.status, 'passed');
+    assert.equal(pass.backend, 'legacy');
+  });
+});
+
+test('CLI reports all phases and honors forced color and NO_COLOR without coloring whole lines', () => {
+  withCorpus(({ root }) => {
+    addCase(root, 'a-input', { sources: { 'entry.js': "console.log('wrong');" } });
+    addCase(root, 'b-build', {
+      sources: { 'entry.js': "const name='./dep.js'; await import(name); console.log('hello');", 'dep.js': '' },
+    });
+    addCase(root, 'c-backend', {
+      sources: { 'entry.js': "await Promise.resolve(); console.log('hello');" },
+      expectations: { stdout: ['hello'], backend: 'native' },
+    });
+    addCase(root, 'd-output', {
+      sources: { 'entry.js': "console.log(process.argv[1].includes('.bundler-generation-') ? 'wrong' : 'hello');" },
+    });
+    addCase(root, 'y-legacy', { sources: { 'entry.js': "await Promise.resolve(); console.log('hello');" } });
+    addCase(root, 'z-valid');
+    const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
+    const env = { ...process.env, FORCE_COLOR: '1' };
+    delete env.NO_COLOR;
+    const colored = spawnSync(process.execPath, [runner, root], { encoding: 'utf8', env });
+    assert.equal(colored.status, 1, colored.stderr);
+    assert(colored.stdout.includes('\x1b[32mPASS\x1b[0m synthetic/y-legacy \x1b[31mbackend=legacy\x1b[0m'));
+    assert(colored.stdout.includes('\x1b[32mPASS\x1b[0m synthetic/z-valid backend=native\n'));
+    assert(colored.stdout.includes('\x1b[31mFAIL\x1b[0m BACKEND synthetic/c-backend \x1b[31mbackend=legacy\x1b[0m'));
+    assert(!colored.stdout.includes('\x1b[31mbackend=native'));
+    const result = spawnSync(process.execPath, [runner, root], {
+      encoding: 'utf8', env: { ...env, NO_COLOR: '1' },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert(!result.stdout.includes('\x1b['));
+    assert.equal(colored.stdout.replace(/\x1b\[\d+m/gu, ''), result.stdout);
+    for (const [stage, name] of [['INPUT', 'a-input'], ['BUILD', 'b-build'], ['BACKEND', 'c-backend'], ['OUTPUT', 'd-output']]) {
+      assert.match(result.stdout, new RegExp(`FAIL ${stage} synthetic/${name}`, 'u'));
+    }
+    assert.match(result.stdout, /PASS synthetic\/z-valid backend=native/u);
+    assert.match(result.stdout, /2 passed \(1 native, 1 legacy\), 4 failed, 0 unsupported/u);
+    assert.match(result.stderr, /public build pipeline.*exit 1/su);
+    assert.match(result.stdout, /Bundler checks: 1 same-runtime identity case; 4 diagnostic cases/u);
+  });
+});
+
+test('CLI labels malformed corpus as input metadata before any execution', () => {
+  withCorpus(({ root, tempRoot }) => {
+    addCase(root, 'a-valid', {
+      sources: { 'entry.js': `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(path.join(tempRoot, 'executed'))}, 'bad');` },
+    });
+    addCase(root, 'z-invalid', { entryPoints: [] });
+    const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
+    const result = spawnSync(process.execPath, [runner, root], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /INPUT metadata:.*entryPoints/su);
+    assert.match(result.stderr, /Caused by:/u);
     assert.deepEqual(readdirSync(tempRoot), []);
   });
 });

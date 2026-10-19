@@ -5,11 +5,12 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const defaultRoot = fileURLToPath(new URL('../fixtures/bundler/', import.meta.url));
 const requiredFields = ['id', 'moduleType', 'entryPoints', 'expectations', 'goals'];
 const defaultTempRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
+const defaultDriver = fileURLToPath(new URL(`../target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
@@ -47,7 +48,7 @@ function json(filename) {
   try {
     return JSON.parse(readFileSync(filename, 'utf8'));
   } catch (error) {
-    throw new Error(`Invalid JSON in ${filename}: ${error.message}`);
+    throw new Error(`Invalid JSON in ${filename}: ${error.message}`, { cause: error });
   }
 }
 
@@ -132,7 +133,7 @@ export function discoverCases(root = defaultRoot) {
       try {
         cases.push(validateCase(root, directory));
       } catch (error) {
-        throw new Error(`${directory}: ${error.message}`);
+        throw new Error(`${directory}: ${error.message}`, { cause: error });
       }
       return;
     }
@@ -167,7 +168,7 @@ export function managed(tempRoot, callback) {
 export function execute(command, args, cwd, timeoutMs = 5000, observation = false) {
   check(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'timeoutMs must be a positive integer');
   const env = { ...process.env };
-  for (const name of ['NODE_OPTIONS', 'NODE_PATH']) delete env[name];
+  for (const name of ['NODE_OPTIONS', 'NODE_PATH', 'FORCE_COLOR']) delete env[name];
   // Node forwards the parent's coverage path even when omitted from env.
   env.NODE_V8_COVERAGE = '';
   const result = spawnSync(command, args, {
@@ -252,26 +253,162 @@ export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 
   return { stdout, outcomes };
 }
 
-export function runFixtures(root = defaultRoot, { timeoutMs = 5000, tempRoot = defaultTempRoot } = {}) {
+export function buildProject(driver, root, entries, timeoutMs = 30000) {
+  assert(existsSync(driver), `Missing library driver; run cargo build -p bundler --example build (${driver})`);
+  const result = execute(driver, [root, path.join(root, '.bundler-output'), ...entries], root, timeoutMs);
+  const build = JSON.parse(successful(result, 'public build pipeline'));
+  assert.deepEqual(build.warnings, [], 'cache write warnings');
+  assert.deepEqual(build.publicationWarnings, [], 'publication warnings');
+  assert(['native', 'legacy'].includes(build.backend), 'driver must report its selected backend');
+  assert.equal(build.layout, build.backend === 'native' ? 'native-single-chunk-v1' : 'exact-root-set-chunks-v1',
+    'physical layout must match the reported backend');
+  for (const file of readdirSync(build.directory, { recursive: true, withFileTypes: true })) {
+    if (file.isDirectory()) continue;
+    assert(file.isFile(), 'generation contains a nonregular artifact');
+    assert(/\.(?:mjs|cjs)$/u.test(file.name), 'generation must contain executable JavaScript, not code JSON');
+    const source = readFileSync(path.join(file.parentPath, file.name), 'utf8');
+    assert(!/registerHooks|experimental-loader|good-fences:|new Function|eval\(/u.test(source),
+      'generated code must use the ordinary file loader');
+  }
+  for (const entry of entries) {
+    assert.equal(typeof build.entries[entry], 'string', 'missing generated entry file');
+    assert(build.entries[entry].startsWith(`${build.directory}${path.sep}`), 'entry escaped generation');
+    assert(existsSync(build.entries[entry]), 'generated entry file missing');
+  }
+  return build;
+}
+
+export function runFixtures(root = defaultRoot, {
+  driver = defaultDriver, timeoutMs = 5000, tempRoot = defaultTempRoot, unsupported = new Map(),
+} = {}) {
   check(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'timeoutMs must be a positive integer');
   // Validate the entire corpus before executing any third-party source.
-  const cases = discoverCases(root);
+  let cases;
+  try { cases = discoverCases(root); }
+  catch (cause) { throw new Error(`INPUT metadata: ${cause.message}`, { cause }); }
+  assert(unsupported instanceof Map, 'unsupported must map case IDs to explicit reasons');
+  for (const [id, reason] of unsupported) {
+    assert(cases.some(({ manifest }) => manifest.id === id), `unknown unsupported case: ${id}`);
+    assert.equal(typeof reason, 'string');
+    assert(reason.trim(), 'unsupported case needs a reason');
+  }
   return cases.map(({ manifest, files }) => managed(tempRoot, (directory) => {
-    copyCase(files, directory, manifest);
-    const entries = Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(directory, entry)]));
-    const { stdout } = observeEntries(manifest, entries, directory, timeoutMs);
-    return { id: manifest.id, stdout };
+    let stage = 'input';
+    let backend;
+    try {
+      const native = path.join(directory, 'native');
+      const source = path.join(directory, 'source');
+      copyCase(files, native, manifest);
+      const baseline = observeEntries(manifest,
+        Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
+        native, timeoutMs, 'source');
+      if (unsupported.has(manifest.id)) {
+        return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0 };
+      }
+      stage = 'build';
+      copyCase(files, source, manifest);
+      const build = buildProject(driver, source, manifest.entryPoints);
+      backend = build.backend;
+      stage = 'backend';
+      if (manifest.expectations.backend === 'native') {
+        assert.equal(backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
+      }
+      stage = 'output';
+      const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
+      assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
+      return { id: manifest.id, status: 'passed', backend, executions: manifest.entryPoints.length, stdout: baseline.stdout };
+    } catch (error) {
+      return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}), executions: 0, error };
+    }
   }));
+}
+
+function writeSources(root, sources) {
+  mkdirSync(root, { recursive: true });
+  for (const [name, source] of Object.entries(sources)) {
+    const filename = path.join(root, name);
+    mkdirSync(path.dirname(filename), { recursive: true });
+    writeFileSync(filename, source);
+  }
+}
+
+export function runBundlerCases({ driver = defaultDriver, tempRoot = defaultTempRoot } = {}) {
+  return managed(tempRoot, (directory) => {
+    const root = path.join(directory, 'identity');
+    writeSources(root, {
+      'a.mjs': "import shared from './shared.cjs'; export {shared}; export default shared; export const bump = shared.bump;",
+      'b.mjs': "export {default, shared, bump} from './a.mjs';",
+      'shared.cjs': "console.log('init'); const shared = {count: 0}; shared.bump = () => ++shared.count; module.exports = shared;",
+    });
+    const observation = `
+const [a,b] = await Promise.all([load('a.mjs'), load('b.mjs')]);
+console.log(a.shared === b.shared, a.bump === b.bump, a.shared.count, a === await load('a.mjs'));
+a.bump(); console.log(a.shared.count, b.shared.count);
+console.log(staticDefault === a.shared, staticNamed === a.shared, staticBump === a.bump);
+`;
+    const nativeDriver = path.join(root, 'native.mjs');
+    writeFileSync(nativeDriver, `import staticDefault, {shared as staticNamed, bump as staticBump} from './a.mjs'; const load = name => import('./' + name); ${observation}`);
+    const baseline = successful(execute(process.execPath, [nativeDriver], root), 'same-runtime native');
+    const build = buildProject(driver, root, ['a.mjs', 'b.mjs']);
+    const generatedDriver = path.join(root, 'observe.mjs');
+    const entries = Object.fromEntries(Object.entries(build.entries).map(([name, filename]) => [name, pathToFileURL(filename).href]));
+    writeFileSync(generatedDriver, `import staticDefault, {shared as staticNamed, bump as staticBump} from ${JSON.stringify(entries['a.mjs'])}; const entries = ${JSON.stringify(entries)}; const load = name => import(entries[name]); ${observation}`);
+    const actual = successful(execute(process.execPath, [generatedDriver], root), 'same-runtime emitted');
+    assert.equal(actual, baseline);
+    assert.equal(actual, 'init\ntrue true 0 true\n1 1\ntrue true true\n');
+
+    const diagnostics = [
+      ['nonliteral', { 'entry.mjs': "const name = './dep.mjs'; import(name);" }, /nonliteral|literal/iu],
+      ['external', { 'entry.mjs': "import 'node:fs';" }, /external.*explicit/iu],
+      ['require-async', {
+        'entry.cjs': "require('./async.mjs');",
+        'async.mjs': "await Promise.resolve(); export const value = 1;",
+      }, /require.*async|async.*require/isu],
+      ['typescript', { 'entry.ts': 'export const value: number = 1;', 'package.json': '{"type":"module"}' }, /JavaScript only|TS\/JSX/iu],
+    ];
+    for (const [name, sources, expected] of diagnostics) {
+      const project = path.join(directory, name);
+      writeSources(project, sources);
+      const result = execute(driver, [project, path.join(project, '.bundler-output'), Object.keys(sources)[0]], project, 30000);
+      assert.equal(result.status, 1, `${name}: diagnostic build unexpectedly passed`);
+      assert.match(result.stderr, expected, `${name}: wrong diagnostic: ${result.stderr}`);
+      assert.match(result.stderr, /entry\.(?:mjs|cjs|ts)/u, `${name}: missing source path`);
+      assert.match(result.stderr, /bytes \d+\.\.\d+/u, `${name}: missing source range`);
+      assert(!existsSync(path.join(project, '.bundler-output/.bundler-current.json')), `${name}: failed build published`);
+    }
+    return { identity: 1, diagnostics: diagnostics.length };
+  });
+}
+
+function diagnostic(error) {
+  return `${error.stack ?? error}${error.cause ? `\nCaused by: ${diagnostic(error.cause)}` : ''}`;
+}
+
+function report(result) {
+  const color = process.env.NO_COLOR === undefined
+    && (process.env.FORCE_COLOR === undefined ? process.stdout.isTTY : process.env.FORCE_COLOR !== '0');
+  const paint = (text, code) => color ? `\x1b[${code}m${text}\x1b[0m` : text;
+  const status = result.status === 'passed' ? paint('PASS', 32)
+    : result.status === 'failed' ? `${paint('FAIL', 31)} ${result.stage.toUpperCase()}` : 'UNSUPPORTED';
+  const backend = result.backend === 'legacy' ? paint('backend=legacy', 31) : `backend=${result.backend}`;
+  return `${status} ${result.id}${result.backend ? ` ${backend}` : ''}${result.reason ? `: ${result.reason}` : ''}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     check(process.argv.length <= 3, 'Usage: node scripts/bundler-fixtures.mjs [fixture-root]');
     const results = runFixtures(process.argv[2]);
-    results.forEach(({ id }) => console.log(`PASS baseline ${id}`));
-    console.log(`Validated ${results.length} runtime semantic contracts; no bundler conformance tested.`);
+    for (const result of results) {
+      console.log(report(result));
+      if (result.error) console.error(diagnostic(result.error));
+    }
+    const count = (status, backend) => results.filter((r) => r.status === status && (!backend || r.backend === backend)).length;
+    console.log(`Fixtures: ${count('passed')} passed (${count('passed', 'native')} native, ${count('passed', 'legacy')} legacy), ${count('failed')} failed, ${count('unsupported')} unsupported, ${results.reduce((n, r) => n + r.executions, 0)} emitted executions.`);
+    if (count('failed')) process.exitCode = 1;
+    const extra = runBundlerCases();
+    console.log(`Bundler checks: ${extra.identity} same-runtime identity case; ${extra.diagnostics} diagnostic cases.`);
   } catch (error) {
-    console.error(error.message);
+    console.error(`Runner error: ${diagnostic(error)}`);
     process.exitCode = 1;
   }
 }

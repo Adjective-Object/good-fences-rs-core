@@ -1,5 +1,24 @@
 # Incremental bundler implementation handoff
 
+## Current diversion: unified fixture runner
+
+On base `ec0a859`, `scripts/bundler-fixtures.mjs [fixture-root]` is now the only
+corpus CLI/API (`runFixtures`); the differential entrypoint is removed. It
+validates all metadata before execution, observes separate source/build copies,
+collects explicit input/build/backend/output failures, and never builds bad
+inputs. Expected errors remain normalized by name/code, not unstable stacks.
+The same CLI retains same-runtime identity and four source-range diagnostics.
+Release/CI run the corpus once; legacy passes remain visibly separate from native.
+PASS/FAIL and legacy backend tokens use TTY/default, FORCE_COLOR opt-in,
+NO_COLOR opt-out coloring; forced color is not inherited by child observations.
+
+Validation: 97 harness tests, public-driver build, 23 passing contracts / 28
+emitted executions (10 native / 13 legacy / zero unsupported), and
+`./scripts/spot-check` pass. No backend/gate, fixture/provenance/license or Rust
+implementation changes. No commit; independent review is required before
+committing or resuming native cross-chunk work. Earlier handoffs below are
+historical.
+
 ## Current diversion: reusable authored semantic fixtures
 
 Second harness-only increment is complete, uncommitted and ready for independent
