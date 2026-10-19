@@ -5,13 +5,20 @@
 - [ ] Symbol linker: effect-retention/order analysis delivered; checked canonical
   symbols, production import/export resolution reuse and capture-safe name
   allocation implemented and validated. Independent review still required;
-  direct lexical emission is not implemented.
+  the gated single-entry native lexical foundation is implemented.
+- [ ] Review the native foundation: synchronous acyclic ESM, one namespace
+  entry/root/group, direct bindings and explicit public aliases in `native.mjs`.
+  Public BuildSession/publication and the 64-star-chain benchmark use it.
+- [ ] Widen native emission to name-sensitive collisions/inference, default
+  expressions/anonymous declarations, read-only import writes and namespace
+  escapes before deleting their temporary legacy staging gates.
 - [ ] Scope-hoist direct bindings and native imports/exports across actual output
   chunks; public entry/export boundaries only, no forced root-set partition.
 - [ ] Integrate one opaque CJS segment and logical ESM facade per input into
   normal usage/link/grouping, not standalone native `.cjs` fallback files.
 - [ ] Remove legacy registrations/cells/aliases/watchers/generator dispatch,
-  capture cycles and ESM per-source facade families.
+  capture cycles and ESM per-source facade families, then delete the native
+  staging gate. It is not a permanent fallback or public feature flag.
 - [ ] Release after independent reviews, runtime/differential/invalidation gates
   and mandatory spot-check. Do not reuse historical completion claims below.
 

@@ -10,7 +10,8 @@ Replace the linker entirely, in independently reviewed committable increments:
    order-only SCCs deterministically with public warnings; then link direct
    lexical identities without runtime cells/aliases. Effect analysis is delivered;
    checked canonical symbol planning and production resolution reuse are now
-   implemented for independent review. Direct lexical emission remains pending.
+   implemented. A gated single-entry native concatenation foundation now emits
+   direct lexical bindings for independent review; general emission is pending.
 2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
    preserve observable effects/activation and native binding/TDZ semantics.
    Native imports/exports cross actual output chunks only. Public entry/export
@@ -24,13 +25,15 @@ Replace the linker entirely, in independently reviewed committable increments:
 5. **Release:** independent reviews, runtime/differential regressions, incremental
    invalidation/determinism and mandatory spot-check before release evidence.
 
-The current increment adds canonical owned binding identities, retained checked
-import/export routes and deterministic capture-safe lexical name allocation.
-Names remain metadata, separate from observable source names; typed boundary
-values are not guessed lexical IDs. The existing emitter consumes canonical
-resolution but remains active; this is not completed direct lexical linking or
-scope hoisting. Order-cycle policy applies to planning, not suppressed binding
-errors or a claim that the legacy runtime already uses the new order.
+The current increment uses canonical symbols for real `native.mjs` emission on
+one synchronous acyclic ESM namespace-entry tree. Direct binding substitutions,
+static dependency/source order and exact entry export aliases are production
+paths, not an unused utility. Name-sensitive substitutions, default expressions,
+namespace boundaries, cycles, multiple roots and async/CJS remain explicitly
+staged on the legacy emitter. The crate README defines the precise gate.
+This is not completed general linking/scope hoisting or legacy removal.
+Order-cycle policy remains planning, not suppressed binding errors; the native
+slice uses source-ordered static DFS, not the scalar effect DAG as a scheduler.
 
 ## Rejected architecture, still-current legacy implementation: physical exact-set linker
 

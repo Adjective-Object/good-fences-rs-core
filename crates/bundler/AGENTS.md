@@ -35,6 +35,8 @@ and capture-cycle backend with a symbol linker and scope-hoisted direct ESM
 bindings. Use native imports/exports across actual output chunks, not per-source
 facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
+Artifact ownership names actual executable files; merged private sources have
+no independently executable namespace path in `Artifacts::modules`.
 Pure segments can relocate by binding dependencies. Effect retention is distinct
 from scheduling and neither is a binding edge. Project through pure/static-import
 connectors before pruning to effects; deterministically break order-only SCCs

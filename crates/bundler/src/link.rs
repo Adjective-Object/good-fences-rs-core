@@ -1,4 +1,4 @@
-//! Exact root-set physical chunks with separately scheduled module evaluation.
+//! Staged native ESM concatenation and the pending-replacement legacy emitter.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -12,6 +12,8 @@ use source_graph::{DependencyTarget, GraphNode, SegmentKey, SourceGraph};
 use crate::chunks::{AsyncSiteId, ChunkId, ChunkPlan, NodeId, RootId};
 use crate::manifest::{diagnostic_manifest, DiagnosticManifest};
 use crate::policy::EffectPolicy;
+#[path = "native.rs"]
+mod native;
 #[path = "physical.rs"]
 mod physical;
 
@@ -21,17 +23,18 @@ mod tests;
 
 /// Owned staging result; no filesystem writes. Publish the complete relative
 /// map together and execute/import `entries` with Node's ordinary loader.
-/// Each retained node belongs to exactly one executable root-set chunk.
+/// Each retained node has one actual executable chunk owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifacts {
     pub files: BTreeMap<PathBuf, String>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
-    /// Source identities to canonical executable relative paths.
+    /// Independently executable source namespaces to relative paths.
+    /// Merged private native sources have owners in `members`, not facade paths.
     pub modules: BTreeMap<PathBuf, PathBuf>,
-    /// Exact node ownership; only nodes with equal root sets share a file.
+    /// Actual executable ownership (native chunk or legacy registration chunk).
     pub members: BTreeMap<NodeId, PathBuf>,
-    /// One distinct executable file per exact nonempty root set.
+    /// Actual executable files implementing each logical chunk.
     pub chunk_artifacts: BTreeMap<ChunkId, BTreeSet<PathBuf>>,
     pub manifest: DiagnosticManifest,
     /// CJS identity -> native ESM proxy file and its static snapshot surface.
@@ -52,7 +55,7 @@ struct Module<'a> {
     surface: BTreeSet<String>,
 }
 
-/// Emit registered syntax into exact chunks, with independent module facades.
+/// Emit a native concatenation when eligible, otherwise staged legacy chunks.
 pub fn esm(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -100,6 +103,9 @@ pub(crate) fn esm_with_source_checker(
     let symbols = crate::symbols::Symbols::link(graph, plan)?;
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
+    }
+    if let Some(output) = native::emit(graph, plan, &modules, &manifest, &symbols)? {
+        return Ok(output);
     }
     physical::emit(graph, plan, modules, manifest, &symbols)
 }

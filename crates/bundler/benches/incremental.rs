@@ -27,12 +27,13 @@ fn run(session: &mut BuildSession, options: &BuildOptions, output: &Path) -> eyr
         published.warnings
     );
     let artifacts = &build.product.artifacts;
-    assert_eq!(artifacts.modules.len(), MODULES + 2);
+    assert_eq!(artifacts.modules.len(), 1);
     assert_eq!(build.product.plan.chunks.len(), 1);
-    assert_eq!(artifacts.files.len(), 5 * (MODULES + 2) + 2);
+    assert_eq!(artifacts.entries["main"], Path::new("native.mjs"));
+    assert_eq!(artifacts.files.len(), 1);
     assert_eq!(
         build.counters.output_parses,
-        build.counters.emissions * 2 * (MODULES + 2 + artifacts.files.len()),
+        build.counters.emissions * (2 * (MODULES + 2) + 2),
     );
     assert_eq!(
         published.files_written,

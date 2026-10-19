@@ -1,5 +1,5 @@
 //! Checked byte edits against original UTF-8 source, followed by JS validation.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ast_segmenter::owned::{BindingId, ExportValue};
@@ -196,11 +196,7 @@ pub fn rename_private(
             .collect();
         for (start, end) in spans {
             let span = Span::new(start, end);
-            let replacement = if shorthand.0.contains(&start) {
-                format!("{}: {name}", &source[start as usize..end as usize])
-            } else {
-                name.clone()
-            };
+            let replacement = shorthand.replacement(source, span, name);
             edits.push(Edit { span, replacement });
         }
     }
@@ -210,27 +206,44 @@ pub fn rename_private(
 }
 
 #[derive(Default)]
-struct Shorthand(BTreeSet<u32>);
+pub(crate) struct Shorthand(BTreeMap<u32, bool>);
+
+impl Shorthand {
+    pub(crate) fn replacement(&self, source: &str, span: Span, name: &str) -> String {
+        match self.0.get(&span.start) {
+            // Only an object literal's noncomputed __proto__ key is a setter.
+            Some(true) => format!("[\"__proto__\"]: {name}"),
+            Some(false) => format!(
+                "{}: {name}",
+                &source[span.start as usize..span.end as usize]
+            ),
+            None => name.to_owned(),
+        }
+    }
+}
 
 impl<'a> Visit<'a> for Shorthand {
     fn visit_assignment_target_property_identifier(
         &mut self,
         property: &AssignmentTargetPropertyIdentifier<'a>,
     ) {
-        self.0.insert(property.binding.span.start);
+        self.0.insert(property.binding.span.start, false);
         walk::walk_assignment_target_property_identifier(self, property);
     }
 
     fn visit_object_property(&mut self, property: &ObjectProperty<'a>) {
         if property.shorthand {
-            self.0.insert(property.value.span().start);
+            self.0.insert(
+                property.value.span().start,
+                matches!(&property.key, PropertyKey::StaticIdentifier(key) if key.name == "__proto__"),
+            );
         }
         walk::walk_object_property(self, property);
     }
 
     fn visit_binding_property(&mut self, property: &BindingProperty<'a>) {
         if property.shorthand {
-            self.0.insert(property.value.span().start);
+            self.0.insert(property.value.span().start, false);
         }
         walk::walk_binding_property(self, property);
     }
@@ -303,6 +316,18 @@ mod tests {
             output,
             "let renamed; ({x: renamed = 1} = {}); globalThis.result = renamed;"
         );
+    }
+
+    #[test]
+    fn proto_shorthand_uses_computed_keys_only_in_object_literals() {
+        let source = "let {__proto__ = null} = {}; ({__proto__ = 4} = {}); console.log({__proto__, nested: {__proto__}, __proto__: __proto__});";
+        let output = rename_private(
+            Path::new("input.mjs"),
+            source,
+            &[(BindingId(5), "renamed".into())],
+        )
+        .unwrap();
+        insta::assert_snapshot!(output, @r#"let {__proto__: renamed = null} = {}; ({__proto__: renamed = 4} = {}); console.log({["__proto__"]: renamed, nested: {["__proto__"]: renamed}, __proto__: renamed});"#);
     }
 
     #[test]

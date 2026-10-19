@@ -16,17 +16,48 @@ The internal `symbols::Symbols::link` increment now builds checked canonical
 resolver. Production surface construction and legacy import/export emission reuse
 that plan, preserving intermediate barrels and every retained var declaration.
 Lexical names are allocated in path/declaration order, avoiding nested bindings,
-free references, keywords and helpers. Allocated names are not source rewrites:
-original observable function/class/inferred names remain separate. Namespace,
+free references, keywords and helpers. Observable function/class/inferred names
+remain separate from those allocations. Namespace,
 default-expression/anonymous-declaration and opaque CJS values retain typed graph
 identities, not invented lexical binding IDs; checked syntax still owns default
 hoisting/initialization semantics. No public product field or dependency was added.
-Independent review, direct lexical emission, scope hoisting, CJS integration and
-removal of the legacy backend remain pending.
+The native foundation below is implemented for independent review, not completion
+of scope hoisting, CJS integration or removal of the legacy backend.
+
+## Staged native foundation
+
+`link::esm` (including public `BuildSession` and publication) emits **one
+`native.mjs`** for a single namespace entry/evaluation root whose retained static
+dependency tree is synchronous, acyclic and ESM-only. Named/default binding
+imports and reexports, including pure star barrels, become direct canonical
+lexical references. Public names are explicit output export aliases; private
+exports and import declarations disappear. Declarations, all retained var
+contributions and statements stay in source order within dependency-first
+static-import DFS order, never path-sorted body order. PURE recipes compose before
+owned occurrences are re-extracted and checked OXC-aware edits are applied.
+Shorthand keys, free globals, nested shadows, hoisting, strict-module `this`,
+TDZ, const and live mutation keep native semantics. The output is parser/semantic
+validated and has no runtime, cells, registrations or per-module facade family.
+
+This is an explicit **temporary staging gate**, not a permanent fallback or an
+option. Multiple roots, cycles, async/CJS/nonstatic dependencies, namespace
+imports/reexports and default expressions/anonymous default declarations still
+use the legacy emitter. So do import writes (never rewritten into defining
+mutable bindings), renamed function/class declarations, and conservatively any
+anonymous function/class/arrow syntax in a module with lexical substitutions:
+allocated identifiers must not change observable explicit/inferred `.name`.
+Named default function/class declarations and default binding aliases are eligible
+when their source names need no change. No unported case silently loses exports.
+Port these boundaries incrementally, then delete the gate and legacy emitter.
+
+`members`/`chunk_artifacts` point to the real native file for this one-group case;
+the logical manifest remains reachability analysis. `modules` contains only the
+entry's independently executable namespace, not fake paths for merged private
+modules. The 64-star-chain benchmark now asserts this actual one-file path.
 
 ## Current legacy exact physical code splitting
 
-The active `link::esm` backend now emits exact physical root-set registrations,
+Builds outside the native staging gate still emit exact root-set registrations,
 not overlapping projections of original module files:
 
 - `chunks/<root-set-sha256>.cjs` owns every assigned real/synthetic node exactly
@@ -275,40 +306,38 @@ outside the timed section. “Cold” means no source sidecars/session/output,
 **not** flushed OS caches. Warm output already exists. Source/derived caches are
 not faked; assertions verify actual public counters.
 
-Measured on Linux 7.2.8 x86_64, AMD Ryzen 7 7840U (8 cores / 16 threads),
+Native-foundation measurement on Linux 7.2.8 x86_64, AMD Ryzen 7 7840U (8 cores / 16 threads),
 Rust `1.97.0-nightly (f53b654a8 2026-04-30)`, Cargo `1.97.0-nightly`, bench
 profile optimized + debuginfo; Node conformance runtime v22.22.2:
 
 | Scenario | Median total ms | Min–max ms | Build portion at median ms |
 | --- | ---: | ---: | ---: |
-| Cold | 802.276 | 715.168–1473.700 | 491.209 |
-| Warm | 448.768 | 411.343–670.102 | 431.694 |
-| No-op | 19.123 | 17.035–24.241 | 3.776 |
-| Local edit | 747.366 | 676.679–1229.383 | 409.596 |
-| Export edit | 998.810 | 735.682–1418.569 | 437.990 |
-| Config edit | 753.231 | 719.519–1488.632 | 447.475 |
+| Cold | 97.230 | 94.729–123.469 | 95.093 |
+| Warm | 44.694 | 43.715–46.573 | 44.488 |
+| No-op | 3.155 | 3.100–3.529 | 3.021 |
+| Local edit | 44.202 | 42.687–47.773 | 42.153 |
+| Export edit | 44.009 | 43.553–45.234 | 42.256 |
+| Config edit | 45.975 | 44.942–48.506 | 43.573 |
 
 | Scenario | Source parses | Resolutions | Link calls | Output/recipe parses | Artifact writes |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Cold | 66 | 65 | 1 | 796 | 332 |
-| Warm | 0 | 65 | 1 | 796 | 0 |
+| Cold | 66 | 65 | 1 | 134 | 1 |
+| Warm | 0 | 65 | 1 | 134 | 0 |
 | No-op | 0 | 0 | 0 | 0 | 0 |
-| Local edit | 1 | 1 | 1 | 796 | 332 |
-| Export edit | 1 | 0 | 1 | 796 | 332 |
-| Config edit | 1 | 65 | 1 | 796 | 332 |
+| Local edit | 1 | 1 | 1 | 134 | 1 |
+| Export edit | 1 | 0 | 1 | 134 | 1 |
+| Config edit | 1 | 65 | 1 | 134 | 1 |
 
 Warm has 66 disk hits; no-op has 66 memory hits; each edit has 65 memory hits.
 Artifact writes count actual staged files, excluding atomic pointer metadata.
-These measurements replace the per-original-module baseline. This single-root
-fixture has **one exact body chunk and 332 total files**: five body-free native
-facades per source, the chunk and runtime. Changes stage a complete immutable
-generation, not just the changed file. Each ESM module has two lowering parses;
-each generated file has source-hint and validation scans: 2 × (66 + 332) = 796.
-This correctness-first layout has materially higher file/validation overhead
-than the old native-module baseline; no speed improvement is claimed.
+This eligible single-root fixture has **one native chunk and one total file**,
+not 332 legacy registration/facade/runtime files. Changes still stage a complete
+immutable generation. Each reached module has owned-occurrence and syntax parses;
+the one output has source-hint and validation scans: 2 × 66 + 2 = 134.
+The measurements apply only to this gated native slice, not unported legacy cases.
 Cached source-fact reuse still avoids redundant emitter source re-extraction.
 No timing improvement percentage is inferred from these small hardware-dependent
-samples. Evidence: `target/physical-bench.log` (not a committed artifact).
+samples. Evidence: `target/native-bench.log` (not a committed artifact).
 
 This is a correctness-first baseline, not fine-grained later-layer incrementality:
 config changes re-resolve all requests and any derived key change rebuilds the

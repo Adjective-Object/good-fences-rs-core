@@ -139,9 +139,11 @@ P1–P5 now provide owned/cacheable facts, the shared typed graph, effect retent
 exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
 The target is scope-hoisted direct ESM bindings with native cross-chunk links.
-Checked canonical symbol planning now feeds production import/export resolution;
-generated lexical names are planned, not yet emitted. The following physical
-backend remains active legacy, pending staged replacement and independent review.
+Checked canonical symbols now feed a staged single-entry native concatenator:
+eligible synchronous acyclic ESM builds emit one ordinary lexical `native.mjs`.
+The precise temporary gate and remaining name-sensitive/default/namespace cases
+are documented in the crate README. Other builds still use the following legacy
+physical backend, pending staged replacement and independent review.
 The physical-linker work now places executable registrations in exact root-set
 `.cjs` chunks, with separate native ESM storage/evaluation facades and a real
 JavaScript binding/factory runtime. No loader hooks or executable source payloads

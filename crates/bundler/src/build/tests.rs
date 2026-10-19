@@ -224,6 +224,11 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     assert_eq!(cold.counters.source_parses, 2);
     assert_eq!(cold.counters.resolutions, 1);
     assert_eq!(cold.counters.emissions, 1);
+    assert_eq!(
+        cold.product.artifacts.entries["main"],
+        Path::new("native.mjs")
+    );
+    assert_eq!(cold.product.artifacts.files.len(), 1);
     assert_eq!(observe(&cold.product.artifacts), b"1\n");
     let same = parity(&mut session, &options);
     assert_eq!(same.counters.source_parses, 0);
@@ -266,6 +271,11 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     );
     options.entries.get_mut("main").unwrap().namespace = false;
     let roots = parity(&mut session, &options);
+    assert!(roots
+        .product
+        .artifacts
+        .files
+        .contains_key(Path::new("runtime.cjs")));
     assert_eq!(roots.counters.source_parses, 0);
     assert_eq!(roots.counters.resolutions, 0);
     assert_eq!(

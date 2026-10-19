@@ -1,6 +1,61 @@
 # Incremental bundler implementation handoff
 
-## Current replacement increment: canonical symbols, not direct lexical emission
+## Current replacement increment: staged native lexical foundation
+
+`link::esm_with_source_checker` tries `native::emit` after constructing checked
+`Symbols`. The native gate requires one namespace entry/evaluation root and one
+group, only synchronous static ESM dependencies and an acyclic source-order DFS.
+The DFS walks dependency occurrences (including pure connectors), not sorted
+module paths or scalar effect-order output. Retained statements remain in source
+order; PURE recipes run before fresh owned occurrences reconnect by module-local
+source name to canonical IDs. Checked byte edits strip intra-chunk imports/
+exports, substitute direct bindings, preserve semantic shorthand keys, and emit
+only explicit public-entry export aliases. The one real `native.mjs` is the
+entry/member/chunk artifact; private merged modules do not pretend to have
+independent namespace artifacts. BuildSession fingerprints include `native.rs`.
+
+This is deliberately smaller than the whole native backend. All multiple-root,
+async/CJS/nonstatic, namespace and cycle cases are explicitly staged on legacy.
+Default expressions/anonymous default declarations, import writes, renamed
+function/class declarations, and anonymous function/class/arrow syntax alongside
+substitutions also remain staged to avoid changing `.name` or import immutability.
+Named default declarations and binding aliases are native when source names
+remain unchanged. Gate widening and eventual gate/legacy deletion are active
+TODOs, not a permanent fallback/flag. Existing legacy layout tests are unchanged;
+new native structure checks assert actual one-file output and Node observations.
+The benchmark now requires native eligibility rather than accepting 332 facade
+files. No commit/push; independent review remains required.
+
+Review follow-up fixes only ASI boundaries and `__proto__` shorthand expansion.
+Retained top-level segments are separated before reparsing; removed whole
+import/reexport declarations leave empty statements. Final module separators
+remain outside source/hashbang/comments. Native and private lexical renaming
+share AST-context shorthand edits: only object-literal `__proto__` needs a
+computed key, never binding/assignment patterns or explicit prototype setters.
+Node regressions failed before the fixes (including independent dead/PURE
+removal probes) and now pass, including escaped identifiers and module ends.
+Follow-up validation: all 139 bundler tests, 12 native / 12 differential
+contracts (15 executions each), 12 differential harness tests, format check,
+all-target bundler clippy and mandatory spot-check. Existing dependency/workspace
+warnings remain. Logs: `target/native-review-{red,dead-red,green,tests,contracts,fmt,clippy,spot-check}.log`.
+The staging gate and legacy backend are unchanged; no benchmark rerun.
+
+Validation: all 132 bundler tests; real Node/native comparisons for direct live
+bindings/aliases, redeclarations/hoisting, nested/free capture, shorthand keys,
+source effect order, public names and lexical TDZ/const errors; explicit staging
+name/import-write probes; format check and all-target bundler clippy (clean for
+bundler); 12 native contracts / 15 executions and 12 public differential
+contracts / 15 emitted executions plus same-runtime identity and four diagnostics;
+mandatory `./scripts/spot-check` (51 parser tests and workspace check).
+The seven-sample 66-source public-build/publication benchmark asserts one
+`native.mjs`, one namespace artifact and 134 generated-output parses per emission.
+Cold/warm median total time: 97.230/44.694 ms; no-op 3.155 ms, zero parses/writes.
+This is hardware-dependent evidence for the eligible slice, not a release claim
+for the unfinished native backend. Commands used `TMPDIR=$PWD/target/p1-test-tmp`;
+logs are `target/native-{tests,fmt,clippy,fixtures,differential,spot-check,bench}.log`.
+Existing dependency/workspace warnings remain; no full workspace test claim.
+
+## Prior replacement increment: canonical symbols, not direct lexical emission
 
 Recovered and integrated the interrupted uncommitted symbol work.
 `symbols::Symbols::link(graph, plan)` is an internal checked plan:
