@@ -21,6 +21,8 @@ The flag also works with a custom fixture root. Each `OUTPUT <case>: <directory>
 line identifies `<group>/<case>/outputs/`, beside that case's `files/` directory.
 It contains only the emitted files with their exact contents and relative paths:
 no copied inputs, observation drivers, publication metadata or generation wrapper.
+Entry filenames match the manifest's entry paths. Outputs named `.js` include
+the bundler's generated `package.json` module-type declaration.
 These directories are gitignored and replaced on each retained run. A failed
 input/build leaves no outputs; a successful build is retained even if backend or
 runtime checks fail. Temporary workspaces and auxiliary checks are always cleaned

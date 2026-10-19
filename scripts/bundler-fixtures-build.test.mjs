@@ -54,8 +54,8 @@ test('retained outputs are exact executable artifacts, including on runtime fail
   withCorpus("console.log('hello');", ({ run, caseDir }) => {
     const [pass] = run({ keepOutput: true });
     assert.equal(pass.directory, path.join(caseDir, 'outputs'));
-    assert.deepEqual(readdirSync(pass.directory), ['native.mjs']);
-    const observed = execute(process.execPath, [path.join(pass.directory, 'native.mjs')], pass.directory);
+    assert.deepEqual(readdirSync(pass.directory), ['entry.js', 'package.json']);
+    const observed = execute(process.execPath, [path.join(pass.directory, 'entry.js')], pass.directory);
     assert.equal(observed.status, 0, observed.stderr);
     assert.equal(observed.stdout, 'hello\n');
   });
@@ -63,8 +63,8 @@ test('retained outputs are exact executable artifacts, including on runtime fail
   withCorpus(source, ({ run, caseDir }) => {
     const failure = assertFailure(run, 'output', /bundled stdout mismatch/u, { keepOutput: true });
     assert.equal(failure.directory, path.join(caseDir, 'outputs'));
-    assert.deepEqual(readdirSync(failure.directory), ['native.mjs']);
-    assert(readFileSync(path.join(failure.directory, 'native.mjs'), 'utf8').includes(source));
+    assert.deepEqual(readdirSync(failure.directory), ['entry.js', 'package.json']);
+    assert(readFileSync(path.join(failure.directory, 'entry.js'), 'utf8').includes(source));
   });
 });
 

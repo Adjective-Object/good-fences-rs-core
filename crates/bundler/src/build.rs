@@ -24,15 +24,21 @@ use crate::{
     policy::EffectPolicy,
 };
 
+#[path = "entry_outputs.rs"]
+mod entry_outputs;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub path: PathBuf,
+    /// Relative output path; None preserves the source path within the project.
+    pub output_name: Option<PathBuf>,
     /// Retain the public namespace, rather than evaluation alone.
     pub namespace: bool,
 }
 
 #[derive(Clone)]
 pub struct BuildOptions {
+    /// Logical entry IDs mapped to source entries and optional output names.
     pub entries: BTreeMap<String, Entry>,
     pub resolver: NodeModulesResolverOptions,
     pub externals: BTreeSet<String>,
@@ -344,6 +350,7 @@ impl BuildSession {
         let emitter = hash(
             concat!(
                 include_str!("link.rs"),
+                include_str!("entry_outputs.rs"),
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
                 include_str!("native_chunks.rs"),
@@ -357,7 +364,8 @@ impl BuildSession {
             )
             .as_bytes(),
         );
-        fingerprints.output = hash(format!("{fingerprints:?}:{emitter:?}").as_bytes());
+        fingerprints.output =
+            hash(format!("{fingerprints:?}:{emitter:?}:{:?}", options.entries).as_bytes());
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &sources, &inventory)?;
@@ -394,7 +402,7 @@ impl BuildSession {
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let before = crate::rewrite::output_parse_count();
-        let artifacts = link::esm_with_source_checker(
+        let mut artifacts = link::esm_with_source_checker(
             &graph,
             &plan,
             &options.effects,
@@ -428,6 +436,7 @@ impl BuildSession {
                 })
             },
         )?;
+        entry_outputs::apply(&self.root, options, &mut artifacts)?;
         Self::recheck(&self.root, &sources, &inventory)?;
         counters.emissions = 1;
         counters.output_parses = crate::rewrite::output_parse_count() - before;

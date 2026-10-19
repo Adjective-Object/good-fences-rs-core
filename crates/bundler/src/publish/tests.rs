@@ -1,5 +1,6 @@
 use super::*;
 use crate::build::Entry;
+use std::process::Command;
 use test_tmpdir::TmpDir;
 
 fn fixture() -> (TmpDir, BuildSession, BuildOptions) {
@@ -16,6 +17,7 @@ fn fixture() -> (TmpDir, BuildSession, BuildOptions) {
             "main".into(),
             Entry {
                 path: "main.mjs".into(),
+                output_name: None,
                 namespace: true,
             },
         )]),
@@ -48,6 +50,63 @@ fn snapshot(directory: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTi
     }
     visit(directory, directory, &mut result);
     result
+}
+
+#[test]
+fn named_js_entries_publish_with_owned_module_type_metadata() {
+    for (input, source, format) in [
+        (
+            "entry.mjs",
+            "export const value = 1; console.log(value);",
+            "module",
+        ),
+        (
+            "entry.cjs",
+            "exports.value = 1; console.log(exports.value);",
+            "commonjs",
+        ),
+    ] {
+        let (dir, mut session, mut options) = fixture();
+        fs::write(dir.root().join(input), source).unwrap();
+        options.entries = BTreeMap::from([(
+            "app.js".into(),
+            Entry {
+                path: input.into(),
+                output_name: Some("app.js".into()),
+                namespace: true,
+            },
+        )]);
+        let (build, published) = session
+            .build_and_publish(
+                &options,
+                &dir.root().join(".bundler-output"),
+                &Cancellation::default(),
+            )
+            .unwrap();
+        assert!(published.entries["app.js"].ends_with("app.js"));
+        assert_eq!(
+            fs::read_to_string(published.directory.join("package.json")).unwrap(),
+            format!("{{\"type\":\"{format}\"}}\n"),
+        );
+        let actual = Command::new("node")
+            .arg(&published.entries["app.js"])
+            .env_remove("NODE_OPTIONS")
+            .env_remove("NODE_PATH")
+            .output()
+            .unwrap();
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, b"1\n");
+        let mut invalid = build.product.artifacts.clone();
+        invalid.files.remove(Path::new("package.json"));
+        assert!(validate_artifacts(&invalid)
+            .unwrap_err()
+            .to_string()
+            .contains("module type metadata"));
+    }
 }
 
 #[test]

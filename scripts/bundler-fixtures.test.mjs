@@ -154,6 +154,28 @@ test('output directory symlinks are rejected without changing their targets', ()
   });
 });
 
+test('generated package metadata only declares a module format, never executable payloads', () => {
+  withCorpus(({ root, run, driver }) => {
+    addCase(root);
+    const original = readFileSync(driver, 'utf8');
+    for (const [metadata, valid] of [
+      [{ type: 'module' }, true],
+      [{ type: 'commonjs' }, true],
+      [{ type: 'unknown' }, false],
+      [{ type: 'module', code: 'console.log("hello")' }, false],
+    ]) {
+      writeFileSync(driver, original.replace('const entries =',
+        `writeFileSync(path.join(directory, 'package.json'), ${JSON.stringify(JSON.stringify(metadata))});\nconst entries =`));
+      const [result] = run();
+      assert.equal(result.status, valid ? 'passed' : 'failed');
+      if (!valid) {
+        assert.equal(result.stage, 'build');
+        assert.match(result.error.message, /generated package.json/u);
+      }
+    }
+  });
+});
+
 test('entrypoints run separately in manifest order with exact concatenated lines', () => {
   withCorpus(({ root, run }) => {
     addCase(root, 'multi', {
@@ -593,7 +615,7 @@ test('CLI keep-output flag prints exact adjacent bundle paths without retaining 
       assert.deepEqual(outputs.map((match) => [match[1], match[2]]),
         [['synthetic/z-success', path.join(goodCase, 'outputs')]]);
       assert(!existsSync(path.join(badCase, 'outputs')));
-      assert.deepEqual(readdirSync(path.join(goodCase, 'outputs')), ['native.mjs']);
+      assert.deepEqual(readdirSync(path.join(goodCase, 'outputs')), ['entry.js', 'package.json']);
     }
     const invalid = spawnSync(process.execPath, [runner, '--keep-output', '--unknown', root], { encoding: 'utf8' });
     assert.equal(invalid.status, 1);

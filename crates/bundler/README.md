@@ -26,8 +26,8 @@ The native-only cutover is implemented for independent review before committing.
 
 ## Native ESM chunks
 
-`link::esm` (including public `BuildSession` and publication) emits **one
-`native.mjs`** for a single namespace entry/evaluation root whose retained static
+Low-level `link::esm` emits **one `native.mjs`** for a single namespace
+entry/evaluation root whose retained static
 dependency tree is synchronous, acyclic and ESM-only. Named/default binding
 imports and reexports, including pure star barrels, become direct canonical
 lexical references. Default expressions have private snapshot bindings, while
@@ -45,6 +45,33 @@ owned occurrences are re-extracted and checked OXC-aware edits are applied.
 Shorthand keys, free globals, nested shadows, hoisting, strict-module `this`,
 TDZ, const and live mutation keep native semantics. The output is parser/semantic
 validated and has no runtime, cells, registrations or per-module facade family.
+
+Public `BuildOptions.entries` keys are logical IDs. `Entry.output_name` is an
+optional relative output name/path supplied by the build config. When omitted,
+the output preserves the canonical source path relative to the project root:
+input `"./entry.mjs"` emits `entry.mjs`, regardless of its entry ID.
+`output_name: Some("appstart".into())` emits `appstart.mjs` for that input;
+`Some("app/start.mjs".into())` preserves the nested output path. Missing extensions inherit supported
+input `.mjs`/`.cjs`/`.js` extensions, otherwise the emitted ESM/CJS format.
+Explicit extensions must match that format (`.js` supports either format through
+a generated `package.json` in its output directory; conflicting `.js` formats
+in one directory are rejected).
+Absolute, traversing, reserved, nonportable, file/directory-colliding and
+generated-artifact-colliding output paths are errors.
+
+`BuildSession` renames the actual canonical entry chunks and all their generated
+relative requests and artifact metadata, including on cached builds and
+publication. A single `.mjs` entry remains one file, not a wrapper plus
+`native.mjs`. Static and dynamic imports still target that same canonical native
+namespace. Logical aliases with the same output path share that canonical file.
+When several explicitly named entries request distinct paths for one namespace, the first key in
+sorted order names its canonical chunk; the other requested files are native
+reexport boundaries (forwarding default and live exports), not additional
+executions of its body. Their namespace objects are distinct, as with ordinary
+ESM reexports; internal dynamic imports retain canonical namespace identity.
+CJS aliases forward the canonical wrapper's current exports, including
+reassignment and accessors. Published generation directories do not change these
+relative entry names. Low-level `RootId` labels retain their existing contracts.
 
 Checked dot-property reads of namespace imports (including namespace reexport
 aliases) resolve directly to canonical live values when the whole graph can
@@ -119,7 +146,7 @@ CJS factories. `async_facades` maps reached source sites to their canonical
 target chunks (CJS targets use the canonical runtime-key bridge job);
 `async_modules` reports source paths with transitive static async status.
 The 66-source star-chain benchmark
-still asserts one ordinary `native.mjs`, without runtime/helpers.
+still asserts one ordinary public `main.mjs`, without runtime/helpers.
 
 ## Retention
 
@@ -216,7 +243,7 @@ use bundler::build::{BuildOptions, BuildSession, Entry};
 let mut session = BuildSession::new("project")?;
 let mut options = BuildOptions::default();
 options.entries.insert("main".into(), Entry {
-    path: "src/main.mjs".into(), namespace: true,
+    path: "src/main.mjs".into(), output_name: None, namespace: true,
 });
 let result = session.build(&options)?;
 let artifacts = &result.product.artifacts;
@@ -274,7 +301,7 @@ transfer them between generations or independent sessions.
 use bundler::{build::{BuildOptions, BuildSession, Entry}, publish::{Cancellation, current_directory, prune_stale}};
 let mut session = BuildSession::new("project")?;
 let mut options = BuildOptions::default();
-options.entries.insert("main".into(), Entry { path: "main.mjs".into(), namespace: true });
+options.entries.insert("main".into(), Entry { path: "main.mjs".into(), output_name: None, namespace: true });
 let output = session.root().join(".bundler-output");
 let (build, published) = session.build_and_publish(&options, &output, &Cancellation::default())?;
 for warning in build.warnings.iter().chain(&published.warnings) { eprintln!("{warning}"); }
@@ -401,6 +428,9 @@ This eligible single-root fixture has **one native chunk and one total file**.
 Changes still stage a complete
 immutable generation. Each reached module has owned-occurrence and syntax parses;
 the one output has source-hint and validation scans: 2 × 66 + 2 = 134.
+Those cutover measurements predate entry-output naming. The current public
+pipeline adds one request-rewrite scan: 135 output parses per changed build,
+still zero on no-op and one emitted file named `main.mjs`.
 The measurements apply only to this synchronous ESM benchmark, not every graph shape.
 Cached source-fact reuse still avoids redundant emitter source re-extraction.
 No timing improvement percentage is inferred from these small hardware-dependent

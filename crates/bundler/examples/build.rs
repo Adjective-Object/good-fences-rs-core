@@ -27,6 +27,7 @@ fn main() -> eyre::Result<()> {
             name,
             Entry {
                 path,
+                output_name: None,
                 namespace: true,
             },
         );

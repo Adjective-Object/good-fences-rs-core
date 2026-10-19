@@ -164,10 +164,31 @@ fn validate_artifacts(artifacts: &Artifacts) -> eyre::Result<()> {
     {
         ensure!(
             artifacts.files.contains_key(path)
-                && path.extension().is_some_and(|e| e == "mjs" || e == "cjs"),
+                && path
+                    .extension()
+                    .is_some_and(|e| e == "mjs" || e == "cjs" || e == "js"),
             "module route is not an owned executable JavaScript file: {}",
             path.display()
         );
+        if path.extension().is_some_and(|e| e == "js") {
+            let package = path.parent().unwrap().join("package.json");
+            let metadata: serde_json::Value =
+                serde_json::from_str(artifacts.files.get(&package).ok_or_else(|| {
+                    eyre::eyre!(
+                        "JavaScript module route requires owned module type metadata: {}",
+                        path.display()
+                    )
+                })?)?;
+            ensure!(
+                metadata.as_object().is_some_and(|object| object.len() == 1)
+                    && matches!(
+                        metadata.get("type").and_then(|value| value.as_str()),
+                        Some("module" | "commonjs")
+                    ),
+                "invalid generated module type metadata: {}",
+                package.display()
+            );
+        }
     }
     Ok(())
 }

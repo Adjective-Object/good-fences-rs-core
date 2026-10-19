@@ -4,6 +4,9 @@ Consume owned syntax facts and checked shared graph edges, never UsedTag.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
 separate layer fingerprints, inventory config/add/delete changes, and derive
 affected users from the existing reverse index. Never return old success on error.
+Entry IDs are logical labels. Entry.output_name optionally overrides the
+source-relative output path; include it in output invalidation, not root identity.
+Renaming canonical files must rewrite requests and artifact routes together.
 Later-layer invalidation is deliberately coarse; counters separate source
 extraction from generated-output/recipe parsing. Reuse hash-checked cache records
 in session emission; public low-level link::esm still validates caller source.

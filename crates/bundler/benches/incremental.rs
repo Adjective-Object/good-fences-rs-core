@@ -29,11 +29,11 @@ fn run(session: &mut BuildSession, options: &BuildOptions, output: &Path) -> eyr
     let artifacts = &build.product.artifacts;
     assert_eq!(artifacts.modules.len(), 1);
     assert_eq!(build.product.plan.chunks.len(), 1);
-    assert_eq!(artifacts.entries["main"], Path::new("native.mjs"));
+    assert_eq!(artifacts.entries["main"], Path::new("main.mjs"));
     assert_eq!(artifacts.files.len(), 1);
     assert_eq!(
         build.counters.output_parses,
-        build.counters.emissions * (2 * (MODULES + 2) + 2),
+        build.counters.emissions * (2 * (MODULES + 2) + 3),
     );
     assert_eq!(
         published.files_written,
@@ -87,6 +87,7 @@ fn main() -> eyre::Result<()> {
                 "main".into(),
                 Entry {
                     path: "main.mjs".into(),
+                    output_name: None,
                     namespace: true,
                 },
             )]),

@@ -269,8 +269,15 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   for (const file of readdirSync(build.directory, { recursive: true, withFileTypes: true })) {
     if (file.isDirectory()) continue;
     assert(file.isFile(), 'generation contains a nonregular artifact');
-    assert(/\.(?:mjs|cjs)$/u.test(file.name), 'generation must contain executable JavaScript, not code JSON');
-    const source = readFileSync(path.join(file.parentPath, file.name), 'utf8');
+    const filename = path.join(file.parentPath, file.name);
+    if (file.name === 'package.json') {
+      const metadata = json(filename);
+      object(metadata, ['type'], 'generated package.json');
+      check(['module', 'commonjs'].includes(metadata.type), 'invalid generated package.json module type');
+      continue;
+    }
+    assert(/\.(?:mjs|cjs|js)$/u.test(file.name), 'generation must contain executable JavaScript, not code JSON');
+    const source = readFileSync(filename, 'utf8');
     assert(!/registerHooks|experimental-loader|good-fences:|new Function|eval\(/u.test(source),
       'generated code must use the ordinary file loader');
   }

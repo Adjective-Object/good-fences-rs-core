@@ -140,8 +140,10 @@ exact async-site root-set partitioning and diagnostic facade/chunk manifests.
 See [`bundler`](crates/bundler/README.md) for library APIs and freshness checks.
 The target is scope-hoisted direct ESM bindings with native cross-chunk links.
 Checked canonical symbols feed native static/dynamic ESM chunks and original
-TLA jobs; eligible synchronous single-entry trees still emit one lexical
-`native.mjs`. CJS inputs contribute one opaque factory each, grouped into pure
+TLA jobs; eligible synchronous single-entry trees still emit one lexical entry
+chunk. `Entry.output_name` optionally overrides the source-relative output path, inheriting the input
+extension when omitted (`appstart` plus `entry.mjs` emits `appstart.mjs`).
+CJS inputs contribute one opaque factory each, grouped into pure
 availability chunks with per-initializer lexical caches. Demanded native ESM
 facade parts provide default, named snapshots and canonical runtime-key bridges;
 loading a factory chunk never executes a deferred factory. Ordinary ESM bindings

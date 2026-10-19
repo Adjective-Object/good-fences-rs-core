@@ -13,6 +13,7 @@ fn options() -> BuildOptions {
             "main".into(),
             Entry {
                 path: "main.mjs".into(),
+                output_name: None,
                 namespace: true,
             },
         )]),
@@ -78,7 +79,9 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
             (path, source)
         })
         .collect();
-    let checked = link::esm(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
+    let mut checked =
+        link::esm(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
+    entry_outputs::apply(session.root(), options, &mut checked).unwrap();
     assert_eq!(incremental.product.artifacts, checked);
     incremental
 }
@@ -102,6 +105,676 @@ fn observe_entry(entry: &Path) -> Vec<u8> {
         String::from_utf8_lossy(&output.stderr)
     );
     output.stdout
+}
+
+fn observe_named(artifacts: &Artifacts, check: &str) -> Vec<u8> {
+    let dir = TmpDir::new();
+    for path in artifacts
+        .entries
+        .values()
+        .chain(artifacts.modules.values())
+        .chain(artifacts.members.values())
+        .chain(artifacts.chunk_artifacts.values().flatten())
+        .chain(artifacts.cjs_proxies.values().map(|(path, _)| path))
+        .chain(artifacts.cjs_namespaces.values())
+        .chain(artifacts.async_facades.values())
+    {
+        assert!(
+            artifacts.files.contains_key(path),
+            "missing artifact {}",
+            path.display()
+        );
+    }
+    for (path, source) in &artifacts.files {
+        write(dir.root(), path.to_str().unwrap(), source);
+    }
+    write(dir.root(), "check.mjs", check);
+    observe_entry(&dir.root().join("check.mjs"))
+}
+
+#[test]
+fn named_entry_outputs_preserve_single_file_default_live_bindings_and_cache() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.mjs",
+        "export let value = 1; export {value as default}; export function bump() { value++; }",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    for (output_name, expected) in [
+        (None, "entry.mjs"),
+        (Some("./entry.mjs"), "entry.mjs"),
+        (Some("appstart"), "appstart.mjs"),
+        (Some("nested/start"), "nested/start.mjs"),
+        (Some("nested/start.mjs"), "nested/start.mjs"),
+        (Some("nested/#100%.mjs"), "nested/#100%.mjs"),
+        (Some("nested/start.js"), "nested/start.js"),
+    ] {
+        let options = BuildOptions {
+            entries: BTreeMap::from([(
+                "startup".into(),
+                Entry {
+                    path: "./entry.mjs".into(),
+                    output_name: output_name.map(PathBuf::from),
+                    namespace: true,
+                },
+            )]),
+            ..Default::default()
+        };
+        let build = session.build(&options).unwrap();
+        let artifacts = &build.product.artifacts;
+        let path = Path::new(expected);
+        assert_eq!(artifacts.entries["startup"], path);
+        assert!(artifacts.files.contains_key(path));
+        assert_eq!(
+            artifacts.files.len(),
+            if expected.ends_with(".js") { 2 } else { 1 }
+        );
+        assert!(artifacts.modules.values().all(|p| p == path));
+        assert!(artifacts.members.values().all(|p| p == path));
+        assert!(artifacts
+            .chunk_artifacts
+            .values()
+            .flatten()
+            .all(|p| p == path));
+        let request = expected.replace('%', "%25").replace('#', "%23");
+        assert_eq!(
+            observe_named(
+                artifacts,
+                &format!(
+                    "import * as ns from './{request}'; ns.bump(); console.log(ns.default, ns.value);"
+                )
+            ),
+            b"2 2\n"
+        );
+        let noop = session.build(&options).unwrap();
+        assert!(Rc::ptr_eq(&build.product, &noop.product));
+        assert_eq!(noop.counters.output_parses, 0);
+        let warm = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&options)
+            .unwrap();
+        assert_eq!(warm.product.artifacts, *artifacts);
+    }
+}
+
+#[test]
+fn default_output_names_preserve_nested_sources_and_share_logical_aliases() {
+    let dir = TmpDir::new();
+    write(dir.root(), "src/entry.mjs", "export const value = 1;");
+    let mut options = BuildOptions {
+        entries: BTreeMap::from([
+            (
+                "../logical-id".into(),
+                Entry {
+                    path: "./src/entry.mjs".into(),
+                    output_name: None,
+                    namespace: true,
+                },
+            ),
+            (
+                "other-id".into(),
+                Entry {
+                    path: dir.root().join("src/entry.mjs"),
+                    output_name: None,
+                    namespace: true,
+                },
+            ),
+            (
+                "explicit-id".into(),
+                Entry {
+                    path: "src/entry.mjs".into(),
+                    output_name: Some("src/entry".into()),
+                    namespace: true,
+                },
+            ),
+        ]),
+        ..Default::default()
+    };
+    let build = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    assert!(build
+        .product
+        .artifacts
+        .entries
+        .values()
+        .all(|path| path == Path::new("src/entry.mjs")));
+    assert_eq!(build.product.artifacts.files.len(), 1);
+    assert_eq!(
+        observe_named(
+            &build.product.artifacts,
+            "import {value} from './src/entry.mjs'; console.log(value);"
+        ),
+        b"1\n"
+    );
+    options
+        .entries
+        .get_mut("../logical-id")
+        .unwrap()
+        .output_name = Some("first.mjs".into());
+    let aliased = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    assert_eq!(
+        aliased.product.artifacts.entries["../logical-id"],
+        Path::new("first.mjs")
+    );
+    assert_eq!(
+        aliased.product.artifacts.entries["other-id"],
+        Path::new("src/entry.mjs")
+    );
+    assert_eq!(
+        aliased.product.artifacts.entries["explicit-id"],
+        Path::new("src/entry.mjs")
+    );
+    assert_eq!(aliased.product.artifacts.files.len(), 2);
+    assert_eq!(
+        observe_named(
+            &aliased.product.artifacts,
+            "import {value} from './src/entry.mjs'; console.log(value);"
+        ),
+        b"1\n"
+    );
+}
+
+#[test]
+fn named_entry_outputs_rewrite_static_reexports_and_dynamic_canonical_namespaces() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.mjs",
+        "import * as ns from './dep.mjs'; export {ns}; export {value} from './dep.mjs'; export function load() { return import('./dep.mjs'); }",
+    );
+    write(
+        dir.root(),
+        "dep.mjs",
+        "await Promise.resolve(); export let value = 1; export {value as default}; export function bump() { value++; }",
+    );
+    let options = BuildOptions {
+        entries: BTreeMap::from([
+            (
+                "app/main.mjs".into(),
+                Entry {
+                    path: "entry.mjs".into(),
+                    output_name: Some("app/main.mjs".into()),
+                    namespace: true,
+                },
+            ),
+            (
+                "lib/#dep%.mjs".into(),
+                Entry {
+                    path: "dep.mjs".into(),
+                    output_name: Some("lib/#dep%.mjs".into()),
+                    namespace: true,
+                },
+            ),
+        ]),
+        ..Default::default()
+    };
+    let build = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    let artifacts = &build.product.artifacts;
+    assert_eq!(artifacts.files.len(), 2);
+    assert_eq!(
+        artifacts.modules[&dir.root().join("dep.mjs")],
+        Path::new("lib/#dep%.mjs")
+    );
+    assert!(artifacts
+        .async_facades
+        .values()
+        .all(|p| p == Path::new("lib/#dep%.mjs")));
+    assert_eq!(
+        observe_named(
+            artifacts,
+            r#"
+import * as entry from './app/main.mjs';
+import * as dep from './lib/%23dep%25.mjs';
+console.log(entry.ns === dep, await entry.load() === dep);
+dep.bump(); console.log(entry.value, dep.default);
+"#
+        ),
+        b"true true\n2 2\n"
+    );
+}
+
+#[test]
+fn named_entry_outputs_keep_cycle_tdz_and_do_not_rewrite_shadowed_require_or_strings() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.mjs",
+        "export const label = './native.mjs'; export function fake(require) { return require('./missing.mjs'); }",
+    );
+    let options = BuildOptions {
+        entries: BTreeMap::from([(
+            "app/entry.mjs".into(),
+            Entry {
+                path: "entry.mjs".into(),
+                output_name: Some("app/entry.mjs".into()),
+                namespace: true,
+            },
+        )]),
+        ..Default::default()
+    };
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let strings = session.build(&options).unwrap();
+    assert_eq!(
+        observe_named(
+            &strings.product.artifacts,
+            "import {label, fake} from './app/entry.mjs'; console.log(label, fake(x => x));"
+        ),
+        b"./native.mjs ./missing.mjs\n"
+    );
+    write(
+        dir.root(),
+        "entry.mjs",
+        "import {b} from './dep.mjs'; export const a = b;",
+    );
+    write(
+        dir.root(),
+        "dep.mjs",
+        "import {a} from './entry.mjs'; export const b = a;",
+    );
+    let cycle = session.build(&options).unwrap();
+    assert_eq!(
+        observe_named(
+            &cycle.product.artifacts,
+            "await import('./app/entry.mjs').catch(error => console.log(error.name));"
+        ),
+        b"ReferenceError\n"
+    );
+}
+
+#[test]
+fn named_entry_outputs_aliases_forward_default_and_live_exports() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.mjs",
+        "globalThis.runs = (globalThis.runs || 0) + 1; export let value = 1; export {value as default}; export function bump() { value++; } export function load() { return import('./entry.mjs'); }",
+    );
+    let options = BuildOptions {
+        entries: ["a.mjs", "nested/z.mjs"]
+            .into_iter()
+            .map(|name| {
+                (
+                    name.into(),
+                    Entry {
+                        path: "entry.mjs".into(),
+                        output_name: Some(name.into()),
+                        namespace: true,
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let build = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    let artifacts = &build.product.artifacts;
+    assert_eq!(artifacts.files.len(), 2);
+    assert_eq!(artifacts.entries["a.mjs"], Path::new("a.mjs"));
+    assert_eq!(artifacts.entries["nested/z.mjs"], Path::new("nested/z.mjs"));
+    assert!(artifacts
+        .async_facades
+        .values()
+        .all(|p| p == Path::new("a.mjs")));
+    assert_eq!(
+        observe_named(
+            artifacts,
+            r#"
+import * as canonical from './a.mjs';
+import * as alias from './nested/z.mjs';
+alias.bump(); console.log(alias.default, canonical.value, globalThis.runs);
+console.log(await alias.load() === canonical, alias.bump === canonical.bump);
+"#
+        ),
+        b"2 2 1\ntrue true\n"
+    );
+}
+
+#[test]
+fn named_entry_outputs_commonjs_aliases_keep_cache_getters_and_reassigned_exports() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.cjs",
+        "globalThis.runs = (globalThis.runs || 0) + 1; Object.defineProperty(exports, 'value', {get: () => 7}); exports.replace = () => { module.exports = {value: 9}; };",
+    );
+    for name in [
+        "entry.cjs",
+        "appstart",
+        "nested/start.cjs",
+        "nested/start.js",
+    ] {
+        let options = BuildOptions {
+            entries: [name, "z-alias.cjs"]
+                .into_iter()
+                .map(|key| {
+                    (
+                        key.into(),
+                        Entry {
+                            path: "entry.cjs".into(),
+                            output_name: Some(key.into()),
+                            namespace: true,
+                        },
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let build = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&options)
+            .unwrap();
+        let artifacts = &build.product.artifacts;
+        let path = if name == "appstart" {
+            "appstart.cjs"
+        } else {
+            name
+        };
+        assert_eq!(artifacts.entries[name], Path::new(path));
+        assert_eq!(
+            observe_named(
+                artifacts,
+                &format!(
+                    r#"
+import {{createRequire}} from 'node:module';
+const require = createRequire(import.meta.url);
+const first = require('./{path}');
+const alias = require('./z-alias.cjs');
+console.log(first === alias, first.value, globalThis.runs, !!Object.getOwnPropertyDescriptor(alias, 'value').get);
+first.replace(); console.log(require('./{path}').value, require('./z-alias.cjs').value, globalThis.runs);
+"#
+                )
+            ),
+            b"true 7 1 true\n9 9 1\n"
+        );
+    }
+}
+
+#[test]
+fn named_entry_outputs_rewrite_deferred_require_and_import_from_commonjs() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.cjs",
+        "exports.load = () => require('./dep.mjs'); exports.dynamic = () => import('./dep.mjs');",
+    );
+    write(
+        dir.root(),
+        "dep.mjs",
+        "globalThis.runs = (globalThis.runs || 0) + 1; export const value = 17;",
+    );
+    let options = BuildOptions {
+        entries: BTreeMap::from([
+            (
+                "app/start".into(),
+                Entry {
+                    path: "entry.cjs".into(),
+                    output_name: Some("app/start".into()),
+                    namespace: true,
+                },
+            ),
+            (
+                "lib/#dep%.mjs".into(),
+                Entry {
+                    path: "dep.mjs".into(),
+                    output_name: Some("lib/#dep%.mjs".into()),
+                    namespace: true,
+                },
+            ),
+        ]),
+        ..Default::default()
+    };
+    let build = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    assert_eq!(
+        build.product.artifacts.entries["app/start"],
+        Path::new("app/start.cjs")
+    );
+    assert_eq!(
+        observe_named(
+            &build.product.artifacts,
+            r#"
+import {createRequire} from 'node:module';
+import * as dep from './lib/%23dep%25.mjs';
+const require = createRequire(import.meta.url);
+const entry = require('./app/start.cjs');
+console.log(entry.load().value, await entry.dynamic() === dep, globalThis.runs);
+"#
+        ),
+        b"17 true 1\n"
+    );
+}
+
+#[test]
+fn named_entry_outputs_infer_js_input_extensions_and_module_format() {
+    for format in ["module", "commonjs"] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "package.json",
+            &format!(r#"{{"type":"{format}"}}"#),
+        );
+        write(
+            dir.root(),
+            "entry.js",
+            if format == "module" {
+                "export const value = 13;"
+            } else {
+                "exports.value = 13;"
+            },
+        );
+        let options = BuildOptions {
+            entries: BTreeMap::from([(
+                "nested/start".into(),
+                Entry {
+                    path: "entry.js".into(),
+                    output_name: Some("nested/start".into()),
+                    namespace: true,
+                },
+            )]),
+            ..Default::default()
+        };
+        let build = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&options)
+            .unwrap();
+        assert_eq!(
+            build.product.artifacts.entries["nested/start"],
+            Path::new("nested/start.js")
+        );
+        assert_eq!(
+            observe_named(
+                &build.product.artifacts,
+                &format!(
+                    "import * as ns from './nested/start.js'; console.log({});",
+                    if format == "module" {
+                        "ns.value"
+                    } else {
+                        "ns.default.value"
+                    }
+                )
+            ),
+            b"13\n"
+        );
+    }
+}
+
+#[test]
+fn named_entry_outputs_publication_uses_requested_relative_paths() {
+    let dir = TmpDir::new();
+    write(dir.root(), "entry.mjs", "export default 42;");
+    let options = BuildOptions {
+        entries: BTreeMap::from([(
+            "app/start".into(),
+            Entry {
+                path: "entry.mjs".into(),
+                output_name: Some("app/start".into()),
+                namespace: true,
+            },
+        )]),
+        ..Default::default()
+    };
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let output = dir.root().join(".bundler-output");
+    let cancel = crate::publish::Cancellation::default();
+    let (build, published) = session
+        .build_and_publish(&options, &output, &cancel)
+        .unwrap();
+    assert_eq!(
+        build.product.artifacts.entries["app/start"],
+        Path::new("app/start.mjs")
+    );
+    assert!(published.entries["app/start"].ends_with("app/start.mjs"));
+    assert!(published.directory.join("app/start.mjs").is_file());
+    write(
+        dir.root(),
+        ".bundler-check/check.mjs",
+        &format!(
+            "import value from {}; console.log(value);",
+            serde_json::to_string(&published.entries["app/start"]).unwrap()
+        ),
+    );
+    assert_eq!(
+        observe_entry(&dir.root().join(".bundler-check/check.mjs")),
+        b"42\n"
+    );
+    let (noop, unchanged) = session
+        .build_and_publish(&options, &output, &cancel)
+        .unwrap();
+    assert!(!unchanged.changed);
+    assert_eq!(unchanged.directory, published.directory);
+    assert!(Rc::ptr_eq(&build.product, &noop.product));
+}
+
+#[test]
+fn named_entry_outputs_reject_unsafe_reserved_incompatible_and_colliding_paths() {
+    let dir = TmpDir::new();
+    write(dir.root(), "entry.mjs", "export const value = 1;");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    for name in [
+        "",
+        "/entry.mjs",
+        "../entry.mjs",
+        "nested/../../entry.mjs",
+        ".bundler-lock",
+        "nested/.bundler-current.json",
+        "C:\\entry.mjs",
+        "entry.cjs",
+        "entry.json",
+        "nested/",
+        "CON.mjs",
+    ] {
+        let options = BuildOptions {
+            entries: BTreeMap::from([(
+                name.into(),
+                Entry {
+                    path: "entry.mjs".into(),
+                    output_name: Some(name.into()),
+                    namespace: true,
+                },
+            )]),
+            ..Default::default()
+        };
+        assert!(session.build(&options).is_err(), "{name}");
+    }
+    for names in [
+        ["entry.mjs", "ENTRY.mjs"],
+        ["entry.mjs", "entry.mjs/child.mjs"],
+    ] {
+        let options = BuildOptions {
+            entries: names
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.into(),
+                        Entry {
+                            path: "entry.mjs".into(),
+                            output_name: Some(name.into()),
+                            namespace: true,
+                        },
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        assert!(session.build(&options).is_err(), "{names:?}");
+    }
+    write(
+        dir.root(),
+        "entry.mjs",
+        "export function load() { return import('./dep.mjs'); }",
+    );
+    write(dir.root(), "dep.mjs", "export const value = 1;");
+    let mut options = BuildOptions {
+        entries: BTreeMap::from([(
+            "entry.mjs".into(),
+            Entry {
+                path: "entry.mjs".into(),
+                output_name: None,
+                namespace: true,
+            },
+        )]),
+        ..Default::default()
+    };
+    let good = session.build(&options).unwrap();
+    let generated = good
+        .product
+        .artifacts
+        .files
+        .keys()
+        .find(|path| **path != Path::new("entry.mjs"))
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    options.entries.get_mut("entry.mjs").unwrap().output_name = Some(generated.into());
+    let error = session.build(&options).err().unwrap().to_string();
+    assert!(
+        error.contains("collides with generated artifact"),
+        "{error}"
+    );
+    write(dir.root(), "entry.cjs", "exports.value = 1;");
+    options.entries = BTreeMap::from([(
+        "wrong.mjs".into(),
+        Entry {
+            path: "entry.cjs".into(),
+            output_name: Some("wrong.mjs".into()),
+            namespace: true,
+        },
+    )]);
+    assert!(session.build(&options).is_err());
+    options.entries = BTreeMap::from([
+        (
+            "a.js".into(),
+            Entry {
+                path: "entry.cjs".into(),
+                output_name: Some("a.js".into()),
+                namespace: true,
+            },
+        ),
+        (
+            "b.js".into(),
+            Entry {
+                path: "entry.mjs".into(),
+                output_name: Some("b.js".into()),
+                namespace: true,
+            },
+        ),
+    ]);
+    let error = session.build(&options).err().unwrap().to_string();
+    assert!(error.contains("incompatible .js module formats"), "{error}");
 }
 
 #[test]
@@ -226,7 +899,7 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     assert_eq!(cold.counters.emissions, 1);
     assert_eq!(
         cold.product.artifacts.entries["main"],
-        Path::new("native.mjs")
+        Path::new("main.mjs")
     );
     assert_eq!(cold.product.artifacts.files.len(), 1);
     assert_eq!(observe(&cold.product.artifacts), b"1\n");
@@ -487,6 +1160,7 @@ fn async_root_add_remove_and_entry_replacement_match_full_rebuild() {
         "second".into(),
         Entry {
             path: "lazy.mjs".into(),
+            output_name: None,
             namespace: true,
         },
     );
