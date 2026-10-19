@@ -1,56 +1,16 @@
 import assert from 'node:assert/strict';
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { discoverCases } from './bundler-fixtures.mjs';
+import { copyCase, discoverCases, execute, managed, observeEntries, successful } from './bundler-fixtures.mjs';
+export { execute } from './bundler-fixtures.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 const defaultRoot = path.join(repository, 'fixtures/bundler');
 const defaultDriver = path.join(repository, `target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`);
 const defaultTempRoot = path.join(repository, 'target/p1-test-tmp');
-
-function environment() {
-  const env = { ...process.env };
-  for (const name of ['NODE_OPTIONS', 'NODE_PATH', 'NODE_V8_COVERAGE']) delete env[name];
-  return env;
-}
-
-function managed(tempRoot, callback) {
-  mkdirSync(tempRoot, { recursive: true });
-  const directory = mkdtempSync(path.join(tempRoot, 'bundler-differential-'));
-  try { return callback(directory); }
-  finally { rmSync(directory, { recursive: true }); }
-}
-
-export function execute(command, args, cwd, timeoutMs = 5000) {
-  assert(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'invalid timeout');
-  const result = spawnSync(command, args, {
-    cwd, env: environment(), encoding: 'utf8', timeout: timeoutMs,
-    killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
-  });
-  if (result.error) {
-    result.error.childPid = result.pid;
-    throw result.error;
-  }
-  return result;
-}
-
-function successful(result, label) {
-  assert.equal(result.status, 0, `${label}: exit ${result.status}, signal ${result.signal}\n${result.stderr}`);
-  assert.equal(result.signal, null, `${label}: signal`);
-  assert.equal(result.stderr, '', `${label}: unexpected stderr`);
-  return result.stdout;
-}
-
-function lines(stdout) {
-  if (!stdout) return [];
-  const values = stdout.split(/\r?\n/u);
-  if (values.at(-1) === '') values.pop();
-  return values;
-}
 
 export function buildProject(driver, root, entries, timeoutMs = 30000) {
   assert(existsSync(driver), `Missing library driver; run cargo build -p bundler --example build (${driver})`);
@@ -58,7 +18,9 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   const build = JSON.parse(successful(result, 'public build pipeline'));
   assert.deepEqual(build.warnings, [], 'cache write warnings');
   assert.deepEqual(build.publicationWarnings, [], 'publication warnings');
-  assert.equal(build.layout, 'exact-root-set-chunks-v1', 'physical layout must be explicit');
+  assert(['native', 'legacy'].includes(build.backend), 'driver must report its selected backend');
+  assert.equal(build.layout, build.backend === 'native' ? 'native-single-chunk-v1' : 'exact-root-set-chunks-v1',
+    'physical layout must match the reported backend');
   for (const file of readdirSync(build.directory, { recursive: true, withFileTypes: true })) {
     if (file.isDirectory()) continue;
     assert(file.isFile(), 'generation contains a nonregular artifact');
@@ -91,26 +53,21 @@ export function runDifferential(root = defaultRoot, {
     const native = path.join(directory, 'native');
     const source = path.join(directory, 'source');
     for (const destination of [native, source]) {
-      cpSync(files, destination, { recursive: true });
-      if (!existsSync(path.join(destination, 'package.json'))) {
-        writeFileSync(path.join(destination, 'package.json'), JSON.stringify({ type: manifest.moduleType }));
-      }
+      copyCase(files, destination, manifest);
     }
-    const baseline = manifest.entryPoints.flatMap((entry) => lines(successful(
-      execute(process.execPath, ['--', path.join(native, entry)], native, timeoutMs),
-      `${manifest.id} native ${entry}`,
-    )));
-    assert.deepEqual(baseline, manifest.expectations.stdout, `${manifest.id}: native stdout mismatch`);
+    const baseline = observeEntries(manifest,
+      Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
+      native, timeoutMs, 'native');
     if (unsupported.has(manifest.id)) {
       return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0 };
     }
     const build = buildProject(driver, source, manifest.entryPoints);
-    const bundled = manifest.entryPoints.flatMap((entry) => lines(successful(
-      execute(process.execPath, ['--', build.entries[entry]], source, timeoutMs),
-      `${manifest.id} bundled ${entry}`,
-    )));
-    assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/native stdout mismatch`);
-    return { id: manifest.id, status: 'passed', executions: manifest.entryPoints.length };
+    if (manifest.expectations.backend === 'native') {
+      assert.equal(build.backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
+    }
+    const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
+    assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/native runtime observation mismatch`);
+    return { id: manifest.id, status: 'passed', backend: build.backend, executions: manifest.entryPoints.length };
   }));
 }
 
@@ -174,7 +131,7 @@ console.log(staticDefault === a.shared, staticNamed === a.shared, staticBump ===
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const results = runDifferential(process.argv[2] ?? defaultRoot);
-    for (const result of results) console.log(`${result.status === 'passed' ? 'PASS differential' : 'UNSUPPORTED'} ${result.id}${result.reason ? `: ${result.reason}` : ''}`);
+    for (const result of results) console.log(`${result.status === 'passed' ? 'PASS differential' : 'UNSUPPORTED'} ${result.id}${result.backend ? ` backend=${result.backend}` : ''}${result.reason ? `: ${result.reason}` : ''}`);
     const extra = runBundlerCases();
     console.log(`Differential: ${results.filter((r) => r.status === 'passed').length} passed, ${results.filter((r) => r.status === 'unsupported').length} unsupported, ${results.reduce((n,r) => n + r.executions, 0)} emitted executions; ${extra.identity} same-runtime identity case; ${extra.diagnostics} diagnostic cases.`);
   } catch (error) {

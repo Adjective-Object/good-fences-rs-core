@@ -1,0 +1,13 @@
+{
+  "id": "authored/runtime-outcomes",
+  "moduleType": "module",
+  "entryPoints": ["throw.js", "reject.js", "success.js"],
+  "expectations": {
+    "stdout": ["before throw", "before rejection", "success"],
+    "errors": {
+      "throw.js": {"name": "TypeError", "code": "AUTHORED_FAILURE"},
+      "reject.js": {"name": "RangeError"}
+    }
+  },
+  "goals": ["Preserve preceding ambient effects and normalized throws/rejections in separate entry processes, alongside a successful entry."]
+}

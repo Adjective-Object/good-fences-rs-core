@@ -786,6 +786,7 @@ pub(super) fn emit(
         crate::rewrite::validate(path, source)?;
     }
     Ok(Artifacts {
+        backend: super::Backend::Legacy,
         files,
         members,
         chunk_artifacts,

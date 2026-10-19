@@ -238,6 +238,7 @@ fn lexical_rename_preserves_proto_literal_binding_and_assignment_shorthand() {
 
 fn assert_native_observation(sources: &BTreeMap<PathBuf, String>, expected: &str) {
     let (_, output) = build(sources, &[("entry.mjs", true)], false);
+    assert_eq!(output.backend, super::Backend::Native);
     assert_eq!(output.files.len(), 1);
     assert_eq!(output.entries["entry.mjs"], Path::new("native.mjs"));
     let baseline = node(sources, Path::new("entry.mjs"));
@@ -347,7 +348,7 @@ fn native_staging_defers_observable_name_changes_and_readonly_import_writes() {
     ] {
         let sources = sources(&[("dep.mjs", dependency), ("entry.mjs", entry)]);
         let (_, output) = build(&sources, &[("entry.mjs", true)], false);
-        assert!(output.files.contains_key(Path::new("runtime.cjs")), "unported case must stay explicitly staged");
+        assert_eq!(output.backend, super::Backend::Legacy, "unported case must stay explicitly staged");
         let observed = node(&output.files, &output.entries["entry.mjs"]);
         assert!(observed.status.success(), "{}", String::from_utf8_lossy(&observed.stderr));
         assert_eq!(observed.stdout, expected.as_bytes());

@@ -166,7 +166,19 @@ Public-pipeline conformance (separate from the native-only fixture baseline):
 Harness regressions: `node --test scripts/bundler-differential.test.mjs`.
 The minimal driver can also build a project directly:
 `cargo run -p bundler --example build -- PROJECT OUTPUT ENTRY...`; it prints
-generation-specific `entries`, the physical `layout` and actual build counters as JSON.
+generation-specific `entries`, the selected `backend`, physical `layout` and
+actual build counters as JSON. `link::Artifacts::backend` is the authoritative
+`link::Backend::{Native, Legacy}` value assigned by the emitter that produced the
+artifacts, never inferred from filenames. It serializes as `"native"` or
+`"legacy"`; `Backend::layout()` currently returns `"native-single-chunk-v1"` or
+`"exact-root-set-chunks-v1"` respectively. This reports the temporary staging
+selection; it is not a new backend option.
+Fixture `expectations.backend: "native"` rejects legacy fallback in differential
+mode, while the Node-only baseline only validates that requirement's schema.
+Expected runtime failures use normalized names/types and optional codes with
+preceding stdout, not unstable stacks/messages; both successful and failing
+entries use the same import observer. See the
+[fixture schema and current backend counts](../../fixtures/bundler/README.md).
 Use an absolute OUTPUT, or note that it is relative to the process cwd.
 
 ## Public build session
@@ -309,6 +321,13 @@ bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 15 emitted executions**, concurrent-entry identity and four diagnostic cases.
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
 lifetime/dead-code warnings remain; no unrelated CI/toolchain health claim.
+
+Current harness-diversion validation (not a full release rerun): **146 bundler
+tests**, **89 harness regressions**, **14 baseline + 14 differential contracts /
+19 emitted executions**, same-runtime identity and four diagnostics, format,
+all-target bundler clippy (`--no-deps`) and mandatory spot-check pass. Only four
+contracts select native; ten select legacy, including the dynamic-import/TLA
+case. Native cross-chunk implementation remains paused pending review.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
@@ -491,7 +510,7 @@ No externals, implicit TS stripping, source maps or filesystem publication.
 ## Linked ESM artifacts (Node target)
 
 `link::esm(graph, &ChunkPlan, policy, &BTreeMap<PathBuf, String>)` returns
-`Artifacts` containing the complete owned relative `files` map, executable
+`Artifacts` containing the selected `backend`, complete owned relative `files` map, executable
 `entries`, source-to-executable `modules`, logical-node-to-file
 `members`, `chunk_artifacts`, and the unchanged
 logical diagnostic `manifest`. It checks freshness and owned source facts,

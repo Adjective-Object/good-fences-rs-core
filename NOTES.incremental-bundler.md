@@ -1,5 +1,53 @@
 # Incremental bundler implementation handoff
 
+## Current diversion: fixture backend and runtime-outcome contracts
+
+First harness-only replacement increment is implemented, uncommitted and awaiting
+independent review; native cross-chunk work remains paused. No linker eligibility,
+emission semantics or legacy layout contracts were advanced. Production emitters
+now assign `link::Artifacts::backend: link::Backend::{Native, Legacy}`. The build
+example serializes `backend` and derives `layout` from `Backend::layout()`, rather
+than asserting legacy layout regardless of the actual selection.
+
+`case.json` keeps its existing required fields; only top-level `upstream` is now
+optional for authored cases. Present provenance remains fully validated, including
+the group's nonempty regular LICENSE. Existing twelve upstream fixtures and all
+their provenance/licenses are unchanged. Optional `expectations.backend` accepts
+only `"native"`; the baseline validates but does not claim it, and differential
+mode fails required-native fallback. Optional nonempty `expectations.errors`
+maps declared entrypoints to `{name, code?}` (nonempty strings, no other fields).
+
+One shared normal-loader import observer captures stdout and null/normalized
+error completion identically for source/emitted and successful/failing entries.
+Error completion uses a separate pipe; stacks/messages are not contracts.
+`observeEntries` returns `{stdout, outcomes: [{entry, stdout, error}]}`; differential
+comparison includes per-entry stdout and observed optional codes, not merely the
+concatenated manifest stdout. Missing failures/completion, wrong names/codes,
+stderr, exit/signal, timeout, overflow, source parse and build failures stay fatal.
+Node's automatic parent coverage propagation requires an explicit empty
+NODE_V8_COVERAGE, not merely deleting that environment key. Normal observation
+now deliberately uses import semantics, not a CLI `require.main` contract.
+
+Only two authored corpus cases were added: native-required lexical TDZ and mixed
+sync throw/TLA rejection/success, all with preceding observable effects. Four
+of fourteen differential cases actually select native: authored/native-tdz,
+esbuild/unused-import-side-effects, rspack/esm-effect-order and
+rspack/esm-live-binding. Other ten are explicitly reported legacy, including
+authored/runtime-outcomes and esbuild/dynamic-import-tla-order. They do not
+establish native coverage. Nineteen emitted entry executions pass, plus one
+same-runtime identity and four diagnostic cases; zero unsupported.
+
+Validation: both Node harness suites **89 tests**, `cargo test -p bundler`
+**146 tests**, driver build + baseline/differential, bundler format check,
+all-target bundler clippy `--no-deps`, and mandatory `./scripts/spot-check`
+(51 parser tests + workspace check) pass. Existing dependency/workspace warnings
+remain. Commands use `TMPDIR=$PWD/target/p1-test-tmp`; logs are
+`target/harness-diversion-{node,rust,contracts,fmt,clippy,spot-check}.log`.
+No benchmark/full workspace test rerun, nested agents, commit or push.
+Next increment: portable hoisting/names/destructuring/order/namespace/ambient
+contracts before resuming native cross-chunk linking; do not duplicate legacy
+inline Rust cases or add file-ownership/deferred-closure assertion DSLs.
+
 ## Current replacement increment: native defaults and checked namespace reads
 
 The synchronous acyclic one-namespace-root/group ESM slice now emits default

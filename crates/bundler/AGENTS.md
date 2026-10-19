@@ -49,6 +49,9 @@ Cache first-effect projections, including empties, on iterative connector SCCs;
 share chain results rather than copying transitive closures per segment.
 The old backend is still active until staged replacement; preserve its runtime
 behavior while replacing analysis in small independently reviewed increments.
+Artifacts report the actual selected Backend from the emitting branch; derive
+driver layout from it, never filenames. Native-required fixture contracts must
+reject legacy fallback; passing unmarked legacy cases is not native coverage.
 Canonical symbols use owned (file, BindingId) identities and checked export routes,
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.

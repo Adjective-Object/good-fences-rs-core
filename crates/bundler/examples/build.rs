@@ -37,7 +37,8 @@ fn main() -> eyre::Result<()> {
         "{}",
         serde_json::json!({
             "entries": published.entries,
-            "layout": "exact-root-set-chunks-v1",
+            "backend": build.product.artifacts.backend,
+            "layout": build.product.artifacts.backend.layout(),
             "directory": published.directory,
             "generation": build.product.generation,
             "sourceParses": build.counters.source_parses,

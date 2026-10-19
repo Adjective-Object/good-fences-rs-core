@@ -2,6 +2,15 @@
 
 ## Active replacement — pending review/implementation
 
+- [ ] Independently review the first harness diversion: authoritative production
+  backend/layout reporting, native-required case metadata, optional fully checked
+  upstream provenance, shared normalized runtime outcomes and preceding effects.
+  Implemented and validated (89 harness/146 bundler tests, 14 baseline and
+  differential contracts; four native, ten legacy), not yet reviewed/committed.
+- [ ] Next harness increment: portable hoisting/names/destructuring/order/
+  namespace/ambient-effect contracts. Keep native cross-chunk work paused until
+  review; no new ownership/deferred-closure assertion DSL or duplicated inline
+  Rust fixture suite in this increment.
 - [ ] Symbol linker: effect-retention/order analysis delivered; checked canonical
   symbols, production import/export resolution reuse and capture-safe name
   allocation implemented and validated. Independent review still required;

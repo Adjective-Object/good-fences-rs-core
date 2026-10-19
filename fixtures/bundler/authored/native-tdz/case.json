@@ -1,0 +1,11 @@
+{
+  "id": "authored/native-tdz",
+  "moduleType": "module",
+  "entryPoints": ["entry.js"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["before TDZ"],
+    "errors": {"entry.js": {"name": "ReferenceError"}}
+  },
+  "goals": ["Observe an ambient effect before a native lexical TDZ failure; require the native backend."]
+}

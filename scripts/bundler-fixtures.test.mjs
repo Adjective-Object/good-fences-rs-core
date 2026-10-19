@@ -1,24 +1,21 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { discoverCases, runFixtures } from './bundler-fixtures.mjs';
+import { discoverCases, managed, runFixtures } from './bundler-fixtures.mjs';
 
 function withCorpus(callback) {
-  const directory = mkdtempSync(path.join(tmpdir(), 'bundler-runner-test-'));
-  const root = path.join(directory, 'corpus');
-  const tempRoot = path.join(directory, 'runs');
-  mkdirSync(path.join(root, 'synthetic'), { recursive: true });
-  mkdirSync(tempRoot);
-  writeFileSync(path.join(root, 'synthetic', 'LICENSE'), 'Synthetic test license, not upstream test data.');
-  try {
+  const managedRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
+  return managed(managedRoot, (directory) => {
+    const root = path.join(directory, 'corpus');
+    const tempRoot = path.join(directory, 'runs');
+    mkdirSync(path.join(root, 'synthetic'), { recursive: true });
+    mkdirSync(tempRoot);
+    writeFileSync(path.join(root, 'synthetic', 'LICENSE'), 'Synthetic test license, not upstream test data.');
     callback({ root, tempRoot, run: (options = {}) => runFixtures(root, { tempRoot, ...options }) });
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  });
 }
 
 function addCase(root, name = 'example', { sources, ...overrides } = {}) {
@@ -103,11 +100,12 @@ for (const [name, source, expected] of [
   ['output mismatch', "console.log('wrong');", /stdout mismatch/u],
   ['unexpected blank line', "console.log('hello\\n');", /stdout mismatch/u],
   ['nonzero exit', 'process.exit(7);', /exit 7/u],
+  ['exit zero before completion', 'process.exit(0);', /observer did not complete/u],
   ['stderr', "console.error('warning'); console.log('hello');", /unexpected stderr/u],
   ['timeout', 'while (true) {}', /ETIMEDOUT/u],
   ['output limit', "process.stdout.write('x'.repeat(2 * 1024 * 1024));", /ENOBUFS/u],
   ['signal', "process.kill(process.pid, 'SIGKILL');", /abnormal termination/u],
-  ['missing external dependency', "import 'not-a-real-fixture-package';", /abnormal termination/u],
+  ['missing external dependency', "import 'not-a-real-fixture-package';", /unexpected runtime failure/u],
 ]) {
   test(`${name} fails and cleans the copied case`, () => {
     withCorpus(({ root, tempRoot, run }) => {
@@ -154,6 +152,16 @@ for (const [name, mutate, expected] of [
   ['bad repository', (m) => { m.upstream.repository = 'http://example.com'; }, /repository/u],
   ['empty adaptations text', (m) => { m.upstream.adaptations = ['']; }, /nonempty text/u],
   ['multiline expectation', (m) => { m.expectations.stdout = ['hello\n']; }, /individual output lines/u],
+  ['null upstream', (m) => { m.upstream = null; }, /upstream must be an object/u],
+  ['unknown expectation', (m) => { m.expectations.stderr = []; }, /exactly/u],
+  ['unsupported backend', (m) => { m.expectations.backend = 'legacy'; }, /backend must be native/u],
+  ['null errors', (m) => { m.expectations.errors = null; }, /must be an object/u],
+  ['empty errors', (m) => { m.expectations.errors = {}; }, /must not be empty/u],
+  ['unknown error entry', (m) => { m.expectations.errors = { 'absent.js': { name: 'Error' } }; }, /exactly/u],
+  ['missing error name', (m) => { m.expectations.errors = { 'entry.js': { code: 'FAIL' } }; }, /exactly/u],
+  ['empty error name', (m) => { m.expectations.errors = { 'entry.js': { name: '' } }; }, /nonempty text/u],
+  ['nonstring error code', (m) => { m.expectations.errors = { 'entry.js': { name: 'Error', code: 1 } }; }, /nonempty text/u],
+  ['unstable error message', (m) => { m.expectations.errors = { 'entry.js': { name: 'Error', message: 'path' } }; }, /exactly/u],
 ]) {
   test(`rejects ${name} before creating execution directories`, () => {
     withCorpus(({ root, tempRoot, run }) => {
@@ -163,6 +171,103 @@ for (const [name, mutate, expected] of [
       mutate(manifest);
       writeFileSync(filename, JSON.stringify(manifest));
       assert.throws(run, expected);
+      assert.deepEqual(readdirSync(tempRoot), []);
+    });
+  });
+}
+
+test('authored cases omit provenance and licenses; native baseline only validates backend requirements', () => {
+  withCorpus(({ root, run }) => {
+    const directory = addCase(root);
+    const filename = path.join(directory, 'case.json');
+    const manifest = JSON.parse(readFileSync(filename, 'utf8'));
+    delete manifest.upstream;
+    manifest.expectations.backend = 'native';
+    writeFileSync(filename, JSON.stringify(manifest));
+    rmSync(path.join(root, 'synthetic/LICENSE'));
+    assert.deepEqual(run()[0].stdout, ['hello']);
+  });
+});
+
+test('expected throws and async rejections preserve earlier stdout across isolated entry processes', () => {
+  withCorpus(({ root, run }) => {
+    addCase(root, 'errors', {
+      entryPoints: ['entry.js', 'rejection.js', 'success.js'],
+      expectations: {
+        stdout: ['before throw', 'before rejection', 'done'],
+        errors: { 'entry.js': { name: 'TypeError', code: 'LOCAL_FAIL' }, 'rejection.js': { name: 'RangeError' } },
+      },
+      sources: {
+        'entry.js': "console.log('before throw'); throw Object.assign(new TypeError('unstable path'), {code:'LOCAL_FAIL'});",
+        'rejection.js': "console.log('before rejection'); await Promise.reject(new RangeError('unstable stack'));",
+        'success.js': "console.log('done');",
+      },
+    });
+    assert.deepEqual(run()[0].stdout, ['before throw', 'before rejection', 'done']);
+  });
+});
+
+test('non-Error throws use their JavaScript type, without unstable values or messages', () => {
+  withCorpus(({ root, run }) => {
+    addCase(root, 'primitive', {
+      sources: { 'entry.js': "console.log('before'); throw 'unstable value';" },
+      expectations: { stdout: ['before'], errors: { 'entry.js': { name: 'string' } } },
+    });
+    assert.deepEqual(run()[0].stdout, ['before']);
+  });
+});
+
+test('Node preload, search and coverage overrides are disabled for normal and expected-failure runs', () => {
+  withCorpus(({ root, run }) => {
+    for (const failure of [false, true]) {
+      addCase(root, failure ? 'failure' : 'success', {
+        sources: {
+          'entry.js': `
+            if (['NODE_OPTIONS', 'NODE_PATH', 'NODE_V8_COVERAGE'].some(key => process.env[key]))
+              throw new RangeError('environment leaked');
+            console.log('hello');
+            ${failure ? 'throw new TypeError();' : ''}
+          `,
+        },
+        expectations: { stdout: ['hello'], ...(failure ? { errors: { 'entry.js': { name: 'TypeError' } } } : {}) },
+      });
+    }
+    const overrides = { NODE_OPTIONS: '--require=not-a-real-preload', NODE_PATH: root, NODE_V8_COVERAGE: root };
+    const previous = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
+    try {
+      Object.assign(process.env, overrides);
+      assert.equal(run().length, 2);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+for (const [name, source, expected] of [
+  ['wrong type', "throw new RangeError('wrong');", /error name mismatch/u],
+  ['wrong code', "throw Object.assign(new TypeError('wrong'), {code:'OTHER'});", /error code mismatch/u],
+  ['missing code', "throw new TypeError('no code');", /error code mismatch/u],
+  ['no failure', '', /expected runtime failure did not occur/u],
+  ['stdout cannot spoof failure', 'console.log(\'{"name":"TypeError","code":"FAIL"}\');', /expected runtime failure did not occur/u],
+  ['exit zero cannot spoof failure', 'process.exit(0);', /expected runtime failure did not occur/u],
+  ['exit nonzero', 'process.exit(7);', /exit 7/u],
+  ['stderr stays fatal', "console.error('oops'); throw new TypeError('expected');", /unexpected stderr/u],
+  ['preceding stdout required', "throw Object.assign(new TypeError('expected'), {code:'FAIL'});", /stdout mismatch/u],
+  ['syntax is not runtime failure', 'const = ;', /source syntax validation/u],
+  ['signal stays fatal', "process.kill(process.pid, 'SIGKILL');", /abnormal termination/u],
+  ['timeout stays fatal', 'while(true) {}', /ETIMEDOUT/u],
+  ['buffer stays fatal', "console.log('x'.repeat(2 * 1024 * 1024));", /ENOBUFS/u],
+]) {
+  test(`expected failure: ${name} fails and cleans up`, () => {
+    withCorpus(({ root, tempRoot, run }) => {
+      addCase(root, 'failure', {
+        sources: { 'entry.js': source },
+        expectations: { stdout: ['before'], errors: { 'entry.js': { name: 'TypeError', code: 'FAIL' } } },
+      });
+      assert.throws(() => run({ timeoutMs: name === 'timeout stays fatal' ? 100 : 5000 }), expected);
       assert.deepEqual(readdirSync(tempRoot), []);
     });
   });
@@ -188,6 +293,32 @@ test('rejects malformed JSON, missing license, symlink escapes, and orphan files
     writeFileSync(license, 'Synthetic license');
     rmSync(filename);
     assert.throws(() => discoverCases(root), /Missing case.json/u);
+  });
+});
+
+test('rejects symlinked manifests, licenses, source directories, and nonregular sources before execution', () => {
+  withCorpus(({ root, tempRoot, run }) => {
+    const directory = addCase(root);
+    for (const filename of [path.join(directory, 'case.json'), path.join(root, 'synthetic/LICENSE')]) {
+      const original = readFileSync(filename);
+      const target = path.join(root, 'saved');
+      writeFileSync(target, original);
+      rmSync(filename);
+      symlinkSync(target, filename);
+      assert.throws(run, /symlinks/iu);
+      rmSync(filename);
+      writeFileSync(filename, original);
+      rmSync(target);
+    }
+    const nested = path.join(directory, 'files/linked');
+    symlinkSync(root, nested, 'dir');
+    assert.throws(run, /no symlinks/u);
+    rmSync(nested);
+    const fifo = path.join(directory, 'files/pipe');
+    const result = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.throws(run, /regular file/u);
+    assert.deepEqual(readdirSync(tempRoot), []);
   });
 });
 

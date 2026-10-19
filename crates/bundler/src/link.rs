@@ -21,11 +21,29 @@ mod physical;
 #[path = "link_tests.rs"]
 mod tests;
 
+/// Emitter selected for this build, not inferred from artifact names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    Native,
+    Legacy,
+}
+
+impl Backend {
+    pub fn layout(self) -> &'static str {
+        match self {
+            Self::Native => "native-single-chunk-v1",
+            Self::Legacy => "exact-root-set-chunks-v1",
+        }
+    }
+}
+
 /// Owned staging result; no filesystem writes. Publish the complete relative
 /// map together and execute/import `entries` with Node's ordinary loader.
 /// Each retained node has one actual executable chunk owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifacts {
+    pub backend: Backend,
     pub files: BTreeMap<PathBuf, String>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
