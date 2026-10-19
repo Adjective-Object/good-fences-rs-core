@@ -1,0 +1,19 @@
+{
+  "id": "authored/native-proto-destructuring",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": [
+      "[ '__proto__' ] true",
+      "[ '__proto__' ] true",
+      "7 [ '__proto__' ] true true",
+      "true"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Literal and escaped __proto__ shorthand produce own properties, not prototype setters, after binding renames.",
+    "Destructuring binding and assignment shorthand preserve property keys and inherited-property default behavior.",
+    "Explicit __proto__: value remains a prototype setter."
+  ]
+}

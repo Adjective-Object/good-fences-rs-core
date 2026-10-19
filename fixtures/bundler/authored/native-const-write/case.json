@@ -1,0 +1,14 @@
+{
+  "id": "authored/native-const-write",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["ReferenceError", "TypeError", "4", "before const write"],
+    "errors": {"entry.mjs": {"name": "TypeError"}},
+    "backend": "native"
+  },
+  "goals": [
+    "Caught lexical TDZ and const-write errors preserve subsequent imported-value observations.",
+    "An uncaught const write terminates entry evaluation after ordered preceding effects."
+  ]
+}

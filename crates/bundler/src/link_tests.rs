@@ -190,26 +190,6 @@ fn native_concatenation_separates_module_ends_outside_comments_and_nested_syntax
 }
 
 #[test]
-fn native_concatenation_preserves_proto_shorthand_own_properties() {
-    for name in ["__proto__", r"\u005f_proto__"] {
-        assert_native_observation(
-            &sources(&[
-                ("dep.mjs", "export const value = null;"),
-                ("entry.mjs", &format!("import {{value as {name}}} from './dep.mjs'; console.log(Object.keys({{{name}}}), Object.getPrototypeOf({{{name}}}) === Object.prototype);")),
-            ]),
-            "[ '__proto__' ] true\n",
-        );
-    }
-    assert_native_observation(
-        &sources(&[
-            ("dep.mjs", "export const __proto__ = 7;"),
-            ("entry.mjs", "import {__proto__ as other} from './dep.mjs'; let {__proto__ = null} = {['__proto__']: null}; console.log(other, Object.keys({__proto__}), Object.getPrototypeOf({__proto__}) === Object.prototype, Object.getPrototypeOf({__proto__: __proto__}) === null); ({__proto__ = 4} = {}); console.log(__proto__ === Object.prototype);"),
-        ]),
-        "7 [ '__proto__' ] true true\ntrue\n",
-    );
-}
-
-#[test]
 fn lexical_rename_preserves_proto_literal_binding_and_assignment_shorthand() {
     let source = "let {__proto__ = null} = {['__proto__']: null}; console.log(Object.keys({__proto__}), Object.getPrototypeOf({__proto__}) === Object.prototype); ({__proto__ = 4} = {}); console.log(__proto__ === Object.prototype);";
     let path = Path::new("entry.mjs");
@@ -381,28 +361,6 @@ fn native_defaults_snapshot_expressions_but_keep_binding_aliases_live() {
 }
 
 #[test]
-fn native_named_default_function_preserves_hoisting_and_own_binding() {
-    assert_native_observation(
-        &sources(&[
-            ("function.mjs", "console.log(early.name, early()); var state = 7; export default function early() { return state; }"),
-            ("entry.mjs", "import value from './function.mjs'; console.log(value.name, value());"),
-        ]),
-        "early undefined\nearly 7\n",
-    );
-}
-
-#[test]
-fn native_import_aliases_do_not_rename_observable_function_and_class_names() {
-    assert_native_observation(
-        &sources(&[
-            ("dep.mjs", "export function Same() {} export class Model {}"),
-            ("entry.mjs", "import {Same, Model} from './dep.mjs'; const fn = () => Same; const object = {Same, Model, fn}; console.log(object.Same.name, object.Model.name, object.fn.name, fn() === Same);"),
-        ]),
-        "Same Model fn true\n",
-    );
-}
-
-#[test]
 fn native_default_value_forms_keep_native_observable_names() {
     for (definition, expected) in [
         ("export default function() {}", "default"),
@@ -530,27 +488,6 @@ fn native_staging_keeps_namespace_escapes_receivers_and_writes_native() {
         assert_eq!(observed.stdout, baseline.stdout);
         assert_eq!(observed.stdout, expected.as_bytes());
     }
-}
-
-#[test]
-fn native_concatenation_keeps_lexical_tdz_and_const_writes() {
-    let sources = sources(&[
-        ("dep.mjs", "export let value = 4;"),
-        ("entry.mjs", "import {value as live} from './dep.mjs'; try { before; } catch(e) { console.log(e.name); } const before = 1; const fixed = 2; try {fixed = 3;} catch(e) {console.log(e.name);} console.log(live);"),
-    ]);
-    let (_, output) = build(&sources, &[("entry.mjs", true)], false);
-    assert_eq!(output.files.len(), 1);
-    let baseline = node(&sources, Path::new("entry.mjs"));
-    let observed = node(&output.files, &output.entries["entry.mjs"]);
-    for result in [&baseline, &observed] {
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-    }
-    assert_eq!(observed.stdout, baseline.stdout);
-    assert_eq!(observed.stdout, b"ReferenceError\nTypeError\n4\n");
 }
 
 #[test]

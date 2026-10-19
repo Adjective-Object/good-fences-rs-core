@@ -1,0 +1,13 @@
+{
+  "id": "authored/ambient-dynamic-laziness",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["before 0", "pending 0", "outer 1", "after outer 1", "inner 2", "after inner 2 7", "true true 2"]
+  },
+  "goals": [
+    "Ambient unknown-call effects cannot run before their dynamic import or before a nested deferred import.",
+    "Repeated imports reuse namespace and object identity without replaying initialization.",
+    "Currently exercises the reported legacy async backend; no file-layout assertions or native async claim."
+  ]
+}

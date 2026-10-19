@@ -16,11 +16,14 @@ An optional positional argument selects a different corpus root. The runner
 fails for missing/empty corpora, malformed or unsupported metadata, execution
 errors, timeouts, stderr, or output differences; it never silently skips cases.
 
-The corpus contains six esbuild cases and six rspack cases covering
+The corpus contains **23 cases / 28 entry executions**: six esbuild cases,
+six rspack cases and eleven authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
-Two authored cases add native-required lexical TDZ and mixed successful,
-throwing and rejecting entrypoints with preceding observable effects.
+Authored cases cover TDZ and const-write failures with preceding effects,
+hoisting, default snapshots/live aliases, inferred names, `__proto__` shorthand
+and destructuring, reverse-path static import ordering, namespace observations,
+ambient deferred effects and once-only shared identity.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The dedicated Node 22 CI job runs both this corpus and the runner's own tests.
 
@@ -170,13 +173,49 @@ node --test scripts/bundler-differential.test.mjs
 It validates the same manifests/provenance first, makes **separate** source and
 bundler copies, and compares manifest expectations with source and emitted
 per-entry stdout and normalized runtime outcomes through the shared observer.
-All fourteen contracts/nineteen emitted entry executions pass, with zero
+All **23 contracts / 28 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
-- **Native (4):** `authored/native-tdz`, `esbuild/unused-import-side-effects`,
-  `rspack/esm-effect-order`, `rspack/esm-live-binding`.
-- **Legacy (10):** all other cases, including `authored/runtime-outcomes` and
+- **Native (10):** all seven `authored/native-*` cases,
+  `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
+  `rspack/esm-live-binding`. The seven authored cases require native selection.
+- **Legacy (13):** all other cases, including the three namespace/ambient cases
+  below, `authored/runtime-outcomes` and
   `esbuild/dynamic-import-tla-order`. These passes are not native-backend coverage.
+
+### Authored migration baseline
+
+Nine cases port representative inline Rust regressions through the same unbundled
+and public-build observer. All have one entry; outcomes below are observed, not
+linker-shape assertions. No upstream provenance is fabricated for local inputs.
+
+| Added case (`authored/`) | Actual backend | Expected completion / observations |
+| --- | --- | --- |
+| `native-hoisting` | native, required | Success; named default function hoisting, undefined early vars, repeated var initialization, live barrel mutation |
+| `native-default-bindings` | native, required | Success; expression effects in order, snapshot `1`, mutated bindings `2` / `4` |
+| `native-name-inference` | native, required | Success; declaration/arrow names, default function/class names and descriptors, unnamed comma/conditional forms |
+| `native-proto-destructuring` | native, required | Success; literal/escaped own keys, prototype setter distinction, binding/assignment defaults |
+| `native-static-order` | native, required | Success; `z` before `a` through a pure barrel, source names, free global and strict `this` |
+| `native-const-write` | native, required | Uncaught `TypeError` after caught TDZ/const errors, imported value and preceding effect |
+| `namespace-observations` | legacy | Success; keys/descriptors, computed read, live aliases, identity, method receiver, read-only write |
+| `ambient-dynamic-laziness` | legacy | Success; zero effects before import, outer then deferred inner effects, cached namespace identity |
+| `ambient-once-identity` | legacy | Success; one shared ambient initialization across concurrent consumers, object/function/namespace identity and mutation |
+
+The existing `authored/native-tdz` remains an uncaught `ReferenceError` contract
+after `before TDZ`; `authored/runtime-outcomes` remains legacy with successful,
+throwing and rejecting entries. Errors constrain names, not stacks or messages;
+these new cases need no fabricated error codes. Ambient cases call functions
+through `globalThis` and observe effects before/after dynamic activation; they do
+not inspect source counts, generated code, chunks or import closures.
+
+Four redundant inline Rust tests are retired; exact mappings and reasons for
+retaining broader/private-API tests are in
+[`NOTES.incremental-bundler.md`](../../NOTES.incremental-bundler.md).
+`scripts/bundler-release-check` already runs both corpus commands, so these
+contracts remain release-gated. Every subsequent linker stage must either
+graduate applicable legacy fixtures to required native coverage, add meaningful
+regressions for its new behavior, or both. Compare actual reported backends with
+this baseline; a legacy pass alone is not progress on native support.
 
 These observations do not establish general bundler conformance. It additionally
 executes an authored same-runtime concurrent multi-entry CJS/ESM identity case

@@ -1,0 +1,13 @@
+{
+  "id": "authored/ambient-once-identity",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["before 0", "shared 1", "true true true true 1", "1 1 1", "true 1"]
+  },
+  "goals": [
+    "Concurrent consumers of one shared module observe one ambient initialization and the same namespace, object and function.",
+    "Live mutation is visible through both consumers and subsequent direct dynamic imports without duplicate initialization.",
+    "Currently exercises the reported legacy async backend, not native multi-root coverage."
+  ]
+}

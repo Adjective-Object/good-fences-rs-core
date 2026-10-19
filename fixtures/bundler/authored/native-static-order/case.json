@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-static-order",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["first", "second", "Named Model undefined 8 true"],
+    "backend": "native"
+  },
+  "goals": [
+    "Static dependency evaluation follows source import order through a pure barrel, not alphabetical path order.",
+    "Import aliases preserve observable names without capturing a same-spelled free global; module this remains undefined."
+  ]
+}

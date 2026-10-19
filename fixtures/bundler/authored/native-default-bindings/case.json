@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-default-bindings",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["before", "expression", "after", "1 2 4 3"],
+    "backend": "native"
+  },
+  "goals": [
+    "Default expressions snapshot their value while default binding aliases remain live through barrels.",
+    "Default expressions run at their source evaluation point, between surrounding effects."
+  ]
+}

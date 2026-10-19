@@ -1,0 +1,10 @@
+globalThis.activations = 0;
+globalThis.observeActivation = label => console.log(label, ++globalThis.activations);
+console.log('before', globalThis.activations);
+const pending = import('./outer.mjs');
+console.log('pending', globalThis.activations);
+const outer = await pending;
+console.log('after outer', globalThis.activations);
+const inner = await outer.later();
+console.log('after inner', globalThis.activations, inner.value);
+console.log(outer === await import('./outer.mjs'), inner === await outer.later(), globalThis.activations);

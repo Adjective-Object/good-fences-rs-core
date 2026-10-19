@@ -1,0 +1,19 @@
+{
+  "id": "authored/namespace-observations",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": [
+      "a", "b", "bump,read,value 1",
+      "true true false",
+      "1 true true false [object Module]",
+      "1", "2 2 2 true",
+      "TypeError", "2"
+    ]
+  },
+  "goals": [
+    "Escaped namespaces preserve keys, descriptors, null prototype, nonextensibility and identity through diamond barrels.",
+    "An unknown computed key and receiver-sensitive method see live values; namespace writes remain read-only.",
+    "Currently exercises the reported legacy backend, not native namespace-escape support."
+  ]
+}

@@ -2,15 +2,23 @@
 
 ## Active replacement — pending review/implementation
 
-- [ ] Independently review the first harness diversion: authoritative production
+- [x] Independently review the first harness diversion: authoritative production
   backend/layout reporting, native-required case metadata, optional fully checked
   upstream provenance, shared normalized runtime outcomes and preceding effects.
   Implemented and validated (89 harness/146 bundler tests, 14 baseline and
-  differential contracts; four native, ten legacy), not yet reviewed/committed.
-- [ ] Next harness increment: portable hoisting/names/destructuring/order/
-  namespace/ambient-effect contracts. Keep native cross-chunk work paused until
-  review; no new ownership/deferred-closure assertion DSL or duplicated inline
-  Rust fixture suite in this increment.
+  differential contracts; four native, ten legacy), reviewed and committed
+  as `6775e6c`.
+- [x] Second harness increment: nine portable hoisting/names/destructuring/order/
+  namespace/ambient-effect contracts; six additional native-required, three
+  reported legacy. Four redundant Rust runtime tests retired (NOTES maps each).
+  Validated: 142 bundler / 89 harness tests, 23 baseline + differential contracts,
+  28 emitted executions; actual backends 10 native / 13 legacy; zero unsupported.
+- [ ] Independently review the second harness diversion before resuming native
+  cross-chunk work. No linker/gate changes, new structural assertion DSL or
+  native namespace-escape/async/CJS coverage claim in this increment.
+- [ ] For each subsequent linker stage, graduate applicable legacy fixtures to
+  required native and/or add meaningful regressions exercising its new behavior.
+  Compare against the fixture README's explicit backend baseline.
 - [ ] Symbol linker: effect-retention/order analysis delivered; checked canonical
   symbols, production import/export resolution reuse and capture-safe name
   allocation implemented and validated. Independent review still required;

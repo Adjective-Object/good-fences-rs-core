@@ -1,9 +1,72 @@
 # Incremental bundler implementation handoff
 
-## Current diversion: fixture backend and runtime-outcome contracts
+## Current diversion: reusable authored semantic fixtures
 
-First harness-only replacement increment is implemented, uncommitted and awaiting
-independent review; native cross-chunk work remains paused. No linker eligibility,
+Second harness-only increment is complete, uncommitted and ready for independent
+review on top of reviewed `6775e6c`. Native cross-chunk implementation remains
+paused. No linker implementation, eligibility gate, runner/schema, dependency,
+upstream source/provenance/license or structural assertion was changed.
+
+Nine portable contracts add six required-native cases and three explicitly
+reported legacy cases. The fixture README lists every ID/backend/outcome.
+`native-hoisting`, `native-default-bindings`, `native-name-inference`,
+`native-proto-destructuring`, `native-static-order` and `native-const-write`
+all actually select native; the last observes an uncaught TypeError after ordered
+effects. Existing `native-tdz` still observes an uncaught ReferenceError.
+`namespace-observations`, `ambient-dynamic-laziness` and `ambient-once-identity`
+select legacy. Ambient unknown calls through globalThis observe deferred
+activation and once-only object/function/namespace identity across consumers,
+without any file-count/closure/deletion/code-pattern assertion.
+
+Exact retired `link_tests.rs` runtime-test mapping:
+
+| Retired Rust test | Portable replacement (`authored/`) |
+| --- | --- |
+| `native_named_default_function_preserves_hoisting_and_own_binding` | `native-hoisting` retains the original early/late reads and own name; adds repeated-var/live-barrel observations |
+| `native_import_aliases_do_not_rename_observable_function_and_class_names` | `native-name-inference` retains the Same/Model/fn shorthand and identity observation |
+| `native_concatenation_preserves_proto_shorthand_own_properties` | `native-proto-destructuring` retains both literal/escaped imported shorthand variants and the binding/assignment/prototype-setter case |
+| `native_concatenation_keeps_lexical_tdz_and_const_writes` | `native-const-write` retains caught ReferenceError/TypeError/imported `4`, then adds an uncaught write |
+
+Other grounding is deliberately a partial port: retain
+`native_concatenation_uses_canonical_live_bindings_and_exact_public_names`,
+`native_defaults_snapshot_expressions_but_keep_binding_aliases_live`,
+`native_concatenation_keeps_static_source_order_names_and_free_globals` and
+`native_namespace_property_reads_follow_aliases_and_live_bindings` for public
+surfaces, physical structure and/or reordered-input assertions. Retain
+`native_default_value_forms_keep_native_observable_names` and
+`native_default_expressions_keep_evaluation_time_and_throwing_tdz` for unported
+collision, named-binding mutation, class TDZ and default-expression TDZ variants.
+Keep the direct lexical-rewrite private-API test.
+Namespace inputs also reuse `native_staging_keeps_namespace_escapes_receivers_and_writes_native`
+and `same_logical_chunk_does_not_flatten_static_evaluation_order`; their remaining
+variants are not deleted. Ambient inputs adapt
+`dynamic_sites_share_native_namespaces_and_preserve_nested_activation_and_timing`
+and `canonical_native_namespaces_and_once_only_evaluation_survive_entry_facades`;
+retain those tests' distinct dead-site/physical and public multi-entry coverage.
+The new shared object is an observable identity probe, not a chunk ownership test.
+
+Existing `scripts/bundler-release-check` runs both complete corpus commands, so
+the four retired runtime checks have release-gated portable replacements.
+Acceptance for every next linker stage: graduate applicable legacy cases to
+required native and/or add meaningful new regressions exercising that stage.
+Current baseline: **23 passed, zero unsupported; 10 native / 13 legacy,
+28 emitted entry executions**. Namespace escapes/cycles/async/CJS are not claimed
+as native coverage. Independent review comes next; only then resume linker work.
+
+Validation on Node v22.22.2: both Node suites **89 passed**, all **23 baseline**
+and **23 differential** contracts pass via CLI and programmatic APIs, plus the
+CLI's same-runtime identity and four diagnostic cases. `cargo test -p bundler`
+**142 passed** after four retirements; bundler format check, focused all-target
+clippy `--no-deps`, and `./scripts/spot-check` (51 parser tests + workspace check)
+pass. Existing dependency/workspace warnings remain. Commands use project-local
+`TMPDIR=$PWD/target/p1-test-tmp`; logs:
+`target/authored-fixtures-{node,rust,fmt,clippy,spot-check,baseline,differential,programmatic}.log`.
+No full release/workspace test or benchmark rerun, subagents, commit or push.
+
+## Previous diversion: fixture backend and runtime-outcome contracts
+
+First harness-only replacement increment was independently reviewed and committed
+as `6775e6c`; native cross-chunk work remained paused. No linker eligibility,
 emission semantics or legacy layout contracts were advanced. Production emitters
 now assign `link::Artifacts::backend: link::Backend::{Native, Legacy}`. The build
 example serializes `backend` and derives `layout` from `Backend::layout()`, rather
@@ -44,9 +107,8 @@ all-target bundler clippy `--no-deps`, and mandatory `./scripts/spot-check`
 remain. Commands use `TMPDIR=$PWD/target/p1-test-tmp`; logs are
 `target/harness-diversion-{node,rust,contracts,fmt,clippy,spot-check}.log`.
 No benchmark/full workspace test rerun, nested agents, commit or push.
-Next increment: portable hoisting/names/destructuring/order/namespace/ambient
-contracts before resuming native cross-chunk linking; do not duplicate legacy
-inline Rust cases or add file-ownership/deferred-closure assertion DSLs.
+The next portable hoisting/names/destructuring/order/namespace/ambient increment
+is recorded above; no file-ownership/deferred-closure assertion DSL was added.
 
 ## Current replacement increment: native defaults and checked namespace reads
 

@@ -1,0 +1,25 @@
+{
+  "id": "authored/native-name-inference",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": [
+      "Same Model fn true",
+      "default fn false false true",
+      "default fn false false true",
+      "default fn false false true",
+      "default fn false false true",
+      "default fn false false true",
+      "default fn false false true",
+      " fn false false true",
+      " fn false false true",
+      "default"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Imported declarations and shorthand properties preserve source function, class and arrow names.",
+    "Anonymous default function, async function, generator, class and parenthesized forms retain name descriptors.",
+    "Comma and conditional expressions do not acquire an inferred default name; class static initialization sees the final name."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-hoisting",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["early undefined", "undefined", "undefined", "early 7", "2 7", "3"],
+    "backend": "native"
+  },
+  "goals": [
+    "Named default functions are hoisted with their own source name and binding.",
+    "Var reads before initialization, repeated var declarations and live barrel aliases retain native semantics."
+  ]
+}

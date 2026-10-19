@@ -322,12 +322,19 @@ bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
 lifetime/dead-code warnings remain; no unrelated CI/toolchain health claim.
 
-Current harness-diversion validation (not a full release rerun): **146 bundler
-tests**, **89 harness regressions**, **14 baseline + 14 differential contracts /
-19 emitted executions**, same-runtime identity and four diagnostics, format,
-all-target bundler clippy (`--no-deps`) and mandatory spot-check pass. Only four
-contracts select native; ten select legacy, including the dynamic-import/TLA
-case. Native cross-chunk implementation remains paused pending review.
+Current second harness-diversion validation (not a full release rerun):
+**142 bundler tests** after retiring four redundant runtime tests,
+**89 harness regressions**, **23 baseline + 23 differential contracts /
+28 emitted executions**, same-runtime identity and four diagnostics, format,
+all-target bundler clippy (`--no-deps`) and mandatory spot-check pass.
+**Ten contracts select native, thirteen select legacy**. Six additional authored
+contracts require native for hoisting, defaults, names, destructuring, static
+order and const errors; namespace escapes/async/CJS remain legacy coverage.
+See the [authored backend baseline](../../fixtures/bundler/README.md#authored-migration-baseline)
+and exact retirement mapping in NOTES. Each subsequent linker stage must graduate
+applicable legacy fixtures to required-native coverage and/or add meaningful
+regressions for its new behavior. Native cross-chunk implementation remains
+paused until independent review of this migration.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
