@@ -1,6 +1,19 @@
 # Incremental bundler execution checklist
 
-## Physical exact-set emission
+## Active replacement — pending review/implementation
+
+- [ ] Symbol linker: first effect-retention/order projection increment implemented
+  for review; verify and commit independently. Direct-symbol linking still pending.
+- [ ] Scope-hoist direct bindings and native imports/exports across actual output
+  chunks; public entry/export boundaries only, no forced root-set partition.
+- [ ] Integrate one opaque CJS segment and logical ESM facade per input into
+  normal usage/link/grouping, not standalone native `.cjs` fallback files.
+- [ ] Remove legacy registrations/cells/aliases/watchers/generator dispatch,
+  capture cycles and ESM per-source facade families.
+- [ ] Release after independent reviews, runtime/differential/invalidation gates
+  and mandatory spot-check. Do not reuse historical completion claims below.
+
+## Rejected architecture: legacy physical exact-set emission (still active)
 
 - [x] Move real/synthetic executable registrations into their one exact chunk.
 - [x] Separate binding storage/instantiation from original module execution;
@@ -15,7 +28,7 @@
 - [x] Revalidate the entire release gate and benchmark, and review executable
   output on adversarial root combinations. No per-module body fallback remains.
 
-## Historical native-file replacement
+## Rejected historical native-file replacement
 
 - [x] Delete the revoked P6–P8 loader backend and source-payload APIs entirely.
 - [x] Emit native per-original-module `.mjs`/`.cjs` files, relative dependencies,

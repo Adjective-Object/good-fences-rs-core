@@ -1,6 +1,19 @@
 # bundler
 
-## Exact physical code splitting
+## Replacement direction and current status
+
+The target is a symbol linker with scope-hoisted direct ESM bindings and native
+imports/exports only across actual output chunks. Root sets remain reachability
+analysis, not mandatory physical partitions. Public entry/export boundaries
+constrain output; pure segments may move according to binding dependencies.
+Each CJS input will remain one opaque segment plus a logical ESM facade, both
+subject to normal usage/linking/grouping, not a native `.cjs`-per-input fallback.
+
+The registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend
+below is **still active but rejected as the target architecture**. Symbol linking,
+scope hoisting, CJS integration and removal of that backend are pending.
+
+## Current legacy exact physical code splitting
 
 The active `link::esm` backend now emits exact physical root-set registrations,
 not overlapping projections of original module files:
@@ -43,6 +56,37 @@ instance-field bodies do not become top-level effects.
 
 `RetentionPlan` exposes deterministic retained segments/reasons and additional
 consumer → dependency edges: static evaluation, module effects and effect order.
+`ModuleEffect` edges run from a shared module-evaluation hub to its local effects.
+Live consumers reach that hub through `BindingEvaluation`; `StaticEvaluation`
+routes retain transitively imported effects, including through pure barrels,
+without copying the effect closure onto every segment.
+`EffectOrder` edges instead constrain scheduling only: preceding statements and
+runtime static imports are projected to actual effects. Hoisted import/re-export
+declarations precede executable statements regardless of textual position.
+Synchronous sibling static subtrees complete in source order, skipping already
+entered modules. Source TLA status propagates through static imports/reexports;
+async modules do not contribute sibling completion-chain edges, since later
+siblings can execute before their completion. Local source-order and static
+dependency constraints remain. This scalar DAG is only a partial order, **not a
+full async scheduler**; omitted async sibling constraints belong to a later
+native scheduling boundary. It neither converts ordinary source awaits nor
+introduces an unsupported-input gate.
+Compact connector/effect chains avoid all-pairs statement constraints. Iterative
+connector SCC condensation caches first-effect projections, including empty
+ones, once per component; single-successor chains share projection sets. Shared
+pure barrels are not re-traversed for each effectful consumer, and projection
+stops at effects rather than materializing full transitive effect closures.
+Reachability indexes outgoing retention edges once rather than rescanning the
+whole graph per node. Order edges do not retain
+bindings or add chunk availability/manifest edges. Pure bindings retain their
+ordinary dependency graph without being pinned to source positions.
+`effect_order` lists available effects dependency-first, breaking order-only SCCs
+by canonical source path/span. `warnings` identifies cycle members in the chosen
+order; `BuildResult.warnings` includes these on changed **and no-op** builds.
+Binding/link/TDZ errors are not exempted. Async imports and deferred requires do
+not gain eager order constraints; the list is not permission to activate them.
+The legacy emitter still schedules using native module jobs, not this new
+linker-planning order. Replacing its scheduling/output is a later increment.
 Original structural edge indices retain exact occurrence/timing metadata.
 Required bodies are **available**, not scheduled eagerly: deferred requires
 keep their original call sites/timing. Async boundary edge indices are recorded

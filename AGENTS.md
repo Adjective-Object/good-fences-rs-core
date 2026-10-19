@@ -41,8 +41,10 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
 - `node scripts/bundler-fixtures.mjs` validates native Node baselines only.
   `cargo build -p bundler --example build && node scripts/bundler-differential.mjs`
   exercises public build/publication, separately from the native baseline.
-- Bundler executable bodies belong to exact nonempty root-set chunks, one
-  physical file per canonical set. Entry/evaluation/namespace facades contain
-  storage and dispatch, never copies of original bodies. Loading a chunk must
-  not evaluate unrelated original modules. Never reintroduce source-loading
-  runtimes, hooks, executable JSON, source assembly or runtime compilation.
+- Bundler target: scope-hoisted direct ESM bindings with native imports/exports
+  only between actual output chunks; root sets describe reachability, not a
+  mandatory physical partition. Public entry/export boundaries constrain output.
+  Each CJS input is one opaque segment plus a logical ESM facade, both subject
+  to normal usage/link/grouping. The registration/cell/facade-family backend
+  remains legacy pending replacement, not an architectural requirement.
+  Preserve activation timing; no source-loading runtimes or runtime compilation.

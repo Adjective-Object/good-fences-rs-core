@@ -30,26 +30,36 @@ Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
 validation. Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 
-Emit one executable registration chunk per exact nonempty root set. Each real
-or synthetic node has exactly one physical owner; chunk_artifacts never overlap.
-Original bodies live only in chunks, not evaluation/entry/namespace facades.
-Relative standard imports/requires are the loader. No hooks, code JSON, source
-loading/assembly, custom protocols, eval or runtime compilation.
-Binding cells enforce lexical TDZ, const writes and aliases. Native facade
-storage is initialized by synchronous binding events, including between
-destructuring elements; subscribers are installed through an instantiation
-cycle before source dependencies execute. Helper exports stay out of public
-namespaces. Do not turn binding events into awaits.
-Native ESM jobs still own dependency/SCC scheduling and rejection. Only source
-await/for-await events suspend evaluation; never wrap every module in async.
+Target: replace the legacy registration/cell/alias/subscriber/generator-dispatch
+and capture-cycle backend with a symbol linker and scope-hoisted direct ESM
+bindings. Use native imports/exports across actual output chunks, not per-source
+facade families. Public entry/export boundaries constrain output; root sets are
+reachability analysis, not unconditional physical partitions or module seams.
+Pure segments can relocate by binding dependencies. Effect retention is distinct
+from scheduling and neither is a binding edge. Project through pure/static-import
+connectors before pruning to effects; deterministically break order-only SCCs
+with visible warnings, never suppress binding/TDZ errors.
+Retain effects through shared module-evaluation hubs, not per-segment closures;
+hoist static connectors and chain newly entered synchronous static subtrees in
+source order. Propagate source TLA over static dependencies; omit async subtree
+completion chains. The scalar DAG is a partial order, not an async scheduler.
+Cache first-effect projections, including empties, on iterative connector SCCs;
+share chain results rather than copying transitive closures per segment.
+The old backend is still active until staged replacement; preserve its runtime
+behavior while replacing analysis in small independently reviewed increments.
+No hooks, code JSON, source loading/assembly, eval or runtime compilation.
+Keep native live bindings, TDZ and const semantics. Only source await/for-await
+events suspend evaluation; never wrap every module in async.
 Derive async status over static runtime dependencies and reject all requires of
 async ESM with original require/TLA spans, including deferred sites.
 Do not persist derived async status. Never run a not-yet-evaluated module from a
 namespace facade; late completion may only finish newly available binding parts
 of an already evaluated module. Externals remain gated.
-Opaque CJS has one assigned factory; the shared runtime allocates its cache
-record before call, preserves wrapper this/exports aliases/current exports,
-and evicts thrown factories for retry. Chunk helper identifiers must avoid all
+Each CJS input is one opaque segment bridged by a logical ESM facade; both
+participate in ordinary usage analysis/linking/grouping, never a standalone
+native .cjs-per-input fallback. Preserve early cache allocation, wrapper
+this/exports aliases/current exports and retry after throws.
+Chunk helper identifiers must avoid all
 source bindings and free references, including in opaque factories.
 Proxy initialization, individual named
 snapshots and runtime-key bridges each live in their assigned synthetic chunk.
@@ -57,9 +67,8 @@ Reverse checked requests supply original names; default is full exports,
 __esModule never unwraps, names snapshot once. Namespace keys snapshot once
 and reads forward to captured exports. Require-of-ESM uses native evaluation
 facades and retains native evaluating-cycle errors.
-Physical ownership alone is not fetching correctness. Root-specific hoisted
-capture cycles expose actual native namespaces before source bodies run.
-Capture follows static execution closure, not deferred require availability.
+Physical ownership alone is not fetching correctness. Static execution closure
+differs from deferred require availability; capture cycles are legacy, not target.
 Never import namespace facades for globally retained but inactive bindings.
 Keep real Node import-closure/deleted-async-chunk and late-identity regressions.
 
@@ -78,8 +87,8 @@ Root identities use entry IDs or async source occurrences, never target paths.
 Canonical diagnostic nodes use paths, not insertion-dependent file numbers.
 Root traversal follows synchronous retention constraints only; namespace
 binding demand differs from module evaluation. Empty modules keep identities.
-Partition only reachable async sites to a fixed point; chunks are exactly
-nonempty canonical root sets. Never merge or hoist. Dead nodes have empty sets.
+Partition only reachable async sites to a fixed point; dead nodes have empty
+root sets. Root-set equivalence is analysis, not a prohibition on scope hoisting.
 Manifest chunk edges/load sets describe availability, never evaluation order.
-Facades stay outside logical chunk equivalence; module records preserve separate
-evaluation identity within shared chunks. Async links never become sync edges.
+Preserve evaluation identity without mandating per-source facade families.
+Async links never become sync edges.

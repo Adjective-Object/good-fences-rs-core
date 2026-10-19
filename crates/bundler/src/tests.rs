@@ -1,6 +1,7 @@
 use super::*;
 use ast_segmenter::{parse_module, ModuleFormat};
 use source_graph::OwnedSourceFileInput;
+use std::collections::HashMap;
 use std::path::Path;
 
 pub(crate) fn input(path: &str, source: &str) -> OwnedSourceFileInput {
@@ -69,6 +70,434 @@ fn runtime_imports_evaluate_unreferenced_exports_and_no_export_modules() {
             && e.from == GraphNode::Segment(SegmentKey::new(2, 1))
             && e.to == GraphNode::Segment(SegmentKey::new(2, 0))));
     assert_eq!(plan, retain(&graph, &[0], &[]).unwrap());
+}
+
+#[test]
+fn effect_retention_crosses_pure_import_and_reexport_connectors() {
+    let graph = SourceGraph::from_owned([
+        input("entry.mjs", "import 'pure.mjs'; const needed = 1;"),
+        input(
+            "pure.mjs",
+            "export {value} from 'barrel.mjs'; const dead = 2;",
+        ),
+        input("barrel.mjs", "export {value} from 'effects.mjs';"),
+        input("effects.mjs", "export const value = 3; run();"),
+    ]);
+    let root = SegmentKey::new(0, 1);
+    let effect = SegmentKey::new(3, 1);
+    let plan = retain(&graph, &[], &[GraphNode::Segment(root)]).unwrap();
+    assert_eq!(plan.modules, [0, 1, 2, 3]);
+    assert_eq!(plan.segments.len(), 2);
+    assert_eq!(plan.effect_order, [effect]);
+    assert!(plan.edges.iter().any(|edge| {
+        edge.from == GraphNode::Module(effect.file_id)
+            && edge.to == GraphNode::Segment(effect)
+            && edge.kind == RetentionEdgeKind::ModuleEffect
+    }));
+    let reached = chunks::reference_reachability(
+        &graph,
+        &plan,
+        &policy::EffectPolicy::default(),
+        &[chunks::RootSeed {
+            id: chunks::RootId::Entry("binding".into()),
+            evaluation_roots: vec![],
+            binding_roots: vec![GraphNode::Segment(root)],
+        }],
+    )
+    .unwrap();
+    assert!(reached
+        .values()
+        .next()
+        .unwrap()
+        .contains(&chunks::node_id(&graph, GraphNode::Segment(effect)).unwrap()));
+    assert!(!plan.edges.iter().any(|edge| {
+        edge.from == GraphNode::Segment(root)
+            && matches!(
+                edge.kind,
+                RetentionEdgeKind::Binding | RetentionEdgeKind::EffectOrder
+            )
+    }));
+}
+
+#[test]
+fn local_effect_retention_does_not_pin_pure_binding_order() {
+    let graph = SourceGraph::from_owned([input(
+        "entry.mjs",
+        "const needed = 1; first(); const dead = 2; second();",
+    )]);
+    let pure = SegmentKey::new(0, 0);
+    let first = SegmentKey::new(0, 1);
+    let second = SegmentKey::new(0, 3);
+    let plan = retain(&graph, &[], &[GraphNode::Segment(pure)]).unwrap();
+    assert_eq!(plan.effect_order, [first, second]);
+    for effect in [first, second] {
+        assert!(plan.edges.iter().any(|edge| {
+            edge.from == GraphNode::Module(pure.file_id)
+                && edge.to == GraphNode::Segment(effect)
+                && edge.kind == RetentionEdgeKind::ModuleEffect
+        }));
+    }
+    assert!(!plan
+        .segments
+        .iter()
+        .any(|segment| segment.key == SegmentKey::new(0, 2)));
+    assert!(!plan.edges.iter().any(|edge| {
+        edge.kind == RetentionEdgeKind::EffectOrder
+            && (edge.from == GraphNode::Segment(pure) || edge.to == GraphNode::Segment(pure))
+    }));
+    assert!(plan.edges.iter().any(|edge| {
+        edge.kind == RetentionEdgeKind::EffectOrder
+            && edge.from == GraphNode::Segment(second)
+            && edge.to == GraphNode::Segment(first)
+    }));
+}
+
+#[test]
+fn sibling_static_imports_finish_in_source_order_through_pure_barrels() {
+    for barrel in [false, true] {
+        for reverse in [false, true] {
+            let mut inputs = vec![
+                input("entry.mjs", "import 'z.mjs'; import 'a.mjs'; entry();"),
+                input(
+                    "z.mjs",
+                    if barrel {
+                        "export * from 'z-leaf.mjs';"
+                    } else {
+                        "z();"
+                    },
+                ),
+                input(
+                    "a.mjs",
+                    if barrel {
+                        "import 'a-leaf.mjs';"
+                    } else {
+                        "a();"
+                    },
+                ),
+                input("z-leaf.mjs", "zLeaf();"),
+                input("a-leaf.mjs", "aLeaf();"),
+            ];
+            if reverse {
+                inputs.reverse();
+            }
+            let graph = SourceGraph::from_owned(inputs);
+            let entry = graph.file_id(Path::new("entry.mjs")).unwrap();
+            let plan = retain(&graph, &[entry], &[]).unwrap();
+            let order: Vec<_> = plan
+                .effect_order
+                .iter()
+                .map(|key| graph.file_path(key.file_id).unwrap().to_str().unwrap())
+                .collect();
+            assert_eq!(
+                order,
+                if barrel {
+                    vec!["z-leaf.mjs", "a-leaf.mjs", "entry.mjs"]
+                } else {
+                    vec!["z.mjs", "a.mjs", "entry.mjs"]
+                },
+                "barrel={barrel}, reverse={reverse}"
+            );
+            assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+        }
+    }
+}
+
+#[test]
+fn async_static_subtrees_do_not_serialize_later_siblings() {
+    for transitive in [false, true] {
+        let graph = SourceGraph::from_owned([
+            input(
+                "entry.mjs",
+                "import 'a.mjs'; import 'b.mjs'; import 'c.mjs'; entry();",
+            ),
+            input(
+                "a.mjs",
+                if transitive {
+                    "import 'child.mjs'; after();"
+                } else {
+                    "before(); await pending; after();"
+                },
+            ),
+            input("b.mjs", "b();"),
+            input("c.mjs", "c();"),
+            input("child.mjs", "before(); await pending; after();"),
+        ]);
+        let plan = retain(&graph, &[0], &[]).unwrap();
+        let dependencies: HashMap<_, Vec<_>> = plan
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == RetentionEdgeKind::EffectOrder)
+            .fold(HashMap::new(), |mut map, edge| {
+                map.entry(edge.from).or_default().push(edge.to);
+                map
+            });
+        let depends_on = |from: SegmentKey, to: SegmentKey| {
+            let mut pending = vec![GraphNode::Segment(from)];
+            let mut seen = HashSet::new();
+            while let Some(node) = pending.pop() {
+                if !seen.insert(node) {
+                    continue;
+                }
+                if node == GraphNode::Segment(to) {
+                    return true;
+                }
+                pending.extend(dependencies.get(&node).into_iter().flatten().copied());
+            }
+            false
+        };
+        let b = SegmentKey::new(2, 0);
+        let c = SegmentKey::new(3, 0);
+        let after = SegmentKey::new(1, if transitive { 1 } else { 2 });
+        assert!(!depends_on(b, after), "transitive={transitive}");
+        assert!(depends_on(c, b), "later synchronous siblings stay ordered");
+        assert!(depends_on(SegmentKey::new(0, 3), after));
+        assert!(depends_on(SegmentKey::new(0, 3), c));
+        if transitive {
+            assert!(!depends_on(b, SegmentKey::new(4, 2)));
+            assert!(depends_on(after, SegmentKey::new(4, 2)));
+        } else {
+            assert!(depends_on(after, SegmentKey::new(1, 0)));
+        }
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+    }
+}
+
+#[test]
+fn static_import_order_does_not_reenter_shared_dependencies() {
+    for entry in [
+        "import 'z.mjs'; import 'a.mjs'; entry();",
+        "import 'z.mjs'; import 'z.mjs'; import 'a.mjs'; entry();",
+    ] {
+        let graph = SourceGraph::from_owned([
+            input("entry.mjs", entry),
+            input("z.mjs", "import 'a.mjs'; z();"),
+            input("a.mjs", "a();"),
+        ]);
+        let plan = retain(&graph, &[0], &[]).unwrap();
+        let order: Vec<_> = plan.effect_order.iter().map(|key| key.file_id).collect();
+        assert_eq!(order, [2, 1, 0]);
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+    }
+}
+
+#[test]
+fn late_static_imports_and_reexports_are_hoisted_without_false_cycles() {
+    for declaration in ["import 'dep.mjs';", "export * from 'dep.mjs';"] {
+        let graph = SourceGraph::from_owned([
+            input("entry.mjs", &format!("before(); {declaration} after();")),
+            input("dep.mjs", "dep();"),
+        ]);
+        let plan = retain(&graph, &[0], &[]).unwrap();
+        assert_eq!(
+            plan.effect_order,
+            [
+                SegmentKey::new(1, 0),
+                SegmentKey::new(0, 0),
+                SegmentKey::new(0, 2)
+            ],
+            "{declaration}"
+        );
+        assert!(
+            plan.warnings.is_empty(),
+            "{declaration}: {:?}",
+            plan.warnings
+        );
+    }
+}
+
+#[test]
+fn effect_retention_and_order_edges_scale_linearly() {
+    let source = "run();".repeat(1000);
+    let graph = SourceGraph::from_owned([input("entry.mjs", &source)]);
+    let plan = retain(&graph, &[0], &[]).unwrap();
+    assert_eq!(plan.effect_order.len(), 1000);
+    assert!(plan.edges.len() <= 3000, "{} edges", plan.edges.len());
+    let reached = chunks::reference_reachability(
+        &graph,
+        &plan,
+        &policy::EffectPolicy::default(),
+        &[chunks::RootSeed {
+            id: chunks::RootId::Entry("main".into()),
+            evaluation_roots: vec![0],
+            binding_roots: vec![],
+        }],
+    )
+    .unwrap();
+    assert_eq!(reached.values().next().unwrap().len(), 1001);
+}
+
+#[test]
+fn effect_order_projects_source_order_and_static_imports_through_pure_modules() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.mjs",
+            "import 'pure.mjs'; first(); const dead = 1; second();",
+        ),
+        input("pure.mjs", "import 'leaf.mjs'; const dead = 2;"),
+        input("leaf.mjs", "leafFirst(); const dead = 3; leafSecond();"),
+    ]);
+    let plan = retain(&graph, &[0], &[]).unwrap();
+    assert_eq!(
+        plan.effect_order,
+        [
+            SegmentKey::new(2, 0),
+            SegmentKey::new(2, 2),
+            SegmentKey::new(0, 1),
+            SegmentKey::new(0, 3),
+        ]
+    );
+    assert!(plan.warnings.is_empty());
+    let root = chunks::RootSeed {
+        id: chunks::RootId::Entry("main".into()),
+        evaluation_roots: vec![0],
+        binding_roots: vec![],
+    };
+    let mut no_order = plan.clone();
+    no_order
+        .edges
+        .retain(|edge| edge.kind != RetentionEdgeKind::EffectOrder);
+    assert_eq!(
+        chunks::reference_reachability(
+            &graph,
+            &plan,
+            &policy::EffectPolicy::default(),
+            std::slice::from_ref(&root)
+        )
+        .unwrap(),
+        chunks::reference_reachability(
+            &graph,
+            &no_order,
+            &policy::EffectPolicy::default(),
+            &[root]
+        )
+        .unwrap(),
+    );
+}
+
+#[test]
+fn effect_order_cycles_warn_with_canonical_members_and_order() {
+    let files = [
+        ("a.mjs", "import 'pure.mjs'; a();"),
+        ("pure.mjs", "import 'b.mjs';"),
+        ("b.mjs", "import 'a.mjs'; b();"),
+    ];
+    let analyze = |reverse: bool| {
+        let mut inputs: Vec<_> = files
+            .iter()
+            .map(|(path, source)| input(path, source))
+            .collect();
+        if reverse {
+            inputs.reverse();
+        }
+        let graph = SourceGraph::from_owned(inputs);
+        let plan = retain(&graph, &[graph.file_id(Path::new("a.mjs")).unwrap()], &[]).unwrap();
+        for edge in plan
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == RetentionEdgeKind::EffectOrder)
+        {
+            let position = |node| {
+                plan.effect_order
+                    .iter()
+                    .position(|&key| GraphNode::Segment(key) == node)
+                    .unwrap()
+            };
+            assert!(
+                position(edge.to) < position(edge.from),
+                "cycle constraints must be resolved"
+            );
+        }
+        let order: Vec<_> = plan
+            .effect_order
+            .iter()
+            .map(|key| {
+                (
+                    graph.file_path(key.file_id).unwrap().to_owned(),
+                    key.segment_idx,
+                )
+            })
+            .collect();
+        (order, plan.warnings)
+    };
+    let (order, warnings) = analyze(false);
+    assert_eq!(order, [("a.mjs".into(), 1), ("b.mjs".into(), 1)]);
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("a.mjs:"));
+    assert!(warnings[0].contains(" -> b.mjs:"));
+    assert_eq!((order, warnings), analyze(true));
+
+    let pure_cycle = SourceGraph::from_owned([
+        input("a.mjs", "import 'b.mjs';"),
+        input("b.mjs", "import 'a.mjs';"),
+    ]);
+    assert!(retain(&pure_cycle, &[0], &[]).unwrap().warnings.is_empty());
+}
+
+#[test]
+fn effect_order_does_not_cross_async_or_deferred_activation_boundaries() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.mjs",
+            "export function later() { return import('async.mjs'); } now();",
+        ),
+        input("async.mjs", "asyncEffect();"),
+        input(
+            "deferred.cjs",
+            "exports.later = () => require('required.cjs');",
+        ),
+        input("required.cjs", "requiredEffect();"),
+    ]);
+    let plan = retain(
+        &graph,
+        &[0, 2],
+        &[GraphNode::Segment(SegmentKey::new(0, 0))],
+    )
+    .unwrap();
+    assert!(!plan.modules.contains(&1));
+    assert_eq!(plan.async_boundaries.len(), 1);
+    assert!(
+        plan.modules.contains(&3),
+        "deferred code is available, not eagerly scheduled"
+    );
+    assert!(!plan.edges.iter().any(|edge| {
+        edge.kind == RetentionEdgeKind::EffectOrder
+            && matches!((edge.from, edge.to),
+                (GraphNode::Segment(from), GraphNode::Segment(to))
+                    if from.file_id != to.file_id)
+    }));
+}
+
+#[test]
+fn effect_projection_recomputes_after_policy_and_source_changes() {
+    let mut graph = SourceGraph::from_owned([input(
+        "entry.mjs",
+        "function f() {} /* @__PURE__ */ f(); second();",
+    )]);
+    let policy = policy::EffectPolicy::default();
+    let initial = retain_with_policy(&graph, &[0], &[], &policy).unwrap();
+    assert_eq!(initial.effect_order, [SegmentKey::new(0, 2)]);
+    let strict = policy.clone().with_pure_annotations(false);
+    assert!(!initial.is_current(&graph, &strict));
+    let changed_policy = retain_with_policy(&graph, &[0], &[], &strict).unwrap();
+    assert_eq!(
+        changed_policy.effect_order,
+        [SegmentKey::new(0, 1), SegmentKey::new(0, 2)]
+    );
+    assert!(changed_policy
+        .edges
+        .iter()
+        .any(|edge| edge.kind == RetentionEdgeKind::EffectOrder));
+    graph
+        .patch_owned(
+            Path::new("entry.mjs"),
+            input("entry.mjs", "const nowPure = 1;"),
+        )
+        .unwrap();
+    assert!(!initial.is_current(&graph, &policy));
+    assert!(!changed_policy.is_current(&graph, &strict));
+    let changed_source = retain_with_policy(&graph, &[0], &[], &strict).unwrap();
+    assert!(changed_source.effect_order.is_empty());
+    assert!(changed_source.edges.is_empty());
 }
 
 #[test]

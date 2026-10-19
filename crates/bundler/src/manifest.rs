@@ -164,6 +164,9 @@ pub fn diagnostic_manifest(
         }
     }
     for edge in &plan.retention.edges {
+        if edge.kind == RetentionEdgeKind::EffectOrder {
+            continue;
+        }
         // Use exactly the same synchronous/namespace expansion as the oracle.
         if let Some(index) = edge.source_edge {
             let source = &graph.edges()[index];

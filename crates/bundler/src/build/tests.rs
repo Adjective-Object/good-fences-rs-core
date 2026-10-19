@@ -20,6 +20,33 @@ fn options() -> BuildOptions {
     }
 }
 
+#[test]
+fn effect_cycle_warnings_survive_noop_and_clear_after_source_change() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './dep.mjs'; console.log('main');",
+    );
+    write(
+        dir.root(),
+        "dep.mjs",
+        "import './main.mjs'; console.log('dep');",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&options()).unwrap();
+    assert_eq!(first.warnings.len(), 1);
+    assert!(first.warnings[0].contains("effect-order cycle"));
+    let noop = session.build(&options()).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert_eq!(first.warnings, noop.warnings);
+    assert_eq!(noop.counters.emissions, 0);
+    write(dir.root(), "dep.mjs", "console.log('dep');");
+    let changed = session.build(&options()).unwrap();
+    assert!(changed.warnings.is_empty());
+    assert!(!Rc::ptr_eq(&first.product, &changed.product));
+}
+
 fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
     let incremental = session.build(options).unwrap();
     let mut full_options = options.clone();

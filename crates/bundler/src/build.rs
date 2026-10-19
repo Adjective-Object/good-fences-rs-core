@@ -91,7 +91,8 @@ pub struct BuildResult {
     pub counters: Counters,
     /// Changed/deleted modules and transitive users from the prior shared graph.
     pub invalidated: BTreeSet<PathBuf>,
-    /// Nonfatal cache-write failures are visible, not silently discarded.
+    /// Nonfatal cache-write failures and effect-order cycles. Plan warnings are
+    /// repeated on no-op reuse so diagnostics do not depend on cache state.
     pub warnings: Vec<String>,
 }
 
@@ -346,7 +347,10 @@ impl BuildSession {
                 include_str!("physical.rs"),
                 include_str!("physical_lower.rs"),
                 include_str!("emit.rs"),
-                include_str!("rewrite.rs")
+                include_str!("rewrite.rs"),
+                include_str!("lib.rs"),
+                include_str!("effects.rs"),
+                include_str!("effect_dependencies.rs")
             )
             .as_bytes(),
         );
@@ -355,6 +359,7 @@ impl BuildSession {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &sources, &inventory)?;
                 counters.elapsed = start.elapsed();
+                warnings.extend(last.plan.retention.warnings.iter().cloned());
                 return Ok(BuildResult {
                     product: last.clone(),
                     counters,
@@ -384,6 +389,7 @@ impl BuildSession {
             })
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
+        warnings.extend(plan.retention.warnings.iter().cloned());
         let before = crate::rewrite::output_parse_count();
         let artifacts = link::esm_with_source_checker(
             &graph,

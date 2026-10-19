@@ -1,6 +1,34 @@
 # Incremental JavaScript bundler plan
 
-## Current implementation: physical exact-set linker
+## Active replacement plan — small reviewed increments
+
+Keep owned parser/IR/cache, canonical graph, usage/effects and publication.
+Replace the linker entirely, in independently reviewed committable increments:
+
+1. **Symbol linker:** distinguish effect retention from effect-order scheduling,
+   project through pure/static-import connectors to actual effects, break
+   order-only SCCs deterministically with public warnings; then link direct
+   lexical identities without runtime cells/aliases. Analysis increment first;
+   symbol linking itself remains pending.
+2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
+   preserve observable effects/activation and native binding/TDZ semantics.
+   Native imports/exports cross actual output chunks only. Public entry/export
+   boundaries constrain output; root sets are analysis, not forced partitions.
+3. **CJS segment/facade integration:** each CJS input is one opaque segment
+   bridged by a logical ESM facade; both participate in ordinary usage, linking
+   and grouping. No standalone native `.cjs`-per-input fallback.
+4. **Remove legacy backend:** delete registrations, cells, aliases, watchers,
+   generator statement dispatch, capture cycles and ESM per-source facade
+   families after the replacement preserves their supported behavior.
+5. **Release:** independent reviews, runtime/differential regressions, incremental
+   invalidation/determinism and mandatory spot-check before release evidence.
+
+Only the first effect-dependency analysis increment is being implemented here.
+The existing emitter remains active; this is not completed symbol linking or
+scope hoisting. Order-cycle policy applies to planning, not suppressed binding
+errors or a claim that the legacy runtime already uses the new order.
+
+## Rejected architecture, still-current legacy implementation: physical exact-set linker
 
 Executable bodies now move into exact root-set registration chunks, with shared
 binding/CJS storage and body-free native module evaluation/namespace facades.
@@ -13,7 +41,7 @@ deferred-only code before initial load, then exercise complete late-load
 identity. No unsupported-source gate or per-module fallback was added.
 Current evidence and architecture are in NOTES and the bundler README.
 
-## Historical replacement baseline: native JavaScript files
+## Rejected historical replacement baseline: native JavaScript files
 
 The prior P6–P8 hook/source-payload output architecture was rejected and has
 been deleted, not retained behind a switch. Parser/cache/graph, effects/PURE,

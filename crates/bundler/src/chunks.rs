@@ -1,5 +1,5 @@
 //! Exact synchronous reachability over retention constraints, not execution order.
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use eyre::{ensure, OptionExt};
@@ -129,6 +129,14 @@ pub fn reference_reachability(
         retention.is_current(graph, policy),
         "stale retention revision or effect policy"
     );
+    let mut outgoing = HashMap::<_, Vec<_>>::new();
+    for edge in &retention.edges {
+        if edge.kind != RetentionEdgeKind::EffectOrder {
+            outgoing.entry(edge.from).or_default().push(edge);
+        }
+    }
+    let retained_segments: HashSet<_> = retention.segments.iter().map(|s| s.key).collect();
+    let retained_modules: HashSet<_> = retention.modules.iter().copied().collect();
     let mut result = BTreeMap::new();
     for root in roots {
         ensure!(!result.contains_key(&root.id), "duplicate root identity");
@@ -150,13 +158,13 @@ pub fn reference_reachability(
             reached.insert(node_id(graph, node)?);
             ensure!(
                 match node {
-                    GraphNode::Module(file) => retention.modules.contains(&file),
-                    GraphNode::Segment(key) => retention.segments.iter().any(|s| s.key == key),
+                    GraphNode::Module(file) => retained_modules.contains(&file),
+                    GraphNode::Segment(key) => retained_segments.contains(&key),
                     GraphNode::Unlinked { .. } => true,
                 },
                 "root or dependency is absent from retention"
             );
-            for edge in retention.edges.iter().filter(|e| e.from == node) {
+            for edge in outgoing.get(&node).into_iter().flatten() {
                 if let Some(index) = edge.source_edge {
                     let source = graph
                         .edges()

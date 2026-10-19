@@ -1,6 +1,75 @@
 # Incremental bundler implementation handoff
 
-## Physical exact-root-set linker
+## Current replacement increment: effect dependencies, not a new emitter
+
+`RetentionPlan` now keeps effect retention separate from effect order.
+Module-evaluation hubs retain local effects; existing binding-evaluation and
+static-evaluation routes retain imported effects through pure barrels without
+per-segment closure expansion. Only actual effects receive order constraints;
+compact source predecessor chains cross pure statements before projection.
+Hoisted imports/reexports never follow executable predecessors. Static DFS
+completion chains preserve synchronous sibling source order through pure barrels
+and skip shared/already entered imports; deferred/async roots remain separate. Iterative SCC
+analysis breaks order-only cycles by canonical path/span and records members plus
+chosen order in warnings. Chunk reachability/manifests ignore schedule-only edges.
+BuildResult forwards warnings even on no-op reuse; graph/policy stamps still
+guard plans and output fingerprints include changed analysis implementation.
+
+Independent-review fixes address missing sibling completion constraints, false
+late-import/reexport self-cycles, and quadratic retention/connector expansion.
+Reachability now indexes outgoing edges and retained-node membership once.
+The new sibling, hoisting and 1,000-effect structural regressions failed before
+the fixes (the latter produced 1,001,999 edges); the compact plan has 2,999.
+A mixed 1,000-statement case bounds the pre-projection connector graph as well.
+
+The narrower second review found completion chaining across suspended static
+subtrees and repeated projection through shared pure barrels. Source TLA now
+propagates through static imports/reexports using a reverse worklist. Async
+modules contribute no sibling completion-chain edges; later synchronous siblings
+still chain, and local/source static-dependency constraints remain. This omits
+async sibling constraints conservatively: the scalar DAG is NOT a full async
+scheduler, and native module jobs remain the execution boundary. No new gate,
+source-await conversion or emitter/dispatcher change was introduced.
+
+Projection now condenses pure/import connector SCCs iteratively and caches
+first-effect results, including empty sets. Single-successor chains share sets;
+effects remain terminals, not full effect-closure expansion points. Regressions
+cover 1,000 consumers sharing 1,000 connectors, dense DAGs, pure connector cycles,
+empty/nonempty outputs and reversed adjacency. The empty-chain regression failed
+at 1,000,000 visits for 1,999 links before the fix; it now measures 6,997
+indexing/edge visits, plus linear SCC passes. A 20,000-connector chain shares a
+1,000-effect projection without recursive traversal or per-connector set copies.
+Branching projections still pay for distinct intermediate first-effect sets;
+this is not a claim of linear work regardless of projection-output size.
+
+Focused cases cover transitive pure import/reexport chains, local retention
+without binding/order pinning, projected source order, deterministic cycle
+warnings and acyclic chosen edges across insertion orders, pure-only cycles,
+deferred/async boundaries, policy/revision invalidation and public no-op warnings.
+Earlier validation: all 119 bundler tests, focused all-target `clippy --no-deps`, bundler
+format check and mandatory `./scripts/spot-check` (51 parser tests plus full
+workspace check) pass. Strict clippy with `-D warnings` is blocked by existing
+dependency lifetime/map/match warnings; unrelated sources are unchanged.
+Second-review validation: both focused regressions failed behaviorally before
+the fixes and pass afterward; all 122 bundler tests, focused all-target
+`clippy --no-deps`, bundler format check and mandatory `./scripts/spot-check`
+(51 parser tests plus workspace check) pass. Existing dependency/workspace
+warnings remain; bundler clippy emits no warnings. Commands used
+`TMPDIR=$PWD/target/p1-test-tmp`. Local, uncommitted evidence:
+`target/fix2-{async,projection}-{red,green}.log`,
+`target/fix2-{bundler-tests,fmt,clippy,spot-check}.log`.
+
+Activation metadata remains authoritative: dynamic imports and deferred requires
+do not acquire static effect-order edges. Available effects in `effect_order`
+are not an eager global execution schedule.
+
+Still pending: direct-symbol linker, scope-hoisted native chunks, opaque CJS
+segment/logical-facade integration, legacy deletion and release. The old emitter
+continues using native module jobs; it does not yet execute the new planned SCC
+order. Namespace conservative liveness and old physical partitioning are
+unchanged in this first analysis increment. Do not claim the whole stage done.
+
+## Rejected architecture: legacy physical exact-root-set linker (still active)
 
 Active source: `link.rs` delegates after checked source/surface construction to
 `physical.rs`; `physical_lower.rs` composes retained PURE statements before

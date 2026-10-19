@@ -2,6 +2,7 @@
 pub mod build;
 pub mod chunks;
 mod cjs;
+mod effect_dependencies;
 pub mod effects;
 pub mod emit;
 pub mod link;
@@ -51,6 +52,7 @@ pub enum RetentionEdgeKind {
     StaticEvaluation,
     BindingEvaluation,
     ModuleEffect,
+    /// Scheduling only; never traverse for binding demand or code availability.
     EffectOrder,
     Binding,
     Require,
@@ -77,6 +79,12 @@ pub struct RetentionPlan {
     pub async_boundaries: Vec<usize>,
     /// All evaluated-module statements, including recipes for otherwise dead ones.
     pub effects: Vec<SegmentEffects>,
+    /// Dependency-first order of available effects, not permission to activate them.
+    /// Independent of binding/availability edges and deferred/async activation.
+    /// The legacy emitter still uses native module jobs, not this future linker schedule.
+    pub effect_order: Vec<SegmentKey>,
+    /// Deterministic effect-order cycle diagnostics; never binding/TDZ exemptions.
+    pub warnings: Vec<String>,
 }
 
 impl RetentionPlan {
@@ -133,27 +141,21 @@ pub fn retain_with_policy(
             Demand::Binding(node, reason) => analysis.binding(node, reason)?,
         }
     }
-    let mut previous = BTreeMap::new();
-    for (&key, summary) in &analysis.effects {
-        if !summary.is_effectful() {
-            continue;
-        }
-        let node = GraphNode::Segment(key);
-        analysis.edges.insert(RetentionEdge {
-            from: GraphNode::Module(key.file_id),
-            to: node,
-            kind: RetentionEdgeKind::ModuleEffect,
-            source_edge: None,
-        });
-        if let Some(previous) = previous.insert(key.file_id, node) {
-            analysis.edges.insert(RetentionEdge {
-                from: node,
-                to: previous,
-                kind: RetentionEdgeKind::EffectOrder,
-                source_edge: None,
-            });
-        }
-    }
+    let (effect_order, warnings) = effect_dependencies::plan(
+        graph,
+        &analysis.modules,
+        &evaluation_roots
+            .iter()
+            .copied()
+            .chain(binding_roots.iter().map(|node| match node {
+                GraphNode::Module(file) => *file,
+                GraphNode::Segment(key) => key.file_id,
+                GraphNode::Unlinked { .. } => unreachable!("validated binding root"),
+            }))
+            .collect::<Vec<_>>(),
+        &analysis.effects,
+        &mut analysis.edges,
+    );
     let mut edges: Vec<_> = analysis.edges.into_iter().collect();
     edges.sort_by_key(|e| (node_key(e.from), node_key(e.to), e.kind, e.source_edge));
     Ok(RetentionPlan {
@@ -175,6 +177,8 @@ pub fn retain_with_policy(
             .into_iter()
             .map(|(key, summary)| SegmentEffects { key, summary })
             .collect(),
+        effect_order,
+        warnings,
     })
 }
 
