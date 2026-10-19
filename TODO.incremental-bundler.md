@@ -47,9 +47,13 @@
   name/identity maps; require native public-surface/false-ambiguity fixture.
 - [ ] Independently review synchronous native grouping; extend pure/shared
   connector relocation and name-inference-safe merges where worthwhile.
-- [ ] Extend native linking to async roots/TLA without imposing synchronous
-  dependency completion order; selected-binding/multi-evaluation low-level roots
-  also remain staged.
+- [x] Extend native linking to literal async roots/TLA/for-await through actual
+  target chunk paths; keep async static closures/SCCs as native jobs, preserving
+  sibling interleaving and source wait bounds. Graduate five legacy contracts
+  and add portable siblings/nested activation, cycle TDZ/rejection/dedup and
+  exported-then/default/live observations.
+- [ ] Independently review the native async increment before committing.
+  Selected-binding/multi-evaluation low-level roots remain staged.
 - [ ] Integrate one opaque CJS segment and logical ESM facade per input into
   normal usage/link/grouping, not standalone native `.cjs` fallback files.
 - [ ] Remove legacy registrations/cells/aliases/watchers/generator dispatch,

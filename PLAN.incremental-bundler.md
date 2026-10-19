@@ -11,7 +11,8 @@ Replace the linker entirely, in independently reviewed committable increments:
    lexical identities without runtime cells/aliases. Effect analysis is delivered;
    checked canonical symbol planning and production resolution reuse are now
    implemented. Synchronous native concatenation/group emission now uses direct
-   lexical bindings and real native seams; async/CJS integration remains pending.
+   lexical bindings and real native seams; native dynamic imports/TLA now use
+   those chunks. Opaque CJS integration remains pending.
 2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
    preserve observable effects/activation and native binding/TDZ semantics.
    Native imports/exports cross actual output chunks only. Public entry/export
@@ -25,19 +26,17 @@ Replace the linker entirely, in independently reviewed committable increments:
 5. **Release:** independent reviews, runtime/differential regressions, incremental
    invalidation/determinism and mandatory spot-check before release evidence.
 
-The current increment extends canonical-symbol concatenation to body-bearing
-synchronous multi-entry native chunks. Exclusive dependency chains and body-free
-connectors can merge; shared bodies remain once-only, independently of logical
-root-set equality. Native imports/reexports cross actual physical groups.
-Precise public surfaces, full namespace values, read-only imported writes,
-name-sensitive collisions and static SCC instantiation retain genuine native
-boundaries rather than legacy cells. Default snapshots/names and the eligible
-66-source one-file path remain intact. Async/CJS/nonstatic dependencies and
-non-module/multi-evaluation low-level root shapes remain explicitly staged on
-legacy. The crate README defines the precise gate and conservative grouping.
-This is not completed general linking/scope hoisting or legacy removal.
-Order-cycle policy remains planning, not suppressed binding errors; the native
-slice uses source-ordered static DFS, not the scalar effect DAG as a scheduler.
+The current increment extends the shared native planner to literal dynamic
+imports and original TLA/for-await. Source-occurrence async roots map to canonical
+target namespace chunks, with only import specifiers rewritten. Async static
+closures/SCCs retain native source jobs and wait bounds; synchronous compatible
+groups still concatenate. Node, not the scalar effect DAG, schedules suspension,
+sibling interleaving, cached rejection and namespace/thenable behavior.
+Default snapshots/names and the eligible 66-source one-file path remain intact.
+CJS/require dependencies and non-module/multi-evaluation low-level root shapes
+remain explicitly legacy. The crate README defines the precise gate. This is
+not CJS integration or legacy removal; those come before deferred upstream parity.
+Independent review is required before committing this async increment.
 
 ## Rejected architecture, still-current legacy implementation: physical exact-set linker
 

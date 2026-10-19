@@ -400,6 +400,30 @@ test('native requirements use the driver backend, not successful runtime observa
   });
 });
 
+test('planning diagnostics remain visible and never admit unrelated build warnings', () => {
+  withCorpus(({ root, run, driver }) => {
+    addCase(root);
+    const source = readFileSync(driver, 'utf8');
+    const warning = 'effect-order cycle; synthetic';
+    writeFileSync(driver, source.replace('warnings:[]',
+      `warnings:[${JSON.stringify(warning)}], planWarnings:[${JSON.stringify(warning)}]`));
+    const [pass] = run();
+    assert.equal(pass.status, 'passed');
+    assert.deepEqual(pass.warnings, [warning]);
+    for (const [warnings, planWarnings, expected] of [
+      [['cache write: failed'], [], /cache write warnings/u],
+      [['unknown'], ['unknown'], /unknown planning warnings/u],
+      [[warning, 'cache write: failed'], [warning], /cache write warnings/u],
+    ]) {
+      writeFileSync(driver, source.replace('warnings:[]',
+        `warnings:${JSON.stringify(warnings)}, planWarnings:${JSON.stringify(planWarnings)}`));
+      const [failure] = run();
+      assert.equal(failure.stage, 'build');
+      assert.match(failure.error.message, expected);
+    }
+  });
+});
+
 test('CLI reports all phases and honors forced color and NO_COLOR without coloring whole lines', () => {
   withCorpus(({ root }) => {
     addCase(root, 'a-input', { sources: { 'entry.js': "console.log('wrong');" } });
@@ -407,13 +431,13 @@ test('CLI reports all phases and honors forced color and NO_COLOR without colori
       sources: { 'entry.js': "const name='./dep.js'; await import(name); console.log('hello');", 'dep.js': '' },
     });
     addCase(root, 'c-backend', {
-      sources: { 'entry.js': "await Promise.resolve(); console.log('hello');" },
+      sources: { 'entry.js': "import './dep.cjs'; console.log('hello');", 'dep.cjs': 'module.exports = 1;' },
       expectations: { stdout: ['hello'], backend: 'native' },
     });
     addCase(root, 'd-output', {
       sources: { 'entry.js': "console.log(process.argv[1].includes('.bundler-generation-') ? 'wrong' : 'hello');" },
     });
-    addCase(root, 'y-legacy', { sources: { 'entry.js': "await Promise.resolve(); console.log('hello');" } });
+    addCase(root, 'y-legacy', { sources: { 'entry.js': "import './dep.cjs'; console.log('hello');", 'dep.cjs': 'module.exports = 1;' } });
     addCase(root, 'z-valid');
     const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
     const env = { ...process.env, FORCE_COLOR: '1' };

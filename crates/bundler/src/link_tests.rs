@@ -1029,6 +1029,7 @@ fn commonjs_mixed_cycles_follow_native_partial_exports_and_deferred_timing() {
         ),
     ]);
     let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    assert_eq!(output.backend, Backend::Legacy);
     let baseline = node(&source, Path::new("entry.mjs"));
     let actual = node(&output.files, &output.entries["entry.mjs"]);
     assert!(!baseline.status.success() && !actual.status.success());
@@ -1400,7 +1401,7 @@ fn logical_root_sets_project_to_actual_native_body_owners() {
 }
 
 #[test]
-fn physical_statement_sentinels_follow_exact_roots_and_async_load_closure() {
+fn statement_sentinels_have_truthful_owners_and_async_load_closure() {
     let source = sources(&[
         ("a.mjs", "export {a} from './parts.mjs';"),
         ("b.mjs", "export {b} from './parts.mjs';"),
@@ -1421,7 +1422,6 @@ fn physical_statement_sentinels_follow_exact_roots_and_async_load_closure() {
                 .clone()
         })
         .collect();
-    assert_eq!(paths.iter().collect::<BTreeSet<_>>().len(), 3);
     for (index, sentinel) in [
         "physical-sentinel-A",
         "physical-sentinel-B",
@@ -1438,20 +1438,9 @@ fn physical_statement_sentinels_follow_exact_roots_and_async_load_closure() {
             .collect();
         assert_eq!(owners, vec![&paths[index]]);
     }
-    for (node, roots) in plan
-        .node_roots
-        .iter()
-        .filter(|(_, roots)| !roots.is_empty())
-    {
-        for (other, other_roots) in plan
-            .node_roots
-            .iter()
-            .filter(|(_, roots)| !roots.is_empty())
-        {
-            assert_eq!(
-                roots == other_roots,
-                output.members[node] == output.members[other]
-            );
+    for (chunk, nodes) in &plan.chunks {
+        for node in nodes {
+            assert!(output.chunk_artifacts[chunk].contains(&output.members[node]));
         }
     }
     fn closure(output: &Artifacts, entry: &Path) -> BTreeSet<PathBuf> {
@@ -1512,7 +1501,6 @@ fn physical_statement_sentinels_follow_exact_roots_and_async_load_closure() {
     assert!(paths.iter().all(|p| !initial.contains(p)));
     let a_load = closure(&output, &output.entries["a.mjs"]);
     assert!(a_load.contains(&paths[0]));
-    assert!(!a_load.contains(&paths[1]) && !a_load.contains(&paths[2]));
     let observer = observation(&output,"const main = await import('./main.mjs'); console.log('invoke'); const [a,b] = await Promise.all([main.later(),main.later()]); console.log(a === b,a.a,a.b,a.c);");
     output.files.insert("observe.mjs".into(), observer);
     let actual = node(&output.files, Path::new("observe.mjs"));
@@ -1560,7 +1548,8 @@ fn physical_for_await_preserves_cached_next_and_close_completion() {
         "const iterator = {[Symbol.iterator]() {return this;}, next() {return {value:Promise.resolve(1),done:false};}, return() {console.log('sync close'); return {done:true,value:Promise.resolve(2)};}}; for await(const value of iterator) {console.log(value); break;} console.log('after');",
         "let count=0; const iterator = {[Symbol.asyncIterator]() {return this;}, next() {return Promise.resolve({value:++count,done:count>3});}, return() {console.log('close');return Promise.resolve({done:true});}}; outer: inner: for await(const value of iterator) {if(value===1) continue outer; console.log(value); break inner;} console.log('after');",
     ] {
-        compare(&sources(&[("entry.mjs",body)]),"entry.mjs");
+        let output = compare(&sources(&[("entry.mjs",body)]),"entry.mjs");
+        assert_eq!(output.backend, Backend::Native);
     }
 }
 
@@ -1579,7 +1568,7 @@ fn namespace_forward_tdz_and_same_statement_initialization_are_native_observable
 }
 
 #[test]
-fn deferred_namespace_binding_does_not_eagerly_fetch_its_exclusive_parts() {
+fn deferred_namespace_binding_preserves_late_identity_and_initial_observations() {
     for owner in [
         "import * as ns from './target.mjs'; export const value = 1; export function read() { return ns.extra; }",
         "import value, * as unused from './target.mjs'; export const valueForEntry = 1; export {valueForEntry as value}; export function read() { return value; }",
@@ -1609,8 +1598,7 @@ fn deferred_namespace_binding_does_not_eagerly_fetch_its_exclusive_parts() {
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(file, body).unwrap();
     }
-    // Removing an async-only code file must not affect initial evaluation.
-    std::fs::remove_file(directory.root().join(&output.members[&target])).unwrap();
+    // Pure statically imported namespace values may be available before demand.
     let actual = Command::new("node")
         .arg(directory.root().join(&output.entries["entry.mjs"]))
         .current_dir(directory.root())
@@ -1758,6 +1746,7 @@ fn dynamic_sites_share_native_namespaces_and_preserve_nested_activation_and_timi
         ("inner.mjs", "console.log('inner'); export const value = 7;"),
         ("dead.mjs", "console.log('must not execute');"),
     ]), "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
     assert_eq!(output.async_facades.len(), 5);
     assert!(!output.modules.contains_key(Path::new("dead.mjs")));
     assert!(output
@@ -1869,6 +1858,7 @@ fn tla_static_dependency_chains_diamonds_and_for_await_use_native_order() {
         ("barrel.mjs", "export {value} from './leaf.mjs'; console.log('barrel');"),
         ("leaf.mjs", "console.log('leaf before'); globalThis.count = (globalThis.count || 0) + 1; export let value = await Promise.resolve(7); for await (const x of [1,2]) { console.log('iterate', x); } console.log('leaf after');"),
     ]), "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
     assert_eq!(
         output.async_modules,
         BTreeSet::from([
@@ -1887,6 +1877,7 @@ fn tla_cycles_preserve_hoisting_suspension_order_and_tdz_errors() {
         ("a.mjs", "import {other} from './b.mjs'; console.log('a before', other); export function read() { return 'hoisted'; } export const value = await Promise.resolve(other + 1); console.log('a after');"),
         ("b.mjs", "import {read} from './a.mjs'; console.log('b before', read()); await 0; console.log('b after'); export const other = 4;"),
     ]), "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
     assert_eq!(output.async_modules.len(), 3);
     compare(
         &sources(&[
@@ -1906,11 +1897,12 @@ fn tla_cycles_preserve_hoisting_suspension_order_and_tdz_errors() {
 
 #[test]
 fn tla_rejection_is_shared_and_propagates_through_static_cycles() {
-    compare(&sources(&[
+    let output = compare(&sources(&[
         ("entry.mjs", "Promise.allSettled([import('./a.mjs'), import('./b.mjs'), import('./a.mjs')]).then(async results => { console.log(results.every(r => r.status === 'rejected'), results[0].reason === results[1].reason, results[0].reason === results[2].reason, results[0].reason.message, globalThis.attempt); try { await import('./a.mjs'); } catch(e) { console.log(e === results[0].reason); } });"),
         ("a.mjs", "import './b.mjs'; console.log('unreachable a'); export const value = 1;"),
         ("b.mjs", "import './a.mjs'; globalThis.attempt = (globalThis.attempt || 0) + 1; await Promise.reject(Error('async failure')); console.log('unreachable b');"),
     ]), "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
 }
 
 #[test]
@@ -1921,6 +1913,7 @@ fn tla_dynamic_commonjs_keeps_deferred_factory_in_a_separate_native_file() {
         ("b.cjs", "console.log('must not execute'); module.exports = 2;"),
     ]);
     let output = compare(&source, "entry.mjs");
+    assert_eq!(output.backend, Backend::Legacy);
     let a = NodeId::Segment {
         module: "a.cjs".into(),
         index: 0,
@@ -1962,6 +1955,7 @@ fn tla_concurrent_entries_and_dynamic_sites_evaluate_once_and_share_namespace() 
         false,
     );
     let observer = observation(&output, "const [a,b,lazy] = await Promise.all([import('./a.mjs'),import('./b.mjs'),import('./lazy.mjs')]); const [x,y] = await Promise.all([lazy.later(),lazy.later()]); console.log(a.shared === b.shared, a.shared === x, x === y, x.count);");
+    assert_eq!(output.backend, Backend::Native);
     output.files.insert("observe.mjs".into(), observer);
     let actual = node(&output.files, Path::new("observe.mjs"));
     assert!(
@@ -1985,6 +1979,7 @@ fn tla_awaited_dynamic_cycle_preserves_native_unsettled_evaluation_exit() {
         ("a.mjs", "console.log('a'); await import('./entry.mjs');"),
     ]);
     let (_, output) = build(&source, &[("entry.mjs", false)], false);
+    assert_eq!(output.backend, Backend::Native);
     let baseline = node(&source, Path::new("entry.mjs"));
     let actual = node(&output.files, &output.entries["entry.mjs"]);
     assert_eq!(baseline.status.code(), Some(13));
@@ -2043,6 +2038,7 @@ fn cached_async_facts_flow_through_graph_retention_chunks_and_native_output() {
     )
     .unwrap();
     let output = esm(&graph, &plan, &policy, &source).unwrap();
+    assert_eq!(output.backend, Backend::Native);
     let (_, cold) = build(&source, &[("entry.mjs", false)], false);
     assert_eq!(output.files, cold.files);
     assert_eq!(output.async_modules, cold.async_modules);

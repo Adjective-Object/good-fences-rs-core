@@ -41,6 +41,9 @@ Synchronous native groups merge exclusive chains and body-free connectors only
 when source-order completion is preserved. Keep SCC declarations and observable
 namespace/name/read-only seams native, not cells. Logical artifact projections
 may overlap or contain several body owners; root sets do not prescribe files.
+Native dynamic imports rewrite only literal specifiers to canonical body chunks;
+protect complete target namespaces. Keep statically async source modules as
+native jobs, preserving original await/for-await and sibling interleaving.
 Redirect pure barrels only for equal export-name/canonical-identity maps,
 including default; subset matches can widen downstream star exports.
 Pure segments can relocate by binding dependencies. Effect retention is distinct

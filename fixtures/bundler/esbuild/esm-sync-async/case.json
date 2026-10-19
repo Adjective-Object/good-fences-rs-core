@@ -16,7 +16,8 @@
   "moduleType": "module",
   "entryPoints": ["node.js"],
   "expectations": {
-    "stdout": ["123 -123"]
+    "stdout": ["123 -123"],
+    "backend": "native"
   },
   "goals": [
     "Static and dynamic imports of the same ESM dependency expose consistent exports.",

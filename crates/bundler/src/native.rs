@@ -1,4 +1,4 @@
-//! Scope-hoisted synchronous ESM, with native boundaries for observable seams.
+//! Scope-hoisted ESM, with native module jobs for observable and async seams.
 use super::*;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
@@ -170,6 +170,7 @@ struct Values<'s> {
     symbols: &'s Symbols,
     defaults: BTreeMap<SegmentKey, String>,
     imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
+    requests: BTreeMap<u32, String>,
 }
 
 impl<'s> Values<'s> {
@@ -217,6 +218,7 @@ impl<'s> Values<'s> {
             symbols,
             defaults,
             imports: HashMap::new(),
+            requests: BTreeMap::new(),
         }
     }
 
@@ -337,6 +339,29 @@ fn body(
     syntax.visit_program(&ast.program);
     if syntax.unsupported {
         return Ok(None);
+    }
+    for dependency in parsed
+        .facts
+        .dependencies
+        .iter()
+        .filter(|d| !d.type_only && d.kind == DependencyKind::DynamicImport)
+    {
+        let original = module
+            .parsed
+            .facts
+            .dependencies
+            .iter()
+            .find(|d| d.kind == dependency.kind && d.specifier == dependency.specifier)
+            .ok_or_eyre("missing retained dynamic dependency")?;
+        let target = target_file(graph, file, original)?;
+        syntax.edits.push(Edit {
+            span: dependency.specifier_span,
+            replacement: values
+                .requests
+                .get(&target)
+                .ok_or_eyre("missing native dynamic target")?
+                .clone(),
+        });
     }
     let mut shorthand = rewrite::Shorthand::default();
     shorthand.visit_program(&ast.program);

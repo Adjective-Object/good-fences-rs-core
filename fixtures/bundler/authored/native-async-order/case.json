@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-async-order",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["before", "pending", "a-before", "b", "a-after", "job", "after 1 2", "nested-before", "nested-pending", "inner", "nested-after 3 true"]
+  },
+  "goals": [
+    "A suspended static sibling must not serialize the later sibling or let its consumer run early.",
+    "Ambient effects stay behind outer and nested dynamic activation, with native cached namespace identity."
+  ]
+}

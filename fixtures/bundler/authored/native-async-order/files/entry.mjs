@@ -1,0 +1,11 @@
+globalThis.observe = value => console.log(value);
+console.log('before');
+const pending = import('./job.mjs');
+console.log('pending');
+const job = await pending;
+console.log('after', job.a, job.b);
+console.log('nested-before');
+const nested = job.later();
+console.log('nested-pending');
+const inner = await nested;
+console.log('nested-after', inner.default, inner === await job.later());

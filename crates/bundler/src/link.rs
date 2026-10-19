@@ -62,7 +62,7 @@ pub struct Artifacts {
     /// Reached source occurrences -> canonical executable target files.
     pub async_facades: BTreeMap<AsyncSiteId, PathBuf>,
     /// ESM modules with source TLA or a transitive static async dependency.
-    /// Native evaluation facades own SCC jobs, suspension and rejection.
+    /// Native body chunks (or staged legacy facades) own SCC jobs and rejection.
     pub async_modules: BTreeSet<PathBuf>,
 }
 

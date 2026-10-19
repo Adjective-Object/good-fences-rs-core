@@ -1,6 +1,65 @@
 # Incremental bundler implementation handoff
 
-## Current increment: body-bearing synchronous native chunks
+## Current increment: native dynamic imports and async module jobs
+
+The existing Symbol/group planner now admits literal ESM dynamic imports and
+source TLA/for-await. Static edges alone participate in grouping/DFS and SCCs.
+Dynamic source-occurrence roots remain logical identities; actual import
+specifiers and `async_facades` use the canonical target body chunk. Full dynamic
+namespace surfaces are boundaries, without private exports. Source async status
+propagates over static dependencies; those source modules retain native jobs
+instead of merging across wait bounds. Node owns sibling interleaving, SCC
+instantiation/TDZ, microtasks, exported-then assimilation and cached rejection.
+No generators, event dispatch, cells, async wrappers or source-loading runtime
+were added. Synchronous subgraphs still concatenate and share the checked
+default/name/live/ASI/shorthand/PURE rewrites. Changed emitter files already
+participate in BuildSession `include_str!` fingerprints.
+
+The gate now stages only opaque CJS/require dependencies and selected-binding/
+multi-evaluation low-level roots. Mixed CJS stays truthfully legacy, including
+require-of-async diagnostics. CJS one-opaque-segment/logical-facade integration,
+then final legacy deletion/cutover, precede deferred upstream parity work.
+
+Graduated with explicit native requirements: both ambient async cases,
+`authored/runtime-outcomes` (all three successful/throwing/rejecting entries),
+`esbuild/dynamic-import-tla-order` and `esbuild/esm-sync-async`.
+New native-required authored contracts:
+`native-async-order` (static siblings and nested deferred activation),
+`native-async-cycles` (hoisting/suspension, cycle TDZ, shared cached rejection and
+dedup), and `native-dynamic-then` (native assimilation/microtasks, precise keys,
+default snapshot/live mutation). The original fourteen native cases stay native:
+**27 contracts / 36 executions, 22 native / 5 CJS legacy, zero unsupported**.
+Existing concurrent-entry, cached-facts, for-await and async-cycle Rust tests now
+also assert native selection.
+
+Two old structural assumptions were incompatible with ordinary native bodies:
+exact root-set equality no longer implies identical/distinct physical files,
+and a pure statically imported namespace target need not remain unfetched until
+a deferred read. Those tests retain truthful ownership projections, actual
+initial observations and late identity. Actual deferred-only static-closure and
+deleted/malformed dynamic-file tests remain, as does running old-generation lazy
+loading after publication. No runtime observation was disabled.
+
+Async SCC fixtures exposed the harness treating all plan warnings as cache
+failures. The public driver now separately exposes the existing plan warnings;
+the harness accepts only exact matching known effect-order-cycle diagnostics,
+retains them in results and prints `WARN` lines. Cache/publication/unknown
+warnings still fail. Two focused harness regressions cover real async-cycle
+warnings and rejection of unrelated warnings. Legacy-selection synthetic probes
+now use CJS, not newly native TLA.
+
+Red/green: restoring the prior gate failed four native-required TLA Rust tests
+and eight portable backend requirements (all source expectations passed).
+Native enabled: **147 bundler tests**, **99 harness tests**, public driver plus
+unified corpus, focused package format/all-target clippy `--no-deps -D warnings`,
+and mandatory spot-check pass. Existing workspace dead-code warnings remain.
+Logs: `target/native-async-{red,focused,tests,build-red,fixtures-red,build,fixtures,harness,clippy,spot-check}.log`;
+all commands use project-local `TMPDIR=$PWD/target/p1-test-tmp`.
+No benchmark rerun/full workspace test/upstream parity claim, subagents, commits,
+pushes or stash operations. User-owned ftree_cache source is untouched.
+Independent review is required before committing this increment.
+
+## Previous increment: body-bearing synchronous native chunks
 
 Native emission now handles synchronous multi-entry ESM graphs with real native
 imports/reexports, not cells, factories, dispatchers or internal facade families.

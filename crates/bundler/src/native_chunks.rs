@@ -9,29 +9,52 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Option<Artifacts>> {
-    // shortcut: async and opaque CJS integration are the next native increments.
+    // shortcut: opaque CJS integration remains the next native increment.
     if modules.values().any(|m| {
         m.parsed.facts.commonjs
-            || !m.parsed.facts.top_level_await.is_empty()
             || m.parsed.facts.dependencies.iter().any(|d| {
-                !d.type_only && !matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+                !d.type_only
+                    && !matches!(
+                        d.kind,
+                        DependencyKind::Import
+                            | DependencyKind::ReExport
+                            | DependencyKind::DynamicImport
+                    )
             })
     }) {
         return Ok(None);
     }
     let mut entries = BTreeMap::new();
+    let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
-        let RootId::Entry(entry) = root else {
-            return Ok(None);
-        };
-        let [file] = seed.evaluation_roots.as_slice() else {
-            return Ok(None);
-        };
-        if !seed.binding_roots.is_empty() && seed.binding_roots != [GraphNode::Module(*file)] {
-            return Ok(None);
+        match root {
+            RootId::Entry(entry) => {
+                let [file] = seed.evaluation_roots.as_slice() else {
+                    return Ok(None);
+                };
+                if !seed.binding_roots.is_empty()
+                    && seed.binding_roots != [GraphNode::Module(*file)]
+                {
+                    return Ok(None);
+                }
+                entries.insert(entry.clone(), *file);
+            }
+            RootId::Async(site) => {
+                if !seed.evaluation_roots.is_empty() {
+                    return Ok(None);
+                }
+                let [GraphNode::Module(file)] = seed.binding_roots.as_slice() else {
+                    return Ok(None);
+                };
+                async_targets.insert(site.clone(), *file);
+            }
         }
-        entries.insert(entry.clone(), *file);
     }
+    let async_modules = super::super::async_modules(graph, modules)?;
+    let asynchronous: BTreeSet<_> = async_modules
+        .iter()
+        .map(|p| graph.file_id(p).unwrap())
+        .collect();
     let mut edges = BTreeMap::new();
     let mut connectors = BTreeSet::new();
     for (&file, module) in modules {
@@ -54,12 +77,18 @@ pub(super) fn emit(
                 .facts
                 .dependencies
                 .iter()
-                .filter(|d| !d.type_only)
+                .filter(|d| {
+                    !d.type_only
+                        && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+                })
                 .map(|d| target_file(graph, file, d))
                 .collect::<eyre::Result<Vec<_>>>()?,
         );
     }
     let mut boundaries: BTreeSet<_> = entries.values().copied().collect();
+    boundaries.extend(async_targets.values().copied());
+    // Keep source wait bounds and sibling interleaving in native module jobs.
+    boundaries.extend(&asynchronous);
     for linked in symbols
         .imports
         .values()
@@ -136,7 +165,7 @@ pub(super) fn emit(
             let Some(group) = groups.get(&root) else {
                 continue;
             };
-            if cycles.contains(&root) {
+            if cycles.contains(&root) || asynchronous.contains(&root) {
                 continue;
             }
             let dependencies: BTreeSet<_> = group
@@ -241,7 +270,7 @@ pub(super) fn emit(
         for node in nodes {
             let module = match node {
                 NodeId::Module(p) | NodeId::Segment { module: p, .. } => p,
-                _ => eyre::bail!("non-ESM node in synchronous native plan"),
+                _ => eyre::bail!("non-ESM node in native plan"),
             };
             let owner = path(graph, owners[&graph.file_id(module).unwrap()]);
             paths.insert(owner.clone());
@@ -262,8 +291,11 @@ pub(super) fn emit(
         manifest: manifest.clone(),
         cjs_proxies: BTreeMap::new(),
         cjs_namespaces: BTreeMap::new(),
-        async_facades: BTreeMap::new(),
-        async_modules: BTreeSet::new(),
+        async_facades: async_targets
+            .into_iter()
+            .map(|(site, file)| (site, path(graph, owners[&file])))
+            .collect(),
+        async_modules,
     }))
 }
 
@@ -294,6 +326,10 @@ fn concatenate(
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
 ) -> eyre::Result<Option<String>> {
     let mut values = Values::new(graph, modules, symbols);
+    values.requests = owners
+        .iter()
+        .map(|(&file, &owner)| (file, request(graph, owner)))
+        .collect();
     let mut output = String::new();
     let mut order = Vec::new();
     let mut pending = vec![(root, false)];
@@ -317,7 +353,9 @@ fn concatenate(
             .dependencies
             .iter()
             .rev()
-            .filter(|d| !d.type_only)
+            .filter(|d| {
+                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            })
         {
             pending.push((redirects[&target_file(graph, file, d)?], false));
         }

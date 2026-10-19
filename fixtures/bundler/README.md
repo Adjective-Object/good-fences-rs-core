@@ -23,14 +23,15 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **24 cases / 31 entry executions**: six esbuild cases,
-six rspack cases and twelve authored cases. The upstream cases cover
+The corpus contains **27 cases / 36 entry executions**: six esbuild cases,
+six rspack cases and fifteen authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
 hoisting, default snapshots/live aliases, inferred names, `__proto__` shorthand
 and destructuring, reverse-path static import ordering, namespace observations,
-ambient deferred effects and once-only shared identity.
+ambient deferred effects and once-only shared identity, native TLA sibling/SCC
+jobs, cached rejection/TDZ and dynamic exported-then assimilation.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -172,18 +173,25 @@ Runner regression tests use synthetic fixtures only:
 The single command above validates manifests/provenance first and compares
 manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
-All **24 contracts / 31 emitted entry executions** pass, with zero
+All **27 contracts / 36 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
-- **Native (14):** all eight `authored/native-*` cases,
+- **Native (22):** all fifteen authored cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
-  `rspack/esm-live-binding`, `authored/namespace-observations`,
-  `esbuild/shared-entrypoint-identity` and `esbuild/reexport-cycle`.
-  The eight native-authored cases and all three graduated cases require
-  native selection.
-- **Legacy (10):** all other cases, including the two ambient async cases
-  below, `authored/runtime-outcomes` and
-  `esbuild/dynamic-import-tla-order`. These passes are not native-backend coverage.
+  `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
+  `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
+  `esbuild/esm-sync-async`. All authored cases and both newly graduated esbuild
+  async cases explicitly require native selection.
+- **Legacy (5):** `esbuild/cjs-sync-async-once`, `rspack/cjs-default-export`,
+  `rspack/cjs-named-reexport`, `rspack/cjs-self-cycle` and
+  `rspack/dynamic-import-cjs`. These passes are not native-backend coverage.
+
+The public driver also returns the plan's effect-order-cycle diagnostics in
+`planWarnings`. These must exactly match the build warnings and be known cycle
+diagnostics; unrelated cache/publication/unknown warnings still fail. Results
+retain nonempty `warnings`, and the CLI prints them as `WARN` lines. This keeps
+async SCC planning diagnostics visible without treating the scalar DAG as an
+executor or suppressing native binding failures.
 
 ### Authored migration baseline
 
@@ -203,11 +211,14 @@ linker-shape assertions. No upstream provenance is fabricated for local inputs.
 | `native-const-write` | native, required | Uncaught `TypeError` after caught TDZ/const errors, imported value and preceding effect |
 | `native-barrel-surface` | native, required | Success; filtered public export keys, default-star exclusion, no false star ambiguity when the full dependency is another public entry |
 | `namespace-observations` | native, required | Success; keys/descriptors, computed read, live aliases, identity, method receiver, read-only write |
-| `ambient-dynamic-laziness` | legacy | Success; zero effects before import, outer then deferred inner effects, cached namespace identity |
-| `ambient-once-identity` | legacy | Success; one shared ambient initialization across concurrent consumers, object/function/namespace identity and mutation |
+| `ambient-dynamic-laziness` | native, required | Success; zero effects before import, outer then deferred inner effects, cached namespace identity |
+| `ambient-once-identity` | native, required | Success; one shared ambient initialization across concurrent consumers, object/function/namespace identity and mutation |
+| `native-async-order` | native, required | Success; `a-before,b,a-after,job` sibling interleaving, deferred outer/inner effects and repeated namespace identity |
+| `native-async-cycles` | native, required | Hoisted cyclic functions and suspension; uncaught cycle `ReferenceError`; shared cached rejection across concurrent imports and retries |
+| `native-dynamic-then` | native, required | Native microtasks/exported-then assimilation, exact namespace keys, default snapshot and live mutation |
 
 The existing `authored/native-tdz` remains an uncaught `ReferenceError` contract
-after `before TDZ`; `authored/runtime-outcomes` remains legacy with successful,
+after `before TDZ`; `authored/runtime-outcomes` now requires native with successful,
 throwing and rejecting entries. Errors constrain names, not stacks or messages;
 these new cases need no fabricated error codes. Ambient cases call functions
 through `globalThis` and observe effects before/after dynamic activation; they do

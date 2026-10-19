@@ -24,7 +24,7 @@ hoisting/initialization semantics. No public product field or dependency was add
 The native foundation below is implemented for independent review, not completion
 of scope hoisting, CJS integration or removal of the legacy backend.
 
-## Staged native synchronous chunks
+## Staged native ESM chunks
 
 `link::esm` (including public `BuildSession` and publication) emits **one
 `native.mjs`** for a single namespace entry/evaluation root whose retained static
@@ -48,7 +48,7 @@ validated and has no runtime, cells, registrations or per-module facade family.
 
 Checked dot-property reads of namespace imports (including namespace reexport
 aliases) resolve directly to canonical live values when the whole graph can
-concatenate. The broader synchronous ESM path emits real body-bearing
+concatenate. The broader ESM path emits real body-bearing
 `native/<path-hash>.mjs` chunks, with ordinary static imports/reexports between
 them. It supports multiple entries, evaluation-only entries, escaped namespaces,
 computed reads, descriptors, receivers and read-only writes. Namespace values
@@ -75,16 +75,36 @@ This planner intentionally does not maximize grouping: shared renaming connector
 some pure sibling declarations and name-inference-sensitive merges can still
 retain native seams.
 
-The remaining **temporary legacy staging gate** is async/nonstatic dependencies,
-CJS, and low-level roots with multiple evaluation files or selected non-module
-binding roots. Async support must preserve real TLA jobs, not impose a sync
-order. Opaque-CJS/facade integration and legacy deletion remain future increments.
+Literal dynamic imports and source TLA/for-await now use this same planner.
+Dynamic source occurrences remain distinct logical roots, but every import of
+one target uses its canonical actual chunk path and native namespace. Only the
+specifier is rewritten: Node owns promises, microtasks, exported-`then`
+assimilation, shared rejections and cached identity. Dynamic edges never become
+static imports or permission to invoke a nested body. Effectful deferred targets
+remain inactive until requested.
+
+Dynamic namespace targets retain their complete public surfaces, without private
+exports. Source TLA status propagates over static runtime dependencies, including
+SCCs. These async modules stay body-bearing native jobs rather than concatenating
+across source wait boundaries. Source await/for-await syntax is untouched; static
+siblings interleave natively, never through scalar effect-order dispatch,
+generators or universal async wrappers. Compatible synchronous subgraphs still
+use the existing grouping/lexical-rewrite path.
+
+The remaining **temporary legacy staging gate** is CJS/require dependencies and
+low-level roots with multiple evaluation files or selected non-module binding
+roots. Require-of-async diagnostics still apply before legacy emission. One
+opaque CJS segment/logical-facade integration and legacy deletion come next,
+before deferred upstream parity work.
 
 `members` points to actual body owners. A logical `chunk_artifacts` projection
 can contain several physical paths and overlap another projection when physical
 groups merge; the manifest/reference reachability oracle is unchanged.
 `modules` contains only independently executable source namespace surfaces,
-not fake paths for merged private modules. The 66-source star-chain benchmark
+not fake paths for merged private modules. `async_facades` maps reached source
+sites to their canonical target chunks, not generated facade files;
+`async_modules` reports source paths with transitive static async status.
+The 66-source star-chain benchmark
 still asserts one ordinary `native.mjs`, without runtime/helpers.
 
 ## Current legacy exact physical code splitting
@@ -345,19 +365,23 @@ bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
 lifetime/dead-code warnings remain; no unrelated CI/toolchain health claim.
 
-Current synchronous native-chunk validation (not a full workspace test rerun):
-**147 bundler tests**, **97 harness regressions**, **24 source/emitted contracts /
-31 emitted executions**, same-runtime identity and four diagnostics, format,
+Current native async-chunk validation (not a full workspace test rerun):
+**147 bundler tests**, **99 harness regressions**, **27 source/emitted contracts /
+36 emitted executions**, same-runtime identity and four diagnostics, format,
 all-target bundler clippy (`--no-deps`, warnings denied) and mandatory spot-check pass.
-**Fourteen contracts select native, ten select legacy**. Namespace observations,
-shared entrypoint identity and reexport cycles now require native in addition to
-the eight authored native-required cases, including the filtered-barrel public
-surface/false-ambiguity regression. Async/CJS remain legacy coverage.
+**Twenty-two contracts select native, five select legacy**. The original fourteen
+native contracts stay native. Both ambient async cases, runtime outcomes,
+dynamic-import/TLA order and ESM sync/async now require native. Three new portable
+cases cover TLA siblings/nested activation, cycle TDZ/shared rejection/dedup and
+exported-then assimilation with default snapshots/live aliases. Only the five
+CJS corpus cases remain legacy coverage. The driver exposes planning warnings
+separately; the harness reports known effect-order-cycle warnings while still
+rejecting cache/publication/unknown warnings.
 See the [authored backend baseline](../../fixtures/bundler/README.md#authored-migration-baseline)
 and exact retirement mapping in NOTES. Each subsequent linker stage must graduate
 applicable legacy fixtures to required-native coverage and/or add meaningful
-regressions for its new behavior. Independent review of synchronous native
-grouping is pending; general ESM/async/CJS completion is not claimed.
+regressions for its new behavior. Independent review of this async increment
+is pending; CJS integration and legacy deletion are not claimed.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
@@ -555,10 +579,11 @@ without changing its relative layout. Run `node <artifacts.entries[name]>`
 or import that file directly:
 
 ```js
-import value, {namedExport} from './facades/<entry-path-hash>.namespace.mjs';
+import value, {namedExport} from './native/<entry-path-hash>.mjs';
 ```
 
-Native synchronous entries point to their actual chunks. In the legacy path,
+Native entries and ESM dynamic targets point to their actual body chunks (the
+single-tree fast path uses `native.mjs`). In the legacy path,
 namespace entries and dynamic imports point to canonical native namespace facades,
 not namespace-object launchers. ESM exposes actual static named/default exports;
 CJS executes directly as CJS. Request namespace binding demand when all public
@@ -576,7 +601,7 @@ Modules with multiple root sets have their statements physically separated;
 modules with equal sets share code files without sharing evaluation identity.
 The native public export surface contains no private setter/capture exports.
 
-`facades/<sha256-original-path>.*` contains only binding storage, subscriptions,
+In the legacy path, `facades/<sha256-original-path>.*` contains only binding storage, subscriptions,
 native dependencies and dispatch. Cell aliases preserve cross-chunk live writes,
 const errors, shorthand/destructuring and TDZ. Function objects instantiate
 before evaluation. Synchronous initialization events initialize native lexical
@@ -587,13 +612,14 @@ No code JSON, hooks, loader registration, preload, custom protocol, source-text
 IO, source assembly or runtime compilation is used.
 
 Node owns native dependency/SCC scheduling, public namespaces and async jobs.
-Loading registration chunks never evaluates another original module. Low-level
+In the legacy path, loading registration chunks never evaluates another original module. Low-level
 roots naming multiple modules emit evaluation-only facades without invented
 namespace merges or exported arrays. `link::esm` itself writes no files.
 
 Literal source dynamic imports use the same native identities as static imports
 and entries. `Artifacts::async_facades` maps each reached source occurrence to
-its canonical native namespace facade path; ESM imports add no promise-unwrapping
+its canonical executable target path (native body chunk or staged legacy
+namespace facade); ESM imports add no promise-unwrapping
 reaction. Native import promises preserve source suspension and
 deduplicate module evaluation. CJS imports unwrap the existing namespace bridge
 with a promise continuation (one extra reaction, not a synchronous require).
@@ -609,12 +635,14 @@ This backend is not a browser/standalone-file target.
 
 ### Async evaluation and support
 
-Source ESM TLA and top-level for-await lower to tagged generator events driven
-by native facade top-level await. Binding events remain synchronous, including
-between destructuring elements; ordinary modules are not wrapped in async functions.
-Node's native module jobs
+The native backend retains original source TLA/top-level for-await syntax in
+body-bearing chunks. Async source modules and their static consumers keep native
+job boundaries; compatible synchronous subgraphs still concatenate. No generator
+events, binding cells or async wrappers are introduced. Node's native module jobs
 schedule static dependency SCCs, suspend importers, deduplicate concurrent jobs,
 and propagate rejection; there is no competing Rust/JavaScript scheduler.
+Only the staged legacy backend lowers source suspension to tagged generator
+events driven by facade top-level await, with synchronous binding events.
 `ModuleFacts::top_level_await` records only source-local suspension ranges
 (nested functions are excluded). The linker derives `Artifacts::async_modules`
 by closing those facts over runtime static import/re-export dependencies,
@@ -637,7 +665,7 @@ Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 | CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
 | Nonliteral imports/requires, options/attributes, externals/assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
 
-Bundled-mode Node tests compare all twelve portable cases (fifteen entry executions)
+The unified public-build Node runner compares all 27 portable cases (36 entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover
 cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
 effect ordering, once-only/concurrent entry loading, bundle-instance isolation,

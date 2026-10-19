@@ -1,0 +1,14 @@
+{
+  "id": "authored/native-async-cycles",
+  "moduleType": "module",
+  "entryPoints": ["success.mjs", "tdz.mjs", "reject.mjs"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["b-before hoisted", "b-after", "a-before 4", "a-after", "entry 5", "before TDZ", "before", "pending", "reject once", "true true true true 1", "true 1"],
+    "errors": {"tdz.mjs": {"name": "ReferenceError"}}
+  },
+  "goals": [
+    "Native async SCCs preserve function instantiation and lexical TDZ after suspension.",
+    "Concurrent imports and later retries share the same cached rejection across a static cycle, without duplicate effects."
+  ]
+}

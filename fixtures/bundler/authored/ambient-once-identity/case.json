@@ -3,11 +3,12 @@
   "moduleType": "module",
   "entryPoints": ["entry.mjs"],
   "expectations": {
-    "stdout": ["before 0", "shared 1", "true true true true 1", "1 1 1", "true 1"]
+    "stdout": ["before 0", "shared 1", "true true true true 1", "1 1 1", "true 1"],
+    "backend": "native"
   },
   "goals": [
     "Concurrent consumers of one shared module observe one ambient initialization and the same namespace, object and function.",
     "Live mutation is visible through both consumers and subsequent direct dynamic imports without duplicate initialization.",
-    "Currently exercises the reported legacy async backend, not native multi-root coverage."
+    "Require native multi-root identity and once-only activation."
   ]
 }

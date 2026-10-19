@@ -4,6 +4,7 @@
   "entryPoints": ["throw.js", "reject.js", "success.js"],
   "expectations": {
     "stdout": ["before throw", "before rejection", "success"],
+    "backend": "native",
     "errors": {
       "throw.js": {"name": "TypeError", "code": "AUTHORED_FAILURE"},
       "reject.js": {"name": "RangeError"}

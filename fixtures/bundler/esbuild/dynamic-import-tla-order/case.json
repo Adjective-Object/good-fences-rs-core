@@ -16,7 +16,8 @@
   "moduleType": "module",
   "entryPoints": ["in.js"],
   "expectations": {
-    "stdout": ["123 1,2,3,4,5,6"]
+    "stdout": ["123 1,2,3,4,5,6"],
+    "backend": "native"
   },
   "goals": [
     "Dynamic import waits for evaluation of a re-exported dependency with top-level await.",

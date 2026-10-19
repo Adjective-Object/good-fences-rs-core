@@ -48,6 +48,7 @@ fn main() -> eyre::Result<()> {
             "outputParses": build.counters.output_parses,
             "artifactWrites": published.files_written,
             "warnings": build.warnings,
+            "planWarnings": build.product.plan.retention.warnings,
             "publicationWarnings": published.warnings,
         })
     );

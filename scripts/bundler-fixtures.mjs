@@ -257,7 +257,11 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   assert(existsSync(driver), `Missing library driver; run cargo build -p bundler --example build (${driver})`);
   const result = execute(driver, [root, path.join(root, '.bundler-output'), ...entries], root, timeoutMs);
   const build = JSON.parse(successful(result, 'public build pipeline'));
-  assert.deepEqual(build.warnings, [], 'cache write warnings');
+  const planWarnings = build.planWarnings ?? [];
+  assert(Array.isArray(planWarnings) && planWarnings.every(warning =>
+    typeof warning === 'string' && warning.startsWith('effect-order cycle; ')),
+    'unknown planning warnings');
+  assert.deepEqual(build.warnings, planWarnings, 'cache write warnings');
   assert.deepEqual(build.publicationWarnings, [], 'publication warnings');
   assert(['native', 'legacy'].includes(build.backend), 'driver must report its selected backend');
   assert.equal(build.layout, build.backend === 'native' ? 'native-esm-chunks-v1' : 'exact-root-set-chunks-v1',
@@ -295,6 +299,7 @@ export function runFixtures(root = defaultRoot, {
   return cases.map(({ manifest, files }) => managed(tempRoot, (directory) => {
     let stage = 'input';
     let backend;
+    let warnings;
     try {
       const native = path.join(directory, 'native');
       const source = path.join(directory, 'source');
@@ -309,6 +314,7 @@ export function runFixtures(root = defaultRoot, {
       copyCase(files, source, manifest);
       const build = buildProject(driver, source, manifest.entryPoints);
       backend = build.backend;
+      if (build.planWarnings?.length) warnings = build.planWarnings;
       stage = 'backend';
       if (manifest.expectations.backend === 'native') {
         assert.equal(backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
@@ -316,9 +322,11 @@ export function runFixtures(root = defaultRoot, {
       stage = 'output';
       const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
       assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
-      return { id: manifest.id, status: 'passed', backend, executions: manifest.entryPoints.length, stdout: baseline.stdout };
+      return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
+        executions: manifest.entryPoints.length, stdout: baseline.stdout };
     } catch (error) {
-      return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}), executions: 0, error };
+      return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}),
+        ...(warnings ? { warnings } : {}), executions: 0, error };
     }
   }));
 }
@@ -400,6 +408,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const results = runFixtures(process.argv[2]);
     for (const result of results) {
       console.log(report(result));
+      for (const warning of result.warnings ?? []) console.log(`WARN ${result.id}: ${warning}`);
       if (result.error) console.error(diagnostic(result.error));
     }
     const count = (status, backend) => results.filter((r) => r.status === status && (!backend || r.backend === backend)).length;

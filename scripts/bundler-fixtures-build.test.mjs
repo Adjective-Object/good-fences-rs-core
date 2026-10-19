@@ -88,14 +88,14 @@ test('native-required cases pass only on the authoritative native backend; fallb
     assert.equal(result.status, 'passed');
     assert.equal(result.backend, 'native');
   });
-  withCorpus("await Promise.resolve(); console.log('hello');", ({ run, configure }) => {
+  withCorpus("import './dep.cjs'; console.log('hello');", ({ run, configure }) => {
     const [result] = run();
     assert.equal(result.status, 'passed');
     assert.equal(result.backend, 'legacy');
     configure({ expectations: { stdout: ['hello'], backend: 'native' } });
     const failure = assertFailure(run, 'backend', /native backend required; legacy fallback selected/u);
     assert.equal(failure.backend, 'legacy');
-  });
+  }, { 'dep.cjs': 'module.exports = 1;' });
 });
 
 test('runtime failures and preceding effects match across native and bundled multiple-entry processes', () => {
@@ -110,12 +110,26 @@ test('runtime failures and preceding effects match across native and bundled mul
       });
       const [result] = run();
       assert.equal(result.status, 'passed');
-      assert.equal(result.backend, 'legacy');
+      assert.equal(result.backend, 'native');
       assert.equal(result.executions, 3);
     }, {
       'async.js': "console.log('async'); await Promise.reject(new RangeError('rejection'));",
       'success.js': "console.log('done');",
     });
+});
+
+test('native async cycles retain visible planning warnings', () => {
+  withCorpus("import './a.js'; console.log('hello');", ({ run, configure }) => {
+    configure({ expectations: { stdout: ['hello'], backend: 'native' } });
+    const [result] = run();
+    assert.equal(result.status, 'passed');
+    assert.equal(result.backend, 'native');
+    assert(result.warnings.length > 0);
+    assert(result.warnings.every(warning => warning.startsWith('effect-order cycle; ')));
+  }, {
+    'a.js': "import './b.js'; await 0;",
+    'b.js': "import './a.js'; await 0;",
+  });
 });
 
 for (const [name, source, expected] of [

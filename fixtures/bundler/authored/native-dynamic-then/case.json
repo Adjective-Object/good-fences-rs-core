@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-dynamic-then",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["target", "before 1 1 bump,default,then,value", "pending", "microtask", "then true", "after true 2 1", "then true", "again true 3 1"]
+  },
+  "goals": [
+    "Literal dynamic imports retain native promise timing and the exported-then assimilation hazard.",
+    "Static namespace surfaces, default snapshots and live aliases are not widened or replaced by dynamic import wrappers."
+  ]
+}
