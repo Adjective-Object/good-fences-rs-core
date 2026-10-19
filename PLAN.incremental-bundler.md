@@ -1,6 +1,6 @@
 # Incremental JavaScript bundler plan
 
-## Active replacement plan — small reviewed increments
+## Active native-only cutover — independent review pending
 
 Keep owned parser/IR/cache, canonical graph, usage/effects and publication.
 Replace the linker entirely, in independently reviewed committable increments:
@@ -12,7 +12,7 @@ Replace the linker entirely, in independently reviewed committable increments:
    checked canonical symbol planning and production resolution reuse are now
    implemented. Synchronous native concatenation/group emission now uses direct
    lexical bindings and real native seams; native dynamic imports/TLA now use
-   those chunks. Opaque CJS integration is now implemented for review.
+   those chunks. Opaque CJS integration is implemented.
 2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
    preserve observable effects/activation and native binding/TDZ semantics.
    Native imports/exports cross actual output chunks only. Public entry/export
@@ -20,28 +20,33 @@ Replace the linker entirely, in independently reviewed committable increments:
 3. **CJS segment/facade integration:** each CJS input is one opaque segment
    bridged by a logical ESM facade; both participate in ordinary usage, linking
    and grouping. No standalone native `.cjs`-per-input fallback.
-4. **Remove legacy backend:** delete registrations, cells, aliases, watchers,
+4. **Remove legacy backend (implemented):** deleted registrations, cells, aliases, watchers,
    generator statement dispatch, capture cycles and ESM per-source facade
-   families after the replacement preserves their supported behavior.
+   families. Low-level roots now use native body chunks/public wrappers.
 5. **Release:** independent reviews, runtime/differential regressions, incremental
    invalidation/determinism and mandatory spot-check before release evidence.
 
-The current increment integrates one opaque CJS factory per input, grouped by
+The native emitter integrates one opaque CJS factory per input, grouped by
 availability roots with lexical cached initializers. Logical facade parts use
 native jobs at their demand seams: default captures the full result, requested
 names snapshot once in sorted order, and canonical bridges capture runtime keys.
 Rewritten requires call native CJS initializers directly or lazily require the
 actual synchronous ESM chunk. Ordinary ESM linkage/jobs remain unchanged.
-All 30 portable cases / 41 executions select native (27 explicitly require it); three new
+All 30 portable cases / 41 executions require native; three
 ambient activation/retry/mixed-cycle contracts supplement the five graduated
 CJS cases. The eligible 66-source one-file ESM path stays intact.
-Only selected-binding/multi-evaluation low-level roots remain legacy. Independent
-review is required before committing; low-root cutover and legacy deletion are
-the next increment, before any deferred upstream parity.
+Selected public/private binding-only roots, ordered multi-owner roots,
+evaluation-only ESM wrappers, empty identities and public entry aliases now use
+the same native emitter. Multi-owner roots expose no invented namespace.
+`physical.rs`, `physical_lower.rs`, `chunk_runtime.cjs`, Backend::Legacy and their
+fingerprints are deleted. The public and cached paths always emit native or
+return existing validation errors; internal grouping compatibility is not a
+backend fallback. Independent review is required before committing this cutover.
+Upstream parity remains deferred.
 
-## Rejected architecture, still-current legacy implementation: physical exact-set linker
+## Historical rejected architecture (deleted): physical exact-set linker
 
-Executable bodies now move into exact root-set registration chunks, with shared
+The rejected implementation moved executable bodies into exact root-set registration chunks, with shared
 binding/CJS storage and body-free native module evaluation/namespace facades.
 Root-specific hoisted capture cycles expose actual native namespace objects
 before evaluation without fetching inactive namespace parts. Capture follows
@@ -50,7 +55,8 @@ events preserve native facade lexical TDZ, while only source await operations
 suspend native module jobs. Real Node tests inspect exact ownership, remove
 deferred-only code before initial load, then exercise complete late-load
 identity. No unsupported-source gate or per-module fallback was added.
-Current evidence and architecture are in NOTES and the bundler README.
+These are historical claims, not current output contracts. Current evidence and
+architecture are in NOTES and the bundler README.
 
 ## Rejected historical replacement baseline: native JavaScript files
 

@@ -334,7 +334,6 @@ impl BuildSession {
                 concat!(
                     "native-node-cjs-initializers-v1\n",
                     include_str!("native_cjs.rs"),
-                    include_str!("chunk_runtime.cjs"),
                     include_str!("commonjs_namespace.mjs")
                 )
                 .as_bytes(),
@@ -350,8 +349,6 @@ impl BuildSession {
                 include_str!("native_chunks.rs"),
                 include_str!("native_cjs.rs"),
                 include_str!("cjs.rs"),
-                include_str!("physical.rs"),
-                include_str!("physical_lower.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),

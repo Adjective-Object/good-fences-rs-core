@@ -47,9 +47,9 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
   mandatory physical partition. Public entry/export boundaries constrain output.
   Each CJS input is one opaque segment plus a logical ESM facade, both subject
   to normal usage/link/grouping. The registration/cell/facade-family backend
-  remains legacy pending replacement, not an architectural requirement.
+  is deleted; linked emission is native-only, including low-level roots.
   Preserve activation timing; no source-loading runtimes or runtime compilation.
-- Public single-module roots now use native ESM/CJS chunks. CJS availability
+- All public and low-level roots use native ESM/CJS chunks. CJS availability
   chunks contain pure lexical cached initializers; only demanded facade jobs
-  execute factories/snapshot properties. Legacy remains for special low-level
-  roots pending cutover/deletion, not as a CJS fallback.
+  execute factories/snapshot properties. Multi-owner roots are evaluation-only
+  native entry wrappers; they never invent a combined public namespace.

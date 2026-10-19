@@ -1,6 +1,27 @@
 # Incremental bundler execution checklist
 
-## Active replacement — pending review/implementation
+## Active native-only cutover — pending independent review
+
+- [x] Support native evaluation-only, multiple evaluation/binding owners,
+  selected public/private binding-only roots, empty module identities and
+  multiple public entry names for one source. Add actual Node observations for
+  ordered effects, retained public surfaces, empty combined surfaces and identity.
+- [x] Delete `physical.rs`, `physical_lower.rs`, `chunk_runtime.cjs`,
+  Backend::Legacy, old module includes/fingerprints and unused symbol metadata.
+  Both checked public and cache-reusing emission always use native output.
+- [x] Require native for all 30 portable contracts / 41 executions.
+- [x] Complete fresh `scripts/bundler-release-check`: 442 scoped Rust tests
+  (151 bundler), 99 harness tests, 30 native-required cases / 41 executions,
+  same-runtime identity + four diagnostics, strict clippy and mandatory spot-check.
+  Fresh benchmark retains 66 reached sources / one file; README records measurements.
+- [ ] Independently review the complete native-only deletion increment before
+  committing. No commit, push, parity/oracle or upstream work in this increment.
+
+## Historical replacement increments — preceding the final cutover
+
+The ledger below records earlier increments and their then-current staging gates,
+not active fallback requirements. Outstanding independent review is not inferred
+from implementation or passing tests.
 
 - [x] Unify the baseline/build corpus runner on base `ec0a859`: one
   `bundler-fixtures.mjs` command/API, input/build/backend/output failure results,
@@ -68,7 +89,7 @@
 - [ ] Release after independent reviews, runtime/differential/invalidation gates
   and mandatory spot-check. Do not reuse historical completion claims below.
 
-## Rejected architecture: legacy physical exact-set emission (still active)
+## Historical rejected architecture: physical exact-set emission (deleted)
 
 - [x] Move real/synthetic executable registrations into their one exact chunk.
 - [x] Separate binding storage/instantiation from original module execution;

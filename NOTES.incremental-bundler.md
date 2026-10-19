@@ -1,6 +1,70 @@
 # Incremental bundler implementation handoff
 
-## Current increment: native opaque CJS integration (uncommitted; review pending)
+## Current increment: native-only cutover (uncommitted; independent review pending)
+
+All `link::esm` and checked-cache emission now use native chunks, including
+selected public/private binding-only roots, ordered multiple evaluation/binding
+owners, evaluation-only ESM roots, empty module identities and entry aliases.
+Single-owner binding roots expose the retained public surface; multi-owner roots
+and evaluation-only ESM entries use export-free native wrappers. Original
+evaluation roots keep their order, followed by distinct binding owners. Real
+source namespace aliases share canonical paths. CJS entry wrappers retain their
+existing full-result semantics, including when imported by multi-owner wrappers.
+
+Deleted `crates/bundler/src/{physical.rs,physical_lower.rs,chunk_runtime.cjs}`,
+their module/fingerprint includes, Backend::Legacy and obsolete symbol metadata/
+reserved legacy helper prefixes. No registrations, ESM cells, watchers, generic
+registry, generator dispatch or capture-cycle output remains. Native CJS keeps
+only pure grouped opaque factories, lexical early-allocated retryable caches and
+demanded logical facade jobs/namespace bridges, not per-input native CJS fallback.
+Logical root projections remain analytical and ownership names actual chunks.
+
+Three new Node regressions cover low roots, ordered/once-only effects, direct
+binding dependencies, retained public vs private surfaces, empty identities,
+evaluation-only/multi-owner export keys and public-name aliases. Existing
+CommonJS cached-facts binding-only and throw-stops-later-owner tests remain.
+Low-root and selected-binding tests failed with Backend::Legacy before cutover.
+All three previously unmarked portable cases now explicitly require native:
+`esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
+`rspack/esm-live-binding`. All 30 cases / 41 executions require native.
+
+Final validation:
+
+- `./scripts/bundler-release-check` passed: **442 scoped Rust tests across nine
+  crates (151 bundler)**, **99 harness regressions**, **30 native-required cases /
+  41 emitted executions** (18 authored, six esbuild, six rspack; zero legacy,
+  failed or unsupported), one same-runtime identity case and four diagnostic
+  cases. Strict all-target bundler clippy and mandatory spot-check passed.
+  Spot-check reruns 51 ast-segmenter tests and checks the full workspace; this is
+  not a full workspace test run. Existing unrelated dependency dead-code warnings
+  and explicitly reported effect-order-cycle fixture warnings remain visible.
+- `TMPDIR="$PWD/target/p1-test-tmp" cargo bench -p bundler --bench incremental`
+  passed. Seven fresh roots per scenario, 66 reached sources / 65 requests,
+  exactly one `native.mjs`. Median total ms: cold **92.947**, warm **43.016**,
+  no-op **3.072**, local edit **41.407**, export edit **43.833**, config edit
+  **44.284**. No-op source/output parses, resolutions, links and writes are zero.
+  Warm has 66 disk hits / zero writes; edits parse one source / write one file.
+  README records ranges/build medians and full counters; no speedup claim.
+- Focused rustfmt check and `git diff --check` passed. Production-source search
+  finds no `physical`/`chunk_runtime` includes, Backend::Legacy, moduleRecord,
+  proxyFactory, generic segment/watch registrations or capture namespace helpers.
+  All native emitters and the CJS bridge remain in `include_str!` fingerprints.
+  No-op generation/mtime and running old-generation lazy imports pass unchanged.
+
+Logs (uncommitted tool output): `target/native-only-release-final.log`,
+`target/native-only-bench.log`; initial red evidence:
+`target/native-only-{low-roots,binding}-red.log`. An initial full run caught only
+the renamed snapshot's old filename; it was moved without changing its content.
+Focused test development also corrected expectations to respect conservative
+module-effect retention rather than removing observable initialization.
+Independent review is still required; no review claim is made. No subagents,
+commit/push, stash application or upstream parity/oracle work. The user-owned
+`crates/ftree_cache/src/context_data.rs` change is untouched.
+
+## Historical increment: native opaque CJS integration
+
+The following checkpoints record then-current staging and evidence; they do not
+describe a retained legacy backend after the final cutover above.
 
 Public module roots now use native ESM/CJS emission; CJS is no longer a legacy
 eligibility gate. Special selected-binding/multi-evaluation low-level roots
@@ -551,7 +615,7 @@ continues using native module jobs; it does not yet execute the new planned SCC
 order. Namespace conservative liveness and old physical partitioning are
 unchanged in this first analysis increment. Do not claim the whole stage done.
 
-## Rejected architecture: legacy physical exact-root-set linker (still active)
+## Historical rejected architecture: physical exact-root-set linker (deleted)
 
 Active source: `link.rs` delegates after checked source/surface construction to
 `physical.rs`; `physical_lower.rs` composes retained PURE statements before

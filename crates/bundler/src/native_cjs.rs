@@ -320,7 +320,7 @@ impl CommonJs {
         graph: &SourceGraph,
         modules: &BTreeMap<u32, Module<'_>>,
         owners: &BTreeMap<u32, u32>,
-        entries: &BTreeMap<String, u32>,
+        entries: &BTreeSet<u32>,
     ) -> eyre::Result<()> {
         // Export initializers before pure cyclic availability imports. Only CJS
         // requires, not ESM interop seams, may observe a still-running factory.
@@ -488,7 +488,7 @@ impl CommonJs {
             if let Ok(value) = self.value(graph, file, &ImportedName::Namespace) {
                 self.namespaces.insert(original.clone(), value.path.clone());
             }
-            if entries.values().any(|&f| f == file) {
+            if entries.contains(&file) {
                 let factory = &self.factories[&file];
                 let path = PathBuf::from(format!(
                     "native/entry-{}.cjs",

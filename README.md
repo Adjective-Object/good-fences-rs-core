@@ -146,10 +146,11 @@ availability chunks with per-initializer lexical caches. Demanded native ESM
 facade parts provide default, named snapshots and canonical runtime-key bridges;
 loading a factory chunk never executes a deferred factory. Ordinary ESM bindings
 have no cells, registry or scheduler. All **30 portable contracts / 41 executions**
-select native (27 explicitly require it). Only selected-binding/multi-evaluation low-level
-roots still use the rejected legacy registration/cell backend. That final
-cutover and legacy deletion come next, after independent review and before
-upstream parity. No loader hooks or executable source payloads are used.
+require native. Selected-binding, binding-only, evaluation-only and multi-owner
+low-level roots also use native chunks; multi-owner entry wrappers export no
+invented combined namespace. The rejected registration/cell backend is deleted,
+not retained as a fallback. Independent review is required before committing.
+No loader hooks or executable source payloads are used; upstream parity is deferred.
 P9 adds public `BuildSession::{build,build_and_publish}`, independent layer keys
 and real counters, selective parse reuse, immutable transactional generations
 with ownership-bounded quiescent cleanup, and a public-pipeline

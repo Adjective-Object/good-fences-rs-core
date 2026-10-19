@@ -529,13 +529,8 @@ fn canonical_imports_and_public_aliases_share_definitions_not_names() {
     assert_eq!(symbols.exports[&entry]["other"].identity, identity);
     let definition = &symbols.definitions[&(leaf, binding.id)];
     assert_eq!(definition.name, "value");
-    assert_eq!(
-        definition.declarations,
-        [SegmentKey::new(leaf, 0), SegmentKey::new(leaf, 1)]
-    );
     let route = &symbols.exports[&entry]["public"].route;
-    assert!(definition
-        .declarations
+    assert!([SegmentKey::new(leaf, 0), SegmentKey::new(leaf, 1)]
         .iter()
         .all(|&key| route.contains(&GraphNode::Segment(key))));
     assert!(route.iter().all(|&node| retained(&plan, node)));
@@ -604,7 +599,7 @@ fn canonical_names_avoid_shadowing_globals_and_reordered_inputs() {
         assert_eq!(names.len(), definitions.len());
         assert!(!names
             .iter()
-            .any(|name| ["global", "shadow", "__gf_runtime"].contains(&name.as_str())));
+            .any(|name| ["global", "shadow"].contains(&name.as_str())));
         assert!(definitions
             .iter()
             .any(|d| d.2 == "__gf_link_0" && d.3 == "__gf_link_0"));
@@ -899,6 +894,7 @@ fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
     )
     .unwrap();
     let mut output = esm(&graph, &plan, &policy, &sources(&[("dep.js", source)])).unwrap();
+    assert_eq!(output.backend, Backend::Native);
     output.files.insert(
         "observe.mjs".into(),
         observation(&output, "console.log((await import('./main')).default);"),
@@ -913,7 +909,7 @@ fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
 }
 
 #[test]
-fn commonjs_exact_proxy_sets_share_one_native_registry_across_entries() {
+fn commonjs_proxy_demands_share_one_cached_initializer_across_entries() {
     let source = sources(&[
         ("a.mjs", "export {a} from './shared.cjs';"),
         ("b.mjs", "export {b} from './shared.cjs';"),
@@ -1599,7 +1595,7 @@ fn statement_sentinels_have_truthful_owners_and_async_load_closure() {
 }
 
 #[test]
-fn physical_binding_operations_preserve_keys_names_strict_this_and_const_errors() {
+fn native_binding_operations_preserve_keys_names_strict_this_and_const_errors() {
     compare(&sources(&[
         ("entry.mjs","import value, {a, next, C, read} from './state.mjs'; console.log(value.name, C.self === C, C.name, read() === undefined, a.name); next(); console.log(a.name);"),
         ("state.mjs","export let {a = () => 1} = {}; export function next() { ({a = () => 2} = {}); } export class C { static self = this; } export function read() { return this; } export default () => 3;"),
@@ -1627,7 +1623,7 @@ fn physical_binding_operations_preserve_keys_names_strict_this_and_const_errors(
 }
 
 #[test]
-fn physical_for_await_preserves_cached_next_and_close_completion() {
+fn native_for_await_preserves_cached_next_and_close_completion() {
     for body in [
         "let n=0; const iterator = { [Symbol.asyncIterator]() {return this;}, next() {this.next = () => {throw Error('replaced next');}; return Promise.resolve({value:++n,done:n>2});}, get return() {console.log('return getter'); return () => {console.log('close'); return Promise.resolve({done:true});};} }; for await (const value of iterator) {console.log(value); if(value===2) break;}",
         "const error = Error('original'); const iterator = {[Symbol.asyncIterator]() {return this;}, next() {return Promise.resolve({value:1,done:false});}, return() {console.log('close'); return Promise.reject(Error('close failure'));}}; try {for await(const value of iterator) {throw error;}} catch(e) {console.log(e === error);}",
@@ -2296,6 +2292,152 @@ fn cross_chunk_cycle_keeps_forward_tdz_and_hoisted_function_instantiation() {
     assert_eq!(String::from_utf8(bundled.stdout).unwrap(), "7\n");
     assert!(String::from_utf8_lossy(&bundled.stderr).contains("ReferenceError"));
     assert!(String::from_utf8_lossy(&bundled.stderr).contains("before initialization"));
+}
+
+#[test]
+fn native_low_roots_preserve_order_without_inventing_a_public_namespace() {
+    let source = sources(&[
+        ("a.mjs", "console.log('a'); export const a = 1;"),
+        ("b.mjs", "console.log('b'); export const b = 2;"),
+        ("selected.mjs", "import {value} from './dep.mjs'; export const selected = console.log('selected', value); const privateValue = console.log('private', value);"),
+        ("dep.mjs", "export const value = 7;"),
+        ("opaque.cjs", "console.log('opaque'); module.exports = 9;"),
+    ]);
+    let graph = graph(&source, false);
+    let file = |name| graph.file_id(Path::new(name)).unwrap();
+    let roots = [
+        RootSeed {
+            id: RootId::Entry("combined".into()),
+            evaluation_roots: vec![file("b.mjs"), file("a.mjs")],
+            binding_roots: vec![
+                GraphNode::Segment(SegmentKey::new(file("selected.mjs"), 1)),
+                GraphNode::Segment(SegmentKey::new(file("selected.mjs"), 2)),
+            ],
+        },
+        RootSeed {
+            id: RootId::Entry("bindings".into()),
+            evaluation_roots: vec![],
+            binding_roots: vec![
+                GraphNode::Module(file("a.mjs")),
+                GraphNode::Module(file("b.mjs")),
+                GraphNode::Module(file("opaque.cjs")),
+            ],
+        },
+    ];
+    let policy = EffectPolicy::default();
+    let plan = partition(&graph, &roots, &policy).unwrap();
+    let output = esm(&graph, &plan, &policy, &source).unwrap();
+    assert_eq!(output.backend, Backend::Native);
+    let mut files = output.files.clone();
+    files.insert("observe.mjs".into(), observation(&output,
+        "const ns = await import('./combined'); console.log(JSON.stringify(Object.keys(ns))); const bindings = await import('./bindings'); console.log(JSON.stringify(Object.keys(bindings)));"));
+    let actual = node(&files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        b"b\na\nselected 7\nprivate 7\n[]\nopaque\n[]\n"
+    );
+}
+
+#[test]
+fn native_binding_only_roots_keep_direct_dependencies_and_retained_public_names() {
+    for (index, expected) in [
+        (1, "private 7\n[\"publicValue\"]\n7\n"),
+        (2, "private 7\n[]\nundefined\n"),
+    ] {
+        let source = sources(&[
+            ("dep.mjs", "export const value = 7;"),
+            ("selected.mjs", "import {value} from './dep.mjs'; export const publicValue = 7; const privateValue = console.log('private', value);"),
+        ]);
+        let graph = graph(&source, false);
+        let file = graph.file_id(Path::new("selected.mjs")).unwrap();
+        let policy = EffectPolicy::default();
+        let plan = partition(
+            &graph,
+            &[RootSeed {
+                id: RootId::Entry("selected".into()),
+                evaluation_roots: vec![],
+                binding_roots: vec![GraphNode::Segment(SegmentKey::new(file, index))],
+            }],
+            &policy,
+        )
+        .unwrap();
+        let output = esm(&graph, &plan, &policy, &source).unwrap();
+        assert_eq!(output.backend, Backend::Native);
+        let mut files = output.files.clone();
+        files.insert("observe.mjs".into(), observation(&output,
+            "const ns = await import('./selected'); console.log(JSON.stringify(Object.keys(ns))); console.log(ns.publicValue);"));
+        let actual = node(&files, Path::new("observe.mjs"));
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(String::from_utf8(actual.stdout).unwrap(), expected);
+    }
+}
+
+#[test]
+fn native_entry_aliases_empty_identities_and_evaluation_only_surfaces() {
+    let source = sources(&[
+        ("empty.mjs", ""),
+        (
+            "entry.mjs",
+            "export const observed = (console.log('once'), {});",
+        ),
+    ]);
+    let graph = graph(&source, false);
+    let file = graph.file_id(Path::new("entry.mjs")).unwrap();
+    let empty = graph.file_id(Path::new("empty.mjs")).unwrap();
+    let roots = [
+        RootSeed {
+            id: RootId::Entry("first".into()),
+            evaluation_roots: vec![file],
+            binding_roots: vec![GraphNode::Module(file)],
+        },
+        RootSeed {
+            id: RootId::Entry("__proto__".into()),
+            evaluation_roots: vec![file, file],
+            binding_roots: vec![GraphNode::Module(file)],
+        },
+        RootSeed {
+            id: RootId::Entry("evaluation".into()),
+            evaluation_roots: vec![file],
+            binding_roots: vec![],
+        },
+        RootSeed {
+            id: RootId::Entry("empty".into()),
+            evaluation_roots: vec![empty],
+            binding_roots: vec![GraphNode::Module(empty)],
+        },
+        RootSeed {
+            id: RootId::Entry("nothing".into()),
+            evaluation_roots: vec![empty],
+            binding_roots: vec![],
+        },
+    ];
+    let policy = EffectPolicy::default();
+    let plan = partition(&graph, &roots, &policy).unwrap();
+    let output = esm(&graph, &plan, &policy, &source).unwrap();
+    assert_eq!(output.backend, Backend::Native);
+    let mut files = output.files.clone();
+    files.insert("observe.mjs".into(), observation(&output, r#"
+const a = await import('./first'), b = await import('./__proto__');
+const evaluation = await import('./evaluation'), empty = await import('./empty'), nothing = await import('./nothing');
+console.log(a === b, a.observed === b.observed);
+console.log(JSON.stringify(Object.keys(evaluation)), JSON.stringify(Object.keys(empty)), JSON.stringify(Object.keys(nothing)), empty !== nothing);
+"#));
+    let actual = node(&files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"once\ntrue true\n[] [] [] true\n");
 }
 
 #[test]

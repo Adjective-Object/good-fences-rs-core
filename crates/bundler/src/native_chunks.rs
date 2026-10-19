@@ -11,30 +11,35 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
-) -> eyre::Result<Option<Artifacts>> {
-    let mut entries = BTreeMap::new();
+) -> eyre::Result<Artifacts> {
+    let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
         match root {
             RootId::Entry(entry) => {
-                let [file] = seed.evaluation_roots.as_slice() else {
-                    return Ok(None);
-                };
-                if !seed.binding_roots.is_empty()
-                    && seed.binding_roots != [GraphNode::Module(*file)]
-                {
-                    return Ok(None);
+                let mut owners = Vec::new();
+                for &file in &seed.evaluation_roots {
+                    if !owners.contains(&file) {
+                        owners.push(file);
+                    }
                 }
-                entries.insert(entry.clone(), *file);
+                for node in &seed.binding_roots {
+                    let file = match node {
+                        GraphNode::Module(file) => *file,
+                        GraphNode::Segment(key) => key.file_id,
+                        GraphNode::Unlinked { .. } => eyre::bail!("unlinked native entry root"),
+                    };
+                    if !owners.contains(&file) {
+                        owners.push(file);
+                    }
+                }
+                entry_owners.insert(entry.clone(), owners);
             }
             RootId::Async(site) => {
-                if !seed.evaluation_roots.is_empty() {
-                    return Ok(None);
-                }
-                let [GraphNode::Module(file)] = seed.binding_roots.as_slice() else {
-                    return Ok(None);
+                let NodeId::Module(target) = &manifest.async_facades[site].target else {
+                    eyre::bail!("nonmodule async target")
                 };
-                async_targets.insert(site.clone(), *file);
+                async_targets.insert(site.clone(), graph.file_id(target).unwrap());
             }
         }
     }
@@ -78,7 +83,7 @@ pub(super) fn emit(
                 .collect::<eyre::Result<Vec<_>>>()?,
         );
     }
-    let mut boundaries: BTreeSet<_> = entries.values().copied().collect();
+    let mut boundaries: BTreeSet<_> = entry_owners.values().flatten().copied().collect();
     boundaries.extend(async_targets.values().copied());
     // Keep source wait bounds and sibling interleaving in native module jobs.
     boundaries.extend(&asynchronous);
@@ -220,7 +225,8 @@ pub(super) fn emit(
     }
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
-    cjs.emit(graph, modules, &owners, &entries)?;
+    let entry_files = entry_owners.values().flatten().copied().collect();
+    cjs.emit(graph, modules, &owners, &entry_files)?;
     for (&root, group) in &groups {
         if cjs.contains(root) {
             continue;
@@ -324,21 +330,35 @@ pub(super) fn emit(
         }
         chunk_artifacts.insert(chunk.clone(), paths);
     }
-    Ok(Some(Artifacts {
+    let mut entry_paths = BTreeMap::new();
+    for (entry, roots) in entry_owners {
+        let root = &plan.roots[&RootId::Entry(entry.clone())];
+        let module_path = |file| {
+            cjs.entries
+                .get(&file)
+                .cloned()
+                .unwrap_or_else(|| path(graph, owners[&file]))
+        };
+        if let [file] = roots.as_slice() {
+            // Multi-owner roots never invent a combined public namespace.
+            if cjs.contains(*file) || !root.binding_roots.is_empty() {
+                entry_paths.insert(entry, module_path(*file));
+                continue;
+            }
+        }
+        let entry_path = PathBuf::from(format!("native/entry-{}.mjs", digest(&entry)));
+        let mut source = String::new();
+        for file in roots {
+            source.push_str(&format!("import {};\n", specifier(&module_path(file))));
+        }
+        rewrite::validate(&entry_path, &source)?;
+        files.insert(entry_path.clone(), source);
+        entry_paths.insert(entry, entry_path);
+    }
+    Ok(Artifacts {
         backend: Backend::Native,
         files,
-        entries: entries
-            .into_iter()
-            .map(|(entry, file)| {
-                (
-                    entry,
-                    cjs.entries
-                        .get(&file)
-                        .cloned()
-                        .unwrap_or_else(|| path(graph, owners[&file])),
-                )
-            })
-            .collect(),
+        entries: entry_paths,
         modules: namespaces,
         members,
         chunk_artifacts,
@@ -358,7 +378,7 @@ pub(super) fn emit(
             })
             .collect(),
         async_modules,
-    }))
+    })
 }
 
 fn path(graph: &SourceGraph, file: u32) -> PathBuf {

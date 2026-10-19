@@ -130,8 +130,9 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. Unmarked cases may currently pass on legacy; that is not
-native-linker coverage.
+back to legacy. All thirty current cases require native. Legacy reporting and
+rejection remain useful when testing older driver binaries; production emission
+has no legacy backend.
 
 Sources must be self-contained JavaScript and local data. No external packages,
 `node_modules`, project sources, downloads, Jest, webpack/rspack globals, or
@@ -177,16 +178,16 @@ runtime outcomes through the shared observer.
 All **30 contracts / 41 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
-- **Native (30, 27 explicitly required):** all eighteen authored cases,
+- **Native (30, all explicitly required):** all eighteen authored cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
   `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
   `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
   `esbuild/esm-sync-async`, `esbuild/cjs-sync-async-once`, `rspack/cjs-default-export`,
   `rspack/cjs-named-reexport`, `rspack/cjs-self-cycle` and
   `rspack/dynamic-import-cjs`. The last five are graduated native CJS coverage.
-- **Legacy (0):** special low-level roots remain staged in Rust, not covered
-  by portable public-build fixtures. Cutover and legacy deletion come next;
-  no upstream parity is claimed.
+- **Legacy (0), unsupported (0):** the production legacy backend is deleted.
+  Rust Node regressions cover low-level root shapes outside the portable public
+  driver API. No upstream parity is claimed.
 
 The public driver also returns the plan's effect-order-cycle diagnostics in
 `planWarnings`. These must exactly match the build warnings and be known cycle

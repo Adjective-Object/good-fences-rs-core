@@ -20,9 +20,9 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
-) -> eyre::Result<Option<Artifacts>> {
+) -> eyre::Result<Artifacts> {
     if let Some(output) = single(graph, plan, modules, manifest, symbols)? {
-        return Ok(Some(output));
+        return Ok(output);
     }
     chunks::emit(graph, plan, modules, manifest, symbols)
 }
@@ -321,8 +321,8 @@ fn body(
         replacements: &replacements,
         edits: Vec::new(),
         unsupported: false,
-        // shortcut: stage anonymous syntax alongside renamed local declarations/
-        // writes until AST name-inference sites preserve their original names.
+        // shortcut: keep native body seams for name-sensitive local renames
+        // until AST name-inference sites preserve their original names.
         // Read-only import substitutions cannot change inferred names.
         inference_changes: parsed
             .facts

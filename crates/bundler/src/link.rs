@@ -1,4 +1,4 @@
-//! Native ESM/CJS chunks and the pending special-root legacy cutover.
+//! Native ESM/CJS chunks.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -14,8 +14,6 @@ use crate::manifest::{diagnostic_manifest, DiagnosticManifest};
 use crate::policy::EffectPolicy;
 #[path = "native.rs"]
 mod native;
-#[path = "physical.rs"]
-mod physical;
 
 #[cfg(test)]
 #[path = "link_tests.rs"]
@@ -26,14 +24,12 @@ mod tests;
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
     Native,
-    Legacy,
 }
 
 impl Backend {
     pub fn layout(self) -> &'static str {
         match self {
             Self::Native => "native-chunks-v1",
-            Self::Legacy => "exact-root-set-chunks-v1",
         }
     }
 }
@@ -50,7 +46,7 @@ pub struct Artifacts {
     /// Independently executable source namespaces to relative paths.
     /// Merged private native sources have owners in `members`, not facade paths.
     pub modules: BTreeMap<PathBuf, PathBuf>,
-    /// Actual executable ownership (native chunk or legacy registration chunk).
+    /// Actual executable chunk ownership.
     pub members: BTreeMap<NodeId, PathBuf>,
     /// Actual executable files implementing each logical chunk.
     pub chunk_artifacts: BTreeMap<ChunkId, BTreeSet<PathBuf>>,
@@ -62,18 +58,17 @@ pub struct Artifacts {
     /// Reached source occurrences -> canonical executable target files.
     pub async_facades: BTreeMap<AsyncSiteId, PathBuf>,
     /// ESM modules with source TLA or a transitive static async dependency.
-    /// Native body chunks (or staged legacy facades) own SCC jobs and rejection.
+    /// Native body chunks own SCC jobs and rejection.
     pub async_modules: BTreeSet<PathBuf>,
 }
 
 struct Module<'a> {
     source: &'a str,
     parsed: ParsedModule,
-    path: PathBuf,
     surface: BTreeSet<String>,
 }
 
-/// Emit native chunks, or staged legacy chunks for special low-level roots.
+/// Emit native chunks.
 pub fn esm(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -101,18 +96,12 @@ pub(crate) fn esm_with_source_checker(
             .get(path)
             .ok_or_else(|| eyre::eyre!("{}: missing linked source text", path.display()))?;
         let parsed = checked_source(file, source)?;
-        let identity = path
-            .to_str()
+        path.to_str()
             .ok_or_eyre("emission module paths must be UTF-8")?;
         modules.insert(
             file,
             Module {
                 source,
-                path: PathBuf::from(format!(
-                    "facades/{}.{}",
-                    digest(identity),
-                    if parsed.facts.commonjs { "cjs" } else { "mjs" }
-                )),
                 parsed,
                 surface: BTreeSet::new(),
             },
@@ -122,10 +111,7 @@ pub(crate) fn esm_with_source_checker(
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    if let Some(output) = native::emit(graph, plan, &modules, &manifest, &symbols)? {
-        return Ok(output);
-    }
-    physical::emit(graph, plan, modules, manifest, &symbols)
+    native::emit(graph, plan, &modules, &manifest, &symbols)
 }
 
 fn async_modules(

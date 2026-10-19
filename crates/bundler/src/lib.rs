@@ -82,7 +82,7 @@ pub struct RetentionPlan {
     pub effects: Vec<SegmentEffects>,
     /// Dependency-first order of available effects, not permission to activate them.
     /// Independent of binding/availability edges and deferred/async activation.
-    /// The legacy emitter still uses native module jobs, not this future linker schedule.
+    /// Native module jobs, not this scalar partial order, schedule async evaluation.
     pub effect_order: Vec<SegmentKey>,
     /// Deterministic effect-order cycle diagnostics; never binding/TDZ exemptions.
     pub warnings: Vec<String>,

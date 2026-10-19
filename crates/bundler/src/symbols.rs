@@ -12,8 +12,6 @@ pub(super) type Symbol = (u32, BindingId);
 pub(super) struct Definition {
     /// Lexical allocation only; never substitute this for an observable `.name`.
     pub name: String,
-    pub source_name: String,
-    pub declarations: Vec<SegmentKey>,
 }
 
 pub(super) struct Symbols {
@@ -31,9 +29,6 @@ fn allocate_name(
 ) -> String {
     let unavailable = |name: &str| {
         occupied.contains(name)
-            || name.starts_with("__gf$")
-            || name.starts_with("__gf_runtime")
-            || name.starts_with("__gf_setter_")
             || "await break case catch class const continue debugger default delete do else enum \
                 export extends false finally for function if implements import in instanceof \
                 interface let new null package private protected public return static super \
@@ -165,14 +160,9 @@ impl Symbols {
                     continue;
                 }
                 let name = allocate_name(&binding.name, &mut reserved, &originals, &mut fresh);
-                result.definitions.insert(
-                    (file, binding.id),
-                    Definition {
-                        name,
-                        source_name: binding.name.clone(),
-                        declarations: declarations.into_iter().collect(),
-                    },
-                );
+                result
+                    .definitions
+                    .insert((file, binding.id), Definition { name });
             }
         }
         let files: BTreeSet<_> = files.into_iter().collect();
@@ -211,33 +201,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allocation_avoids_keywords_helpers_and_future_source_names() {
+    fn allocation_avoids_keywords_collisions_and_future_source_names() {
         let mut occupied = BTreeSet::from(["__gf_link_1".into()]);
         let originals = BTreeSet::from(["__gf_link_0".into()]);
         let mut fresh = 0;
-        let names: Vec<_> = [
-            "class",
-            "__gf_runtime",
-            "__gf$0",
-            "__gf_setter_0",
-            "private",
-            "value",
-            "value",
-        ]
-        .into_iter()
-        .map(|name| allocate_name(name, &mut occupied, &originals, &mut fresh))
-        .collect();
+        let names: Vec<_> = ["class", "private", "value", "value"]
+            .into_iter()
+            .map(|name| allocate_name(name, &mut occupied, &originals, &mut fresh))
+            .collect();
         assert_eq!(
             names,
-            [
-                "__gf_link_2",
-                "__gf_link_3",
-                "__gf_link_4",
-                "__gf_link_5",
-                "__gf_link_6",
-                "value",
-                "__gf_link_7"
-            ]
+            ["__gf_link_2", "__gf_link_3", "value", "__gf_link_4"]
         );
     }
 }

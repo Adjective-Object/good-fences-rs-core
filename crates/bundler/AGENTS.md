@@ -30,9 +30,9 @@ Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
 validation. Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 
-Target: replace the legacy registration/cell/alias/subscriber/generator-dispatch
-and capture-cycle backend with a symbol linker and scope-hoisted direct ESM
-bindings. Use native imports/exports across actual output chunks, not per-source
+The symbol linker emits scope-hoisted direct ESM bindings; the rejected
+registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is
+deleted. Use native imports/exports across actual output chunks, not per-source
 facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
@@ -56,14 +56,14 @@ source order. Propagate source TLA over static dependencies; omit async subtree
 completion chains. The scalar DAG is a partial order, not an async scheduler.
 Cache first-effect projections, including empties, on iterative connector SCCs;
 share chain results rather than copying transitive closures per segment.
-The old backend remains only for special low-level roots until cutover/deletion;
-public module roots, including CJS, use native chunks. Preserve supported behavior
-while replacing analysis in small independently reviewed increments.
-Artifacts report the actual selected Backend from the emitting branch; derive
-driver layout from it, never filenames. Native-required fixture contracts must
-reject legacy fallback; passing unmarked legacy cases is not native coverage.
-Each linker stage must graduate applicable legacy fixtures to required native
-and/or add meaningful regressions for the new behavior; record actual backends.
+All roots, including selected binding-only and multi-owner low-level roots, use
+native chunks. One ESM binding owner exposes its retained surface; evaluation-only
+and multi-owner roots use export-free public wrappers with source-ordered imports.
+Entry aliases of one namespace share its canonical path. Empty modules retain
+their identities. Preserve supported behavior in independently reviewed increments.
+Artifacts report Backend::Native; derive driver layout from it, never filenames.
+All portable fixtures require native. The harness retains legacy rejection and
+reporting for older binaries, not a production emitter fallback.
 Canonical symbols use owned (file, BindingId) identities and checked export routes,
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.
@@ -91,7 +91,7 @@ __esModule never unwraps, names snapshot once. Namespace keys snapshot once
 and reads forward to captured exports. Require-of-ESM uses native evaluation
 facades and retains native evaluating-cycle errors.
 Physical ownership alone is not fetching correctness. Static execution closure
-differs from deferred require availability; capture cycles are legacy, not target.
+differs from deferred require availability; never recreate capture cycles.
 Never import namespace facades for globally retained but inactive bindings.
 Keep real Node import-closure/deleted-async-chunk and late-identity regressions.
 
