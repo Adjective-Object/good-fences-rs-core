@@ -53,6 +53,10 @@ Pure segments can relocate by binding dependencies. Effect retention is distinct
 from scheduling and neither is a binding edge. Project through pure/static-import
 connectors before pruning to effects; deterministically break order-only SCCs
 with visible warnings, never suppress binding/TDZ errors.
+Segment ownership overrides evaluation seams; project actual owners into artifact
+members. Preserve old export addresses for unchanged consumers and allocate
+internal addresses for private bindings/default expressions. Imported writes
+must never become writable locals through relocation.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree

@@ -93,6 +93,21 @@ body owners. Public entry surfaces and namespace targets keep precise native
 surfaces; internal imports/exports disappear inside a merged group. No generated
 private names leak into namespace keys.
 
+The first segment-owned increment relocates independently demanded pure
+declarations into their unique consumer group, including splitting one source
+between entries and co-locating declarations from unrelated sources. Artifact
+members and cross-chunk references follow actual segment owners; remaining
+source effects keep their native evaluation seams. Unchanged consumers retain
+their original export addresses, including aliases and default expressions.
+Structural and Node regressions cover live state, imported writes, inferred
+names, TDZ, effect order and deferred activation.
+
+This is **not complete arbitrary placement**: physical hosts still start from
+module groups, multi-consumer declarations stay at their original seam, and
+cycles, async, CJS and namespace-sensitive groups remain protected. Replacing
+those constraints with segment-level availability/initialization scheduling
+remains active work; upstream parity is deferred.
+
 Static SCC members retain native declarations/imports, preserving function/var
 instantiation and lexical TDZ, including anonymous defaults. A merge that would
 change observed names or turn an imported write into a mutable defining binding

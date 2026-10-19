@@ -5,6 +5,10 @@
 - [ ] Replace input-module ownership/grouping with physical segment ownership.
   Prove one shared source splits across consumers and unrelated-source segments
   co-locate; do not substitute more module-merging heuristics.
+- [x] First pure-declaration increment: assign segment owners through binding
+  demand, split shared sources, co-locate unrelated declarations, remap cross-chunk
+  references and artifact members. Preserve old export aliases/default addresses
+  for unchanged consumers. Module-derived hosts and protected groups remain.
 - [ ] Preserve binding availability/initialization distinctions, TDZ, hoisting,
   imported writes, names, effect order and native namespace surfaces.
 - [ ] Preserve native async suspension/deferred activation and opaque CJS
@@ -13,7 +17,7 @@
   same-spelled inferred names, live state and read-only imports. Baseline corpus
   is 31 native-required cases / 43 executions; runtime equality alone does not
   prove segment relocation.
-- [ ] Independently review the placement increment, run release/spot-check gates,
+- [x] Independently review the first pure-declaration increment, run release/spot-check gates,
   then commit and push with exact supported scope and remaining gaps.
 
 ## Historical native-only cutover

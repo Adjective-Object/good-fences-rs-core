@@ -1255,6 +1255,166 @@ fn native_chunks_preserve_entry_dependent_static_effect_order() {
 }
 
 #[test]
+fn native_segment_owners_split_shared_sources_and_colocate_unrelated_declarations() {
+    let source = sources(&[
+        ("a.mjs", "import {left, state, bump} from './shared.mjs'; import {label} from './left.mjs'; export {left, state, bump, label};"),
+        ("b.mjs", "import {right, state, bump} from './shared.mjs'; import {label} from './right.mjs'; export {right, state, bump, label};"),
+        ("shared.mjs", "export const left = () => state; export const right = () => state; export let state = 0; export function bump() { state++; } console.log('shared');"),
+        ("left.mjs", "export const label = () => 'left'; console.log('left effect');"),
+        ("right.mjs", "export const label = () => 'right'; console.log('right effect');"),
+    ]);
+    let entries = [("a.mjs", true), ("b.mjs", true)];
+    let (plan, output) = build(&source, &entries, false);
+    let segment = |module: &str, index| NodeId::Segment {
+        module: module.into(),
+        index,
+    };
+    let left = &output.members[&segment("shared.mjs", 0)];
+    let right = &output.members[&segment("shared.mjs", 1)];
+    assert_ne!(
+        left, right,
+        "source modules are not physical placement units"
+    );
+    assert_eq!(left, &output.entries["a.mjs"]);
+    assert_eq!(right, &output.entries["b.mjs"]);
+    assert_eq!(left, &output.members[&segment("left.mjs", 0)]);
+    assert_eq!(right, &output.members[&segment("right.mjs", 0)]);
+    assert_ne!(left, &output.members[&segment("left.mjs", 1)]);
+    assert_ne!(right, &output.members[&segment("right.mjs", 1)]);
+    assert_ne!(left, &output.members[&segment("shared.mjs", 2)]);
+    assert_eq!(
+        output.members[&segment("shared.mjs", 2)],
+        output.members[&segment("shared.mjs", 3)]
+    );
+    for (chunk, nodes) in &plan.chunks {
+        for node in nodes {
+            assert!(output.files.contains_key(&output.members[node]));
+            assert!(output.chunk_artifacts[chunk].contains(&output.members[node]));
+        }
+    }
+    assert_eq!(output, build(&source, &entries, true).1);
+    let observer = "const a = await import('./a.mjs'); const b = await import('./b.mjs'); a.bump(); console.log(a.left(), b.right(), a.state, b.state, a.bump === b.bump, a.left.name, b.right.name, a.label.name, b.label.name, a.label(), b.label());";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), observation(&output, observer));
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    let actual = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        baseline.status.success(),
+        "{}",
+        String::from_utf8_lossy(&baseline.stderr)
+    );
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, baseline.stdout);
+}
+
+#[test]
+fn native_segment_relocation_preserves_unchanged_imports_and_default_expressions() {
+    for (shared, left_index) in [
+        ("export const left = 1; const value = 2; export {value as state}; console.log('shared', value);", 0),
+        ("export const left = 1; const value = 2; export {value as state}; export default 3; console.log('shared', value);", 0),
+        ("export const left = 1; const value = 2; const state = 4; export {value as state, state as other}; export default 3; console.log('shared', value, state);", 0),
+        ("const hidden = 2; export const left = () => hidden; const value = 4; export {value as state, value as hidden}; console.log('shared', hidden, value);", 1),
+    ] {
+        let default = if shared.contains("export default") {
+            "import value from './shared.mjs'; console.log(value);"
+        } else {
+            ""
+        };
+        let source = sources(&[
+            ("a.mjs", &format!("import {{left}} from './shared.mjs'; console.log(left); {default}")),
+            ("b.mjs", &format!("import {{state}} from './shared.mjs'; console.log(state); {default}")),
+            ("shared.mjs", shared),
+        ]);
+        let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+        assert_eq!(
+            output.members[&NodeId::Segment {
+                module: "shared.mjs".into(),
+                index: left_index,
+            }],
+            output.entries["a.mjs"],
+            "keep relocation enabled while preserving the remaining addresses"
+        );
+        for entry in ["a.mjs", "b.mjs"] {
+            let baseline = node(&source, Path::new(entry));
+            let actual = node(&output.files, &output.entries[entry]);
+            assert!(
+                actual.status.success(),
+                "{}",
+                String::from_utf8_lossy(&actual.stderr)
+            );
+            assert_eq!(actual.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
+fn native_segment_relocation_keeps_cross_chunk_names_distinct_from_destination_locals() {
+    let source = sources(&[
+        ("a.mjs", "export const x = 1; export const left = () => x; console.log('shared', x);"),
+        ("b.mjs", "import {x as other, left} from './a.mjs'; const x = 3; console.log(other, left(), x, left.name);"),
+        ("c.mjs", "import {x} from './a.mjs'; console.log(x);"),
+    ]);
+    let (_, output) = build(&source, &[("b.mjs", true), ("c.mjs", true)], false);
+    assert_eq!(
+        output.members[&NodeId::Segment {
+            module: "a.mjs".into(),
+            index: 1,
+        }],
+        output.entries["b.mjs"]
+    );
+    for entry in ["b.mjs", "c.mjs"] {
+        let baseline = node(&source, Path::new(entry));
+        let actual = node(&output.files, &output.entries[entry]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, baseline.stdout);
+    }
+}
+
+#[test]
+fn native_segment_relocation_preserves_tdz_effect_order_and_deferred_activation() {
+    let source = sources(&[
+        ("a.mjs", "import {left} from './shared.mjs'; console.log('a', left); export const load = () => import('./lazy.mjs');"),
+        ("b.mjs", "import {right} from './shared.mjs'; console.log('b', right);"),
+        ("shared.mjs", "try { console.log(left); } catch (error) { console.log(error.name); } export const left = 1; export const right = 2; console.log('shared');"),
+        ("lazy.mjs", "console.log('lazy'); export const value = 3;"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    let left = NodeId::Segment {
+        module: "shared.mjs".into(),
+        index: 1,
+    };
+    let right = NodeId::Segment {
+        module: "shared.mjs".into(),
+        index: 2,
+    };
+    assert_ne!(output.members[&left], output.members[&right]);
+    assert_ne!(
+        output.members[&left], output.entries["a.mjs"],
+        "a lexical declaration cannot cross its original TDZ observation"
+    );
+    for (observer, expected) in [
+        ("await import('./a.mjs'); await import('./b.mjs');", "ReferenceError\nshared\na 1\nb 2\n"),
+        ("const a = await import('./a.mjs'); console.log('before lazy'); console.log((await a.load()).value);", "ReferenceError\nshared\na 1\nbefore lazy\nlazy\n3\n"),
+    ] {
+        let mut actual = output.files.clone();
+        actual.insert("observe.mjs".into(), observation(&output, observer));
+        let actual = node(&actual, Path::new("observe.mjs"));
+        assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+        assert_eq!(actual.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
 fn native_barrel_redirects_preserve_exact_public_surfaces() {
     for (dependency, barrel, expected) in [
         (

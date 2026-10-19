@@ -24,6 +24,13 @@ The portable corpus now includes `authored/native-segment-placement`:
 release gate are required before committing the placement implementation.
 Upstream parity remains deferred.
 
+The first pure-declaration relocation increment now has segment-to-owner
+mapping, consumer-based placement, lexical reference remapping and actual
+artifact ownership. Structural tests prove source splitting and cross-source
+co-location. Module evaluation groups still supply hosts; multiple consumers,
+cycles, async/CJS and namespace boundaries remain conservative. This increment
+does not complete the replacement above.
+
 ## Completed native-only cutover — not full segment placement
 
 Keep owned parser/IR/cache, canonical graph, usage/effects and publication.

@@ -169,6 +169,7 @@ fn single(
 struct Values<'s> {
     symbols: &'s Symbols,
     defaults: BTreeMap<SegmentKey, String>,
+    names: HashMap<crate::symbols::Symbol, String>,
     imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
     requests: BTreeMap<u32, String>,
 }
@@ -180,6 +181,12 @@ impl<'s> Values<'s> {
             .values()
             .map(|d| d.name.clone())
             .collect();
+        occupied.extend(
+            symbols
+                .exports
+                .values()
+                .flat_map(|exports| exports.keys().cloned()),
+        );
         for module in modules.values() {
             occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
             occupied.extend(
@@ -217,6 +224,7 @@ impl<'s> Values<'s> {
         Self {
             symbols,
             defaults,
+            names: HashMap::new(),
             imports: HashMap::new(),
             requests: BTreeMap::new(),
         }
@@ -225,10 +233,15 @@ impl<'s> Values<'s> {
     fn name(&self, identity: &ExportIdentity) -> Option<&str> {
         match identity {
             ExportIdentity::Binding(file, binding) => self
-                .symbols
-                .definitions
+                .names
                 .get(&(*file, *binding))
-                .map(|d| d.name.as_str()),
+                .map(String::as_str)
+                .or_else(|| {
+                    self.symbols
+                        .definitions
+                        .get(&(*file, *binding))
+                        .map(|d| d.name.as_str())
+                }),
             ExportIdentity::Expression(key) => self.defaults.get(key).map(String::as_str),
             _ => None,
         }
@@ -260,7 +273,12 @@ fn body(
         let target = if let Some(name) = values.imports.get(&(file, binding.id)) {
             Some(name.as_str())
         } else if let Some(definition) = symbols.definitions.get(&(file, binding.id)) {
-            Some(definition.name.as_str())
+            Some(
+                values
+                    .names
+                    .get(&(file, binding.id))
+                    .map_or(definition.name.as_str(), String::as_str),
+            )
         } else if let Some(import) = symbols.imports.get(&(file, binding.id)) {
             if let ExportIdentity::Namespace(target) = import.identity {
                 namespaces.insert(binding.name.as_str(), target);
@@ -292,8 +310,20 @@ fn body(
         }
     }
     for reference in &parsed.facts.references {
-        if let Some(target) = reference.binding.and_then(|b| targets.get(&b)) {
-            replacements.insert(reference.span.start, (reference.span, (*target).to_owned()));
+        let target = reference
+            .binding
+            .and_then(|b| targets.get(&b).copied())
+            .or_else(|| {
+                // A relocated declaration can leave an original local binding
+                // free in this partial source; nested lexical shadows stay bound.
+                reference
+                    .binding
+                    .is_none()
+                    .then(|| names.get(reference.name.as_str()).copied())
+                    .flatten()
+            });
+        if let Some(target) = target {
+            replacements.insert(reference.span.start, (reference.span, target.to_owned()));
         }
     }
     let allocator = Allocator::default();

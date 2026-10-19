@@ -5,6 +5,9 @@ use ast_segmenter::owned::ImportedName;
 #[path = "native_cjs.rs"]
 mod commonjs;
 
+#[path = "native_segments.rs"]
+mod segments;
+
 pub(super) fn emit(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -223,6 +226,66 @@ pub(super) fn emit(
             break;
         }
     }
+    let mut protected = cycles.clone();
+    protected.extend(&asynchronous);
+    for (&file, module) in modules {
+        let mut cjs_dependency = false;
+        for dependency in module
+            .parsed
+            .facts
+            .dependencies
+            .iter()
+            .filter(|d| !d.type_only)
+        {
+            if dependency.kind == DependencyKind::Require
+                || cjs.contains(target_file(graph, file, dependency)?)
+            {
+                cjs_dependency = true;
+                break;
+            }
+        }
+        if cjs.contains(file)
+            || cjs_dependency
+            || symbols.imports.iter().any(|(&(source, _), linked)| {
+                source == file && matches!(linked.identity, ExportIdentity::Namespace(_))
+            })
+            || symbols.exports[&file].values().any(|linked| {
+                matches!(
+                    linked.identity,
+                    ExportIdentity::Namespace(_) | ExportIdentity::CommonJs(..)
+                )
+            })
+        {
+            protected.insert(file);
+        }
+    }
+    for linked in symbols
+        .imports
+        .values()
+        .chain(symbols.exports.values().flat_map(|e| e.values()))
+    {
+        if let ExportIdentity::Namespace(file) = linked.identity {
+            protected.insert(file);
+        }
+    }
+    protected = protected.into_iter().map(|f| owners[&f]).collect();
+    let placement = segments::Placement::new(
+        graph,
+        plan,
+        modules,
+        symbols,
+        &owners,
+        &protected,
+        &boundaries,
+        &cjs,
+    )?;
+    let mut surfaces = boundaries.clone();
+    surfaces.extend(
+        groups
+            .keys()
+            .filter(|f| !placement.changed.contains(f))
+            .copied(),
+    );
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
@@ -232,7 +295,12 @@ pub(super) fn emit(
             continue;
         }
         let path = path(graph, root);
-        let output = if group.len() > 1 {
+        let output = if placement.changed.contains(&root) {
+            segments::emit(
+                graph, root, group, &owners, &redirects, modules, symbols, &placement, &surfaces,
+                &recipes,
+            )?
+        } else if group.len() > 1 {
             concatenate(
                 graph, root, group, &owners, &redirects, modules, symbols, &live, &recipes, &cjs,
             )?
@@ -299,7 +367,9 @@ pub(super) fn emit(
         };
         let output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;
         rewrite::validate(&path, &output)?;
-        namespaces.insert(graph.file_path(root).unwrap().to_owned(), path.clone());
+        if surfaces.contains(&root) {
+            namespaces.insert(graph.file_path(root).unwrap().to_owned(), path.clone());
+        }
         files.insert(path, output);
     }
     for (&file, path) in &cjs.entries {
@@ -324,7 +394,12 @@ pub(super) fn emit(
                 NodeId::Module(p) | NodeId::Segment { module: p, .. } => p,
                 _ => eyre::bail!("non-ESM node in native plan"),
             };
-            let owner = path(graph, owners[&graph.file_id(module).unwrap()]);
+            let file = graph.file_id(module).unwrap();
+            let owner = match node {
+                NodeId::Segment { index, .. } => placement.owners[&SegmentKey::new(file, *index)],
+                _ => owners[&file],
+            };
+            let owner = path(graph, owner);
             paths.insert(owner.clone());
             members.insert(node.clone(), owner);
         }

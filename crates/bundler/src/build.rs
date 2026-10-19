@@ -354,6 +354,7 @@ impl BuildSession {
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
                 include_str!("native_chunks.rs"),
+                include_str!("native_segments.rs"),
                 include_str!("native_cjs.rs"),
                 include_str!("cjs.rs"),
                 include_str!("emit.rs"),
