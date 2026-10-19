@@ -11,20 +11,20 @@ cargo build -p bundler --example build
 node scripts/bundler-fixtures.mjs
 ```
 
-To retain generated output and input copies for inspection:
+To retain exact bundle outputs for inspection:
 
 ```sh
 node scripts/bundler-fixtures.mjs --keep-output
 ```
 
 The flag also works with a custom fixture root. Each `OUTPUT <case>: <directory>`
-line identifies a retained workspace under `target/p1-test-tmp/`. Generated files
-are in `source/.bundler-output/.bundler-generation-<hash>/`; the
-`source/.bundler-output/.bundler-current.json` pointer identifies the current
-generation. Failed cases keep any inputs and partial outputs too. The auxiliary
-identity/diagnostic workspace is retained and reported separately. Without the
-flag, all workspaces are removed as before. Retained directories require manual
-cleanup.
+line identifies `<group>/<case>/outputs/`, beside that case's `files/` directory.
+It contains only the emitted files with their exact contents and relative paths:
+no copied inputs, observation drivers, publication metadata or generation wrapper.
+These directories are gitignored and replaced on each retained run. A failed
+input/build leaves no outputs; a successful build is retained even if backend or
+runtime checks fail. Temporary workspaces and auxiliary checks are always cleaned
+up. Without the flag, existing retained outputs are left unchanged.
 
 After building the driver, no package installation, upstream engine, or network
 access is needed. `yarn test:bundler-fixtures` builds the driver and runs the same
@@ -282,10 +282,9 @@ unexpected failure. Fatal runner errors include causes in diagnostics.
 The optional synchronous `onResult(result)` callback receives each completed
 case in execution order; the API still returns the complete results array.
 Reporter errors propagate immediately rather than becoming fixture failures.
-With `keepOutput: true`, each case result also includes its retained workspace
-`directory`. `runBundlerCases({keepOutput: true})` returns its auxiliary
-`directory`; unexpected auxiliary failures report the retained path and original
-cause.
+With `keepOutput: true`, successfully built case results also include their
+adjacent `outputs/` path as `directory`, including backend/runtime failures.
+Input/build failures have no retained directory.
 The shared `observeEntries` helper returns `{stdout, outcomes}`, where each ordered outcome
 is `{entry, stdout, error}` and `error` is null or `{name, code?}`. Differential
 comparison includes observed codes even when the manifest does not constrain
@@ -297,8 +296,7 @@ Managed copies default to project-local `target/p1-test-tmp`. Runtime invocation
 have five-second timeouts, bounded output, sanitized Node preload environment,
 checked stderr/exit/signal policy and synchronous child kill/reaping on timeout.
 Build invocations have a separate 30-second timeout after compiling the driver.
-The runner removes managed copies on success and failure unless `--keep-output`
-is enabled. Trusted fixture code must
+The runner always removes managed copies on success and failure. Trusted fixture code must
 not launch detached descendants; this is not a sandbox/process-tree jail.
 The regression suite checks actual emitted mismatch/stderr/nonzero/timeout
 failures, output bounds, cleanup, unsupported reporting and child reaping.

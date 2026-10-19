@@ -50,6 +50,24 @@ test('real public pipeline executes emitted output without modifying original fi
   });
 });
 
+test('retained outputs are exact executable artifacts, including on runtime failure', () => {
+  withCorpus("console.log('hello');", ({ run, caseDir }) => {
+    const [pass] = run({ keepOutput: true });
+    assert.equal(pass.directory, path.join(caseDir, 'outputs'));
+    assert.deepEqual(readdirSync(pass.directory), ['native.mjs']);
+    const observed = execute(process.execPath, [path.join(pass.directory, 'native.mjs')], pass.directory);
+    assert.equal(observed.status, 0, observed.stderr);
+    assert.equal(observed.stdout, 'hello\n');
+  });
+  const source = "console.log(process.argv[1].includes('.bundler-generation-') ? 'wrong' : 'hello');";
+  withCorpus(source, ({ run, caseDir }) => {
+    const failure = assertFailure(run, 'output', /bundled stdout mismatch/u, { keepOutput: true });
+    assert.equal(failure.directory, path.join(caseDir, 'outputs'));
+    assert.deepEqual(readdirSync(failure.directory), ['native.mjs']);
+    assert(readFileSync(path.join(failure.directory, 'native.mjs'), 'utf8').includes(source));
+  });
+});
+
 test('unsupported capabilities are explicitly reported and never counted as passes', () => {
   withCorpus("void import.meta.url; console.log('hello');", ({ run }) => {
     const result = run({ unsupported: new Map([['synthetic/example', 'import.meta is outside this target']]) });

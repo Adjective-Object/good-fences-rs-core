@@ -92,18 +92,25 @@ test('deterministic cases, ESM default, isolated copy/cwd, and cleanup on succes
   });
 });
 
-test('keepOutput retains successful and failed cases with their inspection paths', () => {
+test('keepOutput saves only emitted artifacts beside fixture files and removes stale outputs', () => {
   withCorpus(({ root, tempRoot, run }) => {
-    addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
-    addCase(root, 'z-success');
+    const badCase = addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
+    const goodCase = addCase(root, 'z-success');
     const [failure, success] = run({ keepOutput: true });
     assert.equal(failure.stage, 'input');
     assert.equal(success.status, 'passed');
-    assert.equal(readFileSync(path.join(failure.directory, 'native/entry.js'), 'utf8'), "console.log('wrong');");
-    assert(!existsSync(path.join(failure.directory, 'source')), 'invalid inputs must not build');
-    assert(existsSync(path.join(success.directory, 'source/.bundler-output/0.mjs')));
-    assert.deepEqual(readdirSync(tempRoot).sort(),
-      [path.basename(failure.directory), path.basename(success.directory)].sort());
+    assert.equal(failure.directory, undefined);
+    assert(!existsSync(path.join(badCase, 'outputs')), 'invalid inputs have no bundle outputs');
+    assert.equal(success.directory, path.join(goodCase, 'outputs'));
+    assert.deepEqual(readdirSync(success.directory), ['0.mjs']);
+    assert.match(readFileSync(path.join(success.directory, '0.mjs'), 'utf8'), /^import /u);
+    assert.deepEqual(readdirSync(tempRoot), []);
+    writeFileSync(path.join(success.directory, 'stale.mjs'), 'old generation');
+    run({ keepOutput: true });
+    assert.deepEqual(readdirSync(success.directory), ['0.mjs']);
+    writeFileSync(path.join(goodCase, 'files/entry.js'), "console.log('wrong');");
+    assert.equal(run({ keepOutput: true })[1].stage, 'input');
+    assert(!existsSync(success.directory), 'failed reruns must not expose stale successful outputs');
     assert.throws(() => run({ keepOutput: 'true' }), /keepOutput must be a boolean/u);
   });
 });
@@ -135,20 +142,15 @@ test('reporter errors propagate without running later cases or becoming fixture 
   });
 });
 
-test('kept auxiliary failures expose their directory and preserve the original cause', () => {
-  withCorpus(({ tempRoot }) => {
-    let retained;
-    const cause = new Error('original failure');
-    assert.throws(() => managed(tempRoot, (directory) => {
-      retained = directory;
-      writeFileSync(path.join(directory, 'partial-output'), 'inspect me');
-      throw cause;
-    }, { keepOutput: true }), (error) => {
-      assert.equal(error.cause, cause);
-      assert.equal(error.message, `Retained fixture directory: ${retained}`);
-      return true;
-    });
-    assert.equal(readFileSync(path.join(retained, 'partial-output'), 'utf8'), 'inspect me');
+test('output directory symlinks are rejected without changing their targets', () => {
+  withCorpus(({ root, tempRoot, run }) => {
+    const directory = addCase(root);
+    writeFileSync(path.join(tempRoot, 'untouched'), 'keep me');
+    symlinkSync(tempRoot, path.join(directory, 'outputs'), 'dir');
+    const [failure] = run({ keepOutput: true });
+    assert.equal(failure.stage, 'output');
+    assert.match(failure.error.message, /output directory \(no symlinks\)/u);
+    assert.equal(readFileSync(path.join(tempRoot, 'untouched'), 'utf8'), 'keep me');
   });
 });
 
@@ -577,29 +579,21 @@ test('CLI prints completed results while the next case is still executing', () =
   });
 });
 
-test('CLI keep-output flag retains and prints successful, failed and auxiliary outputs', () => {
+test('CLI keep-output flag prints exact adjacent bundle paths without retaining workspaces', () => {
   withCorpus(({ root }) => {
-    addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
-    addCase(root, 'z-success');
+    const badCase = addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
+    const goodCase = addCase(root, 'z-success');
     const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
-    const managedRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
     for (const args of [[runner, '--keep-output', root], [runner, root, '--keep-output']]) {
       const result = spawnSync(process.execPath, args, {
         encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' },
       });
       const outputs = [...result.stdout.matchAll(/^OUTPUT ([^:]+): (.+)$/gmu)];
-      const directories = outputs.map((match) => match[2]);
-      assert(directories.every((directory) => directory.startsWith(managedRoot)));
-      try {
-        assert.equal(result.status, 1, result.stderr);
-        assert.deepEqual(outputs.map((match) => match[1]),
-          ['synthetic/a-failure', 'synthetic/z-success', 'bundler-checks']);
-        assert(existsSync(path.join(directories[0], 'native/entry.js')));
-        assert(existsSync(path.join(directories[1], 'source/.bundler-output/.bundler-current.json')));
-        assert(existsSync(path.join(directories[2], 'identity/.bundler-output/.bundler-current.json')));
-      } finally {
-        for (const directory of directories) rmSync(directory, { recursive: true, force: true });
-      }
+      assert.equal(result.status, 1, result.stderr);
+      assert.deepEqual(outputs.map((match) => [match[1], match[2]]),
+        [['synthetic/z-success', path.join(goodCase, 'outputs')]]);
+      assert(!existsSync(path.join(badCase, 'outputs')));
+      assert.deepEqual(readdirSync(path.join(goodCase, 'outputs')), ['native.mjs']);
     }
     const invalid = spawnSync(process.execPath, [runner, '--keep-output', '--unknown', root], { encoding: 'utf8' });
     assert.equal(invalid.status, 1);

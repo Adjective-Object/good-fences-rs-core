@@ -158,18 +158,11 @@ function outputLines(stdout) {
   return lines;
 }
 
-export function managed(tempRoot, callback, { keepOutput = false } = {}) {
-  check(typeof keepOutput === 'boolean', 'keepOutput must be a boolean');
+export function managed(tempRoot, callback) {
   mkdirSync(tempRoot, { recursive: true });
   const directory = mkdtempSync(path.join(tempRoot, 'bundler-fixture-'));
   try { return callback(directory); }
-  catch (cause) {
-    if (keepOutput) throw new Error(`Retained fixture directory: ${directory}`, { cause });
-    throw cause;
-  }
-  finally {
-    if (!keepOutput) rmSync(directory, { recursive: true, force: true });
-  }
+  finally { rmSync(directory, { recursive: true, force: true }); }
 }
 
 export function execute(command, args, cwd, timeoutMs = 5000, observation = false) {
@@ -308,11 +301,19 @@ export function runFixtures(root = defaultRoot, {
   }
   return cases.map(({ manifest, files }) => {
     const result = managed(tempRoot, (directory) => {
-      const retained = keepOutput ? { directory } : {};
+      const output = keepOutput ? path.join(path.dirname(files), 'outputs') : undefined;
+      const retained = {};
       let stage = 'input';
       let backend;
       let warnings;
       try {
+        if (output) {
+          stage = 'output';
+          const existing = lstatSync(output, { throwIfNoEntry: false });
+          check(!existing || existing.isDirectory(), `Expected an output directory (no symlinks): ${output}`);
+          if (existing) rmSync(output, { recursive: true });
+          stage = 'input';
+        }
         const native = path.join(directory, 'native');
         const source = path.join(directory, 'source');
         copyCase(files, native, manifest);
@@ -328,6 +329,11 @@ export function runFixtures(root = defaultRoot, {
         const build = buildProject(driver, source, manifest.entryPoints);
         backend = build.backend;
         if (build.planWarnings?.length) warnings = build.planWarnings;
+        if (output) {
+          stage = 'output';
+          cpSync(build.directory, output, { recursive: true });
+          retained.directory = output;
+        }
         stage = 'backend';
         if (manifest.expectations.backend === 'native') {
           assert.equal(backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
@@ -341,7 +347,7 @@ export function runFixtures(root = defaultRoot, {
         return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}),
           ...(warnings ? { warnings } : {}), executions: 0, error, ...retained };
       }
-    }, { keepOutput });
+    });
     onResult?.(result);
     return result;
   });
@@ -356,7 +362,7 @@ function writeSources(root, sources) {
   }
 }
 
-export function runBundlerCases({ driver = defaultDriver, tempRoot = defaultTempRoot, keepOutput = false } = {}) {
+export function runBundlerCases({ driver = defaultDriver, tempRoot = defaultTempRoot } = {}) {
   return managed(tempRoot, (directory) => {
     const root = path.join(directory, 'identity');
     writeSources(root, {
@@ -400,8 +406,8 @@ console.log(staticDefault === a.shared, staticNamed === a.shared, staticBump ===
       assert.match(result.stderr, /bytes \d+\.\.\d+/u, `${name}: missing source range`);
       assert(!existsSync(path.join(project, '.bundler-output/.bundler-current.json')), `${name}: failed build published`);
     }
-    return { identity: 1, diagnostics: diagnostics.length, ...(keepOutput ? { directory } : {}) };
-  }, { keepOutput });
+    return { identity: 1, diagnostics: diagnostics.length };
+  });
 }
 
 function diagnostic(error) {
@@ -438,9 +444,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const count = (status, backend) => results.filter((r) => r.status === status && (!backend || r.backend === backend)).length;
     console.log(`Fixtures: ${count('passed')} passed (${count('passed', 'native')} native, ${count('passed', 'legacy')} legacy), ${count('failed')} failed, ${count('unsupported')} unsupported, ${results.reduce((n, r) => n + r.executions, 0)} emitted executions.`);
     if (count('failed')) process.exitCode = 1;
-    const extra = runBundlerCases({ keepOutput });
+    const extra = runBundlerCases();
     console.log(`Bundler checks: ${extra.identity} same-runtime identity case; ${extra.diagnostics} diagnostic cases.`);
-    if (extra.directory) console.log(`OUTPUT bundler-checks: ${extra.directory}`);
   } catch (error) {
     console.error(`Runner error: ${diagnostic(error)}`);
     process.exitCode = 1;
