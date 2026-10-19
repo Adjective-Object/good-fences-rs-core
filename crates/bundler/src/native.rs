@@ -1,6 +1,5 @@
 //! First staged native slice: one synchronous acyclic ESM evaluation tree.
 use super::*;
-use ast_segmenter::owned::ImportedName;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
@@ -42,14 +41,6 @@ pub(super) fn emit(
                 !d.type_only && !matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
             })
             || facts
-                .imports
-                .iter()
-                .any(|i| i.imported == ImportedName::Namespace)
-            || facts
-                .exports
-                .iter()
-                .any(|e| matches!(e.value, ExportValue::Expression(_)))
-            || facts
                 .references
                 .iter()
                 .any(|r| r.write && r.binding.is_some_and(|b| imports.contains(&b)))
@@ -57,11 +48,9 @@ pub(super) fn emit(
             return Ok(None);
         }
     }
-    if symbols
-        .imports
+    if symbols.exports[file]
         .values()
-        .chain(symbols.exports.values().flat_map(|e| e.values()))
-        .any(|e| !matches!(e.identity, ExportIdentity::Binding(..)))
+        .any(|e| matches!(e.identity, ExportIdentity::Namespace(_)))
     {
         return Ok(None);
     }
@@ -100,6 +89,7 @@ pub(super) fn emit(
         order.len() == modules.len(),
         "native root does not cover retained modules"
     );
+    let values = Values::new(graph, modules, symbols);
     let mut output = String::new();
     let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
     let recipes: BTreeMap<_, _> = plan
@@ -115,22 +105,25 @@ pub(super) fn emit(
         );
         output.push('\n');
     }
+    let mut bodies = String::new();
     for file in order {
-        let Some(body) = body(graph, file, &modules[&file], symbols, &live, &recipes)? else {
+        let Some((hoisted, body)) = body(graph, file, &modules[&file], &values, &live, &recipes)?
+        else {
             return Ok(None);
         };
-        output.push_str(&body);
+        output.push_str(&hoisted);
+        bodies.push_str(&body);
         // Separate statements even when a source lacks a final semicolon/newline.
-        output.push_str("\n;\n");
+        bodies.push_str("\n;\n");
     }
+    output.push_str(&bodies);
     output.push_str("export {\n");
     for (public, linked) in &symbols.exports[file] {
-        let ExportIdentity::Binding(file, binding) = linked.identity else {
-            unreachable!()
-        };
         output.push_str(&format!(
             "{} as {},\n",
-            symbols.definitions[&(file, binding)].name,
+            values
+                .name(&linked.identity)
+                .ok_or_eyre("missing native export value")?,
             quote(public)
         ));
     }
@@ -157,14 +150,77 @@ pub(super) fn emit(
     }))
 }
 
+struct Values<'s> {
+    symbols: &'s Symbols,
+    defaults: BTreeMap<SegmentKey, String>,
+}
+
+impl<'s> Values<'s> {
+    fn new(graph: &SourceGraph, modules: &BTreeMap<u32, Module<'_>>, symbols: &'s Symbols) -> Self {
+        let mut occupied: BTreeSet<_> = symbols
+            .definitions
+            .values()
+            .map(|d| d.name.clone())
+            .collect();
+        for module in modules.values() {
+            occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
+            occupied.extend(
+                module
+                    .parsed
+                    .facts
+                    .references
+                    .iter()
+                    .map(|r| r.name.clone()),
+            );
+        }
+        let mut files: Vec<_> = modules.keys().copied().collect();
+        files.sort_by_key(|&file| graph.file_path(file));
+        let mut defaults = BTreeMap::new();
+        let mut fresh = 0;
+        for file in files {
+            let module = &modules[&file];
+            for export in &module.parsed.facts.exports {
+                if let ExportValue::Expression(span) = export.value {
+                    let index = module
+                        .parsed
+                        .segments
+                        .partition_point(|s| s.span.end <= span.start);
+                    let name = loop {
+                        let name = format!("__gf_default_{fresh}");
+                        fresh += 1;
+                        if occupied.insert(name.clone()) {
+                            break name;
+                        }
+                    };
+                    defaults.insert(SegmentKey::new(file, index as u32), name);
+                }
+            }
+        }
+        Self { symbols, defaults }
+    }
+
+    fn name(&self, identity: &ExportIdentity) -> Option<&str> {
+        match identity {
+            ExportIdentity::Binding(file, binding) => self
+                .symbols
+                .definitions
+                .get(&(*file, *binding))
+                .map(|d| d.name.as_str()),
+            ExportIdentity::Expression(key) => self.defaults.get(key).map(String::as_str),
+            _ => None,
+        }
+    }
+}
+
 fn body(
     graph: &SourceGraph,
     file: u32,
     module: &Module<'_>,
-    symbols: &Symbols,
+    values: &Values<'_>,
     live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
-) -> eyre::Result<Option<String>> {
+) -> eyre::Result<Option<(String, String)>> {
+    let symbols = values.symbols;
     // Compose PURE recipes before re-extracting occurrences. Generated spans
     // never address original text; source binding names reconnect to owned IDs.
     let mut source = String::new();
@@ -194,24 +250,29 @@ fn body(
         ast_segmenter::ModuleFormat::Esm,
     )?;
     let mut names = BTreeMap::new();
+    let mut namespaces = BTreeMap::new();
     for binding in module.parsed.facts.bindings.iter().filter(|b| b.top_level) {
         let target = if let Some(definition) = symbols.definitions.get(&(file, binding.id)) {
-            Some(&definition.name)
+            Some(definition.name.as_str())
         } else if let Some(import) = symbols.imports.get(&(file, binding.id)) {
-            let ExportIdentity::Binding(target, binding) = import.identity else {
-                unreachable!()
-            };
-            Some(&symbols.definitions[&(target, binding)].name)
+            if let ExportIdentity::Namespace(target) = import.identity {
+                namespaces.insert(binding.name.as_str(), target);
+            }
+            values.name(&import.identity)
         } else {
             None
         };
         if let Some(target) = target {
-            names.insert(binding.name.as_str(), target.as_str());
+            names.insert(binding.name.as_str(), target);
         }
     }
     let mut replacements = BTreeMap::new();
     let mut targets = HashMap::new();
+    let mut namespace_bindings = HashMap::new();
     for binding in parsed.facts.bindings.iter().filter(|b| b.top_level) {
+        if let Some(&target) = namespaces.get(binding.name.as_str()) {
+            namespace_bindings.insert(binding.id, target);
+        }
         let Some(&target) = names.get(binding.name.as_str()) else {
             continue;
         };
@@ -232,12 +293,44 @@ fn body(
     rewrite::count_output_parse();
     let ast = Parser::new(&allocator, &source, SourceType::mjs()).parse();
     let mut syntax = Syntax {
+        graph,
+        values,
+        namespaces: parsed
+            .facts
+            .references
+            .iter()
+            .filter_map(|r| {
+                r.binding
+                    .and_then(|b| namespace_bindings.get(&b))
+                    .map(|&file| (r.span.start, file))
+            })
+            .collect(),
+        blocked_namespace: false,
+        default_name: values
+            .defaults
+            .iter()
+            .find(|(k, _)| k.file_id == file)
+            .map(|(_, n)| n.as_str()),
         replacements: &replacements,
         edits: Vec::new(),
-        name_sensitive: false,
+        unsupported: false,
+        // shortcut: stage anonymous syntax alongside renamed local declarations/
+        // writes until AST name-inference sites preserve their original names.
+        // Read-only import substitutions cannot change inferred names.
+        inference_changes: parsed
+            .facts
+            .bindings
+            .iter()
+            .any(|b| !b.import && targets.contains_key(&b.id))
+            || parsed
+                .facts
+                .references
+                .iter()
+                .any(|r| r.write && r.binding.is_some_and(|b| targets.contains_key(&b))),
+        hoists: Vec::new(),
     };
     syntax.visit_program(&ast.program);
-    if syntax.name_sensitive {
+    if syntax.unsupported {
         return Ok(None);
     }
     let mut shorthand = rewrite::Shorthand::default();
@@ -260,13 +353,48 @@ fn body(
             replacement: shorthand.replacement(&source, *span, name),
         });
     }
-    rewrite::apply(&source, &syntax.edits).map(Some)
+    let mut hoisted = String::new();
+    for (export, function, name) in syntax.hoists {
+        let mut edits = Vec::new();
+        syntax.edits.retain(|e| {
+            if contains(function, e.span) {
+                edits.push(Edit {
+                    span: Span::new(e.span.start - function.start, e.span.end - function.start),
+                    replacement: e.replacement.clone(),
+                });
+                false
+            } else {
+                true
+            }
+        });
+        let function = rewrite::apply(
+            &source[function.start as usize..function.end as usize],
+            &edits,
+        )?;
+        // In this acyclic one-file slice, pure function creation precedes all
+        // evaluation, matching instantiation without introducing a runtime cell.
+        hoisted.push_str(&format!(
+            "var {name} = ({{default: {function}}}).default;\n"
+        ));
+        syntax.edits.push(Edit {
+            span: export,
+            replacement: ";".into(),
+        });
+    }
+    Ok(Some((hoisted, rewrite::apply(&source, &syntax.edits)?)))
 }
 
 struct Syntax<'s> {
+    graph: &'s SourceGraph,
+    values: &'s Values<'s>,
+    namespaces: BTreeMap<u32, u32>,
+    blocked_namespace: bool,
+    default_name: Option<&'s str>,
     replacements: &'s BTreeMap<u32, (Span, String)>,
     edits: Vec<Edit>,
-    name_sensitive: bool,
+    unsupported: bool,
+    inference_changes: bool,
+    hoists: Vec<(Span, Span, String)>,
 }
 
 impl<'a> Visit<'a> for Syntax<'_> {
@@ -299,6 +427,24 @@ impl<'a> Visit<'a> for Syntax<'_> {
     }
 
     fn visit_export_default_declaration(&mut self, export: &ExportDefaultDeclaration<'a>) {
+        if let Some(name) = self.default_name {
+            let span = export.declaration.span();
+            if matches!(&export.declaration, ExportDefaultDeclarationKind::FunctionDeclaration(f) if f.id.is_none())
+            {
+                self.hoists.push((export.span, span, name.to_owned()));
+            } else {
+                self.edits.push(Edit {
+                    span: Span::new(export.span.start, span.start),
+                    replacement: format!("const {name} = ({{default: "),
+                });
+                self.edits.push(Edit {
+                    span: Span::new(span.end, export.span.end),
+                    replacement: "}).default;".into(),
+                });
+            }
+            walk::walk_export_default_declaration(self, export);
+            return;
+        }
         self.edits.push(Edit {
             span: Span::new(export.span.start, export.declaration.span().start),
             replacement: String::new(),
@@ -307,28 +453,90 @@ impl<'a> Visit<'a> for Syntax<'_> {
     }
 
     fn visit_function(&mut self, function: &Function<'a>, flags: oxc_semantic::ScopeFlags) {
-        self.name_sensitive |= function
-            .id
-            .as_ref()
-            .map_or(!self.replacements.is_empty(), |id| {
-                self.replacements.contains_key(&id.span.start)
-            });
+        self.unsupported |= function.id.as_ref().map_or(self.inference_changes, |id| {
+            self.replacements.contains_key(&id.span.start)
+        });
         walk::walk_function(self, function, flags);
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {
-        self.name_sensitive |= class
-            .id
-            .as_ref()
-            .map_or(!self.replacements.is_empty(), |id| {
-                self.replacements.contains_key(&id.span.start)
-            });
+        self.unsupported |= class.id.as_ref().map_or(self.inference_changes, |id| {
+            self.replacements.contains_key(&id.span.start)
+        });
         walk::walk_class(self, class);
     }
 
     fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
         // Anonymous inferred names also occur in assignments/destructuring.
-        self.name_sensitive |= !self.replacements.is_empty();
+        self.unsupported |= self.inference_changes;
         walk::walk_arrow_function_expression(self, arrow);
+    }
+
+    fn visit_identifier_reference(&mut self, reference: &IdentifierReference<'a>) {
+        // A namespace that escapes requires a real body-bearing native boundary,
+        // not a getter object or an unconditional internal facade.
+        self.unsupported |= self.namespaces.contains_key(&reference.span.start);
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        if let Expression::Identifier(object) = &member.object {
+            if let Some(&file) = self.namespaces.get(&object.span.start) {
+                if !self.blocked_namespace {
+                    if let Ok(linked) = self.graph.resolve_export(
+                        file,
+                        member.property.name.as_str(),
+                        source_graph::Namespace::Value,
+                    ) {
+                        if let Some(name) = self.values.name(&linked.identity) {
+                            self.edits.push(Edit {
+                                span: member.span,
+                                replacement: name.to_owned(),
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        walk::walk_static_member_expression(self, member);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        let blocked = self.blocked_namespace;
+        self.blocked_namespace = true;
+        self.visit_expression(&call.callee);
+        self.blocked_namespace = blocked;
+        for argument in &call.arguments {
+            self.visit_argument(argument);
+        }
+    }
+
+    fn visit_tagged_template_expression(&mut self, tagged: &TaggedTemplateExpression<'a>) {
+        let blocked = self.blocked_namespace;
+        self.blocked_namespace = true;
+        self.visit_expression(&tagged.tag);
+        self.blocked_namespace = blocked;
+        self.visit_template_literal(&tagged.quasi);
+    }
+
+    fn visit_assignment_target(&mut self, target: &AssignmentTarget<'a>) {
+        let blocked = self.blocked_namespace;
+        self.blocked_namespace = true;
+        walk::walk_assignment_target(self, target);
+        self.blocked_namespace = blocked;
+    }
+
+    fn visit_update_expression(&mut self, update: &UpdateExpression<'a>) {
+        let blocked = self.blocked_namespace;
+        self.blocked_namespace = true;
+        walk::walk_update_expression(self, update);
+        self.blocked_namespace = blocked;
+    }
+
+    fn visit_unary_expression(&mut self, unary: &UnaryExpression<'a>) {
+        let blocked = self.blocked_namespace;
+        self.blocked_namespace |= unary.operator == UnaryOperator::Delete;
+        walk::walk_unary_expression(self, unary);
+        self.blocked_namespace = blocked;
     }
 }

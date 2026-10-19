@@ -81,7 +81,9 @@ impl Symbols {
                 .ok_or_eyre("missing owned link facts")?;
             for binding in &facts.bindings {
                 originals.insert(binding.name.clone());
-                if !binding.top_level || binding.import || facts.commonjs {
+                // Top-level imports disappear after checked read substitution;
+                // reserving their aliases needlessly renames observable functions.
+                if !binding.top_level || facts.commonjs {
                     reserved.insert(binding.name.clone());
                 }
             }

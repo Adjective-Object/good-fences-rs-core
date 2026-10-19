@@ -342,16 +342,191 @@ fn native_concatenation_keeps_static_source_order_names_and_free_globals() {
 fn native_staging_defers_observable_name_changes_and_readonly_import_writes() {
     for (dependency, entry, expected) in [
         ("export function Same() {} export class Model {}", "import {Same as other, Model as Other} from './dep.mjs'; function Same() {} class Model {} console.log(Same.name, other.name, Model.name, Other.name);", "Same Same Model Model\n"),
-        ("export default function() {}", "import value from './dep.mjs'; console.log(value.name);", "default\n"),
-        ("export default class {}", "import value from './dep.mjs'; console.log(value.name);", "default\n"),
+        ("export const fn = 1;", "import {fn as value} from './dep.mjs'; const fn = () => value; console.log(fn.name);", "fn\n"),
         ("export let value = 1;", "import {value as local} from './dep.mjs'; try {local = 2;} catch(e) {console.log(e.name);} console.log(local);", "TypeError\n1\n"),
-        ("export const value = 1;", "import {value as local} from './dep.mjs'; const fn = () => local; console.log(fn.name);", "fn\n"),
     ] {
         let sources = sources(&[("dep.mjs", dependency), ("entry.mjs", entry)]);
         let (_, output) = build(&sources, &[("entry.mjs", true)], false);
         assert!(output.files.contains_key(Path::new("runtime.cjs")), "unported case must stay explicitly staged");
         let observed = node(&output.files, &output.entries["entry.mjs"]);
         assert!(observed.status.success(), "{}", String::from_utf8_lossy(&observed.stderr));
+        assert_eq!(observed.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
+fn native_defaults_snapshot_expressions_but_keep_binding_aliases_live() {
+    let sources = sources(&[
+            ("snapshot.mjs", "export let value = 1; export default value; export function bump() { value++; }"),
+            ("live.mjs", "export let current = 3; export {current as default}; export function step() { current++; }"),
+            ("barrel.mjs", "export {default as snapshot, value, bump} from './snapshot.mjs'; export {default as live, step} from './live.mjs';"),
+            ("entry.mjs", "import {snapshot, value, bump, live, step} from './barrel.mjs'; bump(); step(); console.log(snapshot, value, live); export {snapshot as 'snapshot-key', live as default};"),
+        ]);
+    assert_native_observation(&sources, "1 2 4\n");
+    let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+    assert_eq!(output, build(&sources, &[("entry.mjs", true)], true).1);
+    let mut files = output.files;
+    files.insert("check.mjs".into(), "import * as ns from './native.mjs'; console.log(Object.keys(ns).join(','), ns['snapshot-key'], ns.default, Object.getPrototypeOf(ns) === null, Object.isExtensible(ns));".into());
+    let observed = node(&files, Path::new("check.mjs"));
+    assert!(
+        observed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&observed.stderr)
+    );
+    assert_eq!(
+        observed.stdout,
+        b"1 2 4\ndefault,snapshot-key 1 4 true false\n"
+    );
+}
+
+#[test]
+fn native_named_default_function_preserves_hoisting_and_own_binding() {
+    assert_native_observation(
+        &sources(&[
+            ("function.mjs", "console.log(early.name, early()); var state = 7; export default function early() { return state; }"),
+            ("entry.mjs", "import value from './function.mjs'; console.log(value.name, value());"),
+        ]),
+        "early undefined\nearly 7\n",
+    );
+}
+
+#[test]
+fn native_import_aliases_do_not_rename_observable_function_and_class_names() {
+    assert_native_observation(
+        &sources(&[
+            ("dep.mjs", "export function Same() {} export class Model {}"),
+            ("entry.mjs", "import {Same, Model} from './dep.mjs'; const fn = () => Same; const object = {Same, Model, fn}; console.log(object.Same.name, object.Model.name, object.fn.name, fn() === Same);"),
+        ]),
+        "Same Model fn true\n",
+    );
+}
+
+#[test]
+fn native_default_value_forms_keep_native_observable_names() {
+    for (definition, expected) in [
+        ("export default function() {}", "default"),
+        ("export default async function() {}", "default"),
+        ("export default function*() {}", "default"),
+        (
+            "export default class { static seen = this.name; }",
+            "default",
+        ),
+        ("export default (() => 1);", "default"),
+        ("export default (function() {});", "default"),
+        ("export default (0, function() {});", ""),
+        ("export default (true ? () => 1 : () => 2);", ""),
+        (
+            "export default class Named { static seen = this.name; }",
+            "Named",
+        ),
+        ("export default function Named() {}", "Named"),
+    ] {
+        assert_native_observation(
+            &sources(&[
+                ("dep.mjs", definition),
+                ("entry.mjs", "import value from './dep.mjs'; const fn = () => value; const object = {fn}; if (value.seen !== undefined && value.seen !== value.name) throw Error('class static name'); const descriptor = Object.getOwnPropertyDescriptor(value, 'name'); console.log(value.name, object.fn.name, descriptor.writable, descriptor.enumerable, descriptor.configurable);"),
+            ]),
+            &format!("{expected} fn false false true\n"),
+        );
+    }
+    assert_native_observation(
+        &sources(&[("entry.mjs", "try { Named; } catch (e) { console.log(e.name); } export default class Named { static seen = this.name; } console.log(Named.name, Named.seen);")]),
+        "ReferenceError\nNamed Named\n",
+    );
+    assert_native_observation(
+        &sources(&[("entry.mjs", "const __gf_default_0 = 8; export default class { static seen = this.name; static value = __gf_default_0; } console.log(__gf_default_0);")]),
+        "8\n",
+    );
+    assert_native_observation(
+        &sources(&[
+            ("dep.mjs", "export default function Named() {} Named = 42;"),
+            (
+                "entry.mjs",
+                "import value from './dep.mjs'; console.log(value);",
+            ),
+        ]),
+        "42\n",
+    );
+}
+
+#[test]
+fn native_default_expressions_keep_evaluation_time_and_throwing_tdz() {
+    for (declaration, expected) in [
+        ("export default before; const before = 1;", "before"),
+        (
+            "export default class { static value = before; } const before = 1;",
+            "before",
+        ),
+    ] {
+        let sources = sources(&[("entry.mjs", declaration)]);
+        let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+        assert_eq!(output.entries["entry.mjs"], Path::new("native.mjs"));
+        for result in [
+            node(&sources, Path::new("entry.mjs")),
+            node(&output.files, &output.entries["entry.mjs"]),
+        ] {
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr)
+                .contains(&format!("Cannot access '{expected}' before initialization")));
+        }
+    }
+    assert_native_observation(
+        &sources(&[
+            ("dep.mjs", "console.log('before'); export default (console.log('expression'), 3); console.log('after');"),
+            ("entry.mjs", "import value from './dep.mjs'; console.log(value);"),
+        ]),
+        "before\nexpression\nafter\n3\n",
+    );
+}
+
+#[test]
+fn native_namespace_property_reads_follow_aliases_and_live_bindings() {
+    let sources = sources(&[
+            ("dep.mjs", "export let value = 1; export function bump() { value++; } export default () => 2;"),
+            ("barrel.mjs", "export * as nested from './dep.mjs';"),
+            ("entry.mjs", "import * as ns from './dep.mjs'; import {nested as alias} from './barrel.mjs'; const bump = ns.bump; const fn = ns.default; bump(); console.log(ns.value, alias.value, fn.name, fn(), ns.bump === alias.bump); export {fn as 'public-name'};"),
+        ]);
+    assert_native_observation(&sources, "2 2 default 2 true\n");
+    let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+    let mut files = output.files;
+    files.insert(
+        "check.mjs".into(),
+        "import * as ns from './native.mjs'; console.log(Object.keys(ns).join(','));".into(),
+    );
+    let observed = node(&files, Path::new("check.mjs"));
+    assert!(
+        observed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&observed.stderr)
+    );
+    assert_eq!(observed.stdout, b"2 2 default 2 true\npublic-name\n");
+}
+
+#[test]
+fn native_staging_keeps_namespace_escapes_receivers_and_writes_native() {
+    for (entry, expected) in [
+        ("console.log(ns === alias, Object.getPrototypeOf(ns) === null, Object.isExtensible(ns)); const d = Object.getOwnPropertyDescriptor(ns, 'value'); console.log(d.value, d.writable, d.enumerable, d.configurable, Object.prototype.toString.call(ns)); export {ns as public};", "true true false\n1 true true false [object Module]\n"),
+        ("console.log(ns.read());", "1\n"),
+        ("try { ns.value = 2; } catch (e) { console.log(e.name); } console.log(ns.value);", "TypeError\n1\n"),
+        ("try { ns.value++; } catch (e) { console.log(e.name); } console.log(ns.value);", "TypeError\n1\n"),
+        ("try { delete ns.value; } catch (e) { console.log(e.name); } console.log(ns.value);", "TypeError\n1\n"),
+        ("try { ({value: ns.value} = {value: 2}); } catch (e) { console.log(e.name); } console.log(ns.value);", "TypeError\n1\n"),
+        ("console.log(ns.read`tag`);", "1\n"),
+        ("console.log(ns.missing);", "undefined\n"),
+    ] {
+        let sources = sources(&[
+            ("dep.mjs", "export let value = 1; export function read() { return this.value; }"),
+            ("barrel.mjs", "export * as nested from './dep.mjs';"),
+            ("entry.mjs", &format!("import * as ns from './dep.mjs'; import {{nested as alias}} from './barrel.mjs'; {entry}")),
+        ]);
+        let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+        assert!(output.files.contains_key(Path::new("runtime.cjs")));
+        let baseline = node(&sources, Path::new("entry.mjs"));
+        let observed = node(&output.files, &output.entries["entry.mjs"]);
+        for result in [&baseline, &observed] {
+            assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        }
+        assert_eq!(observed.stdout, baseline.stdout);
         assert_eq!(observed.stdout, expected.as_bytes());
     }
 }

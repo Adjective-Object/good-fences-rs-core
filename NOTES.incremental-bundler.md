@@ -1,6 +1,47 @@
 # Incremental bundler implementation handoff
 
-## Current replacement increment: staged native lexical foundation
+## Current replacement increment: native defaults and checked namespace reads
+
+The synchronous acyclic one-namespace-root/group ESM slice now emits default
+expression snapshots as private lexical values, independently of live default
+binding aliases. Object-property named evaluation preserves anonymous `default`
+function/class/arrow names and descriptors, including class static evaluation.
+Anonymous default functions are created in a pure module prologue before all
+source bodies; this models instantiation only within the current acyclic
+single-file gate. Classes/expressions stay at their original evaluation point.
+Named declarations keep their own bindings, hoisting and class TDZ.
+
+Namespace imports and namespace-reexport aliases are optimized only for checked
+dot-property reads of known lexical/expression values. These keep live bindings
+and value identity without extra exports. Escapes, public namespace exports,
+computed/unresolved properties, receivers, writes and deletes stay on legacy
+native boundaries; no getter object or new per-source facade was introduced.
+Top-level import aliases no longer reserve names because checked import reads
+replace them; this avoids needless observable function/class renames. Anonymous
+syntax is eligible with import-read substitutions, but remains conservatively
+staged alongside renamed locals/writes until AST inference sites preserve names.
+Actual renamed function/class declarations and import writes remain staged.
+
+Next: body-bearing native chunk boundaries for namespace escapes and public
+exports, then general physical multi-entry/async linking and opaque-CJS segment/
+logical-facade integration under normal usage/grouping. Root sets remain
+provenance, not forced partitions. Remove the legacy backend only after these
+semantics are replaced. No cached IR schema change; existing emitter fingerprints
+already include both changed implementation files. No commit/push.
+
+Validation: default snapshot/name regressions first failed native eligibility,
+then passed with real Node/native comparisons. All **146 bundler tests** pass,
+including exact public keys, default expression/class TDZ, named hoisting,
+anonymous names/descriptors/static class names, shorthand/import aliases and
+honestly staged namespace identity/receiver/write cases. Also passed: format,
+all-target bundler clippy, 12 native and 12 public differential contracts
+(15 emitted executions, one same-runtime identity case, four diagnostics),
+12 differential harness tests and mandatory spot-check (51 parser tests and
+workspace check). Existing dependency/workspace warnings remain. Commands use
+`TMPDIR=$PWD/target/p1-test-tmp`; logs: `target/native-values-{red,focused,tests,fmt,clippy,contracts,harness,spot-check}.log`.
+No benchmark or full workspace test-suite rerun; independent review is pending.
+
+## Prior replacement increment: staged native lexical foundation
 
 `link::esm_with_source_checker` tries `native::emit` after constructing checked
 `Symbols`. The native gate requires one namespace entry/evaluation root and one

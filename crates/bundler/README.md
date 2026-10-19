@@ -30,7 +30,14 @@ of scope hoisting, CJS integration or removal of the legacy backend.
 `native.mjs`** for a single namespace entry/evaluation root whose retained static
 dependency tree is synchronous, acyclic and ESM-only. Named/default binding
 imports and reexports, including pure star barrels, become direct canonical
-lexical references. Public names are explicit output export aliases; private
+lexical references. Default expressions have private snapshot bindings, while
+`export {binding as default}` remains live. Anonymous default functions are
+created before source evaluation (safe only in this acyclic single-file slice);
+anonymous default classes/expressions initialize at their original evaluation
+point. Native object-property named evaluation preserves their `default` name
+without a name setter, including class static initialization. Named default
+declarations retain their own binding and function-hoisting/class-TDZ behavior.
+Public names are explicit output export aliases; private
 exports and import declarations disappear. Declarations, all retained var
 contributions and statements stay in source order within dependency-first
 static-import DFS order, never path-sorted body order. PURE recipes compose before
@@ -39,15 +46,23 @@ Shorthand keys, free globals, nested shadows, hoisting, strict-module `this`,
 TDZ, const and live mutation keep native semantics. The output is parser/semantic
 validated and has no runtime, cells, registrations or per-module facade family.
 
+Checked dot-property reads of namespace imports (including namespace reexport
+aliases) resolve directly to canonical live values. Only the public entry gains
+a native namespace; no private getter object or namespace facade is fabricated.
+Namespace escapes/public namespace exports, computed or unresolved properties,
+method/tag receivers and property writes/deletes remain staged. Their identity,
+TDZ, descriptors and read-only behavior still use actual legacy native boundaries.
+
 This is an explicit **temporary staging gate**, not a permanent fallback or an
-option. Multiple roots, cycles, async/CJS/nonstatic dependencies, namespace
-imports/reexports and default expressions/anonymous default declarations still
-use the legacy emitter. So do import writes (never rewritten into defining
-mutable bindings), renamed function/class declarations, and conservatively any
-anonymous function/class/arrow syntax in a module with lexical substitutions:
-allocated identifiers must not change observable explicit/inferred `.name`.
-Named default function/class declarations and default binding aliases are eligible
-when their source names need no change. No unported case silently loses exports.
+option. Multiple roots/groups, non-namespace entries, cycles and async/CJS/
+nonstatic dependencies still use the legacy emitter. So do import writes (never
+rewritten into defining mutable bindings), renamed function/class declarations,
+and conservatively anonymous function/class/arrow syntax alongside renamed
+local declarations or writes. Top-level import aliases no longer reserve lexical
+names: they disappear after checked read substitution, avoiding unnecessary
+function/class renames. Anonymous syntax with only imported-read substitutions is
+eligible. Remaining collision/inference cases need AST-context name preservation,
+not silent `.name` changes. No unported case silently loses exports.
 Port these boundaries incrementally, then delete the gate and legacy emitter.
 
 `members`/`chunk_artifacts` point to the real native file for this one-group case;

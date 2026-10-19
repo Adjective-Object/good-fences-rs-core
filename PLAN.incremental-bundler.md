@@ -28,9 +28,13 @@ Replace the linker entirely, in independently reviewed committable increments:
 The current increment uses canonical symbols for real `native.mjs` emission on
 one synchronous acyclic ESM namespace-entry tree. Direct binding substitutions,
 static dependency/source order and exact entry export aliases are production
-paths, not an unused utility. Name-sensitive substitutions, default expressions,
-namespace boundaries, cycles, multiple roots and async/CJS remain explicitly
-staged on the legacy emitter. The crate README defines the precise gate.
+paths, not an unused utility. Default expressions/anonymous declarations now
+preserve snapshot/live and native name semantics; checked namespace dot reads
+resolve directly, including namespace reexport aliases. Import-read substitutions
+no longer exclude anonymous syntax or reserve disappearing import aliases.
+Remaining name-sensitive collisions/inference, namespace escapes/receivers/writes,
+cycles, multiple roots and async/CJS remain explicitly staged on the legacy
+emitter. The crate README defines the precise gate.
 This is not completed general linking/scope hoisting or legacy removal.
 Order-cycle policy remains planning, not suppressed binding errors; the native
 slice uses source-ordered static DFS, not the scalar effect DAG as a scheduler.

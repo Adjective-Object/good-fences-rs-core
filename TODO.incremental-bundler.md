@@ -9,9 +9,15 @@
 - [ ] Review the native foundation: synchronous acyclic ESM, one namespace
   entry/root/group, direct bindings and explicit public aliases in `native.mjs`.
   Public BuildSession/publication and the 64-star-chain benchmark use it.
-- [ ] Widen native emission to name-sensitive collisions/inference, default
-  expressions/anonymous declarations, read-only import writes and namespace
-  escapes before deleting their temporary legacy staging gates.
+- [x] Extend the native slice to default expression snapshots/live aliases,
+  anonymous default names, named declaration hoisting/TDZ and checked namespace
+  dot reads/reexport aliases; admit anonymous syntax with imported-read rewrites.
+- [ ] Preserve names for remaining declaration collisions and AST inference sites
+  alongside renamed locals/writes. Preserve read-only imports across proper native
+  boundaries rather than rewriting writes into mutable defining bindings.
+- [ ] Use actual body-bearing native chunks for namespace escapes/public namespace
+  exports and receiver-sensitive accesses; do not fabricate getter objects or an
+  unconditional internal facade. Computed/unresolved properties remain staged.
 - [ ] Scope-hoist direct bindings and native imports/exports across actual output
   chunks; public entry/export boundaries only, no forced root-set partition.
 - [ ] Integrate one opaque CJS segment and logical ESM facade per input into
