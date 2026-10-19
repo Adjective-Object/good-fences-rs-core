@@ -158,11 +158,18 @@ function outputLines(stdout) {
   return lines;
 }
 
-export function managed(tempRoot, callback) {
+export function managed(tempRoot, callback, { keepOutput = false } = {}) {
+  check(typeof keepOutput === 'boolean', 'keepOutput must be a boolean');
   mkdirSync(tempRoot, { recursive: true });
   const directory = mkdtempSync(path.join(tempRoot, 'bundler-fixture-'));
   try { return callback(directory); }
-  finally { rmSync(directory, { recursive: true, force: true }); }
+  catch (cause) {
+    if (keepOutput) throw new Error(`Retained fixture directory: ${directory}`, { cause });
+    throw cause;
+  }
+  finally {
+    if (!keepOutput) rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 export function execute(command, args, cwd, timeoutMs = 5000, observation = false) {
@@ -284,8 +291,10 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
 
 export function runFixtures(root = defaultRoot, {
   driver = defaultDriver, timeoutMs = 5000, tempRoot = defaultTempRoot, unsupported = new Map(),
+  keepOutput = false,
 } = {}) {
   check(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'timeoutMs must be a positive integer');
+  check(typeof keepOutput === 'boolean', 'keepOutput must be a boolean');
   // Validate the entire corpus before executing any third-party source.
   let cases;
   try { cases = discoverCases(root); }
@@ -297,6 +306,7 @@ export function runFixtures(root = defaultRoot, {
     assert(reason.trim(), 'unsupported case needs a reason');
   }
   return cases.map(({ manifest, files }) => managed(tempRoot, (directory) => {
+    const retained = keepOutput ? { directory } : {};
     let stage = 'input';
     let backend;
     let warnings;
@@ -308,7 +318,8 @@ export function runFixtures(root = defaultRoot, {
         Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
         native, timeoutMs, 'source');
       if (unsupported.has(manifest.id)) {
-        return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0 };
+        return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0,
+          ...retained };
       }
       stage = 'build';
       copyCase(files, source, manifest);
@@ -323,12 +334,12 @@ export function runFixtures(root = defaultRoot, {
       const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
       assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
       return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
-        executions: manifest.entryPoints.length, stdout: baseline.stdout };
+        executions: manifest.entryPoints.length, stdout: baseline.stdout, ...retained };
     } catch (error) {
       return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}),
-        ...(warnings ? { warnings } : {}), executions: 0, error };
+        ...(warnings ? { warnings } : {}), executions: 0, error, ...retained };
     }
-  }));
+  }, { keepOutput }));
 }
 
 function writeSources(root, sources) {
@@ -340,7 +351,7 @@ function writeSources(root, sources) {
   }
 }
 
-export function runBundlerCases({ driver = defaultDriver, tempRoot = defaultTempRoot } = {}) {
+export function runBundlerCases({ driver = defaultDriver, tempRoot = defaultTempRoot, keepOutput = false } = {}) {
   return managed(tempRoot, (directory) => {
     const root = path.join(directory, 'identity');
     writeSources(root, {
@@ -384,8 +395,8 @@ console.log(staticDefault === a.shared, staticNamed === a.shared, staticBump ===
       assert.match(result.stderr, /bytes \d+\.\.\d+/u, `${name}: missing source range`);
       assert(!existsSync(path.join(project, '.bundler-output/.bundler-current.json')), `${name}: failed build published`);
     }
-    return { identity: 1, diagnostics: diagnostics.length };
-  });
+    return { identity: 1, diagnostics: diagnostics.length, ...(keepOutput ? { directory } : {}) };
+  }, { keepOutput });
 }
 
 function diagnostic(error) {
@@ -404,18 +415,25 @@ function report(result) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    check(process.argv.length <= 3, 'Usage: node scripts/bundler-fixtures.mjs [fixture-root]');
-    const results = runFixtures(process.argv[2]);
+    const args = process.argv.slice(2);
+    const keepIndex = args.indexOf('--keep-output');
+    const keepOutput = keepIndex !== -1;
+    if (keepOutput) args.splice(keepIndex, 1);
+    check(args.length <= 1 && args.every((arg) => !arg.startsWith('-')),
+      'Usage: node scripts/bundler-fixtures.mjs [--keep-output] [fixture-root]');
+    const results = runFixtures(args[0], { keepOutput });
     for (const result of results) {
       console.log(report(result));
+      if (result.directory) console.log(`OUTPUT ${result.id}: ${result.directory}`);
       for (const warning of result.warnings ?? []) console.log(`WARN ${result.id}: ${warning}`);
       if (result.error) console.error(diagnostic(result.error));
     }
     const count = (status, backend) => results.filter((r) => r.status === status && (!backend || r.backend === backend)).length;
     console.log(`Fixtures: ${count('passed')} passed (${count('passed', 'native')} native, ${count('passed', 'legacy')} legacy), ${count('failed')} failed, ${count('unsupported')} unsupported, ${results.reduce((n, r) => n + r.executions, 0)} emitted executions.`);
     if (count('failed')) process.exitCode = 1;
-    const extra = runBundlerCases();
+    const extra = runBundlerCases({ keepOutput });
     console.log(`Bundler checks: ${extra.identity} same-runtime identity case; ${extra.diagnostics} diagnostic cases.`);
+    if (extra.directory) console.log(`OUTPUT bundler-checks: ${extra.directory}`);
   } catch (error) {
     console.error(`Runner error: ${diagnostic(error)}`);
     process.exitCode = 1;

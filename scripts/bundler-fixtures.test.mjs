@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -89,6 +89,39 @@ test('deterministic cases, ESM default, isolated copy/cwd, and cleanup on succes
     ]);
     assert.equal(readFileSync(path.join(directory, 'files/data.txt'), 'utf8'), 'hello');
     assert.deepEqual(readdirSync(tempRoot), []);
+  });
+});
+
+test('keepOutput retains successful and failed cases with their inspection paths', () => {
+  withCorpus(({ root, tempRoot, run }) => {
+    addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
+    addCase(root, 'z-success');
+    const [failure, success] = run({ keepOutput: true });
+    assert.equal(failure.stage, 'input');
+    assert.equal(success.status, 'passed');
+    assert.equal(readFileSync(path.join(failure.directory, 'native/entry.js'), 'utf8'), "console.log('wrong');");
+    assert(!existsSync(path.join(failure.directory, 'source')), 'invalid inputs must not build');
+    assert(existsSync(path.join(success.directory, 'source/.bundler-output/0.mjs')));
+    assert.deepEqual(readdirSync(tempRoot).sort(),
+      [path.basename(failure.directory), path.basename(success.directory)].sort());
+    assert.throws(() => run({ keepOutput: 'true' }), /keepOutput must be a boolean/u);
+  });
+});
+
+test('kept auxiliary failures expose their directory and preserve the original cause', () => {
+  withCorpus(({ tempRoot }) => {
+    let retained;
+    const cause = new Error('original failure');
+    assert.throws(() => managed(tempRoot, (directory) => {
+      retained = directory;
+      writeFileSync(path.join(directory, 'partial-output'), 'inspect me');
+      throw cause;
+    }, { keepOutput: true }), (error) => {
+      assert.equal(error.cause, cause);
+      assert.equal(error.message, `Retained fixture directory: ${retained}`);
+      return true;
+    });
+    assert.equal(readFileSync(path.join(retained, 'partial-output'), 'utf8'), 'inspect me');
   });
 });
 
@@ -475,6 +508,37 @@ test('CLI labels malformed corpus as input metadata before any execution', () =>
     assert.match(result.stderr, /INPUT metadata:.*entryPoints/su);
     assert.match(result.stderr, /Caused by:/u);
     assert.deepEqual(readdirSync(tempRoot), []);
+  });
+});
+
+test('CLI keep-output flag retains and prints successful, failed and auxiliary outputs', () => {
+  withCorpus(({ root }) => {
+    addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
+    addCase(root, 'z-success');
+    const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
+    const managedRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
+    for (const args of [[runner, '--keep-output', root], [runner, root, '--keep-output']]) {
+      const result = spawnSync(process.execPath, args, {
+        encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' },
+      });
+      const outputs = [...result.stdout.matchAll(/^OUTPUT ([^:]+): (.+)$/gmu)];
+      const directories = outputs.map((match) => match[2]);
+      assert(directories.every((directory) => directory.startsWith(managedRoot)));
+      try {
+        assert.equal(result.status, 1, result.stderr);
+        assert.deepEqual(outputs.map((match) => match[1]),
+          ['synthetic/a-failure', 'synthetic/z-success', 'bundler-checks']);
+        assert(existsSync(path.join(directories[0], 'native/entry.js')));
+        assert(existsSync(path.join(directories[1], 'source/.bundler-output/.bundler-current.json')));
+        assert(existsSync(path.join(directories[2], 'identity/.bundler-output/.bundler-current.json')));
+      } finally {
+        for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    const invalid = spawnSync(process.execPath, [runner, '--keep-output', '--unknown', root], { encoding: 'utf8' });
+    assert.equal(invalid.status, 1);
+    assert.equal(invalid.stdout, '');
+    assert.match(invalid.stderr, /Usage:/u);
   });
 });
 

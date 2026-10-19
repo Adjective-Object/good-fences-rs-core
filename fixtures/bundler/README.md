@@ -11,6 +11,21 @@ cargo build -p bundler --example build
 node scripts/bundler-fixtures.mjs
 ```
 
+To retain generated output and input copies for inspection:
+
+```sh
+node scripts/bundler-fixtures.mjs --keep-output
+```
+
+The flag also works with a custom fixture root. Each `OUTPUT <case>: <directory>`
+line identifies a retained workspace under `target/p1-test-tmp/`. Generated files
+are in `source/.bundler-output/.bundler-generation-<hash>/`; the
+`source/.bundler-output/.bundler-current.json` pointer identifies the current
+generation. Failed cases keep any inputs and partial outputs too. The auxiliary
+identity/diagnostic workspace is retained and reported separately. Without the
+flag, all workspaces are removed as before. Retained directories require manual
+cleanup.
+
 After building the driver, no package installation, upstream engine, or network
 access is needed. `yarn test:bundler-fixtures` builds the driver and runs the same
 command.
@@ -245,7 +260,7 @@ and four bundler-only source-range diagnostic cases (nonliteral import,
 unconfigured external, require-of-async-ESM, TS emission).
 No upstream files, provenance or licenses are changed.
 
-`runFixtures(root, {driver, tempRoot, timeoutMs, unsupported})` is the single
+`runFixtures(root, {driver, tempRoot, timeoutMs, unsupported, keepOutput})` is the single
 programmatic harness API. `unsupported` must explicitly map known case IDs to
 nonempty reasons; results say `unsupported`, with zero emitted executions, never
 `passed`. Unexpected build failures remain failures, not inferred skips.
@@ -261,6 +276,10 @@ valid corpus. Invalid runner configuration/infrastructure errors throw instead
 of becoming fixture passes. The CLI prints all case results and native/legacy
 pass, failure, unsupported and execution totals, then exits nonzero for any
 unexpected failure. Fatal runner errors include causes in diagnostics.
+With `keepOutput: true`, each case result also includes its retained workspace
+`directory`. `runBundlerCases({keepOutput: true})` returns its auxiliary
+`directory`; unexpected auxiliary failures report the retained path and original
+cause.
 The shared `observeEntries` helper returns `{stdout, outcomes}`, where each ordered outcome
 is `{entry, stdout, error}` and `error` is null or `{name, code?}`. Differential
 comparison includes observed codes even when the manifest does not constrain
@@ -272,7 +291,8 @@ Managed copies default to project-local `target/p1-test-tmp`. Runtime invocation
 have five-second timeouts, bounded output, sanitized Node preload environment,
 checked stderr/exit/signal policy and synchronous child kill/reaping on timeout.
 Build invocations have a separate 30-second timeout after compiling the driver.
-The runner removes managed copies on every failure. Trusted fixture code must
+The runner removes managed copies on success and failure unless `--keep-output`
+is enabled. Trusted fixture code must
 not launch detached descendants; this is not a sandbox/process-tree jail.
 The regression suite checks actual emitted mismatch/stderr/nonzero/timeout
 failures, output bounds, cleanup, unsupported reporting and child reaping.
