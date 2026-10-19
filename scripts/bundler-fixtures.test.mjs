@@ -108,6 +108,33 @@ test('keepOutput retains successful and failed cases with their inspection paths
   });
 });
 
+test('onResult reports each completed case before starting the next, preserving returned results', () => {
+  withCorpus(({ root, run, builds, tempRoot }) => {
+    addCase(root, 'a-failure', { sources: { 'entry.js': "console.log('wrong');" } });
+    addCase(root, 'z-success');
+    const reported = [];
+    const results = run({ onResult(result) {
+      reported.push(result);
+      assert.equal(existsSync(builds), result.status === 'passed', 'later case must not build before reporting');
+      assert.deepEqual(readdirSync(tempRoot), [], 'completed case must already be cleaned up');
+    } });
+    assert.deepEqual(results, reported);
+    assert.deepEqual(reported.map(({ status }) => status), ['failed', 'passed']);
+    assert.throws(() => run({ onResult: true }), /onResult must be a function/u);
+  });
+});
+
+test('reporter errors propagate without running later cases or becoming fixture failures', () => {
+  withCorpus(({ root, run, builds, tempRoot }) => {
+    addCase(root, 'a-first');
+    addCase(root, 'z-last');
+    const failure = new Error('reporting failed');
+    assert.throws(() => run({ onResult() { throw failure; } }), (error) => error === failure);
+    assert.equal(readFileSync(builds, 'utf8').trim().split('\n').length, 1);
+    assert.deepEqual(readdirSync(tempRoot), []);
+  });
+});
+
 test('kept auxiliary failures expose their directory and preserve the original cause', () => {
   withCorpus(({ tempRoot }) => {
     let retained;
@@ -508,6 +535,45 @@ test('CLI labels malformed corpus as input metadata before any execution', () =>
     assert.match(result.stderr, /INPUT metadata:.*entryPoints/su);
     assert.match(result.stderr, /Caused by:/u);
     assert.deepEqual(readdirSync(tempRoot), []);
+  });
+});
+
+test('CLI prints completed results while the next case is still executing', () => {
+  withCorpus(({ root, tempRoot }) => {
+    const marker = path.join(tempRoot, 'first-result-received');
+    addCase(root, 'a-first');
+    addCase(root, 'z-wait', { sources: { 'entry.js': `
+      import { existsSync } from 'node:fs';
+      while (!existsSync(${JSON.stringify(marker)})) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      console.log('hello');
+    ` } });
+    const runner = fileURLToPath(new URL('./bundler-fixtures.mjs', import.meta.url));
+    const observer = `
+      import { spawn } from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      const child = spawn(process.execPath, ${JSON.stringify([runner, root])}, {
+        env: { ...process.env, NO_COLOR: '1' },
+      });
+      let stdout = '';
+      child.stdout.on('data', chunk => {
+        stdout += chunk;
+        process.stdout.write(chunk);
+        if (stdout.includes('PASS synthetic/a-first backend=native\\n')) {
+          writeFileSync(${JSON.stringify(marker)}, 'received');
+        }
+      });
+      child.stderr.pipe(process.stderr);
+      child.on('error', error => { throw error; });
+      child.on('close', code => { process.exitCode = code ?? 1; });
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', observer], { encoding: 'utf8' });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /PASS synthetic\/a-first backend=native/u);
+    // The marker lets source execution finish; its node:fs import then fails the build.
+    assert.match(result.stdout, /FAIL BUILD synthetic\/z-wait/u);
+    assert.doesNotMatch(result.stderr, /ETIMEDOUT/u);
   });
 });
 

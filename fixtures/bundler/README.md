@@ -260,7 +260,7 @@ and four bundler-only source-range diagnostic cases (nonliteral import,
 unconfigured external, require-of-async-ESM, TS emission).
 No upstream files, provenance or licenses are changed.
 
-`runFixtures(root, {driver, tempRoot, timeoutMs, unsupported, keepOutput})` is the single
+`runFixtures(root, {driver, tempRoot, timeoutMs, unsupported, keepOutput, onResult})` is the single
 programmatic harness API. `unsupported` must explicitly map known case IDs to
 nonempty reasons; results say `unsupported`, with zero emitted executions, never
 `passed`. Unexpected build failures remain failures, not inferred skips.
@@ -273,9 +273,13 @@ observation comparison). `error` retains the original error and its causes.
 Execution totals count entries in passing cases. Malformed metadata throws an
 `INPUT metadata` error before any source runs, rather than executing a partially
 valid corpus. Invalid runner configuration/infrastructure errors throw instead
-of becoming fixture passes. The CLI prints all case results and native/legacy
-pass, failure, unsupported and execution totals, then exits nonzero for any
+of becoming fixture passes. The CLI prints each case result, warnings, errors and
+retained path as soon as that case finishes, before executing the next case.
+It then prints native/legacy pass, failure, unsupported and execution totals and exits nonzero for any
 unexpected failure. Fatal runner errors include causes in diagnostics.
+The optional synchronous `onResult(result)` callback receives each completed
+case in execution order; the API still returns the complete results array.
+Reporter errors propagate immediately rather than becoming fixture failures.
 With `keepOutput: true`, each case result also includes its retained workspace
 `directory`. `runBundlerCases({keepOutput: true})` returns its auxiliary
 `directory`; unexpected auxiliary failures report the retained path and original

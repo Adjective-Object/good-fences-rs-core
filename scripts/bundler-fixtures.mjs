@@ -291,10 +291,11 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
 
 export function runFixtures(root = defaultRoot, {
   driver = defaultDriver, timeoutMs = 5000, tempRoot = defaultTempRoot, unsupported = new Map(),
-  keepOutput = false,
+  keepOutput = false, onResult,
 } = {}) {
   check(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'timeoutMs must be a positive integer');
   check(typeof keepOutput === 'boolean', 'keepOutput must be a boolean');
+  check(onResult === undefined || typeof onResult === 'function', 'onResult must be a function');
   // Validate the entire corpus before executing any third-party source.
   let cases;
   try { cases = discoverCases(root); }
@@ -305,41 +306,45 @@ export function runFixtures(root = defaultRoot, {
     assert.equal(typeof reason, 'string');
     assert(reason.trim(), 'unsupported case needs a reason');
   }
-  return cases.map(({ manifest, files }) => managed(tempRoot, (directory) => {
-    const retained = keepOutput ? { directory } : {};
-    let stage = 'input';
-    let backend;
-    let warnings;
-    try {
-      const native = path.join(directory, 'native');
-      const source = path.join(directory, 'source');
-      copyCase(files, native, manifest);
-      const baseline = observeEntries(manifest,
-        Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
-        native, timeoutMs, 'source');
-      if (unsupported.has(manifest.id)) {
-        return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0,
-          ...retained };
+  return cases.map(({ manifest, files }) => {
+    const result = managed(tempRoot, (directory) => {
+      const retained = keepOutput ? { directory } : {};
+      let stage = 'input';
+      let backend;
+      let warnings;
+      try {
+        const native = path.join(directory, 'native');
+        const source = path.join(directory, 'source');
+        copyCase(files, native, manifest);
+        const baseline = observeEntries(manifest,
+          Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
+          native, timeoutMs, 'source');
+        if (unsupported.has(manifest.id)) {
+          return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0,
+            ...retained };
+        }
+        stage = 'build';
+        copyCase(files, source, manifest);
+        const build = buildProject(driver, source, manifest.entryPoints);
+        backend = build.backend;
+        if (build.planWarnings?.length) warnings = build.planWarnings;
+        stage = 'backend';
+        if (manifest.expectations.backend === 'native') {
+          assert.equal(backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
+        }
+        stage = 'output';
+        const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
+        assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
+        return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
+          executions: manifest.entryPoints.length, stdout: baseline.stdout, ...retained };
+      } catch (error) {
+        return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}),
+          ...(warnings ? { warnings } : {}), executions: 0, error, ...retained };
       }
-      stage = 'build';
-      copyCase(files, source, manifest);
-      const build = buildProject(driver, source, manifest.entryPoints);
-      backend = build.backend;
-      if (build.planWarnings?.length) warnings = build.planWarnings;
-      stage = 'backend';
-      if (manifest.expectations.backend === 'native') {
-        assert.equal(backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
-      }
-      stage = 'output';
-      const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
-      assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
-      return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
-        executions: manifest.entryPoints.length, stdout: baseline.stdout, ...retained };
-    } catch (error) {
-      return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}),
-        ...(warnings ? { warnings } : {}), executions: 0, error, ...retained };
-    }
-  }, { keepOutput }));
+    }, { keepOutput });
+    onResult?.(result);
+    return result;
+  });
 }
 
 function writeSources(root, sources) {
@@ -421,13 +426,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (keepOutput) args.splice(keepIndex, 1);
     check(args.length <= 1 && args.every((arg) => !arg.startsWith('-')),
       'Usage: node scripts/bundler-fixtures.mjs [--keep-output] [fixture-root]');
-    const results = runFixtures(args[0], { keepOutput });
-    for (const result of results) {
-      console.log(report(result));
-      if (result.directory) console.log(`OUTPUT ${result.id}: ${result.directory}`);
-      for (const warning of result.warnings ?? []) console.log(`WARN ${result.id}: ${warning}`);
-      if (result.error) console.error(diagnostic(result.error));
-    }
+    const results = runFixtures(args[0], {
+      keepOutput,
+      onResult(result) {
+        console.log(report(result));
+        if (result.directory) console.log(`OUTPUT ${result.id}: ${result.directory}`);
+        for (const warning of result.warnings ?? []) console.log(`WARN ${result.id}: ${warning}`);
+        if (result.error) console.error(diagnostic(result.error));
+      },
+    });
     const count = (status, backend) => results.filter((r) => r.status === status && (!backend || r.backend === backend)).length;
     console.log(`Fixtures: ${count('passed')} passed (${count('passed', 'native')} native, ${count('passed', 'legacy')} legacy), ${count('failed')} failed, ${count('unsupported')} unsupported, ${results.reduce((n, r) => n + r.executions, 0)} emitted executions.`);
     if (count('failed')) process.exitCode = 1;
