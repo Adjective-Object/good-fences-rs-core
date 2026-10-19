@@ -320,7 +320,7 @@ fn native_concatenation_keeps_static_source_order_names_and_free_globals() {
 }
 
 #[test]
-fn native_staging_defers_observable_name_changes_and_readonly_import_writes() {
+fn native_boundaries_preserve_observable_names_and_readonly_import_writes() {
     for (dependency, entry, expected) in [
         ("export function Same() {} export class Model {}", "import {Same as other, Model as Other} from './dep.mjs'; function Same() {} class Model {} console.log(Same.name, other.name, Model.name, Other.name);", "Same Same Model Model\n"),
         ("export const fn = 1;", "import {fn as value} from './dep.mjs'; const fn = () => value; console.log(fn.name);", "fn\n"),
@@ -328,7 +328,7 @@ fn native_staging_defers_observable_name_changes_and_readonly_import_writes() {
     ] {
         let sources = sources(&[("dep.mjs", dependency), ("entry.mjs", entry)]);
         let (_, output) = build(&sources, &[("entry.mjs", true)], false);
-        assert_eq!(output.backend, super::Backend::Legacy, "unported case must stay explicitly staged");
+        assert_eq!(output.backend, super::Backend::Native);
         let observed = node(&output.files, &output.entries["entry.mjs"]);
         assert!(observed.status.success(), "{}", String::from_utf8_lossy(&observed.stderr));
         assert_eq!(observed.stdout, expected.as_bytes());
@@ -462,7 +462,7 @@ fn native_namespace_property_reads_follow_aliases_and_live_bindings() {
 }
 
 #[test]
-fn native_staging_keeps_namespace_escapes_receivers_and_writes_native() {
+fn native_boundaries_keep_namespace_escapes_receivers_and_writes_native() {
     for (entry, expected) in [
         ("console.log(ns === alias, Object.getPrototypeOf(ns) === null, Object.isExtensible(ns)); const d = Object.getOwnPropertyDescriptor(ns, 'value'); console.log(d.value, d.writable, d.enumerable, d.configurable, Object.prototype.toString.call(ns)); export {ns as public};", "true true false\n1 true true false [object Module]\n"),
         ("console.log(ns.read());", "1\n"),
@@ -479,7 +479,7 @@ fn native_staging_keeps_namespace_escapes_receivers_and_writes_native() {
             ("entry.mjs", &format!("import * as ns from './dep.mjs'; import {{nested as alias}} from './barrel.mjs'; {entry}")),
         ]);
         let (_, output) = build(&sources, &[("entry.mjs", true)], false);
-        assert!(output.files.contains_key(Path::new("runtime.cjs")));
+        assert_eq!(output.backend, super::Backend::Native);
         let baseline = node(&sources, Path::new("entry.mjs"));
         let observed = node(&output.files, &output.entries["entry.mjs"]);
         for result in [&baseline, &observed] {
@@ -755,8 +755,9 @@ fn compare(sources: &BTreeMap<PathBuf, String>, entry: &str) -> Artifacts {
     assert_eq!(
         bundled.status.success(),
         baseline.status.success(),
-        "{}",
-        String::from_utf8_lossy(&bundled.stderr)
+        "{}\n{:?}",
+        String::from_utf8_lossy(&bundled.stderr),
+        output.files
     );
     assert_eq!(bundled.stdout, baseline.stdout);
     if !baseline.status.success() {
@@ -1092,12 +1093,220 @@ fn commonjs_namespace_conservatively_captures_runtime_keys_and_live_properties()
 }
 
 #[test]
+fn native_chunks_share_live_state_and_concatenate_private_chains() {
+    let source = sources(&[
+        ("state.mjs", "globalThis.sharedInitializations = (globalThis.sharedInitializations || 0) + 1; export const sharedObject = {}; export let counter = 0; export function increment() { counter++; } export function strictThis() { return this; } const privateSentinel = 'state-private-body'; console.log(privateSentinel);"),
+        ("pass.mjs", "export * from './state.mjs';"),
+        ("private.mjs", "import {sharedObject, counter, increment, strictThis} from './pass.mjs'; export {sharedObject as object, counter, increment}; console.log('private-chain-body', strictThis() === undefined); try { counter = 99; } catch (error) { console.log(error.name); }"),
+        ("a.mjs", "export {object, counter, increment} from './private.mjs';"),
+        ("b.mjs", "export {sharedObject as other, counter as live} from './pass.mjs';"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    assert_eq!(output.backend, Backend::Native);
+    let owner = |module: &str| &output.members[&NodeId::Module(module.into())];
+    assert_eq!(owner("a.mjs"), owner("private.mjs"));
+    assert_eq!(owner("pass.mjs"), owner("state.mjs"));
+    assert_ne!(owner("a.mjs"), owner("state.mjs"));
+    assert!(!output.modules.contains_key(Path::new("private.mjs")));
+    assert!(!output.modules.contains_key(Path::new("pass.mjs")));
+    assert!(output.files[owner("a.mjs")].contains("private-chain-body"));
+    assert!(output.files[owner("a.mjs")].contains("import {"));
+    assert!(!output.files[owner("a.mjs")].contains("from './private.mjs'"));
+    let check = |a: &Path, b: &Path| {
+        format!(
+        "import * as a from {}; import * as b from {}; console.log(Object.keys(a).join(','), Object.keys(b).join(',')); a.increment(); console.log(a.object === b.other, a.counter, b.live, globalThis.sharedInitializations);",
+        quote(&format!("./{}", a.display())), quote(&format!("./{}", b.display()))
+    )
+    };
+    let mut native = source.clone();
+    native.insert(
+        "check.mjs".into(),
+        check(Path::new("a.mjs"), Path::new("b.mjs")),
+    );
+    let baseline = node(&native, Path::new("check.mjs"));
+    let mut files = output.files.clone();
+    files.insert(
+        "check.mjs".into(),
+        check(&output.entries["a.mjs"], &output.entries["b.mjs"]),
+    );
+    let actual = node(&files, Path::new("check.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, baseline.stdout);
+    assert_eq!(actual.stdout, b"state-private-body\nprivate-chain-body true\nTypeError\ncounter,increment,object live,other\ntrue 1 1 1\n");
+    assert_eq!(
+        output,
+        build(&source, &[("a.mjs", true), ("b.mjs", true)], true).1
+    );
+}
+
+#[test]
+fn native_chunks_preserve_entry_dependent_static_effect_order() {
+    let source = sources(&[
+        (
+            "a.mjs",
+            "import './left.mjs'; import './right.mjs'; console.log('a');",
+        ),
+        (
+            "b.mjs",
+            "import './right.mjs'; import './left.mjs'; console.log('b');",
+        ),
+        ("left.mjs", "console.log('left');"),
+        ("right.mjs", "console.log('right');"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    assert_eq!(output.backend, Backend::Native);
+    for entry in ["a.mjs", "b.mjs"] {
+        let native = node(&source, Path::new(entry));
+        let actual = node(&output.files, &output.entries[entry]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, native.stdout);
+    }
+}
+
+#[test]
+fn native_barrel_redirects_preserve_exact_public_surfaces() {
+    for (dependency, barrel, expected) in [
+        (
+            "export const x = 1; export const y = 2; export default 3;",
+            "export {x} from './dep.mjs';",
+            "x default,x,y true false false\n",
+        ),
+        (
+            "export const x = 1; export const y = 2; export default 3;",
+            "export {x as renamed} from './dep.mjs';",
+            "renamed default,x,y false true false\n",
+        ),
+        (
+            "export const x = 1; export const y = 2;",
+            "export {x as y, y as x} from './dep.mjs';",
+            "x,y x,y false false false\n",
+        ),
+        (
+            "export const x = 1; export const y = 2; export default 3;",
+            "export * from './dep.mjs';",
+            "x,y default,x,y true false false\n",
+        ),
+        (
+            "export * as x from './leaf.mjs'; export const y = 2; export default 3;",
+            "export {x} from './dep.mjs';",
+            "x default,x,y true false false\n",
+        ),
+    ] {
+        let source = sources(&[
+            ("entry.mjs", "export * from './barrel.mjs';"),
+            ("barrel.mjs", barrel),
+            ("dep.mjs", dependency),
+            ("leaf.mjs", "export const value = 1;"),
+        ]);
+        let (_, output) = build(&source, &[("entry.mjs", true), ("dep.mjs", true)], false);
+        assert_eq!(output.backend, Backend::Native);
+        let check = |entry: &Path, dep: &Path| {
+            format!(
+            "import * as entry from {}; import * as dep from {}; console.log(Object.keys(entry).join(','), Object.keys(dep).join(','), entry.x === dep.x, entry.renamed === dep.x, 'default' in entry);",
+            quote(&format!("./{}", entry.display())), quote(&format!("./{}", dep.display()))
+        )
+        };
+        let mut native = source.clone();
+        native.insert(
+            "check.mjs".into(),
+            check(Path::new("entry.mjs"), Path::new("dep.mjs")),
+        );
+        let baseline = node(&native, Path::new("check.mjs"));
+        let mut files = output.files.clone();
+        files.insert(
+            "check.mjs".into(),
+            check(&output.entries["entry.mjs"], &output.entries["dep.mjs"]),
+        );
+        let actual = node(&files, Path::new("check.mjs"));
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, baseline.stdout);
+        assert_eq!(actual.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
+fn native_chunk_namespace_ambiguity_survives_other_entry_demands() {
+    let source = sources(&[
+        (
+            "barrel.mjs",
+            "export * from './left.mjs'; export * from './right.mjs';",
+        ),
+        ("left.mjs", "export const conflict = 1;"),
+        (
+            "right.mjs",
+            "export const conflict = 2; export const kept = 3;",
+        ),
+    ]);
+    let (_, output) = build(&source, &[("barrel.mjs", true), ("left.mjs", true)], false);
+    assert_eq!(output.backend, Backend::Native);
+    let mut files = output.files.clone();
+    files.insert(
+        "check.mjs".into(),
+        format!(
+            "import * as ns from {}; console.log(Object.keys(ns).join(','), ns.conflict, ns.kept);",
+            quote(&format!("./{}", output.entries["barrel.mjs"].display()))
+        ),
+    );
+    let actual = node(&files, Path::new("check.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, b"kept undefined 3\n");
+}
+
+#[test]
+fn native_chunks_share_precise_namespace_values_across_public_entries() {
+    let source = sources(&[
+        (
+            "leaf.mjs",
+            "export let value = 1; export function bump() { value++; }",
+        ),
+        ("a.mjs", "export * as ns from './leaf.mjs';"),
+        ("route.mjs", "export {ns as renamed} from './a.mjs';"),
+        ("b.mjs", "export {renamed as alias} from './route.mjs';"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    assert_eq!(output.backend, Backend::Native);
+    let mut files = output.files.clone();
+    files.insert("check.mjs".into(), format!(
+        "import {{ns}} from {}; import {{alias}} from {}; ns.bump(); const d = Object.getOwnPropertyDescriptor(alias, 'value'); console.log(ns === alias, Object.keys(ns).join(','), alias['value'], d.value, d.writable, d.configurable, Object.getPrototypeOf(ns) === null, Object.isExtensible(ns));",
+        quote(&format!("./{}", output.entries["a.mjs"].display())),
+        quote(&format!("./{}", output.entries["b.mjs"].display()))
+    ));
+    let actual = node(&files, Path::new("check.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        b"true bump,value 2 2 true false true false\n"
+    );
+}
+
+#[test]
 fn native_cycle_instantiation_distinguishes_functions_var_and_lexical_tdz() {
     let output = compare(&sources(&[
         ("entry.mjs", "import {read, bump, value} from './a.mjs'; console.log(read(), value); bump(); console.log(read(), value);"),
         ("a.mjs", "import {initial} from './b.mjs'; export var value = initial + 1; export function read() { return value; } export function bump() { value++; }"),
         ("b.mjs", "import {read, value} from './a.mjs'; console.log(typeof read, value, read()); export var initial = 4;"),
     ]), "entry.mjs");
+    assert_eq!(output.backend, Backend::Native);
     assert!(!output
         .files
         .values()
@@ -1141,7 +1350,7 @@ fn drops_unused_import_bindings_and_reexports_but_not_static_effects() {
 }
 
 #[test]
-fn exact_root_sets_own_distinct_physical_files() {
+fn logical_root_sets_project_to_actual_native_body_owners() {
     let sources = sources(&[
         ("a.mjs", "export {a} from './common.mjs';"),
         ("b.mjs", "export {b} from './common.mjs';"),
@@ -1164,10 +1373,11 @@ fn exact_root_sets_own_distinct_physical_files() {
     };
     let second = NodeId::Segment { module, index: 1 };
     assert_ne!(plan.chunk_for(&first), plan.chunk_for(&second));
-    assert_ne!(output.members[&first], output.members[&second]);
+    assert_eq!(output.backend, super::Backend::Native);
+    assert_eq!(output.members[&first], output.members[&second]);
     assert!(output.members[&first]
         .extension()
-        .is_some_and(|e| e == "cjs"));
+        .is_some_and(|e| e == "mjs"));
     for (chunk, members) in &plan.chunks {
         for member in members {
             assert!(output.chunk_artifacts[chunk].contains(&output.members[member]));

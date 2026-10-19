@@ -1,5 +1,70 @@
 # Incremental bundler implementation handoff
 
+## Current increment: body-bearing synchronous native chunks
+
+Native emission now handles synchronous multi-entry ESM graphs with real native
+imports/reexports, not cells, factories, dispatchers or internal facade families.
+Keep the existing one-tree fast path (including the 66-source one-file benchmark).
+The broader planner protects public/namespace identities and static SCC members,
+redirects unobserved identical-surface pure barrels, and joins exclusive dependency chains
+or body-free connectors only when source-order completion is preserved. Shared
+initializers/objects stay once-only. Group candidates use existing checked
+canonical body rewrites; unsupported name inference or intra-group import writes
+retain genuine native body seams, not legacy fallback. External aliases remain
+capture-free read-only imports. Singletons retain actual function/var/lexical
+declarations, so Node owns cycles, anonymous default hoisting and TDZ.
+
+An initial cycle test caught missing evaluation-only import statements: retention
+need not keep the connector's statement. Native source seams now explicitly
+preserve every original static request in occurrence order before binding imports.
+This fixes the real TDZ failure rather than weakening its runtime comparison.
+
+`members` maps every logical node to its actual body owner. Logical artifact sets
+can project to several physical owners and overlap; root analysis/reference
+reachability is unchanged. Only actual independently executable namespace surfaces
+appear in `modules`. No decorative helper paths or leaked setter exports.
+The new emitter source keys BuildSession fingerprints. Native layout reporting
+is now `native-esm-chunks-v1`; Backend remains authoritative.
+
+Graduated to required native: `authored/namespace-observations`,
+`esbuild/shared-entrypoint-identity`, `esbuild/reexport-cycle`. The original ten
+native fixtures remain native; added `authored/native-barrel-surface`:
+**24 contracts / 31 executions, 14 native /
+10 legacy, zero unsupported**, plus same-runtime identity and four diagnostics.
+Rust regressions cover grouped private bodies with external read-only imports,
+strict variable-call `this`, exact public keys, shared ambient initialization and
+mutable identity, shared barrel elimination, cross-entry namespace descriptors/
+identity/ambiguity, native cycle var/functions/TDZ, and entry-dependent import
+order. Old exact-file assertions now check truthful owners/projections; deferred
+closure tests remain intact.
+
+Review follow-up: subset export-map matches were unsound for barrel redirection.
+The focused Rust regression first observed leaked `y` through the actual emitted
+public entry path. The new native-required portable fixture separately failed
+OUTPUT with both `subset x,y` and a falsely ambiguous combined `y`. Redirects now
+require equal export counts plus the existing per-name canonical-identity checks;
+no new rewrite framework. Runtime cases cover aliases, default-star exclusion,
+namespace identities, filtered keys and false ambiguity. The fixture statically
+observes actual public entry/dep namespaces without self-cycle warning noise.
+
+Validation: **147 bundler tests**, **97 unified harness tests**, unified public
+fixture runner, package format, all-target bundler clippy with warnings denied,
+mandatory spot-check, and seven-sample public build/publication benchmark.
+The benchmark still asserts one ordinary file, 134 output parses/emission and
+zero no-op writes; median cold/warm/no-op totals 95.763/43.719/3.127 ms
+(benchmark measured before the exact-surface review fix; single-file path unchanged).
+Commands use `TMPDIR=$PWD/target/p1-test-tmp`; logs:
+`target/native-chunks-{focused,cycle,tests,harness,build,contracts,clippy,spot-check,bench}.log`.
+Review fix red/green/full validation logs:
+`target/native-barrel-{surface-red,surface-green,fixture-red,tests,build,contracts,harness,clippy,spot-check}.log`.
+Existing workspace dead-code warnings remain. No full workspace tests or upstream
+parity claim; no commits/pushes. User-owned ftree_cache change was left untouched.
+
+Pending: independent review; more aggressive shared renaming-barrel/pure sibling/
+name-inference-safe relocation; native async roots/TLA, CJS one-opaque-segment/
+logical-facade integration and selected-binding/multi-evaluation low-level roots.
+These last capability shapes remain explicitly legacy, not completed native ESM.
+
 ## Current diversion: unified fixture runner
 
 On base `ec0a859`, `scripts/bundler-fixtures.mjs [fixture-root]` is now the only

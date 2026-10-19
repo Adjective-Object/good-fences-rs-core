@@ -1,4 +1,4 @@
-//! First staged native slice: one synchronous acyclic ESM evaluation tree.
+//! Scope-hoisted synchronous ESM, with native boundaries for observable seams.
 use super::*;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
@@ -11,6 +11,9 @@ use std::collections::{HashMap, HashSet};
 use crate::rewrite::{self, Edit};
 use crate::symbols::Symbols;
 
+#[path = "native_chunks.rs"]
+mod chunks;
+
 pub(super) fn emit(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -18,8 +21,20 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Option<Artifacts>> {
-    // shortcut: keep unported boundaries on the legacy emitter until their
-    // native semantics are implemented; remove this staging gate with that emitter.
+    if let Some(output) = single(graph, plan, modules, manifest, symbols)? {
+        return Ok(Some(output));
+    }
+    chunks::emit(graph, plan, modules, manifest, symbols)
+}
+
+fn single(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    symbols: &Symbols,
+) -> eyre::Result<Option<Artifacts>> {
+    // Prefer whole-tree concatenation; the group planner handles native seams.
     if plan.roots.len() != 1 || plan.chunks.len() != 1 {
         return Ok(None);
     }
@@ -154,6 +169,7 @@ pub(super) fn emit(
 struct Values<'s> {
     symbols: &'s Symbols,
     defaults: BTreeMap<SegmentKey, String>,
+    imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
 }
 
 impl<'s> Values<'s> {
@@ -197,7 +213,11 @@ impl<'s> Values<'s> {
                 }
             }
         }
-        Self { symbols, defaults }
+        Self {
+            symbols,
+            defaults,
+            imports: HashMap::new(),
+        }
     }
 
     fn name(&self, identity: &ExportIdentity) -> Option<&str> {
@@ -224,25 +244,7 @@ fn body(
     let symbols = values.symbols;
     // Compose PURE recipes before re-extracting occurrences. Generated spans
     // never address original text; source binding names reconnect to owned IDs.
-    let mut source = String::new();
-    for (index, segment) in module.parsed.segments.iter().enumerate() {
-        let key = SegmentKey::new(file, index as u32);
-        if !live.contains(&key) {
-            continue;
-        }
-        if let Some(recipes) = recipes.get(&key) {
-            source.push_str(&crate::emit::render_segment(
-                module.source,
-                segment.span,
-                recipes,
-                &module.parsed.facts,
-            )?);
-        } else {
-            source.push_str(&module.source[segment.span.start as usize..segment.span.end as usize]);
-        }
-        // Retention and PURE rewrites can expose a new ASI continuation.
-        source.push_str("\n;\n");
-    }
+    let source = retained_source(file, module, live, recipes)?;
     rewrite::count_output_parse();
     let parsed = ast_segmenter::parse_module(
         &logger::StdioLogger::new(),
@@ -253,7 +255,9 @@ fn body(
     let mut names = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     for binding in module.parsed.facts.bindings.iter().filter(|b| b.top_level) {
-        let target = if let Some(definition) = symbols.definitions.get(&(file, binding.id)) {
+        let target = if let Some(name) = values.imports.get(&(file, binding.id)) {
+            Some(name.as_str())
+        } else if let Some(definition) = symbols.definitions.get(&(file, binding.id)) {
             Some(definition.name.as_str())
         } else if let Some(import) = symbols.imports.get(&(file, binding.id)) {
             if let ExportIdentity::Namespace(target) = import.identity {
@@ -372,8 +376,6 @@ fn body(
             &source[function.start as usize..function.end as usize],
             &edits,
         )?;
-        // In this acyclic one-file slice, pure function creation precedes all
-        // evaluation, matching instantiation without introducing a runtime cell.
         hoisted.push_str(&format!(
             "var {name} = ({{default: {function}}}).default;\n"
         ));
@@ -383,6 +385,34 @@ fn body(
         });
     }
     Ok(Some((hoisted, rewrite::apply(&source, &syntax.edits)?)))
+}
+
+fn retained_source(
+    file: u32,
+    module: &Module<'_>,
+    live: &BTreeSet<SegmentKey>,
+    recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
+) -> eyre::Result<String> {
+    let mut source = String::new();
+    for (index, segment) in module.parsed.segments.iter().enumerate() {
+        let key = SegmentKey::new(file, index as u32);
+        if !live.contains(&key) {
+            continue;
+        }
+        if let Some(recipes) = recipes.get(&key) {
+            source.push_str(&crate::emit::render_segment(
+                module.source,
+                segment.span,
+                recipes,
+                &module.parsed.facts,
+            )?);
+        } else {
+            source.push_str(&module.source[segment.span.start as usize..segment.span.end as usize]);
+        }
+        // Retention and PURE rewrites can expose a new ASI continuation.
+        source.push_str("\n;\n");
+    }
+    Ok(source)
 }
 
 struct Syntax<'s> {

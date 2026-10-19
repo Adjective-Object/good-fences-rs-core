@@ -341,7 +341,7 @@ fn merge_projection(
 }
 
 /// Iterative Kosaraju; consumer → dependency DFS finishes dependencies first.
-fn components(dependencies: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
+pub(crate) fn components(dependencies: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
     let mut seen = HashSet::new();
     let mut finished = Vec::new();
     for node in 0..dependencies.len() {

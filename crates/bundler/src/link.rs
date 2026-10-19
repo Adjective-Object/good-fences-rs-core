@@ -32,7 +32,7 @@ pub enum Backend {
 impl Backend {
     pub fn layout(self) -> &'static str {
         match self {
-            Self::Native => "native-single-chunk-v1",
+            Self::Native => "native-esm-chunks-v1",
             Self::Legacy => "exact-root-set-chunks-v1",
         }
     }

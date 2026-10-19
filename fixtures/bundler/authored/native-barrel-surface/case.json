@@ -1,0 +1,14 @@
+{
+  "id": "authored/native-barrel-surface",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs", "dep.mjs", "observe.mjs"],
+  "expectations": {
+    "stdout": ["subset x 1 false false", "combined x,y 1 4 false", "dependency default,x,y"],
+    "backend": "native"
+  },
+  "goals": [
+    "Build the public combined star-export entry and the full dependency as namespace-bearing entries alongside a static namespace observer entry.",
+    "Observe each public entry's own native namespace: a filtered barrel must not expose its dependency's extra names or default.",
+    "A dependency's hidden name must not introduce false ambiguity with another star export."
+  ]
+}

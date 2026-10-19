@@ -24,7 +24,7 @@ hoisting/initialization semantics. No public product field or dependency was add
 The native foundation below is implemented for independent review, not completion
 of scope hoisting, CJS integration or removal of the legacy backend.
 
-## Staged native foundation
+## Staged native synchronous chunks
 
 `link::esm` (including public `BuildSession` and publication) emits **one
 `native.mjs`** for a single namespace entry/evaluation root whose retained static
@@ -47,28 +47,45 @@ TDZ, const and live mutation keep native semantics. The output is parser/semanti
 validated and has no runtime, cells, registrations or per-module facade family.
 
 Checked dot-property reads of namespace imports (including namespace reexport
-aliases) resolve directly to canonical live values. Only the public entry gains
-a native namespace; no private getter object or namespace facade is fabricated.
-Namespace escapes/public namespace exports, computed or unresolved properties,
-method/tag receivers and property writes/deletes remain staged. Their identity,
-TDZ, descriptors and read-only behavior still use actual legacy native boundaries.
+aliases) resolve directly to canonical live values when the whole graph can
+concatenate. The broader synchronous ESM path emits real body-bearing
+`native/<path-hash>.mjs` chunks, with ordinary static imports/reexports between
+them. It supports multiple entries, evaluation-only entries, escaped namespaces,
+computed reads, descriptors, receivers and read-only writes. Namespace values
+are actual native module namespaces, never getter objects or setter facades.
 
-This is an explicit **temporary staging gate**, not a permanent fallback or an
-option. Multiple roots/groups, non-namespace entries, cycles and async/CJS/
-nonstatic dependencies still use the legacy emitter. So do import writes (never
-rewritten into defining mutable bindings), renamed function/class declarations,
-and conservatively anonymous function/class/arrow syntax alongside renamed
-local declarations or writes. Top-level import aliases no longer reserve lexical
-names: they disappear after checked read substitution, avoiding unnecessary
-function/class renames. Anonymous syntax with only imported-read substitutions is
-eligible. Remaining collision/inference cases need AST-context name preservation,
-not silent `.name` changes. No unported case silently loses exports.
-Port these boundaries incrementally, then delete the gate and legacy emitter.
+The conservative planner merges an exclusively consumed dependency group when
+it is the consumer group's only remaining dependency. It can also absorb
+body-free import/reexport connectors among siblings. Unobserved pure barrels
+redirect to their dependency only when their complete export-name/canonical-
+identity maps match, including `default`; subset surfaces must not widen later
+star exports or introduce ambiguity. Source-ordered static DFS
+then preserves dependency completion and statement order; identical logical root
+sets alone never authorize moving effects. Shared dependencies remain once-only
+body owners. Public entry surfaces and namespace targets keep precise native
+surfaces; internal imports/exports disappear inside a merged group. No generated
+private names leak into namespace keys.
 
-`members`/`chunk_artifacts` point to the real native file for this one-group case;
-the logical manifest remains reachability analysis. `modules` contains only the
-entry's independently executable namespace, not fake paths for merged private
-modules. The 64-star-chain benchmark now asserts this actual one-file path.
+Static SCC members retain native declarations/imports, preserving function/var
+instantiation and lexical TDZ, including anonymous defaults. A merge that would
+change observed names or turn an imported write into a mutable defining binding
+is declined in favor of a native body boundary, **not legacy emission**. External
+imports in merged groups use capture-free read-only native aliases.
+This planner intentionally does not maximize grouping: shared renaming connectors,
+some pure sibling declarations and name-inference-sensitive merges can still
+retain native seams.
+
+The remaining **temporary legacy staging gate** is async/nonstatic dependencies,
+CJS, and low-level roots with multiple evaluation files or selected non-module
+binding roots. Async support must preserve real TLA jobs, not impose a sync
+order. Opaque-CJS/facade integration and legacy deletion remain future increments.
+
+`members` points to actual body owners. A logical `chunk_artifacts` projection
+can contain several physical paths and overlap another projection when physical
+groups merge; the manifest/reference reachability oracle is unchanged.
+`modules` contains only independently executable source namespace surfaces,
+not fake paths for merged private modules. The 66-source star-chain benchmark
+still asserts one ordinary `native.mjs`, without runtime/helpers.
 
 ## Current legacy exact physical code splitting
 
@@ -176,7 +193,7 @@ generation-specific `entries`, the selected `backend`, physical `layout` and
 actual build counters as JSON. `link::Artifacts::backend` is the authoritative
 `link::Backend::{Native, Legacy}` value assigned by the emitter that produced the
 artifacts, never inferred from filenames. It serializes as `"native"` or
-`"legacy"`; `Backend::layout()` currently returns `"native-single-chunk-v1"` or
+`"legacy"`; `Backend::layout()` currently returns `"native-esm-chunks-v1"` or
 `"exact-root-set-chunks-v1"` respectively. This reports the temporary staging
 selection; it is not a new backend option.
 Fixture `expectations.backend: "native"` rejects legacy fallback in the unified
@@ -328,19 +345,19 @@ bundler), **43 harness regressions**, **12 native + 12 differential contracts /
 Zero failed/ignored/unsupported cases in these gates. Existing dependency
 lifetime/dead-code warnings remain; no unrelated CI/toolchain health claim.
 
-Current second harness-diversion validation (not a full release rerun):
-**142 bundler tests** after retiring four redundant runtime tests,
-**89 harness regressions**, **23 baseline + 23 differential contracts /
-28 emitted executions**, same-runtime identity and four diagnostics, format,
-all-target bundler clippy (`--no-deps`) and mandatory spot-check pass.
-**Ten contracts select native, thirteen select legacy**. Six additional authored
-contracts require native for hoisting, defaults, names, destructuring, static
-order and const errors; namespace escapes/async/CJS remain legacy coverage.
+Current synchronous native-chunk validation (not a full workspace test rerun):
+**147 bundler tests**, **97 harness regressions**, **24 source/emitted contracts /
+31 emitted executions**, same-runtime identity and four diagnostics, format,
+all-target bundler clippy (`--no-deps`, warnings denied) and mandatory spot-check pass.
+**Fourteen contracts select native, ten select legacy**. Namespace observations,
+shared entrypoint identity and reexport cycles now require native in addition to
+the eight authored native-required cases, including the filtered-barrel public
+surface/false-ambiguity regression. Async/CJS remain legacy coverage.
 See the [authored backend baseline](../../fixtures/bundler/README.md#authored-migration-baseline)
 and exact retirement mapping in NOTES. Each subsequent linker stage must graduate
 applicable legacy fixtures to required-native coverage and/or add meaningful
-regressions for its new behavior. Native cross-chunk implementation remains
-paused until independent review of this migration.
+regressions for its new behavior. Independent review of synchronous native
+grouping is pending; general ESM/async/CJS completion is not claimed.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
@@ -541,7 +558,8 @@ or import that file directly:
 import value, {namedExport} from './facades/<entry-path-hash>.namespace.mjs';
 ```
 
-Namespace entries and dynamic imports point to canonical native namespace facades,
+Native synchronous entries point to their actual chunks. In the legacy path,
+namespace entries and dynamic imports point to canonical native namespace facades,
 not namespace-object launchers. ESM exposes actual static named/default exports;
 CJS executes directly as CJS. Request namespace binding demand when all public
 exports must remain; evaluation-only
@@ -550,9 +568,9 @@ Repeated/concurrent entries and static namespace re-exports share one canonical
 native identity per module. Separate published bundle directories have isolated
 native identities.
 
-Executable bodies live in `chunks/<sha256-canonical-root-set>.cjs`. Two retained
+In the legacy path, executable bodies live in `chunks/<sha256-canonical-root-set>.cjs`. Two retained
 nodes share a file **if and only if** their nonempty root sets are identical.
-`members` is exact ownership; every `chunk_artifacts` set is a singleton and the
+In the legacy path, `members` is exact ownership; every `chunk_artifacts` set is a singleton and the
 sets are disjoint. Facades/runtime support are not pretend node owners.
 Modules with multiple root sets have their statements physically separated;
 modules with equal sets share code files without sharing evaluation identity.
@@ -585,7 +603,8 @@ bundler cache); evaluation errors remain cached by native ESM. Changed artifacts
 new immutable published generation; unchanged content intentionally keeps the
 same directory/native jobs, never an in-place repair of failed jobs.
 Externals, TS/JSX and other source-policy unsupported forms still fail with
-diagnostics. Root-set equality is exact; no heuristic merging/hoisting is performed.
+diagnostics. Logical root-set equality remains exact; native physical grouping
+does not change that analytical partition. The legacy path performs no merging.
 This backend is not a browser/standalone-file target.
 
 ### Async evaluation and support

@@ -37,6 +37,12 @@ facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
 no independently executable namespace path in `Artifacts::modules`.
+Synchronous native groups merge exclusive chains and body-free connectors only
+when source-order completion is preserved. Keep SCC declarations and observable
+namespace/name/read-only seams native, not cells. Logical artifact projections
+may overlap or contain several body owners; root sets do not prescribe files.
+Redirect pure barrels only for equal export-name/canonical-identity maps,
+including default; subset matches can widen downstream star exports.
 Pure segments can relocate by binding dependencies. Effect retention is distinct
 from scheduling and neither is a binding edge. Project through pure/static-import
 connectors before pruning to effects; deterministically break order-only SCCs

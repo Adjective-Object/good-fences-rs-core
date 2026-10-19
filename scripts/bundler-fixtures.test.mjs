@@ -28,7 +28,7 @@ const entries = Object.fromEntries(names.map((name, i) => {
   writeFileSync(filename, 'import ' + JSON.stringify(pathToFileURL(path.join(root, name)).href));
   return [name, filename];
 }));
-console.log(JSON.stringify({directory, entries, backend:'native', layout:'native-single-chunk-v1', warnings:[], publicationWarnings:[]}));
+console.log(JSON.stringify({directory, entries, backend:'native', layout:'native-esm-chunks-v1', warnings:[], publicationWarnings:[]}));
 `);
     chmodSync(driver, 0o755);
     callback({ root, tempRoot, driver, builds, run: (options = {}) => runFixtures(root, { driver, tempRoot, ...options }) });
@@ -389,7 +389,7 @@ test('native requirements use the driver backend, not successful runtime observa
     addCase(root, 'unmarked');
     writeFileSync(driver, readFileSync(driver, 'utf8')
       .replace("backend:'native'", "backend:'legacy'")
-      .replace("layout:'native-single-chunk-v1'", "layout:'exact-root-set-chunks-v1'"));
+      .replace("layout:'native-esm-chunks-v1'", "layout:'exact-root-set-chunks-v1'"));
     const [failure, pass] = run();
     assert.equal(failure.stage, 'backend');
     assert.equal(failure.status, 'failed');

@@ -8,8 +8,8 @@
   and one corpus invocation in release/CI. Validated: 97 harness tests, public
   driver build, 23 contracts / 28 executions (10 native / 13 legacy / zero
   unsupported), and spot-check.
-- [ ] Independently review the unified runner increment before committing or
-  resuming the paused native cross-chunk work; no linker/backend gate changed.
+- [x] Independently review the unified runner increment; committed as `06f6c22`.
+  No linker/backend gate changed in that increment.
 - [x] Independently review the first harness diversion: authoritative production
   backend/layout reporting, native-required case metadata, optional fully checked
   upstream provenance, shared normalized runtime outcomes and preceding effects.
@@ -21,9 +21,8 @@
   reported legacy. Four redundant Rust runtime tests retired (NOTES maps each).
   Validated: 142 bundler / 89 harness tests, 23 baseline + differential contracts,
   28 emitted executions; actual backends 10 native / 13 legacy; zero unsupported.
-- [ ] Independently review the second harness diversion before resuming native
-  cross-chunk work. No linker/gate changes, new structural assertion DSL or
-  native namespace-escape/async/CJS coverage claim in this increment.
+- [x] Independently review the second harness diversion; committed as `ec0a859`.
+  No linker/gate changes or native namespace/async/CJS claim in that increment.
 - [ ] For each subsequent linker stage, graduate applicable legacy fixtures to
   required native and/or add meaningful regressions exercising its new behavior.
   Compare against the fixture README's explicit backend baseline.
@@ -37,14 +36,20 @@
 - [x] Extend the native slice to default expression snapshots/live aliases,
   anonymous default names, named declaration hoisting/TDZ and checked namespace
   dot reads/reexport aliases; admit anonymous syntax with imported-read rewrites.
-- [ ] Preserve names for remaining declaration collisions and AST inference sites
-  alongside renamed locals/writes. Preserve read-only imports across proper native
-  boundaries rather than rewriting writes into mutable defining bindings.
-- [ ] Use actual body-bearing native chunks for namespace escapes/public namespace
-  exports and receiver-sensitive accesses; do not fabricate getter objects or an
-  unconditional internal facade. Computed/unresolved properties remain staged.
-- [ ] Scope-hoist direct bindings and native imports/exports across actual output
-  chunks; public entry/export boundaries only, no forced root-set partition.
+- [x] Preserve names and read-only writes at native body boundaries when a merge
+  cannot preserve them; never rewrite imported writes into defining bindings.
+- [x] Use actual native chunks for full namespace values/public namespace exports,
+  computed reads, descriptors, identity and receiver-sensitive accesses.
+- [x] Scope-hoist exclusive synchronous dependency chains/body-free connectors;
+  use native imports/exports across real chunks and native SCC declarations.
+  Project logical artifacts to actual owners without changing root analysis.
+- [x] Fix reviewed filtered-barrel surface widening: redirect only equal export
+  name/identity maps; require native public-surface/false-ambiguity fixture.
+- [ ] Independently review synchronous native grouping; extend pure/shared
+  connector relocation and name-inference-safe merges where worthwhile.
+- [ ] Extend native linking to async roots/TLA without imposing synchronous
+  dependency completion order; selected-binding/multi-evaluation low-level roots
+  also remain staged.
 - [ ] Integrate one opaque CJS segment and logical ESM facade per input into
   normal usage/link/grouping, not standalone native `.cjs` fallback files.
 - [ ] Remove legacy registrations/cells/aliases/watchers/generator dispatch,

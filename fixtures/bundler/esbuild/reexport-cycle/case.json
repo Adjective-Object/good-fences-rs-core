@@ -17,7 +17,8 @@
   "moduleType": "module",
   "entryPoints": ["node.js"],
   "expectations": {
-    "stdout": ["false true"]
+    "stdout": ["false true"],
+    "backend": "native"
   },
   "goals": [
     "A cyclic ESM graph resolves through a star re-export.",

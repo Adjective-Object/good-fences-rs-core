@@ -17,7 +17,8 @@
   "moduleType": "module",
   "entryPoints": ["a.js", "b.js", "c.js", "node.js"],
   "expectations": {
-    "stdout": ["false false true true"]
+    "stdout": ["false false true true"],
+    "backend": "native"
   },
   "goals": [
     "Multiple source entrypoints share a dependency through named re-exports.",

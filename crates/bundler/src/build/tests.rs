@@ -271,11 +271,10 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     );
     options.entries.get_mut("main").unwrap().namespace = false;
     let roots = parity(&mut session, &options);
-    assert!(roots
-        .product
-        .artifacts
-        .files
-        .contains_key(Path::new("runtime.cjs")));
+    assert_eq!(
+        roots.product.artifacts.backend,
+        crate::link::Backend::Native
+    );
     assert_eq!(roots.counters.source_parses, 0);
     assert_eq!(roots.counters.resolutions, 0);
     assert_eq!(

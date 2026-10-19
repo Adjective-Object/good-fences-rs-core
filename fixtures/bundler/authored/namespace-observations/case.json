@@ -3,6 +3,7 @@
   "moduleType": "module",
   "entryPoints": ["entry.mjs"],
   "expectations": {
+    "backend": "native",
     "stdout": [
       "a", "b", "bump,read,value 1",
       "true true false",
@@ -14,6 +15,6 @@
   "goals": [
     "Escaped namespaces preserve keys, descriptors, null prototype, nonextensibility and identity through diamond barrels.",
     "An unknown computed key and receiver-sensitive method see live values; namespace writes remain read-only.",
-    "Currently exercises the reported legacy backend, not native namespace-escape support."
+    "Require body-bearing native ESM boundaries, not legacy namespace emulation."
   ]
 }

@@ -10,8 +10,8 @@ Replace the linker entirely, in independently reviewed committable increments:
    order-only SCCs deterministically with public warnings; then link direct
    lexical identities without runtime cells/aliases. Effect analysis is delivered;
    checked canonical symbol planning and production resolution reuse are now
-   implemented. A gated single-entry native concatenation foundation now emits
-   direct lexical bindings for independent review; general emission is pending.
+   implemented. Synchronous native concatenation/group emission now uses direct
+   lexical bindings and real native seams; async/CJS integration remains pending.
 2. **Scope hoisting/native chunks:** relocate pure segments by binding needs,
    preserve observable effects/activation and native binding/TDZ semantics.
    Native imports/exports cross actual output chunks only. Public entry/export
@@ -25,16 +25,16 @@ Replace the linker entirely, in independently reviewed committable increments:
 5. **Release:** independent reviews, runtime/differential regressions, incremental
    invalidation/determinism and mandatory spot-check before release evidence.
 
-The current increment uses canonical symbols for real `native.mjs` emission on
-one synchronous acyclic ESM namespace-entry tree. Direct binding substitutions,
-static dependency/source order and exact entry export aliases are production
-paths, not an unused utility. Default expressions/anonymous declarations now
-preserve snapshot/live and native name semantics; checked namespace dot reads
-resolve directly, including namespace reexport aliases. Import-read substitutions
-no longer exclude anonymous syntax or reserve disappearing import aliases.
-Remaining name-sensitive collisions/inference, namespace escapes/receivers/writes,
-cycles, multiple roots and async/CJS remain explicitly staged on the legacy
-emitter. The crate README defines the precise gate.
+The current increment extends canonical-symbol concatenation to body-bearing
+synchronous multi-entry native chunks. Exclusive dependency chains and body-free
+connectors can merge; shared bodies remain once-only, independently of logical
+root-set equality. Native imports/reexports cross actual physical groups.
+Precise public surfaces, full namespace values, read-only imported writes,
+name-sensitive collisions and static SCC instantiation retain genuine native
+boundaries rather than legacy cells. Default snapshots/names and the eligible
+66-source one-file path remain intact. Async/CJS/nonstatic dependencies and
+non-module/multi-evaluation low-level root shapes remain explicitly staged on
+legacy. The crate README defines the precise gate and conservative grouping.
 This is not completed general linking/scope hoisting or legacy removal.
 Order-cycle policy remains planning, not suppressed binding errors; the native
 slice uses source-ordered static DFS, not the scalar effect DAG as a scheduler.

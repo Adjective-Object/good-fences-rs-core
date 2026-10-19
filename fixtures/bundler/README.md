@@ -23,8 +23,8 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **23 cases / 28 entry executions**: six esbuild cases,
-six rspack cases and eleven authored cases. The upstream cases cover
+The corpus contains **24 cases / 31 entry executions**: six esbuild cases,
+six rspack cases and twelve authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
@@ -172,20 +172,25 @@ Runner regression tests use synthetic fixtures only:
 The single command above validates manifests/provenance first and compares
 manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
-All **23 contracts / 28 emitted entry executions** pass, with zero
+All **24 contracts / 31 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
-- **Native (10):** all seven `authored/native-*` cases,
+- **Native (14):** all eight `authored/native-*` cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
-  `rspack/esm-live-binding`. The seven authored cases require native selection.
-- **Legacy (13):** all other cases, including the three namespace/ambient cases
+  `rspack/esm-live-binding`, `authored/namespace-observations`,
+  `esbuild/shared-entrypoint-identity` and `esbuild/reexport-cycle`.
+  The eight native-authored cases and all three graduated cases require
+  native selection.
+- **Legacy (10):** all other cases, including the two ambient async cases
   below, `authored/runtime-outcomes` and
   `esbuild/dynamic-import-tla-order`. These passes are not native-backend coverage.
 
 ### Authored migration baseline
 
 Nine cases port representative inline Rust regressions through the same unbundled
-and public-build observer. All have one entry; outcomes below are observed, not
+and public-build observer; those migrated cases each have one entry. The added
+barrel-surface regression has three entries: the public reexport entry, its full
+dependency, and a static namespace observer. Outcomes below are observed, not
 linker-shape assertions. No upstream provenance is fabricated for local inputs.
 
 | Added case (`authored/`) | Actual backend | Expected completion / observations |
@@ -196,7 +201,8 @@ linker-shape assertions. No upstream provenance is fabricated for local inputs.
 | `native-proto-destructuring` | native, required | Success; literal/escaped own keys, prototype setter distinction, binding/assignment defaults |
 | `native-static-order` | native, required | Success; `z` before `a` through a pure barrel, source names, free global and strict `this` |
 | `native-const-write` | native, required | Uncaught `TypeError` after caught TDZ/const errors, imported value and preceding effect |
-| `namespace-observations` | legacy | Success; keys/descriptors, computed read, live aliases, identity, method receiver, read-only write |
+| `native-barrel-surface` | native, required | Success; filtered public export keys, default-star exclusion, no false star ambiguity when the full dependency is another public entry |
+| `namespace-observations` | native, required | Success; keys/descriptors, computed read, live aliases, identity, method receiver, read-only write |
 | `ambient-dynamic-laziness` | legacy | Success; zero effects before import, outer then deferred inner effects, cached namespace identity |
 | `ambient-once-identity` | legacy | Success; one shared ambient initialization across concurrent consumers, object/function/namespace identity and mutation |
 
