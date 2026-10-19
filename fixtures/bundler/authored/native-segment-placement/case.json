@@ -1,0 +1,26 @@
+{
+  "id": "authored/native-segment-placement",
+  "moduleType": "module",
+  "entryPoints": ["left-entry.mjs", "right-entry.mjs"],
+  "expectations": {
+    "stdout": [
+      "shared:init",
+      "left:init",
+      "left 11 named 7 0 shared",
+      "left:bump 1 1",
+      "TypeError",
+      "shared:init",
+      "right:init",
+      "right 22 named 9 0 shared",
+      "right:bump 1 1",
+      "TypeError"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Independent entry roots demand different pure declarations from one shared input while retaining its initialization effect.",
+    "Sibling inputs with same-spelled arrow and local bindings preserve inferred function names and avoid lexical capture.",
+    "Relocated declarations preserve shared closure state, live reexports and read-only imported bindings.",
+    "Rust ownership regressions separately prove physical segment relocation; runtime equality alone is not placement evidence."
+  ]
+}

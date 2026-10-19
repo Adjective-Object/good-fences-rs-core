@@ -1,6 +1,22 @@
 # Incremental bundler execution checklist
 
-## Active native-only cutover — pending independent review
+## Active segment-owned physical placement
+
+- [ ] Replace input-module ownership/grouping with physical segment ownership.
+  Prove one shared source splits across consumers and unrelated-source segments
+  co-locate; do not substitute more module-merging heuristics.
+- [ ] Preserve binding availability/initialization distinctions, TDZ, hoisting,
+  imported writes, names, effect order and native namespace surfaces.
+- [ ] Preserve native async suspension/deferred activation and opaque CJS
+  segment/facade participation without an ESM runtime or per-source fallback.
+- [x] Add `authored/native-segment-placement`: independent roots, shared effects,
+  same-spelled inferred names, live state and read-only imports. Baseline corpus
+  is 31 native-required cases / 43 executions; runtime equality alone does not
+  prove segment relocation.
+- [ ] Independently review the placement increment, run release/spot-check gates,
+  then commit and push with exact supported scope and remaining gaps.
+
+## Historical native-only cutover
 
 - [x] Support native evaluation-only, multiple evaluation/binding owners,
   selected public/private binding-only roots, empty module identities and

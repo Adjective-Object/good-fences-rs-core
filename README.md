@@ -145,7 +145,7 @@ TLA jobs; eligible synchronous single-entry trees still emit one lexical
 availability chunks with per-initializer lexical caches. Demanded native ESM
 facade parts provide default, named snapshots and canonical runtime-key bridges;
 loading a factory chunk never executes a deferred factory. Ordinary ESM bindings
-have no cells, registry or scheduler. All **30 portable contracts / 41 executions**
+have no cells, registry or scheduler. All **31 portable contracts / 43 executions**
 require native. Selected-binding, binding-only, evaluation-only and multi-owner
 low-level roots also use native chunks; multi-owner entry wrappers export no
 invented combined namespace. The rejected registration/cell backend is deleted,

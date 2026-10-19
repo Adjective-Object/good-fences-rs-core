@@ -1,6 +1,30 @@
 # Incremental JavaScript bundler plan
 
-## Active native-only cutover — independent review pending
+## Active segment-owned physical placement
+
+The native-only cutover removed the rejected runtime; it did not complete
+segment relocation. The current module-grouping heuristic must be replaced,
+not extended with more whole-module merge cases.
+
+- Retained segments are physical ownership units. One source may contribute
+  segments to several chunks; unrelated sources may contribute to one chunk.
+- Binding availability, initialization order, effect order and activation are
+  separate constraints. Root sets describe demand, not mandatory partitions.
+- Link references through the owning symbols/segments, not a file-to-file owner
+  map. Preserve native lexical bindings, TDZ, hoisting and observable names.
+- Preserve public and demanded namespace surfaces without creating an internal
+  facade family per source. Async suspension and deferred activation remain
+  native; CommonJS bodies remain single opaque segments.
+- Require structural Rust regressions for independent segment ownership and
+  portable runtime regressions for effects, names, live state and imported writes.
+  Passing the portable corpus alone does not establish relocation.
+
+The portable corpus now includes `authored/native-segment-placement`:
+31 cases / 43 entry executions, all native-required. Independent review and the
+release gate are required before committing the placement implementation.
+Upstream parity remains deferred.
+
+## Completed native-only cutover — not full segment placement
 
 Keep owned parser/IR/cache, canonical graph, usage/effects and publication.
 Replace the linker entirely, in independently reviewed committable increments:
