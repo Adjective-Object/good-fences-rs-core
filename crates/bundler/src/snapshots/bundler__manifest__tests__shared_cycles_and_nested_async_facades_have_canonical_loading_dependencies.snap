@@ -114,10 +114,6 @@ DiagnosticManifest {
             ),
             Segment {
                 module: "nested.ts",
-                index: 0,
-            },
-            Segment {
-                module: "nested.ts",
                 index: 1,
             },
         ],

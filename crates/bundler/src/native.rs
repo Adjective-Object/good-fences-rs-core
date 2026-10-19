@@ -172,6 +172,8 @@ struct Values<'s> {
     names: HashMap<crate::symbols::Symbol, String>,
     imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
     requests: BTreeMap<u32, String>,
+    dynamic: BTreeMap<u32, String>,
+    native_defaults: BTreeSet<u32>,
 }
 
 impl<'s> Values<'s> {
@@ -227,6 +229,8 @@ impl<'s> Values<'s> {
             names: HashMap::new(),
             imports: HashMap::new(),
             requests: BTreeMap::new(),
+            dynamic: BTreeMap::new(),
+            native_defaults: BTreeSet::new(),
         }
     }
 
@@ -348,6 +352,7 @@ fn body(
             .iter()
             .find(|(k, _)| k.file_id == file)
             .map(|(_, n)| n.as_str()),
+        native_default: values.native_defaults.contains(&file),
         replacements: &replacements,
         edits: Vec::new(),
         unsupported: false,
@@ -384,14 +389,23 @@ fn body(
             .find(|d| d.kind == dependency.kind && d.specifier == dependency.specifier)
             .ok_or_eyre("missing retained dynamic dependency")?;
         let target = target_file(graph, file, original)?;
-        syntax.edits.push(Edit {
-            span: dependency.specifier_span,
-            replacement: values
-                .requests
-                .get(&target)
-                .ok_or_eyre("missing native dynamic target")?
-                .clone(),
-        });
+        syntax
+            .edits
+            .push(if let Some(expression) = values.dynamic.get(&target) {
+                Edit {
+                    span: dependency.span,
+                    replacement: expression.clone(),
+                }
+            } else {
+                Edit {
+                    span: dependency.specifier_span,
+                    replacement: values
+                        .requests
+                        .get(&target)
+                        .ok_or_eyre("missing native dynamic target")?
+                        .clone(),
+                }
+            });
     }
     let mut shorthand = rewrite::Shorthand::default();
     shorthand.visit_program(&ast.program);
@@ -476,6 +490,7 @@ struct Syntax<'s> {
     namespaces: BTreeMap<u32, u32>,
     blocked_namespace: bool,
     default_name: Option<&'s str>,
+    native_default: bool,
     replacements: &'s BTreeMap<u32, (Span, String)>,
     edits: Vec<Edit>,
     unsupported: bool,
@@ -513,6 +528,10 @@ impl<'a> Visit<'a> for Syntax<'_> {
     }
 
     fn visit_export_default_declaration(&mut self, export: &ExportDefaultDeclaration<'a>) {
+        if self.native_default {
+            walk::walk_export_default_declaration(self, export);
+            return;
+        }
         if let Some(name) = self.default_name {
             let span = export.declaration.span();
             if matches!(&export.declaration, ExportDefaultDeclarationKind::FunctionDeclaration(f) if f.id.is_none())

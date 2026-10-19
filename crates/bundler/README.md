@@ -22,7 +22,6 @@ remain separate from those allocations. Namespace,
 default-expression/anonymous-declaration and opaque CJS values retain typed graph
 identities, not invented lexical binding IDs; checked syntax still owns default
 hoisting/initialization semantics. No public product field or dependency was added.
-The native-only cutover is implemented for independent review before committing.
 
 ## Native ESM chunks
 
@@ -81,7 +80,7 @@ them. It supports multiple entries, evaluation-only entries, escaped namespaces,
 computed reads, descriptors, receivers and read-only writes. Namespace values
 are actual native module namespaces, never getter objects or setter facades.
 
-The conservative planner merges an exclusively consumed dependency group when
+The evaluation planner merges an exclusively consumed dependency group when
 it is the consumer group's only remaining dependency. It can also absorb
 body-free import/reexport connectors among siblings. Unobserved pure barrels
 redirect to their dependency only when their complete export-name/canonical-
@@ -93,29 +92,32 @@ body owners. Public entry surfaces and namespace targets keep precise native
 surfaces; internal imports/exports disappear inside a merged group. No generated
 private names leak into namespace keys.
 
-The first segment-owned increment relocates independently demanded pure
-declarations into their unique consumer group, including splitting one source
-between entries and co-locating declarations from unrelated sources. Artifact
-members and cross-chunk references follow actual segment owners; remaining
-source effects keep their native evaluation seams. Unchanged consumers retain
-their original export addresses, including aliases and default expressions.
-Structural and Node regressions cover live state, imported writes, inferred
-names, TDZ, effect order and deferred activation.
+Physical owners are independently assigned to retained segments, not input
+modules or root-set partitions. Pure lexical components move to a unique consumer
+or independent shared binding chunks; components from unrelated sources can
+co-locate. Eager local initializer reads and writes keep their lexical components
+together, preserving snapshots and mutable closures without cells or setters.
+Name-sensitive components split into separate chunks when co-location would
+change names or capture references. Consumer rewrites and artifact members follow
+actual segment owners, including aliases and default-expression addresses.
 
-This is **not complete arbitrary placement**: physical hosts still start from
-module groups, multi-consumer declarations stay at their original seam, and
-cycles, async, CJS and namespace-sensitive groups remain protected. Replacing
-those constraints with segment-level availability/initialization scheduling
-remains active work; upstream parity is deferred.
+Namespaces and CJS-consuming modules no longer impose whole-module placement
+barriers. Namespace demand retains checked visible exports and ordinary effects,
+not unrelated private declarations. Empty private evaluation chunks are removed,
+their evaluation imports are spliced in original order, and no-op metadata owners
+are remapped to surviving consumers. Public, escaped and dynamic namespace
+boundaries remain native modules with exact keys and identity. Cyclic connector
+jobs remain where splicing would bypass a still-evaluating job's dependency order.
 
-Static SCC members retain native declarations/imports, preserving function/var
-instantiation and lexical TDZ, including anonymous defaults. A merge that would
-change observed names or turn an imported write into a mutable defining binding
-is declined in favor of a native body boundary, **not legacy emission**. External
-imports in merged groups use capture-free read-only native aliases.
-This planner intentionally does not maximize grouping: shared renaming connectors,
-some pure sibling declarations and name-inference-sensitive merges can still
-retain native seams.
+Initialization constraints remain real: effectful statements, eager mutable reads
+and non-hoisted initialization across cyclic/async phases stay at their native
+evaluation phase; hoisted functions can relocate when their new static-import
+closure cannot activate a later native initializer early. Native anonymous
+defaults preserve instantiation semantics inside their own evaluation chunks.
+Imported writes still address read-only native aliases. Source evaluation groups
+preserve effect/await order; they are not physical ownership units for independent
+declarations. This is not a claim of globally optimal chunk sizes. Upstream
+parity remains deferred.
 
 Literal dynamic imports and source TLA/for-await now use this same planner.
 Dynamic source occurrences remain distinct logical roots, but every import of
@@ -209,8 +211,9 @@ The emitter uses native module jobs, not this scalar linker-planning order.
 Original structural edge indices retain exact occurrence/timing metadata.
 Required bodies are **available**, not scheduled eagerly: deferred requires
 keep their original call sites/timing. Async boundary edge indices are recorded
-but not crossed by retention; `chunks::partition` assigns separate roots. Namespace demand
-conservatively retains the entire target, not a guessed property subset.
+but not crossed by retention; `chunks::partition` assigns separate roots. Namespace
+demand retains all visible export routes, omitting ambiguous star names and
+unrelated private declarations. Opaque CJS bodies remain indivisible.
 External edges remain explicit unlinked sites for later output policy.
 
 Construct inputs from `ParsedModule::facts` or decoded cache facts/ranges through
@@ -714,7 +717,7 @@ stable across source edits; all graph-local inputs belong to the current revisio
 each root over synchronous retention edges only and returns sorted path-based
 `NodeId` sets, including empty-module identities and explicit external sites.
 It rejects stale retention/policy and duplicate or unretained roots. Namespace
-binding roots/edges conservatively reach retained target statements; module
+binding roots/edges expand checked namespace export routes; module
 evaluation alone does not imply namespace demand. This oracle describes code
 availability, not runtime evaluation, especially for deferred synchronous require.
 

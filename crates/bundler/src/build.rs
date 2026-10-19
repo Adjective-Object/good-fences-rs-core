@@ -360,6 +360,8 @@ impl BuildSession {
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
+                include_str!("chunks.rs"),
+                include_str!("manifest.rs"),
                 include_str!("effects.rs"),
                 include_str!("effect_dependencies.rs")
             )

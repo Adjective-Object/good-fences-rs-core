@@ -1,17 +1,18 @@
 # Incremental bundler execution checklist
 
-## Active segment-owned physical placement
+## Completed segment-owned physical placement
 
-- [ ] Replace input-module ownership/grouping with physical segment ownership.
+- [x] Replace input-module ownership/grouping with physical segment ownership.
   Prove one shared source splits across consumers and unrelated-source segments
   co-locate; do not substitute more module-merging heuristics.
 - [x] First pure-declaration increment: assign segment owners through binding
   demand, split shared sources, co-locate unrelated declarations, remap cross-chunk
   references and artifact members. Preserve old export aliases/default addresses
-  for unchanged consumers. Module-derived hosts and protected groups remain.
-- [ ] Preserve binding availability/initialization distinctions, TDZ, hoisting,
+  for unchanged consumers. Initially kept module-derived hosts and protected
+  groups; generalized below.
+- [x] Preserve binding availability/initialization distinctions, TDZ, hoisting,
   imported writes, names, effect order and native namespace surfaces.
-- [ ] Preserve native async suspension/deferred activation and opaque CJS
+- [x] Preserve native async suspension/deferred activation and opaque CJS
   segment/facade participation without an ESM runtime or per-source fallback.
 - [x] Add `authored/native-segment-placement`: independent roots, shared effects,
   same-spelled inferred names, live state and read-only imports. Baseline corpus
@@ -19,6 +20,12 @@
   prove segment relocation.
 - [x] Independently review the first pure-declaration increment, run release/spot-check gates,
   then commit and push with exact supported scope and remaining gaps.
+- [x] Add shared physical binding chunks and mutable lexical components; remove
+  whole-module namespace/CJS/async/SCC barriers in favor of initialization constraints.
+- [x] Retain only visible namespace export routes, prune empty private evaluation
+  chunks and splice evaluation imports without stale executable metadata.
+- [x] Independently review generalized placement, resolve findings, rerun release
+  gates, commit and push. Upstream parity remains deferred.
 
 ## Historical native-only cutover
 

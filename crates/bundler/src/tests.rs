@@ -596,16 +596,19 @@ fn rejects_invalid_roots_legacy_inputs_and_link_errors() {
 }
 
 #[test]
-fn namespace_demand_is_conservative_and_plans_expire_on_mutation() {
+fn namespace_demand_retains_exports_not_private_declarations_and_plans_expire_on_mutation() {
     let mut graph = SourceGraph::from_owned([
         input("entry.ts", "import * as ns from 'lib.ts'; consume(ns);"),
-        input("lib.ts", "export const one = 1; export const two = 2;"),
+        input("lib.ts", "export const one = 1; export const two = 2; const privateValue = () => import('unused.ts');"),
+        input("unused.ts", "export const dead = 3;"),
     ]);
     let plan = retain(&graph, &[0], &[]).unwrap();
     assert_eq!(
         plan.segments.iter().filter(|s| s.key.file_id == 1).count(),
         2
     );
+    assert!(plan.async_boundaries.is_empty());
+    assert_eq!(plan.modules, [0, 1]);
     assert!(plan.is_current(&graph, &policy::EffectPolicy::default()));
     graph
         .patch_owned(

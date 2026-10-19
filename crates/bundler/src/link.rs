@@ -203,13 +203,22 @@ pub(super) fn export_names(
     graph: &SourceGraph,
     plan: &ChunkPlan,
 ) -> BTreeMap<u32, BTreeSet<String>> {
+    namespace_export_names(graph, |file| {
+        crate::cjs::names(graph, &plan.retention, file)
+    })
+}
+
+pub(super) fn namespace_export_names(
+    graph: &SourceGraph,
+    commonjs: impl Fn(u32) -> BTreeSet<String>,
+) -> BTreeMap<u32, BTreeSet<String>> {
     let mut names: BTreeMap<_, BTreeSet<_>> = graph
         .module_ids()
         .map(|file| {
             (
                 file,
                 if graph.file_facts(file).is_some_and(|facts| facts.commonjs) {
-                    crate::cjs::names(graph, &plan.retention, file)
+                    commonjs(file)
                 } else {
                     graph
                         .file_facts(file)

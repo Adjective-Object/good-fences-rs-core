@@ -207,6 +207,37 @@ impl CommonJs {
         ))
     }
 
+    pub fn import(
+        &self,
+        graph: &SourceGraph,
+        file: u32,
+        name: &ImportedName,
+        local: &str,
+    ) -> eyre::Result<String> {
+        let value = self.value(graph, file, name)?;
+        Ok(format!(
+            "import {{{} as {local}}} from {};\n",
+            quote(&value.exported),
+            specifier(&value.path)
+        ))
+    }
+
+    pub fn reexport(
+        &self,
+        graph: &SourceGraph,
+        file: u32,
+        name: &ImportedName,
+        public: &str,
+    ) -> eyre::Result<String> {
+        let value = self.value(graph, file, name)?;
+        Ok(format!(
+            "export {{{} as {}}} from {};\n",
+            quote(&value.exported),
+            quote(public),
+            specifier(&value.path)
+        ))
+    }
+
     pub fn evaluate(
         &self,
         graph: &SourceGraph,

@@ -40,9 +40,10 @@ facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
 no independently executable namespace path in `Artifacts::modules`.
-Synchronous native groups merge exclusive chains and body-free connectors only
-when source-order completion is preserved. Keep SCC declarations and observable
-namespace/name/read-only seams native, not cells. Logical artifact projections
+Synchronous evaluation groups merge exclusive chains/body-free connectors only
+when source-order completion is preserved; they do not own all source segments.
+Keep initialization/await phases and observable namespace/name/read-only
+boundaries native, not cells. Logical artifact projections
 may overlap or contain several body owners; root sets do not prescribe files.
 Native dynamic imports rewrite only literal specifiers to canonical body chunks;
 protect complete target namespaces. Keep statically async source modules as
@@ -57,6 +58,15 @@ Segment ownership overrides evaluation seams; project actual owners into artifac
 members. Preserve old export addresses for unchanged consumers and allocate
 internal addresses for private bindings/default expressions. Imported writes
 must never become writable locals through relocation.
+Eager initializer reads and writes constrain lexical components; shared demand
+can create independent binding chunks across sources. Split incompatible names
+into separate binding chunks, not original-module groups. Namespace demand follows
+checked export routes, not private statements; evaluation alone never traverses
+namespace edges. Splice empty private evaluation chunks in source order and remap
+their no-op artifact members; preserve public/escaped/async namespace identities.
+Keep cyclic connector evaluation barriers: revisiting an evaluating job must not
+execute its remaining dependencies early. Hoisted availability cannot introduce
+new transitive native-initializer activation across a source phase.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree

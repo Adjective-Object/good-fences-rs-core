@@ -226,66 +226,48 @@ pub(super) fn emit(
             break;
         }
     }
-    let mut protected = cycles.clone();
-    protected.extend(&asynchronous);
-    for (&file, module) in modules {
-        let mut cjs_dependency = false;
-        for dependency in module
-            .parsed
-            .facts
-            .dependencies
-            .iter()
-            .filter(|d| !d.type_only)
-        {
-            if dependency.kind == DependencyKind::Require
-                || cjs.contains(target_file(graph, file, dependency)?)
-            {
-                cjs_dependency = true;
-                break;
-            }
-        }
-        if cjs.contains(file)
-            || cjs_dependency
-            || symbols.imports.iter().any(|(&(source, _), linked)| {
-                source == file && matches!(linked.identity, ExportIdentity::Namespace(_))
-            })
-            || symbols.exports[&file].values().any(|linked| {
-                matches!(
-                    linked.identity,
-                    ExportIdentity::Namespace(_) | ExportIdentity::CommonJs(..)
-                )
-            })
-        {
-            protected.insert(file);
-        }
-    }
-    for linked in symbols
-        .imports
-        .values()
-        .chain(symbols.exports.values().flat_map(|e| e.values()))
-    {
-        if let ExportIdentity::Namespace(file) = linked.identity {
-            protected.insert(file);
-        }
-    }
-    protected = protected.into_iter().map(|f| owners[&f]).collect();
+    let phase_bound = cycles.union(&asynchronous).copied().collect();
     let placement = segments::Placement::new(
         graph,
         plan,
         modules,
         symbols,
         &owners,
-        &protected,
+        &phase_bound,
         &boundaries,
         &cjs,
     )?;
-    let mut surfaces = boundaries.clone();
-    surfaces.extend(
+    let mut changed = BTreeSet::new();
+    changed.extend(
         groups
             .keys()
-            .filter(|f| !placement.changed.contains(f))
+            .filter(|file| connectors.contains(file) && !boundaries.contains(file))
             .copied(),
     );
+    for (&key, &owner) in &placement.owners {
+        if owner != segments::Owner::Evaluation(owners[&key.file_id]) {
+            changed.insert(owners[&key.file_id]);
+            if let segments::Owner::Evaluation(file) = owner {
+                changed.insert(file);
+            }
+        }
+        loop {
+            let mut added = false;
+            for (&file, dependencies) in &edges {
+                if dependencies
+                    .iter()
+                    .any(|target| changed.contains(&owners[target]))
+                {
+                    added |= changed.insert(owners[&file]);
+                }
+            }
+            if !added {
+                break;
+            }
+        }
+    }
+    let mut surfaces = boundaries.clone();
+    surfaces.extend(groups.keys().filter(|f| !changed.contains(f)).copied());
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
@@ -295,10 +277,19 @@ pub(super) fn emit(
             continue;
         }
         let path = path(graph, root);
-        let output = if placement.changed.contains(&root) {
+        let output = if changed.contains(&root) {
             segments::emit(
-                graph, root, group, &owners, &redirects, modules, symbols, &placement, &surfaces,
+                graph,
+                segments::Owner::Evaluation(root),
+                group,
+                &owners,
+                &redirects,
+                modules,
+                symbols,
+                &placement,
+                &surfaces,
                 &recipes,
+                &cjs,
             )?
         } else if group.len() > 1 {
             concatenate(
@@ -372,6 +363,27 @@ pub(super) fn emit(
         }
         files.insert(path, output);
     }
+    for owner in placement.owners.values().copied().collect::<BTreeSet<_>>() {
+        if matches!(owner, segments::Owner::Bindings(_)) {
+            let output = segments::emit(
+                graph,
+                owner,
+                &BTreeSet::new(),
+                &owners,
+                &redirects,
+                modules,
+                symbols,
+                &placement,
+                &surfaces,
+                &recipes,
+                &cjs,
+            )?;
+            let output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;
+            let path = owner.path(graph);
+            rewrite::validate(&path, &output)?;
+            files.insert(path, output);
+        }
+    }
     for (&file, path) in &cjs.entries {
         namespaces.insert(graph.file_path(file).unwrap().to_owned(), path.clone());
     }
@@ -396,10 +408,11 @@ pub(super) fn emit(
             };
             let file = graph.file_id(module).unwrap();
             let owner = match node {
-                NodeId::Segment { index, .. } => placement.owners[&SegmentKey::new(file, *index)],
-                _ => owners[&file],
+                NodeId::Segment { index, .. } => {
+                    placement.owners[&SegmentKey::new(file, *index)].path(graph)
+                }
+                _ => path(graph, owners[&file]),
             };
-            let owner = path(graph, owner);
             paths.insert(owner.clone());
             members.insert(node.clone(), owner);
         }
@@ -430,6 +443,21 @@ pub(super) fn emit(
         files.insert(entry_path.clone(), source);
         entry_paths.insert(entry, entry_path);
     }
+    let removable: BTreeSet<_> = groups
+        .keys()
+        .filter(|file| {
+            !boundaries.contains(file) && !cycles.contains(file) && !cjs.contains(**file)
+        })
+        .map(|&file| path(graph, file))
+        .collect();
+    prune_empty(&mut files, &removable, &mut members)?;
+    namespaces.retain(|_, path| files.contains_key(path));
+    for (chunk, nodes) in &plan.chunks {
+        chunk_artifacts.insert(
+            chunk.clone(),
+            nodes.iter().map(|node| members[node].clone()).collect(),
+        );
+    }
     Ok(Artifacts {
         backend: Backend::Native,
         files,
@@ -454,6 +482,134 @@ pub(super) fn emit(
             .collect(),
         async_modules,
     })
+}
+
+fn prune_empty(
+    files: &mut BTreeMap<PathBuf, String>,
+    candidates: &BTreeSet<PathBuf>,
+    members: &mut BTreeMap<NodeId, PathBuf>,
+) -> eyre::Result<()> {
+    let mut empty = BTreeMap::new();
+    let mut imports = BTreeMap::<_, Vec<_>>::new();
+    for (path, source) in files
+        .iter()
+        .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "mjs"))
+    {
+        let allocator = Allocator::default();
+        rewrite::count_output_parse();
+        let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
+        let mut targets = Vec::new();
+        let mut inert = candidates.contains(path);
+        for statement in &parsed.program.body {
+            match statement {
+                Statement::ImportDeclaration(import) => {
+                    let target = path.parent().unwrap().join(
+                        import
+                            .source
+                            .value
+                            .as_str()
+                            .strip_prefix("./")
+                            .ok_or_eyre("nonrelative native evaluation import")?,
+                    );
+                    targets.push((
+                        import.span,
+                        target,
+                        import.specifiers.as_ref().is_some_and(|s| !s.is_empty()),
+                    ));
+                }
+                Statement::EmptyStatement(_) => {}
+                _ => inert = false,
+            }
+        }
+        if inert {
+            empty.insert(
+                path.clone(),
+                targets
+                    .iter()
+                    .map(|(_, path, _)| path.clone())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        imports.insert(path.clone(), targets);
+    }
+    fn expand(path: &PathBuf, empty: &BTreeMap<PathBuf, Vec<PathBuf>>) -> Vec<PathBuf> {
+        let mut result = Vec::new();
+        let mut pending = vec![path];
+        let mut seen = BTreeSet::new();
+        while let Some(path) = pending.pop() {
+            if !seen.insert(path) {
+                continue;
+            }
+            if let Some(targets) = empty.get(path) {
+                pending.extend(targets.iter().rev());
+            } else {
+                result.push(path.clone());
+            }
+        }
+        result
+    }
+    let mut users = BTreeMap::<_, Vec<_>>::new();
+    for (path, targets) in &imports {
+        for (_, target, _) in targets {
+            users.entry(target.clone()).or_default().push(path.clone());
+        }
+    }
+    for (path, targets) in &imports {
+        if empty.contains_key(path) {
+            continue;
+        }
+        let mut edits = Vec::new();
+        for (span, target, binding) in targets {
+            if empty.contains_key(target) {
+                eyre::ensure!(!binding, "empty native chunk still supplies a binding");
+                let replacement = expand(target, &empty)
+                    .iter()
+                    .map(|path| format!("import {};\n", specifier(path)))
+                    .collect::<String>();
+                edits.push(Edit {
+                    span: *span,
+                    replacement,
+                });
+            }
+        }
+        if !edits.is_empty() {
+            let output = rewrite::apply(&files[path], &edits)?;
+            rewrite::validate(path, &output)?;
+            files.insert(path.clone(), output);
+        }
+    }
+    let mut replacements = BTreeMap::new();
+    for path in empty.keys() {
+        let mut pending = vec![path.clone()];
+        let mut seen = BTreeSet::new();
+        let mut owner = None;
+        while let Some(candidate) = pending.pop() {
+            if !seen.insert(candidate.clone()) {
+                continue;
+            }
+            if !empty.contains_key(&candidate) {
+                owner = Some(candidate);
+                break;
+            }
+            pending.extend(users.get(&candidate).into_iter().flatten().cloned());
+        }
+        if owner.is_none() {
+            owner = expand(path, &empty).into_iter().next();
+        }
+        replacements.insert(
+            path.clone(),
+            owner.ok_or_eyre("empty private module has no retained physical consumer")?,
+        );
+    }
+    for owner in members.values_mut() {
+        if let Some(replacement) = replacements.get(owner) {
+            *owner = replacement.clone();
+        }
+    }
+    for path in empty.keys() {
+        files.remove(path);
+    }
+    Ok(())
 }
 
 fn path(graph: &SourceGraph, file: u32) -> PathBuf {

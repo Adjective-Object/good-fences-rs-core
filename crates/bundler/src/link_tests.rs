@@ -1381,6 +1381,229 @@ fn native_segment_relocation_keeps_cross_chunk_names_distinct_from_destination_l
 }
 
 #[test]
+fn arbitrary_placement_shares_mutable_lexical_clusters_across_source_boundaries() {
+    let source = sources(&[
+        ("a.mjs", "import {left, state, bump} from './shared.mjs'; import {token} from './other.mjs'; export {left, state, bump, token};"),
+        ("b.mjs", "import {right, state, bump} from './shared.mjs'; import {token} from './other.mjs'; export {right, state, bump, token};"),
+        ("shared.mjs", "export let state = 0; export function bump() { state++; } export const left = () => state; export const right = () => state; console.log('shared effect');"),
+        ("other.mjs", "export const token = {};"),
+    ]);
+    let entries = [("a.mjs", true), ("b.mjs", true)];
+    let (_, output) = build(&source, &entries, false);
+    let segment = |module: &str, index| NodeId::Segment {
+        module: module.into(),
+        index,
+    };
+    let state = &output.members[&segment("shared.mjs", 0)];
+    assert_eq!(state, &output.members[&segment("shared.mjs", 1)]);
+    assert_eq!(state, &output.members[&segment("other.mjs", 0)]);
+    assert_ne!(state, &output.entries["a.mjs"]);
+    assert_ne!(state, &output.entries["b.mjs"]);
+    assert_ne!(state, &output.members[&segment("shared.mjs", 4)]);
+    assert_eq!(
+        &output.members[&segment("shared.mjs", 2)],
+        &output.entries["a.mjs"]
+    );
+    assert_eq!(
+        &output.members[&segment("shared.mjs", 3)],
+        &output.entries["b.mjs"]
+    );
+    assert_eq!(output, build(&source, &entries, true).1);
+    let observer = "const a = await import('./a.mjs'); const b = await import('./b.mjs'); a.bump(); b.bump(); console.log(a.left(), b.right(), a.state, b.state, a.bump === b.bump, a.token === b.token, a.bump.name);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), observation(&output, observer));
+    let actual = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        node(&baseline, Path::new("observe.mjs")).stdout
+    );
+}
+
+#[test]
+fn arbitrary_placement_namespaces_do_not_retain_dead_private_chunks() {
+    let source = sources(&[
+        ("a.mjs", "import * as ns from './api.mjs'; console.log(Object.keys(ns).join(','), ns.live, ns.token);"),
+        ("b.mjs", "import {token} from './shared.mjs'; console.log(token);"),
+        ("api.mjs", "import {dead} from './dead.mjs'; const unused = () => dead; export const live = 1; export {token} from './shared.mjs';"),
+        ("dead.mjs", "export const dead = () => 'DEAD_PRIVATE_BODY';"),
+        ("shared.mjs", "export const token = 7;"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    let dead = NodeId::Module("dead.mjs".into());
+    assert!(!output.modules.contains_key(Path::new("dead.mjs")));
+    assert!(output.files.contains_key(&output.members[&dead]));
+    assert!(!output
+        .files
+        .values()
+        .any(|s| s.contains("DEAD_PRIVATE_BODY") || s.is_empty()));
+    let shared = &output.members[&NodeId::Segment {
+        module: "shared.mjs".into(),
+        index: 0,
+    }];
+    assert_ne!(shared, &output.entries["a.mjs"]);
+    assert_ne!(shared, &output.entries["b.mjs"]);
+    for entry in ["a.mjs", "b.mjs"] {
+        let actual = node(&output.files, &output.entries[entry]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, node(&source, Path::new(entry)).stdout);
+    }
+}
+
+#[test]
+fn arbitrary_placement_preserves_initialization_snapshots_and_async_cycle_phases() {
+    for items in [
+        vec![
+            ("a.mjs", "import {snapshot, read} from './shared.mjs'; console.log(snapshot, read());"),
+            ("b.mjs", "import {state, read} from './shared.mjs'; console.log(state, read());"),
+            ("shared.mjs", "export let state = 1; export const snapshot = state; export function read() { return state; } state = 2;"),
+        ],
+        vec![
+            ("a.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
+            ("b.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
+            ("shared.mjs", "console.log('before await'); await 0; export const value = 3; export function read() { return value; } console.log('after await');"),
+        ],
+        vec![
+            ("a.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
+            ("b.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
+            ("shared.mjs", "import './cycle.mjs'; export default function() { return 'default'; } export function read() { return 9; } export const value = 3;"),
+            ("cycle.mjs", "import fn from './shared.mjs'; console.log(fn(), fn.name);"),
+        ],
+        vec![
+            ("a.mjs", "import './b.mjs'; import * as ns from './c.mjs'; export function f() { return ns.value; }"),
+            ("b.mjs", "import {f} from './a.mjs'; try { console.log(f()); } catch (error) { console.log(error.name); }"),
+            ("c.mjs", "console.log('c'); export const value = 1;"),
+        ],
+    ] {
+        let source = sources(&items);
+        let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+        let graph = graph(&source, false);
+        let (module, name) = if source.contains_key(Path::new("shared.mjs")) {
+            ("shared.mjs", "read")
+        } else {
+            ("a.mjs", "f")
+        };
+        let file = graph.file_id(Path::new(module)).unwrap();
+        let linked = graph.resolve_export(file, name, source_graph::Namespace::Value).unwrap();
+        let definition = crate::chunks::node_id(&graph, linked.declaration).unwrap();
+        let evaluation = NodeId::Module(module.into());
+        if module == "shared.mjs" {
+            assert_ne!(output.members[&definition], output.members[&evaluation], "hoisted functions can leave their source evaluation phase");
+        } else {
+            assert_eq!(output.members[&definition], output.members[&evaluation], "relocation cannot activate a later native dependency");
+        }
+        for entry in ["a.mjs", "b.mjs"] {
+            let baseline = node(&source, Path::new(entry));
+            assert!(baseline.status.success(), "{}", String::from_utf8_lossy(&baseline.stderr));
+            let actual = node(&output.files, &output.entries[entry]);
+            assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+            assert_eq!(actual.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
+fn arbitrary_placement_preserves_commonjs_and_namespace_activation_order() {
+    let source = sources(&[
+        ("a.mjs", "import {read, pure} from './shared.mjs'; console.log('a', read(), pure());"),
+        ("b.mjs", "import {read} from './shared.mjs'; console.log('b', read());"),
+        ("shared.mjs", "import './before.mjs'; import value from './dep.cjs'; import * as ns from './ns.mjs'; export function read() { return value + ns.value; } export const pure = () => 1;"),
+        ("before.mjs", "console.log('before');"),
+        ("dep.cjs", "console.log('cjs'); module.exports = 2;"),
+        ("ns.mjs", "console.log('namespace'); export const value = 3;"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    assert_eq!(
+        output.members[&NodeId::Segment {
+            module: "shared.mjs".into(),
+            index: 4
+        }],
+        output.entries["a.mjs"]
+    );
+    for entry in ["a.mjs", "b.mjs"] {
+        let baseline = node(&source, Path::new(entry));
+        let actual = node(&output.files, &output.entries[entry]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, baseline.stdout);
+    }
+}
+
+#[test]
+fn arbitrary_placement_of_dynamic_commonjs_loaders_preserves_deferred_activation() {
+    let source = sources(&[
+        ("a.mjs", "export {load, pure} from './shared.mjs'; console.log('a');"),
+        ("b.mjs", "export {load} from './shared.mjs'; console.log('b');"),
+        ("shared.mjs", "export function load() { return import('./dep.cjs'); } export const pure = () => 1; console.log('shared');"),
+        ("dep.cjs", "console.log('cjs-lazy'); exports.value = 6;"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    let loader = &output.members[&NodeId::Segment {
+        module: "shared.mjs".into(),
+        index: 0,
+    }];
+    assert_ne!(
+        loader,
+        &output.members[&NodeId::Module("shared.mjs".into())]
+    );
+    assert_ne!(loader, &output.entries["a.mjs"]);
+    assert_ne!(loader, &output.entries["b.mjs"]);
+    let observer = "const a = await import('./a.mjs'); const b = await import('./b.mjs'); console.log('before load', a.pure()); const [first, second] = await Promise.all([a.load(), b.load()]); console.log(first === second, first.value, first.default.value);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), observation(&output, observer));
+    let actual = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        baseline.status.success(),
+        "{}",
+        String::from_utf8_lossy(&baseline.stderr)
+    );
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, baseline.stdout);
+}
+
+#[test]
+fn arbitrary_placement_preserves_cyclic_connector_evaluation_barriers() {
+    let source = sources(&[
+        (
+            "entry.mjs",
+            "import {v} from './x.mjs'; console.log('entry', v);",
+        ),
+        ("x.mjs", "import './a.mjs'; export {v} from './b.mjs';"),
+        ("a.mjs", "import './x.mjs'; console.log('a');"),
+        ("b.mjs", "export const v = (console.log('b'), 1);"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", true)], false);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, node(&source, Path::new("entry.mjs")).stdout);
+    assert_eq!(actual.stdout, b"a\nb\nentry 1\n");
+}
+
+#[test]
 fn native_segment_relocation_preserves_tdz_effect_order_and_deferred_activation() {
     let source = sources(&[
         ("a.mjs", "import {left} from './shared.mjs'; console.log('a', left); export const load = () => import('./lazy.mjs');"),
@@ -1617,7 +1840,7 @@ fn logical_root_sets_project_to_actual_native_body_owners() {
     let second = NodeId::Segment { module, index: 1 };
     assert_ne!(plan.chunk_for(&first), plan.chunk_for(&second));
     assert_eq!(output.backend, super::Backend::Native);
-    assert_eq!(output.members[&first], output.members[&second]);
+    assert_ne!(output.members[&first], output.members[&second]);
     assert!(output.members[&first]
         .extension()
         .is_some_and(|e| e == "mjs"));

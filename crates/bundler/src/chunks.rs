@@ -131,7 +131,10 @@ pub fn reference_reachability(
     );
     let mut outgoing = HashMap::<_, Vec<_>>::new();
     for edge in &retention.edges {
-        if edge.kind != RetentionEdgeKind::EffectOrder {
+        if !matches!(
+            edge.kind,
+            RetentionEdgeKind::EffectOrder | RetentionEdgeKind::Namespace
+        ) {
             outgoing.entry(edge.from).or_default().push(edge);
         }
     }
@@ -242,15 +245,22 @@ pub(crate) fn enqueue_binding(
     queue: &mut VecDeque<GraphNode>,
 ) {
     queue.push_back(node);
-    if let GraphNode::Module(file) = node {
-        // Namespace demand is conservative in P4; evaluation demand is not.
-        queue.extend(
-            retention
-                .segments
-                .iter()
-                .filter(|s| s.key.file_id == file)
-                .map(|s| GraphNode::Segment(s.key)),
-        );
+    let mut pending = vec![node];
+    let mut seen = HashSet::new();
+    while let Some(module @ GraphNode::Module(_)) = pending.pop() {
+        if !seen.insert(module) {
+            continue;
+        }
+        for edge in retention
+            .edges
+            .iter()
+            .filter(|edge| edge.from == module && edge.kind == RetentionEdgeKind::Namespace)
+        {
+            queue.push_back(edge.to);
+            if matches!(edge.to, GraphNode::Module(_)) {
+                pending.push(edge.to);
+            }
+        }
     }
 }
 

@@ -1,10 +1,10 @@
 # Incremental JavaScript bundler plan
 
-## Active segment-owned physical placement
+## Completed segment-owned physical placement
 
-The native-only cutover removed the rejected runtime; it did not complete
-segment relocation. The current module-grouping heuristic must be replaced,
-not extended with more whole-module merge cases.
+The native-only cutover removed the rejected runtime. Physical placement now
+assigns segments to evaluation hosts or independent binding chunks; source-module
+grouping is only an evaluation-order optimization, not the ownership unit.
 
 - Retained segments are physical ownership units. One source may contribute
   segments to several chunks; unrelated sources may contribute to one chunk.
@@ -20,16 +20,19 @@ not extended with more whole-module merge cases.
   Passing the portable corpus alone does not establish relocation.
 
 The portable corpus now includes `authored/native-segment-placement`:
-31 cases / 43 entry executions, all native-required. Independent review and the
-release gate are required before committing the placement implementation.
+31 cases / 43 entry executions, all native-required. Generalized placement passed
+independent review and the complete release gate. Reviewed SCC activation and
+cyclic-connector order bugs have actual-bundler regressions.
 Upstream parity remains deferred.
 
-The first pure-declaration relocation increment now has segment-to-owner
-mapping, consumer-based placement, lexical reference remapping and actual
-artifact ownership. Structural tests prove source splitting and cross-source
-co-location. Module evaluation groups still supply hosts; multiple consumers,
-cycles, async/CJS and namespace boundaries remain conservative. This increment
-does not complete the replacement above.
+The generalized placement implementation includes multi-consumer shared chunks,
+cross-source co-location, mutable lexical components and precise namespace demand.
+Whole-module namespace/CJS/async/cycle placement barriers are removed; actual
+initialization/effect/await constraints remain. Hoisted functions can leave cyclic
+or async modules without relocating phase-sensitive initializers. Empty private
+evaluation chunks are spliced out and all artifact owners reference surviving
+files. Structural and Node regressions cover these distinctions; source grouping
+does not force independent declarations to remain together.
 
 ## Completed native-only cutover — not full segment placement
 

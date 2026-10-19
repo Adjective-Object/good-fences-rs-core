@@ -56,6 +56,8 @@ pub enum RetentionEdgeKind {
     /// Scheduling only; never traverse for binding demand or code availability.
     EffectOrder,
     Binding,
+    /// Export routes traversed only by namespace binding demand, not evaluation.
+    Namespace,
     Require,
 }
 
@@ -95,7 +97,7 @@ impl RetentionPlan {
 }
 
 /// Binding roots must include the checked export route when requesting an export.
-/// Namespace module roots conservatively retain all target statements.
+/// Namespace module roots retain visible export routes and ordinary effects.
 pub fn retain(
     graph: &SourceGraph,
     evaluation_roots: &[u32],
@@ -127,6 +129,7 @@ pub fn retain_with_policy(
         queue: VecDeque::new(),
         effects: BTreeMap::new(),
         values: HashSet::new(),
+        export_names: link::namespace_export_names(graph, |_| BTreeSet::from(["default".into()])),
     };
     for &file in evaluation_roots {
         analysis.queue.push_back(Demand::Evaluation(file));
@@ -210,6 +213,7 @@ struct Retention<'g, 'p> {
     queue: VecDeque<Demand>,
     effects: BTreeMap<SegmentKey, effects::StatementEffects>,
     values: HashSet<SegmentKey>,
+    export_names: BTreeMap<u32, BTreeSet<String>>,
 }
 
 impl Retention<'_, '_> {
@@ -289,15 +293,47 @@ impl Retention<'_, '_> {
                 self.facts(file)?;
                 self.queue.push_back(Demand::Evaluation(file));
                 if self.namespaces.insert(file) {
-                    for index in 0..self
-                        .graph
-                        .file_segments(file)
-                        .ok_or_eyre("missing namespace statements")?
-                        .len()
-                    {
-                        let key = SegmentKey::new(file, index as u32);
+                    let mut routes = Vec::new();
+                    if self.facts(file)?.commonjs {
+                        for index in 0..self.graph.file_segments(file).unwrap().len() {
+                            routes.push(GraphNode::Segment(SegmentKey::new(file, index as u32)));
+                        }
+                    } else {
+                        for name in &self.export_names[&file] {
+                            match self.graph.resolve_export(
+                                file,
+                                name,
+                                source_graph::Namespace::Value,
+                            ) {
+                                Ok(linked) => routes.extend(linked.route),
+                                Err(error)
+                                    if !self
+                                        .facts(file)?
+                                        .exports
+                                        .iter()
+                                        .any(|e| e.name.as_ref() == Some(name)) =>
+                                {
+                                    ensure!(
+                                        error.to_string().starts_with("ambiguous ")
+                                            || error.to_string().starts_with("missing "),
+                                        "{error:#}"
+                                    );
+                                }
+                                Err(error) => return Err(error),
+                            }
+                        }
+                    }
+                    routes.sort_by_key(|node| node_key(*node));
+                    routes.dedup();
+                    for target in routes {
+                        self.edges.insert(RetentionEdge {
+                            from: node,
+                            to: target,
+                            kind: RetentionEdgeKind::Namespace,
+                            source_edge: None,
+                        });
                         self.queue.push_back(Demand::Binding(
-                            GraphNode::Segment(key),
+                            target,
                             RetentionReason::NamespaceConservative,
                         ));
                     }

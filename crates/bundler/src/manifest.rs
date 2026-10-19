@@ -164,7 +164,10 @@ pub fn diagnostic_manifest(
         }
     }
     for edge in &plan.retention.edges {
-        if edge.kind == RetentionEdgeKind::EffectOrder {
+        if matches!(
+            edge.kind,
+            RetentionEdgeKind::EffectOrder | RetentionEdgeKind::Namespace
+        ) {
             continue;
         }
         // Use exactly the same synchronous/namespace expansion as the oracle.
