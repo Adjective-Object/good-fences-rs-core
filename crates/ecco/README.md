@@ -74,6 +74,10 @@ receiver; arrows capture lexical `this`. Ordinary functions expose conservative
 constructor hazards; non-constructible arrows do not execute a body when
 construction throws.
 
+Inferred effect queries subscribe to live capture bindings. Later rebinding
+widens those queries, including cached declared callback queries, without
+redirecting previously returned value identities.
+
 Returns through `if`/`else`, blocks, conditionals, and logical expressions join
 possible identities. Fallthrough returns `undefined`; terminal returns/throws
 stop scanning that path. Both possible branches are analyzed, not proven
@@ -117,6 +121,10 @@ call hazards as replacements. Recursive summary calls share exact contexts.
 Declared calls widen growing argument lists; inferred calls widen changing
 recursive contexts rather than grow without bound. Each explicit call site gets
 its own fresh result identity.
+
+Unmodeled ambient identifier reads may execute global accessors, including inside
+`typeof`; lexical/imported bindings and trusted global contracts do not incur
+that fallback.
 
 Unknown-alias reachability propagates through value joins. Updates through such
 aliases widen the heap only when their hazard expression becomes true, including

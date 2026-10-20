@@ -482,6 +482,7 @@ fn source_conditional_aliases_receive_updates() {
     let analysis = source(
         DECLARATIONS,
         r#"
+        import { condition } from "unknown";
         const a = {};
         const b = {};
         const before = a.x;
@@ -1127,6 +1128,7 @@ fn astra_latent_unknown_callback_does_not_poison_unrelated_reads() {
         }
     "#,
         r#"
+        import { unknownCallback } from "unknown";
         const unrelated = {};
         unrelated.value;
         const target = {};
@@ -1251,6 +1253,7 @@ fn astra_round3_false_update_on_unknown_does_not_poison() {
         }
     "#,
         r#"
+        import { unknownValue } from "unknown";
         const unrelated = {};
         noop(unknownValue);
         unrelated.property;
@@ -1445,4 +1448,62 @@ fn astra_round4_inferred_constructor_exposes_construct_hazard() {
     );
     let analysis = source(declarations, "const Arrow = () => log(); construct(Arrow);");
     assert_eq!(effects(&analysis), vec![false; 2]);
+}
+
+#[test]
+fn astra_round5_ambient_identifier_reads_can_execute_global_getters() {
+    let observed: Vec<_> = [
+        "ambient;",
+        "typeof ambient;",
+        "function read() { return ambient; } read();",
+    ]
+    .into_iter()
+    .map(|javascript| *effects(&source("", javascript)).last().unwrap())
+    .collect();
+    assert_eq!(
+        observed,
+        vec![true; 3],
+        "bare reads, typeof, and deferred reads can each execute an ambient global accessor"
+    );
+}
+
+#[test]
+fn astra_round5_latent_callback_tracks_later_capture_rebinding() {
+    let declarations = r#"
+        global fn install(holder, getter) {
+            call_effects = false
+            updates holder.property_read_effects |= call(getter)
+            returns void
+        }
+        global fn invoke(callback) {
+            call_effects = call(callback)
+            returns void
+        }
+        global fn log() { call_effects = true returns void }
+    "#;
+    let observed: Vec<_> = [
+        r#"
+        var callback = () => 1;
+        const getter = () => callback();
+        const holder = {};
+        install(holder, getter);
+        var callback = () => log();
+        holder.property;
+    "#,
+        r#"
+        var target = () => 1;
+        const callback = () => target();
+        invoke(callback);
+        var target = () => log();
+        invoke(callback);
+    "#,
+    ]
+    .into_iter()
+    .map(|javascript| *effects(&source(declarations, javascript)).last().unwrap())
+    .collect();
+    assert_eq!(
+        observed,
+        vec![true; 2],
+        "latent getters and cached callback effects must observe later changes to live captures"
+    );
 }

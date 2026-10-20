@@ -597,10 +597,13 @@ impl<'a> Extractor<'_, 'a> {
                         binding: Some(binding),
                     }
                 };
-                Computed {
-                    named,
-                    effects: self.context.pure(),
-                }
+                let effects =
+                    if reference.symbol_id().is_none() && named.value == self.context.unknown() {
+                        self.context.opaque_effects()
+                    } else {
+                        self.context.pure()
+                    };
+                Computed { named, effects }
             }
             Expression::StaticMemberExpression(member) => {
                 let object = self.expression(&member.object);

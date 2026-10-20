@@ -161,6 +161,11 @@ impl Context {
         }
         if target != value {
             let value = self.resolve_alias(value);
+            if self.resolve_alias(target) != value {
+                for cell in std::mem::take(&mut self.values[target.0].binding_readers) {
+                    self.initial[cell] = true;
+                }
+            }
             let value = if self.values[target.0].retained_capture {
                 self.join_values(&[self.resolve_alias(target), value])
             } else {
@@ -306,6 +311,13 @@ impl Context {
         };
         self.inferred_calls.insert(invocation.clone(), pending);
         let template = self.templates[closure.template].clone();
+        let mut capture_dependencies = Vec::new();
+        for capture in closure.captures.values() {
+            let cell = self.initial.len();
+            self.initial.push(false);
+            self.values[capture.0].binding_readers.push(cell);
+            capture_dependencies.push(Effect(cell));
+        }
         let mut values = closure.captures;
         for (index, parameter) in template.signature.parameters.iter().enumerate() {
             let slot = self.value(Hazards::NONE);
@@ -403,7 +415,7 @@ impl Context {
         let body = template.effects.map_or(self.effectful, |effect| {
             self.template_effect(effect, &template, &values, &effects)
         });
-        let effects = self.any([
+        let effects = self.any(capture_dependencies.into_iter().chain([
             body,
             self.values[function.0].call_mutations,
             self.values[resolved.0].call_mutations,
@@ -412,7 +424,7 @@ impl Context {
             } else {
                 self.pure
             },
-        ]);
+        ]));
         self.equations.push(Equation {
             target: pending.effects.0,
             expression: Expression::Read(effects.0),

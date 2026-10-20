@@ -13,5 +13,6 @@
 - Intern namespace identities before recording; deferred reads share them.
 - Keep unspecialized callable hazards separate from call-target mutation markers.
 - Callback effect queries are latent; only execution applies external updates.
+- Inferred effect queries subscribe to live captures and widen on rebinding.
 - Unknown behavior must not become a proof of purity. Exceptions alone are not
   retention effects. This does not permit reordering or duplicating expressions.

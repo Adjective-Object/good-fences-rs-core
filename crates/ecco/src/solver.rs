@@ -69,6 +69,7 @@ struct Value {
     call_mutations: Effect,
     external_aliases: Effect,
     retained_capture: bool,
+    binding_readers: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -223,6 +224,7 @@ impl Context {
             call_mutations,
             external_aliases,
             retained_capture: false,
+            binding_readers: Vec::new(),
         });
         if let Some(recording) = &mut self.recording {
             recording.instructions.push(Instruction::Value(id, hazards));
