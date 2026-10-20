@@ -1,0 +1,9 @@
+{
+  "id": "authored/css-module-mappings",
+  "moduleType": "module",
+  "entryPoints": ["entry.js"],
+  "fixtureConfig": {"css": {"css_modules": true}},
+  "cssObservation": "observe.mjs",
+  "expectations": {"stdout": ["mappings and stylesheet retained"], "backend": "native"},
+  "goals": ["Observe fixed camelCase named exports, shared class/ID identities, local/global scopes and stylesheet-wide extraction without a DOM."]
+}

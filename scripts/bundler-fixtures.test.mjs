@@ -274,6 +274,16 @@ for (const [name, mutate, expected] of [
   ['empty error name', (m) => { m.expectations.errors = { 'entry.js': { name: '' } }; }, /nonempty text/u],
   ['nonstring error code', (m) => { m.expectations.errors = { 'entry.js': { name: 'Error', code: 1 } }; }, /nonempty text/u],
   ['unstable error message', (m) => { m.expectations.errors = { 'entry.js': { name: 'Error', message: 'path' } }; }, /exactly/u],
+  ['unknown fixture option', (m) => { m.fixtureConfig = { externals: ['node:fs'] }; }, /exactly/u],
+  ['unknown CSS option', (m) => { m.fixtureConfig = { css: { nameMangling: 'none' } }; }, /exactly/u],
+  ['unknown output option', (m) => { m.fixtureConfig = { output: { directory: 'elsewhere' } }; }, /exactly/u],
+  ['null fixture config', (m) => { m.fixtureConfig = null; }, /must be an object/u],
+  ['invalid loader', (m) => { m.fixtureConfig = { css: { load: 'custom' } }; }, /invalid css.load/u],
+  ['invalid module suffix', (m) => { m.fixtureConfig = { css: { css_modules: 'ext:../css' } }; }, /invalid css.css_modules/u],
+  ['oversized fixture config', (m) => { m.fixtureConfig = { output: { base_url: 'x'.repeat(16384) } }; }, /exceeds 16 KiB/u],
+  ['observer traversal', (m) => { m.cssObservation = '../observe.mjs'; }, /relative path/u],
+  ['nested observer', (m) => { m.cssObservation = 'nested/observe.mjs'; }, /sibling .mjs/u],
+  ['observer missing', (m) => { m.cssObservation = 'absent.mjs'; }, /ENOENT/u],
 ]) {
   test(`rejects ${name} before creating execution directories`, () => {
     withCorpus(({ root, tempRoot, run }) => {
@@ -287,6 +297,90 @@ for (const [name, mutate, expected] of [
     });
   });
 }
+
+test('CSS output observations validate syntax without raw CSS imports and keep backend/output failures strict', () => {
+  withCorpus(({ root, run, driver, builds }) => {
+    const directory = addCase(root, 'css', {
+      cssObservation: 'observe.mjs',
+      expectations: { stdout: ['hello'], backend: 'native' },
+      sources: { 'entry.js': "import './style.css';", 'style.css': '.hello { color: red; }' },
+    });
+    const observer = path.join(directory, 'observe.mjs');
+    writeFileSync(observer, "export function observe({entry, entries}) { if (!entries[entry]) throw Error('missing'); console.log('hello'); }");
+    assert.equal(run()[0].status, 'passed', 'raw Node cannot import the CSS source');
+    writeFileSync(observer, "export function observe() { console.log('wrong'); }");
+    const [output] = run();
+    assert.equal(output.stage, 'output');
+    assert.match(output.error.message, /CSS output stdout mismatch/u);
+    writeFileSync(observer, 'export const = ;');
+    const buildCount = readFileSync(builds, 'utf8');
+    assert.equal(run()[0].stage, 'input');
+    assert.equal(readFileSync(builds, 'utf8'), buildCount, 'invalid observers must not build');
+    writeFileSync(observer, 'export function observe() {}');
+    writeFileSync(path.join(directory, 'files/entry.js'), 'const = ;');
+    assert.equal(run()[0].stage, 'input');
+    assert.equal(readFileSync(builds, 'utf8'), buildCount, 'invalid CSS-case JavaScript must not build');
+    writeFileSync(path.join(directory, 'files/entry.js'), "import './style.css';");
+    writeFileSync(driver, readFileSync(driver, 'utf8')
+      .replace("backend:'native'", "backend:'legacy'")
+      .replace("layout:'native-chunks-v1'", "layout:'exact-root-set-chunks-v1'"));
+    assert.equal(run()[0].stage, 'backend');
+    const manifestFile = path.join(directory, 'case.json');
+    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
+    delete manifest.expectations.backend;
+    writeFileSync(manifestFile, JSON.stringify(manifest));
+    assert.throws(run, /CSS output observations require native/u);
+  });
+});
+
+test('custom CSS script suffixes skip CSS syntax checks but still reject malformed JavaScript', () => {
+  withCorpus(({ root, run, builds }) => {
+    for (const extension of ['js', 'mjs', 'cjs']) {
+      const suffix = `.module.${extension}`;
+      const directory = addCase(root, extension, {
+        fixtureConfig: { css: { css_modules: `ext:${suffix}` } },
+        cssObservation: 'observe.mjs',
+        expectations: { stdout: ['hello'], backend: 'native' },
+        sources: {
+          'entry.js': `import './nested/style${suffix}';`,
+          [`nested/style${suffix}`]: '.hello { color: red; }',
+          [`nested/actual.${extension}`]: 'const valid = true;',
+        },
+      });
+      writeFileSync(path.join(directory, 'observe.mjs'),
+        "export function observe() { console.log('hello'); }");
+    }
+    assert.deepEqual(run().map(({ status }) => status), ['passed', 'passed', 'passed']);
+    const buildCount = readFileSync(builds, 'utf8');
+    for (const extension of ['js', 'mjs', 'cjs']) {
+      writeFileSync(path.join(root, `synthetic/${extension}/files/nested/actual.${extension}`), 'const = ;');
+    }
+    for (const result of run()) {
+      assert.equal(result.status, 'failed');
+      assert.equal(result.stage, 'input');
+      assert.match(result.error.message, /source syntax validation \(actual\.(?:js|mjs|cjs)\)/u);
+    }
+    assert.equal(readFileSync(builds, 'utf8'), buildCount, 'invalid JavaScript must not build');
+  });
+});
+
+test('resource inventory permits only declared nonexecutable bytes', () => {
+  withCorpus(({ root, run, driver }) => {
+    addCase(root);
+    const source = readFileSync(driver, 'utf8');
+    for (const [name, declared, valid] of [
+      ['style.css', true, true], ['image.svg', true, true],
+      ['style.css', false, false], ['hidden.js', true, false],
+    ]) {
+      writeFileSync(driver, source.replace('const entries =',
+        `writeFileSync(path.join(directory, ${JSON.stringify(name)}), 'resource bytes');\nconst entries =`)
+        .replace("backend:'native'", `resources:${JSON.stringify(declared ? [name] : [])}, backend:'native'`));
+      const [result] = run();
+      assert.equal(result.status, valid ? 'passed' : 'failed');
+      if (!valid) assert.equal(result.stage, 'build');
+    }
+  });
+});
 
 test('authored cases omit provenance and licenses; native backend requirements are enforced', () => {
   withCorpus(({ root, run }) => {
