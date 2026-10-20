@@ -568,21 +568,18 @@ impl CommonJs {
         Ok(output)
     }
 
-    pub fn emit(
-        &mut self,
+    fn emit_factories(
+        &self,
         graph: &SourceGraph,
         modules: &BTreeMap<u32, Module<'_>>,
         namespaces: &BTreeMap<u32, PathBuf>,
-        entries: &BTreeSet<u32>,
-        plan: &ChunkPlan,
-        prepared: &PreparedValues<'_>,
-    ) -> eyre::Result<()> {
+        factories: &[(u32, &Value)],
+    ) -> eyre::Result<Code> {
         // Export initializers before pure cyclic availability imports. Only CJS
         // requires, not ESM interop seams, may observe a still-running factory.
-        let mut factories: Vec<_> = self.factories.iter().collect();
-        factories.sort_by_key(|(_, value)| &value.name);
         let runtime = &self.runtime;
-        for (_, value) in &factories {
+        let mut output = Code::default();
+        for (_, value) in factories {
             let declaration = if self.browser { "var" } else { "let" };
             let export = if self.browser {
                 format!("export {{{}}};", value.name)
@@ -594,13 +591,13 @@ impl CommonJs {
             } else {
                 "__filename, __dirname".into()
             };
-            self.files.entry(value.path.clone()).or_default().push_str(&format!(
+            output.push_str(&format!(
                 "{declaration} {0}_record;\n{export}\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw {runtime}.assign(new {runtime}.Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {runtime}.apply({0}_factory, module.exports, [module.exports, module, {paths}]); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
                 value.name
             ));
         }
         let mut availability_imports = BTreeSet::new();
-        for &(&file, value) in &factories {
+        for &(file, value) in factories {
             let module = &modules[&file];
             let mut renderer = crate::emit::CachedRenderer::new(
                 module.source,
@@ -760,7 +757,6 @@ impl CommonJs {
                 }
             }
             let source = renderer.materialize()?;
-            let output = self.files.get_mut(&value.path).unwrap();
             for import in imports.into_values() {
                 output.push(import);
             }
@@ -772,6 +768,40 @@ impl CommonJs {
                 "\n}\n",
             ));
         }
+        Ok(output)
+    }
+
+    pub fn emit(
+        &mut self,
+        graph: &SourceGraph,
+        modules: &BTreeMap<u32, Module<'_>>,
+        namespaces: &BTreeMap<u32, PathBuf>,
+        entries: &BTreeSet<u32>,
+        execution: crate::execution::ExecutionOptions,
+        plan: &ChunkPlan,
+        prepared: &PreparedValues<'_>,
+    ) -> eyre::Result<()> {
+        let runtime = &self.runtime;
+        let mut factories: Vec<_> = self.factories.iter().collect();
+        factories.sort_by_key(|(_, value)| &value.name);
+        let mut factory_owners: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (&file, value) in factories {
+            factory_owners
+                .entry(value.path.clone())
+                .or_default()
+                .push((file, value));
+        }
+        let jobs: Vec<_> = factory_owners.into_iter().collect();
+        let outputs = execution.map(&jobs, |(artifact_path, factories)| -> eyre::Result<_> {
+            Ok((
+                artifact_path.clone(),
+                self.emit_factories(graph, modules, namespaces, factories)?,
+            ))
+        })?;
+        for output in outputs {
+            let (path, output) = output?;
+            self.files.insert(path, output);
+        }
         // NodeId order is initialization, sorted names, then namespace per source.
         let mut ordered: Vec<_> = self.values.iter().collect();
         ordered.sort_by_key(|(node, _)| match node {
@@ -779,74 +809,91 @@ impl CommonJs {
             NodeId::CommonJsNamespace(module) => (module, true, None),
             _ => unreachable!(),
         });
-        let mut imported = BTreeSet::new();
+        let mut facade_owners: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for (node, value) in ordered {
-            let module = match node {
-                NodeId::CommonJsProxy { module, .. } | NodeId::CommonJsNamespace(module) => module,
-                _ => unreachable!(),
-            };
-            let file = graph.file_id(module).unwrap();
-            let mut imports = Code::default();
-            let expression = match node {
-                NodeId::CommonJsProxy { name: None, .. } => {
-                    let factory = &self.factories[&file];
-                    if self.browser {
-                        imports.push(
-                            Code::request(factory.path.clone(), RequestKind::Import)
-                                .surrounded(format!("import {{{}}} from ", factory.name), ";\n"),
-                        );
-                        format!("{}(true)", factory.name)
-                    } else {
+            facade_owners
+                .entry(value.path.clone())
+                .or_default()
+                .push((node, value));
+        }
+        let jobs: Vec<_> = facade_owners.into_iter().collect();
+        let outputs = execution.map(&jobs, |(path, ordered)| -> eyre::Result<_> {
+            let mut output = Code::default();
+            let mut imported = BTreeSet::new();
+            for &(node, value) in ordered {
+                let module = match node {
+                    NodeId::CommonJsProxy { module, .. } | NodeId::CommonJsNamespace(module) => {
+                        module
+                    }
+                    _ => unreachable!(),
+                };
+                let file = graph.file_id(module).unwrap();
+                let mut imports = Code::default();
+                let expression = match node {
+                    NodeId::CommonJsProxy { name: None, .. } => {
+                        let factory = &self.factories[&file];
+                        if self.browser {
+                            imports.push(
+                                Code::request(factory.path.clone(), RequestKind::Import)
+                                    .surrounded(format!("import {{{}}} from ", factory.name), ";\n"),
+                            );
+                            format!("{}(true)", factory.name)
+                        } else {
                         imports.push(
                             Code::request(factory.path.clone(), RequestKind::Import)
                                 .surrounded(format!("import {}_factory from ", value.name), ";\n"),
                         );
                         format!("{}_factory.{}(true)", value.name, factory.name)
+                        }
                     }
-                }
-                _ => {
-                    let default = self.value(graph, file, &ImportedName::Name("default".into()))?;
-                    if default.path != value.path
-                        && imported.insert((value.path.clone(), default.path.clone()))
-                    {
-                        imports.push(
-                            Code::request(default.path.clone(), RequestKind::Import).surrounded(
-                                format!("import {{default as {}}} from ", default.name),
-                                ";\n",
-                            ),
-                        );
+                    _ => {
+                        let default =
+                            self.value(graph, file, &ImportedName::Name("default".into()))?;
+                        if default.path != value.path
+                            && imported.insert((value.path.clone(), default.path.clone()))
+                        {
+                            imports.push(
+                                Code::request(default.path.clone(), RequestKind::Import)
+                                    .surrounded(
+                                        format!("import {{default as {}}} from ", default.name),
+                                        ";\n",
+                                    ),
+                            );
+                        }
+                        if let NodeId::CommonJsProxy {
+                            name: Some(name), ..
+                        } = node
+                        {
+                            format!(
+                                "{0} == null ? undefined : {0}[{1}]",
+                                default.name,
+                                quote(name)
+                            )
+                        } else {
+                            let helper = format!("{}_namespace", value.name);
+                            imports.push_str(
+                                &include_str!("commonjs_namespace.mjs")
+                                    .replace("commonjsNamespace", &helper)
+                                    .replace("intrinsics", runtime),
+                            );
+                            format!("{helper}({})", default.name)
+                        }
                     }
-                    if let NodeId::CommonJsProxy {
-                        name: Some(name), ..
-                    } = node
-                    {
-                        format!(
-                            "{0} == null ? undefined : {0}[{1}]",
-                            default.name,
-                            quote(name)
-                        )
-                    } else {
-                        let helper = format!("{}_namespace", value.name);
-                        imports.push_str(
-                            &include_str!("commonjs_namespace.mjs")
-                                .replace("commonjsNamespace", &helper)
-                                .replace("intrinsics", runtime),
-                        );
-                        format!("{helper}({})", default.name)
-                    }
-                }
-            };
-            imports.push_str(&format!(
-                "\nconst {} = {expression};\nexport {{{} as {}}};\n",
-                value.name,
-                value.name,
-                quote(&value.exported)
-            ));
-            imports.default_export = value.exported == "default";
-            self.files
-                .entry(value.path.clone())
-                .or_default()
-                .push(imports);
+                };
+                imports.push_str(&format!(
+                    "\nconst {} = {expression};\nexport {{{} as {}}};\n",
+                    value.name,
+                    value.name,
+                    quote(&value.exported)
+                ));
+                imports.default_export = value.exported == "default";
+                output.push(imports);
+            }
+            Ok((path.clone(), output))
+        })?;
+        for output in outputs {
+            let (path, output) = output?;
+            self.files.entry(path).or_default().push(output);
         }
         for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
             let original = graph.file_path(file).unwrap().to_owned();

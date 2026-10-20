@@ -14,6 +14,7 @@ mod effect_analysis;
 mod effect_dependencies;
 pub mod effects;
 pub mod emit;
+pub mod execution;
 pub mod execution_dependencies;
 pub mod link;
 pub mod manifest;

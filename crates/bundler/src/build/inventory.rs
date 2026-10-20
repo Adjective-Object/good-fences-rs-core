@@ -144,7 +144,6 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
         dir: &Path,
         canonical: &Path,
         scopes: &mut BTreeSet<PathBuf>,
-        validated_configs: &mut BTreeSet<PathBuf>,
         out: &mut Inventory,
     ) -> eyre::Result<()> {
         scopes.insert(scope.to_owned());
@@ -197,14 +196,9 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
                 } else {
                     &target
                 };
-                visit(root, scope, &path, &target, scopes, validated_configs, out)?;
+                visit(root, scope, &path, &target, scopes, out)?;
             } else if metadata.is_file() {
                 out.aliases.entry(target.clone()).or_insert(path.clone());
-                if path.file_name().is_some_and(|name| name == "tsconfig.json")
-                    && validated_configs.insert(target.clone())
-                {
-                    import_resolver::node_resolver::read_custom_conditions(&entry.path())?;
-                }
                 let config = path
                     .extension()
                     .is_some_and(|e| e == "json" || e == "jsonc")
@@ -239,14 +233,12 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
         .canonicalize()
         .wrap_err_with(|| format!("inventory target {}", root.display()))?;
     let mut scopes = BTreeSet::new();
-    let mut validated_configs = BTreeSet::new();
     visit(
         root,
         &canonical_root,
         root,
         &canonical_root,
         &mut scopes,
-        &mut validated_configs,
         &mut result,
     )?;
     // A later link can expose the containing tree of an earlier alias. Validate
@@ -284,9 +276,6 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
                     let target = path
                         .canonicalize()
                         .wrap_err_with(|| format!("inventory config target {}", path.display()))?;
-                    if name == "tsconfig.json" && validated_configs.insert(target.clone()) {
-                        import_resolver::node_resolver::read_custom_conditions(&path)?;
-                    }
                     let digest = result
                         .files
                         .get(&target)

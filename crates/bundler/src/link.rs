@@ -179,6 +179,7 @@ pub fn esm_with_options(
         &BTreeSet::new(),
         &BTreeMap::new(),
         options.min_chunk_bytes,
+        Default::default(),
     )?
     .render()
 }
@@ -213,6 +214,16 @@ pub struct DeferredEsm {
     pub initializer: String,
 }
 
+pub fn esm_with_execution(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+    execution: crate::execution::ExecutionOptions,
+) -> eyre::Result<Artifacts> {
+    esm_plan_configured(graph, plan, policy, sources, &BTreeMap::new(), false, &BTreeSet::new(), &BTreeMap::new(), 0, execution)?.render()
+}
+
 pub(crate) fn esm_plan(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -233,7 +244,7 @@ pub(crate) fn esm_plan_prepared(
     browser: bool,
     require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_configured(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new(), 0)
+    esm_plan_configured(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new(), 0, Default::default())
 }
 
 /// Internal placement; an empty selection derives single-parent placements.
@@ -248,7 +259,7 @@ pub(crate) fn esm_plan_activated(
     relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
     placements: &BTreeMap<u32, u32>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_configured(graph, plan, policy, sources, relocations, false, &BTreeSet::new(), placements, 0)
+    esm_plan_configured(graph, plan, policy, sources, relocations, false, &BTreeSet::new(), placements, 0, Default::default())
 }
 
 pub(crate) fn esm_plan_configured(
@@ -261,6 +272,7 @@ pub(crate) fn esm_plan_configured(
     require_defaults: &BTreeSet<PathBuf>,
     placements: &BTreeMap<u32, u32>,
     min_chunk_bytes: usize,
+    execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
@@ -279,6 +291,7 @@ pub(crate) fn esm_plan_configured(
         require_defaults,
         placements,
         min_chunk_bytes,
+        execution,
     )
 }
 

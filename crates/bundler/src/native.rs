@@ -30,6 +30,7 @@ pub(super) fn emit(
     require_defaults: &BTreeSet<PathBuf>,
     placements: &BTreeMap<u32, u32>,
     min_chunk_bytes: usize,
+    execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     let prepared = PreparedValues::new(graph, modules, symbols);
     if !placements.is_empty() {
@@ -41,6 +42,7 @@ pub(super) fn emit(
             &prepared, browser, require_defaults,
             placements,
             min_chunk_bytes,
+            execution,
         );
     }
     let placements = single_parent(graph, plan, modules, symbols)?;
@@ -53,6 +55,7 @@ pub(super) fn emit(
             &prepared, browser, require_defaults,
             &placements,
             min_chunk_bytes,
+            execution,
         );
     }
     if min_chunk_bytes != 0 || !plan.generated_boundaries.is_empty() {
@@ -64,9 +67,10 @@ pub(super) fn emit(
             &prepared, browser, require_defaults,
             &BTreeMap::new(),
             min_chunk_bytes,
+            execution,
         );
     }
-    ordinary(graph, plan, modules, manifest, &prepared, browser, require_defaults)
+    ordinary(graph, plan, modules, manifest, &prepared, browser, require_defaults, execution)
 }
 
 fn ordinary(
@@ -77,12 +81,13 @@ fn ordinary(
     prepared: &PreparedValues<'_>,
     browser: bool,
     require_defaults: &BTreeSet<PathBuf>,
+    execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     if let Some(output) = single(graph, plan, modules, manifest, prepared, None)? {
         return Ok(output);
     }
     chunks::emit(
-        graph, plan, modules, manifest, prepared, browser, require_defaults,
+        graph, plan, modules, manifest, prepared, browser, require_defaults, execution,
     )
 }
 
@@ -699,6 +704,7 @@ fn single(
 
 struct PreparedValues<'s> {
     symbols: &'s Symbols,
+    files: Vec<u32>,
     definitions: Vec<crate::symbols::Symbol>,
     defaults: BTreeMap<SegmentKey, String>,
     occupied: HashSet<String>,
@@ -736,7 +742,7 @@ impl<'s> PreparedValues<'s> {
         files.sort_by_key(|&file| graph.file_path(file));
         let mut defaults = BTreeMap::new();
         let mut fresh = 0;
-        for file in files {
+        for &file in &files {
             let module = &modules[&file];
             for export in &module.parsed.facts.exports {
                 if let ExportValue::Expression(span) = export.value {
@@ -757,6 +763,7 @@ impl<'s> PreparedValues<'s> {
         }
         Self {
             symbols,
+            files,
             definitions,
             defaults,
             occupied,

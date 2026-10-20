@@ -4288,6 +4288,7 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         &BTreeSet::new(),
         &BTreeMap::new(),
         options.output.min_chunk_bytes,
+        options.execution,
     )
     .unwrap();
     let destinations = entry_outputs::apply(session.root(), options, &mut checked).unwrap();
@@ -6478,3 +6479,68 @@ fn package_classification_only_edit_reparses_only_effective_mode_change() {
     assert!(cjs.product.graph.file_facts(dep).unwrap().commonjs);
     assert_ne!(fs::read(sidecar).unwrap(), previous);
 }
+
+#[test]
+fn parallel_execution_preserves_build_bytes_counters_and_noop_generation() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from './dep.mjs'; console.log(value); export {value};",
+    );
+    write(
+        dir.root(),
+        "dep.mjs",
+        "export let value = 1; export function bump(){value++}",
+    );
+    let mut config = options();
+    config.entries.insert(
+        "dependency".into(),
+        Entry {
+            path: "dep.mjs".into(),
+            output_name: Some("renamed-dependency.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut baseline = None;
+    for workers in [1, 2, 4] {
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let built = session.build(&config).unwrap();
+        assert_eq!(built.counters.source_reparses, 0);
+        assert_eq!(built.counters.fragment_reparses, 0);
+        let executable = built
+            .product
+            .artifacts
+            .files
+            .keys()
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext == "mjs" || ext == "cjs" || ext == "js")
+            })
+            .count();
+        assert_eq!(
+            built.counters.final_validations,
+            if cfg!(debug_assertions) {
+                executable
+            } else {
+                0
+            }
+        );
+        assert_eq!(
+            built.counters.output_parses,
+            built.counters.final_validations
+        );
+        if let Some(previous) = &baseline {
+            assert_eq!(&built.product.artifacts, previous);
+        }
+        baseline = Some(built.product.artifacts.clone());
+        config.execution = crate::execution::ExecutionOptions::default();
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&noop.product, &built.product));
+        assert_eq!(noop.counters.emissions, 0);
+        assert_eq!(noop.counters.output_parses, 0);
+    }
+}
+
