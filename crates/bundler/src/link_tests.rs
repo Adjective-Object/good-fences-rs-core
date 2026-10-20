@@ -340,11 +340,101 @@ fn native_boundaries_preserve_observable_names_and_readonly_import_writes() {
         ("export let value = 1;", "import {value as local} from './dep.mjs'; try {local = 2;} catch(e) {console.log(e.name);} console.log(local);", "TypeError\n1\n"),
     ] {
         let sources = sources(&[("dep.mjs", dependency), ("entry.mjs", entry)]);
+        let before = native::global_preparation_count();
         let (_, output) = build(&sources, &[("entry.mjs", true)], false);
+        assert_eq!(native::global_preparation_count() - before, 1);
         assert_eq!(output.backend, super::Backend::Native);
         let observed = node(&output.files, &output.entries["entry.mjs"]);
         assert!(observed.status.success(), "{}", String::from_utf8_lossy(&observed.stderr));
         assert_eq!(observed.stdout, expected.as_bytes());
+    }
+}
+
+#[test]
+fn native_shared_defaults_avoid_global_names_across_owners_and_input_orders() {
+    let source = sources(&[
+        ("a.mjs", "export let value = 1; export default value; export function bump() { value++; }"),
+        ("z.mjs", "export default (() => 2);"),
+        ("blockers.mjs", "export const __gf_default_0 = 10; export {__gf_default_0 as __gf_default_1}; export function read(__gf_default_2) { return [__gf_default_2, typeof __gf_default_3, typeof __gf_import_0]; }"),
+        ("entry.mjs", "import snapshot, {value, bump} from './a.mjs'; import fn from './z.mjs'; import {__gf_default_1 as blocker, read} from './blockers.mjs'; bump(); console.log(snapshot, value, fn.name, fn(), blocker, read(5).join(',')); export {snapshot, value, fn};"),
+    ]);
+    let baseline = node(&source, Path::new("entry.mjs"));
+    assert!(baseline.status.success());
+    assert_eq!(baseline.stdout, b"1 2 default 2 10 5,undefined,undefined\n");
+    for entries in [
+        vec![("entry.mjs", true)],
+        vec![("entry.mjs", true), ("blockers.mjs", true)],
+    ] {
+        let mut previous = None;
+        for reverse in [false, true] {
+            let before = native::global_preparation_count();
+            let (_, output) = build(&source, &entries, reverse);
+            assert_eq!(native::global_preparation_count() - before, 1);
+            assert_eq!(output.files.len() == 1, entries.len() == 1);
+            let names = if entries.len() == 1 {
+                &["__gf_default_4", "__gf_default_5"][..]
+            } else {
+                // a.mjs retains native default syntax, but its allocation still
+                // precedes the relocated z.mjs expression.
+                &["__gf_default_5"][..]
+            };
+            for name in names {
+                assert!(
+                    output.files.values().any(|text| text.contains(name)),
+                    "missing allocated default {name}: {:?}",
+                    output.files
+                );
+            }
+            let actual = node(&output.files, &output.entries["entry.mjs"]);
+            assert!(
+                actual.status.success(),
+                "{}",
+                String::from_utf8_lossy(&actual.stderr)
+            );
+            assert_eq!(actual.stdout, baseline.stdout);
+            if let Some(previous) = previous {
+                assert_eq!(output, previous);
+            }
+            previous = Some(output);
+        }
+    }
+}
+
+#[test]
+fn native_shared_import_exclusions_preserve_free_names_and_live_bindings() {
+    let alias = format!("__gf_segment_import_{}_8", digest("entry.mjs"));
+    let source = sources(&[
+        ("state.mjs", &format!("console.log('state'); export let value = 1; export function bump() {{ value++; }} export {{value as {alias}__}};")),
+        ("blocker.mjs", &format!("console.log('blocker'); export function read({alias}_) {{ return {alias}_; }}")),
+        ("entry.mjs", &format!("import {{value, bump}} from './state.mjs'; import {{read}} from './blocker.mjs'; bump(); console.log(value, typeof {alias}, read(5));")),
+    ]);
+    let baseline = node(&source, Path::new("entry.mjs"));
+    assert!(baseline.status.success());
+    assert_eq!(baseline.stdout, b"state\nblocker\n2 undefined 5\n");
+    let entries = [("entry.mjs", true), ("state.mjs", true)];
+    let mut previous = None;
+    for reverse in [false, true] {
+        let before = native::global_preparation_count();
+        let (_, output) = build(&source, &entries, reverse);
+        assert_eq!(native::global_preparation_count() - before, 1);
+        // Free references and other modules' nested bindings reserve both
+        // shorter candidates. An export-only name does not reserve this alias.
+        assert!(
+            output.files[&output.entries["entry.mjs"]].contains(&format!(" as {alias}__}}")),
+            "{:?}",
+            output.files
+        );
+        let actual = node(&output.files, &output.entries["entry.mjs"]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, baseline.stdout);
+        if let Some(previous) = previous {
+            assert_eq!(output, previous);
+        }
+        previous = Some(output);
     }
 }
 

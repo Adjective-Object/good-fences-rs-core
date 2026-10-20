@@ -182,6 +182,10 @@ execute its remaining dependencies early. Hoisted availability cannot introduce
 new transitive native-initializer activation across a source phase.
 Use cached placement/name constraints, not trial emission. Reduce connector flags
 over retained segments only; namespace, SCC and activation guards stay derived.
+Prepare immutable occupied/default-name facts once per linked emission, shared
+through whole-tree attempts, placement and chunk emission. Keep owner routing
+and allocated-name overlays separate; never clone global name sets per owner.
+Export-only names constrain default allocation, not local import aliases.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree

@@ -14,8 +14,9 @@ pub(super) fn emit(
     plan: &ChunkPlan,
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
 ) -> eyre::Result<Artifacts<Code>> {
+    let symbols = prepared.symbols;
     let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
@@ -220,7 +221,7 @@ pub(super) fn emit(
                 continue;
             };
             let joined = group.union(&groups[&dependency]).copied().collect();
-            if !compatible_group(graph, &joined, &redirects, modules, symbols, &live, &cjs)? {
+            if !compatible_group(graph, &joined, &redirects, modules, prepared, &live, &cjs)? {
                 continue;
             }
             for owner in owners.values_mut() {
@@ -241,7 +242,7 @@ pub(super) fn emit(
         graph,
         plan,
         modules,
-        symbols,
+        prepared,
         &owners,
         &phase_bound,
         &boundaries,
@@ -295,7 +296,7 @@ pub(super) fn emit(
                 &owners,
                 &redirects,
                 modules,
-                symbols,
+                prepared,
                 &placement,
                 &surfaces,
                 &recipes,
@@ -303,7 +304,7 @@ pub(super) fn emit(
             )?
         } else if group.len() > 1 {
             concatenate(
-                graph, root, group, &owners, &redirects, modules, symbols, &live, &recipes, &cjs,
+                graph, root, group, &owners, &redirects, modules, prepared, &live, &recipes, &cjs,
             )?
             .ok_or_eyre("native group became incompatible")?
         } else {
@@ -452,7 +453,7 @@ pub(super) fn emit(
                 &owners,
                 &redirects,
                 modules,
-                symbols,
+                prepared,
                 &placement,
                 &surfaces,
                 &recipes,
@@ -595,11 +596,12 @@ fn compatible_group(
     group: &BTreeSet<u32>,
     redirects: &BTreeMap<u32, u32>,
     modules: &BTreeMap<u32, Module<'_>>,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
     live: &BTreeSet<SegmentKey>,
     cjs: &commonjs::CommonJs,
 ) -> eyre::Result<bool> {
-    let mut values = Values::new(graph, modules, symbols);
+    let symbols = prepared.symbols;
+    let mut values = Values::new(prepared);
     for &file in group {
         let facts = &modules[&file].parsed.facts;
         if cjs.contains(file) {
@@ -659,11 +661,12 @@ fn concatenate(
     owners: &BTreeMap<u32, u32>,
     redirects: &BTreeMap<u32, u32>,
     modules: &BTreeMap<u32, Module<'_>>,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
     live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
 ) -> eyre::Result<Option<Code>> {
+    let symbols = prepared.symbols;
     if group.iter().any(|f| {
         cjs.contains(*f)
             || modules[f]
@@ -675,7 +678,7 @@ fn concatenate(
     }) {
         return Ok(None);
     }
-    let mut values = Values::new(graph, modules, symbols);
+    let mut values = Values::new(prepared);
     values.requests = owners
         .iter()
         .map(|(&file, &owner)| (file, request(graph, owner)))
@@ -727,19 +730,7 @@ fn concatenate(
             pending.push((redirects[&target_file(graph, file, d)?], false));
         }
     }
-    let mut occupied: BTreeSet<_> = modules
-        .values()
-        .flat_map(|m| {
-            m.parsed
-                .facts
-                .bindings
-                .iter()
-                .map(|b| b.name.clone())
-                .chain(m.parsed.facts.references.iter().map(|r| r.name.clone()))
-        })
-        .chain(symbols.definitions.values().map(|d| d.name.clone()))
-        .chain(values.defaults.values().cloned())
-        .collect();
+    let mut occupied = OccupiedNames::new(prepared);
     let mut fresh = 0;
     for &file in &order {
         let facts = &modules[&file].parsed.facts;
