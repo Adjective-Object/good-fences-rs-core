@@ -1,22 +1,65 @@
 //! Small library driver for the differential fixture harness; not a CLI framework.
-use std::path::PathBuf;
+use std::{io::Read, path::PathBuf};
 
 use bundler::{
-    build::{BuildOptions, BuildSession, CssLoad, Entry},
+    build::{BuildOptions, BuildSession, CssLoad, CssModules, Entry, OutputOptions},
     publish::Cancellation,
 };
 
+#[derive(Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FixtureConfig {
+    output: FixtureOutput,
+    css: FixtureCss,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FixtureOutput {
+    base_url: String,
+}
+
+impl Default for FixtureOutput {
+    fn default() -> Self {
+        Self {
+            base_url: OutputOptions::default().base_url,
+        }
+    }
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct FixtureCss {
+    load: CssLoad,
+    css_modules: CssModules,
+}
+
 fn main() -> eyre::Result<()> {
-    let mut args = std::env::args_os().skip(1);
-    let root = PathBuf::from(
-        args.next()
-            .ok_or_else(|| eyre::eyre!("usage: build ROOT OUTPUT ENTRY..."))?,
-    );
+    let mut args = std::env::args_os().skip(1).peekable();
+    let root =
+        PathBuf::from(args.next().ok_or_else(|| {
+            eyre::eyre!("usage: build ROOT OUTPUT [--fixture-config FILE] ENTRY...")
+        })?);
     let output = PathBuf::from(
         args.next()
             .ok_or_else(|| eyre::eyre!("missing output directory"))?,
     );
     let mut options = BuildOptions::default();
+    if args.peek().is_some_and(|arg| arg == "--fixture-config") {
+        args.next();
+        let filename = args
+            .next()
+            .ok_or_else(|| eyre::eyre!("missing fixture config file"))?;
+        let mut bytes = Vec::new();
+        std::fs::File::open(filename)?
+            .take(16 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        eyre::ensure!(bytes.len() <= 16 * 1024, "fixture config exceeds 16 KiB");
+        let config: FixtureConfig = serde_json::from_slice(&bytes)?;
+        options.output.base_url = config.output.base_url;
+        options.css.load = config.css.load;
+        options.css.css_modules = config.css.css_modules;
+    }
     for path in args {
         if path == "--css-auto-mount" {
             options.css.load = CssLoad::AutoMount;

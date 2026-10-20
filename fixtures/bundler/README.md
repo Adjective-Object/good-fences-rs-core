@@ -1,8 +1,10 @@
 # Portable bundler semantic fixtures
 
 These small upstream adaptations and locally authored cases describe observable
-JavaScript runtime semantics. One runner validates the inputs using Node, builds
-through the public Rust library/publisher, and compares emitted observations.
+JavaScript runtime semantics and CSS output contracts. One runner validates the
+inputs, builds through the public Rust library/publisher, and compares emitted
+observations. Ordinary JavaScript retains unbundled Node differential checks;
+CSS uses a separate explicit output observer because raw Node cannot import CSS.
 
 From the repository root, with Node.js 22 and the repository Rust toolchain:
 
@@ -40,8 +42,10 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **38 cases / 54 entry executions**: six esbuild cases,
-six rspack cases and twenty-six authored cases. The upstream cases cover
+The corpus contains **42 cases / 58 entry executions**: six esbuild cases,
+six rspack cases and thirty authored cases. Four authored CSS cases use
+output observations; the 38 JS cases / 54 executions remain differential.
+The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
@@ -73,7 +77,8 @@ tests.
 ```
 
 Every case has `id`, `moduleType`, `entryPoints`, `expectations` and `goals`.
-Only `upstream` is optional at the top level; no unknown fields are accepted.
+`upstream`, `fixtureConfig` and `cssObservation` are optional at the top level;
+no unknown fields are accepted.
 An upstream adaptation looks like:
 
 ```json
@@ -157,16 +162,77 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All thirty-eight current cases require native. Legacy reporting and
+back to legacy. All forty-two current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 
-Sources must be self-contained JavaScript and local data. No external packages,
+Sources must be self-contained JavaScript, selected CSS and local data. No external packages,
 `node_modules`, project sources, downloads, Jest, webpack/rspack globals, or
 package lifecycle scripts are supported. The runner never installs dependencies
 or invokes scripts; missing runtime dependencies fail execution. Node built-ins
 are available. Only trusted, reviewed fixtures should be run: Node execution is
 **not a sandbox**, and this runner does not enforce a network or filesystem jail.
+
+### CSS output contracts and explicit options
+
+`fixtureConfig` exposes only the example driver's output/CSS options; it does not
+configure external dependencies, effects, entry renames or custom plugins:
+
+```json
+{
+  "fixtureConfig": {
+    "output": {"base_url": "./"},
+    "css": {"load": "caller-loaded", "css_modules": true}
+  },
+  "cssObservation": "observe.mjs"
+}
+```
+
+All config objects/fields are optional; the shipped defaults are base `"./"`,
+load `"caller-loaded"` and modules `false`. The complete serialized config is
+bounded to 16 KiB, with unknown fields rejected at every level. Module selection
+also accepts `"everything"` (CSS only) and `"ext:.custom.suffix"`;
+`true` selects `.module.css`. `"auto-mount"` is independent of selection.
+Mappings always use camelCase named exports, never a configurable naming mode
+or default mapping object. Invalid bases/suffixes, scoped/export collisions,
+invalid composition and unsupported/recovered module syntax are build errors,
+not accepted runtime outcomes. ICSS `:import`/`:export`, `@value` and preprocessor
+compilation remain unsupported. Detailed selector/animation limits live in the
+[crate CSS contract](../../crates/bundler/README.md#extracted-css).
+
+`cssObservation` explicitly opts into **CSS output observation**, requires
+`expectations.backend: "native"`, and names a regular sibling `.mjs` file beside
+`case.json` (no nested path or symlink). The runner syntax-checks all source JS
+and the observer before building, excluding files selected as CSS by a custom
+suffix (including `.module.cjs`); it does **not** execute raw CSS imports or
+pretend to compare them with Node. CSS/resource parsing and closure validation
+remain the production builder's responsibility. Invalid source JS/observer
+syntax is an input failure and skips the build. No custom Node loader is used.
+The observer exports `async function observe(build)` (a synchronous function also
+works) and is called once per entry, in isolated processes, with the driver's
+`entries`, generation `directory`, owned `stylesheets`/`resources`, counters and
+the selected logical `entry`. It imports emitted entries itself and may assert
+mapping/CSS/asset contents or install a minimal DOM recorder before importing.
+Do not import source CSS in the observer or use generated code snapshots.
+The same strict completion pipe, stdout/error expectations, stderr/exit/timeout
+checks and separate input/build/backend/output failure stages apply.
+Observer/import/assertion errors are output failures unless explicitly expected;
+ordinary JS cases still compare every source/emitted stdout and error outcome.
+
+Declared resource inventory permits CSS/binary bytes, not executable JS or
+package metadata disguised as resources; undeclared non-JS generation files
+fail. Stylesheet paths must refer to declared owned `.css` resources.
+Caller-loaded applications must load and order root stylesheets themselves and
+serve resources at the configured public base. Auto-mount requires document/head,
+inserts links synchronously at native evaluation/activation, and promises neither
+stylesheet readiness nor DOM-global deduplication. Unsupported syntax fails
+explicitly. These are Node DOM-recording/file observations, **not real-browser
+rendering, CSS application, fetch or network-readiness tests**.
+
+The four authored contracts cover mappings/scopes, ordered local/global/cross-file
+composition, lazy once-only dependency-first mounts with conditional CSS imports,
+and public stylesheet/asset URLs with exact owned bytes. They are locally authored;
+all pinned upstream provenance, adaptation notes and licenses are unchanged.
 
 ## Unified execution and reporting
 
@@ -188,7 +254,8 @@ This observes imported module execution, not CLI-only `require.main` semantics.
 It uses no preload or custom loader hooks. Fixture code remains trusted, not jailed.
 
 The runner builds the independent copy and executes its resulting entrypoints,
-comparing the same per-entry stdout and normalized error observations.
+comparing the same per-entry stdout and normalized error observations for JS.
+Explicit CSS cases instead execute the output observer described above.
 Explicit unsupported capabilities are visible, never counted as passes. Linking,
 chunking, diagnostics, incremental invalidation, and bundler-only behavior need
 their own drivers and expectations. Chunk names, chunk counts, generated-code
@@ -204,7 +271,7 @@ manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
 The corpus requires source behavior, not the current emitter's behavior:
 
-- **Native (37, all explicitly required):** all twenty-five authored cases,
+- **Native (38 JS, all explicitly required):** all twenty-six authored JS cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
   `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
   `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
@@ -214,6 +281,10 @@ The corpus requires source behavior, not the current emitter's behavior:
 - **No legacy fallback:** the production legacy backend is deleted.
   Rust Node regressions cover low-level root shapes outside the portable public
   driver API. No upstream parity is claimed.
+
+The four additional authored CSS output contracts require/select native, bringing
+the current corpus to **42 contracts / 58 executions**. They supplement rather
+than replace the JS differential baseline; they make no browser-conformance claim.
 
 The public driver also returns the plan's effect-order-cycle diagnostics in
 `planWarnings`. These must exactly match the build warnings and be known cycle

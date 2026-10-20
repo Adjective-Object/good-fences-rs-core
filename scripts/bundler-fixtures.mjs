@@ -66,7 +66,17 @@ function validateFiles(directory) {
 
 function validateCase(root, directory) {
   const manifest = json(path.join(directory, 'case.json'));
-  object(manifest, requiredFields, 'case.json', ['upstream']);
+  object(manifest, requiredFields, 'case.json', ['upstream', 'fixtureConfig', 'cssObservation']);
+  if (Object.hasOwn(manifest, 'fixtureConfig')) {
+    validateFixtureConfig(manifest.fixtureConfig);
+  }
+  if (Object.hasOwn(manifest, 'cssObservation')) {
+    relativePath(manifest.cssObservation, 'cssObservation');
+    check(!manifest.cssObservation.includes('/') && manifest.cssObservation.endsWith('.mjs'),
+      'cssObservation must be a sibling .mjs module');
+    regularFile(path.join(directory, manifest.cssObservation));
+    check(manifest.expectations?.backend === 'native', 'CSS output observations require native backend');
+  }
   relativePath(manifest.id, 'id');
   const relative = path.relative(root, directory).split(path.sep).join('/');
   check(manifest.id === relative && relative.includes('/'), `id must match group/case directory: ${relative}`);
@@ -122,6 +132,27 @@ function validateCase(root, directory) {
       'files/package.json type must be module or commonjs when present');
   }
   return { manifest, files };
+}
+
+function validateFixtureConfig(config) {
+  object(config, [], 'fixtureConfig', ['output', 'css']);
+  check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
+  if (Object.hasOwn(config, 'output')) {
+    object(config.output, [], 'fixtureConfig.output', ['base_url']);
+    if (Object.hasOwn(config.output, 'base_url')) text(config.output.base_url, 'output.base_url');
+  }
+  if (Object.hasOwn(config, 'css')) {
+    object(config.css, [], 'fixtureConfig.css', ['load', 'css_modules']);
+    if (Object.hasOwn(config.css, 'load')) {
+      check(['caller-loaded', 'auto-mount'].includes(config.css.load), 'invalid css.load');
+    }
+    if (Object.hasOwn(config.css, 'css_modules')) {
+      const selection = config.css.css_modules;
+      check(typeof selection === 'boolean' || selection === 'everything'
+        || (typeof selection === 'string' && /^ext:(?:\.[A-Za-z0-9_-]+)+$/u.test(selection)),
+      'invalid css.css_modules');
+    }
+  }
 }
 
 export function discoverCases(root = defaultRoot) {
@@ -195,13 +226,16 @@ export function copyCase(files, directory, manifest) {
   if (!existsSync(path.join(directory, 'package.json'))) {
     writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ type: manifest.moduleType }));
   }
-  if (manifest.expectations.errors) {
+  if (manifest.expectations.errors || manifest.cssObservation) {
+    const selection = manifest.fixtureConfig?.css?.css_modules;
+    const cssSuffix = typeof selection === 'string' && selection.startsWith('ext:')
+      ? selection.slice(4) : undefined;
     // Parse failures are not expected runtime throws/rejections.
     function checkSyntax(folder) {
       for (const name of readdirSync(folder).sort()) {
         const filename = path.join(folder, name);
         if (lstatSync(filename).isDirectory()) checkSyntax(filename);
-        else if (/\.(?:js|mjs|cjs)$/u.test(name)) {
+        else if (/\.(?:js|mjs|cjs)$/u.test(name) && !(cssSuffix && name.endsWith(cssSuffix))) {
           successful(execute(process.execPath, ['--check', filename], directory),
             `${manifest.id}: source syntax validation (${name})`);
         }
@@ -217,7 +251,10 @@ import { writeSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 const entry = process.argv[1];
 let outcome = null;
-try { await import(pathToFileURL(entry).href); }
+try {
+  const namespace = await import(pathToFileURL(entry).href);
+  if (process.argv[2]) await namespace.observe(JSON.parse(process.argv[2]));
+}
 catch (error) {
   outcome = {name: error instanceof Error ? error.name : typeof error};
   if (typeof error?.code === 'string') outcome.code = error.code;
@@ -225,7 +262,7 @@ catch (error) {
 writeSync(3, JSON.stringify(outcome));
 `;
 
-export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 'baseline') {
+export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 'baseline', cssOutput) {
   const stdout = [];
   const outcomes = [];
   for (const entry of manifest.entryPoints) {
@@ -233,7 +270,8 @@ export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 
     const expected = errors && Object.hasOwn(errors, entry) ? errors[entry] : undefined;
     const label = `${manifest.id} ${mode} (${entry})`;
     const result = execute(process.execPath,
-      ['--input-type=module', '-e', observer, '--', entries[entry]], cwd, timeoutMs, true);
+      ['--input-type=module', '-e', observer, '--', entries[entry],
+        ...(cssOutput ? [JSON.stringify({ ...cssOutput, entry })] : [])], cwd, timeoutMs, true);
     const lines = outputLines(successful(result, label));
     stdout.push(...lines);
     check(result.output[3], `${label}: observer did not complete${expected ? '; expected runtime failure did not occur' : ''}`);
@@ -253,9 +291,16 @@ export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 
   return { stdout, outcomes };
 }
 
-export function buildProject(driver, root, entries, timeoutMs = 30000) {
+export function buildProject(driver, root, entries, timeoutMs = 30000, fixtureConfig) {
   assert(existsSync(driver), `Missing library driver; run cargo build -p bundler --example build (${driver})`);
-  const result = execute(driver, [root, path.join(root, '.bundler-output'), ...entries], root, timeoutMs);
+  const configArgs = [];
+  if (fixtureConfig !== undefined) {
+    validateFixtureConfig(fixtureConfig);
+    const filename = path.join(root, '.bundler-fixture-config.json');
+    writeFileSync(filename, JSON.stringify(fixtureConfig));
+    configArgs.push('--fixture-config', filename);
+  }
+  const result = execute(driver, [root, path.join(root, '.bundler-output'), ...configArgs, ...entries], root, timeoutMs);
   const build = JSON.parse(successful(result, 'public build pipeline'));
   const planWarnings = build.planWarnings ?? [];
   assert(Array.isArray(planWarnings) && planWarnings.every(warning =>
@@ -266,10 +311,22 @@ export function buildProject(driver, root, entries, timeoutMs = 30000) {
   assert(['native', 'legacy'].includes(build.backend), 'driver must report its selected backend');
   assert.equal(build.layout, build.backend === 'native' ? 'native-chunks-v1' : 'exact-root-set-chunks-v1',
     'physical layout must match the reported backend');
+  const resources = new Set(build.resources ?? []);
+  assert(Array.isArray(build.resources ?? []), 'resources must be an array');
+  for (const resource of resources) {
+    relativePath(resource, 'resource');
+    assert(!/\.(?:mjs|cjs|js)$/u.test(resource) && path.basename(resource) !== 'package.json',
+      'resources cannot hide executable artifacts');
+    regularFile(path.join(build.directory, resource));
+  }
+  for (const stylesheet of Object.values(build.stylesheets ?? {})) {
+    assert(resources.has(stylesheet) && stylesheet.endsWith('.css'), 'stylesheet must name an owned CSS resource');
+  }
   for (const file of readdirSync(build.directory, { recursive: true, withFileTypes: true })) {
     if (file.isDirectory()) continue;
     assert(file.isFile(), 'generation contains a nonregular artifact');
     const filename = path.join(file.parentPath, file.name);
+    if (resources.has(path.relative(build.directory, filename).split(path.sep).join('/'))) continue;
     if (file.name === 'package.json') {
       const metadata = json(filename);
       object(metadata, ['type'], 'generated package.json');
@@ -324,16 +381,25 @@ export function runFixtures(root = defaultRoot, {
         const native = path.join(directory, 'native');
         const source = path.join(directory, 'source');
         copyCase(files, native, manifest);
-        const baseline = observeEntries(manifest,
-          Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
-          native, timeoutMs, 'source');
+        let baseline;
+        let cssObserver;
+        if (manifest.cssObservation) {
+          cssObserver = path.join(directory, 'observe.mjs');
+          cpSync(path.join(path.dirname(files), manifest.cssObservation), cssObserver);
+          successful(execute(process.execPath, ['--check', cssObserver], directory),
+            `${manifest.id}: CSS observer syntax validation`);
+        } else {
+          baseline = observeEntries(manifest,
+            Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
+            native, timeoutMs, 'source');
+        }
         if (unsupported.has(manifest.id)) {
           return { id: manifest.id, status: 'unsupported', reason: unsupported.get(manifest.id), executions: 0,
             ...retained };
         }
         stage = 'build';
         copyCase(files, source, manifest);
-        const build = buildProject(driver, source, manifest.entryPoints);
+        const build = buildProject(driver, source, manifest.entryPoints, 30000, manifest.fixtureConfig);
         backend = build.backend;
         if (build.planWarnings?.length) warnings = build.planWarnings;
         if (output) {
@@ -346,10 +412,12 @@ export function runFixtures(root = defaultRoot, {
           assert.equal(backend, 'native', `${manifest.id}: native backend required; legacy fallback selected`);
         }
         stage = 'output';
-        const bundled = observeEntries(manifest, build.entries, source, timeoutMs, 'bundled');
-        assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
+        const bundled = observeEntries(manifest,
+          cssObserver ? Object.fromEntries(manifest.entryPoints.map(entry => [entry, cssObserver])) : build.entries,
+          source, timeoutMs, cssObserver ? 'CSS output' : 'bundled', cssObserver ? build : undefined);
+        if (!cssObserver) assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
         return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
-          executions: manifest.entryPoints.length, stdout: baseline.stdout, ...retained };
+          executions: manifest.entryPoints.length, stdout: bundled.stdout, ...retained };
       } catch (error) {
         return { id: manifest.id, status: 'failed', stage, ...(backend ? { backend } : {}),
           ...(warnings ? { warnings } : {}), executions: 0, error, ...retained };

@@ -220,6 +220,12 @@ their identities. Preserve supported behavior in independently reviewed incremen
 Artifacts report Backend::Native; derive driver layout from it, never filenames.
 All portable fixtures require native. The harness retains legacy rejection and
 reporting for older binaries, not a production emitter fallback.
+The example driver accepts only bounded explicit fixture output/CSS config,
+never general BuildOptions or implicit project config; keep positional calls.
+CSS fixtures syntax-check source JS, then run a separate native output observer;
+raw Node cannot import CSS. Keep ordinary JS source/output differential checks,
+owned resource inventory validation and input/build/backend/output stages intact.
+DOM recording proves insertion/activation, never browser rendering or readiness.
 Canonical symbols use owned (file, BindingId) identities and checked export routes,
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.

@@ -1,0 +1,2 @@
+@import "./conditional.css" print;
+.button { composes: base from "./base.style"; color: blue; }
