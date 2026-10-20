@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 /// Flat operation hazards; membership hazards describe the right operand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(usize)]
 pub enum Hazard {
     PropertyRead,
@@ -42,7 +44,7 @@ impl Hazard {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hazards(pub [bool; Hazard::ALL.len()]);
 
 impl Hazards {
@@ -54,14 +56,14 @@ impl Hazards {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Binding {
     Global(Vec<String>),
     Module { module: String, path: Vec<String> },
     Local(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HazardExpr {
     Bool(bool),
     Read {
@@ -76,7 +78,7 @@ pub enum HazardExpr {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CallArgument {
     Value(String),
     Spread(String),
@@ -84,7 +86,7 @@ pub enum CallArgument {
 }
 
 /// Explicit fields override the wildcard default, independent of source order.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HazardFields {
     pub default: Option<HazardExpr>,
     pub fields: Vec<(Hazard, HazardExpr)>,
@@ -102,7 +104,7 @@ impl HazardFields {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Returns {
     #[default]
     Fresh,
@@ -110,7 +112,7 @@ pub enum Returns {
     Void,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Update {
     pub target: String,
     /// None means all hazard slots.
@@ -118,7 +120,7 @@ pub struct Update {
     pub expression: HazardExpr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Definition {
     pub binding: Binding,
     pub parameters: Vec<String>,
@@ -130,13 +132,13 @@ pub struct Definition {
     pub updates: Vec<Update>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalFacts {
     pub definitions: Vec<Definition>,
     pub global_symbols: Vec<GlobalSymbol>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalSymbol {
     pub name: String,
     pub read_effects: bool,

@@ -4,20 +4,22 @@ use std::{
 };
 
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::*;
 
 mod inference;
 pub(crate) use inference::FunctionSignature;
+pub use inference::OwnedFunction;
 use inference::{Closure, Instruction, Recording, Template};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ValueId(usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Effect(usize);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CallResult {
     pub value: ValueId,
     pub effects: Effect,
@@ -141,10 +143,19 @@ pub struct Context {
     inferred_calls: HashMap<Invocation, CallResult>,
     expanding_templates: HashSet<usize>,
     latent: bool,
+    roots: Vec<inference::LazyRoot>,
+    producers: HashMap<ValueId, usize>,
+    root_outputs: HashMap<usize, ValueId>,
 }
 
 impl Context {
     pub fn from_local_facts(facts: LocalFacts) -> eyre::Result<Self> {
+        let mut context = Self::recording_context(facts)?;
+        context.instantiate_declarations(0);
+        Ok(context)
+    }
+
+    pub(crate) fn recording_context(facts: LocalFacts) -> eyre::Result<Self> {
         crate::parser::validate_facts(&facts)?;
         let mut context = Self {
             facts,
@@ -166,6 +177,9 @@ impl Context {
             inferred_calls: HashMap::new(),
             expanding_templates: HashSet::new(),
             latent: false,
+            roots: Vec::new(),
+            producers: HashMap::new(),
+            root_outputs: HashMap::new(),
         };
         context.undefined = context.value(Hazards::NONE);
         context.unknown = context.value(Hazards::UNKNOWN);
@@ -175,22 +189,25 @@ impl Context {
             context.values[value.0].definition = Some(index);
             context.functions.push(value);
         }
-        for index in 0..context.facts.definitions.len() {
-            let definition = context.facts.definitions[index].clone();
-            let arguments = vec![context.unknown; definition.parameters.len()];
+        Ok(context)
+    }
+
+    fn instantiate_declarations(&mut self, start: usize) {
+        for index in start..self.facts.definitions.len() {
+            let definition = self.facts.definitions[index].clone();
+            let arguments = vec![self.unknown; definition.parameters.len()];
             let frame = Frame {
                 definition: &definition,
                 arguments: &arguments,
-                receiver: context.unknown,
-                undefined: context.undefined,
+                receiver: self.unknown,
+                undefined: self.undefined,
             };
             for slot in Hazard::ALL {
-                let expression = context.instantiate(&definition.hazards.get(slot), &frame);
-                let target = context.values[context.functions[index].0].cells[slot as usize];
-                context.equations.push(Equation { target, expression });
+                let expression = self.instantiate(&definition.hazards.get(slot), &frame);
+                let target = self.values[self.functions[index].0].cells[slot as usize];
+                self.equations.push(Equation { target, expression });
             }
         }
-        Ok(context)
     }
 
     pub fn facts(&self) -> &LocalFacts {

@@ -4,7 +4,7 @@ use eyre::{ensure, Result};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
-use oxc_semantic::{ScopeFlags, Semantic, SemanticBuilder, SymbolId};
+use oxc_semantic::{ScopeFlags, Semantic, SemanticBuilder, SymbolId as OxcSymbolId};
 use oxc_span::{GetSpan, Span};
 
 use crate::solver::FunctionSignature;
@@ -17,8 +17,9 @@ pub struct SourceRoot {
     pub effects: Effect,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DefinitionMatch {
+    #[serde(with = "crate::analysis::span")]
     pub span: Span,
     pub binding: Binding,
 }
@@ -33,6 +34,11 @@ pub struct SourceAnalysis {
 /// Parse using the repository's extension-sensitive ESM policy. Import evaluation
 /// and cross-file linking remain caller responsibilities.
 pub fn analyze_source(source: &str, path: &Path, facts: LocalFacts) -> Result<SourceAnalysis> {
+    crate::analysis::analyze_parsed(parse_source(source, path, facts)?)
+}
+
+/// Parse source into saveable lazy operations, without analyzing source calls.
+pub fn parse_source(source: &str, path: &Path, facts: LocalFacts) -> Result<ParsedFile> {
     let allocator = Allocator::default();
     let parsed = oxc_utils_parse::parse_bundler_file(
         &allocator,
@@ -49,17 +55,26 @@ pub fn analyze_source(source: &str, path: &Path, facts: LocalFacts) -> Result<So
         path.display(),
         semantic.errors
     );
-    extract_from_ast(&parsed.program, &semantic.semantic, facts)
+    parse_from_ast(&parsed.program, &semantic.semantic, facts)
 }
 
-/// Extract owned roots from a program and its checked semantic model, without
-/// reparsing or retaining arena-backed data.
+/// Analyze a single checked program without reparsing. Use `parse_from_ast`
+/// instead when extracting precursors for a connected graph.
 pub fn extract_from_ast<'a>(
     program: &Program<'a>,
     semantic: &Semantic<'a>,
     facts: LocalFacts,
 ) -> Result<SourceAnalysis> {
-    let mut context = Context::from_local_facts(facts)?;
+    crate::analysis::analyze_parsed(parse_from_ast(program, semantic, facts)?)
+}
+
+/// Extract owned lazy definitions using an externally supplied checked AST.
+pub fn parse_from_ast<'a>(
+    program: &Program<'a>,
+    semantic: &Semantic<'a>,
+    facts: LocalFacts,
+) -> Result<ParsedFile> {
+    let mut context = Context::recording_context(facts)?;
     let values = semantic
         .scoping()
         .symbol_ids()
@@ -89,42 +104,16 @@ pub fn extract_from_ast<'a>(
         !collector.missing_reference,
         "effect extraction requires resolved OXC references"
     );
-    if collector.mutation {
-        collector.context.opaque_effects();
-    }
     let this_value = collector.context.undefined();
     let slots = collector
         .values
         .iter()
         .map(|(symbol, named)| (*symbol, named.value))
         .collect();
-    let mut namespaces = HashMap::new();
-    for definition in collector.context.facts().definitions.clone() {
-        let prefixes: Vec<_> = match definition.binding {
-            Binding::Global(path) => (1..path.len())
-                .map(|length| Binding::Global(path[..length].to_vec()))
-                .collect(),
-            Binding::Module { module, path } => (0..path.len())
-                .map(|length| Binding::Module {
-                    module: module.clone(),
-                    path: path[..length].to_vec(),
-                })
-                .collect(),
-            Binding::Local(_) => Vec::new(),
-        };
-        for prefix in prefixes {
-            namespaces.entry(prefix).or_insert_with(|| {
-                let mut hazards = Hazards::UNKNOWN;
-                hazards.0[Hazard::PropertyRead as usize] = false;
-                collector.context.value(hazards)
-            });
-        }
-    }
     let mut extractor = Extractor {
         context: collector.context,
         semantic,
         values: collector.values,
-        namespaces,
         roots: Vec::new(),
         matches: Vec::new(),
         functions: collector.functions,
@@ -132,25 +121,71 @@ pub fn extract_from_ast<'a>(
         arguments_value: None,
         deferred: false,
         slots,
+        parsed_roots: Vec::new(),
+        externals: Vec::new(),
     };
+    let symbols = semantic
+        .scoping()
+        .symbol_ids()
+        .filter(|symbol| {
+            semantic.scoping().symbol_scope_id(*symbol) == semantic.scoping().root_scope_id()
+                && !matches!(
+                    extractor.values[symbol].binding,
+                    Some(Binding::Module { .. })
+                )
+        })
+        .map(|symbol| {
+            let span = semantic.scoping().symbol_span(symbol);
+            ParsedSymbol {
+                id: SymbolId(span.start),
+                name: semantic.scoping().symbol_name(symbol).to_owned(),
+                span,
+                value: extractor.slots[&symbol],
+            }
+        })
+        .collect();
+    let values = extractor.context.parsed_values();
     Compiler {
         extractor: &mut extractor,
     }
     .visit_program(program);
+    extractor.context.start_function();
+    if collector.mutation {
+        extractor.context.opaque_effects();
+    }
+    if !program.source_type.is_commonjs() {
+        extractor.hoist(&program.body);
+    }
+    let setup = extractor.context.finish_recording(
+        FunctionSignature::default(),
+        Vec::new(),
+        extractor.context.pure(),
+    );
+    extractor.context.start_function();
     if program.source_type.is_commonjs() {
         let effects = extractor.context.opaque_effects();
-        extractor.roots.push(SourceRoot {
+        extractor.push_root(SourceRoot {
             span: program.span,
             value: extractor.context.unknown(),
             effects,
         });
     } else {
-        extractor.hoist(&program.body);
         extractor.visit_program(program);
     }
-    Ok(SourceAnalysis {
-        context: extractor.context,
-        roots: extractor.roots,
+    extractor.context.finish_recording(
+        FunctionSignature::default(),
+        Vec::new(),
+        extractor.context.pure(),
+    );
+    Ok(ParsedFile {
+        version: 1,
+        facts: extractor.context.facts().clone(),
+        values,
+        functions: extractor.context.owned_functions(),
+        setup,
+        symbols,
+        roots: extractor.parsed_roots,
+        externals: extractor.externals,
         matches: extractor.matches,
     })
 }
@@ -164,7 +199,7 @@ struct NamedValue {
 struct Bindings<'s, 'a> {
     context: Context,
     semantic: &'s Semantic<'a>,
-    values: HashMap<SymbolId, NamedValue>,
+    values: HashMap<OxcSymbolId, NamedValue>,
     mutation: bool,
     missing_reference: bool,
     functions: HashMap<Span, FunctionInfo>,
@@ -174,7 +209,7 @@ struct Bindings<'s, 'a> {
 #[derive(Clone)]
 struct FunctionInfo {
     index: usize,
-    locals: Vec<SymbolId>,
+    locals: Vec<OxcSymbolId>,
     captures: Vec<ValueId>,
     receiver: ValueId,
     arrow: bool,
@@ -339,15 +374,16 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
 struct Extractor<'s, 'a> {
     context: Context,
     semantic: &'s Semantic<'a>,
-    values: HashMap<SymbolId, NamedValue>,
-    namespaces: HashMap<Binding, ValueId>,
+    values: HashMap<OxcSymbolId, NamedValue>,
     roots: Vec<SourceRoot>,
     matches: Vec<DefinitionMatch>,
     functions: HashMap<Span, FunctionInfo>,
     this_value: ValueId,
     arguments_value: Option<ValueId>,
     deferred: bool,
-    slots: HashMap<SymbolId, ValueId>,
+    slots: HashMap<OxcSymbolId, ValueId>,
+    parsed_roots: Vec<ParsedRoot>,
+    externals: Vec<ExternalReference>,
 }
 
 #[derive(Clone)]
@@ -357,6 +393,23 @@ struct Computed {
 }
 
 impl<'a> Extractor<'_, 'a> {
+    fn push_root(&mut self, root: SourceRoot) {
+        if self.deferred {
+            self.roots.push(root);
+        } else {
+            let function = self.context.finish_recording(
+                FunctionSignature::default(),
+                vec![root.value],
+                root.effects,
+            );
+            self.parsed_roots.push(ParsedRoot {
+                span: root.span,
+                function,
+            });
+            self.context.start_function();
+        }
+    }
+
     fn function(&mut self, function: &Function<'_>) -> ValueId {
         if let Some(id) = &function.id {
             if let Some(symbol) = id.symbol_id.get() {
@@ -426,7 +479,7 @@ impl<'a> Extractor<'_, 'a> {
                 };
                 self.context.retain_captures(value.named.value, locals);
                 returns.push(value.named.value);
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: statement.span,
                     value: value.named.value,
                     effects: value.effects,
@@ -438,7 +491,7 @@ impl<'a> Extractor<'_, 'a> {
             }
             Statement::IfStatement(statement) => {
                 let test = self.expression(&statement.test);
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: statement.test.span(),
                     value: test.named.value,
                     effects: test.effects,
@@ -483,7 +536,7 @@ impl<'a> Extractor<'_, 'a> {
             }
             Statement::ThrowStatement(statement) => {
                 let value = self.expression(&statement.argument);
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: statement.span,
                     value: value.named.value,
                     effects: value.effects,
@@ -545,12 +598,16 @@ impl<'a> Extractor<'_, 'a> {
                 span,
                 binding: binding.clone(),
             });
-            return value;
+            if matches!(binding, Binding::Local(_)) {
+                return value;
+            }
         }
-        if let Some(value) = self.namespaces.get(binding) {
-            return *value;
-        }
-        self.context.unknown()
+        let reference = self.externals.len();
+        self.externals.push(ExternalReference {
+            binding: binding.clone(),
+            span,
+        });
+        self.context.external_value(reference)
     }
 
     fn member_binding(binding: Option<Binding>, property: &str) -> Option<Binding> {
@@ -910,7 +967,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                 self.visit_variable_declaration(declaration)
             }
             Declaration::FunctionDeclaration(_) => {
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: declaration.span(),
                     value: self.context.undefined(),
                     effects: self.context.pure(),
@@ -919,7 +976,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             Declaration::TSTypeAliasDeclaration(_) | Declaration::TSInterfaceDeclaration(_) => {}
             _ => {
                 let value = self.unknown();
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: declaration.span(),
                     value: value.named.value,
                     effects: value.effects,
@@ -932,7 +989,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         match statement {
             Statement::ExpressionStatement(statement) => {
                 let value = self.expression(&statement.expression);
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: statement.span,
                     value: value.named.value,
                     effects: value.effects,
@@ -942,7 +999,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                 self.visit_variable_declaration(declaration)
             }
             Statement::FunctionDeclaration(_) | Statement::EmptyStatement(_) => {
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: statement.span(),
                     value: self.context.undefined(),
                     effects: self.context.pure(),
@@ -957,23 +1014,29 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             Statement::ExportDefaultDeclaration(declaration) => {
                 if let Some(expression) = declaration.declaration.as_expression() {
                     let value = self.expression(expression);
-                    self.roots.push(SourceRoot {
+                    self.push_root(SourceRoot {
                         span: declaration.span,
                         value: value.named.value,
                         effects: value.effects,
                     });
-                } else if matches!(
-                    declaration.declaration,
-                    ExportDefaultDeclarationKind::FunctionDeclaration(_)
-                ) {
-                    self.roots.push(SourceRoot {
+                } else if let ExportDefaultDeclarationKind::FunctionDeclaration(function) =
+                    &declaration.declaration
+                {
+                    let value = if let Some(symbol) =
+                        function.id.as_ref().and_then(|id| id.symbol_id.get())
+                    {
+                        self.context.read_binding(self.slots[&symbol])
+                    } else {
+                        self.function(function)
+                    };
+                    self.push_root(SourceRoot {
                         span: declaration.span,
-                        value: self.context.undefined(),
+                        value,
                         effects: self.context.pure(),
                     });
                 } else {
                     let value = self.unknown();
-                    self.roots.push(SourceRoot {
+                    self.push_root(SourceRoot {
                         span: declaration.span,
                         value: value.named.value,
                         effects: value.effects,
@@ -983,7 +1046,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             Statement::TSTypeAliasDeclaration(_) | Statement::TSInterfaceDeclaration(_) => {}
             _ => {
                 let value = self.unknown();
-                self.roots.push(SourceRoot {
+                self.push_root(SourceRoot {
                     span: statement.span(),
                     value: value.named.value,
                     effects: value.effects,
@@ -998,7 +1061,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             VariableDeclarationKind::Using | VariableDeclarationKind::AwaitUsing
         ) {
             let value = self.unknown();
-            self.roots.push(SourceRoot {
+            self.push_root(SourceRoot {
                 span: declaration.span,
                 value: value.named.value,
                 effects: value.effects,
@@ -1009,7 +1072,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                     if let BindingPattern::BindingIdentifier(identifier) = &declarator.id {
                         let symbol = identifier.symbol_id.get().expect("binding symbol");
                         let value = self.context.read_binding(self.values[&symbol].value);
-                        self.roots.push(SourceRoot {
+                        self.push_root(SourceRoot {
                             span: declarator.span,
                             value,
                             effects: self.context.pure(),
@@ -1033,9 +1096,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                 let slot = self.slots[&symbol];
                 self.context.set_binding(slot, value.named.value);
                 let mut named = value.named.clone();
-                if self.deferred {
-                    named.value = slot;
-                }
+                named.value = slot;
                 self.values.insert(symbol, named);
             }
 
@@ -1043,7 +1104,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         } else {
             self.context.opaque_effects()
         };
-        self.roots.push(SourceRoot {
+        self.push_root(SourceRoot {
             span: declaration.span,
             value: value.named.value,
             effects,

@@ -1,6 +1,9 @@
 # ecco
 
 - Keep declarations and extracted graphs owned; never retain OXC arena data.
+- Persist only `ParsedFile` precursors. Instantiate roots/functions in a fresh
+  `Analysis`; external resolutions come from the caller's canonical graph.
+- Register every file before solving; install all hoists before lazy root calls.
 - Value IDs are context-local identities. Passthrough returns reuse them.
 - Hazards only grow within a solve; record dependencies even on false facts.
 - Evaluate against immutable rounds and merge writes before scheduling readers.

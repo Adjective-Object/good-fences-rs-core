@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::*;
 
@@ -59,6 +60,393 @@ fn effects(analysis: &SourceAnalysis) -> Vec<bool> {
         .iter()
         .map(|root| evaluation.effect(root.effects))
         .collect()
+}
+
+fn parsed(javascript: &str) -> Arc<ParsedFile> {
+    Arc::new(parse_source(javascript, Path::new("test.js"), LocalFacts::default()).unwrap())
+}
+
+fn symbol(file: &ParsedFile, name: &str) -> SymbolId {
+    file.symbols()
+        .iter()
+        .find(|symbol| symbol.name == name)
+        .unwrap()
+        .id
+}
+
+#[test]
+fn owned_precursors_roundtrip_without_executing_or_saving_analysis() {
+    let parsed = parse_source(
+        "function make(x) { return () => x.value; } const input = {}; \
+         const read = make(input); /*@__PURE__*/ opaque(); read();",
+        Path::new("owned.js"),
+        LocalFacts::default(),
+    )
+    .unwrap();
+    let bytes = serde_cbor::to_vec(&parsed).unwrap();
+    let parsed: ParsedFile = serde_cbor::from_slice(&bytes).unwrap();
+    parsed.validate().unwrap();
+    assert_eq!(parsed.functions().len(), 2);
+    assert_eq!(parsed.roots().len(), 5);
+    let parsed = Arc::new(parsed);
+    for _ in 0..2 {
+        let mut analysis = Analysis::new();
+        analysis.add_file((), parsed.clone()).unwrap();
+        let result = analysis
+            .solve(&|_: &(), _: &ExternalReference| Ok(Resolution::Unknown))
+            .unwrap();
+        assert!(result.files[&()]
+            .roots
+            .iter()
+            .all(|root| !result.evaluation.effect(root.effects)));
+    }
+    assert_eq!(bytes, serde_cbor::to_vec(&*parsed).unwrap());
+}
+
+#[test]
+fn graph_calls_use_external_symbol_resolutions_and_actual_arguments() {
+    let library = parsed("export function read(input) { return input.value; }");
+    let read = symbol(&library, "read");
+    let library: ParsedFile =
+        serde_cbor::from_slice(&serde_cbor::to_vec(&*library).unwrap()).unwrap();
+    let library = Arc::new(library);
+    for (argument, effectful) in [("{}", false), ("{ get value() {} }", true)] {
+        for reverse in [false, true] {
+            let entry = parsed(&format!(
+                "import {{ read as alias }} from 'resolved-by-caller'; alias({argument});"
+            ));
+            let mut analysis = Analysis::new();
+            let files = if reverse {
+                [("library", library.clone()), ("entry", entry)]
+            } else {
+                [("entry", entry), ("library", library.clone())]
+            };
+            for (key, file) in files {
+                analysis.add_file(key, file).unwrap();
+            }
+            let result = analysis
+                .solve(&|from: &&str, reference: &ExternalReference| {
+                    assert_eq!(*from, "entry");
+                    assert_eq!(
+                        reference.binding,
+                        Binding::Module {
+                            module: "resolved-by-caller".into(),
+                            path: vec!["read".into()],
+                        }
+                    );
+                    Ok(Resolution::Symbol(Symbol {
+                        file: "library",
+                        local: read,
+                    }))
+                })
+                .unwrap();
+            assert_eq!(
+                result
+                    .evaluation
+                    .effect(result.files["entry"].roots[0].effects),
+                effectful,
+            );
+        }
+    }
+}
+
+#[test]
+fn graph_links_cyclic_functions_before_instantiating_calls() {
+    let a = parsed("import { b } from 'b'; export function a(value) { return b(value); } a({});");
+    let b = parsed(
+        "import { a } from 'a'; export function b(value) { \
+         if (value) return a(value); return value.key; }",
+    );
+    let a_symbol = symbol(&a, "a");
+    let b_symbol = symbol(&b, "b");
+    for reverse in [false, true] {
+        let mut analysis = Analysis::new();
+        let files = if reverse {
+            [("b", b.clone()), ("a", a.clone())]
+        } else {
+            [("a", a.clone()), ("b", b.clone())]
+        };
+        for (key, file) in files {
+            analysis.add_file(key, file).unwrap();
+        }
+        let result = analysis
+            .solve(
+                &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                    Binding::Module { module, .. } if module == "a" => {
+                        Ok(Resolution::Symbol(Symbol {
+                            file: "a",
+                            local: a_symbol,
+                        }))
+                    }
+                    Binding::Module { module, .. } if module == "b" => {
+                        Ok(Resolution::Symbol(Symbol {
+                            file: "b",
+                            local: b_symbol,
+                        }))
+                    }
+                    _ => eyre::bail!("unexpected reference"),
+                },
+            )
+            .unwrap();
+        assert!(result
+            .files
+            .values()
+            .flat_map(|file| &file.roots)
+            .all(|root| !result.evaluation.effect(root.effects)));
+    }
+}
+
+#[test]
+fn graph_materializes_foreign_initializers_and_anonymous_default_roots_lazily() {
+    let library = parsed("export const input = {}; export default function () { return input; }");
+    let input = symbol(&library, "input");
+    let entry =
+        parsed("import get, { input } from 'library'; const alias = get(); alias === input;");
+    for reverse in [false, true] {
+        let mut analysis = Analysis::new();
+        let files = if reverse {
+            [("library", library.clone()), ("entry", entry.clone())]
+        } else {
+            [("entry", entry.clone()), ("library", library.clone())]
+        };
+        for (key, file) in files {
+            analysis.add_file(key, file).unwrap();
+        }
+        let result = analysis
+            .solve(
+                &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                    Binding::Module { path, .. } if path == &["default"] => Ok(Resolution::Root {
+                        file: "library",
+                        root: RootId(1),
+                    }),
+                    Binding::Module { path, .. } if path == &["input"] => {
+                        Ok(Resolution::Symbol(Symbol {
+                            file: "library",
+                            local: input,
+                        }))
+                    }
+                    _ => eyre::bail!("unexpected reference"),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            result.files["entry"].roots[0].value,
+            result.files["library"].roots[0].value
+        );
+        assert!(result
+            .files
+            .values()
+            .flat_map(|file| &file.roots)
+            .all(|root| !result.evaluation.effect(root.effects)));
+    }
+}
+
+#[test]
+fn graph_resolver_failures_and_invalid_saved_ids_are_errors() {
+    let file = parsed("import { missing } from 'missing'; missing();");
+    let mut analysis = Analysis::new();
+    analysis.add_file((), file.clone()).unwrap();
+    assert!(analysis.add_file((), file.clone()).is_err());
+    let error = analysis
+        .clone()
+        .solve(&|_: &(), _: &ExternalReference| eyre::bail!("ambiguous caller export"))
+        .unwrap_err();
+    assert!(error.to_string().contains("ambiguous caller export"));
+    assert!(analysis
+        .clone()
+        .solve(&|_: &(), _: &ExternalReference| {
+            Ok(Resolution::Symbol(Symbol {
+                file: (),
+                local: SymbolId(u32::MAX),
+            }))
+        })
+        .is_err());
+    assert!(analysis
+        .solve(&|_: &(), _: &ExternalReference| {
+            Ok(Resolution::Root {
+                file: (),
+                root: RootId(1000),
+            })
+        })
+        .is_err());
+
+    let mut json = serde_json::to_value(&*file).unwrap();
+    json["roots"][0]["function"]["returns"] = serde_json::json!([usize::MAX]);
+    let invalid: ParsedFile = serde_json::from_value(json).unwrap();
+    assert!(Analysis::new().add_file((), Arc::new(invalid)).is_err());
+}
+
+#[test]
+fn graph_namespace_aliases_resolve_static_members_with_shared_identity() {
+    let library = parsed("export const read = value => value.key;");
+    let read = symbol(&library, "read");
+    let entry =
+        parsed("import * as ns from 'library'; const alias = ns; alias.read({}); ns === alias;");
+    let mut analysis = Analysis::new();
+    analysis.add_file("entry", entry).unwrap();
+    analysis.add_file("library", library).unwrap();
+    let result = analysis
+        .solve(
+            &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                Binding::Module { path, .. } if path.is_empty() => {
+                    Ok(Resolution::Namespace("library"))
+                }
+                Binding::Module { path, .. } if path == &["read"] => {
+                    Ok(Resolution::Symbol(Symbol {
+                        file: "library",
+                        local: read,
+                    }))
+                }
+                _ => eyre::bail!("unexpected reference"),
+            },
+        )
+        .unwrap();
+    assert!(result
+        .files
+        .values()
+        .flat_map(|file| &file.roots)
+        .all(|root| !result.evaluation.effect(root.effects)));
+}
+
+#[test]
+fn graph_callback_queries_subscribe_to_foreign_live_bindings() {
+    let entry = Arc::new(parse_source(
+        "import { callback } from 'library'; function read() { return callback(); } query(read);",
+        Path::new("entry.js"),
+        parse_declarations(
+            "global fn query(callback) { call_effects = call(callback) returns void }",
+        ).unwrap(),
+    ).unwrap());
+    for rebind in [false, true] {
+        let library = parsed(&format!(
+            "export var callback = () => 1; {}",
+            if rebind {
+                "var callback = () => opaque();"
+            } else {
+                ""
+            },
+        ));
+        let callback = symbol(&library, "callback");
+        let mut analysis = Analysis::new();
+        analysis.add_file("entry", entry.clone()).unwrap();
+        analysis.add_file("library", library).unwrap();
+        let result = analysis
+            .solve(
+                &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                    Binding::Module { .. } => Ok(Resolution::Symbol(Symbol {
+                        file: "library",
+                        local: callback,
+                    })),
+                    Binding::Global(path) if path == &["query"] => {
+                        Ok(Resolution::Declaration(reference.binding.clone()))
+                    }
+                    _ => Ok(Resolution::Unknown),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            result
+                .evaluation
+                .effect(result.files["entry"].roots[1].effects),
+            rebind,
+        );
+    }
+}
+
+#[test]
+fn graph_initializers_execute_updates_even_when_demanded_by_latent_queries() {
+    let library = Arc::new(
+        parse_source(
+            "export const value = install({});",
+            Path::new("library.js"),
+            parse_declarations(
+                "global fn install(value) { call_effects = false \
+             updates value.property_read_effects |= true returns = value }",
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+    );
+    let value = symbol(&library, "value");
+    let entry = Arc::new(
+        parse_source(
+            "import { value } from 'library'; function read() { return value.key; } query(read);",
+            Path::new("entry.js"),
+            parse_declarations(
+                "global fn query(callback) { call_effects = call(callback) returns void }",
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+    );
+    let mut analysis = Analysis::new();
+    analysis.add_file("entry", entry).unwrap();
+    analysis.add_file("library", library).unwrap();
+    let result = analysis
+        .solve(
+            &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                Binding::Module { .. } => Ok(Resolution::Symbol(Symbol {
+                    file: "library",
+                    local: value,
+                })),
+                _ => Ok(Resolution::Declaration(reference.binding.clone())),
+            },
+        )
+        .unwrap();
+    assert!(result
+        .evaluation
+        .effect(result.files["entry"].roots[1].effects));
+}
+
+#[test]
+fn graph_named_default_roots_preserve_the_hoisted_function_identity() {
+    let library = parsed("export default function self() { return self(); }");
+    let self_symbol = symbol(&library, "self");
+    let entry = parsed("import run from 'library'; run();");
+    let mut analysis = Analysis::new();
+    analysis.add_file("entry", entry).unwrap();
+    analysis.add_file("library", library).unwrap();
+    let result = analysis
+        .solve(&|_: &&str, _: &ExternalReference| {
+            Ok(Resolution::Root {
+                file: "library",
+                root: RootId(0),
+            })
+        })
+        .unwrap();
+    assert_eq!(
+        result.files["library"].roots[0].value,
+        result.files["library"].symbols[&self_symbol],
+    );
+    assert!(!result
+        .evaluation
+        .effect(result.files["entry"].roots[0].effects));
+}
+
+#[test]
+fn graph_local_contracts_are_scoped_to_their_parsed_files() {
+    let mut analysis = Analysis::new();
+    for (key, call_effects) in [("pure", false), ("effectful", true)] {
+        let file = parse_source(
+            "function declared() { opaque(); } declared();",
+            Path::new("scoped.js"),
+            parse_declarations(&format!(
+                "fn declared() {{ call_effects = {call_effects} returns void }}"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        analysis.add_file(key, Arc::new(file)).unwrap();
+    }
+    let result = analysis
+        .solve(&|_: &&str, _: &ExternalReference| Ok(Resolution::Unknown))
+        .unwrap();
+    assert!(!result
+        .evaluation
+        .effect(result.files["pure"].roots[1].effects));
+    assert!(result
+        .evaluation
+        .effect(result.files["effectful"].roots[1].effects));
 }
 
 #[test]

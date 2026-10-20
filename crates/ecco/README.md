@@ -3,10 +3,16 @@
 Effect declarations and alias-aware, parallel hazard propagation for eliminating
 unused module-level JavaScript expressions. Throwing alone is not an effect.
 
-`parse_declarations` produces owned `LocalFacts`. `Context::from_local_facts`
-builds an interpreter context; callers can construct values and operations
-directly or use `extract_from_ast` with an existing OXC program and semantic
-model. `analyze_source` is the parsing convenience entrypoint.
+`parse_declarations` produces owned `LocalFacts`. `parse_from_ast` consumes an
+existing checked OXC program and semantic model without retaining arena data;
+`parse_source` is its parsing convenience entrypoint. Both return a serializable
+`ParsedFile` containing lazy owned function definitions and module roots, not
+evaluated hazards or specialized calls.
+
+`Analysis` links those precursors through a caller-provided `Resolver` and runs
+the connected analysis. `Context::from_local_facts` remains available for
+constructing interpreter values and operations directly. `extract_from_ast`
+and `analyze_source` retain their single-file analysis interfaces.
 
 Evaluation uses a dependency worklist and Rayon to compute a monotone fixed
 point. Updates reach all aliases, including reads preceding a mutation. Safe
@@ -15,8 +21,8 @@ facts are dependencies too. Results are only final after evaluation converges.
 This is an analysis library, not a bundler integration or complete JavaScript
 interpreter. Unknown calls and unsupported executable syntax conservatively
 hazard values. Standard environment declarations are trusted contracts, not
-runtime checks. Cross-module linking, persistent caching, and scheduling belong
-to the caller.
+runtime checks. Module resolution, persistent cache storage, and scheduling
+belong to the caller.
 
 ```rust
 use std::path::Path;
@@ -37,6 +43,63 @@ let evaluation = analysis.context.evaluate();
 assert!(analysis.roots.iter().all(|root| !evaluation.effect(root.effects)));
 # Ok::<(), eyre::Report>(())
 ```
+
+## Owned extraction and graph linking
+
+`ParsedFile` and `OwnedFunction` implement Serde serialization. Save only these
+precursors, never `Context`, `Evaluation`, or `AnalysisResult`. Each solve
+creates fresh interpreter identities and specializes calls only after linking.
+Parsed files include their extraction declarations; scope-specific local
+contracts remain local to the file, even when another file uses the same name.
+Invalidate cached files when those declarations or extraction semantics change.
+The serialized format carries a version; `add_file` validates deserialized
+indices, spans, and template references before installing them.
+
+```rust
+use std::{path::Path, sync::Arc};
+use ecco::{Analysis, ExternalReference, LocalFacts, Resolution, Symbol, parse_source};
+
+let library = Arc::new(parse_source(
+    "export function read(value) { return value.key; }",
+    Path::new("library.js"), LocalFacts::default(),
+)?);
+let read = library.symbols().iter().find(|symbol| symbol.name == "read").unwrap().id;
+let entry = Arc::new(parse_source(
+    "import { read } from 'library'; read({});",
+    Path::new("entry.js"), LocalFacts::default(),
+)?);
+let mut analysis = Analysis::new();
+analysis.add_file("entry", entry)?;
+analysis.add_file("library", library)?;
+let result = analysis.solve(&|_: &&str, reference: &ExternalReference| {
+    match &reference.binding {
+        ecco::Binding::Module { module, path } if module == "library" && path == &["read"] => {
+            Ok(Resolution::Symbol(Symbol { file: "library", local: read }))
+        }
+        _ => Ok(Resolution::Unknown),
+    }
+})?;
+assert!(!result.evaluation.effect(result.files["entry"].roots[0].effects));
+# Ok::<(), eyre::Report>(())
+```
+
+The resolver receives each external reference's source span and global/module
+binding path. Resolve through barrels to canonical `Symbol` identities, whose
+local IDs are declaration starts, not OXC IDs. Anonymous/default expressions can
+be addressed as `Resolution::Root` using their `RootId` and source span.
+`Resolution::Declaration` selects a contract or trusted namespace prefix in the
+referring file. `Resolution::Namespace` shares a module namespace identity;
+static member accesses are separately resolved paths, while computed unknown
+members stay conservative. Return `Unknown` only for valid unmodeled values;
+missing or ambiguous exports must be errors.
+
+All symbols and functions are registered before roots execute. Hoisted
+functions are installed across all files before any root calls. Other
+initializers are instantiated lazily when their bindings or root values are
+demanded. Cyclic function calls share pending equations; cyclic value
+initializers remain conservative. This is analysis dependency traversal, not a
+module evaluation scheduler. Module initialization retention and effect-order
+edges still belong to the bundler.
 
 ## Declarations
 
@@ -133,8 +196,8 @@ the whole function, including declared functions. Known calls specialize the bod
 and separately track replacement hazards, so later updates still invalidate
 earlier pure calls. Executing a potentially replaced target conservatively
 widens heap and return hazards, not only that call's effect.
-`SourceAnalysis.matches` includes matched contracts in supported deferred bodies
-as well as module roots. Summaries are shared within the context; graph
+`SourceAnalysis.matches` and `FileAnalysis.matches` include matched contracts in
+supported deferred bodies as well as module roots. Summaries are shared within the context; graph
 construction is serial and fixed-point evaluation remains parallel.
 
 ## Conservative boundaries
@@ -170,5 +233,5 @@ binding identity precision; other loose comparisons stay conservative.
 
 Context graphs are reusable, but results are not persistently cached. Build a new
 context when removing source facts or changing environment contracts: monotone
-updates cannot retract hazards. Cross-module reference linking and a complete
-Node/browser preset are not implemented.
+updates cannot retract hazards. A complete Node/browser preset and bundler
+cache/configuration integration are not implemented.

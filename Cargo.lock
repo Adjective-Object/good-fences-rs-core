@@ -587,6 +587,9 @@ dependencies = [
  "oxc_span",
  "oxc_utils_parse",
  "rayon",
+ "serde",
+ "serde_cbor",
+ "serde_json",
 ]
 
 [[package]]
