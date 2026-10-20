@@ -392,7 +392,12 @@ fn old_running_entry_keeps_lazy_native_files_until_quiescent_prune() {
         .unwrap();
     let script = format!(
         "setTimeout(() => process.exit(99), 5000).unref(); const entry = await import({}); console.log('ready'); process.stdin.once('data', async () => {{ console.log('old', (await entry.load()).value); process.stdin.pause(); }});",
-        serde_json::to_string(old.entries["main"].to_str().unwrap()).unwrap()
+        serde_json::to_string(
+            url::Url::from_file_path(&old.entries["main"])
+                .unwrap()
+                .as_str()
+        )
+        .unwrap()
     );
     let mut child = Command::new("node")
         .args(["--input-type=module", "-e", &script])
@@ -429,7 +434,12 @@ fn old_running_entry_keeps_lazy_native_files_until_quiescent_prune() {
             "-e",
             &format!(
                 "const entry = await import({}); console.log('new', (await entry.load()).value);",
-                serde_json::to_string(new.entries["main"].to_str().unwrap()).unwrap()
+                serde_json::to_string(
+                    url::Url::from_file_path(&new.entries["main"])
+                        .unwrap()
+                        .as_str()
+                )
+                .unwrap()
             ),
         ])
         .current_dir(dir.root())

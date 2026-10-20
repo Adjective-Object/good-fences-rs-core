@@ -14,6 +14,9 @@ separate layer fingerprints, inventory config/add/delete changes, and derive
 affected users from the existing reverse index. Never return old success on error.
 Entry IDs are logical labels. Entry.output_name optionally overrides the
 source-relative output path; include it in output invalidation, not root identity.
+Convert canonical source-relative filesystem paths to slash-separated artifact
+names; retain portable separators in output metadata, including package.json.
+Validate explicit output spelling before normalization; never accept backslashes.
 Renaming canonical files must rewrite requests and artifact routes together.
 Keep generated requests as typed artifact identities until empty-job pruning and
 destination/alias selection finish; never recover requests by parsing output.

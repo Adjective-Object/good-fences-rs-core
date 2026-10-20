@@ -3972,7 +3972,7 @@ fn default_output_names_preserve_nested_sources_and_share_logical_aliases() {
         .artifacts
         .entries
         .values()
-        .all(|path| path == Path::new("src/entry.mjs")));
+        .all(|path| path.to_str() == Some("src/entry.mjs")));
     assert_eq!(build.product.artifacts.files.len(), 1);
     assert_eq!(
         observe_named(
@@ -4010,6 +4010,89 @@ fn default_output_names_preserve_nested_sources_and_share_logical_aliases() {
         ),
         b"1\n"
     );
+}
+
+#[test]
+fn default_entry_outputs_publish_portable_nested_native_artifacts() {
+    for (input, source, output, format) in [
+        (
+            "src/entry.mjs",
+            "export default 7;",
+            "src/entry.mjs",
+            "module",
+        ),
+        (
+            "src/entry.js",
+            "export default 7;",
+            "src/entry.js",
+            "module",
+        ),
+        (
+            "src/entry.js",
+            "module.exports = 7;",
+            "src/entry.js",
+            "commonjs",
+        ),
+        (
+            "src/entry.cjs",
+            "module.exports = 7;",
+            "src/entry.cjs",
+            "commonjs",
+        ),
+        ("src/value.json", "7", "src/value.cjs", "commonjs"),
+    ] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "package.json",
+            &format!(r#"{{"type":"{format}"}}"#),
+        );
+        write(dir.root(), input, source);
+        let mut config = options();
+        // Exercise native filesystem separators rather than a portable config string.
+        config.entries.get_mut("main").unwrap().path = dir.root().join(input);
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let destination = dir.root().join(".bundler-output");
+        let cancel = crate::publish::Cancellation::default();
+        let (built, published) = session
+            .build_and_publish(&config, &destination, &cancel)
+            .unwrap();
+        let artifacts = &built.product.artifacts;
+        assert_eq!(artifacts.backend, crate::link::Backend::Native);
+        assert_eq!(artifacts.entries["main"].to_str(), Some(output));
+        assert!(artifacts
+            .file_bytes()
+            .all(|(path, _)| !path.to_str().unwrap().contains('\\')));
+        if output.ends_with(".js") {
+            assert!(artifacts
+                .files
+                .keys()
+                .any(|path| path.to_str() == Some("src/package.json")));
+        }
+        let entry_url = url::Url::from_file_path(&published.entries["main"]).unwrap();
+        write(
+            dir.root(),
+            ".bundler-check/check.mjs",
+            &format!(
+                "import value from {}; console.log(value);",
+                serde_json::to_string(entry_url.as_str()).unwrap()
+            ),
+        );
+        assert_eq!(
+            observe_entry(&dir.root().join(".bundler-check/check.mjs")),
+            b"7\n"
+        );
+        let warm = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(warm.product.artifacts, *artifacts);
+        let (_, unchanged) = session
+            .build_and_publish(&config, &destination, &cancel)
+            .unwrap();
+        assert!(!unchanged.changed);
+        assert_eq!(unchanged.directory, published.directory);
+    }
 }
 
 #[test]
@@ -4406,7 +4489,12 @@ fn named_entry_outputs_publication_uses_requested_relative_paths() {
         ".bundler-check/check.mjs",
         &format!(
             "import value from {}; console.log(value);",
-            serde_json::to_string(&published.entries["app/start"]).unwrap()
+            serde_json::to_string(
+                url::Url::from_file_path(&published.entries["app/start"])
+                    .unwrap()
+                    .as_str()
+            )
+            .unwrap()
         ),
     );
     assert_eq!(
@@ -4434,6 +4522,15 @@ fn named_entry_outputs_reject_unsafe_reserved_incompatible_and_colliding_paths()
         ".bundler-lock",
         "nested/.bundler-current.json",
         "C:\\entry.mjs",
+        "C:/entry.mjs",
+        "C:entry.mjs",
+        "\\entry.mjs",
+        "\\\\server\\share\\entry.mjs",
+        "//server/share/entry.mjs",
+        "\\\\?\\C:\\entry.mjs",
+        "nested\\entry.mjs",
+        "nested\\..\\entry.mjs",
+        "nested/../entry.mjs",
         "entry.cjs",
         "entry.json",
         "nested/",
@@ -4455,6 +4552,8 @@ fn named_entry_outputs_reject_unsafe_reserved_incompatible_and_colliding_paths()
     for names in [
         ["entry.mjs", "ENTRY.mjs"],
         ["entry.mjs", "entry.mjs/child.mjs"],
+        ["nested/entry.mjs", "NESTED/ENTRY.mjs"],
+        ["nested/entry.mjs", "NESTED/ENTRY.mjs/child.mjs"],
     ] {
         let options = BuildOptions {
             entries: names
