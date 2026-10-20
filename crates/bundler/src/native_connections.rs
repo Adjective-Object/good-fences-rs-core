@@ -22,6 +22,7 @@ pub(super) fn name_plan(
     prepared: &PreparedValues<'_>,
     owners: &BTreeMap<SegmentKey, Owner>,
     seams: &BTreeMap<u32, u32>,
+    definitions: &BTreeMap<Owner, Vec<crate::symbols::Symbol>>,
 ) -> eyre::Result<BTreeMap<Owner, OwnerNames>> {
     let symbols = prepared.symbols;
     let defaults = Values::new(prepared);
@@ -52,7 +53,13 @@ pub(super) fn name_plan(
         .chain(seams.values().copied().map(Owner::Evaluation))
         .collect::<BTreeSet<_>>()
     {
-        let locals = segments::local_names(graph, modules, symbols, owners, owner)?;
+        let locals = segments::local_names(
+            modules,
+            symbols,
+            owners,
+            owner,
+            definitions.get(&owner).map(Vec::as_slice).unwrap_or_default(),
+        )?;
         let mut occupied: BTreeSet<_> = locals.values().cloned().collect();
         occupied.extend(defaults.defaults.values().cloned());
         for &(file, binding) in references.get(&owner).into_iter().flatten().map(|(s, _)| s) {

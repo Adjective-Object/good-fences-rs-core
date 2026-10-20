@@ -242,6 +242,9 @@ Prepare immutable occupied/default-name facts once per linked emission, shared
 through whole-tree attempts, placement and chunk emission. Keep owner routing
 and allocated-name overlays separate; never clone global name sets per owner.
 Export-only names constrain default allocation, not local import aliases.
+Sort canonical definitions once by source path/binding offset. Partition that
+order by actual segment ownership after each placement revision; reuse the final
+owner slices for local naming and private exports, never source-file seams.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree
