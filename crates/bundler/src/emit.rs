@@ -76,17 +76,8 @@ pub(crate) fn checked_source(
             path.display()
         )
     })?;
-    let config = if crate::resource::is_stylesheet(path) {
-        // CSS strategies choose the wrapper mode. Only sealed plain-JS records
-        // may supply it; original stylesheet extensions are not parser modes.
-        ast_segmenter::ParserConfig::for_path(
-            &path.with_extension(if provenance.config().commonjs {
-                "cjs"
-            } else {
-                "mjs"
-            }),
-            format,
-        )?
+    let config = if let Some(prepared) = graph.file_prepared_resource(file) {
+        prepared.config(path, provenance)?
     } else {
         ast_segmenter::ParserConfig::for_path(&crate::resource::parser_path(path), format)?
     };

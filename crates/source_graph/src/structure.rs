@@ -35,6 +35,28 @@ pub struct OwnedSourceFileInput {
     pub facts: ModuleFacts,
     pub resolutions: AHashMap<DependencyId, DependencyTarget>,
     pub provenance: Option<ast_segmenter::SourceProvenance>,
+    prepared_resource: Option<PreparedResource>,
+}
+
+/// Generated resource identity bound to its original path and extraction mode.
+#[derive(Debug)]
+pub struct PreparedResource {
+    path: PathBuf,
+    provenance: ast_segmenter::SourceProvenance,
+}
+
+impl PreparedResource {
+    pub fn config(
+        &self,
+        path: &std::path::Path,
+        provenance: &ast_segmenter::SourceProvenance,
+    ) -> eyre::Result<ast_segmenter::ParserConfig> {
+        eyre::ensure!(
+            self.path == path && self.provenance == *provenance,
+            "prepared resource identity/parser configuration mismatch"
+        );
+        Ok(self.provenance.config())
+    }
 }
 
 impl OwnedSourceFileInput {
@@ -50,7 +72,23 @@ impl OwnedSourceFileInput {
             facts: parsed.facts,
             resolutions,
             provenance,
+            prepared_resource: None,
         }
+    }
+
+    /// Preserve the original resource identity independently of its JS parser path.
+    pub fn from_prepared_resource(
+        path: PathBuf,
+        parsed: ast_segmenter::ParsedModule,
+        resolutions: AHashMap<DependencyId, DependencyTarget>,
+    ) -> Self {
+        let prepared_resource = PreparedResource {
+            path: path.clone(),
+            provenance: parsed.provenance().clone(),
+        };
+        let mut input = Self::from_parsed(path, parsed, resolutions);
+        input.prepared_resource = Some(prepared_resource);
+        input
     }
 
     /// Build analysis inputs from owned facts/ranges without legacy tracker maps.
@@ -66,6 +104,7 @@ impl OwnedSourceFileInput {
             facts,
             resolutions,
             provenance: None,
+            prepared_resource: None,
             segments: ranges
                 .into_iter()
                 .map(|span| Segment {
@@ -178,6 +217,16 @@ impl SourceGraph {
             .owned
             .as_ref()?
             .provenance
+            .as_ref()
+    }
+
+    pub fn file_prepared_resource(&self, file_id: u32) -> Option<&PreparedResource> {
+        self.file_path(file_id)?;
+        self.files
+            .get(file_id as usize)?
+            .owned
+            .as_ref()?
+            .prepared_resource
             .as_ref()
     }
 

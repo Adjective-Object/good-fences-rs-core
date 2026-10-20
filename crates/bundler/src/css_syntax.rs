@@ -351,14 +351,7 @@ impl Collector<'_> {
     }
 }
 
-pub(crate) fn reject_unfinished(path: &Path, source: &str) -> eyre::Result<()> {
-    let syntax = parse(path, source)?;
-    bail!(
-        "{}: CSS Modules transformation is not implemented (Oxc CSS {PARSER_REVISION}; {} selector names, {} scope markers, {} composition requests); refusing unscoped output",
-        path.display(), syntax.names.len(), syntax.scopes.len(), syntax.compositions.len()
-    )
-}
-
+#[derive(Clone)]
 pub(crate) struct Edit {
     pub(crate) span: Range<usize>,
     pub(crate) replacement: String,
@@ -618,10 +611,6 @@ mod tests {
             let error = format!("{:#}", parse(source).unwrap_err());
             assert!(error.contains(diagnostic), "{source}: {error}");
         }
-        let error = super::reject_unfinished(Path::new("empty.module.css"), "").unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("transformation is not implemented"));
     }
 
     #[test]

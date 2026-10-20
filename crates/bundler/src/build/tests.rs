@@ -22,7 +22,7 @@ fn options() -> BuildOptions {
 }
 
 #[test]
-fn css_modules_validate_before_graph_loading_and_refuse_unfinished_transforms() {
+fn css_modules_validate_before_graph_loading_and_refuse_unsupported_scopes() {
     let dir = TmpDir::new();
     let mut config = options();
     config.css.css_modules = CssModules::Extension(".bad..suffix".into());
@@ -32,7 +32,11 @@ fn css_modules_validate_before_graph_loading_and_refuse_unfinished_transforms() 
     assert!(session.sources.is_empty());
 
     write(dir.root(), "main.mjs", "import './style.module.css';");
-    write(dir.root(), "style.module.css", ".你好 { color: red }");
+    write(
+        dir.root(),
+        "style.module.css",
+        ":global .你好 { color: red }",
+    );
     config.css.css_modules = CssModules::Disabled;
     let global = session.build(&config).unwrap();
     assert_eq!(global.product.artifacts.stylesheets.len(), 1);
@@ -41,7 +45,9 @@ fn css_modules_validate_before_graph_loading_and_refuse_unfinished_transforms() 
         config.css.load = load;
         let error = format!("{:#}", session.build(&config).err().unwrap());
         assert!(
-            error.contains("style.module.css: CSS Modules transformation is not implemented"),
+            error.contains(
+                "style.module.css: CSS Modules :local/:global scope syntax is unsupported"
+            ),
             "{error}"
         );
         assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &global.product));
@@ -64,37 +70,22 @@ fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures()
     );
     let mut config = options();
     config.css.css_modules = CssModules::Extension(".any.custom.extension".into());
-    for (entry, main, expected) in [
-        (
-            "parts/style.any.custom.extension",
-            "",
-            "style.any.custom.extension",
-        ),
-        (
-            "main.mjs",
-            "import './parts/style.any.custom.extension';",
-            "style.any.custom.extension",
-        ),
+    for (entry, main) in [
+        ("parts/style.any.custom.extension", ""),
+        ("main.mjs", "import './parts/style.any.custom.extension';"),
         (
             "main.mjs",
             "export const load = () => import('./parts/style.any.custom.extension');",
-            "style.any.custom.extension",
         ),
         (
             "main.cjs",
             "module.exports = require('./parts/style.any.custom.extension');",
-            "style.any.custom.extension",
         ),
         (
             "main.mjs",
             "export const load = name => import(`./parts/${name}.any.custom.extension`);",
-            "style.any.custom.extension",
         ),
-        (
-            "main.mjs",
-            "import './global.css';",
-            "style.any.custom.extension",
-        ),
+        ("main.mjs", "import './global.css';"),
     ] {
         if !main.is_empty() {
             write(dir.root(), entry, main);
@@ -105,20 +96,160 @@ fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures()
             "@import './parts/style.any.custom.extension';",
         );
         config.entries.get_mut("main").unwrap().path = entry.into();
-        let error = format!(
-            "{:#}",
-            BuildSession::new(dir.root())
+        for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+            config.css.load = load;
+            let built = BuildSession::new(dir.root())
                 .unwrap()
                 .build(&config)
-                .err()
+                .unwrap();
+            assert!(
+                built.product.artifacts.resources.values().any(|bytes| {
+                    let text = std::str::from_utf8(bytes).unwrap();
+                    text.contains("color: red") && text.contains("._") && !text.contains(".class")
+                }),
+                "{main}"
+            );
+            if main.is_empty() {
+                let output = built.product.artifacts.entries["main"].to_str().unwrap();
+                assert_eq!(
+                    observe_named(&built.product.artifacts, &format!(
+                        "{CSS_DOM_RECORDER}\nconst ns = await import('./{output}'); assert.deepEqual(Object.keys(ns), ['class']); assert.equal(links.length, {}); console.log('custom');",
+                        usize::from(load == CssLoad::AutoMount),
+                    )),
+                    b"custom\n",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn css_modules_script_and_json_suffixes_preserve_prepared_mode_and_effects() {
+    let dir = TmpDir::new();
+    let mut config = options();
+    config.declarations.user.push(ecco::parse_declarations(
+        "global fn document.createElement(tag) {call_effects = false returns.*_effects = false}\n\
+         global fn document.head.appendChild(link) {call_effects = false returns.*_effects = false}"
+    ).unwrap());
+    for suffix in [".module.cjs", ".module.ts", ".module.json"] {
+        let stylesheet = format!("style{suffix}");
+        write(dir.root(), &stylesheet, ".used, .unused { color: red }");
+        config.css.css_modules = CssModules::Extension(suffix.into());
+        for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+            config.css.load = load;
+            write(
+                dir.root(),
+                "main.mjs",
+                &format!("export {{used}} from './{stylesheet}';"),
+            );
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let cold = session.build(&config).unwrap();
+            let memory = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&cold.product, &memory.product));
+            let disk = BuildSession::new(dir.root())
                 .unwrap()
+                .build(&config)
+                .unwrap();
+            assert_eq!(cold.product.artifacts, disk.product.artifacts);
+            assert_eq!(disk.counters.source_parses, 0);
+            assert_eq!(cold.counters.source_reparses, 0);
+            assert_eq!(cold.counters.fragment_reparses, 0);
+            assert_eq!(
+                observe_named(&cold.product.artifacts, &format!(
+                    "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['used']); assert.match(ns.used, /^_[A-Za-z0-9_-]{{10}}$/); assert.equal(links.length, {}); console.log('suffix');",
+                    usize::from(load == CssLoad::AutoMount),
+                )),
+                b"suffix\n",
+            );
+            write(dir.root(), "main.mjs", &format!("import './{stylesheet}';"));
+            let unused = session.build(&config).unwrap();
+            assert_eq!(unused.product.artifacts.stylesheets.len(), 1);
+            if load == CssLoad::AutoMount {
+                assert_eq!(
+                    observe_named(&unused.product.artifacts, "import assert from 'node:assert/strict'; await assert.rejects(import('./main.mjs'), /CSS auto-mount requires document/); console.log('no document');"),
+                    b"no document\n",
+                );
+            }
+            assert_eq!(
+                observe_named(&unused.product.artifacts, &format!(
+                    "{CSS_DOM_RECORDER}\nawait import('./main.mjs'); assert.equal(links.length, {}); console.log('effects');",
+                    usize::from(load == CssLoad::AutoMount),
+                )),
+                b"effects\n",
+            );
+        }
+    }
+}
+
+#[test]
+fn caller_loaded_css_module_resource_edits_invalidate_output_without_reparsing_mappings() {
+    let dir = TmpDir::new();
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    config.entries.get_mut("main").unwrap().path = "style.module.css".into();
+    for with_dependencies in [false, true] {
+        let dependency = if with_dependencies {
+            "@import './child.css';"
+        } else {
+            ""
+        };
+        write(
+            dir.root(),
+            "style.module.css",
+            &format!("{dependency}.used {{color:red}}"),
         );
-        assert!(
-            error.contains(&format!(
-                "{expected}: CSS Modules transformation is not implemented"
-            )),
-            "{main}: {error}"
+        write(
+            dir.root(),
+            "child.css",
+            ".child {background:url('./image.bin')}",
         );
+        write(dir.root(), "image.bin", "original");
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let mut previous = session.build(&config).unwrap();
+        let path = dir.root().join("style.module.css");
+        let text = session.sources[&path].text.clone();
+        let mut edits = vec![(
+            "style.module.css",
+            format!("{dependency}.used {{color:blue}}"),
+        )];
+        if with_dependencies {
+            edits.extend([
+                (
+                    "child.css",
+                    ".child {background:url('./image.bin');color:green}".into(),
+                ),
+                ("image.bin", "edited".into()),
+            ]);
+        }
+        for (target, content) in edits {
+            write(dir.root(), target, &content);
+            let edited = session.build(&config).unwrap();
+            assert!(!Rc::ptr_eq(&previous.product, &edited.product), "{target}");
+            assert_ne!(
+                previous.product.fingerprints.output,
+                edited.product.fingerprints.output
+            );
+            assert_eq!(
+                previous.product.fingerprints.parse,
+                edited.product.fingerprints.parse
+            );
+            assert_eq!(session.sources[&path].text, text);
+            assert_eq!(edited.counters.source_parses, 0);
+            assert_eq!(edited.counters.source_reparses, 0);
+            assert_eq!(edited.counters.fragment_reparses, 0);
+            assert_ne!(
+                previous.product.artifacts.stylesheets[&path],
+                edited.product.artifacts.stylesheets[&path],
+            );
+            let fresh = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .unwrap();
+            assert_eq!(edited.product.artifacts, fresh.product.artifacts);
+            let no_op = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&edited.product, &no_op.product));
+            previous = edited;
+        }
     }
 }
 
@@ -147,11 +278,249 @@ fn css_modules_everything_selects_css_not_javascript_json_or_assets() {
     );
     write(dir.root(), "main.mjs", "import './global.css';");
     write(dir.root(), "global.css", ".global {}");
+    let built = session.build(&config).unwrap();
+    let path = &built.product.artifacts.stylesheets[&dir.root().join("global.css")];
+    let text = std::str::from_utf8(&built.product.artifacts.resources[path]).unwrap();
+    assert!(text.starts_with("._"), "{text}");
+}
+
+#[test]
+fn css_modules_native_named_namespace_dynamic_and_require_surfaces_under_both_loaders() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "style.module.css",
+        r".my-class-name, #my-class-name, .class, .\31 23, .a\+b, .你好 { color: red }",
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import { myClassName, class as keyword, "123" as numeric, "a+b" as punctuation, 你好 as unicode } from './style.module.css';
+import * as styles from './style.module.css';
+import load from './load.cjs';
+export {myClassName, keyword, numeric, punctuation, unicode, styles, load};
+export const dynamic = () => import('./style.module.css');
+"#,
+    );
+    write(
+        dir.root(),
+        "load.cjs",
+        "module.exports = () => require('./style.module.css');",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        let memory = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&cold.product, &memory.product));
+        let disk = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(cold.product.artifacts, disk.product.artifacts);
+        assert_eq!(disk.counters.source_parses, 0);
+        let prepared = &session.sources[&dir.root().join("style.module.css")];
+        assert!(!prepared.record.config.commonjs);
+        let stylesheet = &cold.product.artifacts.stylesheets[&dir.root().join("style.module.css")];
+        let css = std::str::from_utf8(&cold.product.artifacts.resources[stylesheet]).unwrap();
+        let check = format!(
+            r#"{CSS_DOM_RECORDER}
+const main = await import('./main.mjs');
+const ns = main.styles;
+assert.deepEqual(Object.keys(ns).sort(), ['123', 'a+b', 'class', 'myClassName', '你好'].sort());
+assert.equal(ns.myClassName, main.myClassName);
+assert.equal(ns.class, main.keyword);
+assert.equal(ns['123'], main.numeric);
+assert.equal(ns['a+b'], main.punctuation);
+assert.equal(ns.你好, main.unicode);
+assert.strictEqual(await main.dynamic(), ns);
+const required = main.load();
+assert.deepEqual(Object.keys(required).sort(), Object.keys(ns).sort());
+for (const key of Object.keys(ns)) {{
+  assert.equal(required[key], ns[key]);
+  assert.match(ns[key], /^_[A-Za-z0-9_-]{{10}}$/);
+  assert.ok({css:?}.includes(ns[key]));
+}}
+assert.ok({css:?}.startsWith('.' + ns.myClassName + ', #' + ns.myClassName));
+assert.equal(links.length, {mounts});
+console.log('module surfaces');
+"#,
+            mounts = usize::from(load == CssLoad::AutoMount)
+        );
+        assert_eq!(
+            observe_named(&cold.product.artifacts, &check),
+            b"module surfaces\n"
+        );
+    }
+}
+
+#[test]
+fn css_modules_prune_bindings_not_stylesheets_and_keep_loader_effects() {
+    let dir = TmpDir::new();
+    let source = r".used, .unused, .class, .\31 23 { color: red }";
+    write(dir.root(), "style.module.css", source);
+    write(
+        dir.root(),
+        "main.mjs",
+        "export { used } from './style.module.css';",
+    );
+    let mappings = crate::css_names::Registry::default()
+        .prepare(dir.root(), &dir.root().join("style.module.css"), source)
+        .unwrap()
+        .mappings;
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let built = session.build(&config).unwrap();
+        assert!(built
+            .product
+            .artifacts
+            .files
+            .values()
+            .any(|text| text.contains(&mappings["used"])));
+        for name in ["unused", "class", "123"] {
+            assert!(
+                built
+                    .product
+                    .artifacts
+                    .files
+                    .values()
+                    .all(|text| !text.contains(&mappings[name])),
+                "{load:?}: {:#?}",
+                built.product.artifacts.files
+            );
+        }
+        let path = &built.product.artifacts.stylesheets[&dir.root().join("style.module.css")];
+        let css = std::str::from_utf8(&built.product.artifacts.resources[path]).unwrap();
+        assert!(css.contains(&mappings["unused"]));
+        write(
+            dir.root(),
+            "main.mjs",
+            "import './style.module.css'; export const value = 1;",
+        );
+        let side_effect_only = session.build(&config).unwrap();
+        assert_eq!(side_effect_only.product.artifacts.stylesheets.len(), 1);
+        assert!(side_effect_only
+            .product
+            .artifacts
+            .files
+            .values()
+            .all(|text| !text.contains(&mappings["used"]) && !text.contains(&mappings["unused"])));
+        assert_eq!(
+            observe_named(&side_effect_only.product.artifacts, &format!(
+                "{CSS_DOM_RECORDER}\nawait import('./main.mjs'); assert.equal(links.length, {}); console.log('retained');",
+                usize::from(load == CssLoad::AutoMount)
+            )),
+            b"retained\n"
+        );
+        write(
+            dir.root(),
+            "main.mjs",
+            "export { used } from './style.module.css';",
+        );
+    }
+}
+
+#[test]
+fn css_modules_stability_content_order_root_and_transitive_selection_invalidate_resources() {
+    let mut original = None;
+    for reverse in [false, true] {
+        let dir = TmpDir::new();
+        write(dir.root(), "a.module.css", ".same {color:red}");
+        write(dir.root(), "b.module.css", ".same {color:blue}");
+        write(
+            dir.root(),
+            "parent.css",
+            "@import './a.module.css'; .global {}",
+        );
+        write(
+            dir.root(),
+            "main.mjs",
+            if reverse {
+                "export {same as b} from './b.module.css'; export {same as a} from './a.module.css'; import './parent.css';"
+            } else {
+                "export {same as a} from './a.module.css'; export {same as b} from './b.module.css'; import './parent.css';"
+            },
+        );
+        let mut config = options();
+        config.css.css_modules = CssModules::Enabled;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        let observation = observe_named(&cold.product.artifacts, "import {a,b} from './main.mjs'; if(a===b) throw new Error('aliased files'); console.log(JSON.stringify([a,b]));");
+        if let Some(original) = &original {
+            assert_eq!(&observation, original);
+        } else {
+            original = Some(observation.clone());
+        }
+        let before = session.sources[&dir.root().join("a.module.css")]
+            .text
+            .clone();
+        let parent = cold.product.artifacts.stylesheets[&dir.root().join("parent.css")].clone();
+        write(dir.root(), "a.module.css", ".same {color:green}");
+        let edited = session.build(&config).unwrap();
+        assert_eq!(
+            session.sources[&dir.root().join("a.module.css")].text,
+            before
+        );
+        assert_ne!(
+            edited.product.artifacts.stylesheets[&dir.root().join("parent.css")],
+            parent
+        );
+        assert_eq!(
+            observe_named(
+                &edited.product.artifacts,
+                "import {a,b} from './main.mjs'; console.log(JSON.stringify([a,b]));"
+            ),
+            observation
+        );
+        config.css.css_modules = CssModules::Disabled;
+        // The named JS imports are now invalid, but the resource closure alone
+        // must still distinguish global output from the transformed version.
+        config.entries.get_mut("main").unwrap().path = "parent.css".into();
+        let global = session.build(&config).unwrap();
+        assert_ne!(
+            global.product.artifacts.stylesheets[&dir.root().join("parent.css")],
+            edited.product.artifacts.stylesheets[&dir.root().join("parent.css")]
+        );
+        assert!(global
+            .product
+            .artifacts
+            .resources
+            .values()
+            .any(|bytes| bytes == b".same {color:green}"));
+    }
+}
+
+#[test]
+fn css_modules_export_collision_has_both_spans_and_preserves_last_product() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {fooBar} from './style.module.css';",
+    );
+    write(dir.root(), "style.module.css", ".foo-bar {}");
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let built = session.build(&config).unwrap();
+    write(dir.root(), "style.module.css", ".foo-bar, #fooBar {}");
     let error = format!("{:#}", session.build(&config).err().unwrap());
     assert!(
-        error.contains("global.css: CSS Modules transformation is not implemented"),
+        error.contains("style.module.css")
+            && error.contains("export collision")
+            && error.contains("foo-bar")
+            && error.contains("fooBar")
+            && error.contains("1..8")
+            && error.contains("11..17"),
         "{error}"
     );
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &built.product));
 }
 
 #[test]

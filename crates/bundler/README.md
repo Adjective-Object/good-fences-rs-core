@@ -122,6 +122,8 @@ bounded inventory as JavaScript sources.
 Stylesheet names include the complete reachable resource closure, so edits to
 imported CSS or referenced binary bytes invalidate parent stylesheet URLs, even
 through cycles. All these input bytes are rechecked before accepting a build.
+These resource identities independently invalidate output reuse, including
+CSS-only edits that leave caller-loaded module mappings unchanged.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
 memory/CBOR cache. There is no Sass compilation, CSS concatenation or minification.
 
@@ -133,13 +135,33 @@ components; empty suffixes, separators, whitespace and URL syntax are rejected
 before graph loading, including programmatically constructed invalid options.
 Custom suffixes identify CSS before generic asset classification, for entries,
 static/dynamic imports, require/context candidates and transitive CSS imports.
+Suffixes such as `.module.cjs`, `.module.ts` and `.module.json` still use the
+sealed generated JavaScript parser mode, not the original extension's mode.
 `"everything"` does not reclassify JavaScript, JSON or binary inputs as CSS.
 Each imported stylesheet uses its own selection rule, not its parent's flag.
 
-**CSS Modules emission is not implemented yet.** Selected inputs are parsed and
-then rejected explicitly; the bundler never silently emits their unscoped CSS or
-pretends to provide mappings. Selection is independent of `css.load`. Disabled
-selection preserves ordinary global CSS, including `.module.css` filenames.
+Selected modules scope classes and IDs to `_` plus ten base64url SHA-256 digest
+characters. The versioned `css-local-v1` hash uses the normalized project-relative
+input path and decoded selector name, never checkout paths, CSS contents or
+discovery order. An equal class/ID name in one file shares a value; distinct file
+paths have distinct identities. Detected scoped-name collisions fail explicitly.
+
+Mappings are separate pure native ESM named bindings, not a default object.
+JS export names always use lower camelCase, recognizing hyphen/underscore
+separators, lower-to-upper transitions and acronym word boundaries
+(`my-class-name` → `myClassName`, `XMLHttp` → `xmlHttp`).
+Other punctuation is preserved rather than silently dropped. Keywords and
+nonidentifier names use safe private bindings and string export aliases. Colliding
+export names report both decoded originals and original byte spans; empty export
+names are errors. For example `.my-class-name, #my-class-name` exports
+`myClassName` with the same scoped string for both selectors.
+Named/namespace imports, dynamic imports and CJS require-of-ESM expose those
+bindings; a deferred import/require still defers auto-mount activation.
+Unused JS bindings can be pruned independently without deleting stylesheet rules
+or the extracted CSS resource. Both loaders use identical mappings and CSS bytes;
+auto-mount retains its DOM effects but does not add a URL default to modules.
+Selection is independent of `css.load`. Disabled selection preserves ordinary
+global CSS, including `.module.css` filenames.
 The separately pinned upstream `oxc-css-parser` revision
 `6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6` parses module selectors, decoded names,
 scope markers and composition requests into owned facts with checked original
@@ -150,12 +172,14 @@ It requires Rust **1.95 or newer**; the repository's
 at 0.137.0; the JavaScript Oxc revision is unchanged.
 Recoverable parse errors, raw selectors/unknown pseudo arguments and unsupported
 selector-bearing at-rule preludes fail closed with path/span diagnostics.
-In particular this parser revision leaves functional `:local(...)` raw; it is
-explicitly rejected for now, while bare scope markers and typed `:global(...)`
-can be collected. `@supports` preludes currently form an explicit unsupported
-boundary, including `selector(...)`. These are parsing boundaries, not claims of
-completed scope/composition/animation transformation. `cssparser` still owns URL
-tokenization; URL edits and future module edits share one overlap-checked pipeline.
+Explicit `:local`/`:global` forms (bare or functional) remain unsupported and fail
+closed; all accepted class/ID selectors are local by default. `composes` also
+fails explicitly. `@supports` preludes currently form an unsupported boundary,
+including `selector(...)`. Local fragment references and animation identifiers
+are not transformed yet. `cssparser` still owns URL tokenization; URL and selector
+edits share one overlap-checked original-byte pipeline. Resource names include
+module transformation identity throughout the CSS import closure so global and
+scoped bytes cannot share an artifact name.
 
 Resource discovery/rendering and loading-stub generation are separate: stubs
 receive the stylesheet identity, public URL and independent name mappings,

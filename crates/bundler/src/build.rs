@@ -297,8 +297,8 @@ impl BuildSession {
                     &crate::css_loading::CssModuleInput {
                         stylesheet: &path,
                         public_url: &styles.public_url(&path)?,
-                        name_mappings: &BTreeMap::new(),
-                        is_module: false,
+                        name_mappings: styles.name_mappings(&path).unwrap_or(&BTreeMap::new()),
+                        is_module: styles.name_mappings(&path).is_some(),
                     },
                 )?)
             } else {
@@ -427,7 +427,12 @@ impl BuildSession {
                     queue.extend(candidates.values().cloned());
                 }
             }
-            inputs.push(OwnedSourceFileInput::from_parsed(
+            let graph_input = if kind == crate::resource::ResourceKind::Script {
+                OwnedSourceFileInput::from_parsed
+            } else {
+                OwnedSourceFileInput::from_prepared_resource
+            };
+            inputs.push(graph_input(
                 path.clone(),
                 source.record.to_parsed(&source.text)?,
                 resolved.into_iter().collect(),
@@ -507,6 +512,7 @@ impl BuildSession {
                 include_str!("css_loading.rs"),
                 include_str!("css_selection.rs"),
                 include_str!("css_syntax.rs"),
+                include_str!("css_names.rs"),
                 include_str!("output_url.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
@@ -521,10 +527,11 @@ impl BuildSession {
         );
         fingerprints.output = hash(
             format!(
-                "{fingerprints:?}:{emitter:?}:{:?}:{}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{:?}:{}:{:?}:{:?}",
                 options.entries,
                 public_base.as_str(),
                 options.css,
+                styles.identities(),
             )
             .as_bytes(),
         );

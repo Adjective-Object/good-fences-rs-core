@@ -25,6 +25,8 @@ edges, keep checked barrel routes, and own their report-only statement ordering.
 Cache ranges/facts can construct owned inputs without legacy maps.
 `from_parsed` carries extraction/cache provenance; bare `from_ranges` inputs
 remain analysis-only. Source patches replace provenance with facts and ranges.
+Prepared-resource inputs seal their original path and extraction provenance;
+never infer generated parser modes from original resource suffixes.
 Effective CJS facts resolve arbitrary value requests to CommonJs(file,name),
 not guessed exports. Binding edges preserve requested names and opaque module
 demand; runtime snapshot/default policy belongs to bundler proxies.

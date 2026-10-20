@@ -32,6 +32,8 @@ pub(crate) struct Styles<'a> {
     requests: BTreeMap<PathBuf, Vec<Request>>,
     public_base: &'a crate::output_url::PublicBase,
     selection: &'a crate::build::CssModules,
+    names: BTreeMap<PathBuf, crate::css_names::PreparedNames>,
+    name_registry: crate::css_names::Registry,
 }
 
 impl<'a> Styles<'a> {
@@ -48,6 +50,8 @@ impl<'a> Styles<'a> {
             requests: BTreeMap::new(),
             public_base,
             selection,
+            names: BTreeMap::new(),
+            name_registry: crate::css_names::Registry::default(),
         }
     }
 
@@ -72,7 +76,10 @@ impl<'a> Styles<'a> {
                 resource::stylesheet_kind(&path, self.selection),
                 resource::ResourceKind::Stylesheet { module: true }
             ) {
-                crate::css_syntax::reject_unfinished(&path, text)?;
+                self.names.insert(
+                    path.clone(),
+                    self.name_registry.prepare(self.root, &path, text)?,
+                );
             }
             let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
             let mut requests = Vec::new();
@@ -136,6 +143,17 @@ impl<'a> Styles<'a> {
         self.public_base.join(&self.output_path(path))
     }
 
+    pub(crate) fn name_mappings(&self, path: &Path) -> Option<&BTreeMap<String, String>> {
+        self.names.get(path).map(|names| &names.mappings)
+    }
+
+    pub(crate) fn identities(&self) -> BTreeMap<&Path, PathBuf> {
+        self.requests
+            .keys()
+            .map(|path| (path.as_path(), self.output_path(path)))
+            .collect()
+    }
+
     fn closure(&self, root: &Path) -> BTreeSet<(PathBuf, bool)> {
         let mut seen = BTreeSet::new();
         let mut queue = VecDeque::from([(root.to_owned(), true)]);
@@ -174,6 +192,10 @@ impl<'a> Styles<'a> {
             digest.update(relative);
             digest.update((input.len() as u64).to_le_bytes());
             digest.update(input);
+            if style && self.names.contains_key(&path) {
+                digest.update(crate::css_names::REVISION.as_bytes());
+                digest.update(crate::css_syntax::PARSER_REVISION.as_bytes());
+            }
         }
         PathBuf::from(format!("assets/{:x}.css", digest.finalize()))
     }
@@ -181,7 +203,10 @@ impl<'a> Styles<'a> {
     fn render(&self, path: &Path) -> eyre::Result<Vec<u8>> {
         let text = std::str::from_utf8(&self.inputs[path])?;
         let stylesheet = self.output_path(path);
-        let mut edits = Vec::new();
+        let mut edits = self
+            .names
+            .get(path)
+            .map_or_else(Vec::new, |names| names.edits.clone());
         for request in &self.requests[path] {
             let target = if request.url.import {
                 self.output_path(&request.path)

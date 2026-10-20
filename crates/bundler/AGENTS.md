@@ -63,9 +63,16 @@ spans, scope markers and composition requests; never persist its arena nodes.
 Normalize pinned CSS decoder NULs to U+FFFD at owned identifier/string boundaries.
 Recovery/raw selector syntax is an explicit error, not partially scoped success.
 Functional :local and @supports preludes are currently explicit parse boundaries.
-Selected modules must reject unfinished transformation, even with no names;
-global CSS continues using cssparser URL tokenization. URL and future selector
-edits share one checked, nonoverlapping original-byte edit pipeline.
+Selected modules default classes/IDs to local; explicit :local/:global and
+composes stay unsupported. Scope identities hash css-local-v1 plus normalized
+project-relative path and decoded symbol into _ plus ten base64url characters;
+class/ID identities coincide. Reject detected hash and camelCase export collisions.
+Keep each mapping a pure native ESM binding with safe private names/string aliases,
+never a default object. Export aliases are nonexecuting connectors even while
+prepared DOM operations stay conservative. Global CSS continues using cssparser
+URL tokenization; URL/selector edits share one checked original-byte pipeline.
+Closure resource names include transform identity for selected stylesheets,
+including transitive CSS imports; loaders never affect scoped name identity.
 CSS loading strategies consume explicit stylesheet/public-URL/mapping inputs,
 never parse CSS or choose names. CallerLoaded is the default; AutoMount is opt-in
 native ESM with a URL-string default and synchronous link insertion, never a
@@ -76,6 +83,8 @@ static/dynamic/deferred-require timing.
 Carry prepared text and parser path/format together into cache loading.
 CSS emission accepts only sealed plain-JS modes matching module facts; never
 infer a wrapper mode from `.css` or bypass source/record provenance checks.
+Output fingerprints independently include discovered stylesheet closure identities,
+even when a declaration-only edit leaves caller-loaded mapping text unchanged.
 Caller-loaded stubs have no relocations. AutoMount carries generated construction
 operation spans into typed build-root URL assembly parts; never scan placeholders.
 Resolve relative public bases from the generation root using the actual final

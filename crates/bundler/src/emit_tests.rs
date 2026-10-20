@@ -327,14 +327,51 @@ fn source_provenance_rejects_changed_bytes_modes_and_unprovenanced_inputs() {
 
 #[test]
 fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
-    for (parser_path, source) in [
-        ("style.css.cjs", "module.exports = './assets/style.css';"),
-        ("style.css.mjs", "export const button = '_button';"),
+    for (input_path, parser_path, source) in [
+        (
+            "style.css",
+            "style.css.cjs",
+            "module.exports = './assets/style.css';",
+        ),
+        (
+            "style.css",
+            "style.css.mjs",
+            "export const button = '_button';",
+        ),
+        (
+            "style.custom",
+            "style.css.mjs",
+            "const local = '_button'; export {local as 'class'};",
+        ),
+        (
+            "style.module.cjs",
+            "style.css.mjs",
+            "export const button = '_button';",
+        ),
+        (
+            "style.module.ts",
+            "style.css.mjs",
+            "export const button = '_button';",
+        ),
+        (
+            "style.module.json",
+            "style.css.mjs",
+            "export const button = '_button';",
+        ),
     ] {
         let input = || {
-            let mut input = crate::tests::input(parser_path, source);
-            input.path = "style.css".into();
-            input
+            let parsed = ast_segmenter::parse_module(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new(parser_path),
+                ModuleFormat::Esm,
+            )
+            .unwrap();
+            source_graph::OwnedSourceFileInput::from_prepared_resource(
+                input_path.into(),
+                parsed,
+                Default::default(),
+            )
         };
         let before = ast_segmenter::module_parse_count();
         let graph = SourceGraph::from_owned([input()]);
@@ -348,6 +385,10 @@ fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
         let mut missing = input();
         missing.provenance = None;
         assert!(checked_source(&SourceGraph::from_owned([missing]), 0, source).is_err());
+
+        let mut renamed = input();
+        renamed.path = "other.css".into();
+        assert!(checked_source(&SourceGraph::from_owned([renamed]), 0, source).is_err());
 
         let mut mismatched = input();
         mismatched.facts.commonjs = !mismatched.facts.commonjs;
@@ -378,7 +419,8 @@ fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
         forged.provenance = Some(serde_json::from_value(value).unwrap());
         let error = checked_source(&SourceGraph::from_owned([forged]), 0, source).unwrap_err();
         assert!(
-            format!("{error:#}").contains("source facts/ranges do not match extraction provenance"),
+            format!("{error:#}")
+                .contains("prepared resource identity/parser configuration mismatch"),
             "{error:#}"
         );
 

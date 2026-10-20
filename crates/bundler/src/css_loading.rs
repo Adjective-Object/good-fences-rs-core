@@ -36,9 +36,17 @@ pub(crate) struct CallerLoaded;
 
 impl CssLoadingStrategy for CallerLoaded {
     fn generate_module(&self, input: &CssModuleInput<'_>) -> eyre::Result<PreparedCssModule> {
+        if input.is_module {
+            return Ok(PreparedCssModule {
+                source: named_exports(input.name_mappings)?,
+                parser_path: input.stylesheet.with_extension("css.mjs"),
+                package: ModuleFormat::Esm,
+                relocations: Vec::new(),
+            });
+        }
         ensure!(
-            !input.is_module && input.name_mappings.is_empty(),
-            "{}: CSS Modules mappings are not supported yet",
+            input.name_mappings.is_empty(),
+            "{}: global CSS cannot have name mappings",
             input.stylesheet.display()
         );
         Ok(PreparedCssModule {
@@ -55,8 +63,8 @@ pub(crate) struct AutoMount;
 impl CssLoadingStrategy for AutoMount {
     fn generate_module(&self, input: &CssModuleInput<'_>) -> eyre::Result<PreparedCssModule> {
         ensure!(
-            !input.is_module && input.name_mappings.is_empty(),
-            "{}: CSS Modules mappings are not supported yet",
+            input.is_module || input.name_mappings.is_empty(),
+            "{}: global CSS cannot have name mappings",
             input.stylesheet.display()
         );
         let mut source = String::from(
@@ -70,8 +78,13 @@ impl CssLoadingStrategy for AutoMount {
         ));
         let operation = Span::new(start, source.len() as u32);
         source.push_str(
-            ".href;\nconst link = document.createElement(\"link\");\nlink.rel = \"stylesheet\";\nlink.href = href;\ndocument.head.appendChild(link);\nexport {href as default};\n",
+            ".href;\nconst link = document.createElement(\"link\");\nlink.rel = \"stylesheet\";\nlink.href = href;\ndocument.head.appendChild(link);\n",
         );
+        if input.is_module {
+            source.push_str(&named_exports(input.name_mappings)?);
+        } else {
+            source.push_str("export {href as default};\n");
+        }
         Ok(PreparedCssModule {
             source,
             parser_path: input.stylesheet.with_extension("css.mjs"),
@@ -84,12 +97,26 @@ impl CssLoadingStrategy for AutoMount {
     }
 }
 
+fn named_exports(mappings: &BTreeMap<String, String>) -> eyre::Result<String> {
+    let mut source = String::new();
+    for (index, (name, value)) in mappings.iter().enumerate() {
+        // Private bindings avoid keywords and loader locals; string aliases also
+        // represent decoded CSS names outside JavaScript IdentifierName syntax.
+        source.push_str(&format!(
+            "const __css_{index} = {};\nexport {{__css_{index} as {}}};\n",
+            serde_json::to_string(value)?,
+            serde_json::to_string(name)?,
+        ));
+    }
+    Ok(source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn caller_loaded_preserves_url_bytes_and_rejects_unimplemented_mappings() {
+    fn caller_loaded_preserves_global_url_bytes_and_emits_separate_module_bindings() {
         let mappings = BTreeMap::new();
         let mut input = CssModuleInput {
             stylesheet: Path::new("style.css"),
@@ -108,10 +135,20 @@ mod tests {
                 .unwrap()
         );
         input.is_module = true;
-        assert!(CallerLoaded.generate_module(&input).is_err());
-        input.is_module = false;
+        assert!(CallerLoaded
+            .generate_module(&input)
+            .unwrap()
+            .source
+            .is_empty());
         let mappings = BTreeMap::from([("button".into(), "_scoped".into())]);
         input.name_mappings = &mappings;
+        let prepared = CallerLoaded.generate_module(&input).unwrap();
+        assert_eq!(prepared.package, ModuleFormat::Esm);
+        assert_eq!(
+            prepared.source,
+            "const __css_0 = \"_scoped\";\nexport {__css_0 as \"button\"};\n"
+        );
+        input.is_module = false;
         assert!(CallerLoaded.generate_module(&input).is_err());
     }
 }

@@ -35,13 +35,6 @@ pub(crate) fn is_asset(path: &Path) -> bool {
     kind(path, &crate::build::CssModules::Disabled) == ResourceKind::Asset
 }
 
-pub(crate) fn is_stylesheet(path: &Path) -> bool {
-    matches!(
-        kind(path, &crate::build::CssModules::Disabled),
-        ResourceKind::Stylesheet { .. }
-    )
-}
-
 pub(crate) fn url_module(
     path: &Path,
     base: &crate::output_url::PublicBase,

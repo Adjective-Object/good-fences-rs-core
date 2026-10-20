@@ -17,6 +17,9 @@ legacy dependency or variable maps. `file_provenance` exposes the source/config
 integrity evidence used by parse-free emission. `from_ranges` remains available
 for analysis-only inputs; without provenance these cannot be emitted. Source
 patches replace provenance and invalidate derived handles, just like facts.
+`from_prepared_resource` additionally seals the original resource path with its
+extraction provenance. `file_prepared_resource` lets emission check that identity
+and reuse the generated parser mode without guessing from the input extension.
 Module nodes preserve empty-file identity.
 `module_ids` enumerates live IDs including empty modules, skipping tombstones;
 `file_count` is a count, not an upper bound on IDs after removals.

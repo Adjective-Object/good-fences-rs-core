@@ -73,12 +73,7 @@ pub(crate) fn analyze(
         let segments = graph.file_segments(file).unwrap();
         // Prepared CSS ESM stubs perform DOM writes and throw without a document.
         // Caller DOM declarations must never infer those operations away.
-        if structural_override
-            || facts.commonjs
-            || graph
-                .file_path(file)
-                .is_some_and(crate::resource::is_stylesheet)
-        {
+        if structural_override || facts.commonjs || graph.file_prepared_resource(file).is_some() {
             continue;
         }
         for root in analyzed.roots {
@@ -108,6 +103,21 @@ pub(crate) fn summarize(
     effectful: Option<bool>,
 ) -> effects::StatementEffects {
     let mut summary = effects::summarize_with_policy(facts, span, demanded, policy);
+    if graph.file_prepared_resource(file).is_some()
+        && graph.file_segments(file).is_some_and(|segments| {
+            let index = segments.partition_point(|segment| segment.span.start < span.start);
+            segments
+                .get(index)
+                .zip(facts.emission.segments.get(index))
+                .is_some_and(|(segment, recipe)| segment.span == span && recipe.connector_only)
+        })
+    {
+        // Generated mapping aliases are export addresses, not executable reads.
+        // Keep DOM operations conservative without retaining every alias's value.
+        summary
+            .sites
+            .retain(|site| site.reason != ast_segmenter::effects::EffectReason::BindingRead);
+    }
     if let Some(false) = effectful {
         // Binding reads remain native TDZ/error barriers. Ecco intentionally
         // does not model throws as effects; emission must preserve these.
