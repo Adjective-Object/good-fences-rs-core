@@ -69,6 +69,9 @@ mode, keys sidecar reuse. Changing only that effective mode is a cache miss even
 for identical generated text. `to_parsed` preserves that checked mode in sealed
 provenance for parse-free emission; mutating the public record configuration
 cannot override its extraction identity.
+Original-only CSS edits may hit the same generated-text record; passing stale
+original bytes still fails on that hit. Complete CSS/composition closure checking
+belongs to the preparing caller, not resolved state persisted in this cache.
 
 `load_or_parse(logger, path, package_format, CacheMode)` always reads the source,
 then checks `<source>.seg.cbor`. It returns the exact source snapshot, record,

@@ -107,6 +107,9 @@ prepared DOM operations stay conservative. Global CSS continues using cssparser
 URL tokenization; URL/selector edits share one checked original-byte pipeline.
 Closure resource names include transform identity for selected stylesheets,
 including transitive CSS imports; loaders never affect scoped name identity.
+Hash transform implementation and CSS parser identity into resource names,
+independently of loader-only options. Configuration-only transitions retain
+unchanged JS parse facts; low-level emission consumes generated text, never CSS.
 CSS loading strategies consume explicit stylesheet/public-URL/mapping inputs,
 never parse CSS or choose names. CallerLoaded is the default; AutoMount is opt-in
 native ESM with a URL-string default and synchronous link insertion, never a

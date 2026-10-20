@@ -22,6 +22,195 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn css_configuration_transitions_keep_javascript_warm_and_low_level_sources_prepared() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './style.module.css'; console.log('ready');",
+    );
+    write(
+        dir.root(),
+        "style.module.css",
+        "@import './child.scope'; .used, .unused { color: red }",
+    );
+    write(dir.root(), "child.scope", ".child { color: blue }");
+    let mut config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = parity(&mut session, &config);
+    assert_eq!(cold.counters.source_parses, 2);
+    let mut previous = cold;
+    for (selection, reparses) in [
+        (CssModules::Enabled, 1),
+        (CssModules::Everything, 0),
+        (CssModules::Extension(".scope".into()), 1),
+        (CssModules::Extension(".module.css".into()), 1),
+        (CssModules::Enabled, 0),
+    ] {
+        config.css.css_modules = selection;
+        let changed = parity(&mut session, &config);
+        assert_eq!(changed.counters.source_parses, reparses);
+        assert_eq!(changed.counters.memory_hits, 2 - reparses);
+        assert_eq!(changed.counters.source_reparses, 0);
+        assert_eq!(changed.counters.fragment_reparses, 0);
+        assert_eq!(
+            previous.product.fingerprints.roots,
+            changed.product.fingerprints.roots
+        );
+        assert_eq!(
+            previous.product.fingerprints.resolution,
+            changed.product.fingerprints.resolution
+        );
+        let disk = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(disk.counters.disk_hits, 2);
+        assert_eq!(disk.counters.source_parses, 0);
+        assert_eq!(disk.product.artifacts, changed.product.artifacts);
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&noop.product, &changed.product));
+        assert_eq!(noop.counters.output_parses, 0);
+        previous = changed;
+    }
+    let path = dir.root().join("style.module.css");
+    let parse = previous.product.fingerprints.parse;
+    let stylesheet = previous.product.artifacts.stylesheets[&path].clone();
+    config.output.base_url = "/static/".into();
+    let rebased = parity(&mut session, &config);
+    assert_eq!(rebased.counters.memory_hits, 2);
+    assert_eq!(rebased.product.fingerprints.parse, parse);
+    assert_ne!(
+        rebased.product.fingerprints.output,
+        previous.product.fingerprints.output
+    );
+    assert_eq!(rebased.product.artifacts.stylesheets[&path], stylesheet);
+    assert_ne!(
+        rebased.product.artifacts.resources,
+        previous.product.artifacts.resources
+    );
+}
+
+#[test]
+fn css_modules_custom_script_deselection_matches_fresh_error_and_preserves_last_product() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './style.style.mjs'; console.log('ready');",
+    );
+    write(dir.root(), "style.style.mjs", ".used { color: red }");
+    let mut config = options();
+    config.css.css_modules = CssModules::Extension(".style.mjs".into());
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        config.css.css_modules = CssModules::Extension(".style.mjs".into());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let selected = session.build(&config).unwrap();
+        let original = selected.product.artifacts.clone();
+        let warm = session.build(&config).unwrap();
+        assert_eq!(warm.counters.memory_hits, 2);
+        assert_eq!(warm.counters.source_parses, 0);
+        assert!(Rc::ptr_eq(&warm.product, &selected.product));
+        let script = dir.root().join("main.mjs");
+        let record = session.sources[&script].record.clone();
+
+        config.css.css_modules = CssModules::Disabled;
+        let fresh_error = format!(
+            "{:#}",
+            BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .err()
+                .expect("deselected CSS is not valid JavaScript")
+        );
+        let error = format!(
+            "{:#}",
+            session
+                .build(&config)
+                .err()
+                .expect("memory reuse must not bypass JavaScript validation")
+        );
+        assert_eq!(error, fresh_error);
+        assert!(error.contains("style.style.mjs"), "{error}");
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &selected.product
+        ));
+        assert_eq!(selected.product.artifacts, original);
+        assert_eq!(session.sources[&script].record, record);
+
+        config.css.css_modules = CssModules::Extension(".style.mjs".into());
+        let recovered = session.build(&config).unwrap();
+        assert_eq!(recovered.counters.memory_hits, 2);
+        assert_eq!(recovered.counters.source_parses, 0);
+        assert!(Rc::ptr_eq(&recovered.product, &selected.product));
+    }
+}
+
+#[test]
+fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sources() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export { used } from './style.module.css';",
+    );
+    write(
+        dir.root(),
+        "style.module.css",
+        ".used, .unused { color: red }",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let caller = session.build(&config).unwrap();
+    let path = dir.root().join("style.module.css");
+    let caller_text = session.sources[&path].text.clone();
+    for load in [CssLoad::AutoMount, CssLoad::CallerLoaded] {
+        config.css.load = load;
+        let built = session.build(&config).unwrap();
+        assert_eq!(built.counters.memory_hits, 1);
+        assert_eq!(built.counters.source_parses, 1);
+        assert_eq!(
+            built.product.artifacts.resources,
+            caller.product.artifacts.resources
+        );
+        assert_eq!(
+            built.product.artifacts.stylesheets,
+            caller.product.artifacts.stylesheets
+        );
+        assert!(built.product.artifacts.async_modules.is_empty());
+        let graph = &built.product.graph;
+        let file = graph.file_id(&path).unwrap();
+        let before = ast_segmenter::module_parse_count();
+        let parsed =
+            crate::emit::checked_source(graph, file, &session.sources[&path].text).unwrap();
+        assert!(!parsed.provenance().config().commonjs);
+        assert!(parsed.facts.top_level_await.is_empty());
+        assert!(crate::emit::checked_source(graph, file, ".used, .unused { color: red }").is_err());
+        if load == CssLoad::AutoMount {
+            assert!(crate::emit::checked_source(graph, file, &caller_text).is_err());
+        }
+        assert_eq!(ast_segmenter::module_parse_count(), before);
+        let disk = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(disk.counters.disk_hits, 2);
+        assert_eq!(disk.product.artifacts, built.product.artifacts);
+        assert_eq!(
+            observe_named(&built.product.artifacts, &format!(
+                "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.match(ns.used, /^_[A-Za-z0-9_-]{{10}}$/); assert.equal(links.length, {}); console.log('loader');",
+                usize::from(load == CssLoad::AutoMount),
+            )),
+            b"loader\n",
+        );
+    }
+    assert_eq!(session.sources[&path].text, caller_text);
+}
+
+#[test]
 fn css_modules_validate_before_graph_loading_and_preserve_failed_last_product() {
     let dir = TmpDir::new();
     let mut config = options();
@@ -361,7 +550,11 @@ fn css_modules_script_and_json_suffixes_preserve_prepared_mode_and_effects() {
                 &format!("export {{used}} from './{stylesheet}';"),
             );
             let mut session = BuildSession::new(dir.root()).unwrap();
-            let cold = session.build(&config).unwrap();
+            let cold = if load == CssLoad::CallerLoaded {
+                parity(&mut session, &config)
+            } else {
+                session.build(&config).unwrap()
+            };
             let memory = session.build(&config).unwrap();
             assert!(Rc::ptr_eq(&cold.product, &memory.product));
             let disk = BuildSession::new(dir.root())
@@ -591,6 +784,10 @@ fn css_modules_prune_bindings_not_stylesheets_and_keep_loader_effects() {
         .mappings;
     let mut config = options();
     config.css.css_modules = CssModules::Enabled;
+    config.declarations.user.push(ecco::parse_declarations(
+        "global fn document.createElement(tag) {call_effects = false returns.*_effects = false}\n\
+         global fn document.head.appendChild(link) {call_effects = false returns.*_effects = false}"
+    ).unwrap());
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         let mut session = BuildSession::new(dir.root()).unwrap();
@@ -3309,14 +3506,17 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         .module_ids()
         .map(|file| {
             let path = graph.file_path(file).unwrap().to_owned();
-            let source = fs::read_to_string(&path).unwrap();
+            let source = session.sources[&path].text.clone();
             (path, source)
         })
         .collect();
     let mut checked =
         link::esm_plan(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
     let destinations = entry_outputs::apply(session.root(), options, &mut checked).unwrap();
-    let checked = checked.render_to(&destinations).unwrap();
+    let mut checked = checked.render_to(&destinations).unwrap();
+    // Low-level emission consumes prepared JS, not original resource discovery.
+    checked.resources = incremental.product.artifacts.resources.clone();
+    checked.stylesheets = incremental.product.artifacts.stylesheets.clone();
     assert_eq!(incremental.product.artifacts, checked);
     incremental
 }
