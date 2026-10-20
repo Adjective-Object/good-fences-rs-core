@@ -89,6 +89,8 @@ and precisely attached PURE hint spans. Only the derived bundler evaluator may
 discard an unused invocation; input effects and optional guards must survive.
 
 `facts.emission` owns segment-indexed recipes and placement/name constraints.
+Deferred alternatives own only syntax shape and initializer source slots; keep
+activation policy and generated names derived in the bundler.
 `facts.ecco` owns lazy ESM extraction from the same AST with unique segment
 root ownership; CJS stays `None`. Effective `ecco_declarations_hash` is a sealed
 configuration input in both formats, never graph conclusions. Share immutable

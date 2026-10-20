@@ -84,6 +84,32 @@ validation; explicit `Entry.output_name` values still require slash-separated
 portable paths. Publication validates path components rather than rejecting
 Windows separators introduced by native path joins.
 
+### Deferred initializer reconstruction
+
+`link::deferred_esm` explicitly reconstructs one checked synchronous, acyclic,
+single-root/single-chunk ESM island. It returns `Some(DeferredEsm)` with ordinary
+native artifacts and the generated initializer export name, or `None` when the
+island needs native evaluation. Ordinary `link::esm` and `BuildSession` output
+are unchanged: no automatic activation rewrites or parent-hoisting yet.
+
+Supported retained declarations are named root functions and simple identifier
+`var`/`let`/`const` declarations (including split declarators and named exports).
+Static internal imports/reexports compose in dependency/source order. Functions
+stay at the ESM root and close over the same root bindings; variable bindings
+become root `var`s, with assignments/effects inside one lexical guarded initializer.
+The native export list remains live, not a returned factory namespace. Merely
+loading the artifact does not initialize the island. Success and every failure,
+including `throw undefined`, are cached permanently; reentry is rejected.
+This explicit reconstruction mode does not preserve TDZ errors.
+
+CommonJS, externals, TLA, cycles, dynamic/require dependencies, observable
+namespace uses, default declarations/expressions, classes, destructuring,
+unsupported declaration statements and name-sensitive collisions stay native.
+Imported writes and writes to const bindings also prevent reconstruction.
+Cached source-local declaration alternatives and original-coordinate initializer
+slots use the same checked operation renderer as ordinary native emission;
+no emitted-source parsing or runtime source loading is involved.
+
 ## JSON modules
 
 Bare-string package `exports` exposes the selected root and arbitrary files
