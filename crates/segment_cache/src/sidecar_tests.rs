@@ -107,7 +107,7 @@ fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
         &path,
         prepared(),
         CacheMode::ReadWrite,
-        &declarations,
+        &ast_segmenter::PreparedDeclarations::new(declarations).unwrap(),
         || {
             fs::write(&path, b"changed input")?;
             Ok(())
@@ -364,7 +364,8 @@ fn source_change_during_staging_cannot_publish_or_return_stale_success() {
         &path,
         ModuleFormat::Esm,
         CacheMode::ReadWrite,
-        &ecco::DeclarationConfig::default().effective().unwrap(),
+        &ast_segmenter::PreparedDeclarations::from_config(&ecco::DeclarationConfig::default())
+            .unwrap(),
         || {
             fs::write(&path, "export const changed = 2;")?;
             Ok(())

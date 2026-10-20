@@ -5,8 +5,9 @@ mod validate;
 mod validate_emission;
 
 pub use sidecar::{
-    is_cache_artifact, load_or_parse, load_or_parse_with_declarations, load_prepared, sidecar_path,
-    CacheMode, CacheOutcome, CacheStatus, CacheWrite, MissReason, PreparedSource,
+    is_cache_artifact, load_or_parse, load_or_parse_with_declarations,
+    load_or_parse_with_prepared_declarations, load_prepared, load_prepared_with_declarations,
+    sidecar_path, CacheMode, CacheOutcome, CacheStatus, CacheWrite, MissReason, PreparedSource,
 };
 
 #[cfg(test)]
@@ -21,7 +22,7 @@ use oxc_span::Span;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 pub const EXTRACTOR_VERSION: u32 = 14;
 pub const OXC_REVISION: &str = "87f065ebf7cde21d1229322f4c7ee58baca5648e";
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
@@ -86,6 +87,13 @@ fn digest(bytes: &[u8]) -> [u8; 32] {
 }
 
 impl CacheRecord {
+    pub fn matches_prepared_declarations(
+        &self,
+        declarations: &ast_segmenter::PreparedDeclarations,
+    ) -> bool {
+        declarations.fingerprint() == self.module.facts.ecco_declarations_hash
+    }
+
     pub fn matches_declarations(&self, declarations: &ecco::LocalFacts) -> bool {
         ast_segmenter::owned::declarations_hash(declarations)
             .is_ok_and(|hash| hash == self.module.facts.ecco_declarations_hash)
@@ -164,9 +172,19 @@ impl CacheRecord {
         config: ParserConfig,
         declarations: &ecco::LocalFacts,
     ) -> eyre::Result<Self> {
+        let declarations = ast_segmenter::PreparedDeclarations::new(declarations.clone())?;
+        Self::decode_with_prepared_declarations(bytes, source, config, &declarations)
+    }
+
+    pub fn decode_with_prepared_declarations(
+        bytes: &[u8],
+        source: &str,
+        config: ParserConfig,
+        declarations: &ast_segmenter::PreparedDeclarations,
+    ) -> eyre::Result<Self> {
         let record = Self::decode(bytes, source, config)?;
         ensure!(
-            record.matches_declarations(declarations),
+            record.matches_prepared_declarations(declarations),
             "cache Ecco declaration configuration mismatch"
         );
         Ok(record)

@@ -13,6 +13,9 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
+- Schema 12 combines execution contexts with typed XXH3 declaration identity.
+  Shared `PreparedDeclarations`
+  avoids per-file serialization; source/checksum/provenance remain SHA-256.
 - Prepared sources cache generated-JS coordinates and parser identity, but recheck
   original resource bytes before sidecar publication and return, including hits.
 - Prepared parser path/format overrides resource extensions/package defaults;
