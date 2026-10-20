@@ -3,6 +3,11 @@
 Effect declarations and alias-aware, parallel hazard propagation for eliminating
 unused module-level JavaScript expressions. Throwing alone is not an effect.
 
+Ecco targets statement-level bundling of massive applications; throughput,
+memory use, and parallel scalability are explicit goals. Function-body inference
+should produce owned contracts from inputs and referenced symbols, without
+caller-specific body re-analysis or live-binding histories.
+
 `parse_declarations` produces owned `LocalFacts`. `parse_from_ast` consumes an
 existing checked OXC program and semantic model without retaining arena data;
 `parse_source` is its parsing convenience entrypoint. Both return a serializable
