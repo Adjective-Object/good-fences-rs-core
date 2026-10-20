@@ -22,6 +22,226 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn native_externals_preserve_imports_reexports_dynamic_identity_and_entry_renaming() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import path, {basename} from 'node:path';
+import * as ns from 'node:path';
+export {basename as base} from 'node:path';
+export * as pathNS from 'node:path';
+export const load = () => import('node:path');
+console.log(basename('/a/b'), path === ns.default, ns === await load());
+"#,
+    );
+    let mut config = options();
+    config.externals.insert("node:path".into());
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/start.mjs".into());
+    let first = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(observe(&first.product.artifacts), b"b true true\n");
+    assert_eq!(observe_named(&first.product.artifacts,
+        "import {base,pathNS,load} from './nested/start.mjs'; console.log(base('/x/y'), pathNS === await load());"),
+        b"b true true\ny true\n");
+    assert!(first.product.artifacts.async_facades.is_empty());
+    assert_eq!(first.product.artifacts.manifest.async_facades.len(), 1);
+    assert!(first
+        .product
+        .artifacts
+        .files
+        .values()
+        .any(|text| text.contains("\"node:path\"")));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(first.product.artifacts, warm.product.artifacts);
+}
+
+#[test]
+fn native_external_star_surfaces_are_owned_and_validated_by_the_native_loader() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs",
+        "export * from './barrel.mjs'; import {basename} from './barrel.mjs'; console.log(basename('/a/b'));");
+    write(
+        dir.root(),
+        "barrel.mjs",
+        "export * from 'node:fs'; export * from 'node:path';",
+    );
+    let mut config = options();
+    config
+        .externals
+        .extend(["node:fs".into(), "node:path".into()]);
+    let first = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(observe_named(&first.product.artifacts,
+        "import * as ns from './main.mjs'; console.log(typeof ns.basename, typeof ns.readFileSync, 'default' in ns);"),
+        b"b\nfunction function false\n");
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {doesNotExist} from 'node:path'; console.log(doesNotExist);",
+    );
+    let missing = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        observe_named(
+            &missing.product.artifacts,
+            "await import('./main.mjs').catch(e => console.log(e.name));"
+        ),
+        b"SyntaxError\n"
+    );
+}
+
+#[test]
+fn native_external_evaluation_order_and_global_mutations_remain_observable() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import 'external-order'; import './local.mjs'; Math.abs(1); console.log('main');",
+    );
+    write(dir.root(), "local.mjs", "console.log('local');");
+    let mut config = options();
+    config.externals.insert("external-order".into());
+    let first = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    let mut artifacts = first.product.artifacts.clone();
+    artifacts.files.insert(
+        "node_modules/external-order/index.js".into(),
+        "console.log('external'); Math.abs = () => console.log('patched');".into(),
+    );
+    assert_eq!(observe(&artifacts), b"external\nlocal\npatched\nmain\n");
+}
+
+#[test]
+fn native_external_requires_and_imports_remain_lazy_and_use_host_caches() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import api from './loader.cjs';
+console.log('start');
+const first = api.load();
+console.log(first.value, first === api.load(), first === (await api.dynamic()).default);
+try { await api.missing(); } catch (e) { console.log(e.code); }
+"#,
+    );
+    write(dir.root(), "loader.cjs",
+        "exports.load = () => require('runtime-lazy'); exports.dynamic = () => import('runtime-lazy'); exports.missing = () => import('not-installed');");
+    let mut config = options();
+    config
+        .externals
+        .extend(["runtime-lazy".into(), "not-installed".into()]);
+    let first = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    let mut artifacts = first.product.artifacts.clone();
+    artifacts.files.insert(
+        "node_modules/runtime-lazy/index.js".into(),
+        "console.log('loaded'); exports.value = 9;".into(),
+    );
+    assert_eq!(
+        observe(&artifacts),
+        b"start\nloaded\n9 true true\nERR_MODULE_NOT_FOUND\n"
+    );
+}
+
+#[test]
+fn native_external_unused_imports_and_reexports_still_validate_names() {
+    for (main, bad) in [
+        (
+            "import {doesNotExist} from 'node:path'; console.log('ran');",
+            "",
+        ),
+        (
+            "import './bad.mjs'; console.log('ran');",
+            "export {doesNotExist} from 'node:path';",
+        ),
+    ] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", main);
+        write(dir.root(), "bad.mjs", bad);
+        let mut config = options();
+        config.externals.insert("node:path".into());
+        let product = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(
+            observe_named(
+                &product.product.artifacts,
+                "await import('./main.mjs').catch(e => console.log(e.name));"
+            ),
+            b"SyntaxError\n"
+        );
+    }
+}
+
+#[test]
+fn native_external_star_collisions_preserve_cjs_candidates_without_explicit_override() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from './barrel.mjs'; console.log(value);",
+    );
+    write(
+        dir.root(),
+        "barrel.mjs",
+        "export * from './dep.cjs'; export * from 'node:path';",
+    );
+    write(dir.root(), "dep.cjs", "exports.value = 1;");
+    let mut config = options();
+    config.externals.insert("node:path".into());
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(observe(&product.product.artifacts), b"1\n");
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from './dep.cjs'; import 'node:path'; console.log('unused');",
+    );
+    let unused = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(observe(&unused.product.artifacts), b"unused\n");
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {basename} from './barrel.mjs'; console.log(basename);",
+    );
+    write(dir.root(), "dep.cjs", "exports.basename = 'own';");
+    let collision = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        observe_named(
+            &collision.product.artifacts,
+            "await import('./main.mjs').catch(e => console.log(e.name));"
+        ),
+        b"SyntaxError\n"
+    );
+}
+
+#[test]
 fn relative_context_imports_preserve_lazy_namespaces_and_warm_candidate_changes() {
     let dir = TmpDir::new();
     write(

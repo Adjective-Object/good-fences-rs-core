@@ -39,6 +39,15 @@ impl Placement {
         cjs: &commonjs::CommonJs,
     ) -> eyre::Result<Self> {
         let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
+        if modules.keys().any(|&file| has_externals(graph, file)) {
+            // Unknown external surfaces/evaluation stay on native source-module seams.
+            return Ok(Self {
+                owners: live
+                    .into_iter()
+                    .map(|key| (key, Owner::Evaluation(seams[&key.file_id])))
+                    .collect(),
+            });
+        }
         let effects: BTreeSet<_> = plan
             .retention
             .effects

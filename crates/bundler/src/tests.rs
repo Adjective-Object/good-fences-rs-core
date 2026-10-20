@@ -666,6 +666,14 @@ fn external_evaluation_is_explicit_and_type_reexports_do_not_evaluate() {
         SourceGraph::from_owned([entry, input("types.ts", "export type T = string; run();")]);
     let plan = retain(&graph, &[0], &[]).unwrap();
     assert_eq!(plan.modules, [0]);
-    assert_eq!(plan.edges.len(), 1);
-    assert!(matches!(plan.edges[0].to, GraphNode::Unlinked { .. }));
+    let external: Vec<_> = plan
+        .edges
+        .iter()
+        .filter(|edge| matches!(edge.to, GraphNode::Unlinked { .. }))
+        .collect();
+    assert_eq!(external.len(), 1);
+    assert!(plan
+        .segments
+        .iter()
+        .any(|segment| segment.key == SegmentKey::new(0, 0)));
 }

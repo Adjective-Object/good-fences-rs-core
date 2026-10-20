@@ -186,6 +186,12 @@ fn async_modules(
             for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
                 !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
             }) {
+                if matches!(
+                    graph.dependency_target(file, dependency.id),
+                    Some(DependencyTarget::External(_))
+                ) {
+                    continue;
+                }
                 let target = target_file(graph, file, dependency)?;
                 if let Some(&origin) = asynchronous.get(&target) {
                     asynchronous.insert(file, origin);
@@ -251,7 +257,12 @@ pub(super) fn target_files(
     file: u32,
     dependency: &Dependency,
 ) -> eyre::Result<Vec<u32>> {
-    if let Some(DependencyTarget::Context(candidates)) =
+    if matches!(
+        graph.dependency_target(file, dependency.id),
+        Some(DependencyTarget::External(_))
+    ) {
+        Ok(vec![])
+    } else if let Some(DependencyTarget::Context(candidates)) =
         graph.dependency_target(file, dependency.id)
     {
         candidates
@@ -262,6 +273,20 @@ pub(super) fn target_files(
     } else {
         Ok(vec![target_file(graph, file, dependency)?])
     }
+}
+
+pub(super) fn has_externals(graph: &SourceGraph, file: u32) -> bool {
+    graph
+        .file_facts(file)
+        .into_iter()
+        .flat_map(|facts| &facts.dependencies)
+        .any(|dependency| {
+            !dependency.type_only
+                && matches!(
+                    graph.dependency_target(file, dependency.id),
+                    Some(DependencyTarget::External(_))
+                )
+        })
 }
 
 pub(super) fn export_names(
@@ -331,7 +356,7 @@ pub(super) fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {
     match node {
         GraphNode::Module(file) => plan.retention.modules.contains(&file),
         GraphNode::Segment(key) => plan.retention.segments.iter().any(|s| s.key == key),
-        GraphNode::Unlinked { .. } => false,
+        GraphNode::Unlinked { .. } => true,
     }
 }
 

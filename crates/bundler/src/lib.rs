@@ -54,6 +54,8 @@ pub struct SegmentEffects {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RetentionEdgeKind {
     StaticEvaluation,
+    /// Native external export checks survive even when a binding is unused.
+    NativeValidation,
     BindingEvaluation,
     ModuleEffect,
     /// Scheduling only; never traverse for binding demand or code availability.
@@ -151,6 +153,9 @@ fn retain_with_effects(
         values: HashSet::new(),
         export_names: link::namespace_export_names(graph, |_| BTreeSet::from(["default".into()])),
         ecco_effects,
+        native_externals: graph
+            .module_ids()
+            .any(|file| link::has_externals(graph, file)),
     };
     for &file in evaluation_roots {
         analysis.queue.push_back(Demand::Evaluation(file));
@@ -236,6 +241,7 @@ struct Retention<'g, 'p> {
     values: HashSet<SegmentKey>,
     export_names: BTreeMap<u32, BTreeSet<String>>,
     ecco_effects: &'g BTreeMap<SegmentKey, bool>,
+    native_externals: bool,
 }
 
 impl Retention<'_, '_> {
@@ -256,6 +262,28 @@ impl Retention<'_, '_> {
             .ok_or_eyre("missing module statements")?;
         for (index, statement) in statements.iter().enumerate() {
             let key = SegmentKey::new(file, index as u32);
+            if self.native_externals
+                && self.facts(file)?.dependencies.iter().any(|dependency| {
+                    !dependency.type_only
+                        && matches!(
+                            dependency.kind,
+                            ast_segmenter::owned::DependencyKind::Import
+                                | ast_segmenter::owned::DependencyKind::ReExport
+                        )
+                        && link::contains(statement.span, dependency.span)
+                })
+            {
+                self.queue.push_back(Demand::Binding(
+                    GraphNode::Segment(key),
+                    RetentionReason::Dependency,
+                ));
+                self.edges.insert(RetentionEdge {
+                    from: GraphNode::Module(file),
+                    to: GraphNode::Segment(key),
+                    kind: RetentionEdgeKind::NativeValidation,
+                    source_edge: None,
+                });
+            }
             let summary = effect_analysis::summarize(
                 graph,
                 file,
@@ -324,6 +352,21 @@ impl Retention<'_, '_> {
                             routes.push(GraphNode::Segment(SegmentKey::new(file, index as u32)));
                         }
                     } else {
+                        if self.graph.has_external_star_exports(file) {
+                            for export in self
+                                .facts(file)?
+                                .exports
+                                .iter()
+                                .filter(|export| !export.type_only && export.name.is_none())
+                            {
+                                let index =
+                                    self.graph.file_segments(file).unwrap().partition_point(
+                                        |segment| segment.span.end <= export.span.start,
+                                    );
+                                routes
+                                    .push(GraphNode::Segment(SegmentKey::new(file, index as u32)));
+                            }
+                        }
                         for name in &self.export_names[&file] {
                             match self.graph.resolve_export(
                                 file,
@@ -366,7 +409,8 @@ impl Retention<'_, '_> {
                 return Ok(());
             }
             GraphNode::Unlinked { .. } => {
-                eyre::bail!("an unlinked dependency cannot be a binding root");
+                self.target(node, true)?;
+                return Ok(());
             }
         };
         self.facts(key.file_id)?;

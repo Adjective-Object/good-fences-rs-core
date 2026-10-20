@@ -19,6 +19,7 @@ pub(crate) enum RequestKind {
 enum Part {
     Text(String),
     Request(PathBuf, RequestKind),
+    External(String, RequestKind),
     Evaluation(PathBuf),
 }
 
@@ -44,6 +45,12 @@ impl From<&str> for Code {
 }
 
 impl Code {
+    pub fn external(specifier: String, kind: RequestKind) -> Self {
+        Self {
+            parts: vec![Part::External(specifier, kind)],
+            ..Self::default()
+        }
+    }
     pub fn request(target: PathBuf, kind: RequestKind) -> Self {
         Self {
             parts: vec![Part::Request(target, kind)],
@@ -191,6 +198,10 @@ impl Code {
             let (target, url, evaluation) = match part {
                 Part::Text(text) => {
                     output.push_str(text);
+                    continue;
+                }
+                Part::External(specifier, _) => {
+                    output.push_str(&serde_json::to_string(specifier)?);
                     continue;
                 }
                 Part::Request(target, kind) => (target, *kind != RequestKind::Require, false),

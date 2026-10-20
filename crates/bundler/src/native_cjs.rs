@@ -215,7 +215,9 @@ impl CommonJs {
             "runtime path collision"
         );
         for paths in chunk_artifacts.values_mut() {
-            paths.insert(path.clone());
+            if !paths.is_empty() {
+                paths.insert(path.clone());
+            }
         }
         Ok(())
     }
@@ -234,7 +236,12 @@ impl CommonJs {
     fn value(&self, graph: &SourceGraph, file: u32, name: &ImportedName) -> eyre::Result<&Value> {
         self.values
             .get(&Self::node(graph, file, name))
-            .ok_or_eyre("missing demanded CommonJS facade part")
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "missing demanded CommonJS facade part {name:?} in {}",
+                    graph.file_path(file).unwrap().display()
+                )
+            })
     }
 
     pub fn initialize(&self, graph: &SourceGraph, file: u32) -> eyre::Result<Code> {
@@ -378,6 +385,11 @@ impl CommonJs {
             for export in facts.exports.iter().filter(|e| {
                 matches!(e.value, ExportValue::ReExport { dependency: d, .. } if d == dependency.id)
             }) {
+                if export.name.is_none() && graph.has_external_star_exports(file) {
+                    let proxy = &self.proxies[graph.file_path(target).unwrap()].0;
+                    declarations.push(Code::request(proxy.clone(), RequestKind::ReExport).surrounded("export * from ", ";\n"));
+                    continue;
+                }
                 let ExportValue::ReExport { imported, .. } = &export.value else {
                     unreachable!()
                 };
@@ -444,6 +456,21 @@ impl CommonJs {
                 .iter()
                 .filter(|d| !d.type_only)
             {
+                if let Some(DependencyTarget::External(specifier)) =
+                    graph.dependency_target(file, dependency.id)
+                {
+                    let (kind, prefix) = match dependency.kind {
+                        DependencyKind::Require => (RequestKind::Require, "require("),
+                        DependencyKind::DynamicImport => (RequestKind::DynamicImport, "import("),
+                        _ => eyre::bail!("static ESM external in opaque CommonJS body"),
+                    };
+                    renderer.dependency(
+                        dependency,
+                        Code::external(specifier.clone(), kind).surrounded(prefix, ")"),
+                        true,
+                    );
+                    continue;
+                }
                 if dependency.pattern.is_some() && dependency.kind == DependencyKind::DynamicImport
                 {
                     renderer.context(

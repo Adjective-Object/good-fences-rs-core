@@ -161,6 +161,25 @@ assimilation, shared rejections and cached identity. Dynamic edges never become
 static imports or permission to invoke a nested body. Effectful deferred targets
 remain inactive until requested.
 
+Explicit `BuildOptions.externals` remain native requests, including builtins.
+Static/default/named/namespace imports, named/namespace/star reexports, dynamic
+imports and CJS requires retain the declared specifier verbatim; no external
+source is loaded or copied during bundling. The deployment supplies those
+requests relative to each emitted job. Host resolution, live bindings, namespace
+identity, require caching, load errors and async-module restrictions stay native.
+Unknown external star surfaces are not enumerated or guessed; ambiguous routes
+involving them defer to native linking while retaining every candidate route.
+Static import/reexport declarations remain even for unused bindings, preserving
+native missing-export checks. Mixed CJS stars retain their demanded proxy names
+as star contributions, never explicit exports overriding external ambiguity.
+Native source-module seams are conservatively kept across a graph containing
+externals, since unknown export/evaluation behavior cannot justify concatenation
+or lexical relocation. External execution also disables inferred Ecco pruning
+because it can mutate otherwise-pure standard globals. Source PURE policy remains
+separate. These restrictions do not introduce a second emission backend.
+External nodes remain in the diagnostic manifest without invented local files;
+`async_facades` and artifact ownership maps contain local targets only.
+
 Relative template/concatenation imports and requires capture a closure from the
 bounded project inventory, not runtime filesystem searches. A leading literal
 `./` or `../` is required; runtime gaps match any path depth between literal
@@ -226,7 +245,7 @@ resolving imports and barrels through the checked `SourceGraph` export identitie
 The same connected effects drive public builds and low-level retention/chunks.
 CommonJS stays opaque. Native binding/TDZ barriers and add-only forced effects
 remain distinct from Ecco's expression effects. Structural force rules targeting
-deferred bodies, opaque CommonJS execution, captured lexical initialization/TDZ barriers, or disabling PURE
+deferred bodies, opaque CommonJS/external execution, captured lexical initialization/TDZ barriers, or disabling PURE
 annotations conservatively disable inferred pruning; cached precursors and
 source-level PURE lowering remain unchanged. Ecco's existing unknown-execution
 widening can also prevent pruning otherwise pure calls.
@@ -788,7 +807,7 @@ Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 | Synchronous require of sync ESM | Native namespace and evaluating-cycle errors |
 | Require of async ESM (including static transitive dependencies) | Source diagnostic before emission |
 | CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
-| Unconstrained/bare nonliteral imports/requires, options/attributes, externals/assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
+| Unconstrained/bare nonliteral imports/requires, options/attributes, assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
 
 The unified public-build Node runner compares all 30 portable cases (41 entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover

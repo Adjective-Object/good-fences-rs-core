@@ -40,6 +40,9 @@ pub(super) fn emit(
                 entry_owners.insert(entry.clone(), owners);
             }
             RootId::Async(site) => {
+                if matches!(manifest.async_facades[site].target, NodeId::External { .. }) {
+                    continue;
+                }
                 let NodeId::Module(target) = &manifest.async_facades[site].target else {
                     eyre::bail!("nonmodule async target")
                 };
@@ -48,6 +51,7 @@ pub(super) fn emit(
         }
     }
     let mut cjs = commonjs::CommonJs::new(graph, plan, modules)?;
+    let native_seams = modules.keys().any(|&file| has_externals(graph, file));
     let async_modules = super::super::async_modules(graph, modules)?;
     let asynchronous: BTreeSet<_> = async_modules
         .iter()
@@ -84,6 +88,12 @@ pub(super) fn emit(
                     !d.type_only
                         && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
                 })
+                .filter(|d| {
+                    !matches!(
+                        graph.dependency_target(file, d.id),
+                        Some(DependencyTarget::External(_))
+                    )
+                })
                 .map(|d| target_file(graph, file, d))
                 .collect::<eyre::Result<Vec<_>>>()?,
         );
@@ -93,6 +103,9 @@ pub(super) fn emit(
     // Keep source wait bounds and sibling interleaving in native module jobs.
     boundaries.extend(&asynchronous);
     boundaries.extend(modules.keys().filter(|&&f| cjs.contains(f)).copied());
+    if native_seams {
+        boundaries.extend(modules.keys().copied());
+    }
     for (&file, module) in modules {
         for dependency in module
             .parsed
@@ -309,6 +322,26 @@ pub(super) fn emit(
                 })
                 .filter(|d| d.pattern.is_none())
                 .map(|d| {
+                    if let Some(DependencyTarget::External(specifier)) =
+                        graph.dependency_target(root, d.id)
+                    {
+                        return Ok((
+                            d,
+                            Code::external(
+                                specifier.clone(),
+                                match d.kind {
+                                    DependencyKind::Import => RequestKind::Import,
+                                    DependencyKind::ReExport => RequestKind::ReExport,
+                                    DependencyKind::DynamicImport => RequestKind::DynamicImport,
+                                    DependencyKind::Require => RequestKind::Require,
+                                    DependencyKind::ImportType => {
+                                        eyre::bail!("type dependency in executable JavaScript")
+                                    }
+                                },
+                            ),
+                            false,
+                        ));
+                    }
                     let target = target_file(graph, root, d)?;
                     if cjs.contains(target) {
                         Ok((
@@ -342,7 +375,19 @@ pub(super) fn emit(
                 .collect::<eyre::Result<Vec<_>>>()?;
             let mut imports = Code::default();
             // Evaluation-only connectors need not own a retained statement.
-            for &target in &edges[&root] {
+            for dependency in facts.dependencies.iter().filter(|d| {
+                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            }) {
+                if let Some(DependencyTarget::External(specifier)) =
+                    graph.dependency_target(root, dependency.id)
+                {
+                    imports.push(
+                        Code::external(specifier.clone(), RequestKind::Import)
+                            .surrounded("import ", ";\n"),
+                    );
+                    continue;
+                }
+                let target = target_file(graph, root, dependency)?;
                 if cjs.contains(target) {
                     imports.push(cjs.evaluate(graph, root, target)?);
                 } else {
@@ -427,6 +472,9 @@ pub(super) fn emit(
     for (chunk, nodes) in &plan.chunks {
         let mut paths = BTreeSet::new();
         for node in nodes {
+            if matches!(node, NodeId::External { .. }) {
+                continue;
+            }
             if let Some(owner) = cjs.members.get(node) {
                 paths.insert(owner.clone());
                 members.insert(node.clone(), owner.clone());
@@ -495,7 +543,10 @@ pub(super) fn emit(
     for (chunk, nodes) in &plan.chunks {
         chunk_artifacts.insert(
             chunk.clone(),
-            nodes.iter().map(|node| members[node].clone()).collect(),
+            nodes
+                .iter()
+                .filter_map(|node| members.get(node).cloned())
+                .collect(),
         );
     }
     cjs.add_runtime(&mut files, &mut chunk_artifacts)?;

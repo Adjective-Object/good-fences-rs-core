@@ -30,6 +30,8 @@ pub enum ExportIdentity {
     Expression(SegmentKey),
     Namespace(u32),
     External(String, Option<String>),
+    /// Ambiguity involving unknown external star surfaces belongs to native linking.
+    Native(u32, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,9 +97,19 @@ impl SourceGraph {
         let Some(mut result) = results.first().cloned() else {
             return Ok(None);
         };
+        let native = namespace == Namespace::Value
+            && results.iter().any(|candidate| {
+                matches!(
+                    candidate.identity,
+                    ExportIdentity::External(..) | ExportIdentity::Native(..)
+                )
+            })
+            && results
+                .iter()
+                .any(|candidate| candidate.identity != result.identity);
         for candidate in results.iter().skip(1) {
             eyre::ensure!(
-                candidate.identity == result.identity,
+                native || candidate.identity == result.identity,
                 "ambiguous {:?} export {name:?} in {:?}",
                 namespace,
                 self.file_path(file)
@@ -106,11 +118,54 @@ impl SourceGraph {
                 if !result.route.contains(node) {
                     result.route.push(*node);
                 }
+                if native {
+                    result.identity = ExportIdentity::Native(file, name.to_owned());
+                }
             }
         }
         let mut seen = AHashSet::default();
         result.route.retain(|node| seen.insert(*node));
         Ok(Some(result))
+    }
+
+    pub fn has_external_star_exports(&self, file: u32) -> bool {
+        let mut pending = vec![file];
+        let mut seen = AHashSet::default();
+        while let Some(file) = pending.pop() {
+            if !seen.insert(file) {
+                continue;
+            }
+            for export in self
+                .file_facts(file)
+                .into_iter()
+                .flat_map(|facts| &facts.exports)
+                .filter(|export| !export.type_only && export.name.is_none())
+            {
+                if let ExportValue::ReExport { dependency, .. } = export.value {
+                    match self.dependency_target(file, dependency) {
+                        Some(DependencyTarget::External(_)) => return true,
+                        Some(DependencyTarget::File(path)) => pending.extend(self.file_id(path)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Preserve concrete candidate demands when unknown external stars defer linking.
+    pub fn resolve_export_alternatives(
+        &self,
+        file: u32,
+        name: &str,
+        namespace: Namespace,
+    ) -> eyre::Result<Vec<LinkedExport>> {
+        let linked = self.resolve_export(file, name, namespace)?;
+        if matches!(linked.identity, ExportIdentity::Native(..)) {
+            Ok(self.export_candidates(file, name, namespace, &mut AHashSet::default()))
+        } else {
+            Ok(vec![linked])
+        }
     }
 
     fn export_candidates(

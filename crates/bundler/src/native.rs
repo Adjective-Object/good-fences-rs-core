@@ -31,6 +31,9 @@ fn single(
     symbols: &Symbols,
 ) -> eyre::Result<Option<Artifacts<Code>>> {
     // Prefer whole-tree concatenation; the group planner handles native seams.
+    if modules.keys().any(|&file| has_externals(graph, file)) {
+        return Ok(None);
+    }
     if plan.roots.len() != 1 || plan.chunks.len() != 1 {
         return Ok(None);
     }

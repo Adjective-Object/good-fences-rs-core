@@ -109,7 +109,11 @@ Derive async status over static runtime dependencies and reject all requires of
 async ESM with original require/TLA spans, including deferred sites.
 Do not persist derived async status. Never run a not-yet-evaluated module from a
 namespace facade; late completion may only finish newly available binding parts
-of an already evaluated module. Externals remain gated.
+of an already evaluated module. Explicit externals remain typed native requests,
+never artifact paths. Keep source-module seams and conservative inferred effects
+when externals are present; unknown star surfaces belong to native linking.
+Preserve static request order across internal and external dependencies.
+Manifest external nodes have no fabricated local artifact owners.
 Each CJS input is one opaque segment bridged by a logical ESM facade; both
 participate in ordinary usage analysis/linking/grouping, never a standalone
 native .cjs-per-input fallback. Preserve early cache allocation, wrapper

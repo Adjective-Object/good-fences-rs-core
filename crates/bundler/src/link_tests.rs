@@ -3150,13 +3150,10 @@ fn stale_and_missing_sources_or_external_policies_fail_without_staging() {
     }];
     let plan = partition(&graph, &roots, &policy).unwrap();
     let sources = BTreeMap::from([("external.mjs".into(), "import 'node:fs';".into())]);
-    let error = esm(&graph, &plan, &policy, &sources)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("external.mjs") && error.contains("bytes") && error.contains("policy"),
-        "{error}"
-    );
+    let output = esm(&graph, &plan, &policy, &sources).unwrap();
+    assert!(node(&output.files, &output.entries["external"])
+        .status
+        .success());
 }
 
 fn read_sources(directory: &Path, prefix: &Path, sources: &mut BTreeMap<PathBuf, String>) {

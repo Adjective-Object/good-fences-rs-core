@@ -11,6 +11,9 @@ pub(crate) fn requests(
     retention: &RetentionPlan,
     file: u32,
 ) -> Vec<(GraphNode, ImportedName)> {
+    let native_externals = graph
+        .module_ids()
+        .any(|file| crate::link::has_externals(graph, file));
     graph
         .incoming(GraphNode::Module(file))
         .filter(|edge| {
@@ -39,9 +42,10 @@ pub(crate) fn requests(
                 GraphNode::Segment(key) => key.file_id,
                 GraphNode::Unlinked { .. } => return None,
             };
-            if edge
-                .binding
-                .is_some_and(|binding| !binding_used(graph, retention, from, binding))
+            if !native_externals
+                && edge
+                    .binding
+                    .is_some_and(|binding| !binding_used(graph, retention, from, binding))
             {
                 return None;
             }
@@ -51,25 +55,29 @@ pub(crate) fn requests(
             };
             let target = graph.file_id(path)?;
             let imported = match edge.imported.as_ref() {
-                Some(ImportedName::Name(name)) => {
-                    let ExportIdentity::CommonJs(target, name) = graph
-                        .resolve_export(target, name, Namespace::Value)
-                        .ok()?
-                        .identity
-                    else {
-                        return None;
-                    };
-                    if target != file {
-                        return None;
-                    }
-                    ImportedName::Name(name)
-                }
-                Some(ImportedName::Namespace) if target == file => ImportedName::Namespace,
-                None if target == file => ImportedName::Name("default".into()),
+                Some(ImportedName::Name(name)) => graph
+                    .resolve_export_alternatives(target, name, Namespace::Value)
+                    .ok()?
+                    .into_iter()
+                    .filter_map(|candidate| match candidate.identity {
+                        ExportIdentity::CommonJs(target, name) if target == file => {
+                            Some(ImportedName::Name(name))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                Some(ImportedName::Namespace) if target == file => vec![ImportedName::Namespace],
+                None if target == file => vec![ImportedName::Name("default".into())],
                 _ => return None,
             };
-            Some((demand_from, imported))
+            Some(
+                imported
+                    .into_iter()
+                    .map(|imported| (demand_from, imported))
+                    .collect::<Vec<_>>(),
+            )
         })
+        .flatten()
         .collect()
 }
 

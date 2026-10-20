@@ -37,6 +37,7 @@ pub(crate) fn analyze(
         || graph.module_ids().any(|file| {
             graph.file_facts(file).is_some_and(|facts| {
                 facts.commonjs
+                    || crate::link::has_externals(graph, file)
                     || facts.invocations.iter().any(|call| {
                         call.deferred.is_some() && policy.matching_patterns(call).next().is_some()
                     })
@@ -256,8 +257,8 @@ fn exported(
                 root: ecco::RootId(root),
             })
         }
-        ExportIdentity::CommonJs(..) | ExportIdentity::External(..) => {
-            Ok(ecco::Resolution::Unknown)
-        }
+        ExportIdentity::CommonJs(..)
+        | ExportIdentity::External(..)
+        | ExportIdentity::Native(..) => Ok(ecco::Resolution::Unknown),
     }
 }

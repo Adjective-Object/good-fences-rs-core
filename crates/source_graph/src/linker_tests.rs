@@ -3,6 +3,37 @@ use crate::*;
 use ast_segmenter::ExportedSymbol;
 
 #[test]
+fn unknown_external_star_collisions_keep_native_boundaries_and_all_routes() {
+    let mut barrel = input("barrel.mjs", "export * from 'one'; export * from 'two';");
+    for dependency in &barrel.facts.dependencies {
+        barrel.resolutions.insert(
+            dependency.id,
+            DependencyTarget::External(dependency.specifier.clone()),
+        );
+    }
+    let graph = SourceGraph::from_owned([
+        barrel,
+        input(
+            "main.mjs",
+            "import {value} from 'barrel.mjs'; export {value};",
+        ),
+    ]);
+    graph.validate_links().unwrap();
+    assert!(graph.has_external_star_exports(0));
+    assert!(!graph.has_external_star_exports(1));
+    let linked = graph.resolve_export(0, "value", Namespace::Value).unwrap();
+    assert_eq!(linked.identity, ExportIdentity::Native(0, "value".into()));
+    for segment in 0..2 {
+        assert!(linked
+            .route
+            .contains(&GraphNode::Segment(SegmentKey::new(0, segment))));
+    }
+    assert!(graph
+        .resolve_export(0, "default", Namespace::Value)
+        .is_err());
+}
+
+#[test]
 fn lexical_forward_var_tdz_shadowing_and_namespaces() {
     let graph = SourceGraph::from_owned([input("a.ts",
         "later; variable; let later = 1; var variable; function f() { let later = 2; return later; } export type T = number; export { later };")]);

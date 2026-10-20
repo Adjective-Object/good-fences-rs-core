@@ -53,6 +53,11 @@ guessed source exports. Type requests do not gain this dynamic fallback.
 Legacy symbol adapters remain permissive type-inclusive
 lookups; executable callers must use the checked linker, not their empty-on-error
 compatibility results.
+Unknown external star surfaces cannot prove missing/ambiguous names at build
+time. Distinct candidate identities involving externals resolve to an explicit
+`ExportIdentity::Native(module, name)` boundary with all candidate routes; the
+native loader validates that binding. Fully known internal ambiguities still
+fail. `has_external_star_exports` identifies transitive open namespace surfaces.
 
 `refresh_resolution` invokes the explicit occurrence resolver for every site,
 including prior failures, and returns errors after replacing stale results with

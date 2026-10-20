@@ -150,17 +150,38 @@ impl Symbols {
                         .iter()
                         .find(|d| d.id == import.dependency)
                         .ok_or_eyre("missing import dependency")?;
-                    let target = super::link::target_file(graph, file, dependency)?;
-                    let mut linked = match &import.imported {
-                        ImportedName::Name(name) => {
-                            graph.resolve_export(target, name, Namespace::Value)?
-                        }
-                        ImportedName::Namespace => LinkedExport {
-                            identity: ExportIdentity::Namespace(target),
-                            declaration: GraphNode::Module(target),
-                            route: vec![GraphNode::Module(target)],
-                        },
-                    };
+                    let mut linked =
+                        if let Some(source_graph::DependencyTarget::External(specifier)) =
+                            graph.dependency_target(file, dependency.id)
+                        {
+                            let node = GraphNode::Unlinked {
+                                file_id: file,
+                                dependency: dependency.id,
+                            };
+                            LinkedExport {
+                                identity: ExportIdentity::External(
+                                    specifier.clone(),
+                                    match &import.imported {
+                                        ImportedName::Name(name) => Some(name.clone()),
+                                        ImportedName::Namespace => None,
+                                    },
+                                ),
+                                declaration: node,
+                                route: vec![node],
+                            }
+                        } else {
+                            let target = super::link::target_file(graph, file, dependency)?;
+                            match &import.imported {
+                                ImportedName::Name(name) => {
+                                    graph.resolve_export(target, name, Namespace::Value)?
+                                }
+                                ImportedName::Namespace => LinkedExport {
+                                    identity: ExportIdentity::Namespace(target),
+                                    declaration: GraphNode::Module(target),
+                                    route: vec![GraphNode::Module(target)],
+                                },
+                            }
+                        };
                     linked
                         .route
                         .extend(declarations.into_iter().map(GraphNode::Segment));
