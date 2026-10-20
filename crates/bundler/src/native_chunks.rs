@@ -248,7 +248,7 @@ pub(super) fn emit(
     let entry_files = entry_owners.values().flatten().copied().collect();
     let routing = segments::Routing::new(graph, prepared, &placement, &surfaces)?;
     cjs.emit(graph, modules, &owners, &entry_files, execution)?;
-    let mut jobs: Vec<_> = jobs
+    let mut owner_jobs: Vec<_> = jobs
         .iter()
         .filter(|&&root| !cjs.contains(root))
         .map(|&root| segments::Owner::Evaluation(root))
@@ -262,24 +262,15 @@ pub(super) fn emit(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    jobs.sort_by_key(|owner| match owner {
+    owner_jobs.sort_by_key(|owner| match owner {
         segments::Owner::Evaluation(file) => (graph.file_path(*file), 0, 0),
         segments::Owner::Bindings(key) => (graph.file_path(key.file_id), 1, key.segment_idx),
     });
-    let outputs = execution.map(&jobs, |&owner| -> eyre::Result<_> {
+    let outputs = execution.map(&owner_jobs, |&owner| -> eyre::Result<_> {
         let segments::Owner::Evaluation(root) = owner else {
             let output = segments::emit(
-                graph,
-                owner,
-                &owners,
-                &redirects,
-                modules,
-                prepared,
-                &placement,
-                &surfaces,
-                &recipes,
-                &cjs,
-                &routing,
+                graph, owner, &owners, &redirects, modules, prepared, &placement, &surfaces,
+                &recipes, &cjs, &routing,
             )?;
             return Ok((owner.path(graph), output, None));
         };
