@@ -75,6 +75,10 @@ reexport boundaries (forwarding default and live exports), not additional
 executions of its body. Their namespace objects are distinct, as with ordinary
 ESM reexports; internal dynamic imports retain canonical namespace identity.
 CJS aliases forward the canonical wrapper's current exports, including
+Destinations and aliases are selected on typed artifact identities before source
+rendering. Static imports, reexports, dynamic imports and checked CJS require
+sites carry typed targets; arbitrary source strings are never discovered or
+rewritten as requests. ESM requests use URL encoding; require uses filesystem paths.
 reassignment and accessors. Published generation directories do not change these
 relative entry names. Low-level `RootId` labels retain their existing contracts.
 

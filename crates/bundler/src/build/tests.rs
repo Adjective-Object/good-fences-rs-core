@@ -80,8 +80,11 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         })
         .collect();
     let mut checked =
-        link::esm(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
-    entry_outputs::apply(session.root(), options, &mut checked).unwrap();
+        link::esm_with_source_checker(graph, &incremental.product.plan, &options.effects, &sources,
+            |file, source| crate::emit::checked_source(graph, file, source),
+        ).unwrap();
+    let destinations = entry_outputs::apply(session.root(), options, &mut checked).unwrap();
+    let checked = checked.render_to(&destinations).unwrap();
     assert_eq!(incremental.product.artifacts, checked);
     incremental
 }
@@ -438,6 +441,37 @@ console.log(await alias.load() === canonical, alias.bump === canonical.bump);
         ),
         b"2 2 1\ntrue true\n"
     );
+}
+
+#[test]
+fn alias_destination_can_reuse_the_original_artifact_path() {
+    let dir = TmpDir::new();
+    write(dir.root(), "entry.mjs",
+        "globalThis.runs = (globalThis.runs || 0) + 1; export default 7; export let value = 1; export function bump(){ value++; }");
+    let options = BuildOptions {
+        entries: [("a", "app.mjs"), ("z", "native.mjs")]
+            .into_iter()
+            .map(|(id, name)| {
+                (
+                    id.into(),
+                    Entry {
+                        path: "entry.mjs".into(),
+                        output_name: Some(name.into()),
+                        namespace: true,
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let build = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    assert_eq!(build.product.artifacts.files.len(), 2);
+    assert_eq!(observe_named(&build.product.artifacts,
+        "import * as first from './app.mjs'; import * as alias from './native.mjs'; alias.bump(); console.log(alias.default, first.value, globalThis.runs);"),
+        b"7 2 1\n");
 }
 
 #[test]

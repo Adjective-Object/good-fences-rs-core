@@ -5,23 +5,18 @@ use std::{
 };
 
 use eyre::{ensure, OptionExt, WrapErr};
-use oxc_allocator::Allocator;
-use oxc_ast::ast::*;
-use oxc_ast_visit::{walk, Visit};
-use oxc_parser::Parser;
-use oxc_span::SourceType;
 
 use super::BuildOptions;
 use crate::{
+    assembly::{Code, RequestKind},
     link::{Artifacts, RUNTIME_PATH},
-    rewrite::{self, Edit},
 };
 
 pub(super) fn apply(
     root: &Path,
     options: &BuildOptions,
-    artifacts: &mut Artifacts,
-) -> eyre::Result<()> {
+    artifacts: &mut Artifacts<Code>,
+) -> eyre::Result<BTreeMap<PathBuf, PathBuf>> {
     let mut names = BTreeMap::new();
     let mut renames: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     let mut aliases = BTreeSet::new();
@@ -112,60 +107,51 @@ pub(super) fn apply(
             path.display()
         );
     }
-    let mut files = BTreeMap::new();
-    for (original, source) in &artifacts.files {
-        let destination = project(original);
-        let mut requests = OwnedRequests::parse(original, source)?;
-        let mut edits = Vec::new();
-        for request in requests.literals.drain(..) {
-            let value = request.value.as_str();
-            if !value.starts_with("./") && !value.starts_with("../") {
-                continue;
-            }
-            let target = resolve(original, value)?;
-            ensure!(
-                artifacts.files.contains_key(&target),
-                "generated request {value:?} in {} has no artifact",
-                original.display()
-            );
-            let replacement = relative_request(&destination, &project(&target), request.url);
-            if replacement != value {
-                edits.push(Edit {
-                    span: request.span,
-                    replacement: serde_json::to_string(&replacement)?,
-                });
-            }
-        }
-        let source = rewrite::apply(source, &edits)?;
-        if !edits.is_empty() {
-            rewrite::validate(&destination, &source)?;
-        }
-        files.insert(destination, source);
-    }
-    for (alias, canonical, original, commonjs) in &aliases {
-        let request = serde_json::to_string(&relative_request(alias, canonical, !commonjs))?;
+    let mut destinations: BTreeMap<_, _> = artifacts
+        .files
+        .keys()
+        .map(|id| (id.clone(), project(id)))
+        .collect();
+    for (index, (alias, _, original, commonjs)) in aliases.iter().enumerate() {
         let source = if *commonjs {
-            let runtime =
-                serde_json::to_string(&relative_request(alias, Path::new(RUNTIME_PATH), false))?;
-            format!(
-                "const {{defineProperty}} = require({runtime});\ndefineProperty(module, 'exports', {{get: () => require({request})}});\nrequire({request});\n"
-            )
+            let mut source = Code::request(PathBuf::from(RUNTIME_PATH), RequestKind::Require)
+                .surrounded("const {defineProperty} = require(", ");\n");
+            source.push(
+                Code::request(original.clone(), RequestKind::Require).surrounded(
+                    "defineProperty(module, 'exports', {get: () => require(",
+                    ")});\n",
+                ),
+            );
+            source.push(
+                Code::request(original.clone(), RequestKind::Require)
+                    .surrounded("require(", ");\n"),
+            );
+            source
         } else {
-            let parsed = OwnedRequests::parse(original, &artifacts.files[original])?;
-            let default = if parsed.default {
-                format!("export {{default}} from {request};\n")
-            } else {
-                String::new()
-            };
-            format!("export * from {request};\n{default}")
+            let mut source = Code::request(original.clone(), RequestKind::ReExport)
+                .surrounded("export * from ", ";\n");
+            if artifacts.files[original].default_export {
+                source.push(
+                    Code::request(original.clone(), RequestKind::ReExport)
+                        .surrounded("export {default} from ", ";\n"),
+                );
+                source.default_export = true;
+            }
+            source
         };
-        rewrite::validate(alias, &source)?;
-        files.insert(alias.clone(), source);
+        let mut id = PathBuf::from(format!(".bundler-alias-{index}"));
+        while artifacts.files.contains_key(&id) {
+            id.push("alias");
+        }
+        destinations.insert(id.clone(), alias.clone());
+        artifacts.files.insert(id, source);
     }
     for (package, format) in packages {
-        files.insert(package, format!("{{\"type\":\"{format}\"}}\n"));
+        destinations.insert(package.clone(), package.clone());
+        artifacts
+            .files
+            .insert(package, Code::from(format!("{{\"type\":\"{format}\"}}\n")));
     }
-    artifacts.files = files;
     artifacts.entries = names;
     for path in artifacts
         .modules
@@ -185,7 +171,7 @@ pub(super) fn apply(
             }
         }
     }
-    Ok(())
+    Ok(destinations)
 }
 
 fn output_path(name: &str) -> eyre::Result<PathBuf> {
@@ -226,163 +212,4 @@ fn output_path(name: &str) -> eyre::Result<PathBuf> {
         "reserved source-cache output path"
     );
     Ok(result)
-}
-
-fn resolve(importer: &Path, request: &str) -> eyre::Result<PathBuf> {
-    let mut target = importer.parent().unwrap().to_owned();
-    for component in Path::new(request).components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => ensure!(target.pop(), "generated request escapes output"),
-            Component::Normal(name) => target.push(name),
-            _ => eyre::bail!("invalid generated relative request"),
-        }
-    }
-    Ok(target)
-}
-
-fn relative_request(importer: &Path, target: &Path, url: bool) -> String {
-    let parent: Vec<_> = importer.parent().unwrap().components().collect();
-    let target: Vec<_> = target.components().collect();
-    let shared = parent
-        .iter()
-        .zip(&target)
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut request = if parent.len() == shared {
-        "./".to_owned()
-    } else {
-        "../".repeat(parent.len() - shared)
-    };
-    request.push_str(
-        &target[shared..]
-            .iter()
-            .map(|part| part.as_os_str().to_str().unwrap())
-            .collect::<Vec<_>>()
-            .join("/"),
-    );
-    if !url {
-        return request;
-    }
-    // Native imports use URLs; CommonJS require uses filesystem paths.
-    request
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"/.-_~".contains(&byte) {
-                (byte as char).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
-}
-
-struct Requests<'s, 'a> {
-    literals: Vec<Literal>,
-    default: bool,
-    semantic: &'s oxc_semantic::Semantic<'a>,
-}
-
-impl OwnedRequests {
-    fn parse(path: &Path, source: &str) -> eyre::Result<Self> {
-        rewrite::count_output_parse();
-        let allocator = Allocator::default();
-        let source_type = if path.extension().is_some_and(|e| e == "cjs") {
-            SourceType::cjs()
-        } else {
-            SourceType::mjs()
-        };
-        let parsed = Parser::new(&allocator, source, source_type).parse();
-        ensure!(
-            !parsed.panicked && parsed.errors.is_empty(),
-            "{}: invalid generated output: {:?}",
-            path.display(),
-            parsed.errors
-        );
-        let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
-        ensure!(
-            semantic.errors.is_empty(),
-            "invalid generated output semantics"
-        );
-        let mut requests = Requests {
-            literals: Vec::new(),
-            default: false,
-            semantic: &semantic.semantic,
-        };
-        requests.visit_program(&parsed.program);
-        Ok(OwnedRequests {
-            literals: requests.literals,
-            default: requests.default,
-        })
-    }
-}
-
-struct Literal {
-    value: String,
-    span: oxc_span::Span,
-    url: bool,
-}
-
-struct OwnedRequests {
-    literals: Vec<Literal>,
-    default: bool,
-}
-
-impl Requests<'_, '_> {
-    fn literal(&mut self, literal: &StringLiteral<'_>, url: bool) {
-        self.literals.push(Literal {
-            value: literal.value.to_string(),
-            span: literal.span,
-            url,
-        });
-    }
-}
-
-impl<'a> Visit<'a> for Requests<'_, 'a> {
-    fn visit_import_declaration(&mut self, declaration: &ImportDeclaration<'a>) {
-        self.literal(&declaration.source, true);
-    }
-
-    fn visit_export_all_declaration(&mut self, declaration: &ExportAllDeclaration<'a>) {
-        self.literal(&declaration.source, true);
-        self.default |= declaration
-            .exported
-            .as_ref()
-            .is_some_and(|name| name.name() == "default");
-    }
-
-    fn visit_export_named_declaration(&mut self, declaration: &ExportNamedDeclaration<'a>) {
-        if let Some(source) = &declaration.source {
-            self.literal(source, true);
-        }
-        self.default |= declaration
-            .specifiers
-            .iter()
-            .any(|specifier| specifier.exported.name() == "default");
-        walk::walk_export_named_declaration(self, declaration);
-    }
-
-    fn visit_export_default_declaration(&mut self, declaration: &ExportDefaultDeclaration<'a>) {
-        self.default = true;
-        walk::walk_export_default_declaration(self, declaration);
-    }
-
-    fn visit_import_expression(&mut self, expression: &ImportExpression<'a>) {
-        if let Expression::StringLiteral(literal) = &expression.source {
-            self.literal(literal, true);
-        }
-        walk::walk_import_expression(self, expression);
-    }
-
-    fn visit_call_expression(&mut self, expression: &CallExpression<'a>) {
-        if matches!(&expression.callee, Expression::Identifier(id)
-            if id.name == "require" && id.reference_id.get().is_some_and(|reference|
-                self.semantic.scoping().get_reference(reference).symbol_id().is_none()))
-        {
-            if let Some(Argument::StringLiteral(literal)) = expression.arguments.first() {
-                self.literal(literal, false);
-            }
-        }
-        walk::walk_call_expression(self, expression);
-    }
 }

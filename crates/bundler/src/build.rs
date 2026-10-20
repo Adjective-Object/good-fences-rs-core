@@ -440,7 +440,8 @@ impl BuildSession {
                 })
             },
         )?;
-        entry_outputs::apply(&self.root, options, &mut artifacts)?;
+        let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
+        let artifacts = artifacts.render_to(&destinations)?;
         Self::recheck(&self.root, &sources, &inventory)?;
         counters.emissions = 1;
         counters.output_parses = crate::rewrite::output_parse_count() - before;

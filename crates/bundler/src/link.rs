@@ -128,7 +128,7 @@ pub fn esm(
 ) -> eyre::Result<Artifacts> {
     esm_with_source_checker(graph, plan, policy, sources, |file, source| {
         crate::emit::checked_source(graph, file, source)
-    })
+    })?.render()
 }
 
 pub(crate) fn esm_with_source_checker(
@@ -137,7 +137,7 @@ pub(crate) fn esm_with_source_checker(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
     mut checked_source: impl FnMut(u32, &str) -> eyre::Result<ParsedModule>,
-) -> eyre::Result<Artifacts> {
+) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = BTreeMap::new();
@@ -162,7 +162,7 @@ pub(crate) fn esm_with_source_checker(
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    native::emit(graph, plan, &modules, &manifest, &symbols)?.render()
+    native::emit(graph, plan, &modules, &manifest, &symbols)
 }
 
 fn async_modules(
