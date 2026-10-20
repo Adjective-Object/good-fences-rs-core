@@ -3683,15 +3683,25 @@ fn connected_effects_preserve_deferred_tdz_observations() {
 
 #[test]
 fn declaration_changes_invalidate_memory_disk_and_build_products() {
+    use ast_segmenter::fingerprint::declaration_fingerprint_count;
+
     let dir = TmpDir::new();
     write(
         dir.root(),
         "main.mjs",
-        "Math.abs(-1); export const kept = 1;",
+        "import './dep.mjs'; Math.abs(-1); export const kept = 1;",
     );
+    write(dir.root(), "dep.mjs", "export const value = 1;");
     let mut config = options();
     let mut session = BuildSession::new(dir.root()).unwrap();
+    let hashes = declaration_fingerprint_count();
     let first = session.build(&config).unwrap();
+    assert_eq!(first.counters.source_parses, 2);
+    assert_eq!(declaration_fingerprint_count(), hashes + 1);
+    let noop = session.build(&config).unwrap();
+    assert_eq!(noop.counters.memory_hits, 2);
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert_eq!(declaration_fingerprint_count(), hashes + 1);
     assert!(first
         .product
         .artifacts
@@ -3702,7 +3712,8 @@ fn declaration_changes_invalidate_memory_disk_and_build_products() {
         ecco::parse_declarations("global fn Math.abs(value) { call_effects = true }").unwrap(),
     );
     let changed = session.build(&config).unwrap();
-    assert_eq!(changed.counters.source_parses, 1);
+    assert_eq!(changed.counters.source_parses, 2);
+    assert_eq!(declaration_fingerprint_count(), hashes + 2);
     assert!(changed
         .product
         .artifacts
@@ -3717,12 +3728,28 @@ fn declaration_changes_invalidate_memory_disk_and_build_products() {
         .unwrap()
         .build(&config)
         .unwrap();
-    assert_eq!(warm.counters.disk_hits, 1);
+    assert_eq!(warm.counters.disk_hits, 2);
+    assert_eq!(declaration_fingerprint_count(), hashes + 3);
     assert_eq!(warm.product.artifacts, changed.product.artifacts);
     config.declarations.user.clear();
     let restored = session.build(&config).unwrap();
-    assert_eq!(restored.counters.source_parses, 1);
+    assert_eq!(restored.counters.source_parses, 2);
+    assert_eq!(declaration_fingerprint_count(), hashes + 4);
     assert_eq!(restored.product.artifacts, first.product.artifacts);
+
+    config.declarations.user.push(
+        ecco::parse_declarations("global fn invalid() { call_effects = false }").unwrap(),
+    );
+    config
+        .declarations
+        .user
+        .push(config.declarations.user[0].clone());
+    assert!(session.build(&config).is_err());
+    assert_eq!(declaration_fingerprint_count(), hashes + 4);
+    config.declarations.user.clear();
+    let recovered = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&restored.product, &recovered.product));
+    assert_eq!(declaration_fingerprint_count(), hashes + 4);
 }
 
 #[test]

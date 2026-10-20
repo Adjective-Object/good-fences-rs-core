@@ -60,6 +60,18 @@ pub fn load_prepared(
     mode: CacheMode,
     declarations: &ecco::LocalFacts,
 ) -> eyre::Result<CacheOutcome> {
+    let declarations = ast_segmenter::PreparedDeclarations::new(declarations.clone())?;
+    load_prepared_with_declarations(logger, path, prepared, mode, &declarations)
+}
+
+/// Resource loading with a shared, validated declaration configuration.
+pub fn load_prepared_with_declarations(
+    logger: &impl logger::Logger,
+    path: &Path,
+    prepared: PreparedSource<'_>,
+    mode: CacheMode,
+    declarations: &ast_segmenter::PreparedDeclarations,
+) -> eyre::Result<CacheOutcome> {
     load_prepared_inner(logger, path, prepared, mode, declarations, || Ok(()))
 }
 
@@ -99,6 +111,17 @@ pub fn load_or_parse_with_declarations(
     mode: CacheMode,
     declarations: &ecco::LocalFacts,
 ) -> eyre::Result<CacheOutcome> {
+    let declarations = ast_segmenter::PreparedDeclarations::new(declarations.clone())?;
+    load_or_parse_with_prepared_declarations(logger, path, package, mode, &declarations)
+}
+
+pub fn load_or_parse_with_prepared_declarations(
+    logger: &impl logger::Logger,
+    path: &Path,
+    package: ModuleFormat,
+    mode: CacheMode,
+    declarations: &ast_segmenter::PreparedDeclarations,
+) -> eyre::Result<CacheOutcome> {
     load(logger, path, package, mode, declarations, || Ok(()))
 }
 
@@ -135,7 +158,7 @@ fn load(
     path: &Path,
     package: ModuleFormat,
     mode: CacheMode,
-    declarations: &ecco::LocalFacts,
+    declarations: &ast_segmenter::PreparedDeclarations,
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<CacheOutcome> {
     let source = fs::read_to_string(path)
@@ -160,7 +183,7 @@ fn load_prepared_inner(
     path: &Path,
     prepared: PreparedSource<'_>,
     mode: CacheMode,
-    declarations: &ecco::LocalFacts,
+    declarations: &ast_segmenter::PreparedDeclarations,
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<CacheOutcome> {
     let source = prepared.source;
@@ -169,19 +192,19 @@ fn load_prepared_inner(
         Err(MissReason::Disabled)
     } else {
         read_cache(&sidecar_path(path)).and_then(|bytes| {
-            CacheRecord::decode_with_declarations(&bytes, source, config, declarations)
+            CacheRecord::decode_with_prepared_declarations(&bytes, source, config, declarations)
                 .map_err(|e| MissReason::InvalidRecord(format!("{e:#}")))
         })
     };
     let (record, status, write) = match cached {
         Ok(record) => (record, CacheStatus::Hit, CacheWrite::NotRequested),
         Err(reason) => {
-            let parsed = ast_segmenter::parse_module_with_declarations(
+            let parsed = ast_segmenter::parse_module_with_prepared_declarations(
                 logger,
                 source,
                 prepared.parser_path,
                 prepared.package,
-                declarations.clone(),
+                declarations,
             )?;
             let record = CacheRecord::from_parsed(source, &parsed)?;
             let write = if mode == CacheMode::ReadWrite {

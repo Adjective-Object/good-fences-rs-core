@@ -33,6 +33,14 @@ model; it does not perform the full bundler support-policy/occurrence checks.
 
 `parse_module_with_declarations` accepts explicit effective Ecco `LocalFacts`;
 the default entrypoint uses `DeclarationConfig::default().effective()`.
+For repeated extraction, construct `PreparedDeclarations::from_config` (or
+`new(LocalFacts)`) once and use `parse_module_with_prepared_declarations`.
+It validates and owns immutable facts together with their typed 128-bit XXH3
+`DeclarationFingerprint`; cloning shares the facts and never rehashes them.
+`fingerprint::declaration_fingerprint_count()` counts declaration serialization/
+hash operations on the current thread, including compatibility wrappers.
+The declaration fingerprint replaces the former 32-byte SHA-256 declaration
+field; source and sealed extraction integrity hashes remain SHA-256.
 ESM `facts.ecco` contains owned lazy roots/functions extracted from the same
 checked AST, at most one root per actual segment (including split declarators).
 CommonJS keeps `None` and remains opaque. `facts.ecco_declarations_hash` seals

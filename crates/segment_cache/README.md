@@ -7,7 +7,7 @@ resolution and fixed-point effect solving remain build-local.
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 10 /
+Syntax-local effect reasons/timing are persisted and range-checked (schema 11 /
 extractor 13, including relative dependency patterns, owned lazy Ecco precursors,
 inferred user-function contracts and declaration identity,
 source-local emission recipes/placement constraints,
@@ -88,6 +88,15 @@ and Node presets. `CacheRecord::matches_declarations` also checks in-memory
 identity without parsing. Ecco templates persist only lazy extraction, never
 solved hazards; decoding validates their local IDs, UTF-8 spans, source bindings
 and unique root-to-segment ownership.
+
+Shared configurations use `ast_segmenter::PreparedDeclarations` with
+`load_or_parse_with_prepared_declarations`, `load_prepared_with_declarations`,
+`CacheRecord::matches_prepared_declarations` and
+`CacheRecord::decode_with_prepared_declarations`. These paths compare the prepared
+identity without serializing declarations per source or hit. Existing `LocalFacts`
+entrypoints remain compatibility wrappers. Schema 11 invalidates old sidecars
+because declaration identity is now a typed 128-bit XXH3 fingerprint; source,
+payload checksum and sealed extraction integrity remain SHA-256.
 
 Writes use uniquely named sibling `.seg.cbor.stage-*` files, flush/sync before
 atomic replacement, and clean up staging files on errors/normal cancellation.

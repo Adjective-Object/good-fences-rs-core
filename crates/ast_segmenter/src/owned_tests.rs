@@ -13,7 +13,7 @@ fn parse(source: &str) -> ModuleFacts {
     .unwrap()
     .facts;
     facts.ecco = None;
-    facts.ecco_declarations_hash = [0; 32];
+    facts.ecco_declarations_hash = Default::default();
     facts
 }
 
