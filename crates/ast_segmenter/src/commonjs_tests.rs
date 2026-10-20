@@ -53,7 +53,7 @@ fn opaque_body_preserves_directives_reassignment_and_nested_sites() {
     assert_eq!(module.facts, parse(source, "test.cjs").unwrap().facts);
     assert!(module.facts.ecco.is_none());
     let facts = crate::owned::ModuleFacts {
-        ecco_declarations_hash: [0; 32],
+        ecco_declarations_hash: Default::default(),
         ..module.facts
     };
     insta::assert_debug_snapshot!(facts);

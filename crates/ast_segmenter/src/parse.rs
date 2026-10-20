@@ -98,6 +98,18 @@ pub fn parse_module_with_declarations(
     package_format: ModuleFormat,
     declarations: ecco::LocalFacts,
 ) -> eyre::Result<ParsedModule> {
+    let declarations = crate::PreparedDeclarations::new(declarations)?;
+    parse_module_with_prepared_declarations(logger, source, path, package_format, &declarations)
+}
+
+/// Extract using one immutable configuration shared across source/cache operations.
+pub fn parse_module_with_prepared_declarations(
+    logger: &impl logger::Logger,
+    source: &str,
+    path: &Path,
+    package_format: ModuleFormat,
+    declarations: &crate::PreparedDeclarations,
+) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)?;
@@ -114,9 +126,8 @@ pub fn parse_module_with_declarations(
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
     crate::policy::check(&parsed.program, &facts)
         .wrap_err_with(|| format!("{}: unsupported bundler syntax", path.display()))?;
-    facts.ecco_declarations_hash = crate::owned::declarations_hash(&declarations)?;
+    facts.ecco_declarations_hash = declarations.fingerprint();
     let (body, segments) = if parsed.program.source_type.is_commonjs() {
-        ecco::Context::from_local_facts(declarations.clone())?;
         let span = Span::new(
             parsed.program.hashbang.as_ref().map_or(0, |h| h.span.end),
             source
@@ -156,7 +167,7 @@ pub fn parse_module_with_declarations(
         (ModuleBody::Esm, segments)
     };
     if matches!(body, ModuleBody::Esm) {
-        let mut used_declarations = declarations;
+        let mut used_declarations = declarations.facts().clone();
         used_declarations
             .definitions
             .retain(|definition| match &definition.binding {
@@ -195,6 +206,52 @@ pub fn parse_module_with_declarations(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_declarations_share_identity_without_rehashing_or_mutable_pairing() {
+        use crate::{fingerprint::declaration_fingerprint_count, PreparedDeclarations};
+
+        let mut facts =
+            ecco::parse_declarations("global fn noop() { call_effects = false }").unwrap();
+        let before = declaration_fingerprint_count();
+        let prepared = PreparedDeclarations::new(facts.clone()).unwrap();
+        let shared = prepared.clone();
+        facts.definitions.clear();
+        assert_eq!(prepared.facts().definitions.len(), 1);
+        for (path, source) in [
+            ("file.mjs", "noop(); export const value = 1;"),
+            ("file.cjs", "noop(); module.exports = 1;"),
+        ] {
+            let parsed = parse_module_with_prepared_declarations(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new(path),
+                ModuleFormat::Esm,
+                &shared,
+            )
+            .unwrap();
+            assert_eq!(parsed.facts.ecco_declarations_hash, prepared.fingerprint());
+            let mut changed = parsed.facts.clone();
+            changed.ecco_declarations_hash = Default::default();
+            assert!(parsed
+                .provenance()
+                .verify(
+                    source,
+                    crate::ParserConfig::from_source_type(parsed.source_type),
+                    parsed.body,
+                    &parsed.segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+                    &changed,
+                )
+                .is_err());
+        }
+        assert_eq!(declaration_fingerprint_count(), before + 1);
+        let changed = PreparedDeclarations::new(facts).unwrap();
+        assert_ne!(prepared.fingerprint(), changed.fingerprint());
+        let mut invalid = prepared.facts().clone();
+        invalid.definitions.push(invalid.definitions[0].clone());
+        assert!(PreparedDeclarations::new(invalid).is_err());
+        assert_eq!(declaration_fingerprint_count(), before + 2);
+    }
 
     fn parse(source: &str, path: &str) -> eyre::Result<ParsedModule> {
         parse_module(

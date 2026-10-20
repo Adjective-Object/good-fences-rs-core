@@ -86,7 +86,10 @@ discard an unused invocation; input effects and optional guards must survive.
 `facts.emission` owns segment-indexed recipes and placement/name constraints.
 `facts.ecco` owns lazy ESM extraction from the same AST with unique segment
 root ownership; CJS stays `None`. Effective `ecco_declarations_hash` is a sealed
-configuration inputs in both formats, never graph conclusions.
+configuration input in both formats, never graph conclusions. Share immutable
+`PreparedDeclarations` across checked parses/cache checks; its typed XXH3 identity
+is computed from validated facts, never paired with a caller-supplied digest.
+Source/body/facts provenance keeps SHA-256 independently.
 Operations address existing occurrence IDs/indices and original spans; preorder
 parents and source-slot roots precompose nesting before the arena drops.
 PURE callee steps preserve parentheses as chain boundaries and guard awaits in

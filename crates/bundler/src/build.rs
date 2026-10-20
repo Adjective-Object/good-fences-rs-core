@@ -7,7 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ast_segmenter::{owned::DependencyKind, ModuleFormat};
+use ast_segmenter::{
+    fingerprint::Fingerprint, owned::DependencyKind, ModuleFormat, PreparedDeclarations,
+};
 use eyre::{ensure, WrapErr};
 use import_resolver::{
     node_resolver::caching::NodeModulesResolverOptions,
@@ -107,12 +109,12 @@ impl Default for BuildOptions {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Fingerprints {
-    pub parse: [u8; 32],
-    pub resolution: [u8; 32],
+    pub parse: Fingerprint,
+    pub resolution: Fingerprint,
     pub effects: [u8; 32],
-    pub roots: [u8; 32],
-    pub runtime: [u8; 32],
-    pub output: [u8; 32],
+    pub roots: Fingerprint,
+    pub runtime: Fingerprint,
+    pub output: Fingerprint,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -177,10 +179,12 @@ pub struct BuildSession {
     root: PathBuf,
     sources: BTreeMap<PathBuf, Source>,
     resolutions: BTreeMap<PathBuf, HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>>,
-    resolution_key: Option<[u8; 32]>,
+    resolution_key: Option<Fingerprint>,
+    declarations: Option<(ecco::DeclarationConfig, PreparedDeclarations)>,
     last: Option<Rc<BuildProduct>>,
 }
 
+// Publication ownership/cleanup uses this integrity hash, not the internal keys.
 pub(crate) fn hash(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
@@ -194,6 +198,7 @@ impl BuildSession {
             sources: BTreeMap::new(),
             resolutions: BTreeMap::new(),
             resolution_key: None,
+            declarations: None,
             last: None,
         })
     }
@@ -225,8 +230,21 @@ impl BuildSession {
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
         options.css.css_modules.validate()?;
-        let declarations = options.declarations.effective()?;
-        let declarations_key = hash(&serde_json::to_vec(&declarations)?);
+        if self
+            .declarations
+            .as_ref()
+            .is_none_or(|(config, _)| config != &options.declarations)
+        {
+            let prepared = PreparedDeclarations::from_config(&options.declarations)?;
+            self.declarations = Some((options.declarations.clone(), prepared));
+        }
+        let declarations = self
+            .declarations
+            .as_ref()
+            .expect("prepared declarations")
+            .1
+            .clone();
+        let declarations_key = declarations.fingerprint();
         let inventory = inventory(&self.root)?;
         let mut styles = crate::css::Styles::new(
             &self.root,
@@ -236,7 +254,7 @@ impl BuildSession {
         );
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
-        let resolution_key = hash(
+        let resolution_key = Fingerprint::of(
             format!(
                 "resolution-v1:{inventory:?}:{:?}:{aliases:?}:{:?}:{:?}:{:?}:{}:{:?}",
                 options.resolver.target_env,
@@ -333,11 +351,11 @@ impl BuildSession {
                 s.input == input
                     && s.text == text
                     && s.record.config == config
-                    && s.record.matches_declarations(&declarations)
+                    && s.record.matches_prepared_declarations(&declarations)
             }) {
                 counters.memory_hits += 1;
             } else {
-                let loaded = segment_cache::load_prepared(
+                let loaded = segment_cache::load_prepared_with_declarations(
                     &logger::StdioLogger::new(),
                     &path,
                     segment_cache::PreparedSource {
@@ -459,7 +477,7 @@ impl BuildSession {
         self.sources.retain(|path, _| sources.contains_key(path));
         self.resolutions
             .retain(|path, _| sources.contains_key(path));
-        let parse = hash(
+        let parse = Fingerprint::of(
             format!(
                 "{}:{}:{}:{declarations_key:?}:{:?}",
                 segment_cache::SCHEMA_VERSION,
@@ -488,10 +506,12 @@ impl BuildSession {
             .collect();
         let mut fingerprints = Fingerprints {
             parse,
-            resolution: hash(format!("{resolution_key:?}:{resolution_inputs:?}").as_bytes()),
+            resolution: Fingerprint::of(
+                format!("{resolution_key:?}:{resolution_inputs:?}").as_bytes(),
+            ),
             effects: options.effects.fingerprint(),
-            roots: hash(format!("{entries:?}").as_bytes()),
-            runtime: hash(
+            roots: Fingerprint::of(format!("{entries:?}").as_bytes()),
+            runtime: Fingerprint::of(
                 concat!(
                     "native-node-cjs-initializers-v1\n",
                     include_str!("native_cjs.rs"),
@@ -500,10 +520,10 @@ impl BuildSession {
                 )
                 .as_bytes(),
             ),
-            output: [0; 32],
+            output: Fingerprint::default(),
         };
         // Include emitter implementation, not user-chosen cache-busting strings.
-        let emitter = hash(
+        let emitter = Fingerprint::of(
             concat!(
                 include_str!("link.rs"),
                 include_str!("assembly.rs"),
@@ -533,7 +553,7 @@ impl BuildSession {
             )
             .as_bytes(),
         );
-        fingerprints.output = hash(
+        fingerprints.output = Fingerprint::of(
             format!(
                 "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}",
                 crate::css_syntax::PARSER_REVISION,

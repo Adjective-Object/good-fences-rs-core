@@ -757,6 +757,13 @@ Source entries/dependencies inside excluded directories are rejected.
 Source bytes and effective parser config key in-memory and disk parse reuse.
 `Fingerprints` independently identifies parse, resolution, effects, entry roots,
 fixed Node runtime and emitter/output inputs. Source caches never contain policy.
+The session prepares immutable effective Ecco declarations once per configuration
+change, sharing the facts and declaration fingerprint across memory checks,
+sidecar checks and extraction (no per-source declaration serialization).
+Parse, resolution, roots, runtime and output keys are typed XXH3-128
+`ast_segmenter::fingerprint::Fingerprint` values rather than 32-byte SHA-256
+arrays. The separate effect-policy identity, source/provenance checks,
+published-file integrity and content-addressed resource names remain SHA-256.
 The session reports actual extraction misses, memory/disk hits, dependency
 resolution calls, linker calls and generated-output/recipe parse calls separately.
 It passes hash-checked existing owned cache facts/ranges into the same linker,
