@@ -15,6 +15,8 @@ types/return empty on failure; do not use them for executable validation.
 
 Source/resolution epochs invalidate derived handles. Remove tombstones IDs;
 recreation appends, never recycles. Patch paths must match input paths.
+ID-indexed liveness stays aligned with file storage; checked ID access never
+round-trips through the path index. Duplicate construction paths retire prior IDs.
 Consumers enumerate `module_ids`, not `0..file_count`, after tombstoning.
 Resolver refresh includes prior misses and rebuilds both indexes/cache; coarse
 invalidation is the initial correctness contract, not P9 minimal invalidation.

@@ -53,6 +53,8 @@ pub struct SourceGraph {
     incoming: AHashMap<GraphNode, Vec<usize>>,
     path_to_id: AHashMap<PathBuf, u32>,
     files: Vec<SourceGraphFile>,
+    /// Aligned with `files`; tombstoned IDs are never reused.
+    live_files: Vec<bool>,
     /// Cache for cross-file import resolution. Keyed by (file_id, symbol).
     /// Interior-mutated so `resolve_import_across_files` can take `&self`.
     reexport_cache: Mutex<AHashMap<(u32, ExportedSymbol), Vec<SegmentKey>>>,
@@ -91,10 +93,13 @@ impl SourceGraph {
     pub fn new(source_files: impl Iterator<Item = SourceFileInput>) -> Self {
         let mut path_to_id = AHashMap::default();
         let mut files = Vec::new();
+        let mut live_files = Vec::new();
 
         for input in source_files {
             let file_id = files.len() as u32;
-            path_to_id.insert(input.source_file_path.clone(), file_id);
+            if let Some(previous) = path_to_id.insert(input.source_file_path.clone(), file_id) {
+                live_files[previous as usize] = false;
+            }
 
             let file = Self::build_file(
                 input.source_file_path,
@@ -103,6 +108,7 @@ impl SourceGraph {
                 input.resolved_import_paths,
             );
             files.push(file);
+            live_files.push(true);
         }
 
         let mut graph = SourceGraph {
@@ -113,6 +119,7 @@ impl SourceGraph {
             incoming: AHashMap::default(),
             path_to_id,
             files,
+            live_files,
             reexport_cache: Mutex::new(AHashMap::default()),
         };
         graph.rebuild_edges();
@@ -176,40 +183,37 @@ impl SourceGraph {
 
     /// Live module identities, including empty modules and excluding tombstones.
     pub fn module_ids(&self) -> impl Iterator<Item = u32> + '_ {
-        self.files.iter().enumerate().filter_map(|(id, file)| {
-            let id = id as u32;
-            (self.file_id(&file.path) == Some(id)).then_some(id)
-        })
+        self.live_files
+            .iter()
+            .enumerate()
+            .filter_map(|(id, &live)| live.then_some(id as u32))
+    }
+
+    fn live_file(&self, file_id: u32) -> Option<&SourceGraphFile> {
+        if !self.live_files.get(file_id as usize).copied()? {
+            return None;
+        }
+        self.files.get(file_id as usize)
     }
 
     /// Returns the path of a file by its id.
     pub fn file_path(&self, file_id: u32) -> Option<&Path> {
-        self.files
-            .get(file_id as usize)
-            .filter(|f| self.file_id(&f.path) == Some(file_id))
-            .map(|f| f.path.as_path())
+        self.live_file(file_id).map(|f| f.path.as_path())
     }
 
     /// Returns the segments for a file by its id.
     pub fn file_segments(&self, file_id: u32) -> Option<&[Segment]> {
-        self.file_path(file_id)?;
-        self.files
-            .get(file_id as usize)
-            .map(|f| f.segments.as_slice())
+        self.live_file(file_id).map(|f| f.segments.as_slice())
     }
 
     /// Returns the symbol_to_segment index for a file.
     pub fn file_symbol_to_segment(&self, file_id: u32) -> Option<&AHashMap<ExportedSymbol, u32>> {
-        self.files
-            .get(file_id as usize)
-            .map(|f| &f.symbol_to_segment)
+        self.live_file(file_id).map(|f| &f.symbol_to_segment)
     }
 
     /// Returns the resolved import paths for a file.
     pub fn file_resolved_import_paths(&self, file_id: u32) -> Option<&AHashMap<String, PathBuf>> {
-        self.files
-            .get(file_id as usize)
-            .map(|f| &f.resolved_import_paths)
+        self.live_file(file_id).map(|f| &f.resolved_import_paths)
     }
 
     /// Resolve a name reference to the segment that declares it within the same file.
@@ -223,7 +227,7 @@ impl SourceGraph {
         name: &str,
         referencing_segment_idx: u32,
     ) -> Option<SegmentKey> {
-        let file = self.files.get(file_id as usize)?;
+        let file = self.live_file(file_id)?;
         if let Some(input) = &file.owned {
             let span = file.segments.get(referencing_segment_idx as usize)?.span;
             let binding = input
@@ -338,8 +342,8 @@ impl SourceGraph {
 
     /// Iterate over all segments in the graph, yielding `(SegmentKey, &Segment)` pairs.
     pub fn iter_segments(&self) -> impl Iterator<Item = (SegmentKey, &Segment)> {
-        self.files.iter().enumerate().flat_map(|(file_id, file)| {
-            let file_id = file_id as u32;
+        self.module_ids().flat_map(|file_id| {
+            let file = &self.files[file_id as usize];
             file.segments
                 .iter()
                 .enumerate()
@@ -382,6 +386,7 @@ impl SourceGraph {
                 input.resolved_import_paths,
             );
             self.files.push(new_file);
+            self.live_files.push(true);
         }
         self.revision.source += 1;
         self.revision.resolution += 1;
