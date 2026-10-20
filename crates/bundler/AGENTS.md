@@ -221,15 +221,25 @@ Export-only names constrain default allocation, not local import aliases.
 Sort canonical definitions once by source path/binding offset. Partition that
 order by actual segment ownership after each placement revision; reuse the final
 owner slices for local naming and private exports, never source-file seams.
-ExecutionOptions explicitly bounds scoped output-owner workers; one is inline.
-Keep preparation/retention/placement/effects/global names serial, sharing checked
+ExecutionOptions bounds sequential preparation/output-owner stages; one is inline.
+The coordinator deduplicates canonical paths and replenishes script jobs after
+each completion; outstanding reads/results together never exceed the worker bound.
+Workers read/check caches/extract owned facts with private arenas and shared
+PreparedDeclarations. Pending frontiers contain paths, never source buffers.
+Resolution and graph mutation stay serial. Resource/CSS processing uses a canonical
+serial frontier after scripts drain; do not serially pre-read ordinary scripts.
+Select source errors by canonical path, sort cache warnings and stop resource
+processing at its first serial failure. Drain/join workers on spawn/panic errors.
+Keep retention/placement/effects/global names serial, sharing checked
 Sync graph/facts and prepared canonical order without copies. Settle cross-owner
 addresses before dispatch; each ESM/CJS owner has private renderer/name/routing
 state. Merge code/errors in canonical owner order, never completion order.
 Workers return typed requests, never publish/prune/render; finalization stays
-serial. Aggregate worker source/rewrite/validation counters onto the caller.
-Execution counts do not invalidate output; module preparation stays serial until
-the next independently reviewed stage uses this same execution configuration.
+serial. Aggregate real worker source/rewrite/validation/declaration-hash counters.
+Execution counts do not invalidate output. Preserve final source/inventory checks
+and last-successful product identity on failure.
+Keep pending invalidations across failed attempts until the next successful
+product/no-op, even when successfully prepared source facts were cached meanwhile.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree
@@ -244,7 +254,7 @@ their identities. Preserve supported behavior in independently reviewed incremen
 Artifacts report Backend::Native; derive driver layout from it, never filenames.
 All portable fixtures require native. The harness retains legacy rejection and
 reporting for older binaries, not a production emitter fallback.
-The example driver accepts only bounded explicit fixture output/CSS/resolveConditions config,
+The example driver accepts only bounded explicit fixture output/CSS/resolveConditions/workers config,
 never general BuildOptions or implicit project config; keep positional calls.
 resolveConditions extends Node defaults; the fixture observer explicitly passes
 each condition to Node via --conditions, never assumes Node reads our config.
