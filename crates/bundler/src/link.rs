@@ -45,7 +45,8 @@ pub struct Artifacts<C = String> {
     pub files: BTreeMap<PathBuf, C>,
     /// Non-executable, byte-preserving resources keyed by output-relative paths.
     pub resources: BTreeMap<PathBuf, Vec<u8>>,
-    /// Imported CSS roots to extracted files, independent of loading strategy.
+    /// Input CSS roots to owned output-relative CSS paths, never public URLs.
+    /// Independent of loading strategy and executable entry aliases.
     pub stylesheets: BTreeMap<PathBuf, PathBuf>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
