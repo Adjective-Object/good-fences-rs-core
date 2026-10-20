@@ -14,8 +14,9 @@ pub(super) fn emit(
     plan: &ChunkPlan,
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
 ) -> eyre::Result<Artifacts<Code>> {
+    let symbols = prepared.symbols;
     let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
@@ -199,7 +200,7 @@ pub(super) fn emit(
         graph,
         plan,
         modules,
-        symbols,
+        prepared,
         &owners,
         &phase_bound,
         &wait_bound,
@@ -257,7 +258,7 @@ pub(super) fn emit(
                 &owners,
                 &redirects,
                 modules,
-                symbols,
+                prepared,
                 &placement,
                 &surfaces,
                 &recipes,
@@ -404,8 +405,16 @@ pub(super) fn emit(
     for owner in placement.owners.values().copied().collect::<BTreeSet<_>>() {
         if matches!(owner, segments::Owner::Bindings(_)) {
             let output = segments::emit(
-                graph, owner, &owners, &redirects, modules, symbols, &placement, &surfaces,
-                &recipes, &cjs,
+                graph,
+                owner,
+                &owners,
+                &redirects,
+                modules,
+                prepared,
+                &placement,
+                &surfaces,
+                &recipes,
+                &cjs,
             )?;
             let path = owner.path(graph);
             files.insert(path, output);

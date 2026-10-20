@@ -42,13 +42,14 @@ impl Placement {
         graph: &SourceGraph,
         plan: &ChunkPlan,
         modules: &BTreeMap<u32, Module<'_>>,
-        symbols: &Symbols,
+        prepared: &PreparedValues<'_>,
         seams: &BTreeMap<u32, u32>,
         phase_bound: &BTreeSet<u32>,
         wait_bound: &BTreeSet<u32>,
         surfaces: &BTreeSet<u32>,
         cjs: &commonjs::CommonJs,
     ) -> eyre::Result<Self> {
+        let symbols = prepared.symbols;
         let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
         if modules.keys().any(|&file| has_externals(graph, file)) {
             // Unknown external surfaces/evaluation stay on native source-module seams.
@@ -486,7 +487,7 @@ impl Placement {
             let mut rejected = BTreeSet::new();
             for (owner, members) in &activation.members {
                 let names = local_names(graph, modules, symbols, &owners, *owner)?;
-                let mut values = Values::new(graph, modules, symbols);
+                let mut values = Values::new(prepared);
                 values.names = names;
                 values.requests = seams
                     .iter()
@@ -1224,19 +1225,20 @@ pub(super) fn emit(
     seams: &BTreeMap<u32, u32>,
     redirects: &BTreeMap<u32, u32>,
     modules: &BTreeMap<u32, Module<'_>>,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
     placement: &Placement,
     surfaces: &BTreeSet<u32>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
 ) -> eyre::Result<Code> {
+    let symbols = prepared.symbols;
     let live: BTreeSet<_> = placement
         .owners
         .iter()
         .filter(|(_, &o)| o == root)
         .map(|(&k, _)| k)
         .collect();
-    let mut values = Values::new(graph, modules, symbols);
+    let mut values = Values::new(prepared);
     values.names = local_names(graph, modules, symbols, &placement.owners, root)?;
     values.requests = seams
         .iter()
@@ -1308,24 +1310,10 @@ pub(super) fn emit(
         .collect();
     relocated.sort_by_key(|&file| graph.file_path(file));
     let mut imported = BTreeSet::new();
-    let mut occupied: BTreeSet<_> = values
-        .names
-        .values()
-        .chain(values.defaults.values())
-        .cloned()
-        .collect();
-    for module in modules.values() {
-        occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
-        occupied.extend(
-            module
-                .parsed
-                .facts
-                .references
-                .iter()
-                .map(|r| r.name.clone()),
-        );
+    let mut occupied = OccupiedNames::new(prepared);
+    for name in values.names.values() {
+        occupied.insert(name.clone());
     }
-    occupied.extend(symbols.definitions.values().map(|d| d.name.clone()));
     for &file in &relocated {
         for binding in modules[&file]
             .parsed
@@ -1511,7 +1499,7 @@ pub(super) fn emit(
                 output.push_str(&format!("export {{{name} as {}}};\n", quote(&address)));
             }
         }
-        for (key, name) in &values.defaults {
+        for (key, name) in values.defaults {
             if placement.owners.get(key) == Some(&root) {
                 let address = address(
                     graph,
