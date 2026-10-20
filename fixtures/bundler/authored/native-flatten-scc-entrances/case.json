@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-flatten-scc-entrances",
+  "moduleType": "module",
+  "entryPoints": ["x.js", "y.js"],
+  "expectations": {
+    "stdout": ["b", "a", "x", "a", "b", "y"],
+    "backend": "native"
+  },
+  "goals": [
+    "Preserve entrance-dependent source SCC evaluation: x enters a first and y enters b first in fresh processes.",
+    "A shared a/b SCC must not silently choose one fixed flattening order; any future order-cycle policy relaxation must be explicit and diagnosed."
+  ]
+}

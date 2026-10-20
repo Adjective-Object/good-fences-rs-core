@@ -40,8 +40,8 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **32 cases / 44 entry executions**: six esbuild cases,
-six rspack cases and twenty authored cases. The upstream cases cover
+The corpus contains **36 cases / 51 entry executions**: six esbuild cases,
+six rspack cases and twenty-four authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
@@ -52,6 +52,9 @@ jobs, cached rejection/TDZ, dynamic exported-then assimilation, and native CJS
 ambient activation/identity, path-wrapper redeclarations, late interop after
 public built-in mutation, failure retry and mixed-cycle error contracts,
 and independent demands on shared segments with live state and inferred names.
+Four flattening regressions additionally defend shared-group body
+retention, outside-job return paths, redirected-barrel ordering, and
+entrance-dependent source SCC evaluation.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -149,7 +152,7 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All thirty-two current cases require native. Legacy reporting and
+back to legacy. All thirty-six current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 
@@ -189,22 +192,21 @@ snapshots, and incidental formatting are not this corpus's semantic contracts.
 Runner regression tests use synthetic fixtures only:
 `node --test scripts/bundler-fixtures.test.mjs scripts/bundler-fixtures-build.test.mjs`.
 
-## Public-pipeline results (Node 22)
+## Public-pipeline validation
 
 The single command above validates manifests/provenance first and compares
 manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
-All **32 contracts / 44 emitted entry executions** pass, with zero
-unsupported skips. The actual backend is reported for every built case:
+The corpus requires source behavior, not the current emitter's behavior:
 
-- **Native (32, all explicitly required):** all twenty authored cases,
+- **Native (36, all explicitly required):** all twenty-four authored cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
   `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
   `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
   `esbuild/esm-sync-async`, `esbuild/cjs-sync-async-once`, `rspack/cjs-default-export`,
   `rspack/cjs-named-reexport`, `rspack/cjs-self-cycle` and
   `rspack/dynamic-import-cjs`. The last five are graduated native CJS coverage.
-- **Legacy (0), unsupported (0):** the production legacy backend is deleted.
+- **No legacy fallback:** the production legacy backend is deleted.
   Rust Node regressions cover low-level root shapes outside the portable public
   driver API. No upstream parity is claimed.
 
@@ -214,6 +216,41 @@ diagnostics; unrelated cache/publication/unknown warnings still fail. Results
 retain nonempty `warnings`, and the CLI prints them as `WARN` lines. This keeps
 async SCC planning diagnostics visible without treating the scalar DAG as an
 executor or suppressing native binding failures.
+
+### Native flattening regression contracts
+
+All four authored cases require successful native builds and validate their
+unbundled expectations before comparing emitted output. Required lines below
+are in order (`/` separates independently executed public entries).
+Each entry runs in a fresh Node process, including the two SCC entrances.
+
+| Case (`authored/`) | Required stdout |
+| --- | --- |
+| `native-flatten-absorption` | `b a c x / b a c y` |
+| `native-flatten-outside-return` | `b c a entry c` |
+| `native-flatten-barrel-order` | `leaf entry / unrelated` |
+| `native-flatten-scc-entrances` | `b a x / a b y` |
+
+These are portable runtime contracts, not chunk-layout snapshots. The absorption
+case's `a,b,c` path order permits successive absorption of a shared `a -> b`
+group through `c -> b`; two public roots prevent an entry from swallowing the
+entire shared region and hiding the missing body. The outside-return case instead
+sorts `0-entry.js` first and observes `c`'s namespace to protect its native job.
+Moving `b` into the entry while leaving `c` outside can introduce a chunk cycle
+that executes `c` before `b`; the contract rejects that reordering independently
+of body omission. The barrel case's unrelated public entry avoids the
+single-entry fast path, and every ordering traversal must follow the redirected
+barrel target before the entry body.
+
+The SCC regression also has a focused Rust counterpart,
+`native_shared_source_scc_preserves_both_entry_orders`, which compares each
+entrance in fresh Node processes for both public-root orders and both graph
+insertion orders. An `effect-order cycle` warning alone does not relax the
+fixture's source-order contract. A future policy allowing
+deterministic breaking of actual effect-order cycles must explicitly revise and
+diagnose that policy, not silently treat every source SCC as a fixed-order body.
+The existing fixture schema accepts native requirements and runtime observations,
+not warning expectations or build-time rejections.
 
 ### Authored migration baseline
 

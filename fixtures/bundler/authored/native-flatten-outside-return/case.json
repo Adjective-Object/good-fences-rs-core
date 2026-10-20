@@ -1,0 +1,14 @@
+{
+  "id": "authored/native-flatten-outside-return",
+  "moduleType": "module",
+  "entryPoints": ["0-entry.js"],
+  "expectations": {
+    "stdout": ["b", "c", "a", "entry c"],
+    "backend": "native"
+  },
+  "goals": [
+    "Follow an outside namespace job back into a proposed merged region before validating its evaluation prefix.",
+    "Preserve b before protected c for entry-to-c-to-b followed by entry-to-a-to-b; do not introduce a native chunk cycle.",
+    "Sort 0-entry before a,b,c so its region is considered before c can absorb the shared dependency."
+  ]
+}

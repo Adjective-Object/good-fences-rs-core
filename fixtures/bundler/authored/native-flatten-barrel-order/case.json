@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-flatten-barrel-order",
+  "moduleType": "module",
+  "entryPoints": ["entry.js", "unrelated.js"],
+  "expectations": {
+    "stdout": ["leaf", "entry", "unrelated"],
+    "backend": "native"
+  },
+  "goals": [
+    "Use the redirected target in every dependency ordering traversal of entry-to-empty-barrel-to-leaf.",
+    "A second unrelated public entry exercises the general native chunk path rather than the single-entry fast path."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-flatten-absorption",
+  "moduleType": "module",
+  "entryPoints": ["x.js", "y.js"],
+  "expectations": {
+    "stdout": ["b", "a", "c", "x", "b", "a", "c", "y"],
+    "backend": "native"
+  },
+  "goals": [
+    "Retain every body when a shared a-to-b group is subsequently absorbed through c-to-b.",
+    "Lexical a,b,c path order and two public roots keep the shared region separate from either entry."
+  ]
+}

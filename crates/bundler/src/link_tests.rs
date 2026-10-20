@@ -1188,6 +1188,52 @@ fn commonjs_namespace_conservatively_captures_runtime_keys_and_live_properties()
 }
 
 #[test]
+fn native_shared_source_scc_preserves_both_entry_orders() {
+    let source = sources(&[
+        ("a.mjs", "import './b.mjs'; console.log('a');"),
+        ("b.mjs", "import './a.mjs'; console.log('b');"),
+        ("x.mjs", "import './a.mjs'; console.log('x');"),
+        ("y.mjs", "import './b.mjs'; console.log('y');"),
+    ]);
+    let baselines: BTreeMap<_, _> = ["x.mjs", "y.mjs"]
+        .into_iter()
+        .map(|entry| {
+            let baseline = node(&source, Path::new(entry));
+            assert!(baseline.status.success());
+            assert!(baseline.stderr.is_empty());
+            (entry, baseline.stdout)
+        })
+        .collect();
+    let mut mismatches = Vec::new();
+    for entries in [
+        [("x.mjs", true), ("y.mjs", true)],
+        [("y.mjs", true), ("x.mjs", true)],
+    ] {
+        for reverse_graph in [false, true] {
+            let (_, output) = build(&source, &entries, reverse_graph);
+            assert_eq!(output.backend, Backend::Native);
+            for (entry, _) in entries {
+                let actual = node(&output.files, &output.entries[entry]);
+                assert!(
+                    actual.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&actual.stderr)
+                );
+                assert!(actual.stderr.is_empty());
+                if actual.stdout != baselines[entry] {
+                    mismatches.push(format!(
+                        "roots={entries:?}, reverse_graph={reverse_graph}, entry={entry}: expected {:?}, got {:?}",
+                        String::from_utf8_lossy(&baselines[entry]),
+                        String::from_utf8_lossy(&actual.stdout),
+                    ));
+                }
+            }
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
 fn native_chunks_share_live_state_and_concatenate_private_chains() {
     let source = sources(&[
         ("state.mjs", "globalThis.sharedInitializations = (globalThis.sharedInitializations || 0) + 1; export const sharedObject = {}; export let counter = 0; export function increment() { counter++; } export function strictThis() { return this; } const privateSentinel = 'state-private-body'; console.log(privateSentinel);"),
