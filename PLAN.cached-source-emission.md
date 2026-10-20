@@ -66,24 +66,36 @@ source + cached facts + retained segments + derived edits -> rendered chunk
 - Consumers: `entry_outputs.rs::{apply, OwnedRequests}` and ESM/CJS emitters.
 - Record generated requests as typed targets: static import/reexport, dynamic import, CJS require and namespace/export surfaces.
 - Choose public filenames and aliases before rendering; distinguish ESM URL encoding from CJS filesystem paths.
+- Assign artifact identities, destinations and aliases on interim structures; render source only after pruning and naming finish.
 - Replace original unshadowed require sites through checked dependency IDs; never scan arbitrary strings or lexical shadows.
 - Remove output-request discovery parses; retain collision/package-format validation.
 - Preserve nested names, aliases, live/default exports and canonical namespace identity.
 
-## 8. Remove hint scans; validate only final artifacts
+## 8. Remove redundant source verification parses
+
+- Consumers: `link::esm`, `emit::checked_source` and the cache-backed `BuildSession` adapter.
+- Today `link::esm` accepts a graph plus separate source strings and reparses those strings to compare facts/ranges.
+- Carry validated source hashes and effective parser configuration with the extracted source records used to construct the graph.
+- Verify source bytes match that provenance without parsing; reuse owned facts/ranges for both public and session emission.
+- Preserve source/configuration mismatch errors, JavaScript support checks and graph/plan revision checks.
+- Delete the re-extraction callback split; callers must not supply unrelated text with otherwise plausible byte ranges.
+
+## 9. Remove hint scans; debug-validate final artifacts
 
 - Consumers: `rewrite::{source_hint_edits, validate}` and all output assembly paths.
 - Remove cached source-hint spans during source rendering; generators add none.
-- Run parser/semantic validation once per final executable artifact, after naming/alias construction; skip intermediate candidates.
-- Keep low-level caller-source verification; cache-backed `BuildSession` reuses hash-checked facts without reparsing original sources.
-- Test generated-code errors remain explicit; no silent validation bypass.
+- Gate final parser/semantic validation with `#[cfg(debug_assertions)]`; release emission performs no parsing.
+- In debug builds, validate once per final executable artifact after naming/alias construction; skip intermediate candidates.
+- Keep source/cache integrity, edit-range/overlap, artifact-target and output-path validation enabled in every build.
+- Test debug diagnostics and release parse counts explicitly; runtime regressions exercise generated output independently.
 
-## 9. Prove the migration and remove obsolete paths
+## 10. Prove the migration and remove obsolete paths
 
 - Consumers: `BuildSession` counters/fingerprints, benchmark, release checks and docs.
 - Land independently reviewed consumer migrations in order; delete replaced parser paths rather than retaining a second backend.
 - Count extraction, source/fragment reparses and final-artifact validation separately.
-- Assert zero source/fragment reparses and one validation parse per final executable artifact; no-op builds perform neither.
+- Assert zero source/fragment reparses; debug builds validate each final executable once, release builds never parse emitted output.
+- Verify no-op builds perform neither and exercise both profiles in the migration gates.
 - Compare cold/warm/edit benchmarks and cache size against a recorded baseline; report timings, not speedups inferred from parse counts.
 - Run cache parity, structural/runtime regressions, `scripts/bundler-release-check` and `./scripts/spot-check`; update crate READMEs.
 - Out of scope: minification, upstream parity and finer later-layer invalidation.
