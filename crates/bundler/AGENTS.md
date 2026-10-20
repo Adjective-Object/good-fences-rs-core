@@ -57,6 +57,8 @@ Resource preparation separates original input bytes from generated JS text and
 parser paths. Graph paths retain input identity; spans/provenance describe only
 generated text. Recheck original bytes on reuse and return. JSON uses an opaque
 CJS value initializer with computed object keys, never mutable runtime JSON.parse.
+JSONC alone normalizes parser-identified comments/trailing commas before strict
+JSON validation; preserve original lexemes, and keep JSON/package metadata strict.
 Assets export validated public-base URL strings (output-root-relative by default)
 and use content-addressed byte artifacts. Relative CSS fetches resolve from the
 emitted stylesheet, never by applying the public base twice. Bases do not rename

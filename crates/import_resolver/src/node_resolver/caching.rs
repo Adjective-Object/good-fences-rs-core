@@ -86,7 +86,7 @@ pub struct CachingNodeModulesResolver<'a> {
     extensions: Vec<String>,
 }
 
-pub const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
+pub const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node", "jsonc"];
 pub const DEFAULT_EXPORT_CODITIONS: &[&str] = &[
     "node",
     "node-addons",
