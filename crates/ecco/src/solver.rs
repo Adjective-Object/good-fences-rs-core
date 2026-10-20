@@ -366,6 +366,16 @@ impl Context {
         arguments: &[ValueId],
         receiver: Option<ValueId>,
     ) -> CallResult {
+        self.call_with_annotation(function, arguments, receiver, false)
+    }
+
+    pub(crate) fn call_with_annotation(
+        &mut self,
+        function: ValueId,
+        arguments: &[ValueId],
+        receiver: Option<ValueId>,
+        pure: bool,
+    ) -> CallResult {
         let receiver = receiver.unwrap_or(self.undefined);
         if self.recording.is_some() {
             let value = self.value(Hazards::NONE);
@@ -380,8 +390,19 @@ impl Context {
                     function,
                     arguments.to_vec(),
                     receiver,
+                    pure,
                 ));
             return result;
+        }
+        if pure {
+            let previous = self.latent;
+            self.latent = true;
+            let result = self.call(function, arguments, Some(receiver));
+            self.latent = previous;
+            return CallResult {
+                value: result.value,
+                effects: self.pure,
+            };
         }
         let resolved = self.resolve_alias(function);
         if !self.latent {

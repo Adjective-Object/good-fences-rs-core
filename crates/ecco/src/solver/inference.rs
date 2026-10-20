@@ -17,7 +17,7 @@ pub(super) enum Instruction {
     Retain(ValueId, Vec<ValueId>),
     Bind(ValueId, ValueId),
     Join(ValueId, Vec<ValueId>),
-    Call(CallResult, ValueId, Vec<ValueId>, ValueId),
+    Call(CallResult, ValueId, Vec<ValueId>, ValueId, bool),
     Closure(ValueId, usize),
     Opaque,
 }
@@ -385,15 +385,16 @@ impl Context {
                         inputs.iter().map(|value| mapped(&values, *value)).collect();
                     values.insert(*target, self.join_values(&inputs));
                 }
-                Instruction::Call(target, function, arguments, receiver) => {
+                Instruction::Call(target, function, arguments, receiver, pure) => {
                     let arguments: Vec<_> = arguments
                         .iter()
                         .map(|value| mapped(&values, *value))
                         .collect();
-                    let result = self.call(
+                    let result = self.call_with_annotation(
                         mapped(&values, *function),
                         &arguments,
                         Some(mapped(&values, *receiver)),
+                        *pure,
                     );
                     values.insert(target.value, result.value);
                     effects.insert(target.effects, result.effects);

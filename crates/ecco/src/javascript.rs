@@ -595,6 +595,88 @@ impl<'a> Extractor<'_, 'a> {
         }
     }
 
+    fn invocation_arguments(
+        &mut self,
+        arguments: &[Argument<'_>],
+    ) -> (Vec<ValueId>, Vec<Effect>, bool) {
+        let mut values = Vec::new();
+        let mut effects = Vec::new();
+        let mut spread = false;
+        for argument in arguments {
+            if let Argument::SpreadElement(element) = argument {
+                let value = self.expression(&element.argument);
+                effects.push(value.effects);
+                effects.push(self.context.operation(value.named.value, Hazard::Iterate));
+                spread = true;
+            } else {
+                let value = self.expression(argument.as_expression().expect("expression argument"));
+                effects.push(value.effects);
+                values.push(value.named.value);
+            }
+        }
+        (values, effects, spread)
+    }
+
+    fn reference(&mut self, expression: &Expression<'_>) -> (Computed, Option<ValueId>) {
+        let member = match expression.get_inner_expression() {
+            Expression::StaticMemberExpression(member) => (
+                &member.object,
+                Some(member.property.name.as_str()),
+                None,
+                member.span,
+            ),
+            Expression::ComputedMemberExpression(member) => {
+                (&member.object, None, Some(&member.expression), member.span)
+            }
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::StaticMemberExpression(member) => (
+                    &member.object,
+                    Some(member.property.name.as_str()),
+                    None,
+                    member.span,
+                ),
+                ChainElement::ComputedMemberExpression(member) => {
+                    (&member.object, None, Some(&member.expression), member.span)
+                }
+                ChainElement::CallExpression(call) => return (self.call_expression(call), None),
+                _ => return (self.unknown(), None),
+            },
+            _ => return (self.expression(expression), None),
+        };
+        let (object, property, key, span) = member;
+        let object = self.expression(object);
+        let receiver = object.named.value;
+        let property = property.or_else(|| match key?.get_inner_expression() {
+            Expression::StringLiteral(literal) => Some(literal.value.as_str()),
+            _ => None,
+        });
+        let key = key.map(|key| self.expression(key));
+        (self.member(object, property, key, span), Some(receiver))
+    }
+
+    fn call_expression(&mut self, call: &CallExpression<'_>) -> Computed {
+        let (callee, receiver) = self.reference(&call.callee);
+        let mut effects = vec![callee.effects];
+        let (arguments, argument_effects, spread) = self.invocation_arguments(&call.arguments);
+        effects.extend(argument_effects);
+        let result = if spread {
+            CallResult {
+                value: self.context.unknown(),
+                effects: if call.pure {
+                    self.context.pure()
+                } else {
+                    self.context.opaque_effects()
+                },
+            }
+        } else {
+            self.context
+                .call_with_annotation(callee.named.value, &arguments, receiver, call.pure)
+        };
+        effects.push(result.effects);
+        let effects = self.context.any(effects);
+        self.computed(result.value, effects)
+    }
+
     fn expression(&mut self, expression: &Expression<'_>) -> Computed {
         match expression.get_inner_expression() {
             Expression::BooleanLiteral(_)
@@ -644,83 +726,20 @@ impl<'a> Extractor<'_, 'a> {
                 };
                 Computed { named, effects }
             }
-            Expression::StaticMemberExpression(member) => {
-                let object = self.expression(&member.object);
-                self.member(
-                    object,
-                    Some(member.property.name.as_str()),
-                    None,
-                    member.span,
-                )
-            }
-            Expression::ComputedMemberExpression(member) => {
-                let object = self.expression(&member.object);
-                let key = self.expression(&member.expression);
-                let property = match member.expression.get_inner_expression() {
-                    Expression::StringLiteral(literal) => Some(literal.value.as_str()),
-                    _ => None,
-                };
-                self.member(object, property, Some(key), member.span)
-            }
-            Expression::CallExpression(call) => {
-                // Evaluate a member receiver once, not once for matching and again
-                // for `this`: either evaluation can allocate or mutate identities.
-                let (callee, receiver) = match call.callee.get_inner_expression() {
-                    Expression::StaticMemberExpression(member) => {
-                        let object = self.expression(&member.object);
-                        let receiver = object.named.value;
-                        (
-                            self.member(
-                                object,
-                                Some(member.property.name.as_str()),
-                                None,
-                                member.span,
-                            ),
-                            Some(receiver),
-                        )
-                    }
-                    Expression::ComputedMemberExpression(member) => {
-                        let object = self.expression(&member.object);
-                        let receiver = object.named.value;
-                        let key = self.expression(&member.expression);
-                        let property = match member.expression.get_inner_expression() {
-                            Expression::StringLiteral(literal) => Some(literal.value.as_str()),
-                            _ => None,
-                        };
-                        (
-                            self.member(object, property, Some(key), member.span),
-                            Some(receiver),
-                        )
-                    }
-                    _ => (self.expression(&call.callee), None),
-                };
-                let mut effects = vec![callee.effects];
-                let mut arguments = Vec::new();
-                let mut spread = false;
-                for argument in &call.arguments {
-                    if let Argument::SpreadElement(element) = argument {
-                        let value = self.expression(&element.argument);
-                        effects.push(value.effects);
-                        effects.push(self.context.operation(value.named.value, Hazard::Iterate));
-                        spread = true;
-                    } else {
-                        let value =
-                            self.expression(argument.as_expression().expect("expression argument"));
-                        effects.push(value.effects);
-                        arguments.push(value.named.value);
-                    }
+            Expression::StaticMemberExpression(_)
+            | Expression::ComputedMemberExpression(_)
+            | Expression::ChainExpression(_) => self.reference(expression).0,
+            Expression::CallExpression(call) => self.call_expression(call),
+            Expression::NewExpression(call) => {
+                let callee = self.expression(&call.callee);
+                let (_, mut effects, _) = self.invocation_arguments(&call.arguments);
+                effects.push(callee.effects);
+                if !call.pure {
+                    effects.push(self.context.opaque_effects());
                 }
-                let result = if spread {
-                    CallResult {
-                        value: self.context.unknown(),
-                        effects: self.context.opaque_effects(),
-                    }
-                } else {
-                    self.context.call(callee.named.value, &arguments, receiver)
-                };
-                effects.push(result.effects);
+                let value = self.context.value(Hazards::UNKNOWN);
                 let effects = self.context.any(effects);
-                self.computed(result.value, effects)
+                self.computed(value, effects)
             }
             Expression::BinaryExpression(binary) => {
                 let left = self.expression(&binary.left);

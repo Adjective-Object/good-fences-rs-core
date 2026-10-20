@@ -78,6 +78,19 @@ monotonically adds hazards; `updates argument.*_effects |= true` sets all slots.
 Call expressions in hazard assignments describe latent hazards, not execution
 at declaration time.
 
+## PURE annotations
+
+`/*#__PURE__*/` and `/*@__PURE__*/` on calls and `new` expressions override
+invocation effects, including conservative unknown/unsupported bodies and
+declared mutation summaries. Callee evaluation, argument evaluation, and spread
+iteration still contribute effects. The annotation is retained in inferred
+function summaries and honored through optional calls as well.
+
+Known call return identities and hazards are inferred without executing updates.
+Unknown returns and constructed values remain conservative: PURE describes the
+invocation, not subsequent operations on its result. Annotations are trusted
+caller contracts, not verified proofs.
+
 ## Function inference
 
 OXC's semantic symbol/reference IDs connect parameters, captures, local aliases,

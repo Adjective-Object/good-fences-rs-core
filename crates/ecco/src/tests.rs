@@ -571,7 +571,10 @@ fn source_errors_are_not_recovered_into_purity() {
 #[test]
 fn source_ast_entrypoint_does_not_need_reparsing() {
     let allocator = oxc_allocator::Allocator::default();
-    let parsed = oxc_utils_parse::parse_ts(&allocator, "const a: number = 1; Number(a);");
+    let parsed = oxc_utils_parse::parse_ts(
+        &allocator,
+        "const a: number = 1; Number(a); /*#__PURE__*/ unknown();",
+    );
     assert!(parsed.errors.is_empty());
     let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
     assert!(semantic.errors.is_empty());
@@ -581,7 +584,7 @@ fn source_ast_entrypoint_does_not_need_reparsing() {
         parse_declarations(DECLARATIONS).unwrap(),
     )
     .unwrap();
-    assert_eq!(effects(&analysis), vec![false, false]);
+    assert_eq!(effects(&analysis), vec![false; 3]);
 }
 
 #[test]
@@ -1685,4 +1688,111 @@ fn astra_round7_instanceof_checks_left_prototype_traps() {
         );
         assert_eq!(*effects(&analysis).last().unwrap(), expected, "{hazards}");
     }
+}
+
+#[test]
+fn pure_annotations_override_invocation_effects_without_poisoning_the_heap() {
+    for marker in ["/*#__PURE__*/", "/*@__PURE__*/"] {
+        for invocation in [
+            "unknown()",
+            "(unknown())",
+            "unknown?.()",
+            "new Unknown()",
+            "new Unknown",
+            "console.log(1)",
+            "(() => unknown())()",
+        ] {
+            let analysis = source(
+                DECLARATIONS,
+                &format!("const object = {{}}; object.value; {marker} {invocation}; object.value;"),
+            );
+            assert_eq!(effects(&analysis), vec![false; 4], "{marker} {invocation}");
+        }
+    }
+    for javascript in ["unknown();", "/* PURE */ unknown();", "new Unknown();"] {
+        assert_eq!(effects(&source("", javascript)), vec![true], "{javascript}");
+    }
+}
+
+#[test]
+fn pure_annotations_preserve_callee_argument_and_iteration_effects() {
+    for invocation in [
+        "unknown(console.log(1))",
+        "new Unknown(console.log(1))",
+        "object.method()",
+        "unknown(...items)",
+        "new Unknown(...items)",
+    ] {
+        let analysis = source(DECLARATIONS, &format!("/*#__PURE__*/ {invocation};"));
+        assert_eq!(effects(&analysis), vec![true], "{invocation}");
+    }
+    let analysis = source(
+        "global symbol ambient { read_effects = true }",
+        "/*#__PURE__*/ ambient();",
+    );
+    assert_eq!(effects(&analysis), vec![true]);
+    for invocation in ["unknown(...items())", "new Unknown(...items())"] {
+        let analysis = source(
+            "global fn items() { call_effects = false returns.iterate_effects = false }",
+            &format!("/*#__PURE__*/ {invocation};"),
+        );
+        assert_eq!(effects(&analysis), vec![false], "{invocation}");
+    }
+}
+
+#[test]
+fn pure_calls_in_summaries_skip_updates_and_preserve_known_returns() {
+    let declarations = r#"
+        global fn mutate(target) {
+            call_effects = true
+            updates target.property_read_effects |= true
+            returns = target
+        }
+    "#;
+    let analysis = source(
+        declarations,
+        r#"
+        function wrap(target) { return /*#__PURE__*/ mutate(target); }
+        const object = {};
+        object.value;
+        const alias = wrap(object);
+        alias.value;
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 5]);
+    assert_eq!(analysis.roots[1].value, analysis.roots[3].value);
+    let analysis = source(
+        "",
+        "function identity(x) { return x; } const object = {}; const alias = /*#__PURE__*/ identity(object);",
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_eq!(analysis.roots[1].value, analysis.roots[2].value);
+    for invocation in ["unknown()", "new Unknown()"] {
+        let analysis = source(
+            "",
+            &format!("const result = /*#__PURE__*/ {invocation}; result.value;"),
+        );
+        assert_eq!(effects(&analysis), vec![false, true], "{invocation}");
+    }
+}
+
+#[test]
+fn pure_optional_member_calls_preserve_receiver_and_key_effects() {
+    let declarations = r#"
+        global fn namespace.method() { call_effects = true returns = this }
+        global fn key() { call_effects = true returns.*_effects = false }
+    "#;
+    for invocation in ["namespace?.method?.()", "(namespace?.method)()"] {
+        let analysis = source(
+            declarations,
+            &format!("const receiver = namespace; const result = /*#__PURE__*/ {invocation};"),
+        );
+        assert_eq!(effects(&analysis), vec![false; 2], "{invocation}");
+        assert_eq!(
+            analysis.roots[0].value, analysis.roots[1].value,
+            "{invocation}"
+        );
+    }
+    let analysis = source(declarations, "/*#__PURE__*/ namespace?.[key()]?.();");
+    assert_eq!(effects(&analysis), vec![true]);
 }
