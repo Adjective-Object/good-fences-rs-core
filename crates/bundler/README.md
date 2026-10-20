@@ -123,8 +123,40 @@ Stylesheet names include the complete reachable resource closure, so edits to
 imported CSS or referenced binary bytes invalidate parent stylesheet URLs, even
 through cycles. All these input bytes are rechecked before accepting a build.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
-memory/CBOR cache. There is no CSS Modules, Sass compilation, CSS concatenation
-or minification.
+memory/CBOR cache. There is no Sass compilation, CSS concatenation or minification.
+
+`BuildOptions.css.css_modules` (`CssModules`) accepts `false` (default/`Disabled`),
+`true` (`Enabled`, selecting `.module.css`), `"everything"` (`Everything`, all CSS
+inputs), or `"ext:.any.custom.extension"` (`Extension` with the dotted suffix).
+Suffixes consist of nonempty dot-separated ASCII letters/digits/underscore/hyphen
+components; empty suffixes, separators, whitespace and URL syntax are rejected
+before graph loading, including programmatically constructed invalid options.
+Custom suffixes identify CSS before generic asset classification, for entries,
+static/dynamic imports, require/context candidates and transitive CSS imports.
+`"everything"` does not reclassify JavaScript, JSON or binary inputs as CSS.
+Each imported stylesheet uses its own selection rule, not its parent's flag.
+
+**CSS Modules emission is not implemented yet.** Selected inputs are parsed and
+then rejected explicitly; the bundler never silently emits their unscoped CSS or
+pretends to provide mappings. Selection is independent of `css.load`. Disabled
+selection preserves ordinary global CSS, including `.module.css` filenames.
+The separately pinned upstream `oxc-css-parser` revision
+`6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6` parses module selectors, decoded names,
+scope markers and composition requests into owned facts with checked original
+UTF-8 byte spans. The owned boundary normalizes the pinned decoder's NUL values
+to CSS's U+FFFD replacement character for names and composition file requests.
+It requires Rust **1.95 or newer**; the repository's
+`nightly-2026-05-01` satisfies this. Its re-exported allocator is separately locked
+at 0.137.0; the JavaScript Oxc revision is unchanged.
+Recoverable parse errors, raw selectors/unknown pseudo arguments and unsupported
+selector-bearing at-rule preludes fail closed with path/span diagnostics.
+In particular this parser revision leaves functional `:local(...)` raw; it is
+explicitly rejected for now, while bare scope markers and typed `:global(...)`
+can be collected. `@supports` preludes currently form an explicit unsupported
+boundary, including `selector(...)`. These are parsing boundaries, not claims of
+completed scope/composition/animation transformation. `cssparser` still owns URL
+tokenization; URL edits and future module edits share one overlap-checked pipeline.
+
 Resource discovery/rendering and loading-stub generation are separate: stubs
 receive the stylesheet identity, public URL and independent name mappings,
 not CSS syntax. Prepared wrapper text and explicit parser identity travel

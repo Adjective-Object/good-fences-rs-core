@@ -36,12 +36,8 @@ pub(super) fn apply(
                 .to_owned(),
         };
         if entry.output_name.is_none()
-            && (crate::resource::is_asset(&entry.path)
-                || crate::resource::is_stylesheet(&entry.path)
-                || entry
-                    .path
-                    .extension()
-                    .is_some_and(|extension| extension == "json"))
+            && crate::resource::kind(&entry.path, &options.css.css_modules)
+                != crate::resource::ResourceKind::Script
         {
             requested.set_extension(if commonjs { "cjs" } else { "mjs" });
         }

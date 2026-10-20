@@ -4,15 +4,42 @@ use std::path::{Path, PathBuf};
 use eyre::WrapErr;
 use sha2::{Digest, Sha256};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResourceKind {
+    Script,
+    Json,
+    Stylesheet { module: bool },
+    Asset,
+}
+
+pub(crate) fn kind(path: &Path, selection: &crate::build::CssModules) -> ResourceKind {
+    if selection.matches(path) || path.extension().is_some_and(|extension| extension == "css") {
+        return stylesheet_kind(path, selection);
+    }
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("json") => ResourceKind::Json,
+        Some("js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx") => ResourceKind::Script,
+        _ => ResourceKind::Asset,
+    }
+}
+
+/// A CSS @import supplies a stylesheet even if its filename has no CSS suffix.
+pub(crate) fn stylesheet_kind(path: &Path, selection: &crate::build::CssModules) -> ResourceKind {
+    ResourceKind::Stylesheet {
+        module: matches!(selection, crate::build::CssModules::Everything)
+            || selection.matches(path),
+    }
+}
+
 pub(crate) fn is_asset(path: &Path) -> bool {
-    !matches!(
-        path.extension().and_then(|extension| extension.to_str()),
-        Some("js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" | "json" | "css")
-    )
+    kind(path, &crate::build::CssModules::Disabled) == ResourceKind::Asset
 }
 
 pub(crate) fn is_stylesheet(path: &Path) -> bool {
-    path.extension().is_some_and(|extension| extension == "css")
+    matches!(
+        kind(path, &crate::build::CssModules::Disabled),
+        ResourceKind::Stylesheet { .. }
+    )
 }
 
 pub(crate) fn url_module(

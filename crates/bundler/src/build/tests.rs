@@ -22,6 +22,139 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn css_modules_validate_before_graph_loading_and_refuse_unfinished_transforms() {
+    let dir = TmpDir::new();
+    let mut config = options();
+    config.css.css_modules = CssModules::Extension(".bad..suffix".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(error.contains("invalid css_modules extension"), "{error}");
+    assert!(session.sources.is_empty());
+
+    write(dir.root(), "main.mjs", "import './style.module.css';");
+    write(dir.root(), "style.module.css", ".你好 { color: red }");
+    config.css.css_modules = CssModules::Disabled;
+    let global = session.build(&config).unwrap();
+    assert_eq!(global.product.artifacts.stylesheets.len(), 1);
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(
+            error.contains("style.module.css: CSS Modules transformation is not implemented"),
+            "{error}"
+        );
+        assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &global.product));
+    }
+    config.css.css_modules = CssModules::Disabled;
+    config.css.load = CssLoad::CallerLoaded;
+    assert_eq!(
+        session.build(&config).unwrap().product.artifacts,
+        global.product.artifacts
+    );
+}
+
+#[test]
+fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "parts/style.any.custom.extension",
+        ".class { color: red }",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Extension(".any.custom.extension".into());
+    for (entry, main, expected) in [
+        (
+            "parts/style.any.custom.extension",
+            "",
+            "style.any.custom.extension",
+        ),
+        (
+            "main.mjs",
+            "import './parts/style.any.custom.extension';",
+            "style.any.custom.extension",
+        ),
+        (
+            "main.mjs",
+            "export const load = () => import('./parts/style.any.custom.extension');",
+            "style.any.custom.extension",
+        ),
+        (
+            "main.cjs",
+            "module.exports = require('./parts/style.any.custom.extension');",
+            "style.any.custom.extension",
+        ),
+        (
+            "main.mjs",
+            "export const load = name => import(`./parts/${name}.any.custom.extension`);",
+            "style.any.custom.extension",
+        ),
+        (
+            "main.mjs",
+            "import './global.css';",
+            "style.any.custom.extension",
+        ),
+    ] {
+        if !main.is_empty() {
+            write(dir.root(), entry, main);
+        }
+        write(
+            dir.root(),
+            "global.css",
+            "@import './parts/style.any.custom.extension';",
+        );
+        config.entries.get_mut("main").unwrap().path = entry.into();
+        let error = format!(
+            "{:#}",
+            BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .err()
+                .unwrap()
+        );
+        assert!(
+            error.contains(&format!(
+                "{expected}: CSS Modules transformation is not implemented"
+            )),
+            "{main}: {error}"
+        );
+    }
+}
+
+#[test]
+fn css_modules_everything_selects_css_not_javascript_json_or_assets() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import data from './data.json'; import url from './image.bin'; export { data, url };",
+    );
+    write(dir.root(), "data.json", "{}");
+    write(dir.root(), "image.bin", "binary");
+    let mut config = options();
+    config.css.css_modules = CssModules::Everything;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    assert_eq!(
+        session
+            .build(&config)
+            .unwrap()
+            .product
+            .artifacts
+            .resources
+            .len(),
+        1
+    );
+    write(dir.root(), "main.mjs", "import './global.css';");
+    write(dir.root(), "global.css", ".global {}");
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        error.contains("global.css: CSS Modules transformation is not implemented"),
+        "{error}"
+    );
+}
+
+#[test]
 fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
     let dir = TmpDir::new();
     write(dir.root(), "style.css", ".button { color: red; }\n");

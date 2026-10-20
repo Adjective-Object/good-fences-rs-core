@@ -31,6 +31,7 @@ pub(crate) struct Styles<'a> {
     inputs: BTreeMap<PathBuf, Vec<u8>>,
     requests: BTreeMap<PathBuf, Vec<Request>>,
     public_base: &'a crate::output_url::PublicBase,
+    selection: &'a crate::build::CssModules,
 }
 
 impl<'a> Styles<'a> {
@@ -38,6 +39,7 @@ impl<'a> Styles<'a> {
         root: &'a Path,
         inventory: &'a BTreeMap<PathBuf, Option<[u8; 32]>>,
         public_base: &'a crate::output_url::PublicBase,
+        selection: &'a crate::build::CssModules,
     ) -> Self {
         Self {
             root,
@@ -45,6 +47,7 @@ impl<'a> Styles<'a> {
             inputs: BTreeMap::new(),
             requests: BTreeMap::new(),
             public_base,
+            selection,
         }
     }
 
@@ -65,6 +68,12 @@ impl<'a> Styles<'a> {
             }
             let text = std::str::from_utf8(&self.inputs[&path])
                 .wrap_err_with(|| format!("{}: CSS is not UTF-8", path.display()))?;
+            if matches!(
+                resource::stylesheet_kind(&path, self.selection),
+                resource::ResourceKind::Stylesheet { module: true }
+            ) {
+                crate::css_syntax::reject_unfinished(&path, text)?;
+            }
             let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
             let mut requests = Vec::new();
             for url in urls {
@@ -172,8 +181,7 @@ impl<'a> Styles<'a> {
     fn render(&self, path: &Path) -> eyre::Result<Vec<u8>> {
         let text = std::str::from_utf8(&self.inputs[path])?;
         let stylesheet = self.output_path(path);
-        let mut output = String::new();
-        let mut start = 0;
+        let mut edits = Vec::new();
         for request in &self.requests[path] {
             let target = if request.url.import {
                 self.output_path(&request.path)
@@ -185,18 +193,20 @@ impl<'a> Styles<'a> {
                 self.public_base.css_fetch(&stylesheet, &target)?,
                 request.suffix
             );
-            output.push_str(&text[start..request.url.span.start]);
+            let mut replacement = String::new();
             if request.url.function {
-                output.push_str("url(");
+                replacement.push_str("url(");
             }
-            cssparser::serialize_string(&url, &mut output)?;
+            cssparser::serialize_string(&url, &mut replacement)?;
             if request.url.function {
-                output.push(')');
+                replacement.push(')');
             }
-            start = request.url.span.end;
+            edits.push(crate::css_syntax::Edit {
+                span: request.url.span.clone(),
+                replacement,
+            });
         }
-        output.push_str(&text[start..]);
-        Ok(output.into_bytes())
+        Ok(crate::css_syntax::apply_edits(text, edits)?.into_bytes())
     }
 
     pub(crate) fn emit<C>(&self, root: &Path, artifacts: &mut Artifacts<C>) -> eyre::Result<()> {

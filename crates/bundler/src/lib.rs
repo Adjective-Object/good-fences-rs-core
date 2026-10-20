@@ -6,6 +6,8 @@ mod cjs;
 mod context;
 mod css;
 mod css_loading;
+mod css_selection;
+mod css_syntax;
 mod effect_analysis;
 mod effect_dependencies;
 pub mod effects;

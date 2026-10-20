@@ -53,6 +53,19 @@ layers and cycles. Closure hashes include transitive original CSS/asset bytes;
 recheck every input. Stylesheets maps CSS roots only; caller-loaded styles remain
 application-ordered. Never flatten CSS imports or mount their discovered
 dependencies as unconditional JS effects.
+Validate css_modules before graph loading; central resource selection precedes
+assets for entries/imports/contexts. Custom suffixes identify CSS; Everything
+selects known CSS inputs, never arbitrary JS/JSON/binary graph inputs. CSS imports
+use their own selection, not an inherited module flag.
+Keep CSS Oxc pinned separately from JS Oxc and use its re-exported allocator
+(locked 0.137.0; Rust >=1.95). Own decoded selector names, original checked UTF-8
+spans, scope markers and composition requests; never persist its arena nodes.
+Normalize pinned CSS decoder NULs to U+FFFD at owned identifier/string boundaries.
+Recovery/raw selector syntax is an explicit error, not partially scoped success.
+Functional :local and @supports preludes are currently explicit parse boundaries.
+Selected modules must reject unfinished transformation, even with no names;
+global CSS continues using cssparser URL tokenization. URL and future selector
+edits share one checked, nonoverlapping original-byte edit pipeline.
 CSS loading strategies consume explicit stylesheet/public-URL/mapping inputs,
 never parse CSS or choose names. CallerLoaded is the default; AutoMount is opt-in
 native ESM with a URL-string default and synchronous link insertion, never a

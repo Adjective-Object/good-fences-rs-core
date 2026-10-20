@@ -139,7 +139,7 @@ dependencies = [
  "insta",
  "logger",
  "logger_srcfile",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_semantic",
@@ -219,7 +219,8 @@ dependencies = [
  "import_resolver",
  "insta",
  "logger",
- "oxc_allocator",
+ "oxc-css-parser",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",
@@ -633,7 +634,7 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "insta",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_semantic",
@@ -812,7 +813,7 @@ dependencies = [
  "import_resolver",
  "jwalk",
  "lazy_static",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_semantic",
@@ -1438,6 +1439,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
+name = "oxc-css-parser"
+version = "0.0.17"
+source = "git+https://github.com/oxc-project/oxc-css-parser?rev=6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6#6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6"
+dependencies = [
+ "oxc_allocator 0.137.0",
+]
+
+[[package]]
 name = "oxc-miette"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1470,7 +1479,19 @@ source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7
 dependencies = [
  "allocator-api2",
  "hashbrown 0.17.1",
- "oxc_data_structures",
+ "oxc_data_structures 0.132.0",
+ "rustc-hash",
+]
+
+[[package]]
+name = "oxc_allocator"
+version = "0.137.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b34ec71e68e73a0ed7d929e58ab2bb4f58752dea944c08f14ccc3b8272c77946"
+dependencies = [
+ "allocator-api2",
+ "hashbrown 0.17.1",
+ "oxc_data_structures 0.137.0",
  "rustc-hash",
 ]
 
@@ -1480,9 +1501,9 @@ version = "0.132.0"
 source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
 dependencies = [
  "bitflags",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast_macros",
- "oxc_data_structures",
+ "oxc_data_structures 0.132.0",
  "oxc_diagnostics",
  "oxc_estree",
  "oxc_regular_expression",
@@ -1507,7 +1528,7 @@ name = "oxc_ast_visit"
 version = "0.132.0"
 source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
 dependencies = [
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_span",
  "oxc_syntax",
@@ -1517,6 +1538,12 @@ dependencies = [
 name = "oxc_data_structures"
 version = "0.132.0"
 source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
+
+[[package]]
+name = "oxc_data_structures"
+version = "0.137.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde9ca13ef89018fb4c18502cefb9668baac6066905d27a914c29fb5fae1c8ac"
 
 [[package]]
 name = "oxc_diagnostics"
@@ -1536,7 +1563,7 @@ dependencies = [
  "cow-utils",
  "num-bigint",
  "num-traits",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_regular_expression",
  "oxc_span",
@@ -1568,9 +1595,9 @@ dependencies = [
  "memchr",
  "num-bigint",
  "num-traits",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
- "oxc_data_structures",
+ "oxc_data_structures 0.132.0",
  "oxc_diagnostics",
  "oxc_ecmascript",
  "oxc_regular_expression",
@@ -1587,7 +1614,7 @@ version = "0.132.0"
 source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7ee58baca5648e#87f065ebf7cde21d1229322f4c7ee58baca5648e"
 dependencies = [
  "bitflags",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast_macros",
  "oxc_diagnostics",
  "oxc_span",
@@ -1604,7 +1631,7 @@ source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7
 dependencies = [
  "itertools 0.14.0",
  "memchr",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_diagnostics",
@@ -1624,7 +1651,7 @@ source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7
 dependencies = [
  "compact_str",
  "oxc-miette",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast_macros",
  "oxc_estree",
  "oxc_str",
@@ -1637,7 +1664,7 @@ source = "git+https://github.com/oxc-project/oxc?rev=87f065ebf7cde21d1229322f4c7
 dependencies = [
  "compact_str",
  "hashbrown 0.17.1",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_estree",
 ]
 
@@ -1650,7 +1677,7 @@ dependencies = [
  "cow-utils",
  "dragonbox_ecma",
  "nonmax",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast_macros",
  "oxc_estree",
  "oxc_index",
@@ -1665,7 +1692,7 @@ name = "oxc_utils_parse"
 version = "0.1.0"
 dependencies = [
  "eyre",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_ast",
  "oxc_parser",
  "oxc_span",
@@ -2361,7 +2388,7 @@ dependencies = [
  "eyre",
  "import_resolver",
  "logger",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_span",
  "oxc_utils_parse",
  "pretty_assertions",
@@ -2713,7 +2740,7 @@ dependencies = [
  "logger",
  "logger_srcfile",
  "multi_err",
- "oxc_allocator",
+ "oxc_allocator 0.132.0",
  "oxc_semantic",
  "oxc_span",
  "oxc_utils_parse",

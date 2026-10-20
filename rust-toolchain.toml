@@ -1,4 +1,5 @@
 [toolchain]
+# The separately pinned CSS parser requires Rust >=1.95; keep JS Oxc pinned.
 channel = "nightly-2026-05-01"
 profile = "default"
 components = [

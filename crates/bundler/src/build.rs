@@ -27,6 +27,8 @@ use crate::{
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
 
+pub use crate::css_selection::CssModules;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub path: PathBuf,
@@ -53,6 +55,7 @@ pub struct BuildOptions {
 #[serde(default)]
 pub struct CssOptions {
     pub load: CssLoad,
+    pub css_modules: CssModules,
 }
 
 /// Built-in stylesheet loading policies; custom strategies are not public API.
@@ -220,10 +223,16 @@ impl BuildSession {
         );
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
+        options.css.css_modules.validate()?;
         let declarations = options.declarations.effective()?;
         let declarations_key = hash(&serde_json::to_vec(&declarations)?);
         let inventory = inventory(&self.root)?;
-        let mut styles = crate::css::Styles::new(&self.root, &inventory, &public_base);
+        let mut styles = crate::css::Styles::new(
+            &self.root,
+            &inventory,
+            &public_base,
+            &options.css.css_modules,
+        );
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
         let resolution_key = hash(
@@ -281,7 +290,8 @@ impl BuildSession {
             );
             let format = package_format(&self.root, &path)?;
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
-            let prepared_css = if crate::resource::is_stylesheet(&path) {
+            let kind = crate::resource::kind(&path, &options.css.css_modules);
+            let prepared_css = if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
                 styles.discover(&path, &input)?;
                 Some(options.css.load.strategy().generate_module(
                     &crate::css_loading::CssModuleInput {
@@ -305,7 +315,7 @@ impl BuildSession {
             let prepared_resource = if let Some(prepared) = prepared_css {
                 relocations.insert(path.clone(), prepared.relocations);
                 Some(prepared.source)
-            } else if crate::resource::is_asset(&path) {
+            } else if kind == crate::resource::ResourceKind::Asset {
                 Some(crate::resource::prepare(&path, &input, &public_base)?)
             } else {
                 None
@@ -495,6 +505,8 @@ impl BuildSession {
                 include_str!("resource.rs"),
                 include_str!("css.rs"),
                 include_str!("css_loading.rs"),
+                include_str!("css_selection.rs"),
+                include_str!("css_syntax.rs"),
                 include_str!("output_url.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
@@ -557,12 +569,13 @@ impl BuildSession {
             link::esm_plan_prepared(&graph, &plan, &options.effects, &sources, &relocations)?;
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
-            if crate::resource::is_asset(path) {
+            let kind = crate::resource::kind(path, &options.css.css_modules);
+            if kind == crate::resource::ResourceKind::Asset {
                 let input = &self.sources[path].input;
                 artifacts
                     .resources
                     .insert(crate::resource::asset_path(path, input), input.clone());
-            } else if crate::resource::is_stylesheet(path) {
+            } else if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
                 styles.emit(path, &mut artifacts)?;
             }
         }
