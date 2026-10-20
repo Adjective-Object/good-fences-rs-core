@@ -293,6 +293,38 @@ fn emit(source: &str, namespace: bool) -> String {
     single_module(&graph, &retention, &policy, 0, source).unwrap()
 }
 
+#[test]
+fn source_provenance_rejects_changed_bytes_modes_and_unprovenanced_inputs() {
+    let source = "export const value = 1;";
+    let policy = EffectPolicy::default();
+    let check = |graph: &SourceGraph, text: &str| {
+        let retention = crate::retain_with_policy(graph, &[0], &[], &policy).unwrap();
+        single_module(graph, &retention, &policy, 0, text)
+    };
+    let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", source)]);
+    assert!(check(&graph, source).is_ok());
+    assert!(check(&graph, "export const value = 2;").is_err());
+
+    let mut input = crate::tests::input("input.mjs", source);
+    input.path = "input.cjs".into();
+    let error = format!(
+        "{:#}",
+        check(&SourceGraph::from_owned([input]), source).unwrap_err()
+    );
+    assert!(error.contains("parser configuration mismatch"), "{error}");
+
+    let mut input = crate::tests::input("input.mjs", source);
+    input.provenance = None;
+    let error = check(&SourceGraph::from_owned([input]), source).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("missing source extraction provenance"));
+
+    let mut input = crate::tests::input("input.mjs", source);
+    input.facts.emission.segments[0].connector_only = true;
+    assert!(check(&SourceGraph::from_owned([input]), source).is_err());
+}
+
 fn node(source: &str, observer: &str) -> Output {
     let dir = TmpDir::new();
     dir.write_batch(&std::collections::HashMap::from([

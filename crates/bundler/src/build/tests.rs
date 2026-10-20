@@ -80,9 +80,7 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         })
         .collect();
     let mut checked =
-        link::esm_with_source_checker(graph, &incremental.product.plan, &options.effects, &sources,
-            |file, source| crate::emit::checked_source(graph, file, source),
-        ).unwrap();
+        link::esm_plan(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
     let destinations = entry_outputs::apply(session.root(), options, &mut checked).unwrap();
     let checked = checked.render_to(&destinations).unwrap();
     assert_eq!(incremental.product.artifacts, checked);

@@ -44,6 +44,25 @@ fn normalized(graph: &SourceGraph) -> Vec<String> {
 }
 
 #[test]
+fn source_patch_replaces_provenance_and_invalidates_existing_handles() {
+    let mut graph = SourceGraph::from_owned([input("input.mjs", "export const value = 1;")]);
+    let old = graph.file_provenance(0).unwrap().clone();
+    let node = graph.versioned_node(GraphNode::Module(0));
+    graph
+        .patch_owned(
+            Path::new("input.mjs"),
+            input("input.mjs", "export const value = 2;"),
+        )
+        .unwrap();
+    assert!(!graph.is_current(node));
+    assert_ne!(graph.file_provenance(0), Some(&old));
+    let source_revision = graph.revision().source;
+    assert!(graph.remove_file(Path::new("input.mjs")));
+    assert!(graph.file_provenance(0).is_none());
+    assert!(graph.revision().source > source_revision);
+}
+
+#[test]
 fn missing_added_removed_recreated_matches_rebuild_and_rejects_rename() {
     let dir = test_tmpdir! { "entry.ts" => "import {x} from './target'; console.log(x);" };
     let entry = dir.root().join("entry.ts");
@@ -136,12 +155,11 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
             ast_segmenter::ModuleFormat::CommonJs,
         )
         .unwrap();
-        let mut inputs = vec![OwnedSourceFileInput {
-            path: entry.clone(),
-            segments: parsed.segments,
-            facts: parsed.facts,
-            resolutions: Default::default(),
-        }];
+        let mut inputs = vec![OwnedSourceFileInput::from_parsed(
+            entry.clone(),
+            parsed,
+            Default::default(),
+        )];
         for path in [
             "node_modules/pkg/i.js",
             "node_modules/pkg/r.js",

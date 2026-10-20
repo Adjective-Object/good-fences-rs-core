@@ -48,6 +48,13 @@ impl CacheRecord {
             "cache source mismatch"
         );
         ensure!(self.config == config, "cache parser configuration mismatch");
+        self.provenance.verify(
+            source,
+            config,
+            self.module.body,
+            &self.module.segments,
+            &self.module.facts,
+        )?;
         ensure!(
             !config.definition || config.typescript,
             "invalid parser mode"

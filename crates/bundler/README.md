@@ -25,6 +25,12 @@ hoisting/initialization semantics. No public product field or dependency was add
 
 ## Native ESM chunks
 
+Public `link::esm`, isolated emission and `BuildSession` share parse-free source
+verification. Graph inputs must preserve extraction/cache provenance through
+`OwnedSourceFileInput::from_parsed`; analysis-only `from_ranges` inputs cannot be
+emitted. Exact source hashes, effective parser modes and owned records must
+match; JavaScript support and graph/policy revision checks remain mandatory.
+
 Low-level `link::esm` emits **one `native.mjs`** for a single namespace
 entry/evaluation root whose retained static
 dependency tree is synchronous, acyclic and ESM-only. Named/default binding
@@ -69,16 +75,16 @@ relative requests and artifact metadata, including on cached builds and
 publication. A single `.mjs` entry remains one file, not a wrapper plus
 `native.mjs`. Static and dynamic imports still target that same canonical native
 namespace. Logical aliases with the same output path share that canonical file.
+Destinations and aliases are selected on typed artifact identities before source
+rendering. Static imports, reexports, dynamic imports and checked CJS require
+sites carry typed targets; arbitrary source strings are never discovered or
+rewritten as requests. ESM requests use URL encoding; require uses filesystem paths.
 When several explicitly named entries request distinct paths for one namespace, the first key in
 sorted order names its canonical chunk; the other requested files are native
 reexport boundaries (forwarding default and live exports), not additional
 executions of its body. Their namespace objects are distinct, as with ordinary
 ESM reexports; internal dynamic imports retain canonical namespace identity.
 CJS aliases forward the canonical wrapper's current exports, including
-Destinations and aliases are selected on typed artifact identities before source
-rendering. Static imports, reexports, dynamic imports and checked CJS require
-sites carry typed targets; arbitrary source strings are never discovered or
-rewritten as requests. ESM requests use URL encoding; require uses filesystem paths.
 reassignment and accessors. Published generation directories do not change these
 relative entry names. Low-level `RootId` labels retain their existing contracts.
 
@@ -122,16 +128,16 @@ their evaluation imports are spliced in original order, and no-op metadata owner
 are remapped to surviving consumers. Public, escaped and dynamic namespace
 boundaries remain native modules with exact keys and identity. Cyclic connector
 jobs remain where splicing would bypass a still-evaluating job's dependency order.
+The physical plan carries source fragments and typed ordered requests, not an
+emitted AST. Cached retained-content flags select empty private jobs before final
+rendering; binding requests cannot target a deleted job. Ownership projections
+are updated with the spliced evaluation edges.
 
 Initialization constraints remain real: effectful statements, eager mutable reads
 and non-hoisted initialization across cyclic/async phases stay at their native
 evaluation phase; hoisted functions can relocate when their new static-import
 closure cannot activate a later native initializer early. Native anonymous
 defaults preserve instantiation semantics inside their own evaluation chunks.
-The physical plan carries source fragments and typed ordered requests, not an
-emitted AST. Cached retained-content flags select empty private jobs before final
-rendering; binding requests cannot target a deleted job. Ownership projections
-are updated with the spliced evaluation edges.
 Imported writes still address read-only native aliases. Source evaluation groups
 preserve effect/await order; they are not physical ownership units for independent
 declarations. This is not a claim of globally optimal chunk sizes. Upstream

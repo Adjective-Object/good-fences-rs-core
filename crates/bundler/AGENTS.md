@@ -11,7 +11,8 @@ Keep generated requests as typed artifact identities until empty-job pruning and
 destination/alias selection finish; never recover requests by parsing output.
 Later-layer invalidation is deliberately coarse; counters separate source
 extraction from generated-output/recipe parsing. Reuse hash-checked cache records
-in session emission; public low-level link::esm still validates caller source.
+in session emission; public low-level link::esm shares its parse-free
+source/config/facts provenance checker. Analysis-only graph inputs cannot emit.
 Project roots are bounded/canonical;
 symlinks and resolved sources outside the root are rejected.
 Product generations are session-local immutable snapshots; never transfer

@@ -3,7 +3,7 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 6 /
+Syntax-local effect reasons/timing are persisted and range-checked (schema 7 /
 extractor 9, including source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
 effective commonjs format, invocation inputs/annotation sites and normalized member
@@ -24,6 +24,11 @@ source-local IDs, links and ordering. Decode limits input to 16 MiB, 262,144
 CBOR items and 32 levels before serde allocates; indefinite lengths and trailing
 data are rejected. This is an untrusted cache, not an authenticated artifact.
 Diagnostics are not persisted. The codec is owned after parser arena drop.
+`from_parsed` also checks the extraction's sealed source/configuration and record
+hashes; passing an unrelated parse alongside plausible-length text is an error.
+`to_parsed(source)` returns provenance-bearing owned records for graph inputs,
+without parsing or reconstructing legacy tracker maps. Serialized provenance
+detects accidental re-pairing or mutation, not a malicious cache publisher.
 
 Recipe validation covers exact segment/capture/occurrence coverage, declaration,
 forward-use and write links, eager-read ranges, hoisted availability consistency,

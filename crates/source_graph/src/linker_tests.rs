@@ -138,10 +138,9 @@ fn decoded_cache_ranges_and_facts_link_without_legacy_maps() {
         ParserConfig::for_path(Path::new("leaf.ts"), ModuleFormat::Esm).unwrap(),
     )
     .unwrap();
-    let warm = SourceGraph::from_owned([OwnedSourceFileInput::from_ranges(
+    let warm = SourceGraph::from_owned([OwnedSourceFileInput::from_parsed(
         "leaf.ts".into(),
-        record.module.segments,
-        record.module.facts,
+        record.to_parsed(source).unwrap(),
         Default::default(),
     )]);
     assert_eq!(cold.edges(), warm.edges());

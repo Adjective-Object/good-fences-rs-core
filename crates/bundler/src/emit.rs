@@ -71,23 +71,50 @@ pub(crate) fn checked_source(
     } else {
         ModuleFormat::Esm
     };
-    let parsed = ast_segmenter::parse_module(&logger::StdioLogger::new(), source, path, format)?;
+    let provenance = graph.file_provenance(file).ok_or_else(|| {
+        eyre::eyre!(
+            "{}: missing source extraction provenance; reparse and rebuild before emission",
+            path.display()
+        )
+    })?;
+    let config = ast_segmenter::ParserConfig::for_path(path, format)?;
     ensure!(
-        !parsed.source_type.is_typescript() && !parsed.source_type.is_jsx(),
+        provenance.config() == config,
+        "{}: source parser configuration mismatch; reparse and rebuild before emission",
+        path.display()
+    );
+    ensure!(
+        !config.typescript && !config.jsx,
         "{}: emission supports JavaScript only at bytes 0..{}; TS/JSX need later backends",
         path.display(),
         source.len()
     );
-    ensure!(
-        graph.file_facts(file) == Some(&parsed.facts)
-            && graph.file_segments(file).is_some_and(|segments| segments
-                .iter()
-                .map(|s| s.span)
-                .eq(parsed.segments.iter().map(|s| s.span))),
-        "{}: source facts/ranges do not match graph; reparse and rebuild before emission",
-        path.display()
-    );
-    Ok(parsed)
+    let facts = graph
+        .file_facts(file)
+        .ok_or_eyre("missing emission facts")?;
+    let segments = graph
+        .file_segments(file)
+        .ok_or_eyre("missing emission ranges")?;
+    let body = if config.commonjs {
+        ModuleBody::CommonJs {
+            span: segments.first().ok_or_eyre("missing opaque CJS body")?.span,
+        }
+    } else {
+        ModuleBody::Esm
+    };
+    ParsedModule::from_provenance(
+        source,
+        provenance.clone(),
+        body,
+        segments.to_vec(),
+        facts.clone(),
+    )
+    .wrap_err_with(|| {
+        format!(
+            "{}: source facts/ranges do not match graph; reparse and rebuild before emission",
+            path.display()
+        )
+    })
 }
 
 fn project(

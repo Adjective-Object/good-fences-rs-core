@@ -284,10 +284,9 @@ impl BuildSession {
                     queue.push_back(path.clone());
                 }
             }
-            inputs.push(OwnedSourceFileInput::from_ranges(
+            inputs.push(OwnedSourceFileInput::from_parsed(
                 path.clone(),
-                source.record.module.segments.clone(),
-                source.record.module.facts.clone(),
+                source.record.to_parsed(&source.text)?,
                 resolved.into_iter().collect(),
             ));
             sources.insert(path, source.text.clone());
@@ -406,39 +405,11 @@ impl BuildSession {
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let before = crate::rewrite::output_parse_count();
-        let mut artifacts = link::esm_with_source_checker(
+        let mut artifacts = link::esm_plan(
             &graph,
             &plan,
             &options.effects,
             &sources,
-            |file, text| {
-                let path = graph.file_path(file).expect("retained module");
-                let source = &self.sources[path];
-                ensure!(
-                    source.record.source_hash == hash(text.as_bytes()),
-                    "cached source digest mismatch"
-                );
-                let config = source.record.config;
-                ensure!(!config.typescript && !config.jsx, "{}: emission supports JavaScript only at bytes 0..{}; TS/JSX need later backends", path.display(), text.len());
-                ensure!(
-                    graph.file_facts(file) == Some(&source.record.module.facts),
-                    "cached graph facts mismatch"
-                );
-                let source_type = oxc_span::SourceType::from_path(path)?;
-                Ok(ast_segmenter::ParsedModule {
-                    source_type: if config.commonjs {
-                        source_type.with_commonjs(true)
-                    } else {
-                        source_type.with_module(true)
-                    },
-                    body: source.record.module.body,
-                    segments: graph
-                        .file_segments(file)
-                        .expect("retained segments")
-                        .to_vec(),
-                    facts: source.record.module.facts.clone(),
-                })
-            },
         )?;
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;

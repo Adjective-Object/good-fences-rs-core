@@ -9,49 +9,22 @@ pub use sidecar::{
     CacheWrite, MissReason,
 };
 
+#[cfg(test)]
 use std::path::Path;
 
-use ast_segmenter::{owned::ModuleFacts, ModuleBody, ModuleFormat, ParsedModule};
+#[cfg(test)]
+use ast_segmenter::ModuleFormat;
+pub use ast_segmenter::ParserConfig;
+use ast_segmenter::{owned::ModuleFacts, ModuleBody, ParsedModule};
 use eyre::ensure;
-use oxc_span::{SourceType, Span};
+use oxc_span::Span;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 pub const EXTRACTOR_VERSION: u32 = 9;
 pub const OXC_REVISION: &str = "87f065ebf7cde21d1229322f4c7ee58baca5648e";
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-
-/// Effective parser policy, not the source path or package discovery result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParserConfig {
-    pub typescript: bool,
-    pub jsx: bool,
-    pub definition: bool,
-    pub commonjs: bool,
-}
-
-impl ParserConfig {
-    pub fn for_path(path: &Path, package: ModuleFormat) -> eyre::Result<Self> {
-        let mut source_type = SourceType::from_path(path)?;
-        if source_type.is_unambiguous() {
-            source_type = match package {
-                ModuleFormat::Esm => source_type.with_module(true),
-                ModuleFormat::CommonJs => source_type.with_commonjs(true),
-            };
-        }
-        Ok(Self::from_source_type(source_type))
-    }
-
-    fn from_source_type(source_type: SourceType) -> Self {
-        Self {
-            typescript: source_type.is_typescript(),
-            jsx: source_type.is_jsx(),
-            definition: source_type.is_typescript_definition(),
-            commonjs: source_type.is_commonjs(),
-        }
-    }
-}
 
 /// Projection of ParsedModule that preserves executable occurrence facts and
 /// statement ranges without serializing legacy tracker tags or name sets.
@@ -73,6 +46,7 @@ pub struct CacheRecord {
     pub source_hash: [u8; 32],
     pub config: ParserConfig,
     pub module: CachedModule,
+    provenance: ast_segmenter::SourceProvenance,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -126,9 +100,30 @@ impl CacheRecord {
                 segments: parsed.segments.iter().map(|s| s.span).collect(),
                 facts: parsed.facts.clone(),
             },
+            provenance: parsed.provenance().clone(),
         };
         record.validate(source, record.config)?;
         Ok(record)
+    }
+
+    /// Checked cache adapter shared by graph construction and emission.
+    pub fn to_parsed(&self, source: &str) -> eyre::Result<ParsedModule> {
+        self.validate(source, self.config)?;
+        ParsedModule::from_provenance(
+            source,
+            self.provenance.clone(),
+            self.module.body,
+            self.module
+                .segments
+                .iter()
+                .map(|&span| ast_segmenter::Segment {
+                    span,
+                    module_deps: Default::default(),
+                    variables: Default::default(),
+                })
+                .collect(),
+            self.module.facts.clone(),
+        )
     }
 
     pub fn encode(&self, source: &str) -> eyre::Result<Vec<u8>> {

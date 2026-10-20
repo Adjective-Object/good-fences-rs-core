@@ -21,6 +21,12 @@ statement extraction for callers that already validated an AST and semantic
 model; it does not perform the full bundler support-policy/occurrence checks.
 `segment_file` retains the unused tracker's legacy behavior.
 
+`ParsedModule::provenance()` binds the exact source bytes, effective
+`ParserConfig` and owned body/ranges/facts to extraction. `from_provenance`
+reconstitutes matching cache records without parsing; it rejects re-paired text,
+changed records and parser modes. These integrity hashes prevent ordinary API
+misuse, not deliberate forgery by a cache publisher.
+
 `ParsedModule::facts` contains the owned occurrence IR in `owned`: effective
 `commonjs` parser-format bit (including package policy for `.js`), bindings,
 declaration and reference ranges, import aliases, export mappings, directives,

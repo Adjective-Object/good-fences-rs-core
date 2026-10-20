@@ -18,12 +18,7 @@ pub(crate) fn input(path: &str, source: &str) -> OwnedSourceFileInput {
         .iter()
         .map(|d| (d.id, DependencyTarget::File(d.specifier.clone().into())))
         .collect();
-    OwnedSourceFileInput {
-        path: path.into(),
-        segments: parsed.segments,
-        facts: parsed.facts,
-        resolutions,
-    }
+    OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
 }
 
 fn retained_sources<'a>(
@@ -645,10 +640,9 @@ fn cache_ranges_and_facts_produce_the_same_plan_without_tracker_maps() {
             .iter()
             .map(|d| (d.id, DependencyTarget::File(d.specifier.clone().into())))
             .collect();
-        OwnedSourceFileInput::from_ranges(
+        OwnedSourceFileInput::from_parsed(
             (*path).into(),
-            record.module.segments,
-            record.module.facts,
+            record.to_parsed(source).unwrap(),
             resolutions,
         )
     }));

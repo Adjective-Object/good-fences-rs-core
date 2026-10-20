@@ -244,10 +244,9 @@ fn dsl_only_reanalysis_uses_owned_cache_facts_without_reparse_or_cache_contamina
     )
     .unwrap();
     assert_eq!(warm.status, CacheStatus::Hit);
-    let graph = SourceGraph::from_owned([source_graph::OwnedSourceFileInput::from_ranges(
+    let graph = SourceGraph::from_owned([source_graph::OwnedSourceFileInput::from_parsed(
         path.clone(),
-        warm.record.module.segments,
-        warm.record.module.facts,
+        warm.record.to_parsed(&warm.source).unwrap(),
         Default::default(),
     )]);
     let default = EffectPolicy::default();

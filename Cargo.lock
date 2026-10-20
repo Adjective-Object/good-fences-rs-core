@@ -145,6 +145,8 @@ dependencies = [
  "oxc_span",
  "oxc_utils_parse",
  "serde",
+ "serde_cbor",
+ "sha2",
  "test_tmpdir",
  "thiserror 1.0.69",
 ]

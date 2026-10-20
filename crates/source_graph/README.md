@@ -11,8 +11,12 @@ construction/mutation, including checked barrel routes. They have no lexical
 occurrence facts: spans are statement-level, absent targets remain `Unlinked`,
 and import lookups retain the tracker's type-inclusive compatibility policy.
 Use owned inputs for executable validation and precise occurrence metadata.
-`OwnedSourceFileInput::from_ranges` accepts decoded cache ranges/facts without
-reconstructing legacy dependency or variable maps.
+`OwnedSourceFileInput::from_parsed` preserves extraction provenance, including
+checked cache records from `CacheRecord::to_parsed(source)`, without rebuilding
+legacy dependency or variable maps. `file_provenance` exposes the source/config
+integrity evidence used by parse-free emission. `from_ranges` remains available
+for analysis-only inputs; without provenance these cannot be emitted. Source
+patches replace provenance and invalidate derived handles, just like facts.
 Module nodes preserve empty-file identity.
 `module_ids` enumerates live IDs including empty modules, skipping tombstones;
 `file_count` is a count, not an upper bound on IDs after removals.

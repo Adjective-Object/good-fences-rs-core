@@ -51,12 +51,7 @@ fn graph_with_format(
                     (d.id, DependencyTarget::File(target))
                 })
                 .collect();
-            OwnedSourceFileInput {
-                path: path.clone(),
-                segments: parsed.segments,
-                facts: parsed.facts,
-                resolutions,
-            }
+            OwnedSourceFileInput::from_parsed(path.clone(), parsed, resolutions)
         })
         .collect();
     if reverse {
@@ -876,12 +871,11 @@ fn commonjs_package_format_survives_owned_graph_and_cache_facts() {
         ModuleFormat::CommonJs,
     )
     .unwrap();
-    let graph = SourceGraph::from_owned([OwnedSourceFileInput {
-        path: "dep.js".into(),
-        segments: parsed.segments,
-        facts: parsed.facts,
-        resolutions: Default::default(),
-    }]);
+    let graph = SourceGraph::from_owned([OwnedSourceFileInput::from_parsed(
+        "dep.js".into(),
+        parsed,
+        Default::default(),
+    )]);
     let policy = EffectPolicy::default();
     let plan = partition(
         &graph,
@@ -2596,10 +2590,9 @@ fn cached_async_facts_flow_through_graph_retention_chunks_and_native_output() {
                     )
                 })
                 .collect();
-            OwnedSourceFileInput::from_ranges(
+            OwnedSourceFileInput::from_parsed(
                 path.clone(),
-                decoded.module.segments,
-                decoded.module.facts,
+                decoded.to_parsed(text).unwrap(),
                 resolutions,
             )
         })

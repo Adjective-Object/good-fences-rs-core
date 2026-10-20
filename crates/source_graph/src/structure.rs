@@ -33,10 +33,27 @@ pub struct OwnedSourceFileInput {
     pub segments: Vec<Segment>,
     pub facts: ModuleFacts,
     pub resolutions: AHashMap<DependencyId, DependencyTarget>,
+    pub provenance: Option<ast_segmenter::SourceProvenance>,
 }
 
 impl OwnedSourceFileInput {
-    /// Cache hits need only owned facts/ranges, never reconstructed tracker maps.
+    pub fn from_parsed(
+        path: PathBuf,
+        parsed: ast_segmenter::ParsedModule,
+        resolutions: AHashMap<DependencyId, DependencyTarget>,
+    ) -> Self {
+        let provenance = Some(parsed.provenance().clone());
+        Self {
+            path,
+            segments: parsed.segments,
+            facts: parsed.facts,
+            resolutions,
+            provenance,
+        }
+    }
+
+    /// Build analysis inputs from owned facts/ranges without legacy tracker maps.
+    /// Without extraction provenance this input is analysis-only, not emittable.
     pub fn from_ranges(
         path: PathBuf,
         ranges: impl IntoIterator<Item = Span>,
@@ -47,6 +64,7 @@ impl OwnedSourceFileInput {
             path,
             facts,
             resolutions,
+            provenance: None,
             segments: ranges
                 .into_iter()
                 .map(|span| Segment {
@@ -150,6 +168,16 @@ impl SourceGraph {
             .owned
             .as_ref()
             .map(|i| &i.facts)
+    }
+
+    pub fn file_provenance(&self, file_id: u32) -> Option<&ast_segmenter::SourceProvenance> {
+        self.file_path(file_id)?;
+        self.files
+            .get(file_id as usize)?
+            .owned
+            .as_ref()?
+            .provenance
+            .as_ref()
     }
 
     pub fn outgoing(&self, node: GraphNode) -> impl Iterator<Item = &OccurrenceEdge> {
@@ -407,12 +435,7 @@ pub(crate) mod tests {
                 )
             })
             .collect();
-        OwnedSourceFileInput {
-            path: path.into(),
-            segments: parsed.segments,
-            facts: parsed.facts,
-            resolutions,
-        }
+        OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
     }
 
     #[test]
@@ -542,12 +565,7 @@ pub(crate) mod tests {
             .map(|d| (d.id, DependencyTarget::File("empty.ts".into())))
             .collect();
         let graph = SourceGraph::from_owned([
-            OwnedSourceFileInput {
-                path: "entry.cjs".into(),
-                segments: parsed.segments,
-                facts: parsed.facts,
-                resolutions,
-            },
+            OwnedSourceFileInput::from_parsed("entry.cjs".into(), parsed, resolutions),
             input("empty.ts", ""),
         ]);
         let require = graph

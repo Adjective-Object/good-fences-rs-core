@@ -19,6 +19,37 @@ pub struct ParsedModule {
     pub body: ModuleBody,
     pub segments: Vec<Segment>,
     pub facts: crate::owned::ModuleFacts,
+    provenance: crate::SourceProvenance,
+}
+
+impl ParsedModule {
+    pub fn provenance(&self) -> &crate::SourceProvenance {
+        &self.provenance
+    }
+
+    /// Reconstitute owned extraction records only with matching extraction/cache provenance.
+    pub fn from_provenance(
+        source: &str,
+        provenance: crate::SourceProvenance,
+        body: ModuleBody,
+        segments: Vec<Segment>,
+        facts: crate::owned::ModuleFacts,
+    ) -> eyre::Result<Self> {
+        provenance.verify(
+            source,
+            provenance.config(),
+            body,
+            &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+            &facts,
+        )?;
+        Ok(Self {
+            source_type: provenance.config().source_type(),
+            body,
+            segments,
+            facts,
+            provenance,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,11 +126,19 @@ pub fn parse_module(
             .wrap_err_with(|| format!("{}: segment extraction failed", path.display()))?;
         (ModuleBody::Esm, segments)
     };
+    let provenance = crate::SourceProvenance::extracted(
+        source,
+        crate::ParserConfig::from_source_type(parsed.program.source_type),
+        body,
+        &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+        &facts,
+    )?;
     Ok(ParsedModule {
         source_type: parsed.program.source_type,
         body,
         segments,
         facts,
+        provenance,
     })
 }
 

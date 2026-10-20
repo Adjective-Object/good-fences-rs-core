@@ -16,12 +16,7 @@ fn input_with_format(path: &str, source: &str, format: ModuleFormat) -> OwnedSou
         .iter()
         .map(|d| (d.id, DependencyTarget::File(d.specifier.clone().into())))
         .collect();
-    OwnedSourceFileInput {
-        path: path.into(),
-        segments: parsed.segments,
-        facts: parsed.facts,
-        resolutions,
-    }
+    OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
 }
 
 fn graphs() -> (SourceGraph, SourceGraph) {

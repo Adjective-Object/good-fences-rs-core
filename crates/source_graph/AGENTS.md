@@ -23,6 +23,8 @@ Legacy tracker maps project once into the same edge indexes; missing owned
 facts are intentional, not a second nominal IR. Usage walks skip evaluation
 edges, keep checked barrel routes, and own their report-only statement ordering.
 Cache ranges/facts can construct owned inputs without legacy maps.
+`from_parsed` carries extraction/cache provenance; bare `from_ranges` inputs
+remain analysis-only. Source patches replace provenance with facts and ranges.
 Effective CJS facts resolve arbitrary value requests to CommonJs(file,name),
 not guessed exports. Binding edges preserve requested names and opaque module
 demand; runtime snapshot/default policy belongs to bundler proxies.

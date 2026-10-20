@@ -126,17 +126,14 @@ pub fn esm(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Artifacts> {
-    esm_with_source_checker(graph, plan, policy, sources, |file, source| {
-        crate::emit::checked_source(graph, file, source)
-    })?.render()
+    esm_plan(graph, plan, policy, sources)?.render()
 }
 
-pub(crate) fn esm_with_source_checker(
+pub(crate) fn esm_plan(
     graph: &SourceGraph,
     plan: &ChunkPlan,
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
-    mut checked_source: impl FnMut(u32, &str) -> eyre::Result<ParsedModule>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
@@ -146,7 +143,7 @@ pub(crate) fn esm_with_source_checker(
         let source = sources
             .get(path)
             .ok_or_else(|| eyre::eyre!("{}: missing linked source text", path.display()))?;
-        let parsed = checked_source(file, source)?;
+        let parsed = crate::emit::checked_source(graph, file, source)?;
         path.to_str()
             .ok_or_eyre("emission module paths must be UTF-8")?;
         modules.insert(

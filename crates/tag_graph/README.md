@@ -7,6 +7,8 @@ imports or reconstructs reverse edges. Checked routes keep intermediate barrels
 used. Namespace/side-effect/opaque-require dependencies conservatively retain
 all target statements, including empty-module identity. Dynamic imports remain
 ordinary usage dependencies, not bundler activation or scheduling policy.
+Owned-input adapters preserve extraction provenance for downstream emitters;
+tag propagation itself remains independent of source bytes and parser policy.
 
 When `follow_type_only` is false, traversal skips explicitly type-only imports,
 re-exports, and intra-file references. Mixed type/value references still

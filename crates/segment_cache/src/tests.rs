@@ -17,6 +17,38 @@ fn envelope(record: &CacheRecord) -> Vec<u8> {
 }
 
 #[test]
+fn provenance_rejects_repaired_source_config_and_fact_pairings() {
+    let source = "export const value = 1;";
+    let parsed = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("file.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let changed = "export const value = 2;";
+    assert!(CacheRecord::from_parsed(changed, &parsed).is_err());
+    let original = CacheRecord::from_parsed(source, &parsed).unwrap();
+
+    let mut replaced = original.clone();
+    replaced.source_hash = digest(changed.as_bytes());
+    assert!(replaced.to_parsed(changed).is_err());
+    assert!(CacheRecord::decode(&envelope(&replaced), changed, replaced.config).is_err());
+
+    let mut replaced = original.clone();
+    replaced.config.commonjs = true;
+    assert!(replaced.to_parsed(source).is_err());
+
+    let mut replaced = original;
+    replaced.module.facts.emission.segments[0].connector_only = true;
+    assert!(replaced.to_parsed(source).is_err());
+
+    let mut wrong_config = parsed;
+    wrong_config.source_type = oxc_span::SourceType::ts();
+    assert!(CacheRecord::from_parsed(source, &wrong_config).is_err());
+}
+
+#[test]
 fn deterministic_roundtrip_after_parser_arena_drop() {
     for (path, source, format) in [
         ("file.ts", "#!/bin/node\n'use strict'; import {x as y} from './dep'; export const café = y; export {café as 'é'}; import('./lazy');", ModuleFormat::Esm),
@@ -44,6 +76,11 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         let decoded = CacheRecord::decode(&bytes, source, first.config).unwrap();
         assert_eq!(first, decoded);
         assert_eq!(bytes, decoded.encode(source).unwrap());
+        let parsed = decoded.to_parsed(source).unwrap();
+        assert_eq!(
+            ParserConfig::from_source_type(parsed.source_type),
+            decoded.config
+        );
     }
 }
 

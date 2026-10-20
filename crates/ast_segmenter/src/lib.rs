@@ -7,6 +7,8 @@ pub mod invocation;
 pub mod name_set;
 pub mod owned;
 pub mod parse;
+mod provenance;
+pub use provenance::{ParserConfig, SourceProvenance};
 mod policy;
 pub mod raw_module_deps;
 pub mod segment_graph;
