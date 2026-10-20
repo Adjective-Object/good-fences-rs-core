@@ -1143,3 +1143,99 @@ fn astra_latent_unknown_callback_does_not_poison_unrelated_reads() {
         .hazards(analysis.roots[2].value)
         .get(Hazard::PropertyRead));
 }
+
+#[test]
+fn astra_round2_hoisted_function_reads_expose_callable_hazards() {
+    let analysis = source(
+        r#"
+        global fn probe(callback) {
+            call_effects = callback.call_effects
+            returns void
+        }
+    "#,
+        r#"
+        function callback(value) { return value.property; }
+        probe(callback);
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false, true],
+        "a hoisted function's lexical slot must not hide its unspecialized call hazard"
+    );
+}
+
+#[test]
+fn astra_round2_uninitialized_var_redeclaration_preserves_parameter() {
+    let analysis = source(
+        "",
+        r#"
+        function keep(value) {
+            var value;
+            return value;
+        }
+        const original = {};
+        const saved = keep(original);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_eq!(
+        analysis.roots[1].value, analysis.roots[2].value,
+        "a var declaration without an initializer does not overwrite its parameter"
+    );
+    let analysis = source("", "var value; const initial = value; var value;");
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert!(analysis
+        .roots
+        .iter()
+        .all(|root| root.value == analysis.context.undefined()));
+}
+
+#[test]
+fn astra_round2_callable_join_does_not_invent_replacement_mutations() {
+    let mut analysis = source(
+        "",
+        r#"
+        const read = value => value.property;
+        const other = () => 1;
+        const selected = true ? read : other;
+        read({});
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false; 4],
+        "joining function identities must not turn a bare call hazard into a mutation of read"
+    );
+    let selected = analysis.roots[2].value;
+    analysis
+        .context
+        .update(selected, Hazard::Call, analysis.context.effectful());
+    assert_eq!(effects(&analysis), vec![false, false, false, true]);
+}
+
+#[test]
+fn astra_round2_nested_declared_callback_execution_applies_updates() {
+    let analysis = source(
+        r#"
+        global fn invoke(callback, ...args) {
+            call_effects = call(callback, ...args)
+            returns void
+        }
+        global fn mutate(target) {
+            call_effects = false
+            updates target.property_read_effects |= true
+            returns void
+        }
+    "#,
+        r#"
+        const target = {};
+        invoke(invoke, mutate, target);
+        target.property;
+    "#,
+    );
+    assert!(
+        effects(&analysis)[2],
+        "executing invoke(invoke, mutate, target) must propagate mutate's property-read update"
+    );
+}

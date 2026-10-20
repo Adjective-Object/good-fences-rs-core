@@ -63,11 +63,13 @@ impl Context {
     }
 
     pub(crate) fn function_local(&mut self, value: ValueId) {
-        self.recording
+        let instructions = &mut self
+            .recording
             .as_mut()
             .expect("function recording")
-            .instructions
-            .push(Instruction::Value(value, Hazards::NONE));
+            .instructions;
+        instructions.push(Instruction::Value(value, Hazards::NONE));
+        instructions.push(Instruction::Bind(value, self.undefined));
     }
 
     pub(crate) fn finish_function(
@@ -144,29 +146,29 @@ impl Context {
             return;
         }
         self.values[target.0].alias = Some(value);
-        for slot in Hazard::ALL {
+        self.link_hazards(target, value);
+    }
+
+    pub(super) fn link_hazards(&mut self, target: ValueId, value: ValueId) {
+        let targets = self.values[target.0]
+            .cells
+            .into_iter()
+            .chain([self.values[target.0].call_mutations.0]);
+        let values = self.values[value.0]
+            .cells
+            .into_iter()
+            .chain([self.values[value.0].call_mutations.0]);
+        for (target, value) in targets.zip(values) {
             self.equations.push(Equation {
-                target: self.hazard(target, slot).0,
-                expression: Expression::Read(self.hazard(value, slot).0),
+                target,
+                expression: Expression::Read(value),
             });
             if !self.latent {
                 self.equations.push(Equation {
-                    target: self.hazard(value, slot).0,
-                    expression: Expression::Read(self.hazard(target, slot).0),
+                    target: value,
+                    expression: Expression::Read(target),
                 });
             }
-        }
-        let target = self.values[target.0].call_mutations;
-        let value = self.values[value.0].call_mutations;
-        self.equations.push(Equation {
-            target: target.0,
-            expression: Expression::Read(value.0),
-        });
-        if !self.latent {
-            self.equations.push(Equation {
-                target: value.0,
-                expression: Expression::Read(target.0),
-            });
         }
     }
 

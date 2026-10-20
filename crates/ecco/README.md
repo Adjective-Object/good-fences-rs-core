@@ -77,9 +77,10 @@ possible identities. Fallthrough returns `undefined`; terminal returns/throws
 stop scanning that path. Both possible branches are analyzed, not proven
 reachable. Continuing branches merge their lexical bindings; reading a binding
 captures its current value without redirecting earlier aliases on rebinding.
-Supplied contracts called from inferred bodies propagate their
-updates normally. Hazard queries of inferred callbacks remain latent: querying
-an effect does not execute its mutations. Queries involving mutation contracts
+Initializer-free `var` declarations preserve existing bindings. Supplied
+contracts called from inferred bodies or through nested declared callbacks
+propagate their updates normally. Hazard queries of inferred callbacks remain
+latent: querying an effect does not execute its mutations. Queries involving mutation contracts
 conservatively widen effects rather than simulate a hypothetical heap.
 
 Bare `call_effects` reads cannot specialize arguments and conservatively describe
@@ -104,9 +105,11 @@ Trusted namespace prefixes have ordinary member reads. Replacements, unknown
 execution, and potentially effectful hooks widen all value hazards until
 capture/prototype reachability is modeled. Direct `hazard` queries only consult
 facts; `operation` additionally models execution of unmodeled hooks. Conditional
-value joins propagate updates to every possible alias. Recursive summary calls
-share exact contexts; changing recursive contexts widen rather than grow without
-bound. Each explicit call site gets its own fresh result identity.
+value joins propagate updates to every possible alias without treating intrinsic
+call hazards as replacements. Recursive summary calls share exact contexts.
+Declared calls widen growing argument lists; inferred calls widen changing
+recursive contexts rather than grow without bound. Each explicit call site gets
+its own fresh result identity.
 
 Context graphs are reusable, but results are not persistently cached. Build a new
 context when removing source facts or changing environment contracts: monotone

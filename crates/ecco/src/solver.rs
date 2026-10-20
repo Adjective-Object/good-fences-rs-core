@@ -123,7 +123,8 @@ pub struct Context {
     initial: Vec<bool>,
     equations: Vec<Equation>,
     calls: HashMap<Invocation, Effect>,
-    expanding: HashSet<ValueId>,
+    expanding: HashSet<Invocation>,
+    executing: HashSet<Invocation>,
     opaque: bool,
     undefined: ValueId,
     unknown: ValueId,
@@ -148,6 +149,7 @@ impl Context {
             equations: Vec::new(),
             calls: HashMap::new(),
             expanding: HashSet::new(),
+            executing: HashSet::new(),
             opaque: false,
             undefined: ValueId(0),
             unknown: ValueId(0),
@@ -322,12 +324,7 @@ impl Context {
             return result;
         }
         for value in values {
-            for slot in Hazard::ALL {
-                self.update(result, slot, self.hazard(*value, slot));
-                if !self.latent {
-                    self.update(*value, slot, self.hazard(result, slot));
-                }
-            }
+            self.link_hazards(result, *value);
         }
         result
     }
@@ -402,7 +399,17 @@ impl Context {
             undefined: self.undefined,
         };
         if !self.latent {
-            self.execute_dependencies(&definition.hazards.get(Hazard::Call), &frame);
+            let invocation = Invocation {
+                function,
+                arguments: arguments.to_vec(),
+                receiver,
+            };
+            if Self::growing_context(&self.executing, &invocation) {
+                self.opaque_effects();
+            } else if self.executing.insert(invocation.clone()) {
+                self.execute_dependencies(&definition.hazards.get(Hazard::Call), &frame);
+                self.executing.remove(&invocation);
+            }
         }
         let value = match &definition.returns {
             Returns::Argument(name) => frame.value(name),
@@ -475,15 +482,16 @@ impl Context {
             return *effect;
         }
         // Argument forwarding can grow an unbounded family of recursive call
-        // contexts. Keep exact cycles; widen changing recursive contexts.
-        if !self.expanding.insert(function) {
+        // contexts. Fixed-size argument permutations are finite; widen growth.
+        if Self::growing_context(&self.expanding, &invocation) {
             self.opaque |= !self.latent;
             return self.effectful;
         }
+        self.expanding.insert(invocation.clone());
         // Install the cell before expansion so recursive summaries share a cycle.
         let effect = Effect(self.initial.len());
         self.initial.push(false);
-        self.calls.insert(invocation, effect);
+        self.calls.insert(invocation.clone(), effect);
         let frame = Frame {
             definition: &definition,
             arguments,
@@ -491,7 +499,7 @@ impl Context {
             undefined: self.undefined,
         };
         let body = self.instantiate(&definition.hazards.get(Hazard::Call), &frame);
-        self.expanding.remove(&function);
+        self.expanding.remove(&invocation);
         self.equations.push(Equation {
             target: effect.0,
             expression: Expression::Or(vec![
@@ -553,28 +561,16 @@ impl Context {
                 let receiver = receiver
                     .as_ref()
                     .map_or(self.undefined, |name| frame.value(name));
-                if self.values[self.resolve_alias(function).0]
-                    .closure
-                    .is_some()
-                {
-                    self.call(function, &arguments, Some(receiver));
-                    return;
-                }
-                let effects = self.call_effects(function, &arguments, receiver);
-                // Nested callback execution has no capture/reachability graph.
-                // Keep its effects latent in other fields; widen only on a call.
-                self.equations.push(Equation {
-                    target: self.poison.0,
-                    expression: Expression::Read(effects.0),
-                });
-                if self.values[function.0]
-                    .definition
-                    .is_some_and(|index| !self.facts.definitions[index].updates.is_empty())
-                {
-                    self.opaque = true;
-                }
+                self.call(function, &arguments, Some(receiver));
             }
         }
+    }
+
+    fn growing_context(active: &HashSet<Invocation>, invocation: &Invocation) -> bool {
+        active.iter().any(|parent| {
+            parent.function == invocation.function
+                && parent.arguments.len() < invocation.arguments.len()
+        })
     }
 
     pub fn evaluate(&self) -> Evaluation {

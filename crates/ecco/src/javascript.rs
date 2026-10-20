@@ -64,10 +64,12 @@ pub fn extract_from_ast<'a>(
         .scoping()
         .symbol_ids()
         .map(|symbol| {
+            let value = context.value(Hazards::NONE);
+            context.set_binding(value, context.undefined());
             (
                 symbol,
                 NamedValue {
-                    value: context.value(Hazards::NONE),
+                    value,
                     binding: None,
                 },
             )
@@ -582,7 +584,7 @@ impl<'a> Extractor<'_, 'a> {
                     });
                     if let Some(binding) = &named.binding {
                         named.value = self.resolve(binding, identifier.span);
-                    } else if self.deferred {
+                    } else {
                         named.value = self.context.read_binding(named.value);
                     }
                     named
@@ -936,6 +938,18 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             });
         } else {
             for declarator in &declaration.declarations {
+                if declaration.kind == VariableDeclarationKind::Var && declarator.init.is_none() {
+                    if let BindingPattern::BindingIdentifier(identifier) = &declarator.id {
+                        let symbol = identifier.symbol_id.get().expect("binding symbol");
+                        let value = self.context.read_binding(self.values[&symbol].value);
+                        self.roots.push(SourceRoot {
+                            span: declarator.span,
+                            value,
+                            effects: self.context.pure(),
+                        });
+                        continue;
+                    }
+                }
                 self.visit_variable_declarator(declarator);
             }
         }
