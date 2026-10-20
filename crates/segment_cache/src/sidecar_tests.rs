@@ -120,6 +120,48 @@ fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
 }
 
 #[test]
+fn prepared_css_hits_recheck_originals_but_key_generated_text() {
+    let dir = TmpDir::new();
+    let path = dir.root_join("style.module.css");
+    let parser_path = path.with_extension("css.mjs");
+    let original = b".button { color: red }";
+    let edited = b".button { color: blue }";
+    let source = "export const button = '_button';";
+    let declarations = ecco::LocalFacts::default();
+    fs::write(&path, original).unwrap();
+    let load = |source, original, mode| {
+        load_prepared(
+            &logger::StdioLogger::new(),
+            &path,
+            PreparedSource {
+                source,
+                original,
+                parser_path: &parser_path,
+                package: ModuleFormat::Esm,
+            },
+            mode,
+            &declarations,
+        )
+    };
+    load(source, original.as_slice(), CacheMode::ReadWrite).unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    fs::write(&path, edited).unwrap();
+    let hit = load(source, edited.as_slice(), CacheMode::ReadOnly).unwrap();
+    assert_eq!(hit.status, CacheStatus::Hit);
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    let error = load(source, original.as_slice(), CacheMode::ReadOnly).unwrap_err();
+    assert!(format!("{error:#}").contains("source changed"));
+    let changed = load(
+        "export const button = '_different';",
+        edited.as_slice(),
+        CacheMode::ReadWrite,
+    )
+    .unwrap();
+    assert!(matches!(changed.status, CacheStatus::Miss(_)));
+    assert_eq!(ast_segmenter::module_parse_count(), parses + 1);
+}
+
+#[test]
 fn prepared_css_parser_modes_key_disk_reuse_even_when_generated_text_is_unchanged() {
     let dir = TmpDir::new();
     let path = dir.root_join("style.css");
