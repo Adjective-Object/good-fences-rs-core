@@ -146,8 +146,18 @@ facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
 no independently executable namespace path in `Artifacts::modules`.
-Observable namespace seams keep private declarations and local deferred readers
-in one lexical component; relocating readers must not invent private exports.
+Lower original static imports/references to typed semantic obligations: binding
+availability, mandatory execution/effects, activation/deferred/TLA timing, exact
+namespace/public surfaces and external native validation. Preserve those
+obligations, not literal source import topology. Solve physical segment owners
+before reconstructing same-owner locals and cross-owner internal imports/exports.
+Source-private visibility and missing export addresses never impose co-location;
+real execution/binding compatibility still can. Internal chunk exports may expose
+private bindings, but public namespace projections must never leak them. Use native
+public projection wrappers only for actual observable surfaces, not facade families.
+This supersedes the private-declaration/deferred-reader co-location rule.
+Keep deferred binding edges abstract, never eager execution; scheduling edges
+must not retain segments. Plan routes/projections explicitly, not during emission.
 Never greedily absorb whole modules or use SCC completeness as relocation proof.
 Mandatory execution components and consumer demand choose segment owners.
 Emit a complete exactly-once SegmentKey schedule per owner, using full cached

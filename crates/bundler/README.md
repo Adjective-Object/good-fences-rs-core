@@ -368,9 +368,9 @@ modules or root-set partitions. Pure lexical components move to a unique consume
 or independent shared binding chunks; components from unrelated sources can
 co-locate. Eager local initializer reads and writes keep their lexical components
 together, preserving snapshots and mutable closures without cells or setters.
-Within an observable namespace seam, private declarations and their local
-readers also share a lexical component, including deferred function accesses.
-Moving a reader alone must not require adding private exports to that namespace.
+Source-private visibility must not make a deferred reader and its declaration
+an indivisible component. A pinned initializer and a shared deferred reader may
+have distinct owners even when the source namespace is observable.
 Source-phase barriers pin non-hoisted evaluations, even when Ecco or PURE calls
 classify a site as pure. Proven initialized immutable local reads can discharge
 read-only fences; their mandatory ordering still travels with the component.
@@ -400,6 +400,33 @@ Placement and candidate-name compatibility consume owned source-local recipes,
 without reparsing or trial emission. Connector classification includes only
 retained segments; dead declarations do not prevent connector grouping. Namespace,
 cycle, initialization and evaluation-order barriers remain graph-derived.
+
+### Semantic obligations before physical routes
+
+The durable pipeline is to lower original static imports/references into typed
+obligations for binding availability, mandatory execution order/effects,
+activation/deferred/top-level-await timing, exact namespace/public surfaces and
+external native validation. Solve physical segment ownership from those
+obligations and consumer demand, independently of source visibility or existing
+export addresses. Then reconstruct same-owner local references and cross-owner
+internal native imports/exports, and project each observable namespace exactly.
+Original import obligations survive; their literal source-module topology need
+not. A deferred binding dependency is not eager execution, and scheduling edges
+must never supply retention.
+
+Internal chunks may export source-private bindings for other owners. Those
+internal routes must not widen public namespace keys; native public projection
+wrappers are appropriate only where an actual observable surface needs one, not
+as a mandatory facade family per source. Real execution/binding compatibility
+constraints may still require co-location. No cells, registration, interpreter,
+source loading or runtime compilation is permitted.
+
+This supersedes the earlier rule that observable namespace seams force private
+declarations and deferred readers together. The current placement workaround
+still imposes that rule, and emission still derives internal export addresses
+from public source surfaces. The defensive private-boundary regression requires
+distinct actual owners for a pinned initializer and shared reader; it intentionally
+fails until explicit internal routes and public projections replace that coupling.
 
 Namespaces and CJS-consuming modules no longer impose whole-module placement
 barriers. Namespace demand retains checked visible exports and ordinary effects,

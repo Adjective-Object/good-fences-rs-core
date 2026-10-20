@@ -1458,14 +1458,21 @@ fn native_chunks_preserve_entry_dependent_static_effect_order() {
 
 #[test]
 fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
-    for (dependency, expected) in [
+    for (dependency, expected, separate_private_reader) in [
         (
             "const Base = class {}; export const value = class Self extends (() => Base)() { static own() { return Self; } }; export function read() { return [value.name, value.own() === value, Object.getPrototypeOf(value) === Base]; }",
             "[\"Self\",true,true]\nread,value\n",
+            false,
         ),
         (
             "let value = 0; if (true) { globalThis.capture(() => [value, after, hoisted()]); value = 2; } function hoisted() { return value; } export const after = 3; export function read() { return [value, after, hoisted()]; }",
             "ReferenceError\n[2,3,2]\nafter,read\n",
+            false,
+        ),
+        (
+            "const secret = (console.log('initialize'), {value: 7}); export function read() { return secret.value; }",
+            "initialize\n7\nread\n",
+            true,
         ),
     ] {
         let source = sources(&[
@@ -1476,13 +1483,14 @@ fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
             ("other.mjs", "export {read} from './dep.mjs';"),
             ("dep.mjs", dependency),
         ]);
+        let mut private_owners = Vec::new();
         for reverse in [false, true] {
             let entries = if reverse {
                 [("other.mjs", true), ("entry.mjs", true)]
             } else {
                 [("entry.mjs", true), ("other.mjs", true)]
             };
-            let (_, output) = build(&source, &entries, reverse);
+            let (plan, output) = build(&source, &entries, reverse);
             assert_eq!(output.backend, Backend::Native);
             let observer = format!(
                 "globalThis.capture = f => {{ try {{ f(); }} catch (e) {{ console.log(e.name); }} }}; {} (await import('./entry.mjs')).observe();",
@@ -1500,6 +1508,41 @@ fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
             assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
             assert!(actual.stderr.is_empty());
             assert_eq!(actual.stdout, baseline.stdout);
+            if separate_private_reader {
+                let graph = graph(&source, reverse);
+                let file = graph.file_id(Path::new("dep.mjs")).unwrap();
+                let secret = SegmentKey::new(file, 0);
+                let reader = SegmentKey::new(file, 1);
+                assert!(plan.retention.effects.iter().any(|effect| {
+                    effect.key == secret && effect.summary.is_effectful()
+                }));
+                assert!(plan.retention.edges.iter().any(|edge| {
+                    edge.kind == crate::RetentionEdgeKind::Binding
+                        && edge.from == GraphNode::Segment(reader)
+                        && edge.to == GraphNode::Segment(secret)
+                }));
+                let access = plan.retention.execution.accesses.iter()
+                    .find(|access| access.segment == reader && access.declaration == secret)
+                    .unwrap();
+                let placement = &graph.file_facts(file).unwrap().emission.segments[1].placement;
+                assert!(placement.instantiable);
+                assert!(!placement.eager_reads.contains(&access.reference));
+                assert!(!plan.retention.execution.constraints.iter().any(|constraint| {
+                    (constraint.before == secret && constraint.after == reader)
+                        || (constraint.before == reader && constraint.after == secret)
+                }));
+                let owner = |index| &output.members[&NodeId::Segment {
+                    module: "dep.mjs".into(),
+                    index,
+                }];
+                private_owners.push((owner(0).clone(), owner(1).clone()));
+            }
+        }
+        // Execution pins the initializer; both entries demand the reader.
+        // Privacy is not a reason to collapse their physical owners.
+        for (initializer, reader) in private_owners {
+            assert_ne!(initializer, reader,
+                "private binding availability must cross owners without widening the public namespace");
         }
     }
 }
