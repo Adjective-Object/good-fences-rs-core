@@ -1,0 +1,90 @@
+// Bounded Window-host contracts, not exhaustive DOM typings or purity promises.
+// HTML/DOM standards: https://html.spec.whatwg.org/ https://dom.spec.whatwg.org/
+// Keep host lookups observable, including replaceable globals and named properties.
+// No trusted window/self/globalThis member aliases: those objects can have getters.
+global symbol window { read_effects = true }
+global symbol self { read_effects = true }
+global symbol document { read_effects = true }
+global symbol navigator { read_effects = true }
+global symbol location { read_effects = true }
+global symbol history { read_effects = true }
+global symbol screen { read_effects = true }
+global symbol frames { read_effects = true }
+global symbol parent { read_effects = true }
+global symbol top { read_effects = true }
+global symbol opener { read_effects = true }
+global symbol localStorage { read_effects = true }
+global symbol sessionStorage { read_effects = true }
+global symbol customElements { read_effects = true }
+global symbol crypto { read_effects = true }
+global symbol performance { read_effects = true }
+global symbol console { read_effects = true }
+global symbol fetch { read_effects = true }
+global symbol setTimeout { read_effects = true }
+global symbol clearTimeout { read_effects = true }
+global symbol setInterval { read_effects = true }
+global symbol clearInterval { read_effects = true }
+global symbol queueMicrotask { read_effects = true }
+global symbol requestAnimationFrame { read_effects = true }
+global symbol cancelAnimationFrame { read_effects = true }
+global symbol requestIdleCallback { read_effects = true }
+global symbol cancelIdleCallback { read_effects = true }
+global symbol addEventListener { read_effects = true }
+global symbol removeEventListener { read_effects = true }
+global symbol dispatchEvent { read_effects = true }
+global symbol postMessage { read_effects = true }
+global symbol getComputedStyle { read_effects = true }
+global symbol matchMedia { read_effects = true }
+global symbol alert { read_effects = true }
+global symbol confirm { read_effects = true }
+global symbol prompt { read_effects = true }
+global symbol open { read_effects = true }
+global symbol close { read_effects = true }
+global symbol indexedDB { read_effects = true }
+global symbol caches { read_effects = true }
+global symbol Window { read_effects = true }
+global symbol Document { read_effects = true }
+global symbol Node { read_effects = true }
+global symbol Element { read_effects = true }
+global symbol HTMLElement { read_effects = true }
+global symbol Image { read_effects = true }
+global symbol DOMParser { read_effects = true }
+global symbol Event { read_effects = true }
+global symbol CustomEvent { read_effects = true }
+global symbol EventTarget { read_effects = true }
+global symbol AbortController { read_effects = true }
+global symbol AbortSignal { read_effects = true }
+global symbol MutationObserver { read_effects = true }
+global symbol IntersectionObserver { read_effects = true }
+global symbol ResizeObserver { read_effects = true }
+global symbol URL { read_effects = true }
+global symbol URLSearchParams { read_effects = true }
+global symbol Headers { read_effects = true }
+global symbol Request { read_effects = true }
+global symbol Response { read_effects = true }
+global symbol XMLHttpRequest { read_effects = true }
+global symbol WebSocket { read_effects = true }
+
+// Omitted hazard fields are conservative, including coercions, callbacks,
+// returned objects, custom element construction, scheduling and DOM mutation.
+global fn fetch(...) {}
+global fn setTimeout(...) {}
+global fn clearTimeout(...) {}
+global fn setInterval(...) {}
+global fn clearInterval(...) {}
+global fn queueMicrotask(...) {}
+global fn requestAnimationFrame(...) {}
+global fn cancelAnimationFrame(...) {}
+global fn requestIdleCallback(...) {}
+global fn cancelIdleCallback(...) {}
+global fn addEventListener(...) {}
+global fn removeEventListener(...) {}
+global fn dispatchEvent(...) {}
+global fn postMessage(...) {}
+global fn getComputedStyle(...) {}
+global fn matchMedia(...) {}
+global fn alert(...) {}
+global fn confirm(...) {}
+global fn prompt(...) {}
+global fn open(...) {}
+global fn close(...) {}

@@ -1,6 +1,8 @@
 use super::*;
 use test_tmpdir::TmpDir;
 
+mod browser;
+
 #[cfg(any(unix, windows))]
 mod linked_inventory;
 
@@ -5394,7 +5396,7 @@ fn unsupported_configuration_is_fallible_not_silently_ignored() {
     assert!(session.build(&hidden).is_err());
     let mut browser = options.clone();
     browser.resolver.target_env = TargetEnv::Browser;
-    assert!(session.build(&browser).is_err());
+    assert!(session.build(&browser).is_ok());
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink("main.mjs", dir.root().join("alias.mjs")).unwrap();

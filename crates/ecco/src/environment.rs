@@ -4,11 +4,22 @@ use eyre::{ensure, eyre, Result};
 
 use crate::{parse_declarations, Binding, Definition, LocalFacts};
 
+/// Host preset selection, independent of JavaScript language contracts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Environment {
+    #[default]
+    Node,
+    Browser,
+}
+
 /// Build-wide contracts. Per-file local contracts belong in `LocalFacts`, not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclarationConfig {
     pub javascript: bool,
+    /// Enable Node contracts when selecting `Environment::Node`.
     pub node: bool,
+    /// Enable browser contracts when selecting `Environment::Browser`.
+    pub browser: bool,
     pub user: Vec<LocalFacts>,
 }
 
@@ -17,6 +28,7 @@ impl Default for DeclarationConfig {
         Self {
             javascript: true,
             node: true,
+            browser: true,
             user: Vec::new(),
         }
     }
@@ -27,10 +39,23 @@ impl DeclarationConfig {
     ///
     /// Output ordering depends only on binding names, not user file ordering.
     pub fn effective(&self) -> Result<LocalFacts> {
-        static PRESETS: [OnceLock<Result<LocalFacts, String>>; 4] = [const { OnceLock::new() }; 4];
-        let index = usize::from(self.javascript) * 2 + usize::from(self.node);
+        self.effective_for_environment(Environment::Node)
+    }
+
+    /// Select only the requested host preset, retaining switches and exact user overrides.
+    pub fn effective_for_environment(&self, environment: Environment) -> Result<LocalFacts> {
+        static PRESETS: [OnceLock<Result<LocalFacts, String>>; 6] = [const { OnceLock::new() }; 6];
+        let host = match environment {
+            Environment::Node if self.node => 1,
+            Environment::Browser if self.browser => 2,
+            _ => 0,
+        };
+        let index = usize::from(self.javascript) * 3 + host;
         let presets = PRESETS[index]
-            .get_or_init(|| self.preset_facts().map_err(|error| error.to_string()))
+            .get_or_init(|| {
+                self.preset_facts(environment)
+                    .map_err(|error| error.to_string())
+            })
             .as_ref()
             .map_err(|error| eyre!("{error}"))?;
         let mut user = LocalFacts::default();
@@ -62,7 +87,7 @@ impl DeclarationConfig {
         })
     }
 
-    fn preset_facts(&self) -> Result<LocalFacts> {
+    fn preset_facts(&self, environment: Environment) -> Result<LocalFacts> {
         let mut presets = LocalFacts::default();
         if self.javascript {
             let mut facts = parse_declarations(include_str!("../presets/ecmascript2025.ecco"))?;
@@ -112,7 +137,7 @@ impl DeclarationConfig {
             presets.definitions.extend(facts.definitions);
             presets.global_symbols.extend(facts.global_symbols);
         }
-        if self.node {
+        if environment == Environment::Node && self.node {
             let facts = parse_declarations(include_str!("../presets/node24.ecco"))?;
             for definition in facts.definitions {
                 if let Binding::Module { module, path } = &definition.binding {
@@ -155,6 +180,11 @@ impl DeclarationConfig {
                     presets.definitions.push(definition);
                 }
             }
+            presets.global_symbols.extend(facts.global_symbols);
+        }
+        if environment == Environment::Browser && self.browser {
+            let facts = parse_declarations(include_str!("../presets/browser.ecco"))?;
+            presets.definitions.extend(facts.definitions);
             presets.global_symbols.extend(facts.global_symbols);
         }
         crate::parser::validate_facts(&presets)?;

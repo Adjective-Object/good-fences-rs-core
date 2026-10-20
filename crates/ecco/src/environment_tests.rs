@@ -59,6 +59,7 @@ fn environment_presets_are_independent_and_match_only_exact_paths_or_prefixes() 
     }
     let js = DeclarationConfig {
         node: false,
+        browser: false,
         ..config.clone()
     }
     .effective()
@@ -77,6 +78,7 @@ fn environment_presets_are_independent_and_match_only_exact_paths_or_prefixes() 
         DeclarationConfig {
             javascript: false,
             node: false,
+            browser: false,
             user: vec![]
         }
         .effective()
@@ -220,5 +222,106 @@ fn environment_specialization_preserves_coercions_mutations_and_host_effects() {
             effectful,
             "{source}"
         );
+    }
+}
+
+#[test]
+fn browser_environment_is_separate_and_preserves_host_effects() {
+    let config = DeclarationConfig::default();
+    let facts = config
+        .effective_for_environment(Environment::Browser)
+        .unwrap();
+    definition(&facts, &global(&["fetch"]));
+    definition(&facts, &global(&["Math", "abs"]));
+    assert!(!declaration_matches(
+        &facts,
+        &module("node:fs", &["readFile"])
+    ));
+    assert!(!declaration_matches(&facts, &global(&["process"])));
+    assert!(!declaration_matches(
+        &facts,
+        &global(&["window", "arbitraryAPI"])
+    ));
+    for (source, effectful) in [
+        ("Math.abs(2);", false),
+        ("Number.isFinite({});", false),
+        ("const document = 1; document;", false),
+        ("window;", true),
+        ("self;", true),
+        ("document;", true),
+        ("typeof document;", true),
+        ("function read() { return document; } read();", true),
+        ("globalThis.document;", true),
+        ("window.document;", true),
+        ("self.location.href;", true),
+        ("navigator.userAgent;", true),
+        ("location;", true),
+        ("document.cookie;", true),
+        ("document.cookie = 'x=y';", true),
+        ("document.createElement('custom-element');", true),
+        ("document.querySelector('main');", true),
+        ("document.body.appendChild(unknown);", true),
+        ("window.arbitraryAPI();", true),
+        ("fetch('/data');", true),
+        ("setTimeout(() => {}, 0);", true),
+        ("clearTimeout(1);", true),
+        ("queueMicrotask(() => {});", true),
+        ("requestAnimationFrame(() => {});", true),
+        ("addEventListener('click', () => {});", true),
+        ("dispatchEvent(unknown);", true),
+        ("Event;", true),
+        ("new CustomEvent('ready');", true),
+        ("new Image();", true),
+        ("new MutationObserver(() => {});", true),
+        ("location.href = '/next';", true),
+        ("localStorage.getItem('key');", true),
+    ] {
+        let analysis = analyze_source(source, Path::new("browser.js"), facts.clone()).unwrap();
+        let evaluation = analysis.context.evaluate();
+        assert_eq!(
+            analysis
+                .roots
+                .iter()
+                .any(|root| evaluation.effect(root.effects)),
+            effectful,
+            "{source}"
+        );
+    }
+    let disabled = DeclarationConfig {
+        javascript: false,
+        browser: false,
+        ..Default::default()
+    };
+    assert_eq!(
+        disabled
+            .effective_for_environment(Environment::Browser)
+            .unwrap(),
+        LocalFacts::default()
+    );
+    assert!(declaration_matches(
+        &disabled.effective().unwrap(),
+        &module("node:fs", &["readFile"])
+    ));
+}
+
+#[test]
+fn browser_user_contracts_override_reads_and_calls_independently() {
+    for (extra, effectful) in [
+        ("", true),
+        ("global symbol fetch { read_effects = false }", false),
+    ] {
+        let config = DeclarationConfig {
+            user: vec![parse_declarations(&format!(
+                "global fn fetch(...) {{ call_effects = false }} {extra}"
+            ))
+            .unwrap()],
+            ..Default::default()
+        };
+        let facts = config
+            .effective_for_environment(Environment::Browser)
+            .unwrap();
+        let analysis = analyze_source("fetch('/data');", Path::new("browser.js"), facts).unwrap();
+        let evaluation = analysis.context.evaluate();
+        assert_eq!(evaluation.effect(analysis.roots[0].effects), effectful);
     }
 }

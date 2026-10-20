@@ -14,6 +14,7 @@ pub(crate) struct CssModuleInput<'a> {
     pub name_mappings: &'a BTreeMap<String, String>,
     pub is_module: bool,
     pub evaluation_dependencies: &'a [&'a str],
+    pub wrapper_format: ModuleFormat,
 }
 
 pub(crate) struct PreparedCssModule {
@@ -52,9 +53,15 @@ impl CssLoadingStrategy for CallerLoaded {
             input.stylesheet.display()
         );
         Ok(PreparedCssModule {
-            source: crate::resource::public_url_module(input.public_url)?,
-            parser_path: input.stylesheet.with_extension("css.cjs"),
-            package: ModuleFormat::CommonJs,
+            source: crate::resource::public_url_module(input.public_url, input.wrapper_format)?,
+            parser_path: input.stylesheet.with_extension(
+                if input.wrapper_format == ModuleFormat::Esm {
+                    "css.mjs"
+                } else {
+                    "css.cjs"
+                },
+            ),
+            package: input.wrapper_format,
             relocations: Vec::new(),
         })
     }
@@ -135,6 +142,7 @@ mod tests {
             name_mappings: &mappings,
             is_module: false,
             evaluation_dependencies: &[],
+            wrapper_format: ModuleFormat::CommonJs,
         };
         let prepared = CallerLoaded.generate_module(&input).unwrap();
         assert_eq!(

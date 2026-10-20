@@ -11,11 +11,28 @@ pub(super) struct BuildResolver {
 }
 
 impl BuildResolver {
+    fn options(options: &BuildOptions) -> NodeModulesResolverOptions {
+        let mut resolver = options.resolver.clone();
+        // A target-only switch follows host defaults; nondefault condition sets
+        // are explicit caller policy and remain untouched.
+        if [TargetEnv::Node, TargetEnv::Browser]
+            .into_iter()
+            .any(|target| {
+                resolver.export_conditions
+                    == NodeModulesResolverOptions::default_for_env(target).export_conditions
+            })
+        {
+            resolver.export_conditions =
+                NodeModulesResolverOptions::default_for_env(resolver.target_env).export_conditions;
+        }
+        resolver
+    }
+
     pub(super) fn new(root: &Path, options: &BuildOptions, replay: bool) -> Self {
         Self {
             inner: StructuralResolver::new(
                 root.to_owned(),
-                options.resolver.clone(),
+                Self::options(options),
                 options.externals.clone(),
             ),
             replay,
@@ -26,7 +43,7 @@ impl BuildResolver {
     pub(super) fn recheck(&self, root: &Path, options: &BuildOptions) -> eyre::Result<()> {
         let fresh = StructuralResolver::new(
             root.to_owned(),
-            options.resolver.clone(),
+            Self::options(options),
             options.externals.clone(),
         );
         for (base, request, mode, before) in self.requests.borrow().iter() {

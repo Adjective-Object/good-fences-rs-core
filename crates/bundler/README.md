@@ -41,12 +41,14 @@ explicit export maps or their private subpaths.
 `BuildSession` accepts `.json` dependencies and entries. JSON values are shared
 between default ESM imports, dynamic-import defaults and CommonJS `require`;
 objects remain mutable and are initialized lazily when required. Inputs are
-validated as JSON, then prepared as an opaque CommonJS value initializer, not
-loaded or parsed at runtime. Computed object keys preserve own `__proto__`
+validated as JSON, then prepared as an opaque CommonJS value initializer for Node
+or a native ESM default value for Browser, not loaded or parsed at runtime.
+Browser static and dynamic defaults share the same mutable value.
+Computed object keys preserve own `__proto__`
 properties, duplicate-key semantics, negative zero, large numbers and escaped
 surrogates without consulting mutable `JSON.parse`. UTF-8 BOMs are accepted.
 Named JSON exports and import attributes remain unsupported; use a default import
-or `require`. A JSON entry defaults to a `.cjs` output file.
+or, on Node, `require`. A JSON entry defaults to `.cjs` on Node and `.mjs` on Browser.
 
 Resource preparation separates original input bytes from generated JavaScript.
 Graph identities remain original resource paths, while cached spans and sealed
@@ -69,7 +71,8 @@ Empty bases, protocol-relative URLs, non-HTTP(S) schemes, credentials, malformed
 hosts/percent escapes, queries, fragments, backslashes and control characters
 are errors. Public bases never rename owned resource files or executable import
 requests. Equal bytes with equal extensions share one resource file.
-Asset entries emit a `.cjs` URL-exporting wrapper by default. Unreached dynamic
+Asset entries emit a `.cjs` URL-exporting wrapper on Node and a native `.mjs`
+default export on Browser. Unreached dynamic
 assets are not emitted.
 
 `Artifacts.files` retains executable/metadata strings; `Artifacts.resources`
@@ -84,7 +87,8 @@ CSS default imports and `require` export a stylesheet URL using the same base;
 side-effect imports also extract the file. `BuildOptions.css.load` selects the
 built-in `CssLoad::CallerLoaded` policy by default (`"caller-loaded"` when
 serializing `CssOptions`).
-Global CSS keeps its CJS URL wrapper and `.cjs` entry extension.
+Global CSS uses a CJS URL wrapper and `.cjs` entry extension on Node, or a native
+ESM default URL export and `.mjs` entry extension on Browser.
 `Artifacts.stylesheets` maps retained
 input stylesheet roots to owned output-relative `.css` paths, never public URLs
 or executable aliases (including custom-suffix CSS Modules). The example driver reports
@@ -509,10 +513,13 @@ annotations conservatively disable inferred pruning; cached precursors and
 source-level PURE lowering remain unchanged. Ecco's existing unknown-execution
 widening can also prevent pruning otherwise pure calls.
 
-`BuildOptions.declarations` enables separate JavaScript and Node presets by
-default and accepts parsed user declaration sets. User bindings override presets;
+`BuildOptions.declarations` enables JavaScript and the requested resolver target's
+host preset (Node by default, Browser for `TargetEnv::Browser`) and accepts parsed
+user declaration sets. User bindings override presets;
 duplicates between user sets and build-wide local contracts are errors. Disable
-either preset with its corresponding boolean. The effective parsed declaration
+language or selected host contracts with `javascript`, `node`, or `browser`.
+Switching targets also invalidates prepared declarations; explicit user read/call
+contracts and language switches survive that transition. The effective parsed declaration
 identity participates in disk metadata, memory reuse and build parse fingerprints,
 so declaration changes trigger fresh extraction and whole-graph analysis.
 Only potentially referenced declaration families enter each file's precursors;
@@ -645,6 +652,29 @@ contracts separately syntax-check source JavaScript and observe native emitted
 output because raw Node cannot import CSS. DOM recorders do not establish browser
 CSS application, real network behavior or readiness. Existing JavaScript fixtures
 continue comparing unbundled and emitted observations without a custom loader.
+
+## Browser target
+
+Set `options.resolver = NodeModulesResolverOptions::default_for_env(TargetEnv::Browser)`.
+A target-only switch of untouched default conditions also follows the new host;
+nondefault condition sets remain explicit caller policy. Browser defaults activate
+`browser`, not `node`/`node-addons`/`module-sync`; package declaration order still
+determines exports selection. String `browser` entries and dependency-local
+object mappings of the selected legacy entry are supported alongside importer
+request/path mappings. No polyfills or empty-module substitutions
+are injected. Node builtins (bare and `node:`) fail even if listed as externals.
+
+The browser target emits native ESM chunks for ESM inputs, JSON, assets and CSS,
+with conservative Window-host effect analysis. Finite relative dynamic-import
+contexts support compatible ESM/resource candidates; misses asynchronously reject
+using a captured Error intrinsic in a native ESM module. Caller-loaded CSS
+remains application-ordered; auto-mount follows static/dynamic evaluation timing.
+Actual CommonJS inputs and `require` (including contexts) fail explicitly rather
+than emitting unusable `.cjs` chunks. Explicit nonbuiltin externals need a
+host-provided resolution mechanism.
+No worker subtargets, DOM typings, rendering/readiness guarantees, or single-file
+runtime are provided. Controlled host-global execution tests cover getter reads,
+DOM mutations, scheduling and lazy native imports, not real browser rendering.
 
 ## Public build session
 
@@ -885,7 +915,7 @@ and debug-only final output validation remain whole-product operations.
 No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
 
 **Limits:** Linux was executed; Windows atomic replacement/OS locks rely on
-standard-library/tempfile contracts but were not runtime-tested. No browser,
+standard-library/tempfile contracts but were not runtime-tested. No
 standalone single-file output, TS/JSX lowering, assets/native addons, executable
 externals, import.meta or source maps. The exact root sets are the existing
 conservative retention contract, not a whole-program minimality claim. CJS bridge
@@ -1126,7 +1156,8 @@ same directory/native jobs, never an in-place repair of failed jobs.
 Externals, TS/JSX and other source-policy unsupported forms still fail with
 diagnostics. Logical root-set equality remains exact; native physical grouping
 does not change that analytical partition.
-This backend is not a browser/standalone-file target.
+Public browser builds support the native ESM subset described above; this is not
+a standalone-file target, and Node-loader-dependent CJS/context output is rejected.
 
 ### Async evaluation and support
 

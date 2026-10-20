@@ -10,8 +10,9 @@ const ENVIRONMENT_PROBES: [&str; 3] = ["module", "exports", "require"];
 
 pub(crate) fn prepare_declarations(
     config: &ecco::DeclarationConfig,
+    environment: ecco::Environment,
 ) -> eyre::Result<ast_segmenter::PreparedDeclarations> {
-    let mut facts = config.effective()?;
+    let mut facts = config.effective_for_environment(environment)?;
     for name in ENVIRONMENT_PROBES {
         if !facts
             .global_symbols

@@ -1,6 +1,7 @@
 //! Resource preparation keeps original input identity separate from JS coordinates.
 use std::path::{Path, PathBuf};
 
+use ast_segmenter::ModuleFormat;
 use eyre::WrapErr;
 use sha2::{Digest, Sha256};
 
@@ -39,14 +40,22 @@ pub(crate) fn url_module(
     path: &Path,
     base: &crate::output_url::PublicBase,
 ) -> eyre::Result<String> {
-    public_url_module(&base.join(path)?)
+    public_url_module(&base.join(path)?, ModuleFormat::CommonJs)
 }
 
-pub(crate) fn public_url_module(public_url: &str) -> eyre::Result<String> {
+pub(crate) fn public_url_module(public_url: &str, format: ModuleFormat) -> eyre::Result<String> {
     Ok(format!(
-        "module.exports = {};\n",
+        "{} {};\n",
+        export_value(format),
         serde_json::to_string(public_url)?
     ))
+}
+
+fn export_value(format: ModuleFormat) -> &'static str {
+    match format {
+        ModuleFormat::CommonJs => "module.exports =",
+        ModuleFormat::Esm => "export default",
+    }
 }
 
 pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
@@ -60,14 +69,19 @@ pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
     PathBuf::from(format!("assets/{:x}.{extension}", Sha256::digest(input)))
 }
 
-pub(crate) fn parser_path(path: &Path) -> PathBuf {
+pub(crate) fn parser_path(path: &Path, format: ModuleFormat) -> PathBuf {
+    let extension = if format == ModuleFormat::Esm {
+        "mjs"
+    } else {
+        "cjs"
+    };
     if is_asset(path) {
-        path.with_extension("asset.cjs")
+        path.with_extension(format!("asset.{extension}"))
     } else if path
         .extension()
         .is_some_and(|extension| extension == "json")
     {
-        path.with_extension("json.cjs")
+        path.with_extension(format!("json.{extension}"))
     } else {
         path.to_owned()
     }
@@ -77,9 +91,13 @@ pub(crate) fn prepare(
     path: &Path,
     input: &[u8],
     base: &crate::output_url::PublicBase,
+    format: ModuleFormat,
 ) -> eyre::Result<String> {
     if is_asset(path) {
-        return url_module(&asset_path(path, input), base);
+        if format == ModuleFormat::CommonJs {
+            return url_module(&asset_path(path, input), base);
+        }
+        return public_url_module(&base.join(&asset_path(path, input))?, format);
     }
     let text = std::str::from_utf8(input)
         .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;
@@ -92,7 +110,7 @@ pub(crate) fn prepare(
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     serde_json::from_str::<serde::de::IgnoredAny>(text)
         .wrap_err_with(|| format!("{}: invalid JSON module", path.display()))?;
-    let mut source = String::from("module.exports = (");
+    let mut source = format!("{} (", export_value(format));
     let mut start = 0;
     let mut bytes = text.bytes().enumerate();
     while let Some((index, byte)) = bytes.next() {

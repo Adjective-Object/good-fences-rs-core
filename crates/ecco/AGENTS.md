@@ -17,6 +17,9 @@
 - Evaluate against immutable rounds and merge writes before scheduling readers.
 - Binding matching uses OXC semantics, never identifier spelling alone.
 - Global reads default pure; callers declare effectful global symbol accessors.
+- Host selection is explicit: effective() stays Node; Browser selects bounded
+  conservative Window contracts, not Node or exhaustive DOM typings. Keep host
+  member paths untrusted and read contracts independent of callable overrides.
 - PURE annotations override invocation effects, not input evaluation or result hazards.
 - Record function operations without executing them; rollback recording-only
   graph allocations and instantiate owned summaries at calls.

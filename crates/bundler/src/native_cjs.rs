@@ -197,7 +197,12 @@ impl CommonJs {
         if !self.runtime_required {
             return Ok(());
         }
-        let path = PathBuf::from(RUNTIME_PATH);
+        let esm_only = self.factories.is_empty();
+        let path = PathBuf::from(if esm_only {
+            "native/context-intrinsics.mjs"
+        } else {
+            RUNTIME_PATH
+        });
         // First dependency of every job, including entries that never touch CJS.
         for (file, source) in files.iter_mut() {
             let header = if file.extension().is_some_and(|ext| ext == "cjs") {
@@ -209,7 +214,11 @@ impl CommonJs {
             };
             source.prepend_after_hashbang(header);
         }
-        let source = Code::from(include_str!("runtime.cjs"));
+        let source = Code::from(if esm_only {
+            include_str!("context_intrinsics.mjs")
+        } else {
+            include_str!("runtime.cjs")
+        });
         ensure!(
             files.insert(path.clone(), source).is_none(),
             "runtime path collision"

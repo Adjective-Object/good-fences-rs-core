@@ -8,7 +8,7 @@ use crate::{
     node_resolver::{
         caching::NodeModulesResolverOptions, combined_resolver::CombinedResolverCaches,
     },
-    resolve::{PathResolver, NODE_BUILTINS},
+    resolve::{PathResolver, TargetEnv, NODE_BUILTINS},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +83,11 @@ impl DependencyResolver for StructuralResolver {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<ResolvedDependency> {
+        eyre::ensure!(
+            self.options.target_env != TargetEnv::Browser
+                || (!specifier.starts_with("node:") && !NODE_BUILTINS.contains(&specifier)),
+            "Node builtin {specifier:?} is unsupported for the browser target; no polyfills are provided"
+        );
         if self.externals.contains(specifier) {
             return Ok(ResolvedDependency::External(specifier.to_owned()));
         }
@@ -178,6 +183,101 @@ mod tests {
                         .is_err(),
                     "{request}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn browser_dependency_main_mapping_with_canonical_cwd_prefix() {
+        const CHILD_ROOT: &str = "IMPORT_RESOLVER_BROWSER_CWD_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let cwd = PathBuf::from(root).canonicalize().unwrap();
+            // Only this exact test runs in the child, so changing cwd is isolated.
+            std::env::set_current_dir(&cwd).unwrap();
+            assert_eq!(std::env::current_dir().unwrap(), cwd);
+            let root = cwd.join("project");
+            assert!(root
+                .join("node_modules/dep/browser.mjs")
+                .strip_prefix(&cwd)
+                .is_ok());
+            for (target, expected) in [
+                (TargetEnv::Browser, "browser.mjs"),
+                (TargetEnv::Node, "server.mjs"),
+            ] {
+                let mut options = NodeModulesResolverOptions::default_for_env(target);
+                options.alias.insert("alias".into(), "dep".into());
+                let resolver = StructuralResolver::new(root.clone(), options, BTreeSet::new());
+                for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                    for request in ["dep", "alias", "dep"] {
+                        assert_eq!(
+                            resolver
+                                .resolve_dependency(&root.join("entry.mjs"), request, mode)
+                                .unwrap(),
+                            ResolvedDependency::File(root.join("node_modules/dep").join(expected))
+                        );
+                    }
+                }
+            }
+            return;
+        }
+
+        let dir = test_tmpdir::test_tmpdir! {
+            "project/entry.mjs" => "",
+            "project/node_modules/dep/package.json" => r#"{"main":"server.mjs","browser":{"./server.mjs":"./browser.mjs"}}"#,
+            "project/node_modules/dep/server.mjs" => "",
+            "project/node_modules/dep/browser.mjs" => ""
+        };
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "structural::tests::browser_dependency_main_mapping_with_canonical_cwd_prefix",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_ROOT, dir.root())
+            .current_dir(dir.root())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated resolver test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn browser_dependency_main_mapping_and_importer_mapping_are_both_applied() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "package.json" => r#"{"browser":{"./local.mjs":"./local-browser.mjs"}}"#,
+            "local.mjs" => "",
+            "local-browser.mjs" => "",
+            "node_modules/dep/package.json" => r#"{"main":"server.mjs","browser":{"./server.mjs":"./browser.mjs"}}"#,
+            "node_modules/dep/server.mjs" => "",
+            "node_modules/dep/browser.mjs" => ""
+        };
+        for (target, dependency, local) in [
+            (TargetEnv::Browser, "browser.mjs", "local-browser.mjs"),
+            (TargetEnv::Node, "server.mjs", "local.mjs"),
+        ] {
+            let resolver = StructuralResolver::new(
+                dir.root().into(),
+                NodeModulesResolverOptions::default_for_env(target),
+                BTreeSet::new(),
+            );
+            for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                for (request, expected) in [
+                    ("dep", dir.root().join("node_modules/dep").join(dependency)),
+                    ("./local.mjs", dir.root().join(local)),
+                ] {
+                    assert_eq!(
+                        resolver
+                            .resolve_dependency(&dir.root().join("entry.mjs"), request, mode)
+                            .unwrap(),
+                        ResolvedDependency::File(expected)
+                    );
+                }
             }
         }
     }
