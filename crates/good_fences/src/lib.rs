@@ -1,4 +1,3 @@
-use anyhow::Context;
 use error::EvaluateFencesError;
 use serde::Serialize;
 pub mod error;
@@ -14,19 +13,10 @@ use core::option::Option::None;
 pub use walk_dirs::ExternalFences;
 
 pub fn good_fences(opts: GoodFencesOptions) -> Vec<GoodFencesResult> {
-    let mut tsconfig = tsconfig_paths::TsconfigPathsJson::from_path(&opts.project)
-        .with_context(|| format!("Unable to find --project path {}", &opts.project))
-        .unwrap();
-
-    if opts.base_url.is_some() {
-        tsconfig.compiler_options.base_url = opts.base_url;
-    }
-
     let ignored_dirs_regexs = create_ignored_dirs_regexes(opts.ignored_dirs);
 
     let dirs_to_walk: Vec<&str> = opts.paths.iter().map(|x| x.as_str()).collect();
     let good_fences_runner = good_fences_runner::GoodFencesRunner::new(
-        tsconfig,
         &dirs_to_walk,
         match opts.ignore_external_fences {
             Some(ief) => ief,
@@ -111,8 +101,6 @@ fn create_ignored_dirs_regexes(ignored_dirs: Option<Vec<String>>) -> Vec<regex::
 
 pub struct GoodFencesOptions {
     pub paths: Vec<String>,
-    pub project: String,
-    pub base_url: Option<String>,
     pub err_output_path: Option<String>,
     pub ignore_external_fences: Option<ExternalFences>,
     pub ignored_dirs: Option<Vec<String>>,

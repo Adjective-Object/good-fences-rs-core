@@ -23,15 +23,30 @@ retain legacy filesystem resolution. Bare-string exports intentionally expose
 the selected root plus arbitrary files within that package, equivalent to adding
 `"./*": "./*"`; unlike explicit maps, this shorthand is not Node-encapsulated.
 
-The nearest bounded `tsconfig.json` adds `compilerOptions.customConditions`
-to the active export conditions. `customSourceConditions` is a compatibility
-alias; specifying both names is an error. Conditions retain package declaration
-priority. `baseUrl` and `paths` are ignored, never runtime aliases or local-file
-fallbacks. Use package exports instead. Configs must be strict JSON with direct
-conditions; `extends`/`references` remain explicit unsupported errors.
-The separate legacy `manual_resolver` used by fence checks is unchanged.
+Resolvers never discover, parse or validate `tsconfig.json`. Compiler
+`customConditions`/`customSourceConditions`, `extends`, `references`, `baseUrl`
+and `paths` have no effect on runtime resolution. Supply additional conditions
+explicitly through `NodeModulesResolverOptions::export_conditions` (including
+when constructing `MonorepoResolver` or setting `StructuralResolver` policy):
 
-Call `invalidate` after filesystem/package/tsconfig edits, additions or removals;
+```rust
+use import_resolver::{node_resolver::caching::NodeModulesResolverOptions, resolve::TargetEnv};
+let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+options.export_conditions.push("source".into());
+```
+
+This replaces the removed `read_custom_conditions` API and tsconfig cache.
+Use package exports or relative requests instead of compiler path aliases;
+TypeScript precompilation remains external. Existing package resolution and
+linked-package behavior retain their separate policies; no new symlink support
+is implied.
+
+The fence-checker's separate `manual_resolver::resolve_import` classifies relative
+and bare requests without compiler aliases. `resolve_ts_import` and the
+`tsconfig_paths` crate have been removed, along with the fence API's `project` and
+`base_url` options. Bare fence imports are dependency names, not local path aliases.
+
+Call `invalidate` after filesystem/package edits, additions or removals;
 `set_policy` invalidates automatically. Invalidation intentionally replaces both
-cache trees, including misses/config ancestry. `revision` tracks these policy/
+cache trees, including misses/package ancestry. `revision` tracks these policy/
 filesystem epochs. This correctness-first API does not promise minimal relinking.

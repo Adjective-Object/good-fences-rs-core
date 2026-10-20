@@ -29,8 +29,10 @@ Project roots are bounded/canonical;
 symlinks and resolved sources outside the root are rejected.
 Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
-Read only direct tsconfig customConditions (customSourceConditions alias);
-never rewrite paths/baseUrl. Gate unsupported inherited/reference conditions.
+Never discover/parse/validate tsconfig for resolution, including extends/references.
+Use explicit BuildOptions.resolver.export_conditions; never ingest
+customConditions/customSourceConditions or rewrite paths/baseUrl.
+Inventory may hash compiler config bytes without interpreting them.
 Publish immutable generations through one atomic ownership pointer; OS locking
 rejects competing publishers and spans the whole build_and_publish operation.
 Explicitly unlock before closing descriptors, including unwind; forked child
@@ -261,8 +263,10 @@ their identities. Preserve supported behavior in independently reviewed incremen
 Artifacts report Backend::Native; derive driver layout from it, never filenames.
 All portable fixtures require native. The harness retains legacy rejection and
 reporting for older binaries, not a production emitter fallback.
-The example driver accepts only bounded explicit fixture output/CSS config,
+The example driver accepts only bounded explicit fixture output/CSS/resolveConditions config,
 never general BuildOptions or implicit project config; keep positional calls.
+resolveConditions extends Node defaults; the fixture observer explicitly passes
+each condition to Node via --conditions, never assumes Node reads our config.
 CSS fixtures syntax-check source JS, then run a separate native output observer;
 raw Node cannot import CSS. Keep ordinary JS source/output differential checks,
 owned resource inventory validation and input/build/backend/output stages intact.

@@ -15,8 +15,6 @@ pub mod combined_resolver;
 mod common;
 pub mod internal_resolver;
 mod pkgjson_rewrites;
-mod tsconfig;
-pub use tsconfig::read_custom_conditions;
 mod util;
 
 // Wrapper for Combined resolver that owns its own caches, instead of

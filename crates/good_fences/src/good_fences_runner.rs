@@ -7,11 +7,9 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::{FromIterator, Iterator};
-use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, PartialEq)]
 pub struct GoodFencesRunner {
-    tsconfig_paths_json: TsconfigPathsJson,
     fence_collection: FenceCollection,
     source_files: HashMap<String, SourceFile>,
 }
@@ -24,7 +22,6 @@ pub struct UndefinedTagReference<'a> {
 
 impl GoodFencesRunner {
     pub fn new(
-        tsconfig_paths_json: TsconfigPathsJson,
         directory_paths_to_walk: &[&str],
         external_fences: ExternalFences,
         ignored_dirs: &[regex::Regex],
@@ -72,7 +69,6 @@ impl GoodFencesRunner {
         GoodFencesRunner {
             source_files: source_file_map,
             fence_collection: FenceCollection { fences_map },
-            tsconfig_paths_json,
         }
     }
 
@@ -84,12 +80,7 @@ impl GoodFencesRunner {
             .source_files
             .par_iter()
             .map(|(_, source_file)| {
-                evaluate_fences(
-                    &self.fence_collection,
-                    &self.source_files,
-                    source_file,
-                    &self.tsconfig_paths_json,
-                )
+                evaluate_fences(&self.fence_collection, &self.source_files, source_file)
             })
             .collect::<Vec<_>>();
         for result in violation_results {
@@ -174,7 +165,6 @@ mod test {
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
     use text_diff::print_diff;
-    use tsconfig_paths::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
 
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {
@@ -203,7 +193,6 @@ mod test {
     #[test]
     fn good_fences_integration_test_runner_initialized() {
         let good_fences_runner = GoodFencesRunner::new(
-            TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json").unwrap(),
             &["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
             &Vec::new(),
@@ -212,12 +201,6 @@ mod test {
         assert_eq!(
             good_fences_runner,
             GoodFencesRunner {
-                tsconfig_paths_json: TsconfigPathsJson {
-                    compiler_options: TsconfigPathsCompilerOptions {
-                        base_url: None,
-                        paths: HashMap::new(),
-                    },
-                },
                 fence_collection: FenceCollection {
                     fences_map: map!(
                         "tests/good_fences_integration/src/componentB/someDeep/complexComponentA/fence.json" => Fence {
@@ -471,7 +454,6 @@ mod test {
     #[test]
     fn good_fences_integration_test_violations() {
         let good_fences_runner = GoodFencesRunner::new(
-            TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json").unwrap(),
             &["tests/good_fences_integration"],
             ExternalFences::Ignore,
             &Vec::new(),
@@ -570,7 +552,6 @@ mod test {
     #[test]
     fn good_fences_integration_test_find_undefined_tags() {
         let good_fences_runner = GoodFencesRunner::new(
-            TsconfigPathsJson::from_path("tests/good_fences_integration/tsconfig.json").unwrap(),
             &["tests/good_fences_integration/src"],
             ExternalFences::Ignore,
             &Vec::new(),

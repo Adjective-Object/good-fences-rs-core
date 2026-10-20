@@ -1,6 +1,5 @@
 extern crate import_resolver;
 extern crate serde_json;
-extern crate tsconfig_paths;
 
 #[macro_use]
 extern crate anyhow;

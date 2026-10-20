@@ -22,7 +22,6 @@ oxc_span.workspace = true
 oxc_utils_parse = { version = "0.1.0", path = "../oxc_utils_parse" }
 ast-segmenter = { path = "../ast_segmenter" }
 thiserror.workspace = true
-tsconfig_paths = { path = "../tsconfig_paths" }
 packagejson = { path = "../packagejson" }
 packagejson_exports = { path = "../packagejson_exports" }
 path-clean.workspace = true
