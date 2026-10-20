@@ -1,0 +1,3 @@
+.button-label, #button-label { color: red; }
+:global(.theme) .button-label { color: blue; }
+.unused-rule { color: green; }

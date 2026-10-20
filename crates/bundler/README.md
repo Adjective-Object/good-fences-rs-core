@@ -735,6 +735,44 @@ entries use the same import observer. See the
 [fixture schema and current backend counts](../../fixtures/bundler/README.md).
 Use an absolute OUTPUT, or note that it is relative to the process cwd.
 
+### Explicit fixture configuration
+
+Existing positional invocations are unchanged. To exercise output/CSS options:
+
+```sh
+cargo run -p bundler --example build -- PROJECT OUTPUT --fixture-config CONFIG.json ENTRY...
+```
+
+The optional flag occurs immediately after OUTPUT. CONFIG.json is an explicit
+JSON file limited to **16 KiB**, with only these optional fields (shown with
+shipped defaults); unknown fields, including nested fields, are errors:
+
+```json
+{
+  "output": {"base_url": "./"},
+  "css": {"load": "caller-loaded", "css_modules": false}
+}
+```
+
+This is a small fixture driver, not a general BuildOptions configuration API.
+No configuration is discovered implicitly; entry selection remains positional.
+`css_modules` accepts `false`, `true` (`.module.css`), `"everything"` (known CSS
+inputs only) or `"ext:.custom.suffix"`; `load` accepts `"caller-loaded"` or
+`"auto-mount"`, independently of selection. Export-name conversion is fixed
+camelCase, not configurable. Invalid bases/suffixes, collisions, illegal or cyclic
+composition and unsupported/recovered module syntax return errors, never partial
+transform success. ICSS `:import`/`:export`, `@value` and preprocessor compilation
+are unsupported; see the full CSS contract above for selector/value boundaries.
+
+Caller-loaded users must serve owned resources under the configured base and
+load/order their stylesheets. Auto-mount users must provide a usable document/head
+and serve the same resources; synchronous link insertion is **not load readiness**.
+Missing DOM/head fails rather than silently skipping CSS. The portable CSS
+contracts separately syntax-check source JavaScript and observe native emitted
+output because raw Node cannot import CSS. DOM recorders do not establish browser
+CSS application, real network behavior or readiness. Existing JavaScript fixtures
+continue comparing unbundled and emitted observations without a custom loader.
+
 ## Public build session
 
 `build::{BuildSession, BuildOptions, Entry}` joins the existing source cache,
