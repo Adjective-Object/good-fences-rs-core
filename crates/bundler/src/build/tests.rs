@@ -1945,6 +1945,82 @@ console.log('esm entry');
 }
 
 #[test]
+fn css_modules_custom_suffix_aliases_keep_owned_paths_and_mount_once_for_each_base() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "source/style.module.cjs",
+        ".button-label {color: red}",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Extension(".module.cjs".into());
+    config.entries.get_mut("main").unwrap().path = "source/style.module.cjs".into();
+    config.entries.insert(
+        "z-alias".into(),
+        Entry {
+            path: "source/style.module.cjs".into(),
+            output_name: Some("deep/alias/styles.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut owned = None;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        for base in [
+            "./",
+            "./public space/",
+            "../outside/",
+            "/static/",
+            "http://cdn.example/styles/",
+            "https://cdn.example/styles/",
+        ] {
+            config.output.base_url = base.into();
+            let built = session.build(&config).unwrap();
+            let artifacts = &built.product.artifacts;
+            assert_eq!(
+                artifacts.entries["main"],
+                Path::new("source/style.module.mjs")
+            );
+            assert_eq!(artifacts.stylesheets.len(), 1);
+            assert_eq!(artifacts.resources.len(), 1);
+            if let Some(previous) = &owned {
+                assert_eq!(previous, &artifacts.resources);
+            }
+            owned = Some(artifacts.resources.clone());
+            let stylesheet = &artifacts.stylesheets[&dir.root().join("source/style.module.cjs")];
+            assert!(artifacts.resources.contains_key(stylesheet));
+            assert!(!artifacts.files.contains_key(stylesheet));
+            let public = crate::output_url::PublicBase::new(base)
+                .unwrap()
+                .join(stylesheet)
+                .unwrap();
+            assert_eq!(
+                observe_named(
+                    artifacts,
+                    &format!(
+                        r#"{CSS_DOM_RECORDER}
+const alias = await import('./deep/alias/styles.mjs');
+const canonical = await import('./source/style.module.mjs');
+assert.deepEqual(Object.keys(alias), ['buttonLabel']);
+assert.deepEqual(Object.keys(canonical), ['buttonLabel']);
+assert.equal(alias.buttonLabel, canonical.buttonLabel);
+assert.match(canonical.buttonLabel, /^_[A-Za-z0-9_-]{{10}}$/);
+assert.strictEqual(await import('./deep/alias/styles.mjs'), alias);
+assert.equal(links.length, {mounts});
+if ({mounts}) assert.equal(links[0].href, new URL({public:?}, import.meta.url).href);
+console.log('module alias');
+"#,
+                        mounts = usize::from(load == CssLoad::AutoMount),
+                    ),
+                ),
+                b"module alias\n",
+            );
+        }
+    }
+}
+
+#[test]
 fn auto_mount_css_http_origin_and_cdn_urls_use_native_owner_meta_url() {
     let dir = TmpDir::new();
     write(dir.root(), "style.css", ".a {}");
@@ -2014,6 +2090,203 @@ console.log('http origin');
         );
         assert_eq!(output.stdout, b"http origin\n");
     }
+}
+
+#[test]
+fn css_modules_published_shared_static_dynamic_and_cjs_activation_keep_generations() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {sharedName} from './shared.style'; \
+         export const load = () => import('./nested/lazy.mjs'); \
+         export {default as requireStyle} from './loader.cjs';",
+    );
+    write(
+        dir.root(),
+        "other.mjs",
+        "export {sharedName} from './shared.style';",
+    );
+    write(
+        dir.root(),
+        "nested/lazy.mjs",
+        "export {sharedName} from '../shared.style'; \
+         export {buttonLabel} from '../button.style'; \
+         export const deeper = () => import('./deeper.mjs');",
+    );
+    write(
+        dir.root(),
+        "nested/deeper.mjs",
+        "export {deepName} from '../deep.style';",
+    );
+    write(
+        dir.root(),
+        "loader.cjs",
+        "module.exports = () => require('./required.style');",
+    );
+    let shared = "@import './theme.css' screen; \
+                  .shared-name {color: red; background: url('./pixel.bin?v=1#icon')}";
+    write(dir.root(), "shared.style", shared);
+    write(dir.root(), "theme.css", ".theme {color: yellow}");
+    write(dir.root(), "pixel.bin", "first pixel");
+    write(
+        dir.root(),
+        "button.style",
+        ".button-label {composes: shared-name from './shared.style'; color: red}",
+    );
+    write(dir.root(), "deep.style", ".deep-name {color: green}");
+    write(dir.root(), "required.style", ".required-name {color: blue}");
+    let mut config = options();
+    config.css.css_modules = CssModules::Extension(".style".into());
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/app/main.mjs".into());
+    for (name, path, output) in [
+        ("other", "other.mjs", "another/entry.mjs"),
+        ("z-alias", "main.mjs", "aliases/main.mjs"),
+    ] {
+        config.entries.insert(
+            name.into(),
+            Entry {
+                path: path.into(),
+                output_name: Some(output.into()),
+                namespace: true,
+            },
+        );
+    }
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let output = dir.root().join(".bundler-published");
+    let cancel = crate::publish::Cancellation::default();
+    let (old_build, old) = session
+        .build_and_publish(&config, &output, &cancel)
+        .unwrap();
+    let before = crate::publish::current_directory(&output).unwrap();
+    let old_bytes: BTreeMap<_, _> = old_build
+        .product
+        .artifacts
+        .file_bytes()
+        .map(|(path, bytes)| (path.clone(), bytes.to_vec()))
+        .collect();
+    write(
+        dir.root(),
+        "shared.style",
+        &shared.replace("color: red", "color: purple"),
+    );
+    write(dir.root(), "pixel.bin", "second pixel");
+    let (new_build, new) = session
+        .build_and_publish(&config, &output, &cancel)
+        .unwrap();
+    assert_ne!(before, new.directory);
+    for (path, bytes) in &old_bytes {
+        assert_eq!(&fs::read(old.directory.join(path)).unwrap(), bytes);
+    }
+    for (build, published) in [(&old_build, &old), (&new_build, &new)] {
+        assert_eq!(build.product.artifacts.stylesheets.len(), 4);
+        for path in build.product.artifacts.stylesheets.values() {
+            assert!(published.directory.join(path).is_file());
+            assert!(build.product.artifacts.resources.contains_key(path));
+            assert!(!build.product.artifacts.files.contains_key(path));
+        }
+    }
+    let urls = |published: &crate::publish::Published| {
+        published
+            .entries
+            .iter()
+            .map(|(name, path)| {
+                (
+                    name.clone(),
+                    url::Url::from_file_path(path).unwrap().to_string(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let hrefs = |build: &BuildResult, published: &crate::publish::Published| {
+        [
+            "shared.style",
+            "required.style",
+            "button.style",
+            "deep.style",
+        ]
+        .map(|input| {
+            url::Url::from_file_path(
+                published
+                    .directory
+                    .join(&build.product.artifacts.stylesheets[&dir.root().join(input)]),
+            )
+            .unwrap()
+            .to_string()
+        })
+    };
+    write(
+        dir.root(),
+        "published-modules-check.mjs",
+        &format!(
+            r#"{CSS_DOM_RECORDER}
+import {{readFileSync}} from 'node:fs';
+const generations = {generations};
+const retained = [];
+for (const [entries, expected] of generations) {{
+    const start = links.length;
+    const alias = await import(entries['z-alias']);
+    const main = await import(entries.main);
+    const other = await import(entries.other);
+    assert.equal(links.length, start + 1);
+    assert.equal(main.sharedName, alias.sharedName);
+    assert.equal(main.sharedName, other.sharedName);
+    assert.match(main.sharedName, /^_[A-Za-z0-9_-]{{10}}$/);
+    assert.strictEqual(main.load, alias.load);
+    assert.strictEqual(main.requireStyle, alias.requireStyle);
+    const required = main.requireStyle();
+    assert.deepEqual(Object.keys(required), ['requiredName']);
+    assert.strictEqual(main.requireStyle(), required);
+    assert.equal(links.length, start + 2);
+    const lazy = await alias.load();
+    assert.strictEqual(await main.load(), lazy);
+    assert.equal(lazy.sharedName, main.sharedName);
+    assert.equal(lazy.buttonLabel.split(' ')[1], main.sharedName);
+    assert.equal(links.length, start + 3);
+    const deep = await lazy.deeper();
+    assert.deepEqual(Object.keys(deep), ['deepName']);
+    assert.strictEqual(await lazy.deeper(), deep);
+    assert.equal(links.length, start + 4);
+    assert.deepEqual(links.slice(start).map(link => link.href), expected);
+    for (const [index, mapping] of [main.sharedName, required.requiredName, lazy.buttonLabel, deep.deepName].entries()) {{
+        assert.ok(existsSync(new URL(expected[index])));
+        assert.ok(readFileSync(new URL(expected[index]), 'utf8').includes('.' + mapping.split(' ')[0]));
+    }}
+    const css = readFileSync(new URL(expected[0]), 'utf8');
+    const generation = new URL('../../', entries.main).href;
+    assert.ok(expected.every(href => href.startsWith(generation)));
+    const references = [css.match(/@import "([^"]+)"/)[1], css.match(/url\("([^"]+)"\)/)[1]];
+    for (const reference of references) {{
+        const resolved = new URL(reference, expected[0]);
+        assert.ok(resolved.href.startsWith(generation));
+        assert.ok(existsSync(resolved), resolved.href);
+    }}
+    assert.match(css, /screen;/);
+    assert.equal(readFileSync(new URL(references[1], expected[0]), 'utf8'), retained.length ? 'second pixel' : 'first pixel');
+    retained.push({{main, lazy, deep, required}});
+}}
+assert.equal(retained[0].main.sharedName, retained[1].main.sharedName);
+assert.equal(retained[0].lazy.buttonLabel, retained[1].lazy.buttonLabel);
+assert.notEqual(generations[0][1][0], generations[1][1][0]);
+assert.notEqual(generations[0][1][2], generations[1][1][2]);
+assert.strictEqual(await retained[0].main.load(), retained[0].lazy);
+assert.strictEqual(await retained[0].lazy.deeper(), retained[0].deep);
+assert.strictEqual(retained[0].main.requireStyle(), retained[0].required);
+assert.equal(links.length, 8);
+console.log('published module activation');
+"#,
+            generations = serde_json::to_string(&[
+                (urls(&old), hrefs(&old_build, &old)),
+                (urls(&new), hrefs(&new_build, &new)),
+            ])
+            .unwrap(),
+        ),
+    );
+    assert_eq!(
+        observe_entry(&dir.root().join("published-modules-check.mjs")),
+        b"published module activation\n"
+    );
 }
 
 #[test]
