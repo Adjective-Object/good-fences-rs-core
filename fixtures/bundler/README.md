@@ -176,13 +176,14 @@ Node defaults. Move previously staged tsconfig custom conditions here (or to
 the Rust resolver options); tsconfig files, including JSONC extends/references,
 are no longer interpreted or validated for resolution. TS compilation remains external.
 
-`fixtureConfig` exposes only the example driver's output/CSS options and additional
-explicit export conditions; it does not
+`fixtureConfig` exposes only the example driver's output/CSS options, bounded
+worker count and additional explicit export conditions; it does not
 configure external dependencies, effects, entry renames or custom plugins:
 
 ```json
 {
   "fixtureConfig": {
+    "workers": 4,
     "output": {"base_url": "./"},
     "css": {"load": "caller-loaded", "css_modules": true}
   },
@@ -191,7 +192,11 @@ configure external dependencies, effects, entry renames or custom plugins:
 ```
 
 All config objects/fields are optional; the shipped defaults are base `"./"`,
-load `"caller-loaded"` and modules `false`. The complete serialized config is
+load `"caller-loaded"`, modules `false` and workers `1` (inline execution).
+`workers` must be an integer from 1 through 64 and bounds both script preparation
+and output emission, in sequential stages; resolution/CSS/Ecco stay serial.
+Use worker counts 1, 2, 4 and 6 for comparable forthcoming benchmarks.
+The complete serialized config is
 bounded to 16 KiB, with unknown fields rejected at every level. Module selection
 also accepts `"everything"` (CSS only) and `"ext:.custom.suffix"`;
 `true` selects `.module.css`. `"auto-mount"` is independent of selection.

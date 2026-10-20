@@ -6,13 +6,25 @@ use bundler::{
     publish::Cancellation,
 };
 
-#[derive(Default, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct FixtureConfig {
+    workers: std::num::NonZeroUsize,
     output: FixtureOutput,
     css: FixtureCss,
     #[serde(rename = "resolveConditions")]
     resolve_conditions: Vec<String>,
+}
+
+impl Default for FixtureConfig {
+    fn default() -> Self {
+        Self {
+            workers: std::num::NonZeroUsize::MIN,
+            output: FixtureOutput::default(),
+            css: FixtureCss::default(),
+            resolve_conditions: Vec::new(),
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -58,6 +70,11 @@ fn main() -> eyre::Result<()> {
             .read_to_end(&mut bytes)?;
         eyre::ensure!(bytes.len() <= 16 * 1024, "fixture config exceeds 16 KiB");
         let config: FixtureConfig = serde_json::from_slice(&bytes)?;
+        eyre::ensure!(
+            config.workers.get() <= 64,
+            "workers must be between 1 and 64"
+        );
+        options.execution = bundler::execution::ExecutionOptions::new(config.workers);
         eyre::ensure!(
             config
                 .resolve_conditions
@@ -108,6 +125,7 @@ fn main() -> eyre::Result<()> {
             "resources": build.product.artifacts.resources.keys().collect::<Vec<_>>(),
             "generation": build.product.generation,
             "sourceParses": build.counters.source_parses,
+            "declarationFingerprints": build.counters.declaration_fingerprints,
             "diskHits": build.counters.disk_hits,
             "resolutions": build.counters.resolutions,
             "emissions": build.counters.emissions,

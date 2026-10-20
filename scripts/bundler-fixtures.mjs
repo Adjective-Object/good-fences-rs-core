@@ -135,8 +135,12 @@ function validateCase(root, directory) {
 }
 
 function validateFixtureConfig(config) {
-  object(config, [], 'fixtureConfig', ['output', 'css', 'resolveConditions']);
+  object(config, [], 'fixtureConfig', ['output', 'css', 'resolveConditions', 'workers']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
+  if (Object.hasOwn(config, 'workers')) {
+    check(Number.isInteger(config.workers) && config.workers >= 1 && config.workers <= 64,
+      'workers must be an integer between 1 and 64');
+  }
   if (Object.hasOwn(config, 'resolveConditions')) {
     strings(config.resolveConditions, 'fixtureConfig.resolveConditions', { empty: true });
     check(config.resolveConditions.every(condition => !['import', 'require'].includes(condition)),
