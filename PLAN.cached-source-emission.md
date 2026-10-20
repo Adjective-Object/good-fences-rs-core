@@ -93,6 +93,7 @@ cached recipe + original source + link-time substitutions -> rendered chunk
 - Consumers: `rewrite::{source_hint_edits, validate}` and all output assembly paths.
 - Apply precomputed source-hint removal operations during rendering; generators add none.
 - Gate final parser/semantic validation with `#[cfg(debug_assertions)]`; release emission performs no parsing.
+- Before gating, enforce parse-free identifier legality for rename targets, including reserved words and strict-mode restrictions; reuse `symbols.rs` rules.
 - In debug builds, validate once per final executable artifact after naming/alias construction; skip intermediate candidates.
 - Keep source/cache integrity, edit-range/overlap, artifact-target and output-path validation enabled in every build.
 - Test debug diagnostics and release parse counts explicitly; runtime regressions exercise generated output independently.
@@ -106,4 +107,4 @@ cached recipe + original source + link-time substitutions -> rendered chunk
 - Verify no-op builds perform neither and exercise both profiles in the migration gates.
 - Compare cold/warm/edit benchmarks and cache size against a recorded baseline; report timings, not speedups inferred from parse counts.
 - Run cache parity, structural/runtime regressions, `scripts/bundler-release-check` and `./scripts/spot-check`; update crate READMEs.
-- Out of scope: minification, upstream parity and finer later-layer invalidation.
+- Out of scope: minification, source-map support/out-of-segment source-map hint cleanup, upstream parity and finer later-layer invalidation.
