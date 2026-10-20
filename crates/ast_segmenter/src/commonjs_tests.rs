@@ -201,6 +201,101 @@ fn commonjs_path_parameters_allow_var_function_and_nested_shadowing() {
 }
 
 #[test]
+fn esm_environment_probes_are_free_reads_not_commonjs_bindings() {
+    let source = r#"
+var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
+var freeModule = freeExports && typeof module == 'object' && module && !module.nodeType && module;
+var moduleExports = freeModule && freeModule.exports === freeExports;
+var nodeUtil = freeModule && freeModule.require && freeModule.require('util');
+export const detected = moduleExports;
+export function guarded() {
+    if (typeof module !== 'undefined') return module['exports'];
+    return typeof exports === 'undefined' ? undefined : exports.nodeType;
+}
+export const loaderType = typeof (require);
+"#;
+    let parsed = parse(source, "probes.mjs").unwrap();
+    assert_eq!(parsed.body, ModuleBody::Esm);
+    assert!(!parsed.facts.commonjs);
+    assert!(parsed.facts.dependencies.is_empty());
+    for name in ["exports", "module", "require"] {
+        let references: Vec<_> = parsed
+            .facts
+            .references
+            .iter()
+            .filter(|r| r.name == name)
+            .collect();
+        assert!(!references.is_empty());
+        assert!(references
+            .iter()
+            .all(|r| r.binding.is_none() && r.commonjs.is_none() && !r.write));
+    }
+}
+
+#[test]
+fn esm_environment_probes_preserve_shadows_and_unprotected_read_semantics() {
+    for source in [
+        "export function f(module, exports, require) { module.exports = exports; return require('local'); }",
+        "export function f() { return typeof exports; let exports; }",
+        "export const value = module.exports;",
+        "export const value = typeof exports['nodeType'];",
+        "export function f() { if (typeof module === 'object') return module.exports; }",
+        "export const value = (() => typeof module)();",
+        "export const value = (function () { return typeof exports; })();",
+        "const target = {}; target[typeof module] = 1; export default target;",
+        "export const value = table[typeof exports]();",
+        "export const value = wrap(typeof require)();",
+        "export const value = (typeof module === 'object' && module ? nodeImpl : browserImpl)();",
+        "export const value = (module, exports, browserImpl)();",
+        "export const value = (module === null || browserImpl)();",
+        "export const value = new (module ? NodeImpl : BrowserImpl)();",
+        "export const value = (exports ? nodeTag : browserTag)`value`;",
+    ] {
+        parse(source, "probes.mjs").unwrap();
+    }
+}
+
+#[test]
+fn esm_environment_probes_do_not_enable_wrapper_operations() {
+    for source in [
+        "module.exports = 1;",
+        "exports.x++;",
+        "delete exports.x;",
+        "({x: module.exports} = value);",
+        "for (exports.x of values) {}",
+        "module['exports'].x = 1;",
+        "typeof module !== 'undefined' && (module.exports = 1);",
+        "module.require('./x');",
+        "module?.require?.('./x');",
+        "(0, module.require)('./x');",
+        "new exports.Factory();",
+        "exports.tag`value`;",
+        "const load = require;",
+        "typeof require.resolve;",
+        "typeof require === 'function' && require('./x');",
+        "(module ? module.require : browserImpl)('./x');",
+        "(exports ? browserImpl : exports.run)();",
+        "(module, exports.run)();",
+        "(module.require('./x'), browserImpl)();",
+        "(module.exports = 1, browserImpl)();",
+        "(module.require || browserImpl)();",
+        "(browserImpl && module.require)();",
+        "(module.require ?? browserImpl)();",
+        "(module.require && browserImpl)();",
+        "new (module ? exports.Factory : BrowserImpl)();",
+        "(module ? exports.tag : browserTag)`value`;",
+    ] {
+        let error = format!("{:#}", parse(source, "probes.mjs").unwrap_err());
+        assert!(
+            error.contains("mixed ESM/CommonJS") && error.contains("bytes "),
+            "{}: {}",
+            source,
+            error
+        );
+    }
+}
+
+#[test]
 fn mixed_modules_are_errors_not_partial_records() {
     for (path, source) in [
         ("test.mjs", "export const x = require('./x');"),

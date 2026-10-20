@@ -6,6 +6,28 @@ use source_graph::{DependencyTarget, ExportIdentity, Namespace, SegmentKey, Sour
 
 use crate::{effects, policy::EffectPolicy};
 
+const ENVIRONMENT_PROBES: [&str; 3] = ["module", "exports", "require"];
+
+pub(crate) fn prepare_declarations(
+    config: &ecco::DeclarationConfig,
+) -> eyre::Result<ast_segmenter::PreparedDeclarations> {
+    let mut facts = config.effective()?;
+    for name in ENVIRONMENT_PROBES {
+        if !facts
+            .global_symbols
+            .iter()
+            .any(|symbol| symbol.name == name)
+        {
+            facts.global_symbols.push(ecco::GlobalSymbol {
+                name: name.to_owned(),
+                read_effects: true,
+            });
+        }
+    }
+    facts.global_symbols.sort_by(|a, b| a.name.cmp(&b.name));
+    ast_segmenter::PreparedDeclarations::new(facts)
+}
+
 pub(crate) fn analyze(
     graph: &SourceGraph,
     policy: &EffectPolicy,
@@ -33,11 +55,28 @@ pub(crate) fn analyze(
     let mut effects = BTreeMap::new();
     // shortcut: deferred policy/TDZ barriers disable inferred pruning until Ecco
     // exposes invocation-specific policy and initialization-error dependencies.
+    // Low-level inputs may also lack the build's probe read contracts. Their
+    // inferred functions can hide those reads from callers in other modules.
     let structural_override = !policy.honors_pure_annotations()
         || graph.module_ids().any(|file| {
             graph.file_facts(file).is_some_and(|facts| {
                 facts.commonjs
                     || crate::link::has_externals(graph, file)
+                    || facts.effects.iter().any(|site| {
+                        site.deferred.is_some()
+                            && site.reason == ast_segmenter::effects::EffectReason::UnresolvedRead
+                            && facts.references.iter().any(|reference| {
+                                reference.span == site.span
+                                    && ENVIRONMENT_PROBES.contains(&reference.name.as_str())
+                                    && !facts.ecco.as_ref().is_some_and(|parsed| {
+                                        parsed
+                                            .declarations()
+                                            .global_symbols
+                                            .iter()
+                                            .any(|symbol| symbol.name == reference.name)
+                                    })
+                            })
+                    })
                     || facts.invocations.iter().any(|call| {
                         call.deferred.is_some() && policy.matching_patterns(call).next().is_some()
                     })
@@ -119,8 +158,9 @@ pub(crate) fn summarize(
             .retain(|site| site.reason != ast_segmenter::effects::EffectReason::BindingRead);
     }
     if let Some(false) = effectful {
-        // Binding reads remain native TDZ/error barriers. Ecco intentionally
-        // does not model throws as effects; emission must preserve these.
+        // Binding reads remain native TDZ/error barriers. Environment probes
+        // can invoke host getters (even under typeof) or throw ReferenceError;
+        // Ecco's default purity for undeclared globals does not prove otherwise.
         summary.sites.retain(|site| {
             (matches!(
                 site.reason,
@@ -132,6 +172,11 @@ pub(crate) fn summarize(
                 .any(|call| call.span == site.span && call.pure.is_some()))
                 || site.reason == ast_segmenter::effects::EffectReason::BindingRead
                     && binding_may_throw(graph, file, facts, site.span)
+                || site.reason == ast_segmenter::effects::EffectReason::UnresolvedRead
+                    && facts.references.iter().any(|reference| {
+                        reference.span == site.span
+                            && ENVIRONMENT_PROBES.contains(&reference.name.as_str())
+                    })
         });
     }
     summary

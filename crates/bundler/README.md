@@ -517,6 +517,12 @@ identity participates in disk metadata, memory reuse and build parse fingerprint
 so declaration changes trigger fresh extraction and whole-graph analysis.
 Only potentially referenced declaration families enter each file's precursors;
 cache identity still hashes the complete effective declaration set.
+Public builds also default `module`, `exports`, and `require` global-symbol reads
+to effectful, independently of the presets. Explicit user read contracts override
+these defaults. The contracts participate in the same validated prepared identity
+and propagate through inferred functions and imported helpers; they introduce no
+runtime bindings. Low-level graphs with undeclared deferred probe reads
+conservatively disable inferred pruning instead.
 
 Library-only retention, exact chunk planning and JavaScript ESM/CJS emission over
 the checked owned `SourceGraph`. This is not an unused-report adapter.
@@ -888,6 +894,26 @@ Old-reader quiescence is mandatory before pruning immutable prior generations;
 publication promises atomic visibility, not power-loss durability.
 
 ## CommonJS runtime
+
+ESM inputs may read `module`/`exports` or probe `typeof require` for environment
+detection (including lodash-es guards). These stay native free references, not
+CommonJS wrapper bindings: the bundler does not inject Node globals or replace
+guards with `false`. Host-provided values/getters, short-circuit timing, lexical
+shadowing/TDZ and unguarded ReferenceErrors remain observable. Direct wrapper
+writes, deletes, updates, calls, construction and tags remain unsupported in ESM;
+aliases remain ordinary JavaScript values, not inferred loaders.
+Unused native `module`/`exports` reads and `typeof require` retain their read
+effects through Ecco refinement, including host getters and missing-global errors;
+this includes unused calls to functions and indirect helpers that perform reads.
+Uncalled probe functions do not disable refinement. Executed host reads use Ecco's
+opaque-execution widening, which can also retain otherwise pure calls whose
+globals or values might be mutated by a getter.
+
+Package format is explicit, not inferred from probes or export syntax. Precompiled
+ESM `.js` in a package without `"type":"module"` is a consumer configuration error:
+add `"type":"module"` to its `package.json`, or use `.mjs` instead of `.js`.
+The diagnostic includes the input path and declaration span; no format override
+is applied.
 
 Linked opaque JavaScript CJS bodies appear once as real function syntax in pure
 availability `.cjs` chunks. These chunks group factories by existing root sets;

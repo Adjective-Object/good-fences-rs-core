@@ -69,6 +69,11 @@ function containment is syntax metadata, not eager evaluation permission.
 `policy` is the checked source-local support gate; target format, assets and
 externals remain resolver/linker checks. Low-level parsing and legacy adapters
 intentionally accept a broader syntax set.
+ESM environment reads of module/exports and typeof require stay unresolved native
+references, not CJS wrapper facts or constant-false guards. Preserve host reads,
+short-circuit aliases and lexical TDZ; keep direct wrapper operations rejected.
+Operation context follows selected conditional branches/final sequence values,
+not tests/discarded prefixes; logical operands remain conservatively checked.
 CommonJS path parameters allow var/function redeclarations and nested shadows;
 reject top-level lexical redeclarations before factory emission.
 `top_level_await` owns ESM await/for-await source spans outside functions;

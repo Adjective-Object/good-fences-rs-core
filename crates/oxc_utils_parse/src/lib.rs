@@ -34,6 +34,25 @@ pub fn parse_bundler_file<'a>(
         };
     }
     let parsed = Parser::new(allocator, source, source_type).parse();
+    if source_type.is_commonjs() && path.extension().is_some_and(|ext| ext == "js") {
+        use oxc_ast::ast::Statement;
+        use oxc_span::GetSpan;
+        if let Some(declaration) = parsed.program.body.iter().find(|statement| {
+            matches!(
+                statement,
+                Statement::ImportDeclaration(_)
+                    | Statement::ExportNamedDeclaration(_)
+                    | Statement::ExportDefaultDeclaration(_)
+                    | Statement::ExportAllDeclaration(_)
+            )
+        }) {
+            let span = declaration.span();
+            eyre::bail!(
+                "{}: mixed CommonJS/ESM syntax at bytes {}..{}: this ESM .js input's package is missing required \"type\":\"module\" in package.json (or explicitly selects CommonJS); add \"type\":\"module\" or use .mjs instead of .js",
+                path.display(), span.start, span.end
+            );
+        }
+    }
     ensure!(
         !parsed.panicked && parsed.errors.is_empty(),
         "{}: parser diagnostics (panicked={}): {:?}",
@@ -181,6 +200,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn esm_javascript_requires_explicit_package_format() {
+        for source in [
+            "export const value = 1;",
+            "export default 1;",
+            "export * from './dep.js';",
+            "import './dep.js';",
+        ] {
+            let allocator = Allocator::default();
+            let error = parse_bundler_file(
+                &allocator,
+                source,
+                Path::new("compiled.js"),
+                ModuleFormat::CommonJs,
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert!(
+                error.contains("compiled.js") && error.contains("bytes "),
+                "{error}"
+            );
+            assert!(
+                error.contains("missing required \"type\":\"module\""),
+                "{error}"
+            );
+            assert!(error.contains("use .mjs instead of .js"), "{error}");
+            assert!(parse_bundler_file(
+                &allocator,
+                source,
+                Path::new("compiled.js"),
+                ModuleFormat::Esm,
+            )
+            .is_ok());
+            assert!(parse_bundler_file(
+                &allocator,
+                source,
+                Path::new("compiled.mjs"),
+                ModuleFormat::CommonJs,
+            )
+            .is_ok());
+        }
+        let allocator = Allocator::default();
+        assert!(parse_bundler_file(
+            &allocator,
+            "import('./dep.js');",
+            Path::new("dynamic.js"),
+            ModuleFormat::CommonJs,
+        )
+        .is_ok());
     }
 
     #[test]

@@ -80,7 +80,8 @@ original execution timing inside the opaque body. The segment's legacy
 dependency sets are only a conservative projection.
 
 `Reference::commonjs` classifies unresolved `require`, `module` and `exports`
-wrapper references; lexical shadows are ordinary bindings. `module.exports`
+wrapper references only in CommonJS; lexical shadows and ESM environment reads
+are ordinary bindings/references. `module.exports`
 replacement, `exports` alias replacement and `module` assignment remain in the
 body verbatim. No static list of CommonJS named exports is guessed.
 
@@ -104,13 +105,24 @@ unchanged.
 | CJS `module`/`exports` reassignment | Preserved verbatim with reference write flags; no alias or named-export inference |
 | CJS directives/hashbang/top-level return | Preserved; hashbang recorded separately; one opaque body even when empty |
 | CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |
-| Mixed-file static ESM/CJS syntax or unshadowed ESM references to CJS wrapper names | Diagnostic; explicit extension/package format is never guessed from content |
+| ESM environment probes | `typeof require`, read-only `module`/`exports` references and property reads remain native globals, including lodash-style short-circuit aliases; no injected bindings or constant replacement |
+| Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or ESM loader use other than `typeof require` | Diagnostic; explicit extension/package format is never guessed from content |
 | Unshadowed eval, nested `with`, `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
 | Top-level await/for-await | ESM source spans in `facts.top_level_await`, excluding nested functions; CJS diagnostic. Dependency/SCC scheduling belongs to the native bundler host |
 | Import attributes/options/phases (including type import options) | Diagnostic |
 | Erasable TS annotations/types/assertions, TS import types | Owned syntax facts and type-only references/dependencies; **not erased or executable output** |
 | JSX, decorators, auto-accessors, TS enums/namespaces/parameter properties, TS import/export assignments and namespace exports, resource management | Unsupported-transform diagnostic |
 | Native-addon/asset specifiers, external/builtin specifiers, require-of-ESM targets | Raw target string and occurrence preserved, **not resolved, externalized, transformed or validated for execution**; these need resolver/linker policy, including require-of-async-ESM diagnostics |
+
+Environment reads do not prove a guard true or false: host globals, getters,
+short-circuit evaluation, unguarded ReferenceErrors and shadowed lexical TDZ all
+retain JavaScript semantics. Aliases are ordinary values, not inferred CommonJS
+wrappers or loaders. Direct wrapper operations remain a conservative source-local
+gate, even inside a guard. ESM syntax in CommonJS-mode `.js` produces an actionable
+package `"type":"module"` / `.mjs` diagnostic, not content-based format inference.
+Conditional callee tests and discarded sequence prefixes are reads, not invoked
+values; selected branches and final sequence values still undergo operation checks.
+Logical callee operands are conservatively checked because either can supply a value.
 
 Owned occurrence records and `ModuleBody` support serde for the versioned
 `segment_cache` codec. Span serialization is a pair of byte offsets, not OXC

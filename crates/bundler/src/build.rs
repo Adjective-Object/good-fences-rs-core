@@ -235,7 +235,7 @@ impl BuildSession {
             .as_ref()
             .is_none_or(|(config, _)| config != &options.declarations)
         {
-            let prepared = PreparedDeclarations::from_config(&options.declarations)?;
+            let prepared = crate::effect_analysis::prepare_declarations(&options.declarations)?;
             self.declarations = Some((options.declarations.clone(), prepared));
         }
         let declarations = self
