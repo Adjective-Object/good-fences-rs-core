@@ -1115,7 +1115,7 @@ Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 | CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
 | Unconstrained/bare nonliteral imports/requires, options/attributes, assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
 
-The unified public-build Node runner compares all 30 portable cases (41 entry executions)
+The unified public-build Node runner compares all 37 portable cases (52 entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover
 cross-root mutation, adversarial cycle TDZ/hoisting, namespace identity and shape,
 effect ordering, once-only/concurrent entry loading, bundle-instance isolation,

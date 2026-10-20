@@ -55,8 +55,9 @@ and independent demands on shared segments with live state and inferred names.
 Four flattening regressions additionally defend shared-group body
 retention, outside-job return paths, redirected-barrel ordering, and
 entrance-dependent source SCC evaluation.
-The prefix/throw regression additionally preserves uninitialized exports through
-an escaped entry namespace when another source's pure prefix evaluates first.
+The fifth regression, `native-prefix-throw-visibility`, additionally preserves
+uninitialized exports through an escaped entry namespace when another source's
+pure prefix evaluates first.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -154,7 +155,7 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All thirty-six current cases require native. Legacy reporting and
+back to legacy. All thirty-seven current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 
@@ -201,7 +202,7 @@ manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
 The corpus requires source behavior, not the current emitter's behavior:
 
-- **Native (36, all explicitly required):** all twenty-four authored cases,
+- **Native (37, all explicitly required):** all twenty-five authored cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
   `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
   `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
