@@ -1,0 +1,9 @@
+{
+  "id": "authored/css-resource-urls",
+  "moduleType": "module",
+  "entryPoints": ["entry.js"],
+  "fixtureConfig": {"output": {"base_url": "https://cdn.example.test/static/"}, "css": {"load": "auto-mount"}},
+  "cssObservation": "observe.mjs",
+  "expectations": {"stdout": ["public CSS and asset URLs preserve owned bytes"], "backend": "native"},
+  "goals": ["Observe global CSS URL defaults and CDN mounts, asset URL escaping/suffixes and unchanged remote/data/fragment references independently of owned resource paths."]
+}

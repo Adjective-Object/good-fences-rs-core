@@ -1,0 +1,6 @@
+.button {
+  composes: local-base local-base;
+  composes: base-name from "./base.css";
+  composes: external-token from global;
+}
+.local-base { color: blue; }

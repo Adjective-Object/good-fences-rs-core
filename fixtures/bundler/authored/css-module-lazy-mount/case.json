@@ -1,0 +1,9 @@
+{
+  "id": "authored/css-module-lazy-mount",
+  "moduleType": "module",
+  "entryPoints": ["entry.js"],
+  "fixtureConfig": {"css": {"load": "auto-mount", "css_modules": "ext:.style"}},
+  "cssObservation": "observe.mjs",
+  "expectations": {"stdout": ["lazy dependency-first once-only mounts"], "backend": "native"},
+  "goals": ["Observe custom-suffix module selection, lazy composition activation and synchronous once-only dependency-first link insertion without treating it as load readiness."]
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -47,6 +47,60 @@ function assertFailure(run, stage, expected, options = {}) {
 test('real public pipeline executes emitted output without modifying original fixtures', () => {
   withCorpus("console.log('hello');", ({ run }) => {
     assert.deepEqual(run(), [{ id: 'synthetic/example', status: 'passed', backend: 'native', executions: 1, stdout: ['hello'] }]);
+  });
+});
+
+for (const suffix of ['.module.css', '.module.cjs']) {
+  test(`explicit fixture configuration selects ${suffix} CSS transforms and preserves byte resources`, () => {
+    withCorpus(`export {buttonLabel} from './style${suffix}';`, ({ run, configure, caseDir }) => {
+      configure({
+        fixtureConfig: { output: { base_url: '/static/' }, css: { css_modules: suffix === '.module.css' ? true : `ext:${suffix}` } },
+        cssObservation: 'observe.mjs',
+        expectations: { stdout: ['CSS mapping'], backend: 'native' },
+      });
+      const observer = path.join(caseDir, 'observe.mjs');
+      writeFileSync(observer, `
+      import assert from 'node:assert/strict';
+      import {readFileSync} from 'node:fs';
+      import path from 'node:path';
+      import {pathToFileURL} from 'node:url';
+      export async function observe({entries, entry, directory, stylesheets}) {
+        const {buttonLabel} = await import(pathToFileURL(entries[entry]));
+        assert.match(buttonLabel, /^_[A-Za-z0-9_-]{10}$/u);
+        assert(readFileSync(path.join(directory, Object.values(stylesheets)[0]), 'utf8').includes('.' + buttonLabel));
+        console.log('CSS mapping');
+      }
+    `);
+      assert.equal(run()[0].status, 'passed');
+      writeFileSync(observer, "export function observe() { throw Error('output must fail'); }");
+      assertFailure(run, 'output', /unexpected runtime failure/u);
+    }, { [`style${suffix}`]: '.button-label { color: red; }' });
+  });
+}
+
+test('driver rejects unknown, malformed and oversized config before publication', () => {
+  withCorpus("console.log('hello');", ({ caseDir }) => {
+    const root = path.join(caseDir, 'files');
+    const driver = path.join(project, 'target/debug/examples/build');
+    const configFile = path.join(root, '.bundler-fixture-config.json');
+    const output = path.join(root, '.bundler-output');
+    for (const config of [
+      '{"css":{"nameMangling":"none"}}',
+      '{"output":{"directory":"other"}}',
+      '{"entries":[]}', '{"css":{"load":"plugin"}}',
+      '{"css":{"css_modules":"ext:../css"}}',
+      '{"output":{"base_url":"javascript:bad"}}', '{',
+      JSON.stringify({ output: { base_url: 'x'.repeat(16384) } }),
+    ]) {
+      writeFileSync(configFile, config);
+      const result = execute(driver, [root, output, '--fixture-config', configFile, 'entry.js'], root, 30000);
+      assert.equal(result.status, 1, config);
+      assert(result.stderr, 'configuration rejection must explain failure');
+      assert(!existsSync(path.join(output, '.bundler-current.json')), 'invalid config published');
+    }
+    const missing = execute(driver, [root, output, '--fixture-config'], root);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /missing fixture config file/u);
   });
 });
 

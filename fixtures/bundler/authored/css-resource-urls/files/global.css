@@ -1,0 +1,3 @@
+.icon { background: url("./icon.svg?theme=dark#symbol"); }
+.remote { background: url("https://other.example.test/remote.svg"); }
+.inline { background: url("data:image/svg+xml,icon"); filter: url("#filter"); }
