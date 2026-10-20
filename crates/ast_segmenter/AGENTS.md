@@ -81,6 +81,9 @@ and precisely attached PURE hint spans. Only the derived bundler evaluator may
 discard an unused invocation; input effects and optional guards must survive.
 
 `facts.emission` owns segment-indexed recipes and placement/name constraints.
+`facts.ecco` owns lazy ESM extraction from the same AST with unique segment
+root ownership; CJS stays `None`. Effective `ecco_declarations_hash` is a sealed
+configuration inputs in both formats, never graph conclusions.
 Operations address existing occurrence IDs/indices and original spans; preorder
 parents and source-slot roots precompose nesting before the arena drops.
 PURE callee steps preserve parentheses as chain boundaries and guard awaits in

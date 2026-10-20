@@ -12,6 +12,7 @@ edition = "2018"
 crate-type = ["lib"]
 
 [dependencies]
+ecco = { path = "../ecco" }
 eyre.workspace = true
 serde.workspace = true
 serde_cbor = "0.11.2"

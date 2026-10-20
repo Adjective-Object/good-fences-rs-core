@@ -201,6 +201,27 @@ still asserts one ordinary public `main.mjs`, without runtime/helpers.
 
 ## Retention
 
+Source extraction records owned Ecco functions and at most one lazy root per
+segment in the metadata CBOR, using the existing AST/semantic parse. After
+registering the complete graph, retention solves those precursors together,
+resolving imports and barrels through the checked `SourceGraph` export identities.
+The same connected effects drive public builds and low-level retention/chunks.
+CommonJS stays opaque. Native binding/TDZ barriers and add-only forced effects
+remain distinct from Ecco's expression effects. Structural force rules targeting
+deferred bodies, opaque CommonJS execution, captured lexical initialization/TDZ barriers, or disabling PURE
+annotations conservatively disable inferred pruning; cached precursors and
+source-level PURE lowering remain unchanged. Ecco's existing unknown-execution
+widening can also prevent pruning otherwise pure calls.
+
+`BuildOptions.declarations` enables separate JavaScript and Node presets by
+default and accepts parsed user declaration sets. User bindings override presets;
+duplicates between user sets and build-wide local contracts are errors. Disable
+either preset with its corresponding boolean. The effective parsed declaration
+identity participates in disk metadata, memory reuse and build parse fingerprints,
+so declaration changes trigger fresh extraction and whole-graph analysis.
+Only potentially referenced declaration families enter each file's precursors;
+cache identity still hashes the complete effective declaration set.
+
 Library-only retention, exact chunk planning and JavaScript ESM/CJS emission over
 the checked owned `SourceGraph`. This is not an unused-report adapter.
 

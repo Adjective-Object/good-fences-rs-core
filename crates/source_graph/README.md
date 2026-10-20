@@ -40,7 +40,8 @@ initializers, without crossing lexical shadows.
 binding identity plus all intermediate barrel sites. Stars exclude default,
 explicit exports take precedence, equal-identity diamonds merge, and ambiguous/
 missing/cycle-only exports fail. `validate_links` exposes construction diagnostics
-with source sites. Opaque CommonJS value requests resolve to
+with source sites. `resolve_optional_export` distinguishes absent namespace
+properties from ambiguity, which remains an error. Opaque CommonJS value requests resolve to
 `ExportIdentity::CommonJs(file, requested_name)` and a module/body demand, not
 guessed source exports. Type requests do not gain this dynamic fallback.
 Legacy symbol adapters remain permissive type-inclusive

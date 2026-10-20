@@ -6,7 +6,7 @@ pub(super) struct Closure {
     captures: HashMap<ValueId, ValueId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Instruction {
     Value(ValueId, Hazards),
     Any(Effect, Vec<Effect>),
@@ -31,7 +31,7 @@ pub(super) struct Recording {
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FunctionSignature {
     pub captures: Vec<ValueId>,
     pub parameters: Vec<ValueId>,
@@ -43,13 +43,13 @@ pub(crate) struct FunctionSignature {
 
 /// Owned, lazy operations. IDs are local to the containing `ParsedFile`, not
 /// handles into an interpreter. Serializing this never saves analyzed calls.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnedFunction {
     pub(crate) signature: FunctionSignature,
     pub(crate) instructions: Vec<Instruction>,
     pub(crate) returns: Vec<ValueId>,
     pub(crate) effects: Option<Effect>,
-    pub(crate) sources: HashMap<Effect, (ValueId, Hazard)>,
+    pub(crate) sources: std::collections::BTreeMap<Effect, (ValueId, Hazard)>,
 }
 
 #[derive(Debug, Clone, Default)]

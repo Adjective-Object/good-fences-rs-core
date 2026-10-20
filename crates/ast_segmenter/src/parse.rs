@@ -81,6 +81,23 @@ pub fn parse_module(
     path: &Path,
     package_format: ModuleFormat,
 ) -> eyre::Result<ParsedModule> {
+    parse_module_with_declarations(
+        logger,
+        source,
+        path,
+        package_format,
+        ecco::DeclarationConfig::default().effective()?,
+    )
+}
+
+/// Extract with explicit effective contracts; these become part of provenance.
+pub fn parse_module_with_declarations(
+    logger: &impl logger::Logger,
+    source: &str,
+    path: &Path,
+    package_format: ModuleFormat,
+    declarations: ecco::LocalFacts,
+) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)?;
@@ -93,11 +110,13 @@ pub fn parse_module(
         path.display(),
         semantic.errors
     );
-    let facts = crate::owned::extract(&parsed.program, &semantic.semantic)
+    let mut facts = crate::owned::extract(&parsed.program, &semantic.semantic)
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
     crate::policy::check(&parsed.program, &facts)
         .wrap_err_with(|| format!("{}: unsupported bundler syntax", path.display()))?;
+    facts.ecco_declarations_hash = crate::owned::declarations_hash(&declarations)?;
     let (body, segments) = if parsed.program.source_type.is_commonjs() {
+        ecco::Context::from_local_facts(declarations.clone())?;
         let span = Span::new(
             parsed.program.hashbang.as_ref().map_or(0, |h| h.span.end),
             source
@@ -136,6 +155,27 @@ pub fn parse_module(
             .wrap_err_with(|| format!("{}: segment extraction failed", path.display()))?;
         (ModuleBody::Esm, segments)
     };
+    if matches!(body, ModuleBody::Esm) {
+        let mut used_declarations = declarations;
+        used_declarations
+            .definitions
+            .retain(|definition| match &definition.binding {
+                ecco::Binding::Global(path) => facts.references.iter().any(|reference| {
+                    reference.binding.is_none() && path.first() == Some(&reference.name)
+                }),
+                ecco::Binding::Module { module, .. } => facts
+                    .dependencies
+                    .iter()
+                    .any(|dependency| !dependency.type_only && dependency.specifier == *module),
+                ecco::Binding::Local(_) => true,
+            });
+        facts.ecco = Some(ecco::parse_from_ast_with_segments(
+            &parsed.program,
+            &semantic.semantic,
+            used_declarations,
+            &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+        )?);
+    }
     let provenance = crate::SourceProvenance::extracted(
         source,
         crate::ParserConfig::from_source_type(parsed.program.source_type),
@@ -220,6 +260,35 @@ mod tests {
             assert_eq!(export.span, parsed.segments[index].span);
             assert_eq!(parsed.segments[index].module_deps.exports_locals.len(), 1);
         }
+    }
+
+    #[test]
+    fn ecco_uses_one_parse_and_owned_split_roots() {
+        let source = "export const a = 1, b = a; function lazy() { unknown(); }";
+        let before = module_parse_count();
+        let parsed = parse(source, "file.mjs").unwrap();
+        assert_eq!(module_parse_count(), before + 1);
+        let ecco = parsed.facts.ecco.as_ref().unwrap();
+        assert_eq!(ecco.roots().len(), parsed.segments.len());
+        assert_eq!(ecco.functions().len(), 1);
+        for (root, segment) in ecco.roots().iter().zip(&parsed.segments) {
+            assert!(segment.span.start <= root.span.start && root.span.end <= segment.span.end);
+        }
+        assert!(ecco.symbols().iter().any(|s| s.name == "lazy"));
+        let encoded = serde_cbor::to_vec(&parsed.facts).unwrap();
+        let decoded: crate::owned::ModuleFacts = serde_cbor::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, parsed.facts);
+        assert_eq!(serde_cbor::to_vec(&decoded).unwrap(), encoded);
+        parsed
+            .provenance()
+            .verify(
+                source,
+                crate::ParserConfig::from_source_type(parsed.source_type),
+                parsed.body,
+                &parsed.segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+                &decoded,
+            )
+            .unwrap();
     }
 
     #[test]

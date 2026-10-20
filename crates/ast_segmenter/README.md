@@ -31,6 +31,15 @@ statement extraction for callers that already validated an AST and semantic
 model; it does not perform the full bundler support-policy/occurrence checks.
 `segment_file` retains the unused tracker's legacy behavior.
 
+`parse_module_with_declarations` accepts explicit effective Ecco `LocalFacts`;
+the default entrypoint uses `DeclarationConfig::default().effective()`.
+ESM `facts.ecco` contains owned lazy roots/functions extracted from the same
+checked AST, at most one root per actual segment (including split declarators).
+CommonJS keeps `None` and remains opaque. `facts.ecco_declarations_hash` seals
+canonical effective contracts into provenance for both formats. No analyzed effects or
+graph resolutions are cached. PURE hints remain policy-sensitive: consumers
+disabling annotation trust must conservatively retain annotated invocations.
+
 `ParsedModule::provenance()` binds the exact source bytes, effective
 `ParserConfig` and owned body/ranges/facts to extraction. `from_provenance`
 reconstitutes matching cache records without parsing; it rejects re-paired text,

@@ -1,0 +1,678 @@
+// Node 24 public API families. Conservative declarations, not purity promises.
+// Bare specifiers and default-export member paths are expanded by the loader.
+global fn AbortController(...) {}
+global fn AbortSignal(...) {}
+global fn AbortSignal.abort(...) {}
+global fn AbortSignal.any(...) {}
+global fn AbortSignal.timeout(...) {}
+global fn Blob(...) {}
+global fn Buffer(...) {}
+global fn Buffer.alloc(...) {}
+global fn Buffer.allocUnsafe(...) {}
+global fn Buffer.allocUnsafeSlow(...) {}
+global fn Buffer.byteLength(...) {}
+global fn Buffer.compare(...) {}
+global fn Buffer.concat(...) {}
+global fn Buffer.copyBytesFrom(...) {}
+global fn Buffer.from(...) {}
+global fn Buffer.isBuffer(...) {}
+global fn Buffer.isEncoding(...) {}
+global fn Buffer.of(...) {}
+global fn BroadcastChannel(...) {}
+global fn ByteLengthQueuingStrategy(...) {}
+global fn CloseEvent(...) {}
+global fn CompressionStream(...) {}
+global fn CountQueuingStrategy(...) {}
+global fn Crypto(...) {}
+global fn CryptoKey(...) {}
+global fn CustomEvent(...) {}
+global fn DecompressionStream(...) {}
+global fn DOMException(...) {}
+global fn Event(...) {}
+global fn EventSource(...) {}
+global fn EventTarget(...) {}
+global fn File(...) {}
+global fn FormData(...) {}
+global fn Headers(...) {}
+global fn MessageChannel(...) {}
+global fn MessageEvent(...) {}
+global fn MessagePort(...) {}
+global fn Navigator(...) {}
+global fn Performance(...) {}
+global fn PerformanceEntry(...) {}
+global fn PerformanceMark(...) {}
+global fn PerformanceMeasure(...) {}
+global fn PerformanceObserver(...) {}
+global fn PerformanceObserverEntryList(...) {}
+global fn PerformanceResourceTiming(...) {}
+global fn ReadableByteStreamController(...) {}
+global fn ReadableStream(...) {}
+global fn ReadableStreamBYOBReader(...) {}
+global fn ReadableStreamBYOBRequest(...) {}
+global fn ReadableStreamDefaultController(...) {}
+global fn ReadableStreamDefaultReader(...) {}
+global fn Request(...) {}
+global fn Response(...) {}
+global fn Response.error(...) {}
+global fn Response.json(...) {}
+global fn Response.redirect(...) {}
+global fn Storage(...) {}
+global fn SubtleCrypto(...) {}
+global fn TextDecoder(...) {}
+global fn TextDecoderStream(...) {}
+global fn TextEncoder(...) {}
+global fn TextEncoderStream(...) {}
+global fn TransformStream(...) {}
+global fn TransformStreamDefaultController(...) {}
+global fn URL(...) {}
+global fn URLPattern(...) {}
+global fn URL.canParse(...) {}
+global fn URL.createObjectURL(...) {}
+global fn URL.parse(...) {}
+global fn URL.revokeObjectURL(...) {}
+global fn URLSearchParams(...) {}
+global fn WebSocket(...) {}
+global fn WritableStream(...) {}
+global fn WritableStreamDefaultController(...) {}
+global fn WritableStreamDefaultWriter(...) {}
+global fn atob(...) {}
+global fn btoa(...) {}
+global fn clearImmediate(...) {}
+global fn clearInterval(...) {}
+global fn clearTimeout(...) {}
+global fn fetch(...) {}
+global fn queueMicrotask(...) {}
+global fn setImmediate(...) {}
+global fn setInterval(...) {}
+global fn setTimeout(...) {}
+global fn structuredClone(...) {}
+// V8 additions and WebAssembly are host coverage, not ECMAScript 2025 promises.
+global fn JSON.rawJSON(...) {}
+global fn JSON.isRawJSON(...) {}
+global fn Math.sumPrecise(...) {}
+global fn Atomics.pause(...) {}
+global fn WebAssembly.compile(...) {}
+global fn WebAssembly.compileStreaming(...) {}
+global fn WebAssembly.instantiate(...) {}
+global fn WebAssembly.instantiateStreaming(...) {}
+global fn WebAssembly.validate(...) {}
+global fn WebAssembly.Module(...) {}
+global fn WebAssembly.Module.customSections(...) {}
+global fn WebAssembly.Module.exports(...) {}
+global fn WebAssembly.Module.imports(...) {}
+global fn WebAssembly.Instance(...) {}
+global fn WebAssembly.Memory(...) {}
+global fn WebAssembly.Memory.prototype.grow(...) {}
+global fn WebAssembly.Table(...) {}
+global fn WebAssembly.Table.prototype.get(...) {}
+global fn WebAssembly.Table.prototype.set(...) {}
+global fn WebAssembly.Table.prototype.grow(...) {}
+global fn WebAssembly.Global(...) {}
+global fn WebAssembly.Tag(...) {}
+global fn WebAssembly.Exception(...) {}
+global fn WebAssembly.Exception.prototype.getArg(...) {}
+global fn WebAssembly.Exception.prototype.is(...) {}
+global fn WebAssembly.CompileError(...) {}
+global fn WebAssembly.LinkError(...) {}
+global fn WebAssembly.RuntimeError(...) {}
+// These objects expose lazy/accessor members; never promise wildcard safe reads.
+global fn process(...) {}
+global fn console(...) {}
+global fn crypto(...) {}
+global fn performance(...) {}
+global fn console.assert(...) {}
+global fn console.clear(...) {}
+global fn console.count(...) {}
+global fn console.countReset(...) {}
+global fn console.debug(...) {}
+global fn console.dir(...) {}
+global fn console.dirxml(...) {}
+global fn console.error(...) {}
+global fn console.group(...) {}
+global fn console.groupCollapsed(...) {}
+global fn console.groupEnd(...) {}
+global fn console.info(...) {}
+global fn console.log(...) {}
+global fn console.table(...) {}
+global fn console.time(...) {}
+global fn console.timeEnd(...) {}
+global fn console.timeLog(...) {}
+global fn console.trace(...) {}
+global fn console.warn(...) {}
+global fn crypto.getRandomValues(...) {}
+global fn crypto.randomUUID(...) {}
+global fn crypto.subtle.encrypt(...) {}
+global fn crypto.subtle.decrypt(...) {}
+global fn crypto.subtle.sign(...) {}
+global fn crypto.subtle.verify(...) {}
+global fn crypto.subtle.digest(...) {}
+global fn crypto.subtle.generateKey(...) {}
+global fn crypto.subtle.deriveKey(...) {}
+global fn crypto.subtle.deriveBits(...) {}
+global fn crypto.subtle.importKey(...) {}
+global fn crypto.subtle.exportKey(...) {}
+global fn crypto.subtle.wrapKey(...) {}
+global fn crypto.subtle.unwrapKey(...) {}
+global fn performance.clearMarks(...) {}
+global fn performance.clearMeasures(...) {}
+global fn performance.clearResourceTimings(...) {}
+global fn performance.eventLoopUtilization(...) {}
+global fn performance.getEntries(...) {}
+global fn performance.getEntriesByName(...) {}
+global fn performance.getEntriesByType(...) {}
+global fn performance.mark(...) {}
+global fn performance.markResourceTiming(...) {}
+global fn performance.measure(...) {}
+global fn performance.now(...) {}
+global fn performance.setResourceTimingBufferSize(...) {}
+global fn performance.timerify(...) {}
+global fn performance.toJSON(...) {}
+// Lazy host accessors can initialize state or perform I/O.
+global symbol navigator { read_effects = true }
+global symbol localStorage { read_effects = true }
+global symbol sessionStorage { read_effects = true }
+global symbol crypto { read_effects = true }
+global symbol performance { read_effects = true }
+module "node:assert" {
+ export fn default(...) {} export fn Assert(...) {} export fn AssertionError(...) {}
+ export fn CallTracker(...) {} export fn ok(...) {} export fn fail(...) {}
+ export fn equal(...) {} export fn notEqual(...) {} export fn deepEqual(...) {}
+ export fn notDeepEqual(...) {} export fn deepStrictEqual(...) {}
+ export fn notDeepStrictEqual(...) {} export fn strictEqual(...) {}
+ export fn notStrictEqual(...) {} export fn partialDeepStrictEqual(...) {}
+ export fn match(...) {} export fn doesNotMatch(...) {} export fn throws(...) {}
+ export fn rejects(...) {} export fn doesNotThrow(...) {} export fn doesNotReject(...) {}
+ export fn ifError(...) {} export fn strict(...) {}
+}
+module "node:assert/strict" {
+ export fn default(...) {} export fn Assert(...) {} export fn AssertionError(...) {}
+ export fn CallTracker(...) {} export fn ok(...) {} export fn fail(...) {}
+ export fn equal(...) {} export fn notEqual(...) {} export fn deepEqual(...) {}
+ export fn notDeepEqual(...) {} export fn deepStrictEqual(...) {}
+ export fn notDeepStrictEqual(...) {} export fn strictEqual(...) {}
+ export fn notStrictEqual(...) {} export fn partialDeepStrictEqual(...) {}
+ export fn match(...) {} export fn doesNotMatch(...) {} export fn throws(...) {}
+ export fn rejects(...) {} export fn doesNotThrow(...) {} export fn doesNotReject(...) {}
+ export fn ifError(...) {} export fn strict(...) {}
+}
+module "node:async_hooks" {
+ export fn default(...) {} export fn AsyncLocalStorage(...) {} export fn AsyncResource(...) {}
+ export fn createHook(...) {} export fn executionAsyncId(...) {}
+ export fn triggerAsyncId(...) {} export fn executionAsyncResource(...) {}
+ export fn asyncWrapProviders(...) {}
+}
+module "node:buffer" {
+ export fn default(...) {} export fn Buffer(...) {} export fn SlowBuffer(...) {}
+ export fn transcode(...) {} export fn isUtf8(...) {} export fn isAscii(...) {}
+ export fn kMaxLength(...) {} export fn kStringMaxLength(...) {}
+ export fn btoa(...) {} export fn atob(...) {} export fn constants(...) {}
+ export fn INSPECT_MAX_BYTES(...) {} export fn Blob(...) {}
+ export fn resolveObjectURL(...) {} export fn File(...) {}
+}
+module "node:child_process" {
+ export fn default(...) {} export fn ChildProcess(...) {} export fn exec(...) {}
+ export fn execFile(...) {} export fn execFileSync(...) {} export fn execSync(...) {}
+ export fn fork(...) {} export fn spawn(...) {} export fn spawnSync(...) {}
+}
+module "node:cluster" {
+ export fn default(...) {} export fn isWorker(...) {} export fn isMaster(...) {}
+ export fn isPrimary(...) {} export fn Worker(...) {} export fn workers(...) {}
+ export fn settings(...) {} export fn SCHED_NONE(...) {} export fn SCHED_RR(...) {}
+ export fn schedulingPolicy(...) {} export fn setupPrimary(...) {}
+ export fn setupMaster(...) {} export fn fork(...) {} export fn disconnect(...) {}
+}
+module "node:console" {
+ export fn default(...) {} export fn Console(...) {} export fn log(...) {}
+ export fn info(...) {} export fn debug(...) {} export fn warn(...) {}
+ export fn error(...) {} export fn dir(...) {} export fn time(...) {}
+ export fn timeEnd(...) {} export fn timeLog(...) {} export fn trace(...) {}
+ export fn assert(...) {} export fn clear(...) {} export fn count(...) {}
+ export fn countReset(...) {} export fn group(...) {} export fn groupEnd(...) {}
+ export fn table(...) {} export fn dirxml(...) {} export fn groupCollapsed(...) {}
+ export fn profile(...) {} export fn profileEnd(...) {} export fn timeStamp(...) {}
+}
+module "node:constants" { export fn default(...) {} }
+module "node:crypto" {
+ export fn default(...) {} export fn checkPrime(...) {} export fn checkPrimeSync(...) {}
+ export fn createCipheriv(...) {} export fn createDecipheriv(...) {}
+ export fn createDiffieHellman(...) {} export fn createDiffieHellmanGroup(...) {}
+ export fn createECDH(...) {} export fn createHash(...) {} export fn createHmac(...) {}
+ export fn createPrivateKey(...) {} export fn createPublicKey(...) {}
+ export fn createSecretKey(...) {} export fn createSign(...) {} export fn createVerify(...) {}
+ export fn diffieHellman(...) {} export fn generatePrime(...) {} export fn generatePrimeSync(...) {}
+ export fn getCiphers(...) {} export fn getCipherInfo(...) {} export fn getCurves(...) {}
+ export fn getDiffieHellman(...) {} export fn getHashes(...) {} export fn hkdf(...) {}
+ export fn hkdfSync(...) {} export fn pbkdf2(...) {} export fn pbkdf2Sync(...) {}
+ export fn generateKeyPair(...) {} export fn generateKeyPairSync(...) {}
+ export fn generateKey(...) {} export fn generateKeySync(...) {}
+ export fn privateDecrypt(...) {} export fn privateEncrypt(...) {}
+ export fn publicDecrypt(...) {} export fn publicEncrypt(...) {}
+ export fn randomBytes(...) {} export fn randomFill(...) {} export fn randomFillSync(...) {}
+ export fn randomInt(...) {} export fn randomUUID(...) {} export fn scrypt(...) {}
+ export fn scryptSync(...) {} export fn sign(...) {} export fn setEngine(...) {}
+ export fn timingSafeEqual(...) {} export fn getFips(...) {} export fn setFips(...) {}
+ export fn verify(...) {} export fn hash(...) {} export fn Certificate(...) {}
+ export fn Cipheriv(...) {} export fn Decipheriv(...) {} export fn DiffieHellman(...) {}
+ export fn DiffieHellmanGroup(...) {} export fn ECDH(...) {} export fn Hash(...) {}
+ export fn Hmac(...) {} export fn KeyObject(...) {} export fn Sign(...) {}
+ export fn Mac(...) {}
+ export fn Verify(...) {} export fn X509Certificate(...) {} export fn secureHeapUsed(...) {}
+ export fn fips(...) {} export fn constants(...) {} export fn webcrypto(...) {}
+ export fn subtle(...) {} export fn getRandomValues(...) {}
+ export fn encapsulate(...) {} export fn decapsulate(...) {}
+}
+module "node:dgram" {
+ export fn default(...) {} export fn createSocket(...) {} export fn Socket(...) {}
+}
+module "node:diagnostics_channel" {
+ export fn default(...) {} export fn channel(...) {} export fn hasSubscribers(...) {}
+ export fn subscribe(...) {} export fn tracingChannel(...) {} export fn unsubscribe(...) {}
+ export fn Channel(...) {}
+}
+module "node:dns" {
+ export fn default(...) {} export fn lookup(...) {} export fn lookupService(...) {}
+ export fn Resolver(...) {} export fn getDefaultResultOrder(...) {}
+ export fn setDefaultResultOrder(...) {} export fn setServers(...) {}
+ export fn ADDRCONFIG(...) {} export fn ALL(...) {} export fn V4MAPPED(...) {}
+ export fn getServers(...) {} export fn resolve(...) {} export fn resolve4(...) {}
+ export fn resolve6(...) {} export fn resolveAny(...) {} export fn resolveCaa(...) {}
+ export fn resolveCname(...) {} export fn resolveMx(...) {} export fn resolveNaptr(...) {}
+ export fn resolveNs(...) {} export fn resolvePtr(...) {} export fn resolveSoa(...) {}
+ export fn resolveSrv(...) {} export fn resolveTlsa(...) {} export fn resolveTxt(...) {}
+ export fn reverse(...) {} export fn promises(...) {}
+}
+module "node:dns/promises" {
+ export fn default(...) {} export fn lookup(...) {} export fn lookupService(...) {}
+ export fn Resolver(...) {} export fn getDefaultResultOrder(...) {}
+ export fn setDefaultResultOrder(...) {} export fn setServers(...) {}
+ export fn getServers(...) {} export fn resolve(...) {} export fn resolve4(...) {}
+ export fn resolve6(...) {} export fn resolveAny(...) {} export fn resolveCaa(...) {}
+ export fn resolveCname(...) {} export fn resolveMx(...) {} export fn resolveNaptr(...) {}
+ export fn resolveNs(...) {} export fn resolvePtr(...) {} export fn resolveSoa(...) {}
+ export fn resolveSrv(...) {} export fn resolveTlsa(...) {} export fn resolveTxt(...) {}
+ export fn reverse(...) {}
+}
+module "node:domain" {
+ export fn default(...) {} export fn Domain(...) {} export fn createDomain(...) {}
+ export fn create(...) {} export fn active(...) {}
+}
+module "node:events" {
+ export fn default(...) {} export fn addAbortListener(...) {} export fn once(...) {}
+ export fn on(...) {} export fn getEventListeners(...) {} export fn getMaxListeners(...) {}
+ export fn EventEmitter(...) {} export fn usingDomains(...) {}
+ export fn captureRejectionSymbol(...) {} export fn captureRejections(...) {}
+ export fn EventEmitterAsyncResource(...) {} export fn errorMonitor(...) {}
+ export fn defaultMaxListeners(...) {} export fn setMaxListeners(...) {}
+ export fn listenerCount(...) {}
+}
+module "node:fs" {
+ export fn default(...) {} export fn appendFile(...) {} export fn appendFileSync(...) {}
+ export fn access(...) {} export fn accessSync(...) {} export fn chown(...) {}
+ export fn chownSync(...) {} export fn chmod(...) {} export fn chmodSync(...) {}
+ export fn close(...) {} export fn closeSync(...) {} export fn copyFile(...) {}
+ export fn copyFileSync(...) {} export fn cp(...) {} export fn cpSync(...) {}
+ export fn createReadStream(...) {} export fn createWriteStream(...) {}
+ export fn exists(...) {} export fn existsSync(...) {} export fn fchown(...) {}
+ export fn fchownSync(...) {} export fn fchmod(...) {} export fn fchmodSync(...) {}
+ export fn fdatasync(...) {} export fn fdatasyncSync(...) {} export fn fstat(...) {}
+ export fn fstatSync(...) {} export fn fsync(...) {} export fn fsyncSync(...) {}
+ export fn ftruncate(...) {} export fn ftruncateSync(...) {} export fn futimes(...) {}
+ export fn futimesSync(...) {} export fn glob(...) {} export fn globSync(...) {}
+ export fn lchown(...) {} export fn lchownSync(...) {} export fn lchmod(...) {}
+ export fn lchmodSync(...) {} export fn link(...) {} export fn linkSync(...) {}
+ export fn lstat(...) {} export fn lstatSync(...) {} export fn lutimes(...) {}
+ export fn lutimesSync(...) {} export fn mkdir(...) {} export fn mkdirSync(...) {}
+ export fn mkdtemp(...) {} export fn mkdtempSync(...) {} export fn mkdtempDisposableSync(...) {}
+ export fn open(...) {} export fn openSync(...) {} export fn openAsBlob(...) {}
+ export fn readdir(...) {} export fn readdirSync(...) {} export fn read(...) {}
+ export fn readSync(...) {} export fn readv(...) {} export fn readvSync(...) {}
+ export fn readFile(...) {} export fn readFileSync(...) {} export fn readlink(...) {}
+ export fn readlinkSync(...) {} export fn realpath(...) {} export fn realpathSync(...) {}
+ export fn rename(...) {} export fn renameSync(...) {} export fn rm(...) {}
+ export fn rmSync(...) {} export fn rmdir(...) {} export fn rmdirSync(...) {}
+ export fn stat(...) {} export fn statfs(...) {} export fn statSync(...) {}
+ export fn statfsSync(...) {} export fn symlink(...) {} export fn symlinkSync(...) {}
+ export fn truncate(...) {} export fn truncateSync(...) {} export fn unwatchFile(...) {}
+ export fn unlink(...) {} export fn unlinkSync(...) {} export fn utimes(...) {}
+ export fn utimesSync(...) {} export fn watch(...) {} export fn watchFile(...) {}
+ export fn writeFile(...) {} export fn writeFileSync(...) {} export fn write(...) {}
+ export fn writeSync(...) {} export fn writev(...) {} export fn writevSync(...) {}
+ export fn Dirent(...) {} export fn Stats(...) {} export fn ReadStream(...) {}
+ export fn WriteStream(...) {} export fn FileReadStream(...) {} export fn FileWriteStream(...) {}
+ export fn Dir(...) {} export fn opendir(...) {} export fn opendirSync(...) {}
+ export fn F_OK(...) {} export fn R_OK(...) {} export fn W_OK(...) {}
+ export fn X_OK(...) {} export fn constants(...) {} export fn promises(...) {}
+}
+module "node:fs/promises" {
+ export fn default(...) {} export fn access(...) {} export fn copyFile(...) {}
+ export fn cp(...) {} export fn glob(...) {} export fn open(...) {} export fn opendir(...) {}
+ export fn rename(...) {} export fn truncate(...) {} export fn rm(...) {} export fn rmdir(...) {}
+ export fn mkdir(...) {} export fn readdir(...) {} export fn readlink(...) {}
+ export fn symlink(...) {} export fn lstat(...) {} export fn stat(...) {} export fn statfs(...) {}
+ export fn link(...) {} export fn unlink(...) {} export fn chmod(...) {}
+ export fn lchmod(...) {} export fn lchown(...) {} export fn chown(...) {}
+ export fn utimes(...) {} export fn lutimes(...) {} export fn realpath(...) {}
+ export fn mkdtemp(...) {} export fn mkdtempDisposable(...) {} export fn writeFile(...) {}
+ export fn appendFile(...) {} export fn readFile(...) {} export fn watch(...) {}
+ export fn constants(...) {}
+}
+module "node:http" {
+ export fn default(...) {} export fn METHODS(...) {} export fn STATUS_CODES(...) {}
+ export fn Agent(...) {} export fn ClientRequest(...) {} export fn IncomingMessage(...) {}
+ export fn OutgoingMessage(...) {} export fn Server(...) {} export fn ServerResponse(...) {}
+ export fn createServer(...) {} export fn validateHeaderName(...) {}
+ export fn validateHeaderValue(...) {} export fn get(...) {} export fn request(...) {}
+ export fn setMaxIdleHTTPParsers(...) {} export fn maxHeaderSize(...) {}
+ export fn globalAgent(...) {} export fn WebSocket(...) {} export fn CloseEvent(...) {}
+ export fn MessageEvent(...) {} export fn setGlobalProxyFromEnv(...) {}
+}
+module "node:http2" {
+ export fn default(...) {} export fn connect(...) {} export fn constants(...) {}
+ export fn createServer(...) {} export fn createSecureServer(...) {}
+ export fn getDefaultSettings(...) {} export fn getPackedSettings(...) {}
+ export fn getUnpackedSettings(...) {} export fn performServerHandshake(...) {}
+ export fn sensitiveHeaders(...) {} export fn Http2ServerRequest(...) {}
+ export fn Http2ServerResponse(...) {}
+}
+module "node:https" {
+ export fn default(...) {} export fn Agent(...) {} export fn globalAgent(...) {}
+ export fn Server(...) {} export fn createServer(...) {} export fn get(...) {}
+ export fn request(...) {}
+}
+module "node:inspector" {
+ export fn default(...) {} export fn open(...) {} export fn close(...) {}
+ export fn url(...) {} export fn waitForDebugger(...) {} export fn Session(...) {}
+ export fn console(...) {} export fn Network(...) {}
+}
+module "node:inspector/promises" {
+ export fn default(...) {} export fn open(...) {} export fn close(...) {}
+ export fn url(...) {} export fn waitForDebugger(...) {} export fn Session(...) {}
+ export fn console(...) {} export fn Network(...) {}
+}
+module "node:module" {
+ export fn default(...) {} export fn globalPaths(...) {} export fn wrap(...) {}
+ export fn wrapper(...) {} export fn isBuiltin(...) {} export fn createRequire(...) {}
+ export fn syncBuiltinESMExports(...) {} export fn Module(...) {} export fn registerHooks(...) {}
+ export fn builtinModules(...) {} export fn runMain(...) {} export fn register(...) {}
+ export fn constants(...) {} export fn enableCompileCache(...) {} export fn findPackageJSON(...) {}
+ export fn flushCompileCache(...) {} export fn stripTypeScriptTypes(...) {}
+ export fn getCompileCacheDir(...) {} export fn findSourceMap(...) {} export fn SourceMap(...) {}
+ export fn getSourceMapsSupport(...) {} export fn setSourceMapsSupport(...) {}
+}
+module "node:net" {
+ export fn default(...) {} export fn BlockList(...) {} export fn SocketAddress(...) {}
+ export fn connect(...) {} export fn createConnection(...) {} export fn createServer(...) {}
+ export fn isIP(...) {} export fn isIPv4(...) {} export fn isIPv6(...) {}
+ export fn Server(...) {} export fn Socket(...) {} export fn Stream(...) {}
+ export fn getDefaultAutoSelectFamily(...) {} export fn setDefaultAutoSelectFamily(...) {}
+ export fn getDefaultAutoSelectFamilyAttemptTimeout(...) {}
+ export fn setDefaultAutoSelectFamilyAttemptTimeout(...) {}
+}
+module "node:os" {
+ export fn default(...) {} export fn arch(...) {} export fn availableParallelism(...) {}
+ export fn cpus(...) {} export fn endianness(...) {} export fn freemem(...) {}
+ export fn getPriority(...) {} export fn homedir(...) {} export fn hostname(...) {}
+ export fn loadavg(...) {} export fn networkInterfaces(...) {} export fn platform(...) {}
+ export fn release(...) {} export fn setPriority(...) {} export fn tmpdir(...) {}
+ export fn totalmem(...) {} export fn type(...) {} export fn userInfo(...) {}
+ export fn uptime(...) {} export fn version(...) {} export fn machine(...) {}
+ export fn constants(...) {} export fn EOL(...) {} export fn devNull(...) {}
+}
+module "node:path" {
+ export fn default(...) {} export fn resolve(...) {} export fn normalize(...) {}
+ export fn isAbsolute(...) {} export fn join(...) {} export fn relative(...) {}
+ export fn toNamespacedPath(...) {} export fn dirname(...) {} export fn basename(...) {}
+ export fn extname(...) {} export fn format(...) {} export fn parse(...) {}
+ export fn matchesGlob(...) {} export fn sep(...) {} export fn delimiter(...) {}
+ export fn win32(...) {} export fn posix(...) {}
+}
+module "node:path/posix" {
+ export fn default(...) {} export fn resolve(...) {} export fn normalize(...) {}
+ export fn isAbsolute(...) {} export fn join(...) {} export fn relative(...) {}
+ export fn toNamespacedPath(...) {} export fn dirname(...) {} export fn basename(...) {}
+ export fn extname(...) {} export fn format(...) {} export fn parse(...) {}
+ export fn matchesGlob(...) {} export fn sep(...) {} export fn delimiter(...) {}
+ export fn win32(...) {} export fn posix(...) {}
+}
+module "node:path/win32" {
+ export fn default(...) {} export fn resolve(...) {} export fn normalize(...) {}
+ export fn isAbsolute(...) {} export fn join(...) {} export fn relative(...) {}
+ export fn toNamespacedPath(...) {} export fn dirname(...) {} export fn basename(...) {}
+ export fn extname(...) {} export fn format(...) {} export fn parse(...) {}
+ export fn matchesGlob(...) {} export fn sep(...) {} export fn delimiter(...) {}
+ export fn win32(...) {} export fn posix(...) {}
+}
+module "node:perf_hooks" {
+ export fn default(...) {} export fn Performance(...) {} export fn PerformanceEntry(...) {}
+ export fn PerformanceMark(...) {} export fn PerformanceMeasure(...) {}
+ export fn PerformanceObserver(...) {} export fn PerformanceObserverEntryList(...) {}
+ export fn PerformanceResourceTiming(...) {} export fn monitorEventLoopDelay(...) {}
+ export fn createHistogram(...) {} export fn performance(...) {} export fn constants(...) {}
+}
+module "node:process" {
+ export fn default(...) {} export fn version(...) {} export fn versions(...) {}
+ export fn arch(...) {} export fn platform(...) {} export fn release(...) {}
+ export fn moduleLoadList(...) {} export fn binding(...) {} export fn domain(...) {}
+ export fn exitCode(...) {} export fn config(...) {} export fn dlopen(...) {}
+ export fn uptime(...) {} export fn getActiveResourcesInfo(...) {} export fn loadEnvFile(...) {}
+ export fn cpuUsage(...) {} export fn threadCpuUsage(...) {} export fn resourceUsage(...) {}
+ export fn memoryUsage(...) {} export fn constrainedMemory(...) {} export fn availableMemory(...) {}
+ export fn kill(...) {} export fn exit(...) {} export fn execve(...) {}
+ export fn ref(...) {} export fn unref(...) {} export fn finalization(...) {}
+ export fn hrtime(...) {} export fn openStdin(...) {} export fn getuid(...) {}
+ export fn geteuid(...) {} export fn getgid(...) {} export fn getegid(...) {}
+ export fn getgroups(...) {} export fn allowedNodeEnvironmentFlags(...) {}
+ export fn assert(...) {} export fn features(...) {}
+ export fn setUncaughtExceptionCaptureCallback(...) {}
+ export fn hasUncaughtExceptionCaptureCallback(...) {} export fn emitWarning(...) {}
+ export fn nextTick(...) {} export fn sourceMapsEnabled(...) {} export fn setSourceMapsEnabled(...) {}
+ export fn getBuiltinModule(...) {} export fn stdout(...) {} export fn stdin(...) {}
+ export fn stderr(...) {} export fn abort(...) {} export fn umask(...) {}
+ export fn chdir(...) {} export fn cwd(...) {} export fn initgroups(...) {}
+ export fn setgroups(...) {} export fn setegid(...) {} export fn seteuid(...) {}
+ export fn setgid(...) {} export fn setuid(...) {} export fn env(...) {}
+ export fn title(...) {} export fn argv(...) {} export fn execArgv(...) {}
+ export fn pid(...) {} export fn ppid(...) {} export fn execPath(...) {}
+ export fn debugPort(...) {} export fn argv0(...) {} export fn report(...) {}
+ export fn permission.has(...) {}
+}
+module "node:punycode" {
+ export fn default(...) {} export fn version(...) {} export fn ucs2(...) {}
+ export fn decode(...) {} export fn encode(...) {} export fn toASCII(...) {}
+ export fn toUnicode(...) {}
+}
+module "node:querystring" {
+ export fn default(...) {} export fn unescapeBuffer(...) {} export fn unescape(...) {}
+ export fn escape(...) {} export fn stringify(...) {} export fn encode(...) {}
+ export fn parse(...) {} export fn decode(...) {}
+}
+module "node:readline" {
+ export fn default(...) {} export fn Interface(...) {} export fn clearLine(...) {}
+ export fn clearScreenDown(...) {} export fn createInterface(...) {}
+ export fn cursorTo(...) {} export fn emitKeypressEvents(...) {}
+ export fn moveCursor(...) {} export fn promises(...) {}
+}
+module "node:readline/promises" {
+ export fn default(...) {} export fn Interface(...) {} export fn Readline(...) {}
+ export fn createInterface(...) {}
+}
+module "node:repl" {
+ export fn default(...) {} export fn start(...) {} export fn REPLServer(...) {}
+ export fn Recoverable(...) {} export fn REPL_MODE_SLOPPY(...) {}
+ export fn REPL_MODE_STRICT(...) {} export fn writer(...) {}
+}
+module "node:sea" {
+ export fn default(...) {} export fn isSea(...) {} export fn getAsset(...) {}
+ export fn getAssetAsBlob(...) {} export fn getRawAsset(...) {} export fn getAssetKeys(...) {}
+}
+module "node:sqlite" {
+ export fn default(...) {} export fn DatabaseSync(...) {} export fn StatementSync(...) {}
+ export fn constants(...) {} export fn backup(...) {}
+ export fn SQLTagStore(...) {}
+}
+module "node:stream" {
+ export fn default(...) {} export fn isDestroyed(...) {} export fn isDisturbed(...) {}
+ export fn isErrored(...) {} export fn isReadable(...) {} export fn isWritable(...) {}
+ export fn Readable(...) {} export fn Writable(...) {} export fn Duplex(...) {}
+ export fn Transform(...) {} export fn PassThrough(...) {} export fn duplexPair(...) {}
+ export fn pipeline(...) {} export fn addAbortSignal(...) {} export fn finished(...) {}
+ export fn destroy(...) {} export fn compose(...) {} export fn setDefaultHighWaterMark(...) {}
+ export fn getDefaultHighWaterMark(...) {} export fn promises(...) {} export fn Stream(...) {}
+}
+module "node:stream/consumers" {
+ export fn default(...) {} export fn arrayBuffer(...) {} export fn blob(...) {}
+ export fn buffer(...) {} export fn text(...) {} export fn json(...) {}
+}
+module "node:stream/promises" {
+ export fn default(...) {} export fn finished(...) {} export fn pipeline(...) {}
+}
+module "node:stream/web" {
+ export fn default(...) {} export fn ReadableStream(...) {}
+ export fn ReadableStreamDefaultReader(...) {} export fn ReadableStreamBYOBReader(...) {}
+ export fn ReadableStreamBYOBRequest(...) {} export fn ReadableByteStreamController(...) {}
+ export fn ReadableStreamDefaultController(...) {} export fn TransformStream(...) {}
+ export fn TransformStreamDefaultController(...) {} export fn WritableStream(...) {}
+ export fn WritableStreamDefaultWriter(...) {} export fn WritableStreamDefaultController(...) {}
+ export fn ByteLengthQueuingStrategy(...) {} export fn CountQueuingStrategy(...) {}
+ export fn TextEncoderStream(...) {} export fn TextDecoderStream(...) {}
+ export fn CompressionStream(...) {} export fn DecompressionStream(...) {}
+}
+module "node:string_decoder" {
+ export fn default(...) {} export fn StringDecoder(...) {}
+}
+module "node:sys" { export fn default(...) {} }
+module "node:test" {
+ export fn default(...) {} export fn test(...) {} export fn describe(...) {}
+ export fn it(...) {} export fn suite(...) {} export fn before(...) {}
+ export fn after(...) {} export fn beforeEach(...) {} export fn afterEach(...) {}
+ export fn run(...) {} export fn mock(...) {} export fn snapshot(...) {}
+ export fn getTestContext(...) {}
+ export fn assert(...) {} export fn skip(...) {} export fn todo(...) {}
+ export fn only(...) {}
+}
+module "node:test/reporters" {
+ export fn default(...) {} export fn dot(...) {} export fn junit(...) {}
+ export fn spec(...) {} export fn tap(...) {} export fn lcov(...) {}
+}
+module "node:timers" {
+ export fn default(...) {} export fn setTimeout(...) {} export fn clearTimeout(...) {}
+ export fn setImmediate(...) {} export fn clearImmediate(...) {}
+ export fn setInterval(...) {} export fn clearInterval(...) {} export fn promises(...) {}
+}
+module "node:timers/promises" {
+ export fn default(...) {} export fn setTimeout(...) {} export fn setImmediate(...) {}
+ export fn setInterval(...) {} export fn scheduler(...) {}
+}
+module "node:tls" {
+ export fn default(...) {} export fn CLIENT_RENEG_LIMIT(...) {}
+ export fn CLIENT_RENEG_WINDOW(...) {} export fn DEFAULT_CIPHERS(...) {}
+ export fn DEFAULT_ECDH_CURVE(...) {} export fn DEFAULT_MIN_VERSION(...) {}
+ export fn DEFAULT_MAX_VERSION(...) {} export fn getCiphers(...) {}
+ export fn rootCertificates(...) {} export fn getCACertificates(...) {}
+ export fn setDefaultCACertificates(...) {} export fn convertALPNProtocols(...) {}
+ export fn checkServerIdentity(...) {} export fn createSecureContext(...) {}
+ export fn SecureContext(...) {} export fn TLSSocket(...) {} export fn Server(...) {}
+ export fn createServer(...) {} export fn connect(...) {} export fn createSecurePair(...) {}
+}
+module "node:trace_events" {
+ export fn default(...) {} export fn createTracing(...) {} export fn getEnabledCategories(...) {}
+}
+module "node:tty" {
+ export fn default(...) {} export fn isatty(...) {} export fn ReadStream(...) {}
+ export fn WriteStream(...) {}
+}
+module "node:url" {
+ export fn default(...) {} export fn Url(...) {} export fn parse(...) {}
+ export fn resolve(...) {} export fn resolveObject(...) {} export fn format(...) {}
+ export fn URL(...) {} export fn URLSearchParams(...) {} export fn domainToASCII(...) {}
+ export fn domainToUnicode(...) {} export fn pathToFileURL(...) {} export fn fileURLToPath(...) {}
+ export fn fileURLToPathBuffer(...) {} export fn urlToHttpOptions(...) {}
+}
+module "node:util" {
+ export fn default(...) {} export fn callbackify(...) {} export fn debug(...) {}
+ export fn debuglog(...) {} export fn deprecate(...) {} export fn format(...) {}
+ export fn styleText(...) {} export fn formatWithOptions(...) {} export fn getCallSite(...) {}
+ export fn getCallSites(...) {} export fn getSystemErrorMap(...) {}
+ export fn getSystemErrorName(...) {} export fn getSystemErrorMessage(...) {}
+ export fn inherits(...) {} export fn inspect(...) {} export fn isArray(...) {}
+ export fn isBoolean(...) {} export fn isBuffer(...) {} export fn isDeepStrictEqual(...) {}
+ export fn isNull(...) {} export fn isNullOrUndefined(...) {} export fn isNumber(...) {}
+ export fn isString(...) {} export fn isSymbol(...) {} export fn isUndefined(...) {}
+ export fn isRegExp(...) {} export fn isObject(...) {} export fn isDate(...) {}
+ export fn isError(...) {} export fn isFunction(...) {} export fn isPrimitive(...) {}
+ export fn log(...) {} export fn promisify(...) {} export fn stripVTControlCharacters(...) {}
+ export fn toUSVString(...) {} export fn transferableAbortSignal(...) {}
+ export fn transferableAbortController(...) {} export fn aborted(...) {}
+ export fn types(...) {} export fn parseEnv(...) {} export fn parseArgs(...) {}
+ export fn TextDecoder(...) {} export fn TextEncoder(...) {} export fn MIMEType(...) {}
+ export fn MIMEParams(...) {} export fn diff(...) {} export fn setTraceSigInt(...) {}
+ export fn convertProcessSignalToExitCode(...) {} export fn debounce(...) {}
+ export fn throttle(...) {} export fn markPromiseAsHandled(...) {}
+}
+module "node:util/types" {
+ export fn default(...) {} export fn isArgumentsObject(...) {} export fn isArrayBuffer(...) {}
+ export fn isAsyncFunction(...) {} export fn isBigIntObject(...) {} export fn isBooleanObject(...) {}
+ export fn isDataView(...) {} export fn isDate(...) {} export fn isExternal(...) {}
+ export fn isGeneratorFunction(...) {} export fn isGeneratorObject(...) {} export fn isMap(...) {}
+ export fn isMapIterator(...) {} export fn isModuleNamespaceObject(...) {} export fn isNativeError(...) {}
+ export fn isNumberObject(...) {} export fn isPromise(...) {} export fn isProxy(...) {}
+ export fn isRegExp(...) {} export fn isSet(...) {} export fn isSetIterator(...) {}
+ export fn isSharedArrayBuffer(...) {} export fn isStringObject(...) {} export fn isSymbolObject(...) {}
+ export fn isWeakMap(...) {} export fn isWeakSet(...) {} export fn isAnyArrayBuffer(...) {}
+ export fn isBoxedPrimitive(...) {} export fn isArrayBufferView(...) {} export fn isTypedArray(...) {}
+ export fn isUint8Array(...) {} export fn isUint8ClampedArray(...) {} export fn isUint16Array(...) {}
+ export fn isUint32Array(...) {} export fn isInt8Array(...) {} export fn isInt16Array(...) {}
+ export fn isInt32Array(...) {} export fn isFloat16Array(...) {} export fn isFloat32Array(...) {}
+ export fn isFloat64Array(...) {} export fn isBigInt64Array(...) {} export fn isBigUint64Array(...) {}
+ export fn isKeyObject(...) {} export fn isCryptoKey(...) {}
+}
+module "node:v8" {
+ export fn default(...) {} export fn cachedDataVersionTag(...) {} export fn getHeapSnapshot(...) {}
+ export fn getHeapStatistics(...) {} export fn getHeapSpaceStatistics(...) {}
+ export fn getHeapCodeStatistics(...) {} export fn getCppHeapStatistics(...) {}
+ export fn setFlagsFromString(...) {} export fn Serializer(...) {} export fn Deserializer(...) {}
+ export fn DefaultSerializer(...) {} export fn DefaultDeserializer(...) {} export fn deserialize(...) {}
+ export fn takeCoverage(...) {} export fn stopCoverage(...) {} export fn serialize(...) {}
+ export fn writeHeapSnapshot(...) {} export fn promiseHooks(...) {} export fn queryObjects(...) {}
+ export fn startupSnapshot(...) {} export fn setHeapSnapshotNearHeapLimit(...) {}
+ export fn GCProfiler(...) {} export fn isStringOneByteRepresentation(...) {}
+}
+module "node:vm" {
+ export fn default(...) {} export fn Script(...) {} export fn SourceTextModule(...) {}
+ export fn SyntheticModule(...) {} export fn Module(...) {} export fn createContext(...) {}
+ export fn createScript(...) {} export fn runInContext(...) {} export fn runInNewContext(...) {}
+ export fn runInThisContext(...) {} export fn isContext(...) {} export fn compileFunction(...) {}
+ export fn measureMemory(...) {} export fn constants(...) {}
+}
+module "node:wasi" { export fn default(...) {} export fn WASI(...) {} }
+module "node:worker_threads" {
+ export fn default(...) {} export fn isInternalThread(...) {} export fn isMainThread(...) {}
+ export fn MessagePort(...) {} export fn MessageChannel(...) {} export fn markAsUncloneable(...) {}
+ export fn markAsUntransferable(...) {} export fn isMarkedAsUntransferable(...) {}
+ export fn moveMessagePortToContext(...) {} export fn receiveMessageOnPort(...) {}
+ export fn resourceLimits(...) {} export fn postMessageToThread(...) {} export fn threadId(...) {}
+ export fn threadName(...) {} export fn SHARE_ENV(...) {} export fn Worker(...) {}
+ export fn parentPort(...) {} export fn workerData(...) {} export fn BroadcastChannel(...) {}
+ export fn setEnvironmentData(...) {} export fn getEnvironmentData(...) {}
+ export fn locks(...) {}
+}
+module "node:zlib" {
+ export fn default(...) {} export fn crc32(...) {} export fn Deflate(...) {}
+ export fn Inflate(...) {} export fn Gzip(...) {} export fn Gunzip(...) {}
+ export fn DeflateRaw(...) {} export fn InflateRaw(...) {} export fn Unzip(...) {}
+ export fn BrotliCompress(...) {} export fn BrotliDecompress(...) {}
+ export fn ZstdCompress(...) {} export fn ZstdDecompress(...) {}
+ export fn deflate(...) {} export fn deflateSync(...) {} export fn gzip(...) {}
+ export fn gzipSync(...) {} export fn deflateRaw(...) {} export fn deflateRawSync(...) {}
+ export fn unzip(...) {} export fn unzipSync(...) {} export fn inflate(...) {}
+ export fn inflateSync(...) {} export fn gunzip(...) {} export fn gunzipSync(...) {}
+ export fn inflateRaw(...) {} export fn inflateRawSync(...) {} export fn brotliCompress(...) {}
+ export fn brotliCompressSync(...) {} export fn brotliDecompress(...) {}
+ export fn brotliDecompressSync(...) {} export fn zstdCompress(...) {}
+ export fn zstdCompressSync(...) {} export fn zstdDecompress(...) {} export fn zstdDecompressSync(...) {}
+ export fn createDeflate(...) {} export fn createInflate(...) {} export fn createDeflateRaw(...) {}
+ export fn createInflateRaw(...) {} export fn createGzip(...) {} export fn createGunzip(...) {}
+ export fn createUnzip(...) {} export fn createBrotliCompress(...) {}
+ export fn createBrotliDecompress(...) {} export fn createZstdCompress(...) {}
+ export fn createZstdDecompress(...) {} export fn constants(...) {} export fn codes(...) {}
+}

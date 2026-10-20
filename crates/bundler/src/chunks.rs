@@ -305,6 +305,8 @@ pub fn partition(
     entries: &[RootSeed],
     policy: &EffectPolicy,
 ) -> eyre::Result<ChunkPlan> {
+    graph.validate_links()?;
+    let ecco_effects = crate::effect_analysis::analyze(graph, policy)?;
     let mut roots = BTreeMap::new();
     for entry in entries {
         ensure!(
@@ -337,7 +339,8 @@ pub fn partition(
             .flat_map(|r| r.binding_roots.iter().copied())
             .filter(|n| !matches!(n, GraphNode::Unlinked { .. }))
             .collect();
-        let retention = crate::retain_with_policy(graph, &evaluation, &bindings, policy)?;
+        let retention =
+            crate::retain_with_effects(graph, &evaluation, &bindings, policy, &ecco_effects)?;
         let seeds: Vec<_> = roots.values().cloned().collect();
         let reached = reference_reachability(graph, &retention, policy, &seeds)?;
         let mut added = false;

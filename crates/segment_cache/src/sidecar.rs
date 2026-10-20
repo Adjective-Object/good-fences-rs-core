@@ -65,7 +65,23 @@ pub fn load_or_parse(
     package: ModuleFormat,
     mode: CacheMode,
 ) -> eyre::Result<CacheOutcome> {
-    load(logger, path, package, mode, || Ok(()))
+    load_or_parse_with_declarations(
+        logger,
+        path,
+        package,
+        mode,
+        &ecco::DeclarationConfig::default().effective()?,
+    )
+}
+
+pub fn load_or_parse_with_declarations(
+    logger: &impl logger::Logger,
+    path: &Path,
+    package: ModuleFormat,
+    mode: CacheMode,
+    declarations: &ecco::LocalFacts,
+) -> eyre::Result<CacheOutcome> {
+    load(logger, path, package, mode, declarations, || Ok(()))
 }
 
 fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
@@ -101,6 +117,7 @@ fn load(
     path: &Path,
     package: ModuleFormat,
     mode: CacheMode,
+    declarations: &ecco::LocalFacts,
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<CacheOutcome> {
     let source = fs::read_to_string(path)
@@ -110,14 +127,20 @@ fn load(
         Err(MissReason::Disabled)
     } else {
         read_cache(&sidecar_path(path)).and_then(|bytes| {
-            CacheRecord::decode(&bytes, &source, config)
+            CacheRecord::decode_with_declarations(&bytes, &source, config, declarations)
                 .map_err(|e| MissReason::InvalidRecord(format!("{e:#}")))
         })
     };
     let (record, status, write) = match cached {
         Ok(record) => (record, CacheStatus::Hit, CacheWrite::NotRequested),
         Err(reason) => {
-            let parsed = ast_segmenter::parse_module(logger, &source, path, package)?;
+            let parsed = ast_segmenter::parse_module_with_declarations(
+                logger,
+                &source,
+                path,
+                package,
+                declarations.clone(),
+            )?;
             let record = CacheRecord::from_parsed(&source, &parsed)?;
             let write = if mode == CacheMode::ReadWrite {
                 match publish(path, &source, &record, before_publish) {

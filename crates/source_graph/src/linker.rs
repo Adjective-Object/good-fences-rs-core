@@ -73,14 +73,27 @@ impl SourceGraph {
         name: &str,
         namespace: Namespace,
     ) -> eyre::Result<LinkedExport> {
+        self.resolve_optional_export(file, name, namespace)?
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "missing {:?} export {name:?} in {:?} (including unresolved cycles)",
+                    namespace,
+                    self.file_path(file)
+                )
+            })
+    }
+
+    /// Namespace property reads may name an absent export, but not an ambiguous one.
+    pub fn resolve_optional_export(
+        &self,
+        file: u32,
+        name: &str,
+        namespace: Namespace,
+    ) -> eyre::Result<Option<LinkedExport>> {
         let mut active = AHashSet::default();
         let results = self.export_candidates(file, name, namespace, &mut active);
         let Some(mut result) = results.first().cloned() else {
-            eyre::bail!(
-                "missing {:?} export {name:?} in {:?} (including unresolved cycles)",
-                namespace,
-                self.file_path(file)
-            );
+            return Ok(None);
         };
         for candidate in results.iter().skip(1) {
             eyre::ensure!(
@@ -97,7 +110,7 @@ impl SourceGraph {
         }
         let mut seen = AHashSet::default();
         result.route.retain(|node| seen.insert(*node));
-        Ok(result)
+        Ok(Some(result))
     }
 
     fn export_candidates(

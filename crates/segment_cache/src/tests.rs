@@ -1,9 +1,14 @@
 use super::*;
 
 fn record(source: &str, path: &str, format: ModuleFormat) -> CacheRecord {
-    let parsed =
-        ast_segmenter::parse_module(&logger::StdioLogger::new(), source, Path::new(path), format)
-            .unwrap();
+    let parsed = ast_segmenter::parse_module_with_declarations(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new(path),
+        format,
+        ecco::LocalFacts::default(),
+    )
+    .unwrap();
     CacheRecord::from_parsed(source, &parsed).unwrap()
 }
 
@@ -469,7 +474,7 @@ fn bounded_decoder_rejects_allocation_and_depth_bombs() {
         vec![0x9f, 0xff],
         vec![0x81; 40],
         vec![0; MAX_RECORD_BYTES + 1],
-        [vec![0x9a, 0, 4, 0, 0], vec![0; 262_144]].concat(),
+        [vec![0x9a, 0, 32, 0, 0], vec![0; 2_097_152]].concat(),
     ] {
         assert!(bounded::check(&bytes).is_err());
     }

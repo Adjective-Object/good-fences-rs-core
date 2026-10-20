@@ -58,6 +58,17 @@ fn stars_diamonds_explicit_precedence_namespace_alias_and_cycles() {
         .unwrap_err()
         .to_string()
         .contains("ambiguous"));
+    assert!(graph
+        .resolve_optional_export(5, "x", Namespace::Value)
+        .unwrap_err()
+        .to_string()
+        .contains("ambiguous"));
+    assert_eq!(
+        graph
+            .resolve_optional_export(0, "missing", Namespace::Value)
+            .unwrap(),
+        None
+    );
     assert_eq!(
         graph
             .resolve_export(6, "x", Namespace::Value)

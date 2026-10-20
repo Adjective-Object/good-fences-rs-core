@@ -1,6 +1,10 @@
 # bundler
 
 Consume owned syntax facts and checked shared graph edges, never UsedTag.
+Solve cached Ecco precursors on the complete checked graph, using canonical export
+identities; never cache solved effects. Share a solve across async partition rounds.
+Declaration structs key source metadata, memory reuse and parse fingerprints.
+Keep native TDZ barriers and add-only forced-effect rules when refining syntax effects.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
 separate layer fingerprints, inventory config/add/delete changes, and derive
 affected users from the existing reverse index. Never return old success on error.

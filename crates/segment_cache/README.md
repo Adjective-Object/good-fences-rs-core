@@ -3,8 +3,9 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 8 /
-extractor 10, including source-local emission recipes/placement constraints,
+Syntax-local effect reasons/timing are persisted and range-checked (schema 9 /
+extractor 11, including owned lazy Ecco precursors and declaration identity,
+source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
 effective commonjs format, invocation inputs/annotation sites and normalized member
 shapes). No resolver, usage, effects-policy, graph, absolute path or arena IDs
@@ -24,7 +25,7 @@ language/module/definition mode. Current parser defaults are part of the
 extractor version; bump it when defaults or extraction/support policy change.
 
 `CacheRecord::from_parsed`, `encode` and `decode` validate all UTF-8 ranges,
-source-local IDs, links and ordering. Decode limits input to 16 MiB, 262,144
+source-local IDs, links and ordering. Decode limits input to 16 MiB, 2,097,152
 CBOR items and 32 levels before serde allocates; indefinite lengths and trailing
 data are rejected. This is an untrusted cache, not an authenticated artifact.
 Diagnostics are not persisted. The codec is owned after parser arena drop.
@@ -59,6 +60,13 @@ No negative diagnostics are cached: failures are regenerated with the current
 path. Cache read/write errors are nonfatal and explicitly reported in the
 outcome, not logged behind the caller's back. `ReadOnly` suppresses writes;
 `Disabled` suppresses both cache reads and writes.
+
+`load_or_parse_with_declarations(..., &LocalFacts)` includes effective contracts
+in identity for ESM and opaque CJS; `load_or_parse` uses the default JavaScript
+and Node presets. `CacheRecord::matches_declarations` also checks in-memory
+identity without parsing. Ecco templates persist only lazy extraction, never
+solved hazards; decoding validates their local IDs, UTF-8 spans, source bindings
+and unique root-to-segment ownership.
 
 Writes use uniquely named sibling `.seg.cbor.stage-*` files, flush/sync before
 atomic replacement, and clean up staging files on errors/normal cancellation.

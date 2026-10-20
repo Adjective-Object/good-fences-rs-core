@@ -89,6 +89,53 @@ impl CacheRecord {
             }
         }
         let facts = &module.facts;
+        match (&facts.ecco, module.body) {
+            (Some(parsed), ModuleBody::Esm) => {
+                parsed.validate()?;
+                ensure!(
+                    sorted(parsed.roots().iter().map(|r| (r.span.start, r.span.end)))
+                        && sorted(parsed.symbols().iter().map(|s| s.id.0)),
+                    "unordered Ecco source records"
+                );
+                let mut occupied = HashSet::new();
+                for root in parsed.roots() {
+                    span(source, root.span)?;
+                    ensure!(root.span.start < root.span.end, "empty Ecco root");
+                    let segment = module
+                        .segments
+                        .iter()
+                        .position(|s| contains(*s, root.span))
+                        .ok_or_else(|| eyre::eyre!("Ecco root outside segment"))?;
+                    ensure!(occupied.insert(segment), "multiple Ecco roots in segment");
+                }
+                for symbol in parsed.symbols() {
+                    span(source, symbol.span)?;
+                    ensure!(
+                        facts.bindings.iter().any(|binding| binding.top_level
+                            && binding.id.0 == symbol.id.0
+                            && binding.name == symbol.name
+                            && binding.declarations.contains(&symbol.span)),
+                        "Ecco symbol does not match source binding"
+                    );
+                }
+                for reference in parsed.external_references() {
+                    span(source, reference.span)?;
+                    ensure!(
+                        module.segments.iter().any(|s| contains(*s, reference.span)),
+                        "Ecco reference outside segment"
+                    );
+                }
+                for matched in parsed.definition_matches() {
+                    span(source, matched.span)?;
+                    ensure!(
+                        module.segments.iter().any(|s| contains(*s, matched.span)),
+                        "Ecco declaration match outside segment"
+                    );
+                }
+            }
+            (None, ModuleBody::CommonJs { .. }) => {}
+            _ => eyre::bail!("invalid Ecco module representation"),
+        }
         ensure!(
             facts.commonjs == config.commonjs,
             "facts parser format mismatch"

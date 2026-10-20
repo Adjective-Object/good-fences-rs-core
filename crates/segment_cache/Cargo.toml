@@ -6,6 +6,7 @@ license = "Apache-2.0"
 description = "Versioned source-local segment facts and atomic CBOR sidecars"
 
 [dependencies]
+ecco = { path = "../ecco" }
 ast-segmenter = { path = "../ast_segmenter" }
 eyre.workspace = true
 logger = { path = "../logger" }

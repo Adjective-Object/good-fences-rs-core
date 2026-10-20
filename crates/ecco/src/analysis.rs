@@ -14,7 +14,7 @@ pub struct SymbolId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RootId(pub usize);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedSymbol {
     pub id: SymbolId,
     pub name: String,
@@ -23,21 +23,21 @@ pub struct ParsedSymbol {
     pub(crate) value: ValueId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalReference {
     pub binding: Binding,
     #[serde(with = "span")]
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedRoot {
     #[serde(with = "span")]
     pub span: Span,
     pub function: OwnedFunction,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ParsedValue {
     pub hazards: Hazards,
     pub definition: Option<usize>,
@@ -46,7 +46,7 @@ pub(crate) struct ParsedValue {
 
 /// Cacheable extraction only: no evaluated hazards, specialized calls, resolved
 /// cross-file links, or interpreter state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedFile {
     pub(crate) version: u32,
     pub(crate) facts: LocalFacts,
@@ -80,6 +80,10 @@ impl ParsedFile {
 
     pub fn declarations(&self) -> &LocalFacts {
         &self.facts
+    }
+
+    pub fn definition_matches(&self) -> &[DefinitionMatch] {
+        &self.matches
     }
 
     /// Check deserialized IDs and references before they enter an interpreter.

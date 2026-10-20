@@ -3,6 +3,7 @@ mod assembly;
 pub mod build;
 pub mod chunks;
 mod cjs;
+mod effect_analysis;
 mod effect_dependencies;
 pub mod effects;
 pub mod emit;
@@ -119,6 +120,23 @@ pub fn retain_with_policy(
     policy: &policy::EffectPolicy,
 ) -> eyre::Result<RetentionPlan> {
     graph.validate_links()?;
+    let ecco_effects = effect_analysis::analyze(graph, policy)?;
+    retain_with_effects(
+        graph,
+        evaluation_roots,
+        binding_roots,
+        policy,
+        &ecco_effects,
+    )
+}
+
+fn retain_with_effects(
+    graph: &SourceGraph,
+    evaluation_roots: &[u32],
+    binding_roots: &[GraphNode],
+    policy: &policy::EffectPolicy,
+    ecco_effects: &BTreeMap<SegmentKey, bool>,
+) -> eyre::Result<RetentionPlan> {
     let mut analysis = Retention {
         graph,
         policy,
@@ -131,6 +149,7 @@ pub fn retain_with_policy(
         effects: BTreeMap::new(),
         values: HashSet::new(),
         export_names: link::namespace_export_names(graph, |_| BTreeSet::from(["default".into()])),
+        ecco_effects,
     };
     for &file in evaluation_roots {
         analysis.queue.push_back(Demand::Evaluation(file));
@@ -215,6 +234,7 @@ struct Retention<'g, 'p> {
     effects: BTreeMap<SegmentKey, effects::StatementEffects>,
     values: HashSet<SegmentKey>,
     export_names: BTreeMap<u32, BTreeSet<String>>,
+    ecco_effects: &'g BTreeMap<SegmentKey, bool>,
 }
 
 impl Retention<'_, '_> {
@@ -235,11 +255,14 @@ impl Retention<'_, '_> {
             .ok_or_eyre("missing module statements")?;
         for (index, statement) in statements.iter().enumerate() {
             let key = SegmentKey::new(file, index as u32);
-            let summary = effects::summarize_with_policy(
+            let summary = effect_analysis::summarize(
+                graph,
+                file,
                 self.facts(file)?,
                 statement.span,
                 self.values.contains(&key),
                 self.policy,
+                self.ecco_effects.get(&key).copied(),
             );
             if summary.is_effectful() {
                 let node = GraphNode::Segment(key);
@@ -361,8 +384,15 @@ impl Retention<'_, '_> {
                 .file_segments(key.file_id)
                 .ok_or_eyre("missing binding statements")?[key.segment_idx as usize]
                 .span;
-            let summary =
-                effects::summarize_with_policy(self.facts(key.file_id)?, span, true, self.policy);
+            let summary = effect_analysis::summarize(
+                self.graph,
+                key.file_id,
+                self.facts(key.file_id)?,
+                span,
+                true,
+                self.policy,
+                self.ecco_effects.get(&key).copied(),
+            );
             self.effects.insert(key, summary);
         }
         if !first {

@@ -17,7 +17,7 @@ pub struct SourceRoot {
     pub effects: Effect,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DefinitionMatch {
     #[serde(with = "crate::analysis::span")]
     pub span: Span,
@@ -124,7 +124,7 @@ pub fn parse_from_ast<'a>(
         parsed_roots: Vec::new(),
         externals: Vec::new(),
     };
-    let symbols = semantic
+    let mut symbols: Vec<_> = semantic
         .scoping()
         .symbol_ids()
         .filter(|symbol| {
@@ -144,6 +144,7 @@ pub fn parse_from_ast<'a>(
             }
         })
         .collect();
+    symbols.sort_by_key(|symbol| symbol.id.0);
     let values = extractor.context.parsed_values();
     Compiler {
         extractor: &mut extractor,
@@ -188,6 +189,30 @@ pub fn parse_from_ast<'a>(
         externals: extractor.externals,
         matches: extractor.matches,
     })
+}
+
+/// Extract from the same checked AST as a segmenter, preserving declarator
+/// boundaries without reconstructing or reparsing source.
+pub fn parse_from_ast_with_segments<'a>(
+    program: &Program<'a>,
+    semantic: &Semantic<'a>,
+    facts: LocalFacts,
+    segments: &[Span],
+) -> Result<ParsedFile> {
+    let parsed = parse_from_ast(program, semantic, facts)?;
+    let mut occupied = std::collections::HashSet::new();
+    for root in parsed.roots() {
+        let segment = segments
+            .iter()
+            .position(|span| span.start <= root.span.start && root.span.end <= span.end)
+            .ok_or_else(|| eyre::eyre!("Ecco root outside segment ownership"))?;
+        ensure!(
+            occupied.insert(segment),
+            "multiple Ecco roots in one segment"
+        );
+    }
+    parsed.validate()?;
+    Ok(parsed)
 }
 
 #[derive(Clone)]

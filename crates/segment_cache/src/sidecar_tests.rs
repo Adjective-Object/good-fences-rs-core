@@ -61,6 +61,41 @@ fn cold_warm_and_cache_modes() {
 }
 
 #[test]
+fn declaration_changes_invalidate_disk_and_opaque_commonjs() {
+    let dir = TmpDir::new();
+    for name in ["entry.mjs", "entry.cjs"] {
+        let path = dir.root_join(name);
+        fs::write(&path, "const value = 1;").unwrap();
+        let declarations = ecco::LocalFacts::default();
+        let changed =
+            ecco::parse_declarations("global fn noop() { call_effects = false }").unwrap();
+        let run = |facts| {
+            load_or_parse_with_declarations(
+                &logger::StdioLogger::new(),
+                &path,
+                ModuleFormat::Esm,
+                CacheMode::ReadWrite,
+                facts,
+            )
+            .unwrap()
+        };
+        let before = ast_segmenter::module_parse_count();
+        assert!(matches!(run(&declarations).status, CacheStatus::Miss(_)));
+        assert_eq!(run(&declarations).status, CacheStatus::Hit);
+        assert_eq!(ast_segmenter::module_parse_count(), before + 1);
+        let changed_record = run(&changed);
+        assert!(matches!(
+            changed_record.status,
+            CacheStatus::Miss(MissReason::InvalidRecord(_))
+        ));
+        assert!(changed_record.record.matches_declarations(&changed));
+        assert!(!changed_record.record.matches_declarations(&declarations));
+        assert_eq!(run(&changed).status, CacheStatus::Hit);
+        assert_eq!(ast_segmenter::module_parse_count(), before + 2);
+    }
+}
+
+#[test]
 fn corruption_truncation_and_oversize_are_repaired_misses() {
     let (_dir, path) = setup();
     let cold = run(&path).unwrap();
@@ -118,6 +153,7 @@ fn source_change_during_staging_cannot_publish_or_return_stale_success() {
         &path,
         ModuleFormat::Esm,
         CacheMode::ReadWrite,
+        &ecco::DeclarationConfig::default().effective().unwrap(),
         || {
             fs::write(&path, "export const changed = 2;")?;
             Ok(())

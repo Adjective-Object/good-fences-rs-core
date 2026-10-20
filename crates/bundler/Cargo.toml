@@ -6,6 +6,7 @@ license = "Apache-2.0"
 description = "Owned graph retention, exact chunk planning and native ESM emission"
 
 [dependencies]
+ecco = { path = "../ecco" }
 ast-segmenter = { path = "../ast_segmenter" }
 source_graph = { path = "../source_graph" }
 eyre.workspace = true

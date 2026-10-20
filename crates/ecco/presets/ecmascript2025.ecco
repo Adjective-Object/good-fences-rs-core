@@ -1,0 +1,457 @@
+// ECMAScript 2025. Empty bodies intentionally retain every unknown hazard.
+// Primitive returns have no effectful hooks; conversions query their input.
+global symbol globalThis { read_effects = false }
+global symbol Infinity { read_effects = false }
+global symbol NaN { read_effects = false }
+global symbol undefined { read_effects = false }
+// globalThis may expose host-defined getters even with the Node preset disabled.
+global fn globalThis(...) {}
+global fn eval(...) {}
+global fn isFinite(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn isNaN(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn parseFloat(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn parseInt(value, radix) { call_effects = value.toprimitive_effects | radix.toprimitive_effects returns.*_effects = false }
+global fn decodeURI(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn decodeURIComponent(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn encodeURI(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn encodeURIComponent(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Boolean(value) { call_effects = false returns.*_effects = false }
+global fn Boolean.prototype.toString(...) {}
+global fn Boolean.prototype.valueOf(...) {}
+global fn Number(value) { property_read_effects = false call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Number.isFinite(value) { call_effects = false returns.*_effects = false }
+global fn Number.isInteger(value) { call_effects = false returns.*_effects = false }
+global fn Number.isNaN(value) { call_effects = false returns.*_effects = false }
+global fn Number.isSafeInteger(value) { call_effects = false returns.*_effects = false }
+global fn Number.parseFloat(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Number.parseInt(value, radix) { call_effects = value.toprimitive_effects | radix.toprimitive_effects returns.*_effects = false }
+global fn Number.prototype.toExponential(...) {}
+global fn Number.prototype.toFixed(...) {}
+global fn Number.prototype.toLocaleString(...) {}
+global fn Number.prototype.toPrecision(...) {}
+global fn Number.prototype.toString(...) {}
+global fn Number.prototype.valueOf(...) {}
+global fn BigInt(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn BigInt.asIntN(...) {}
+global fn BigInt.asUintN(...) {}
+global fn BigInt.prototype.toLocaleString(...) {}
+global fn BigInt.prototype.toString(...) {}
+global fn BigInt.prototype.valueOf(...) {}
+global fn String(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn String.fromCharCode(...) {}
+global fn String.fromCodePoint(...) {}
+global fn String.raw(...) {}
+global fn String.prototype.at(...) {}
+global fn String.prototype.charAt(...) {}
+global fn String.prototype.charCodeAt(...) {}
+global fn String.prototype.codePointAt(...) {}
+global fn String.prototype.concat(...) {}
+global fn String.prototype.endsWith(...) {}
+global fn String.prototype.includes(...) {}
+global fn String.prototype.indexOf(...) {}
+global fn String.prototype.isWellFormed(...) {}
+global fn String.prototype.lastIndexOf(...) {}
+global fn String.prototype.localeCompare(...) {}
+global fn String.prototype.match(...) {}
+global fn String.prototype.matchAll(...) {}
+global fn String.prototype.normalize(...) {}
+global fn String.prototype.padEnd(...) {}
+global fn String.prototype.padStart(...) {}
+global fn String.prototype.repeat(...) {}
+global fn String.prototype.replace(...) {}
+global fn String.prototype.replaceAll(...) {}
+global fn String.prototype.search(...) {}
+global fn String.prototype.slice(...) {}
+global fn String.prototype.split(...) {}
+global fn String.prototype.startsWith(...) {}
+global fn String.prototype.substring(...) {}
+global fn String.prototype.toLocaleLowerCase(...) {}
+global fn String.prototype.toLocaleUpperCase(...) {}
+global fn String.prototype.toLowerCase(...) {}
+global fn String.prototype.toString(...) {}
+global fn String.prototype.toUpperCase(...) {}
+global fn String.prototype.toWellFormed(...) {}
+global fn String.prototype.trim(...) {}
+global fn String.prototype.trimEnd(...) {}
+global fn String.prototype.trimStart(...) {}
+global fn String.prototype.valueOf(...) {}
+global fn Symbol(...) {}
+global fn Symbol.for(...) {}
+global fn Symbol.keyFor(...) {}
+global fn Symbol.prototype.toString(...) {}
+global fn Symbol.prototype.valueOf(...) {}
+global fn Object(...) { property_read_effects = false }
+global fn Object.assign(...) {}
+global fn Object.create(...) {}
+global fn Object.defineProperties(...) {}
+global fn Object.defineProperty(...) {}
+global fn Object.entries(...) {}
+global fn Object.freeze(...) {}
+global fn Object.fromEntries(...) {}
+global fn Object.getOwnPropertyDescriptor(...) {}
+global fn Object.getOwnPropertyDescriptors(...) {}
+global fn Object.getOwnPropertyNames(...) {}
+global fn Object.getOwnPropertySymbols(...) {}
+global fn Object.getPrototypeOf(...) {}
+global fn Object.groupBy(...) {}
+global fn Object.hasOwn(...) {}
+global fn Object.is(left, right) { call_effects = false returns.*_effects = false }
+global fn Object.isExtensible(...) {}
+global fn Object.isFrozen(...) {}
+global fn Object.isSealed(...) {}
+global fn Object.keys(...) {}
+global fn Object.preventExtensions(...) {}
+global fn Object.seal(...) {}
+global fn Object.setPrototypeOf(...) {}
+global fn Object.values(...) {}
+global fn Object.prototype.hasOwnProperty(...) {}
+global fn Object.prototype.isPrototypeOf(...) {}
+global fn Object.prototype.propertyIsEnumerable(...) {}
+global fn Object.prototype.toLocaleString(...) {}
+global fn Object.prototype.toString(...) {}
+global fn Object.prototype.valueOf(...) {}
+global fn Function(...) {}
+global fn Function.prototype.apply(...) {}
+global fn Function.prototype.bind(...) {}
+global fn Function.prototype.call(...) {}
+global fn Function.prototype.toString(...) {}
+global fn Array(...) { property_read_effects = false }
+global fn Array.from(...) {}
+global fn Array.isArray(value) { call_effects = false returns.*_effects = false }
+global fn Array.of(...) {}
+global fn Array.prototype.at(...) {}
+global fn Array.prototype.concat(...) {}
+global fn Array.prototype.copyWithin(...) {}
+global fn Array.prototype.entries(...) {}
+global fn Array.prototype.every(...) {}
+global fn Array.prototype.fill(...) {}
+global fn Array.prototype.filter(...) {}
+global fn Array.prototype.find(...) {}
+global fn Array.prototype.findIndex(...) {}
+global fn Array.prototype.findLast(...) {}
+global fn Array.prototype.findLastIndex(...) {}
+global fn Array.prototype.flat(...) {}
+global fn Array.prototype.flatMap(...) {}
+global fn Array.prototype.forEach(...) {}
+global fn Array.prototype.includes(...) {}
+global fn Array.prototype.indexOf(...) {}
+global fn Array.prototype.join(...) {}
+global fn Array.prototype.keys(...) {}
+global fn Array.prototype.lastIndexOf(...) {}
+global fn Array.prototype.map(...) {}
+global fn Array.prototype.pop(...) {}
+global fn Array.prototype.push(...) {}
+global fn Array.prototype.reduce(...) {}
+global fn Array.prototype.reduceRight(...) {}
+global fn Array.prototype.reverse(...) {}
+global fn Array.prototype.shift(...) {}
+global fn Array.prototype.slice(...) {}
+global fn Array.prototype.some(...) {}
+global fn Array.prototype.sort(...) {}
+global fn Array.prototype.splice(...) {}
+global fn Array.prototype.toLocaleString(...) {}
+global fn Array.prototype.toReversed(...) {}
+global fn Array.prototype.toSorted(...) {}
+global fn Array.prototype.toSpliced(...) {}
+global fn Array.prototype.toString(...) {}
+global fn Array.prototype.unshift(...) {}
+global fn Array.prototype.values(...) {}
+global fn Array.prototype.with(...) {}
+global fn ArrayBuffer(...) { property_read_effects = false }
+global fn ArrayBuffer.isView(value) { call_effects = false returns.*_effects = false }
+global fn ArrayBuffer.prototype.resize(...) {}
+global fn ArrayBuffer.prototype.slice(...) {}
+global fn ArrayBuffer.prototype.transfer(...) {}
+global fn ArrayBuffer.prototype.transferToFixedLength(...) {}
+global fn SharedArrayBuffer(...) {}
+global fn SharedArrayBuffer.prototype.grow(...) {}
+global fn SharedArrayBuffer.prototype.slice(...) {}
+global fn DataView(...) {}
+global fn DataView.prototype.getBigInt64(...) {}
+global fn DataView.prototype.getBigUint64(...) {}
+global fn DataView.prototype.getFloat16(...) {}
+global fn DataView.prototype.getFloat32(...) {}
+global fn DataView.prototype.getFloat64(...) {}
+global fn DataView.prototype.getInt8(...) {}
+global fn DataView.prototype.getInt16(...) {}
+global fn DataView.prototype.getInt32(...) {}
+global fn DataView.prototype.getUint8(...) {}
+global fn DataView.prototype.getUint16(...) {}
+global fn DataView.prototype.getUint32(...) {}
+global fn DataView.prototype.setBigInt64(...) {}
+global fn DataView.prototype.setBigUint64(...) {}
+global fn DataView.prototype.setFloat16(...) {}
+global fn DataView.prototype.setFloat32(...) {}
+global fn DataView.prototype.setFloat64(...) {}
+global fn DataView.prototype.setInt8(...) {}
+global fn DataView.prototype.setInt16(...) {}
+global fn DataView.prototype.setInt32(...) {}
+global fn DataView.prototype.setUint8(...) {}
+global fn DataView.prototype.setUint16(...) {}
+global fn DataView.prototype.setUint32(...) {}
+global fn Int8Array(...) {}
+global fn Uint8Array(...) {}
+global fn Uint8ClampedArray(...) {}
+global fn Int16Array(...) {}
+global fn Uint16Array(...) {}
+global fn Int32Array(...) {}
+global fn Uint32Array(...) {}
+global fn Float16Array(...) {}
+global fn Float32Array(...) {}
+global fn Float64Array(...) {}
+global fn BigInt64Array(...) {}
+global fn BigUint64Array(...) {}
+// TypedArray is an inventory template, expanded to concrete constructors.
+global fn TypedArray.from(...) {}
+global fn TypedArray.of(...) {}
+global fn TypedArray.prototype.at(...) {}
+global fn TypedArray.prototype.copyWithin(...) {}
+global fn TypedArray.prototype.entries(...) {}
+global fn TypedArray.prototype.every(...) {}
+global fn TypedArray.prototype.fill(...) {}
+global fn TypedArray.prototype.filter(...) {}
+global fn TypedArray.prototype.find(...) {}
+global fn TypedArray.prototype.findIndex(...) {}
+global fn TypedArray.prototype.findLast(...) {}
+global fn TypedArray.prototype.findLastIndex(...) {}
+global fn TypedArray.prototype.forEach(...) {}
+global fn TypedArray.prototype.includes(...) {}
+global fn TypedArray.prototype.indexOf(...) {}
+global fn TypedArray.prototype.join(...) {}
+global fn TypedArray.prototype.keys(...) {}
+global fn TypedArray.prototype.lastIndexOf(...) {}
+global fn TypedArray.prototype.map(...) {}
+global fn TypedArray.prototype.reduce(...) {}
+global fn TypedArray.prototype.reduceRight(...) {}
+global fn TypedArray.prototype.reverse(...) {}
+global fn TypedArray.prototype.set(...) {}
+global fn TypedArray.prototype.slice(...) {}
+global fn TypedArray.prototype.some(...) {}
+global fn TypedArray.prototype.sort(...) {}
+global fn TypedArray.prototype.subarray(...) {}
+global fn TypedArray.prototype.toLocaleString(...) {}
+global fn TypedArray.prototype.toReversed(...) {}
+global fn TypedArray.prototype.toSorted(...) {}
+global fn TypedArray.prototype.toString(...) {}
+global fn TypedArray.prototype.values(...) {}
+global fn TypedArray.prototype.with(...) {}
+global fn Math.abs(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.acos(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.acosh(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.asin(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.asinh(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.atan(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.atanh(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.atan2(y, x) { call_effects = y.toprimitive_effects | x.toprimitive_effects returns.*_effects = false }
+global fn Math.cbrt(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.ceil(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.clz32(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.cos(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.cosh(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.exp(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.expm1(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.floor(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.f16round(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.fround(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.hypot(...) {}
+global fn Math.imul(left, right) { call_effects = left.toprimitive_effects | right.toprimitive_effects returns.*_effects = false }
+global fn Math.log(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.log1p(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.log2(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.log10(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.max(...) {}
+global fn Math.min(...) {}
+global fn Math.pow(base, exponent) { call_effects = base.toprimitive_effects | exponent.toprimitive_effects returns.*_effects = false }
+global fn Math.random(...) {}
+global fn Math.round(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.sign(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.sin(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.sinh(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.sqrt(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.tan(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.tanh(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Math.trunc(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+global fn Date(...) {}
+global fn Date.now(...) {}
+global fn Date.parse(...) {}
+global fn Date.UTC(...) {}
+global fn Date.prototype.getDate(...) {}
+global fn Date.prototype.getDay(...) {}
+global fn Date.prototype.getFullYear(...) {}
+global fn Date.prototype.getHours(...) {}
+global fn Date.prototype.getMilliseconds(...) {}
+global fn Date.prototype.getMinutes(...) {}
+global fn Date.prototype.getMonth(...) {}
+global fn Date.prototype.getSeconds(...) {}
+global fn Date.prototype.getTime(...) {}
+global fn Date.prototype.getTimezoneOffset(...) {}
+global fn Date.prototype.getUTCDate(...) {}
+global fn Date.prototype.getUTCDay(...) {}
+global fn Date.prototype.getUTCFullYear(...) {}
+global fn Date.prototype.getUTCHours(...) {}
+global fn Date.prototype.getUTCMilliseconds(...) {}
+global fn Date.prototype.getUTCMinutes(...) {}
+global fn Date.prototype.getUTCMonth(...) {}
+global fn Date.prototype.getUTCSeconds(...) {}
+global fn Date.prototype.setDate(...) {}
+global fn Date.prototype.setFullYear(...) {}
+global fn Date.prototype.setHours(...) {}
+global fn Date.prototype.setMilliseconds(...) {}
+global fn Date.prototype.setMinutes(...) {}
+global fn Date.prototype.setMonth(...) {}
+global fn Date.prototype.setSeconds(...) {}
+global fn Date.prototype.setTime(...) {}
+global fn Date.prototype.setUTCDate(...) {}
+global fn Date.prototype.setUTCFullYear(...) {}
+global fn Date.prototype.setUTCHours(...) {}
+global fn Date.prototype.setUTCMilliseconds(...) {}
+global fn Date.prototype.setUTCMinutes(...) {}
+global fn Date.prototype.setUTCMonth(...) {}
+global fn Date.prototype.setUTCSeconds(...) {}
+global fn Date.prototype.toDateString(...) {}
+global fn Date.prototype.toISOString(...) {}
+global fn Date.prototype.toJSON(...) {}
+global fn Date.prototype.toLocaleDateString(...) {}
+global fn Date.prototype.toLocaleString(...) {}
+global fn Date.prototype.toLocaleTimeString(...) {}
+global fn Date.prototype.toString(...) {}
+global fn Date.prototype.toTimeString(...) {}
+global fn Date.prototype.toUTCString(...) {}
+global fn Date.prototype.valueOf(...) {}
+global fn RegExp(...) {}
+global fn RegExp.escape(...) {}
+global fn RegExp.prototype.exec(...) {}
+global fn RegExp.prototype.test(...) {}
+global fn RegExp.prototype.toString(...) {}
+global fn Map(...) {}
+global fn Map.groupBy(...) {}
+global fn Map.prototype.clear(...) {}
+global fn Map.prototype.delete(...) {}
+global fn Map.prototype.entries(...) {}
+global fn Map.prototype.forEach(...) {}
+global fn Map.prototype.get(...) {}
+global fn Map.prototype.has(...) {}
+global fn Map.prototype.keys(...) {}
+global fn Map.prototype.set(...) {}
+global fn Map.prototype.values(...) {}
+global fn Set(...) {}
+global fn Set.prototype.add(...) {}
+global fn Set.prototype.clear(...) {}
+global fn Set.prototype.delete(...) {}
+global fn Set.prototype.difference(...) {}
+global fn Set.prototype.entries(...) {}
+global fn Set.prototype.forEach(...) {}
+global fn Set.prototype.has(...) {}
+global fn Set.prototype.intersection(...) {}
+global fn Set.prototype.isDisjointFrom(...) {}
+global fn Set.prototype.isSubsetOf(...) {}
+global fn Set.prototype.isSupersetOf(...) {}
+global fn Set.prototype.keys(...) {}
+global fn Set.prototype.symmetricDifference(...) {}
+global fn Set.prototype.union(...) {}
+global fn Set.prototype.values(...) {}
+global fn WeakMap(...) {}
+global fn WeakMap.prototype.delete(...) {}
+global fn WeakMap.prototype.get(...) {}
+global fn WeakMap.prototype.has(...) {}
+global fn WeakMap.prototype.set(...) {}
+global fn WeakSet(...) {}
+global fn WeakSet.prototype.add(...) {}
+global fn WeakSet.prototype.delete(...) {}
+global fn WeakSet.prototype.has(...) {}
+global fn WeakRef(...) {}
+global fn WeakRef.prototype.deref(...) {}
+global fn FinalizationRegistry(...) {}
+global fn FinalizationRegistry.prototype.register(...) {}
+global fn FinalizationRegistry.prototype.unregister(...) {}
+global fn Promise(...) {}
+global fn Promise.all(...) {}
+global fn Promise.allSettled(...) {}
+global fn Promise.any(...) {}
+global fn Promise.race(...) {}
+global fn Promise.reject(...) {}
+global fn Promise.resolve(...) {}
+global fn Promise.try(...) {}
+global fn Promise.withResolvers(...) {}
+global fn Promise.prototype.catch(...) {}
+global fn Promise.prototype.finally(...) {}
+global fn Promise.prototype.then(...) {}
+global fn Iterator(...) {}
+global fn Iterator.from(...) {}
+global fn Iterator.prototype.drop(...) {}
+global fn Iterator.prototype.every(...) {}
+global fn Iterator.prototype.filter(...) {}
+global fn Iterator.prototype.find(...) {}
+global fn Iterator.prototype.flatMap(...) {}
+global fn Iterator.prototype.forEach(...) {}
+global fn Iterator.prototype.map(...) {}
+global fn Iterator.prototype.reduce(...) {}
+global fn Iterator.prototype.some(...) {}
+global fn Iterator.prototype.take(...) {}
+global fn Iterator.prototype.toArray(...) {}
+global fn Proxy(...) {}
+global fn Proxy.revocable(...) {}
+global fn Reflect.apply(...) {}
+global fn Reflect.construct(...) {}
+global fn Reflect.defineProperty(...) {}
+global fn Reflect.deleteProperty(...) {}
+global fn Reflect.get(...) {}
+global fn Reflect.getOwnPropertyDescriptor(...) {}
+global fn Reflect.getPrototypeOf(...) {}
+global fn Reflect.has(...) {}
+global fn Reflect.isExtensible(...) {}
+global fn Reflect.ownKeys(...) {}
+global fn Reflect.preventExtensions(...) {}
+global fn Reflect.set(...) {}
+global fn Reflect.setPrototypeOf(...) {}
+global fn JSON.parse(...) {}
+global fn JSON.stringify(...) {}
+global fn Atomics.add(...) {}
+global fn Atomics.and(...) {}
+global fn Atomics.compareExchange(...) {}
+global fn Atomics.exchange(...) {}
+global fn Atomics.isLockFree(...) {}
+global fn Atomics.load(...) {}
+global fn Atomics.notify(...) {}
+global fn Atomics.or(...) {}
+global fn Atomics.store(...) {}
+global fn Atomics.sub(...) {}
+global fn Atomics.wait(...) {}
+global fn Atomics.waitAsync(...) {}
+global fn Atomics.xor(...) {}
+global fn Error(...) {}
+global fn Error.prototype.toString(...) {}
+global fn EvalError(...) {}
+global fn RangeError(...) {}
+global fn ReferenceError(...) {}
+global fn SyntaxError(...) {}
+global fn TypeError(...) {}
+global fn URIError(...) {}
+global fn AggregateError(...) {}
+// Annex B legacy functions remain conservative.
+global fn escape(...) {}
+global fn unescape(...) {}
+global fn Object.prototype.__defineGetter__(...) {}
+global fn Object.prototype.__defineSetter__(...) {}
+global fn Object.prototype.__lookupGetter__(...) {}
+global fn Object.prototype.__lookupSetter__(...) {}
+global fn String.prototype.substr(...) {}
+global fn String.prototype.anchor(...) {}
+global fn String.prototype.big(...) {}
+global fn String.prototype.blink(...) {}
+global fn String.prototype.bold(...) {}
+global fn String.prototype.fixed(...) {}
+global fn String.prototype.fontcolor(...) {}
+global fn String.prototype.fontsize(...) {}
+global fn String.prototype.italics(...) {}
+global fn String.prototype.link(...) {}
+global fn String.prototype.small(...) {}
+global fn String.prototype.strike(...) {}
+global fn String.prototype.sub(...) {}
+global fn String.prototype.sup(...) {}
+global fn String.prototype.trimLeft(...) {}
+global fn String.prototype.trimRight(...) {}
+global fn Date.prototype.getYear(...) {}
+global fn Date.prototype.setYear(...) {}
+global fn Date.prototype.toGMTString(...) {}
+global fn RegExp.prototype.compile(...) {}

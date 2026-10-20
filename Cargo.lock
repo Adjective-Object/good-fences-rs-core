@@ -134,6 +134,7 @@ version = "0.2.0-beta.1"
 dependencies = [
  "ahashmap",
  "compact_str",
+ "ecco",
  "eyre",
  "insta",
  "logger",
@@ -212,6 +213,7 @@ name = "bundler"
 version = "0.1.0"
 dependencies = [
  "ast-segmenter",
+ "ecco",
  "eyre",
  "import_resolver",
  "insta",
@@ -1951,6 +1953,7 @@ name = "segment_cache"
 version = "0.1.0"
 dependencies = [
  "ast-segmenter",
+ "ecco",
  "eyre",
  "import_resolver",
  "logger",

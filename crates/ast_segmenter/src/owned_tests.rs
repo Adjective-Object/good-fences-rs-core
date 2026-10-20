@@ -4,14 +4,17 @@ use oxc_allocator::Allocator;
 use std::path::Path;
 
 fn parse(source: &str) -> ModuleFacts {
-    parse_module(
+    let mut facts = parse_module(
         &logger::StdioLogger::new(),
         source,
         Path::new("test.ts"),
         ModuleFormat::Esm,
     )
     .unwrap()
-    .facts
+    .facts;
+    facts.ecco = None;
+    facts.ecco_declarations_hash = [0; 32];
+    facts
 }
 
 #[test]

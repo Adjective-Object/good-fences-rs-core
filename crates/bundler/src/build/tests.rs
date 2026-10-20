@@ -22,6 +22,129 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn connected_effects_specialize_imported_functions_through_barrels() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {read} from './barrel.mjs'; read({value: 1}); export const kept = 1;",
+    );
+    write(dir.root(), "barrel.mjs", "export {read} from './read.mjs';");
+    write(
+        dir.root(),
+        "read.mjs",
+        "export function read(x) { return x.value; }",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&options()).unwrap();
+    assert_eq!(observe(&first.product.artifacts), b"");
+    assert!(first
+        .product
+        .artifacts
+        .files
+        .values()
+        .all(|text| !text.contains("function read")));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.counters.disk_hits, 3);
+    assert_eq!(warm.product.artifacts, first.product.artifacts);
+    let noop = session.build(&options()).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    write(
+        dir.root(),
+        "read.mjs",
+        "export function read(x) { console.log('read'); return x.value; }",
+    );
+    let changed = session.build(&options()).unwrap();
+    assert_eq!(changed.counters.source_parses, 1);
+    assert_eq!(observe(&changed.product.artifacts), b"read\n");
+}
+
+#[test]
+fn opaque_commonjs_mutations_invalidate_environment_purity() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './patch.cjs'; Math.abs(1);");
+    write(
+        dir.root(),
+        "patch.cjs",
+        "Math.abs = function () { console.log('patched'); return 0; };",
+    );
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(observe(&product.product.artifacts), b"patched\n");
+}
+
+#[test]
+fn connected_effects_preserve_deferred_tdz_observations() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "function read() { return value; } read(); let value = 1;",
+    );
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(
+        observe_named(
+            &product.product.artifacts,
+            "await import('./main.mjs').catch(error => console.log(error.name));"
+        ),
+        b"ReferenceError\n"
+    );
+}
+
+#[test]
+fn declaration_changes_invalidate_memory_disk_and_build_products() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "Math.abs(-1); export const kept = 1;",
+    );
+    let mut config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&config).unwrap();
+    assert!(first
+        .product
+        .artifacts
+        .files
+        .values()
+        .all(|text| !text.contains("Math.abs")));
+    config.declarations.user.push(
+        ecco::parse_declarations("global fn Math.abs(value) { call_effects = true }").unwrap(),
+    );
+    let changed = session.build(&config).unwrap();
+    assert_eq!(changed.counters.source_parses, 1);
+    assert!(changed
+        .product
+        .artifacts
+        .files
+        .values()
+        .any(|text| text.contains("Math.abs")));
+    assert_ne!(
+        first.product.fingerprints.parse,
+        changed.product.fingerprints.parse
+    );
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.disk_hits, 1);
+    assert_eq!(warm.product.artifacts, changed.product.artifacts);
+    config.declarations.user.clear();
+    let restored = session.build(&config).unwrap();
+    assert_eq!(restored.counters.source_parses, 1);
+    assert_eq!(restored.product.artifacts, first.product.artifacts);
+}
+
+#[test]
 fn effect_cycle_warnings_survive_noop_and_clear_after_source_change() {
     let dir = TmpDir::new();
     write(

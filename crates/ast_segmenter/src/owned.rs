@@ -11,6 +11,12 @@ use oxc_semantic::{ScopeFlags, Semantic, SymbolFlags, SymbolId};
 use oxc_span::{GetSpan, Span};
 use serde::{Deserialize, Serialize};
 
+/// Canonical parsed contract identity; never hashes raw declaration text.
+pub fn declarations_hash(declarations: &ecco::LocalFacts) -> eyre::Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    Ok(Sha256::digest(serde_cbor::to_vec(declarations)?).into())
+}
+
 /// The byte offset of a binding's first declaration, not an OXC symbol ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BindingId(pub u32);
@@ -129,6 +135,10 @@ pub struct Directive {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleFacts {
+    /// Owned lazy ESM operations, never solved effects. CJS stays opaque.
+    pub ecco: Option<ecco::ParsedFile>,
+    /// Effective contracts are identity inputs even for opaque CommonJS.
+    pub ecco_declarations_hash: [u8; 32],
     /// Effective parser format, including package policy for extensionless/.js input.
     pub commonjs: bool,
     /// Syntax-local await/for-await sites outside functions, not a schedule.

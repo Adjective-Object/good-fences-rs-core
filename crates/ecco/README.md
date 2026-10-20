@@ -9,6 +9,11 @@ existing checked OXC program and semantic model without retaining arena data;
 `ParsedFile` containing lazy owned function definitions and module roots, not
 evaluated hazards or specialized calls.
 
+`parse_from_ast_with_segments(program, semantic, facts, segments)` reuses that
+same checked AST and validates unique root ownership in the caller's actual
+segment ranges, including split multi-declarator declarations. Owned template
+serialization is deterministic; recording never executes source function calls.
+
 `Analysis` links those precursors through a caller-provided `Resolver` and runs
 the connected analysis. `Context::from_local_facts` remains available for
 constructing interpreter values and operations directly. `extract_from_ast`
@@ -102,6 +107,18 @@ module evaluation scheduler. Module initialization retention and effect-order
 edges still belong to the bundler.
 
 ## Declarations
+
+`DeclarationConfig::default().effective()` combines the independently switchable
+ECMAScript 2025 and Node 24 presets with parsed `user` declaration sets. Exact
+user bindings override preset bindings; duplicate user contracts and build-wide
+local contracts are errors. Effective ordering is canonical for cache hashing.
+The JavaScript preset covers globals, constructors/prototypes, collections,
+typed arrays, Math, JSON, Reflect, Atomics, promises and iterator helpers. The Node
+preset covers host globals and builtin modules, including `node:` and supported
+bare aliases and their default-export member paths. Unknown or unsafe operations
+remain effectful; conversions consult input hooks. Prototype methods, mutation,
+callbacks and I/O mostly have conservative contracts, not specialized heap models.
+Contracts assume standard environments; unknown execution still widens hazards.
 
 `global fn console.log(...)`, `module "node:path" { export fn join(...) }`,
 and `fn localName(...)` bind globals, exact module exports/members, and trusted

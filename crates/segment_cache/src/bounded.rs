@@ -7,7 +7,8 @@ pub(crate) fn check(bytes: &[u8]) -> eyre::Result<()> {
         "cache exceeds byte limit"
     );
     let mut cursor = 0;
-    let mut remaining = 262_144;
+    // Full environment contracts accompany owned Ecco precursors.
+    let mut remaining = 2_097_152;
     item(bytes, &mut cursor, &mut remaining, 0)?;
     ensure!(cursor == bytes.len(), "trailing cache data");
     Ok(())

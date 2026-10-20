@@ -43,6 +43,7 @@ pub struct BuildOptions {
     pub resolver: NodeModulesResolverOptions,
     pub externals: BTreeSet<String>,
     pub effects: EffectPolicy,
+    pub declarations: ecco::DeclarationConfig,
     pub cache: CacheMode,
 }
 
@@ -53,6 +54,7 @@ impl Default for BuildOptions {
             resolver: NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
             externals: BTreeSet::new(),
             effects: EffectPolicy::default(),
+            declarations: ecco::DeclarationConfig::default(),
             cache: CacheMode::ReadWrite,
         }
     }
@@ -174,6 +176,8 @@ impl BuildSession {
             crate::rewrite::final_validation_count(),
         );
         let mut warnings = Vec::new();
+        let declarations = options.declarations.effective()?;
+        let declarations_key = hash(&serde_json::to_vec(&declarations)?);
         let inventory = inventory(&self.root)?;
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
@@ -233,18 +237,19 @@ impl BuildSession {
             let config = ParserConfig::for_path(&path, format)?;
             let text =
                 fs::read_to_string(&path).wrap_err_with(|| format!("source {}", path.display()))?;
-            if self
-                .sources
-                .get(&path)
-                .is_some_and(|s| s.text == text && s.record.config == config)
-            {
+            if self.sources.get(&path).is_some_and(|s| {
+                s.text == text
+                    && s.record.config == config
+                    && s.record.matches_declarations(&declarations)
+            }) {
                 counters.memory_hits += 1;
             } else {
-                let loaded = segment_cache::load_or_parse(
+                let loaded = segment_cache::load_or_parse_with_declarations(
                     &logger::StdioLogger::new(),
                     &path,
                     format,
                     options.cache,
+                    &declarations,
                 )?;
                 match loaded.status {
                     CacheStatus::Hit => counters.disk_hits += 1,
@@ -325,7 +330,7 @@ impl BuildSession {
             .retain(|path, _| sources.contains_key(path));
         let parse = hash(
             format!(
-                "{}:{}:{}:{:?}",
+                "{}:{}:{}:{declarations_key:?}:{:?}",
                 segment_cache::SCHEMA_VERSION,
                 segment_cache::EXTRACTOR_VERSION,
                 segment_cache::OXC_REVISION,
@@ -384,6 +389,7 @@ impl BuildSession {
                 include_str!("chunks.rs"),
                 include_str!("manifest.rs"),
                 include_str!("effects.rs"),
+                include_str!("effect_analysis.rs"),
                 include_str!("effect_dependencies.rs")
             )
             .as_bytes(),

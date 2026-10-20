@@ -5,8 +5,8 @@ mod validate;
 mod validate_emission;
 
 pub use sidecar::{
-    is_cache_artifact, load_or_parse, sidecar_path, CacheMode, CacheOutcome, CacheStatus,
-    CacheWrite, MissReason,
+    is_cache_artifact, load_or_parse, load_or_parse_with_declarations, sidecar_path, CacheMode,
+    CacheOutcome, CacheStatus, CacheWrite, MissReason,
 };
 
 #[cfg(test)]
@@ -21,8 +21,8 @@ use oxc_span::Span;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: u32 = 8;
-pub const EXTRACTOR_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 9;
+pub const EXTRACTOR_VERSION: u32 = 11;
 pub const OXC_REVISION: &str = "87f065ebf7cde21d1229322f4c7ee58baca5648e";
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 
@@ -86,6 +86,11 @@ fn digest(bytes: &[u8]) -> [u8; 32] {
 }
 
 impl CacheRecord {
+    pub fn matches_declarations(&self, declarations: &ecco::LocalFacts) -> bool {
+        ast_segmenter::owned::declarations_hash(declarations)
+            .is_ok_and(|hash| hash == self.module.facts.ecco_declarations_hash)
+    }
+
     pub fn from_parsed(source: &str, parsed: &ParsedModule) -> eyre::Result<Self> {
         let record = Self {
             magic: "good-fences-segments".into(),
@@ -150,6 +155,20 @@ impl CacheRecord {
         let record: Self = serde_cbor::from_slice(&envelope.payload)?;
         record.validate(source, config)?;
         ensure!(record.encode(source)? == bytes, "noncanonical cache record");
+        Ok(record)
+    }
+
+    pub fn decode_with_declarations(
+        bytes: &[u8],
+        source: &str,
+        config: ParserConfig,
+        declarations: &ecco::LocalFacts,
+    ) -> eyre::Result<Self> {
+        let record = Self::decode(bytes, source, config)?;
+        ensure!(
+            record.matches_declarations(declarations),
+            "cache Ecco declaration configuration mismatch"
+        );
         Ok(record)
     }
 }
