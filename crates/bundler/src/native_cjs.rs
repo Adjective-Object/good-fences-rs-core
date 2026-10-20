@@ -9,6 +9,7 @@ struct Value {
 }
 
 pub(super) struct CommonJs {
+    runtime: String,
     values: BTreeMap<NodeId, Value>,
     factories: BTreeMap<u32, Value>,
     demands: BTreeMap<(u32, u32), BTreeSet<NodeId>>,
@@ -41,6 +42,7 @@ impl CommonJs {
             .find(|p| occupied.iter().all(|name| !name.starts_with(p)))
             .unwrap();
         let mut result = Self {
+            runtime: format!("{prefix}runtime"),
             values: BTreeMap::new(),
             factories: BTreeMap::new(),
             demands: BTreeMap::new(),
@@ -171,6 +173,43 @@ impl CommonJs {
         self.factories.contains_key(&file)
     }
 
+    pub fn add_runtime(
+        &self,
+        files: &mut BTreeMap<PathBuf, String>,
+        chunk_artifacts: &mut BTreeMap<ChunkId, BTreeSet<PathBuf>>,
+    ) -> eyre::Result<()> {
+        if self.factories.is_empty() {
+            return Ok(());
+        }
+        let path = PathBuf::from(RUNTIME_PATH);
+        // First dependency of every job, including entries that never touch CJS.
+        for (file, source) in files.iter_mut() {
+            let request = specifier(&path);
+            let header = if file.extension().is_some_and(|ext| ext == "cjs") {
+                format!("const {} = require({request});\n", self.runtime)
+            } else {
+                format!("import {} from {request};\n", self.runtime)
+            };
+            let start = if source.starts_with("#!") {
+                source.find('\n').map_or(source.len(), |index| index + 1)
+            } else {
+                0
+            };
+            source.insert_str(start, &format!("\n{header}"));
+            rewrite::validate(file, source)?;
+        }
+        let source = include_str!("runtime.cjs").to_owned();
+        rewrite::validate(&path, &source)?;
+        ensure!(
+            files.insert(path.clone(), source).is_none(),
+            "runtime path collision"
+        );
+        for paths in chunk_artifacts.values_mut() {
+            paths.insert(path.clone());
+        }
+        Ok(())
+    }
+
     fn node(graph: &SourceGraph, file: u32, name: &ImportedName) -> NodeId {
         let module = graph.file_path(file).unwrap().to_owned();
         match name {
@@ -202,7 +241,9 @@ impl CommonJs {
     pub fn dynamic(&self, graph: &SourceGraph, file: u32) -> eyre::Result<String> {
         let value = self.value(graph, file, &ImportedName::Namespace)?;
         Ok(format!(
-            "import({}).then(ns => ns.default)",
+            "{}.apply({}.then, import({}), [ns => ns.default])",
+            self.runtime,
+            self.runtime,
             specifier(&value.path),
         ))
     }
@@ -357,9 +398,10 @@ impl CommonJs {
         // requires, not ESM interop seams, may observe a still-running factory.
         let mut factories: Vec<_> = self.factories.iter().collect();
         factories.sort_by_key(|(_, value)| &value.name);
+        let runtime = &self.runtime;
         for (_, value) in &factories {
             self.files.entry(value.path.clone()).or_default().push_str(&format!(
-                "let {0}_record;\nexports.{0} = {0};\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw Object.assign(new Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {0}_factory.call(module.exports, module.exports, module, __filename, __dirname); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
+                "let {0}_record;\nexports.{0} = {0};\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw {runtime}.assign(new {runtime}.Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {runtime}.apply({0}_factory, module.exports, [module.exports, module, __filename, __dirname]); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
                 value.name
             ));
         }
@@ -473,7 +515,8 @@ impl CommonJs {
                         let helper = format!("{}_namespace", value.name);
                         imports.push_str(
                             &include_str!("commonjs_namespace.mjs")
-                                .replace("commonjsNamespace", &helper),
+                                .replace("commonjsNamespace", &helper)
+                                .replace("intrinsics", runtime),
                         );
                         format!("{helper}({})", default.name)
                     }
@@ -528,7 +571,7 @@ impl CommonJs {
                 self.files.insert(
                     path.clone(),
                     format!(
-                        "const {{{1}}} = require({0});\nObject.defineProperty(module, 'exports', {{get: {1}}});\n{1}();\n",
+                        "const {{{1}}} = require({0});\n{runtime}.defineProperty(module, 'exports', {{get: {1}}});\n{1}();\n",
                         specifier(&factory.path),
                         factory.name
                     ),

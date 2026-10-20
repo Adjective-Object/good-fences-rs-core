@@ -1,0 +1,12 @@
+const fail = () => { throw Error('patched'); };
+Object.getOwnPropertyNames = fail;
+Object.create = fail;
+Object.defineProperty = fail;
+Object.freeze = fail;
+Object.assign = fail;
+Reflect.apply = fail;
+Array.prototype[Symbol.iterator] = fail;
+globalThis.Object = fail;
+globalThis.Symbol = fail;
+console.log('before');
+console.log((await import('./dep.cjs')).default.value);

@@ -22,7 +22,7 @@ grouping is only an evaluation-order optimization, not the ownership unit.
   Passing the portable corpus alone does not establish relocation.
 
 The portable corpus now includes `authored/native-segment-placement`:
-31 cases / 43 entry executions, all native-required. Generalized placement passed
+32 cases / 44 entry executions, all native-required. Generalized placement passed
 independent review and the complete release gate. Reviewed SCC activation and
 cyclic-connector order bugs have actual-bundler regressions.
 Upstream parity remains deferred.

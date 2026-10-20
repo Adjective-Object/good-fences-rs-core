@@ -40,8 +40,8 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **31 cases / 43 entry executions**: six esbuild cases,
-six rspack cases and nineteen authored cases. The upstream cases cover
+The corpus contains **32 cases / 44 entry executions**: six esbuild cases,
+six rspack cases and twenty authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
@@ -49,7 +49,8 @@ hoisting, default snapshots/live aliases, inferred names, `__proto__` shorthand
 and destructuring, reverse-path static import ordering, namespace observations,
 ambient deferred effects and once-only shared identity, native TLA sibling/SCC
 jobs, cached rejection/TDZ, dynamic exported-then assimilation, and native CJS
-ambient activation/identity, path-wrapper redeclarations, failure retry and mixed-cycle error contracts,
+ambient activation/identity, path-wrapper redeclarations, late interop after
+public built-in mutation, failure retry and mixed-cycle error contracts,
 and independent demands on shared segments with live state and inferred names.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
@@ -148,7 +149,7 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All thirty-one current cases require native. Legacy reporting and
+back to legacy. All thirty-two current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 
@@ -193,10 +194,10 @@ Runner regression tests use synthetic fixtures only:
 The single command above validates manifests/provenance first and compares
 manifest expectations with source and emitted per-entry stdout and normalized
 runtime outcomes through the shared observer.
-All **31 contracts / 43 emitted entry executions** pass, with zero
+All **32 contracts / 44 emitted entry executions** pass, with zero
 unsupported skips. The actual backend is reported for every built case:
 
-- **Native (31, all explicitly required):** all nineteen authored cases,
+- **Native (32, all explicitly required):** all twenty authored cases,
   `esbuild/unused-import-side-effects`, `rspack/esm-effect-order`,
   `rspack/esm-live-binding`, `esbuild/shared-entrypoint-identity`,
   `esbuild/reexport-cycle`, `esbuild/dynamic-import-tla-order` and
@@ -238,6 +239,7 @@ linker-shape assertions. No upstream provenance is fabricated for local inputs.
 | `native-async-cycles` | native, required | Hoisted cyclic functions and suspension; uncaught cycle `ReferenceError`; shared cached rejection across concurrent imports and retries |
 | `native-dynamic-then` | native, required | Native microtasks/exported-then assimilation, exact namespace keys, default snapshot and live mutation |
 | `native-cjs-activation` | native, required | Shared static/named/dynamic/require identity, ambient once-only effects, deferred require and wrapper this/exports replacement |
+| `native-cjs-intrinsics` | native, required | Late CJS initialization and namespace construction survive public Object/Reflect methods, constructors, Symbol and array iterator changes |
 | `native-cjs-retry` | native, required | Concurrent/repeated dynamic facade failures share a cached error; a later require retries the failed factory |
 | `native-cjs-cycles` | native, required | Legal CJS-first require through ESM, shared partial-object identity, and ESM-first/direct mixed-cycle `ERR_REQUIRE_CYCLE_MODULE` outcomes |
 | `native-segment-placement` | native, required | Two independent entries demand shared-module declarations; dependency effects, inferred names, live reexports, closure state and imported-write errors remain intact |

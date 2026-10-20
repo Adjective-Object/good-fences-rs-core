@@ -15,6 +15,8 @@ use crate::policy::EffectPolicy;
 #[path = "native.rs"]
 mod native;
 
+pub(crate) const RUNTIME_PATH: &str = "native/runtime.cjs";
+
 #[cfg(test)]
 #[path = "link_tests.rs"]
 mod tests;

@@ -493,6 +493,18 @@ writes stay local to one factory, and nested lexical shadows remain ordinary JS.
 Top-level lexical redeclarations conflict with wrapper parameters and are rejected
 with source diagnostics, as in Node.
 
+When CJS is retained, `native/runtime.cjs` captures generated-shim intrinsics
+before application evaluation. Every emitted job loads it first, including
+otherwise unrelated entries, so late namespace jobs and public CJS aliases reuse
+the same captures. Namespace construction, factory invocation and cycle errors
+never look up public Object/Reflect methods again. Namespace key traversal uses
+indices rather than the mutable array iterator. Application code keeps its own
+ordinary built-in lookups unchanged. Pure ESM builds need no helper.
+The support file is included in every logical chunk's artifact projection;
+it contains no source loader, factory registry or application initialization.
+Captures reflect the host at the bundle's first load, not a pristine realm if
+unrelated code already patched it.
+
 ### Interop policy
 
 `Artifacts::cjs_proxies` reports relative executable proxy paths and static surfaces.
