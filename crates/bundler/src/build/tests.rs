@@ -1019,6 +1019,40 @@ fn delete_recreate_rename_and_old_success_after_failure() {
 }
 
 #[test]
+fn package_export_patterns_are_specific_across_fresh_builds() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from 'pkg/feature/x'; console.log(value);",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/package.json",
+        r#"{"type":"module","exports":{"./*":"./generic/*.mjs","./feature/*":"./specific/*.mjs"}}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/generic/feature/x.mjs",
+        "export const value = 'generic';",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/specific/x.mjs",
+        "export const value = 'specific';",
+    );
+    let expected = observe_entry(&dir.root().join("main.mjs"));
+    assert_eq!(expected, b"specific\n");
+    for _ in 0..16 {
+        let build = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&options())
+            .unwrap();
+        assert_eq!(observe(&build.product.artifacts), expected);
+    }
+}
+
+#[test]
 fn package_exports_type_tsconfig_and_options_invalidate_independently() {
     let dir = TmpDir::new();
     let root = dir.root();
