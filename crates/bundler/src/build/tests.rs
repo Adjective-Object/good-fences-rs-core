@@ -3270,6 +3270,221 @@ fn binary_asset_entries_export_urls_and_dead_dynamic_assets_are_not_emitted() {
 }
 
 #[test]
+fn jsonc_modules_preserve_literals_identity_and_cached_edits() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import data from './data.jsonc';
+import load from './loader.cjs';
+const dynamic = await import('./data.jsonc');
+console.log(data === load(), data === dynamic.default, data.value);
+console.log(data.url, data.escaped, data.markers, data.list.join(','));
+console.log(Object.hasOwn(data, '__proto__'), data.__proto__.own,
+    data.duplicate, Object.is(data.zero, -0), data.large, data.surrogate.charCodeAt(0));
+"#,
+    );
+    write(
+        dir.root(),
+        "loader.cjs",
+        "module.exports = () => require('./data.jsonc');",
+    );
+    let text = concat!(
+        "\u{feff}",
+        r#"// leading comment
+{
+    "value": 7, // edit this value
+    "url": "https://example.test/a//b",
+    "escaped": "quote\"slash\\",
+    "markers": "/* not a comment */ // neither ,}",
+    "list": [1, 2, /* trailing comma */],
+    "__proto__": {"own": false},
+    "__proto__" /* key comment */: {"own": true,},
+    "duplicate": 1, "duplicate": 2,
+    "zero": -0, "large": 1e400, "surrogate": "\ud800",
+    /* multiline
+       Unicode comment: café */
+} // final comment"#
+    );
+    write(dir.root(), "data.jsonc", text);
+    let config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let expected = concat!(
+        "true true 7\n",
+        "https://example.test/a//b quote\"slash\\ /* not a comment */ // neither ,} 1,2\n",
+        "true true 2 true Infinity 55296\n",
+    );
+    assert_eq!(observe(&cold.product.artifacts), expected.as_bytes());
+    assert!(cold.product.artifacts.resources.is_empty());
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.counters.disk_hits, 3);
+    assert_eq!(cold.product.artifacts, warm.product.artifacts);
+
+    let edited_text = text.replace("\"value\": 7", "\"value\": 9");
+    write(dir.root(), "data.jsonc", &edited_text);
+    let edited = session.build(&config).unwrap();
+    assert_eq!(edited.counters.source_parses, 1);
+    assert!(edited
+        .invalidated
+        .contains(&dir.root().join("main.mjs").canonicalize().unwrap()));
+    assert_eq!(
+        observe(&edited.product.artifacts),
+        expected.replace("true true 7", "true true 9").as_bytes()
+    );
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.product.artifacts, edited.product.artifacts);
+
+    // Even an edit that leaves the generated value unchanged must be revalidated.
+    write(dir.root(), "data.jsonc", &format!("{edited_text}\n/* unterminated"));
+    for error in [
+        session.build(&config).err().unwrap(),
+        BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .err()
+            .unwrap(),
+    ] {
+        assert!(format!("{error:#}").contains("data.jsonc: invalid JSONC module"));
+    }
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &edited.product));
+}
+
+#[test]
+fn jsonc_line_comments_use_cr_lf_boundaries_and_preserve_string_separators() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import data from './data.jsonc'; console.log(JSON.stringify([...data].map(c => c.codePointAt(0))));",
+    );
+    write(
+        dir.root(),
+        "data.jsonc",
+        concat!(
+            "// before\u{2028}still a comment\n",
+            "// before\u{2029}still a comment\r\n",
+            "\"\u{2028}\u{2029}\" // after\u{2028}still\u{2029}a comment\n",
+        ),
+    );
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(observe(&built.product.artifacts), b"[8232,8233]\n");
+}
+
+#[test]
+fn jsonc_entries_and_extensionless_resolution_use_values_not_asset_urls() {
+    let dir = TmpDir::new();
+    write(dir.root(), "data.jsonc", "[1, /* trailing */ 2,] // end");
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().path = "data.jsonc".into();
+    let entry = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        entry.product.artifacts.entries["main"],
+        PathBuf::from("data.cjs")
+    );
+    assert_eq!(
+        observe_named(
+            &entry.product.artifacts,
+            "import value from './data.cjs'; console.log(JSON.stringify(value));"
+        ),
+        b"[1,2]\n"
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "import data from './data'; console.log(JSON.stringify(data));",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    assert_eq!(
+        observe(&session.build(&options()).unwrap().product.artifacts),
+        b"[1,2]\n"
+    );
+    write(dir.root(), "data.json", "42");
+    assert_eq!(
+        observe(&session.build(&options()).unwrap().product.artifacts),
+        b"42\n"
+    );
+}
+
+#[test]
+fn jsonc_rejects_malformed_and_json5_syntax_while_json_stays_strict() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import data from './data.jsonc'; console.log(data);",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    for invalid in [
+        "",
+        "// only a comment",
+        "{} /* unterminated",
+        r#"{"a":}"#,
+        r#"{"a": 1 "b": 2}"#,
+        r#"{"a": 1,,}"#,
+        "[,]",
+        "[1,,]",
+        "[1 2]",
+        "{unquoted: 1}",
+        "{'single': 1}",
+        r#"{"a": undefined}"#,
+        r#"{"a": NaN}"#,
+        r#"{"a": Infinity}"#,
+        r#"{"a": 0xff}"#,
+        r#"{"a": +1}"#,
+        r#"{"a": .5}"#,
+        r#"{"a": 1.}"#,
+        r#"{"a": "\x41"}"#,
+        "{\n# shell comment\n}",
+        "{}; console.log('injected')",
+        "({})",
+    ] {
+        write(dir.root(), "data.jsonc", invalid);
+        let error = session.build(&options()).err().unwrap();
+        assert!(
+            format!("{error:#}").contains("data.jsonc: invalid JSONC module"),
+            "{invalid}: {error:#}"
+        );
+    }
+    write(
+        dir.root(),
+        "main.mjs",
+        "import data from './data.json'; console.log(data);",
+    );
+    for invalid in [r#"{"a": 1,}"#, "[1,]", "{/* comment */}", "// comment\n{}"] {
+        write(dir.root(), "data.json", invalid);
+        let error = session.build(&options()).err().unwrap();
+        assert!(
+            format!("{error:#}").contains("data.json: invalid JSON module"),
+            "{invalid}: {error:#}"
+        );
+    }
+    write(dir.root(), "data.json", "{}");
+    for invalid in [r#"{"type": "module",}"#, "{/* comment */}"] {
+        write(dir.root(), "package.json", invalid);
+        let error = session.build(&options()).err().unwrap();
+        assert!(format!("{error:#}").contains("package.json"), "{error:#}");
+    }
+}
+
+#[test]
 fn json_modules_share_values_across_import_require_dynamic_and_warm_builds() {
     let dir = TmpDir::new();
     write(
