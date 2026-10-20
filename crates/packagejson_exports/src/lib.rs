@@ -297,17 +297,23 @@ impl PackageExportRewriteData {
             )));
         }
 
-        // check for star matches in the resolution data
+        // Choose the subpath before its conditions; a broader pattern cannot win
+        // just because it supplies an earlier requested condition.
+        let best_pattern = self
+            .star_exports
+            .values()
+            .flatten()
+            .filter_map(|(pattern, _)| {
+                match_star_pattern(pattern, clean_relative_import).map(|matched| (pattern, matched))
+            })
+            .max_by_key(|(pattern, _)| (pattern.find('*').unwrap(), pattern.len()));
         let star_match = resolve_export_condition(
             &self.star_exports,
             requested_export_conditions.clone(),
             |x: &Vec<(String, ExportedPath)>| {
+                let (best, matched) = best_pattern?;
                 x.iter()
-                    .filter_map(|(star_pattern, star_export)| {
-                        match_star_pattern(star_pattern, clean_relative_import)
-                            .map(|star_match| (star_match, star_export))
-                    })
-                    .next()
+                    .find_map(|(pattern, target)| (pattern == best).then_some((matched, target)))
             },
         );
         if let Some(((star_match, target), export_condition)) = star_match {
@@ -492,6 +498,43 @@ mod test {
     use super::*;
     use std::collections::{hash_map::HashMap, BTreeMap};
     use test_tmpdir::map2;
+
+    #[test]
+    fn star_patterns_choose_the_most_specific_key_before_conditions() {
+        let exports = serde_json::from_str(
+            r#"{
+                "./*": {"import": "./generic/*.mjs"},
+                "./feature/*": "./specific/*.mjs",
+                "./feature/*.mjs": "./suffix/*.mjs",
+                "./feature/private/*": null
+            }"#,
+        )
+        .unwrap();
+        let mut rewrites = PackageExportRewriteData::try_from(&exports).unwrap();
+        for reverse in [false, true] {
+            for patterns in rewrites.star_exports.values_mut() {
+                patterns.sort_by(|a, b| a.0.cmp(&b.0));
+                if reverse {
+                    patterns.reverse();
+                }
+            }
+            for (request, expected) in [
+                ("./feature/x", ExportedPathRef::Exported("./specific/x.mjs")),
+                (
+                    "./feature/x.mjs",
+                    ExportedPathRef::Exported("./suffix/x.mjs"),
+                ),
+                ("./feature/private/x", ExportedPathRef::Private),
+            ] {
+                let mut out = String::new();
+                let result = rewrites
+                    .rewrite_relative_export(request, ["import"], &mut out)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(result.rewritten_export, expected);
+            }
+        }
+    }
 
     struct TestCase {
         exports: &'static str,
