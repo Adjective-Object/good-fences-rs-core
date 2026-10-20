@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-cjs-intrinsics",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "backend": "native",
+    "stdout": ["before", "factory", "42"]
+  },
+  "goals": [
+    "Capture generated interop intrinsics before application code can replace public built-ins.",
+    "Late CommonJS namespace construction remains lazy and survives Object method, constructor, Symbol and array iterator mutation."
+  ]
+}

@@ -340,6 +340,7 @@ impl BuildSession {
                 concat!(
                     "native-node-cjs-initializers-v1\n",
                     include_str!("native_cjs.rs"),
+                    include_str!("runtime.cjs"),
                     include_str!("commonjs_namespace.mjs")
                 )
                 .as_bytes(),

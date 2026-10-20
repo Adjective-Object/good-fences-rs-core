@@ -13,7 +13,7 @@ use oxc_span::SourceType;
 
 use super::BuildOptions;
 use crate::{
-    link::Artifacts,
+    link::{Artifacts, RUNTIME_PATH},
     rewrite::{self, Edit},
 };
 
@@ -145,8 +145,10 @@ pub(super) fn apply(
     for (alias, canonical, original, commonjs) in &aliases {
         let request = serde_json::to_string(&relative_request(alias, canonical, !commonjs))?;
         let source = if *commonjs {
+            let runtime =
+                serde_json::to_string(&relative_request(alias, Path::new(RUNTIME_PATH), false))?;
             format!(
-                "Object.defineProperty(module, 'exports', {{get: () => require({request})}});\nrequire({request});\n"
+                "const {{defineProperty}} = require({runtime});\ndefineProperty(module, 'exports', {{get: () => require({request})}});\nrequire({request});\n"
             )
         } else {
             let parsed = OwnedRequests::parse(original, &artifacts.files[original])?;

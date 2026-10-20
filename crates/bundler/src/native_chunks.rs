@@ -458,6 +458,7 @@ pub(super) fn emit(
             nodes.iter().map(|node| members[node].clone()).collect(),
         );
     }
+    cjs.add_runtime(&mut files, &mut chunk_artifacts)?;
     Ok(Artifacts {
         backend: Backend::Native,
         files,

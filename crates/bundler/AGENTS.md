@@ -98,6 +98,10 @@ native .cjs-per-input fallback. Preserve early cache allocation, wrapper
 this/exports aliases/current exports and retry after throws.
 Initialize factory-local __filename/__dirname parameters from actual output
 availability paths; retain var/function redeclarations and nested shadows.
+When CJS is retained, add runtime.cjs as the first dependency of every emitted
+job after empty-job pruning. Capture shim intrinsics once before application
+code; include the support file in chunk projections and use it in CJS aliases.
+Never rewrite application built-in lookups or activate factories from the helper.
 Chunk helper identifiers must avoid all
 source bindings and free references, including in opaque factories.
 Pure CJS factories group by availability roots, with one lexical cache per

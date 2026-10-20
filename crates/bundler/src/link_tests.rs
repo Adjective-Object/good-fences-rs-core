@@ -2965,6 +2965,65 @@ fn separate_bundle_directories_do_not_share_native_module_state() {
 }
 
 #[test]
+fn lazy_commonjs_bridges_survive_native_compatible_intrinsic_mutations() {
+    for mutation in [
+        "Object.getOwnPropertyNames = fail",
+        "Object.create = fail",
+        "Object.defineProperty = fail",
+        "Object.freeze = fail",
+        "Object.assign = fail",
+        "globalThis.Object = fail",
+        "globalThis.Symbol = fail",
+        "Reflect.apply = fail",
+        "Array.prototype[Symbol.iterator] = fail",
+    ] {
+        let source = sources(&[
+            (
+                "entry.mjs",
+                &format!(
+                    "const fail = () => {{throw Error('patched');}}; {mutation}; \
+                     console.log((await import('./dep.cjs')).default.value);"
+                ),
+            ),
+            ("dep.cjs", "module.exports = {value: 42};"),
+        ]);
+        let (_, output) = build(&source, &[("entry.mjs", false)], false);
+        for result in [
+            node(&source, Path::new("entry.mjs")),
+            node(&output.files, &output.entries["entry.mjs"]),
+        ] {
+            assert!(
+                result.status.success(),
+                "{mutation}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert_eq!(result.stdout, b"42\n", "{mutation}");
+        }
+    }
+}
+
+#[test]
+fn commonjs_cycle_diagnostics_use_captured_intrinsics() {
+    let source = sources(&[
+        (
+            "entry.mjs",
+            "Object.assign = () => {throw Error('patched');}; \
+             try { await import('./cycle.cjs'); } catch (error) { console.log(error.code); }",
+        ),
+        ("cycle.cjs", "exports.value = 1; require('./bridge.mjs');"),
+        (
+            "bridge.mjs",
+            "import value from './cycle.cjs'; export {value};",
+        ),
+    ]);
+    let output = compare(&source, "entry.mjs");
+    assert_eq!(
+        node(&output.files, &output.entries["entry.mjs"]).stdout,
+        b"ERR_REQUIRE_CYCLE_MODULE\n"
+    );
+}
+
+#[test]
 fn later_entries_load_after_user_code_changes_public_builtins() {
     let sources = sources(&[
         ("first.mjs", "const fail = () => { throw new Error('public builtin changed'); }; JSON.parse = fail; Object.hasOwn = fail; globalThis.URL = fail; Map.prototype.get = fail; Map.prototype.has = fail; Map.prototype.set = fail;"),

@@ -1019,6 +1019,64 @@ fn delete_recreate_rename_and_old_success_after_failure() {
 }
 
 #[test]
+fn runtime_intrinsics_are_captured_before_first_entry_and_reused_by_late_aliases() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "first.mjs",
+        "const fail = () => {throw Error('patched');}; \
+         Object.getOwnPropertyNames = fail; Object.create = fail; \
+         Object.defineProperty = fail; Object.freeze = fail; Object.assign = fail; \
+         Reflect.apply = fail; Array.prototype[Symbol.iterator] = fail; \
+         globalThis.Object = fail; globalThis.Symbol = fail; \
+         console.log(typeof __gf_cjs_0_runtime);",
+    );
+    write(
+        dir.root(),
+        "loader.mjs",
+        "console.log('loader'); export function load() { return import('./dep.cjs'); }",
+    );
+    write(
+        dir.root(),
+        "dep.cjs",
+        "console.log('factory'); module.exports = {value: 42};",
+    );
+    let mut options = options();
+    options.entries = [
+        ("main", "first.mjs", None),
+        ("loader", "loader.mjs", None),
+        ("canonical", "dep.cjs", Some("nested/canonical.cjs")),
+        ("alias", "dep.cjs", Some("aliases/deep/alias.cjs")),
+    ]
+    .into_iter()
+    .map(|(id, path, output)| {
+        (
+            id.into(),
+            Entry {
+                path: path.into(),
+                output_name: output.map(PathBuf::from),
+                namespace: true,
+            },
+        )
+    })
+    .collect();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let build = parity(&mut session, &options);
+    assert_eq!(
+        observe_named(
+            &build.product.artifacts,
+            "await import('./first.mjs'); \
+             const loader = await import('./loader.mjs'); console.log('before'); \
+             const first = await loader.load(), second = await loader.load(); \
+             console.log(first === second, first.default.value); \
+             const alias = await import('./nested/canonical.cjs'); \
+             console.log(alias.default === first.default);"
+        ),
+        b"undefined\nloader\nbefore\nfactory\ntrue 42\ntrue\n"
+    );
+}
+
+#[test]
 fn commonjs_path_parameters_describe_the_actual_output_owner() {
     let dir = TmpDir::new();
     write(

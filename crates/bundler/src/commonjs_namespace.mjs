@@ -1,14 +1,16 @@
 function commonjsNamespace(value) {
-  const namespace = Object.create(null);
-  Object.defineProperty(namespace, 'default', { enumerable: true, value });
+  const namespace = intrinsics.create(null);
+  intrinsics.defineProperty(namespace, 'default', { enumerable: true, value });
   if (value != null) {
-    const target = Object(value);
-    for (const key of Object.getOwnPropertyNames(target)) {
+    const target = intrinsics.object(value);
+    const keys = intrinsics.getOwnPropertyNames(target);
+    for (let index = 0; index < keys.length; index++) {
+      const key = keys[index];
       if (key !== 'default') {
-        Object.defineProperty(namespace, key, { enumerable: true, get: () => target[key] });
+        intrinsics.defineProperty(namespace, key, { enumerable: true, get: () => target[key] });
       }
     }
   }
-  Object.defineProperty(namespace, Symbol.toStringTag, { value: 'Module' });
-  return Object.freeze(namespace);
+  intrinsics.defineProperty(namespace, intrinsics.toStringTag, { value: 'Module' });
+  return intrinsics.freeze(namespace);
 }
