@@ -21,6 +21,470 @@ fn options() -> BuildOptions {
     }
 }
 
+struct PreparationObserver;
+
+impl Drop for PreparationObserver {
+    fn drop(&mut self) {
+        prepare::AFTER_PREPARE.with(|observer| *observer.borrow_mut() = None);
+    }
+}
+
+fn observe_preparation(observer: impl Fn(&Path) + Send + Sync + 'static) -> PreparationObserver {
+    prepare::AFTER_PREPARE.with(|slot| *slot.borrow_mut() = Some(std::sync::Arc::new(observer)));
+    PreparationObserver
+}
+
+#[test]
+fn parallel_preparation_discovers_a_child_while_an_earlier_sibling_is_blocked() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './slow.mjs'; import './fast.mjs';",
+    );
+    write(dir.root(), "fast.mjs", "import './child.mjs';");
+    write(dir.root(), "child.mjs", "import './slow.mjs';");
+    write(dir.root(), "slow.mjs", "export const value = 1;");
+    for workers in [2, 4] {
+        let (release, wait) = std::sync::mpsc::channel();
+        let wait = std::sync::Mutex::new(wait);
+        let siblings = std::sync::Barrier::new(2);
+        let observer = observe_preparation(move |path| {
+            let name = path.file_name().unwrap();
+            if name == "fast.mjs" || name == "slow.mjs" {
+                siblings.wait();
+            }
+            if name == "slow.mjs" {
+                wait.lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .expect("dependency discovery must not wait for a whole sibling batch");
+            } else if name == "child.mjs" {
+                release.send(()).unwrap();
+            }
+        });
+        let mut config = options();
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let built = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        drop(observer);
+        assert_eq!(built.counters.source_parses + built.counters.disk_hits, 4);
+    }
+}
+
+#[test]
+fn parallel_preparation_cold_warm_noop_edit_delete_cycles_and_shared_dependencies() {
+    let dir = TmpDir::new();
+    let root = dir.root();
+    let files = [
+        ("main.mjs", "import {left} from './left.mjs'; import {right} from './right.mjs'; import data from './data.json'; import './style.css'; import image from './image.bin'; console.log(left(), right(), data, image);"),
+        ("left.mjs", "import {shared} from './shared.mjs'; export function left(){return shared()}"),
+        ("right.mjs", "import {shared} from './shared.mjs'; export function right(){return shared()}"),
+        ("shared.mjs", "import './left.mjs'; export function shared(){return 3}"),
+        ("data.json", "{\"value\":42}"),
+        ("style.css", ".hello { color: red }"),
+        ("image.bin", "asset bytes"),
+    ];
+    let mut baselines = BTreeMap::new();
+    for reverse_entries in [false, true] {
+        for workers in [1, 2, 4, 4, 2, 1] {
+            for (path, text) in files {
+                write(root, path, text);
+                let sidecar = segment_cache::sidecar_path(&root.join(path));
+                if sidecar.exists() {
+                    fs::remove_file(sidecar).unwrap();
+                }
+            }
+            let mut config = options();
+            config.execution = crate::execution::ExecutionOptions::new(
+                std::num::NonZeroUsize::new(workers).unwrap(),
+            );
+            config.entries = [
+                (if reverse_entries { "z" } else { "a" }, "main.mjs"),
+                (if reverse_entries { "a" } else { "z" }, "right.mjs"),
+            ]
+            .into_iter()
+            .map(|(name, path)| {
+                (
+                    name.into(),
+                    Entry {
+                        path: path.into(),
+                        output_name: None,
+                        namespace: true,
+                    },
+                )
+            })
+            .collect();
+            let seen =
+                std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::<PathBuf, usize>::new()));
+            let seen_worker = seen.clone();
+            let observer = observe_preparation(move |path| {
+                *seen_worker
+                    .lock()
+                    .unwrap()
+                    .entry(path.to_owned())
+                    .or_default() += 1;
+            });
+            let mut session = BuildSession::new(root).unwrap();
+            let cold = session.build(&config).unwrap();
+            drop(observer);
+            assert_eq!(seen.lock().unwrap().len(), files.len());
+            assert!(seen.lock().unwrap().values().all(|&count| count == 1));
+            assert_eq!(cold.counters.source_parses, files.len());
+            assert_eq!(cold.counters.declaration_fingerprints, 1);
+            assert_eq!(cold.counters.source_reparses, 0);
+            assert_eq!(cold.counters.fragment_reparses, 0);
+            let warm = BuildSession::new(root).unwrap().build(&config).unwrap();
+            assert_eq!(warm.counters.disk_hits, files.len());
+            assert_eq!(warm.counters.source_parses, 0);
+            assert_eq!(warm.counters.declaration_fingerprints, 1);
+            assert_eq!(warm.product.artifacts, cold.product.artifacts);
+            let noop = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&noop.product, &cold.product));
+            assert_eq!(noop.counters.memory_hits, files.len());
+            assert_eq!(noop.counters.declaration_fingerprints, 0);
+            assert_eq!(noop.counters.output_parses, 0);
+
+            write(
+                root,
+                "shared.mjs",
+                "import './left.mjs'; export function shared(){return 4}",
+            );
+            let edit = session.build(&config).unwrap();
+            assert_eq!(edit.counters.source_parses, 1);
+            assert_eq!(edit.counters.memory_hits, files.len() - 1);
+            for path in ["main.mjs", "left.mjs", "right.mjs", "shared.mjs"] {
+                assert!(edit.invalidated.contains(&root.join(path)));
+            }
+            fs::remove_file(root.join("shared.mjs")).unwrap();
+            assert!(session.build(&config).is_err());
+            assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &edit.product));
+            write(
+                root,
+                "shared.mjs",
+                "import './left.mjs'; export function shared(){return 4}",
+            );
+            let restored = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&restored.product, &edit.product));
+
+            write(root, "main.mjs", "import {left} from './left.mjs'; import data from './data.json'; import './style.css'; import image from './image.bin'; console.log(left(), data, image);");
+            config
+                .entries
+                .retain(|_, entry| entry.path != Path::new("right.mjs"));
+            fs::remove_file(root.join("right.mjs")).unwrap();
+            let deleted = session.build(&config).unwrap();
+            assert!(deleted.invalidated.contains(&root.join("right.mjs")));
+            assert!(deleted
+                .product
+                .graph
+                .file_id(&root.join("right.mjs"))
+                .is_none());
+            let products = [
+                cold.product.artifacts.clone(),
+                edit.product.artifacts.clone(),
+                deleted.product.artifacts.clone(),
+            ];
+            if let Some(baseline) = baselines.get(&reverse_entries) {
+                assert_eq!(&products, baseline);
+            } else {
+                baselines.insert(reverse_entries, products);
+            }
+        }
+    }
+}
+
+#[test]
+fn parallel_preparation_corrupt_stale_caches_and_source_errors_are_deterministic() {
+    let dir = TmpDir::new();
+    for (path, text) in [
+        ("main.mjs", "import './a.mjs'; import './z.mjs';"),
+        ("a.mjs", "export const a = 1;"),
+        ("z.mjs", "export const z = 1;"),
+    ] {
+        write(dir.root(), path, text);
+    }
+    let mut config = options();
+    let mut baseline = None;
+    for workers in [1, 2, 4, 2, 4] {
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        write(dir.root(), "a.mjs", "export const a = 1;");
+        write(dir.root(), "z.mjs", "export const z = 1;");
+        let valid = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        fs::write(
+            segment_cache::sidecar_path(&dir.root().join("a.mjs")),
+            b"invalid CBOR",
+        )
+        .unwrap();
+        fs::copy(
+            segment_cache::sidecar_path(&dir.root().join("main.mjs")),
+            segment_cache::sidecar_path(&dir.root().join("z.mjs")),
+        )
+        .unwrap();
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let repaired = session.build(&config).unwrap();
+        assert_eq!(repaired.counters.source_parses, 2);
+        assert_eq!(repaired.counters.disk_hits, 1);
+        assert_eq!(repaired.product.artifacts, valid.product.artifacts);
+        let warm = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(warm.counters.disk_hits, 3);
+
+        // Even a memory hit must validate sealed source/facts provenance.
+        session
+            .sources
+            .get_mut(&dir.root().join("a.mjs"))
+            .unwrap()
+            .record
+            .module
+            .segments[0]
+            .end -= 1;
+        assert!(session.build(&config).is_err());
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &repaired.product
+        ));
+        session.sources.remove(&dir.root().join("a.mjs"));
+        write(dir.root(), "a.mjs", "export const a = ;");
+        write(dir.root(), "z.mjs", "export const z = ;");
+        // Force the lexically later error to finish preparation first.
+        let (release, wait) = std::sync::mpsc::channel();
+        let wait = std::sync::Mutex::new(wait);
+        let observer = observe_preparation(move |path| {
+            if workers > 1 && path.file_name().unwrap() == "a.mjs" {
+                wait.lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_secs(30))
+                    .unwrap();
+            } else if path.file_name().unwrap() == "z.mjs" {
+                release.send(()).unwrap();
+            }
+        });
+        let diagnostic = format!("{:#}", session.build(&config).err().unwrap());
+        drop(observer);
+        assert!(diagnostic.contains("a.mjs"), "{diagnostic}");
+        if let Some(expected) = &baseline {
+            assert_eq!(&diagnostic, expected);
+        } else {
+            baseline = Some(diagnostic);
+        }
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &repaired.product
+        ));
+    }
+}
+
+#[test]
+fn parallel_preparation_css_frontier_errors_do_not_depend_on_script_discovery() {
+    let dir = TmpDir::new();
+    let mut baseline = None;
+    for workers in [1, 2, 4, 4, 2] {
+        for reverse in [false, true] {
+            write(
+                dir.root(),
+                "main.mjs",
+                if reverse {
+                    "import './z.mjs'; import './a.mjs';"
+                } else {
+                    "import './a.mjs'; import './z.mjs';"
+                },
+            );
+            write(dir.root(), "a.mjs", "import './a.module.css';");
+            write(dir.root(), "z.mjs", "import './z.module.css';");
+            write(
+                dir.root(),
+                "a.module.css",
+                ".a { composes: z from './z.module.css'; color: red }",
+            );
+            write(dir.root(), "z.module.css", ".z { color: blue }");
+            let mut config = options();
+            config.css.css_modules = CssModules::Enabled;
+            config.execution = crate::execution::ExecutionOptions::new(
+                std::num::NonZeroUsize::new(workers).unwrap(),
+            );
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let previous = session.build(&config).unwrap();
+            write(
+                dir.root(),
+                "z.module.css",
+                ".z { composes: a from './a.module.css'; color: blue }",
+            );
+            let diagnostic = format!("{:#}", session.build(&config).err().unwrap());
+            assert!(diagnostic.contains("composition cycle"), "{diagnostic}");
+            if let Some(expected) = &baseline {
+                assert_eq!(&diagnostic, expected);
+            } else {
+                baseline = Some(diagnostic);
+            }
+            assert!(Rc::ptr_eq(
+                session.last.as_ref().unwrap(),
+                &previous.product
+            ));
+        }
+    }
+}
+
+#[test]
+fn parallel_preparation_resolution_errors_and_cache_write_warnings_are_stable() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './a.mjs'; import './z.mjs';",
+    );
+    for path in ["a.mjs", "z.mjs"] {
+        fs::create_dir(segment_cache::sidecar_path(&dir.root().join(path))).unwrap();
+    }
+    let mut expected_warnings = None;
+    let mut expected_error = None;
+    for workers in [1, 2, 4, 2, 4] {
+        write(dir.root(), "a.mjs", "console.log('a');");
+        write(dir.root(), "z.mjs", "console.log('z');");
+        let mut config = options();
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let previous = session.build(&config).unwrap();
+        assert_eq!(previous.warnings.len(), 2);
+        if let Some(warnings) = &expected_warnings {
+            assert_eq!(&previous.warnings, warnings);
+        } else {
+            expected_warnings = Some(previous.warnings.clone());
+        }
+        write(dir.root(), "a.mjs", "import './missing-a.mjs';");
+        write(dir.root(), "z.mjs", "import './missing-z.mjs';");
+        let diagnostic = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(diagnostic.contains("a.mjs"), "{diagnostic}");
+        if let Some(error) = &expected_error {
+            assert_eq!(&diagnostic, error);
+        } else {
+            expected_error = Some(diagnostic);
+        }
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &previous.product
+        ));
+    }
+}
+
+#[test]
+fn parallel_preparation_rechecks_source_and_inventory_before_noop_return() {
+    let dir = TmpDir::new();
+    for workers in [1, 2, 4] {
+        write(dir.root(), "main.mjs", "export const value = 1;");
+        let mut config = options();
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let previous = session.build(&config).unwrap();
+        let observer = observe_preparation(|path| {
+            fs::write(path, "export const value = 2;").unwrap();
+        });
+        assert!(session.build(&config).is_err());
+        drop(observer);
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &previous.product
+        ));
+        let repaired = session.build(&config).unwrap();
+        assert_eq!(repaired.counters.source_parses, 1);
+        let observer = observe_preparation(|path| {
+            fs::write(path.parent().unwrap().join("added.mjs"), "export {};").unwrap();
+        });
+        assert!(session.build(&config).is_err());
+        drop(observer);
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &repaired.product
+        ));
+        fs::remove_file(dir.root().join("added.mjs")).unwrap();
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&noop.product, &repaired.product));
+    }
+}
+
+#[test]
+fn parallel_preparation_failed_build_keeps_invalidations_until_success() {
+    let dir = TmpDir::new();
+    for workers in [1, 2, 4] {
+        write(
+            dir.root(),
+            "main.mjs",
+            "import {a} from './a.mjs'; import './z.mjs'; console.log(a);",
+        );
+        write(dir.root(), "a.mjs", "export const a = 1;");
+        write(dir.root(), "z.mjs", "export const z = 1;");
+        let mut config = options();
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let previous = session.build(&config).unwrap();
+        write(dir.root(), "a.mjs", "export const a = 2;");
+        write(dir.root(), "z.mjs", "export const z = ;");
+        assert!(session.build(&config).is_err());
+        assert!(Rc::ptr_eq(
+            session.last.as_ref().unwrap(),
+            &previous.product
+        ));
+        write(dir.root(), "z.mjs", "export const z = 1;");
+        let repaired = session.build(&config).unwrap();
+        assert!(repaired.invalidated.contains(&dir.root().join("a.mjs")));
+        assert!(repaired.invalidated.contains(&dir.root().join("main.mjs")));
+        assert!(repaired.product.generation > previous.product.generation);
+        assert!(session.build(&config).unwrap().invalidated.is_empty());
+    }
+}
+
+#[test]
+fn parallel_preparation_panic_preserves_resolution_invalidations_for_retry() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import value from 'choice'; console.log(value);");
+    write(
+        dir.root(),
+        "node_modules/choice/package.json",
+        r#"{"type":"module","exports":{".":{"alternate":"./b.mjs","default":"./a.mjs"}}}"#,
+    );
+    write(dir.root(), "node_modules/choice/a.mjs", "export default 'a';");
+    write(dir.root(), "node_modules/choice/b.mjs", "export default 'b';");
+    let mut config = options();
+    config.execution =
+        crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(2).unwrap());
+    for name in ["a", "b"] {
+        config.entries.insert(
+            name.into(),
+            Entry {
+                path: format!("node_modules/choice/{name}.mjs").into(),
+                output_name: Some(format!("{name}.mjs").into()),
+                namespace: true,
+            },
+        );
+    }
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let previous = session.build(&config).unwrap();
+    config.resolver.export_conditions.push("alternate".into());
+    let observer = observe_preparation(|_| panic!("expected preparation panic"));
+    assert!(session.build(&config).is_err());
+    drop(observer);
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &previous.product));
+    let repaired = session.build(&config).unwrap();
+    assert!(repaired.invalidated.contains(&dir.root().join("main.mjs")));
+    assert_eq!(repaired.counters.source_parses, 0);
+    assert_eq!(
+        repaired.product.artifacts,
+        BuildSession::new(dir.root()).unwrap().build(&config).unwrap().product.artifacts
+    );
+    assert!(session.build(&config).unwrap().invalidated.is_empty());
+}
+
 #[test]
 fn parallel_execution_preserves_build_bytes_counters_and_noop_generation() {
     let dir = TmpDir::new();

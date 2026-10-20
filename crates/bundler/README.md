@@ -84,13 +84,31 @@ validation; explicit `Entry.output_name` values still require slash-separated
 portable paths. Publication validates path components rather than rejecting
 Windows separators introduced by native path joins.
 
-### Bounded output emission
+### Bounded preparation and output emission
 
 `BuildOptions.execution` and low-level `link::esm_with_execution` accept
 `execution::ExecutionOptions::new(NonZeroUsize::new(4).unwrap())`. The default is
 one worker, running inline; existing `link::esm` callers remain serial. The
 explicit count bounds scoped workers, additionally capped by each batch's
-actual owner count. No environment variable or global pool selects concurrency.
+actual owner count for emission. No environment variable or global pool selects concurrency.
+
+Module preparation uses a replenished, deduplicated canonical-path frontier:
+the coordinator integrates each completed script and resolves/enqueues its
+dependencies immediately, without waiting for sibling jobs. Workers read source
+bytes and validate sidecars or extract owned facts using private Oxc arenas and
+the session's shared immutable `PreparedDeclarations`. At most the configured
+number of jobs, including completed results, are outstanding. Pending jobs hold
+paths, not source buffers. Cycles/shared dependencies are scheduled once.
+Resolution, graph mutation and Ecco solving stay serial. Stateful resources
+(CSS, JSON and assets) use a canonical serial frontier after the script frontier
+drains, without pre-reading scripts on the coordinator. Preparation workers join
+before resource processing or emission starts, so stage worker counts never add.
+Source errors are selected by canonical path after script discovery; serial
+resource processing stops at its first failure. Cache warnings are sorted.
+Failed builds retain the previous successful product but never return it as success.
+Invalidations accumulated by failed attempts survive until the next successful build.
+Cache provenance checks, atomic writes and final source/inventory rechecks remain
+in force, including no-op returns.
 
 Retention, effects/order, placement, global names and cross-owner export
 addresses are prepared serially. Checked graphs and owned syntax facts are
@@ -101,11 +119,18 @@ availability owner remains unchanged. Workers return typed requests, never
 publish. Results/errors merge in canonical owner order before serial pruning,
 destination/alias selection, rendering and final validation.
 
-Worker parser/rewrite counts are aggregated back to the caller, including
+Worker parser/rewrite/declaration-fingerprint counts are aggregated back to the caller, including
 failed jobs. Debug final validation remains once per executable artifact;
 release never validates output. Worker count does not affect fingerprints or
-invalidate a successful no-op generation. This configuration is reserved for
-future module preparation too; preparation is **not** parallelized yet.
+invalidate a successful no-op generation. `Counters.declaration_fingerprints`
+reports actual declaration serialization/hashing rather than assuming worker
+counts are zero.
+
+The example driver's bounded `--fixture-config FILE` accepts `"workers": 1`
+(default), with integer counts from 1 through 64. Use 1, 2, 4 and 6 for forthcoming
+cold/warm/no-op/edit benchmarks; hold fixture inputs, cache mode and output
+settings constant. It reports `declarationFingerprints` alongside existing
+parse/cache counters. No throughput claim is made before those benchmarks.
 
 ## JSON modules
 

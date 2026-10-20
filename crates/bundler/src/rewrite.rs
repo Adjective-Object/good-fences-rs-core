@@ -16,6 +16,7 @@ thread_local! {
     static OUTPUT_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static FINAL_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static WORKER_SOURCE_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static WORKER_DECLARATION_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Clone, Copy)]
@@ -23,6 +24,7 @@ pub(crate) struct ParseCounts {
     pub(crate) source: usize,
     pub(crate) output: usize,
     pub(crate) validation: usize,
+    pub(crate) declarations: usize,
 }
 
 impl ParseCounts {
@@ -31,6 +33,7 @@ impl ParseCounts {
             source: self.source - before.source,
             output: self.output - before.output,
             validation: self.validation - before.validation,
+            declarations: self.declarations - before.declarations,
         }
     }
 }
@@ -44,6 +47,8 @@ pub(crate) fn parse_counts() -> ParseCounts {
         source: source_parse_count(),
         output: output_parse_count(),
         validation: final_validation_count(),
+        declarations: ast_segmenter::fingerprint::declaration_fingerprint_count()
+            + WORKER_DECLARATION_HASHES.with(std::cell::Cell::get),
     }
 }
 
@@ -51,6 +56,7 @@ pub(crate) fn record_worker_parses(counts: ParseCounts) {
     WORKER_SOURCE_PARSES.with(|count| count.set(count.get() + counts.source));
     OUTPUT_PARSES.with(|count| count.set(count.get() + counts.output));
     FINAL_VALIDATIONS.with(|count| count.set(count.get() + counts.validation));
+    WORKER_DECLARATION_HASHES.with(|count| count.set(count.get() + counts.declarations));
 }
 
 pub(crate) fn output_parse_count() -> usize {
