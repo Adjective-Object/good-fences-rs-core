@@ -6,5 +6,8 @@ use Node's specificity rules: longest prefix before `*`, then longest full key,
 independent of map iteration order or the requested conditions.
 Conditions are an active set, not a priority list: the selected subpath's first
 active condition in package declaration order wins, with `default` always active.
+The package reader normalizes bare-string exports to `"."`. Wildcard targets
+can expose arbitrary nested files (including non-JavaScript resources), while
+more-specific private patterns still block access.
 
 Run `cargo test -p packagejson_exports` for rewrite and visibility regressions.

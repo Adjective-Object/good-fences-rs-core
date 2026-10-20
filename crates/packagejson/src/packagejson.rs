@@ -32,11 +32,30 @@ pub struct PackageJson {
     pub module: Option<String>,
     #[serde(default)]
     pub browser: Option<Browser>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_exports")]
     pub exports: Option<PackageJsonExports>,
 }
 
 pub type PackageJsonExports = AHashMap<String, PackageJsonExport>;
+
+fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<PackageJsonExports>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Exports {
+        Root(String),
+        Subpaths(PackageJsonExports),
+    }
+    Ok(
+        Option::<Exports>::deserialize(deserializer)?.map(|exports| match exports {
+            Exports::Root(path) => [(".".to_owned(), PackageJsonExport::Single(Some(path)))]
+                .into_iter()
+                .collect(),
+            Exports::Subpaths(paths) => paths,
+        }),
+    )
+}
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
@@ -110,11 +129,31 @@ impl ContextData for PackageJson {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     return Ok(None);
                 }
+
                 return Err(e.into());
             }
         };
         serde_json::from_reader(file)
             .map(Some)
             .map_err(|e| e.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_exports_normalize_to_the_root_subpath() {
+        let shorthand: PackageJson = serde_json::from_str(r#"{"exports":"./index.mjs"}"#).unwrap();
+        let explicit: PackageJson =
+            serde_json::from_str(r#"{"exports":{".":"./index.mjs"}}"#).unwrap();
+        assert_eq!(shorthand, explicit);
+        for invalid in ["false", "42", "[]"] {
+            assert!(
+                serde_json::from_str::<PackageJson>(&format!(r#"{{"exports":{invalid}}}"#))
+                    .is_err()
+            );
+        }
     }
 }

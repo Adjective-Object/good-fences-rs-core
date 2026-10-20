@@ -86,6 +86,7 @@ impl DependencyResolver for StructuralResolver {
         if self.externals.contains(specifier) {
             return Ok(ResolvedDependency::External(specifier.to_owned()));
         }
+
         eyre::ensure!(
             !specifier.starts_with("node:") && !NODE_BUILTINS.contains(&specifier),
             "external {specifier:?} requires explicit external policy"
@@ -123,5 +124,54 @@ impl DependencyResolver for StructuralResolver {
             result.path.display()
         );
         Ok(ResolvedDependency::File(result.path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_string_roots_and_wildcard_resource_paths_resolve() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/closed/package.json" => r#"{"exports":"./index.mjs"}"#,
+            "node_modules/closed/index.mjs" => "",
+            "node_modules/open/package.json" => r#"{"exports":{".":"./index.mjs","./*":"./*","./private/*":null}}"#,
+            "node_modules/open/index.mjs" => "",
+            "node_modules/open/data/nested/file.json" => "{}",
+            "node_modules/open/private/file.json" => "{}"
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(crate::resolve::TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+            for (request, target) in [
+                ("closed", "closed/index.mjs"),
+                ("open", "open/index.mjs"),
+                ("open/data/nested/file.json", "open/data/nested/file.json"),
+            ] {
+                assert_eq!(
+                    resolver
+                        .resolve_dependency(&dir.root().join("entry.mjs"), request, mode)
+                        .unwrap(),
+                    ResolvedDependency::File(dir.root().join("node_modules").join(target))
+                );
+            }
+            for request in [
+                "closed/index.mjs",
+                "open/private/file.json",
+                "open/missing.json",
+            ] {
+                assert!(
+                    resolver
+                        .resolve_dependency(&dir.root().join("entry.mjs"), request, mode)
+                        .is_err(),
+                    "{request}"
+                );
+            }
+        }
     }
 }

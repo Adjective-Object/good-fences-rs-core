@@ -343,6 +343,50 @@ mod test {
     use test_tmpdir::map2;
 
     #[test]
+    fn string_roots_and_arbitrary_wildcard_files_keep_export_encapsulation() {
+        for json in [
+            r#"{"exports":"./index.mjs"}"#,
+            r#"{"exports":{".":"./index.mjs","./*":"./*","./private/*":null}}"#,
+        ] {
+            let package: packagejson::PackageJson = serde_json::from_str(json).unwrap();
+            let rewrites =
+                PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+            let mut output = String::new();
+            assert_eq!(
+                rewrites
+                    .rewrite_relative_export(".", ["import"], &mut output)
+                    .unwrap()
+                    .unwrap()
+                    .rewritten_export,
+                ExportedPathRef::Exported("./index.mjs")
+            );
+            if json.contains("./*") {
+                assert_eq!(
+                    rewrites
+                        .rewrite_relative_export("./data/nested/file.json", ["import"], &mut output)
+                        .unwrap()
+                        .unwrap()
+                        .rewritten_export,
+                    ExportedPathRef::Exported("./data/nested/file.json")
+                );
+                assert_eq!(
+                    rewrites
+                        .rewrite_relative_export("./private/file.json", ["import"], &mut output)
+                        .unwrap()
+                        .unwrap()
+                        .rewritten_export,
+                    ExportedPathRef::Private
+                );
+            } else {
+                assert!(rewrites
+                    .rewrite_relative_export("./index.mjs", ["import"], &mut output)
+                    .unwrap()
+                    .is_none());
+            }
+        }
+    }
+
+    #[test]
     fn star_patterns_choose_the_most_specific_key_before_conditions() {
         let exports = serde_json::from_str(
             r#"{
