@@ -91,6 +91,16 @@ including unchanged caller-loaded stub bytes. Persist no resolved CSS graph stat
 Scope identities hash css-local-v1 plus normalized
 project-relative path and decoded symbol into _ plus ten base64url characters;
 class/ID identities coincide. Reject detected hash and camelCase export collisions.
+Animation identifier definitions/references use Oxc keyframe/declaration/value
+facts and a separate css-animation-v1 identity domain, never JS exports.
+Resolve shorthand slots per comma group before interpreting a name; preserve
+strings, custom properties, timing functions and opaque runtime groups.
+Treat auto as a name candidate; quote explicit global keyword references and
+preserve token boundaries when removing animation scope wrappers.
+Explicit local(name)/global(name), optionally colon-prefixed, require one ident;
+reject nested/ambiguous module-only values. Reparse colon escapes only through
+same-length Oxc parse views and retain original-byte checked edits.
+ICSS :import/:export and @value remain unsupported.
 Keep each mapping a pure native ESM binding with safe private names/string aliases,
 never a default object. Export aliases are nonexecuting connectors even while
 prepared DOM operations stay conservative. Global CSS continues using cssparser
