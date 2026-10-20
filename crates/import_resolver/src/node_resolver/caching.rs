@@ -79,7 +79,7 @@ pub struct CachingNodeModulesResolver<'a> {
     // cache of node_modules directories discovered during resolution
     node_modules_cache: &'a NodeModulesCache,
 
-    // List of export conditions to try when resolving exports
+    // Active export conditions; package declaration order determines priority.
     export_conditions: Vec<String>,
 
     // list of extensions to use when resolving files
@@ -87,7 +87,8 @@ pub struct CachingNodeModulesResolver<'a> {
 }
 
 pub const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
-pub const DEFAULT_EXPORT_CODITIONS: &[&str] = &["import", "require", "default"];
+pub const DEFAULT_EXPORT_CODITIONS: &[&str] =
+    &["node", "node-addons", "module-sync", "import", "require", "default"];
 
 #[derive(Clone)]
 pub struct NodeModulesResolverOptions {
@@ -109,6 +110,11 @@ impl NodeModulesResolverOptions {
             extensions: DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
             export_conditions: DEFAULT_EXPORT_CODITIONS
                 .iter()
+                .copied()
+                .filter(|condition| {
+                    target_env == TargetEnv::Node
+                        || !matches!(*condition, "node" | "node-addons" | "module-sync")
+                })
                 .map(|s| s.to_string())
                 .collect(),
         }

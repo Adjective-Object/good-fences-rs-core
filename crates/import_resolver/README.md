@@ -12,6 +12,9 @@ specifier, not conditions). Only exact declared externals are accepted;
 undeclared builtins fail. External export names are delegated to the host, not
 validated as local files. Options retain explicit canonical/preserved symlink
 policy. Graph source identities must use the same policy.
+Node defaults activate `node`, `node-addons` and `module-sync` in addition to the
+request mode; browser defaults omit those Node conditions. Package declaration
+order, including an early `default`, determines which active condition wins.
 
 Call `invalidate` after filesystem/package/tsconfig edits, additions or removals;
 `set_policy` invalidates automatically. Invalidation intentionally replaces both

@@ -50,7 +50,7 @@ pub enum PackageJsonExport {
     //   "default": "./main.js"
     // }
     Single(Option<String>),
-    // A nested hashmap that maps multiple import paths into the module:
+    // An export condition object, kept in declaration order:
     //
     // e.g:
     // {
@@ -65,7 +65,38 @@ pub enum PackageJsonExport {
     //     "default": "./lib/util.js"
     //   }
     // }
-    Conditional(AHashMap<String, ExportedPath>),
+    Conditional(#[serde(deserialize_with = "deserialize_conditions")] Vec<(String, ExportedPath)>),
+}
+
+fn deserialize_conditions<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<(String, ExportedPath)>, D::Error> {
+    struct Conditions;
+    impl<'de> serde::de::Visitor<'de> for Conditions {
+        type Value = Vec<(String, ExportedPath)>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an ordered export condition object")
+        }
+
+        fn visit_map<M: serde::de::MapAccess<'de>>(
+            self,
+            mut map: M,
+        ) -> Result<Self::Value, M::Error> {
+            let mut conditions: Vec<(String, ExportedPath)> = Vec::new();
+            while let Some((condition, target)) = map.next_entry::<String, ExportedPath>()? {
+                if let Some((_, previous)) =
+                    conditions.iter_mut().find(|(key, _)| key == &condition)
+                {
+                    *previous = target;
+                } else {
+                    conditions.push((condition, target));
+                }
+            }
+            Ok(conditions)
+        }
+    }
+    deserializer.deserialize_map(Conditions)
 }
 
 impl ContextData for PackageJson {
