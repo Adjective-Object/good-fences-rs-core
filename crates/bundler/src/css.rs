@@ -28,7 +28,7 @@ struct Request {
 
 pub(crate) struct Styles<'a> {
     root: &'a Path,
-    inventory: &'a BTreeMap<PathBuf, Option<[u8; 32]>>,
+    inventory: &'a crate::build::Inventory,
     inputs: BTreeMap<PathBuf, Vec<u8>>,
     requests: BTreeMap<PathBuf, Vec<Request>>,
     compositions: BTreeMap<PathBuf, Vec<(crate::css_syntax::Name, PathBuf)>>,
@@ -42,7 +42,7 @@ pub(crate) struct Styles<'a> {
 impl<'a> Styles<'a> {
     pub(crate) fn new(
         root: &'a Path,
-        inventory: &'a BTreeMap<PathBuf, Option<[u8; 32]>>,
+        inventory: &'a crate::build::Inventory,
         public_base: &'a crate::output_url::PublicBase,
         selection: &'a crate::build::CssModules,
     ) -> Self {
@@ -126,8 +126,7 @@ impl<'a> Styles<'a> {
                     };
                     let target = target.canonicalize().wrap_err_with(context)?;
                     ensure!(
-                        target.starts_with(self.root)
-                            && self.inventory.contains_key(target.strip_prefix(self.root)?),
+                        self.inventory.contains(&target),
                         "{}: composition target outside bounded source inventory",
                         context()
                     );
@@ -182,8 +181,7 @@ impl<'a> Styles<'a> {
                     .canonicalize()
                     .wrap_err_with(|| format!("{}: CSS URL {:?}", path.display(), url.value))?;
                 ensure!(
-                    target.starts_with(self.root)
-                        && self.inventory.contains_key(target.strip_prefix(self.root)?),
+                    self.inventory.contains(&target),
                     "{}: CSS URL outside bounded source inventory: {:?}",
                     path.display(),
                     url.value
@@ -240,7 +238,8 @@ impl<'a> Styles<'a> {
                     resource::ResourceKind::Stylesheet { module: true }
                 ) {
                     let text = std::str::from_utf8(&self.inputs[path])?;
-                    let mut names = self.name_registry.prepare_linked(self.root, path, text, &|request, name| {
+                    let identity = self.root.join(self.inventory.relative(self.root, path));
+                    let mut names = self.name_registry.prepare_linked(self.root, &identity, text, &|request, name| {
                         let target = &self.compositions[path].iter()
                             .find(|(original, _)| original.decoded == request.decoded)
                             .expect("discovered composition request").1;
@@ -339,17 +338,15 @@ impl<'a> Styles<'a> {
     fn output_path(&self, path: &Path) -> PathBuf {
         let mut digest = Sha256::new();
         digest.update(b"css-resource-v1\0");
-        let root = path
-            .strip_prefix(self.root)
-            .expect("bounded CSS")
+        let root = self.inventory
+            .relative(self.root, path)
             .as_os_str()
             .as_encoded_bytes();
         digest.update((root.len() as u64).to_le_bytes());
         digest.update(root);
         for (path, style) in self.closure(path) {
-            let relative = path
-                .strip_prefix(self.root)
-                .expect("bounded CSS dependency")
+            let relative = self.inventory
+                .relative(self.root, &path)
                 .as_os_str()
                 .as_encoded_bytes();
             let input = &self.inputs[&path];
@@ -361,9 +358,8 @@ impl<'a> Styles<'a> {
             if style && self.names.contains_key(&path) {
                 digest.update(self.transform_identity);
                 for (request, target) in &self.compositions[&path] {
-                    let target = target
-                        .strip_prefix(self.root)
-                        .expect("bounded composition")
+                    let target = self.inventory
+                        .relative(self.root, target)
                         .as_os_str()
                         .as_encoded_bytes();
                     digest.update(b"composition\0");

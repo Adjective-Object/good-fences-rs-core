@@ -221,7 +221,7 @@ classified as stylesheets by their `.css` or configured custom suffix. Unlike
 CSS `@import`, `composes` cannot treat arbitrary filenames as stylesheets,
 even under `"everything"`;
 missing/global-only names, non-module targets, externals, private package paths,
-out-of-root/excluded files and inventory symlinks are errors.
+unlinked out-of-root files and excluded files are errors.
 Composition closure discovery precedes loader generation. Mappings resolve
 dependency-first; composition file cycles fail even for otherwise unrelated
 names, while ordinary CSS `@import` cycles remain supported. Generated native
@@ -654,16 +654,32 @@ let artifacts = &result.product.artifacts;
 # Ok::<(), eyre::Report>(())
 ```
 
-The canonical project root is a bounded dependency/configuration boundary.
-All resolved sources must remain inside it. In-tree symlinks (including directory
-symlinks) are explicitly rejected by this orchestration API; the lower-level
-resolver retains its separate policy. Nearest package metadata determines `.js`
+The canonical project root seeds a bounded reachable input inventory. File and
+directory symlinks and Windows junctions may reach packages outside that root;
+unlinked external sources are still rejected. Aliases share one canonical module
+identity. Inventory scans each canonical directory once and stores alias edges
+compactly, even through directory diamonds. Relative contexts expand only
+prefix-compatible finite non-cyclic alias paths on demand. Canonical candidates
+on another Windows volume/share are skipped, retaining usable lexical aliases.
+Dangling links and unreadable targets
+are errors, not silently omitted inputs. External entries require an explicit
+safe `output_name`; links never authorize output paths outside owned output.
+External CSS identity paths use the first sorted in-root alias, while in-root
+CSS identities remain canonical/root-relative.
+Nearest canonical package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
 supported package forms, including bare-string root exports and wildcard access
 to arbitrary package files. Export maps still enforce private subpaths.
 JSON/JSONC bytes and all file names
-under the root conservatively invalidate resolution, including package trees,
-config ancestry, new files and deleted targets. The public API gates unsupported
+in the reachable inventory conservatively invalidate resolution, including linked
+package trees, link retargets, new files and deleted targets. Canonical ancestor
+`package.json`/`tsconfig.json` probes (including missing files and linked config
+targets) are tracked without enumerating ancestor directories or unrelated
+sibling trees. Sources and inventory are rechecked before returning success,
+including no-op builds. Builds with external inputs refresh resolution and replay
+actual resolver requests before success, detecting ancestor `node_modules`
+shadowing without adding unrelated trees to the inventory.
+The public API gates unsupported
 tsconfig conditions instead of silently ignoring them: use strict `tsconfig.json`
 JSON with direct `compilerOptions.customConditions` (`customSourceConditions`
 is an alias); no extends/references. `baseUrl`/`paths` never rewrite runtime

@@ -1,6 +1,9 @@
 use super::*;
 use test_tmpdir::TmpDir;
 
+#[cfg(any(unix, windows))]
+mod linked_inventory;
+
 fn write(root: &Path, path: &str, text: &str) {
     let path = root.join(path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1388,7 +1391,7 @@ fn css_modules_cross_file_composition_rejects_nonlocal_targets_and_file_cycles()
 }
 
 #[test]
-fn css_modules_cross_file_composition_rejects_outside_inventory_and_symlinks() {
+fn css_modules_cross_file_composition_rejects_unlinked_and_excluded_sources() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
     write(&root, "main.mjs", "import './button.module.css';");
@@ -1423,18 +1426,8 @@ fn css_modules_cross_file_composition_rejects_outside_inventory_and_symlinks() {
             "button.module.css",
             ".button { composes: base from './alias.module.css' }",
         );
-        let error = format!(
-            "{:#}",
-            BuildSession::new(&root)
-                .unwrap()
-                .build(&config)
-                .err()
-                .unwrap()
-        );
-        assert!(
-            error.contains("symlinks in build inventory unsupported"),
-            "{error}"
-        );
+        config.entries.get_mut("main").unwrap().output_name = Some("main.mjs".into());
+        BuildSession::new(&root).unwrap().build(&config).unwrap();
     }
 }
 
