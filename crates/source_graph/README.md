@@ -72,9 +72,11 @@ inventory instead; `refresh_resolution` rejects them before mutating the graph.
 
 `patch_file`/`patch_owned` reject mismatched paths (rename = remove + add).
 `remove_file` tombstones IDs; recreation appends a new ID. Mutations rebuild both
-indexes and invalidate export caches. `GraphRevision` separates source and
-resolution epochs; `VersionedNode` rejects stale handles even when segment
-indices repeat. Paths are supplied identities: the graph never silently
+indexes and invalidate export caches. Checked ID access uses an aligned liveness
+vector, not path hashing; removed IDs remain inaccessible after recreation.
+`GraphRevision` separates source and resolution epochs; `VersionedNode` rejects
+stale handles even when segment indices repeat. Paths are supplied identities:
+the graph never silently
 canonicalizes them or merges symlink aliases. Refresh/rebuild is deliberately
 coarse, not a claim of minimal P9 invalidation.
 

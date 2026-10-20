@@ -202,28 +202,15 @@ impl SourceGraph {
 
     /// Checked consumers must distinguish owned inputs from lossy tracker adapters.
     pub fn file_facts(&self, file_id: u32) -> Option<&ModuleFacts> {
-        self.file_path(file_id)?;
-        self.files
-            .get(file_id as usize)?
-            .owned
-            .as_ref()
-            .map(|i| &i.facts)
+        self.live_file(file_id)?.owned.as_ref().map(|i| &i.facts)
     }
 
     pub fn file_provenance(&self, file_id: u32) -> Option<&ast_segmenter::SourceProvenance> {
-        self.file_path(file_id)?;
-        self.files
-            .get(file_id as usize)?
-            .owned
-            .as_ref()?
-            .provenance
-            .as_ref()
+        self.live_file(file_id)?.owned.as_ref()?.provenance.as_ref()
     }
 
     pub fn file_prepared_resource(&self, file_id: u32) -> Option<&PreparedResource> {
-        self.file_path(file_id)?;
-        self.files
-            .get(file_id as usize)?
+        self.live_file(file_id)?
             .owned
             .as_ref()?
             .prepared_resource
@@ -272,6 +259,9 @@ impl SourceGraph {
         self.diagnostics.clear();
         let mut edges = Vec::new();
         for (file_id, file) in self.files.iter().enumerate() {
+            if !self.live_files[file_id] {
+                continue;
+            }
             let file_id = file_id as u32;
             let Some(input) = &file.owned else {
                 edges.extend(self.legacy_edges(file_id));
