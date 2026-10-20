@@ -43,6 +43,144 @@ fn normalized(graph: &SourceGraph) -> Vec<String> {
     edges
 }
 
+fn legacy_input(path: &str, source: &str) -> SourceFileInput {
+    SourceFileInput {
+        source_file_path: path.into(),
+        segments: input(path, source).segments,
+        resolved_import_paths: Default::default(),
+        resolved_reexport_paths: Default::default(),
+    }
+}
+
+fn assert_dead_id(graph: &SourceGraph, id: u32) {
+    assert!(graph.file_path(id).is_none());
+    assert!(graph.file_segments(id).is_none());
+    assert!(graph.file_symbol_to_segment(id).is_none());
+    assert!(graph.file_resolved_import_paths(id).is_none());
+    assert!(graph.file_facts(id).is_none());
+    assert!(graph.file_provenance(id).is_none());
+    assert!(graph.file_prepared_resource(id).is_none());
+    assert!(graph
+        .dependency_target(id, ast_segmenter::owned::DependencyId(0))
+        .is_none());
+    assert!(graph
+        .resolve_binding(id, ast_segmenter::owned::BindingId(0))
+        .is_none());
+    assert!(graph.resolve_symbol_in_file(id, "value", 0).is_none());
+    assert!(graph.resolve_export(id, "value", Namespace::Value).is_err());
+    assert!(graph
+        .resolve_optional_export(id, "value", Namespace::Value)
+        .unwrap()
+        .is_none());
+    assert!(graph
+        .resolve_import_across_files(id, &ExportedSymbol::from("value"))
+        .is_empty());
+    assert!(!graph.module_ids().any(|live| live == id));
+    assert!(!graph.iter_segments().any(|(key, _)| key.file_id == id));
+    for node in [
+        GraphNode::Module(id),
+        GraphNode::Segment(SegmentKey::new(id, 0)),
+    ] {
+        assert!(graph.incoming(node).next().is_none());
+        assert!(graph.outgoing(node).next().is_none());
+        assert!(graph.outgoing_indexed(node).next().is_none());
+    }
+}
+
+#[test]
+fn checked_ids_stay_dead_across_owned_and_legacy_recreation() {
+    for owned in [false, true] {
+        let mut graph = if owned {
+            SourceGraph::from_owned([
+                input("input.mjs", "export const value = 1;"),
+                input("empty.mjs", ""),
+            ])
+        } else {
+            SourceGraph::new(
+                [
+                    legacy_input("input.mjs", "export const value = 1;"),
+                    legacy_input("empty.mjs", ""),
+                ]
+                .into_iter(),
+            )
+        };
+        let path = Path::new("input.mjs");
+        let empty_id = graph.file_id(Path::new("empty.mjs")).unwrap();
+        let mut retired = Vec::new();
+        for patch_owned in [true, false, true, false] {
+            let id = graph.file_id(path).unwrap();
+            assert_eq!(graph.file_count(), 2);
+            assert_eq!(graph.module_ids().count(), 2);
+            assert_eq!(graph.file_segments(empty_id).unwrap().len(), 0);
+            assert!(graph.resolve_export(id, "value", Namespace::Value).is_ok());
+            assert!(!graph
+                .resolve_import_across_files(id, &ExportedSymbol::from("value"))
+                .is_empty());
+            let old_node = graph.versioned_node(GraphNode::Module(id));
+            let patch = |graph: &mut SourceGraph| {
+                if patch_owned {
+                    graph.patch_owned(path, input("input.mjs", "export const value = 2;"))
+                } else {
+                    graph.patch_file(path, legacy_input("input.mjs", "export const value = 2;"))
+                }
+                .unwrap();
+            };
+            patch(&mut graph);
+            assert_eq!(graph.file_id(path), Some(id));
+            assert!(!graph.is_current(old_node));
+            assert!(graph.remove_file(path));
+            retired.push(id);
+            assert_eq!(graph.file_count(), 1);
+            assert_eq!(graph.module_ids().collect::<Vec<_>>(), [empty_id]);
+            assert!(graph.file_id(path).is_none());
+            for &dead in &retired {
+                assert_dead_id(&graph, dead);
+            }
+            let revision = graph.revision();
+            assert!(!graph.remove_file(path));
+            assert_eq!(graph.revision(), revision);
+            patch(&mut graph);
+            assert!(graph.file_id(path).unwrap() > id.max(empty_id));
+            for &dead in &retired {
+                assert_dead_id(&graph, dead);
+            }
+            assert_dead_id(&graph, u32::MAX);
+        }
+        assert_eq!(graph.file_count(), 2);
+        assert_eq!(graph.module_ids().count(), 2);
+    }
+}
+
+#[test]
+fn duplicate_construction_paths_keep_only_the_last_id_live() {
+    for owned in [false, true] {
+        let mut graph = if owned {
+            SourceGraph::from_owned([
+                input("input.mjs", "export const value = 1; console.log(value);"),
+                input("input.mjs", ""),
+            ])
+        } else {
+            SourceGraph::new(
+                [
+                    legacy_input("input.mjs", "export const value = 1; console.log(value);"),
+                    legacy_input("input.mjs", ""),
+                ]
+                .into_iter(),
+            )
+        };
+        assert_eq!(graph.file_id(Path::new("input.mjs")), Some(1));
+        assert_eq!(graph.file_count(), 1);
+        assert_eq!(graph.module_ids().collect::<Vec<_>>(), [1]);
+        assert_eq!(graph.file_segments(1).unwrap().len(), 0);
+        assert_dead_id(&graph, 0);
+        assert!(graph.remove_file(Path::new("input.mjs")));
+        assert_eq!(graph.file_count(), 0);
+        assert_eq!(graph.module_ids().count(), 0);
+        assert_dead_id(&graph, 0);
+        assert_dead_id(&graph, 1);
+    }
+}
+
 #[test]
 fn source_patch_replaces_provenance_and_invalidates_existing_handles() {
     let mut graph = SourceGraph::from_owned([input("input.mjs", "export const value = 1;")]);

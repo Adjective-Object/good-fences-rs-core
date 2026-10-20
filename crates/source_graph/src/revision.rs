@@ -34,9 +34,8 @@ impl SourceGraph {
     /// Re-resolve all occurrences, including prior misses. Call after resolver invalidation.
     pub fn refresh_resolution(&mut self, resolver: &impl DependencyResolver) -> eyre::Result<()> {
         eyre::ensure!(
-            self.files
-                .iter()
-                .filter_map(|file| file.owned.as_ref())
+            self.module_ids()
+                .filter_map(|id| self.files[id as usize].owned.as_ref())
                 .all(|input| input
                     .facts
                     .dependencies
@@ -44,7 +43,10 @@ impl SourceGraph {
                     .all(|dependency| dependency.pattern.is_none())),
             "context resolution requires a bounded file inventory; rebuild owned inputs"
         );
-        for file in &mut self.files {
+        for (file, &live) in self.files.iter_mut().zip(&self.live_files) {
+            if !live {
+                continue;
+            }
             let Some(input) = &mut file.owned else {
                 continue;
             };
@@ -75,8 +77,7 @@ impl SourceGraph {
         file_id: u32,
         dependency: ast_segmenter::owned::DependencyId,
     ) -> Option<&DependencyTarget> {
-        self.files
-            .get(file_id as usize)?
+        self.live_file(file_id)?
             .owned
             .as_ref()?
             .resolutions
@@ -88,14 +89,18 @@ impl SourceGraph {
             path == input.path,
             "patch path mismatch; rename requires remove plus add"
         );
-        let mut replacement = Self::from_owned([input]);
-        let file = replacement.files.pop().expect("one input");
+        let file = Self::from_owned([input])
+            .files
+            .into_iter()
+            .next()
+            .expect("one input");
         if let Some(id) = self.file_id(path) {
             self.files[id as usize] = file;
         } else {
             self.path_to_id
                 .insert(path.to_owned(), self.files.len() as u32);
             self.files.push(file);
+            self.live_files.push(true);
         }
         self.revision.source += 1;
         self.revision.resolution += 1;
@@ -109,6 +114,7 @@ impl SourceGraph {
         let Some(id) = self.path_to_id.remove(path) else {
             return false;
         };
+        self.live_files[id as usize] = false;
         let file = &mut self.files[id as usize];
         file.segments.clear();
         file.symbol_to_segment.clear();

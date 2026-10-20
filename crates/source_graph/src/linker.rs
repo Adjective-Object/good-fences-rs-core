@@ -63,7 +63,7 @@ impl SourceGraph {
 
     /// Representative declaration; checked export routes include every declaration.
     pub fn resolve_binding(&self, file_id: u32, id: BindingId) -> Option<GraphNode> {
-        let input = self.files.get(file_id as usize)?.owned.as_ref()?;
+        let input = self.live_file(file_id)?.owned.as_ref()?;
         let binding = input.facts.bindings.iter().find(|b| b.id == id)?;
         Some(self.segment_at(file_id, *binding.declarations.first()?))
     }
@@ -179,7 +179,7 @@ impl SourceGraph {
         if !active.insert(key.clone()) {
             return vec![];
         }
-        let Some(file) = self.files.get(file_id as usize) else {
+        let Some(file) = self.live_file(file_id) else {
             active.remove(&key);
             return vec![];
         };
