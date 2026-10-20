@@ -11,6 +11,17 @@ pub(crate) fn is_asset(path: &Path) -> bool {
     )
 }
 
+pub(crate) fn is_stylesheet(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "css")
+}
+
+pub(crate) fn url_module(path: &Path) -> eyre::Result<String> {
+    Ok(format!(
+        "module.exports = {};\n",
+        serde_json::to_string(&format!("./{}", path.display()))?
+    ))
+}
+
 pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
     let extension = path
         .extension()
@@ -23,7 +34,7 @@ pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
 }
 
 pub(crate) fn parser_path(path: &Path) -> PathBuf {
-    if is_asset(path) {
+    if is_asset(path) || is_stylesheet(path) {
         path.with_extension("asset.cjs")
     } else if path
         .extension()
@@ -37,10 +48,7 @@ pub(crate) fn parser_path(path: &Path) -> PathBuf {
 
 pub(crate) fn prepare(path: &Path, input: &[u8]) -> eyre::Result<String> {
     if is_asset(path) {
-        return Ok(format!(
-            "module.exports = {};\n",
-            serde_json::to_string(&format!("./{}", asset_path(path, input).display()))?
-        ));
+        return url_module(&asset_path(path, input));
     }
     let text = std::str::from_utf8(input)
         .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;

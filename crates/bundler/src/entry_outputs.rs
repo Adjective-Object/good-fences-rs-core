@@ -37,6 +37,7 @@ pub(super) fn apply(
         };
         if entry.output_name.is_none()
             && (crate::resource::is_asset(&entry.path)
+                || crate::resource::is_stylesheet(&entry.path)
                 || entry
                     .path
                     .extension()

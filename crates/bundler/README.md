@@ -55,8 +55,33 @@ assets are not emitted.
 contains byte-preserving non-executable files. Use `Artifacts::file_bytes()` to
 write the complete output or use the publisher. Resources participate in content
 hashing, immutable generations, cancellation, ownership validation and stale
-cleanup. They never serve as executable module routes. CSS extraction is not
-implemented yet.
+cleanup. They never serve as executable module routes.
+
+## Extracted CSS
+
+CSS default imports and `require` export an output-root-relative stylesheet URL;
+side-effect imports also extract the file. `Artifacts.stylesheets` maps retained
+CSS module roots to their emitted resource paths. The example driver reports
+this map and resource paths. Callers load the relevant root stylesheets in their
+application's order; there is **no implicit DOM injection** or automatic loading
+when a dynamic JavaScript chunk executes.
+
+`cssparser` tokenizes CSS requests, including escaped URLs, quoted/unquoted
+`url()`, `@import` and `image-set` strings. Local imports remain separate CSS
+files: source order, media queries, supports conditions, layers, charset
+declarations and import cycles are not flattened. Local asset URLs are copied
+and rewritten relative to the emitted stylesheet, retaining queries/fragments;
+percent-encoded filenames resolve to original files. Remote, data, fragment and
+host-root-relative URLs remain unchanged. Namespace/document URLs remain
+identifiers rather than file dependencies. Local files must be inside the same
+bounded inventory as JavaScript sources.
+
+Stylesheet names include the complete reachable resource closure, so edits to
+imported CSS or referenced binary bytes invalidate parent stylesheet URLs, even
+through cycles. All these input bytes are rechecked before accepting a build.
+CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
+memory/CBOR cache. There is no CSS Modules, Sass compilation, CSS concatenation
+or minification.
 
 ## Native ESM chunks
 

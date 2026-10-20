@@ -41,6 +41,8 @@ fn main() -> eyre::Result<()> {
             "backend": build.product.artifacts.backend,
             "layout": build.product.artifacts.backend.layout(),
             "directory": published.directory,
+            "stylesheets": build.product.artifacts.stylesheets,
+            "resources": build.product.artifacts.resources.keys().collect::<Vec<_>>(),
             "generation": build.product.generation,
             "sourceParses": build.counters.source_parses,
             "diskHits": build.counters.disk_hits,

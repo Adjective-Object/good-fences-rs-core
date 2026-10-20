@@ -45,6 +45,8 @@ pub struct Artifacts<C = String> {
     pub files: BTreeMap<PathBuf, C>,
     /// Non-executable, byte-preserving resources keyed by output-relative paths.
     pub resources: BTreeMap<PathBuf, Vec<u8>>,
+    /// Imported CSS roots to extracted files; callers choose when to load styles.
+    pub stylesheets: BTreeMap<PathBuf, PathBuf>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
     /// Independently executable source namespaces to relative paths.
@@ -101,6 +103,7 @@ impl Artifacts<crate::assembly::Code> {
             backend: self.backend,
             files,
             resources: self.resources,
+            stylesheets: self.stylesheets,
             entries: self.entries,
             modules: self.modules,
             members: self.members,

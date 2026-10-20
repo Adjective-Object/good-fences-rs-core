@@ -44,6 +44,10 @@ CJS value initializer with computed object keys, never mutable runtime JSON.pars
 Assets export output-root-relative URL strings and use content-addressed byte
 artifacts. file_bytes includes text and resources; publication ownership/hash/
 cleanup cover both. Resource paths never become executable module routes.
+Extract CSS with parser-backed URL spans; preserve separate imports, conditions,
+layers and cycles. Closure hashes include transitive original CSS/asset bytes;
+recheck every input. Stylesheets maps CSS roots only; callers load them in their
+application order. Never add implicit DOM injection or flatten CSS imports.
 
 Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
 artifacts once after naming; release never parses output. Keep identifier,

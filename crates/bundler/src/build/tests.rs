@@ -22,6 +22,234 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn css_feature_query_urls_are_not_dependencies_and_url_whitespace_is_normalized() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './style.css';");
+    write(dir.root(), "theme.css", ".theme { color: green; }");
+    write(
+        dir.root(),
+        "style.css",
+        r#"
+@import " https://example.invalid/theme.css ";
+@import "./theme.css" supports(background-image: image-set(url("./probe.png") 1x));
+@supports (background-image: image-set(url("./another-probe.png") 1x)) {
+  body { background: url(" ./image.png "); }
+}
+.encoded { background: url("./%20padded.png%20"); }
+"#,
+    );
+    fs::write(dir.root().join("image.png"), [1, 2]).unwrap();
+    fs::write(dir.root().join(" padded.png "), [3, 4]).unwrap();
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(built.product.artifacts.resources.len(), 4);
+    let style = built.product.artifacts.stylesheets.values().next().unwrap();
+    let output = std::str::from_utf8(&built.product.artifacts.resources[style]).unwrap();
+    for unchanged in [
+        r#"@import " https://example.invalid/theme.css ";"#,
+        r#"supports(background-image: image-set(url("./probe.png") 1x))"#,
+        r#"@supports (background-image: image-set(url("./another-probe.png") 1x))"#,
+    ] {
+        assert!(output.contains(unchanged), "{output}");
+    }
+    for image in ["image.png", " padded.png "] {
+        let path = dir.root().join(image);
+        let artifact = crate::resource::asset_path(&path, &fs::read(&path).unwrap());
+        assert!(built.product.artifacts.resources.contains_key(&artifact));
+        assert!(
+            output.contains(artifact.file_name().unwrap().to_str().unwrap()),
+            "{output}"
+        );
+    }
+}
+
+#[test]
+fn css_extraction_preserves_import_conditions_cycles_and_rewrites_local_urls() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {default as css} from './style.css';",
+    );
+    write(
+        dir.root(),
+        "style.css",
+        r#"@charset "UTF-8";
+@import "./nested/theme.css" layer(theme) supports(display: grid) screen;
+@import url("https://example.invalid/remote.css") print;
+@namespace svg url("urn:svg");
+@namespace local url("./not-a-file-namespace");
+/* url("missing.png") */
+body {
+  background: url("./logo%20file.png?v=1#icon");
+  mask: url(#cutout);
+  border-image: url("/public/border.png");
+  content: "url(missing.png)";
+  background-image: image-set("./logo%20file.png" 1x, url('./logo\ file.png') 2x);
+  cursor: url("data:image/svg+xml,<svg/>"), auto;
+}
+"#,
+    );
+    write(
+        dir.root(),
+        "nested/theme.css",
+        "@import '../style.css' layer(cycle);\n.theme { color: red; }\n",
+    );
+    fs::write(dir.root().join("logo file.png"), [255, 0, 42]).unwrap();
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/main.mjs".into());
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(built.product.artifacts.stylesheets.len(), 1);
+    assert_eq!(built.product.artifacts.resources.len(), 3);
+    let style =
+        &built.product.artifacts.stylesheets[&dir.root().join("style.css").canonicalize().unwrap()];
+    let css = std::str::from_utf8(&built.product.artifacts.resources[style]).unwrap();
+    let theme = built
+        .product
+        .artifacts
+        .resources
+        .keys()
+        .find(|path| path.extension().is_some_and(|ext| ext == "css") && *path != style)
+        .unwrap();
+    let image = built
+        .product
+        .artifacts
+        .resources
+        .keys()
+        .find(|path| path.extension().is_some_and(|ext| ext == "png"))
+        .unwrap();
+    assert!(css.starts_with("@charset \"UTF-8\";\n"));
+    assert!(css.contains(&format!(
+        "@import \"./{}\" layer(theme) supports(display: grid) screen;",
+        theme.file_name().unwrap().to_str().unwrap()
+    )));
+    assert!(css.contains(&format!(
+        "url(\"./{}?v=1#icon\")",
+        image.file_name().unwrap().to_str().unwrap()
+    )));
+    assert!(css.contains("image-set(\"./"));
+    for unchanged in [
+        "@import url(\"https://example.invalid/remote.css\") print;",
+        "@namespace local url(\"./not-a-file-namespace\");",
+        "/* url(\"missing.png\") */",
+        "mask: url(#cutout)",
+        "border-image: url(\"/public/border.png\")",
+        "content: \"url(missing.png)\"",
+        "url(\"data:image/svg+xml,<svg/>\")",
+    ] {
+        assert!(css.contains(unchanged), "{css}");
+    }
+    let child = std::str::from_utf8(&built.product.artifacts.resources[theme]).unwrap();
+    assert!(child.contains(&format!(
+        "@import \"./{}\" layer(cycle);",
+        style.file_name().unwrap().to_str().unwrap()
+    )));
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            "import {css} from './nested/main.mjs'; console.log(css);"
+        ),
+        format!("./{}\n", style.display()).as_bytes()
+    );
+    assert_eq!(built.counters.source_reparses, 0);
+    assert_eq!(built.counters.fragment_reparses, 0);
+    let output = TmpDir::new();
+    let published = crate::publish::publish(
+        output.root(),
+        &built.product.artifacts,
+        &crate::publish::Cancellation::default(),
+    )
+    .unwrap();
+    for (path, bytes) in &built.product.artifacts.resources {
+        assert_eq!(&fs::read(published.directory.join(path)).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn css_transitive_edits_invalidate_parent_urls_and_failures_preserve_last_product() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './style.css'; console.log('main');",
+    );
+    write(
+        dir.root(),
+        "style.css",
+        "@import './theme.css'; .a { background: url('./image.png'); }",
+    );
+    write(dir.root(), "theme.css", ".theme { color: red; }");
+    fs::write(dir.root().join("image.png"), [255, 0]).unwrap();
+    let config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.product.artifacts, cold.product.artifacts);
+    fs::write(dir.root().join("image.png"), [254, 1]).unwrap();
+    let image_edit = session.build(&config).unwrap();
+    assert_ne!(
+        cold.product.artifacts.stylesheets,
+        image_edit.product.artifacts.stylesheets
+    );
+    assert_eq!(image_edit.counters.source_parses, 1);
+    assert!(image_edit
+        .invalidated
+        .contains(&dir.root().join("main.mjs").canonicalize().unwrap()));
+    write(dir.root(), "theme.css", ".theme { color: blue; }");
+    let theme_edit = session.build(&config).unwrap();
+    assert_ne!(
+        image_edit.product.artifacts.stylesheets,
+        theme_edit.product.artifacts.stylesheets
+    );
+    assert_eq!(observe(&theme_edit.product.artifacts), b"main\n");
+    fs::remove_file(dir.root().join("image.png")).unwrap();
+    assert!(format!("{:#}", session.build(&config).err().unwrap()).contains("CSS URL"));
+    assert!(Rc::ptr_eq(
+        session.last.as_ref().unwrap(),
+        &theme_edit.product
+    ));
+}
+
+#[test]
+fn css_entries_are_extracted_and_invalid_or_escaping_urls_are_errors() {
+    let dir = TmpDir::new();
+    let project = dir.root().join("project");
+    fs::create_dir(&project).unwrap();
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().path = "style.css".into();
+    write(&project, "style.css", ".a { color: red; }");
+    let built = BuildSession::new(&project).unwrap().build(&config).unwrap();
+    assert_eq!(
+        built.product.artifacts.entries["main"],
+        PathBuf::from("style.cjs")
+    );
+    assert_eq!(built.product.artifacts.stylesheets.len(), 1);
+    fs::write(dir.root().join("outside.png"), [255]).unwrap();
+    for css in [
+        ".a { background: url(bad url); }".to_owned(),
+        ".a { background: url('./bad%GG.png'); }".to_owned(),
+        ".a { background: url('../outside.png'); }".to_owned(),
+    ] {
+        write(&project, "style.css", &css);
+        assert!(
+            BuildSession::new(&project).unwrap().build(&config).is_err(),
+            "{css}"
+        );
+    }
+}
+
+#[test]
 fn binary_assets_preserve_bytes_urls_cache_and_published_generations() {
     let dir = TmpDir::new();
     let original = [0, 255, 128, 10, 13, 42];

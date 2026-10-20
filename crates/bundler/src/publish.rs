@@ -167,6 +167,14 @@ fn validate_artifacts(artifacts: &Artifacts) -> eyre::Result<()> {
             "owned artifact file/directory collision: {path}"
         );
     }
+    for path in artifacts.stylesheets.values() {
+        ensure!(
+            artifacts.resources.contains_key(path)
+                && path.extension().is_some_and(|extension| extension == "css"),
+            "stylesheet route is not an owned CSS resource: {}",
+            path.display()
+        );
+    }
     for path in artifacts
         .modules
         .values()

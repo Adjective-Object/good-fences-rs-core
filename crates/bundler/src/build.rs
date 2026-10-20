@@ -180,6 +180,7 @@ impl BuildSession {
         let declarations = options.declarations.effective()?;
         let declarations_key = hash(&serde_json::to_vec(&declarations)?);
         let inventory = inventory(&self.root)?;
+        let mut styles = crate::css::Styles::new(&self.root, &inventory);
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
         let resolution_key = hash(
@@ -238,14 +239,23 @@ impl BuildSession {
             let parser_path = crate::resource::parser_path(&path);
             let config = ParserConfig::for_path(&parser_path, format)?;
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
+            let prepared_style = if crate::resource::is_stylesheet(&path) {
+                Some(styles.prepare(&path, &input)?)
+            } else {
+                None
+            };
             if self.sources.get(&path).is_some_and(|s| {
                 s.input == input
+                    && prepared_style.as_ref().is_none_or(|text| &s.text == text)
                     && s.record.config == config
                     && s.record.matches_declarations(&declarations)
             }) {
                 counters.memory_hits += 1;
             } else {
-                let text = crate::resource::prepare(&path, &input)?;
+                let text = match prepared_style {
+                    Some(text) => text,
+                    None => crate::resource::prepare(&path, &input)?,
+                };
                 let loaded = segment_cache::load_prepared(
                     &logger::StdioLogger::new(),
                     &path,
@@ -415,6 +425,7 @@ impl BuildSession {
                 include_str!("cjs.rs"),
                 include_str!("context.rs"),
                 include_str!("resource.rs"),
+                include_str!("css.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
@@ -431,6 +442,7 @@ impl BuildSession {
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &self.sources, &inventory)?;
+                styles.recheck()?;
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
                 warnings.extend(last.plan.retention.warnings.iter().cloned());
@@ -472,11 +484,14 @@ impl BuildSession {
                 artifacts
                     .resources
                     .insert(crate::resource::asset_path(path, input), input.clone());
+            } else if crate::resource::is_stylesheet(path) {
+                styles.emit(path, &mut artifacts)?;
             }
         }
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;
         Self::recheck(&self.root, &self.sources, &inventory)?;
+        styles.recheck()?;
         counters.emissions = 1;
         counters.record_parses(before_parses);
         let generation = match &self.last {

@@ -552,6 +552,7 @@ pub(super) fn emit(
     cjs.add_runtime(&mut files, &mut chunk_artifacts)?;
     Ok(Artifacts {
         resources: BTreeMap::new(),
+        stylesheets: BTreeMap::new(),
         backend: Backend::Native,
         files,
         entries: entry_paths,
