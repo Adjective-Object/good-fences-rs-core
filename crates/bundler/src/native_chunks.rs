@@ -1,5 +1,6 @@
 //! Conservative grouping; native module jobs own every remaining semantic seam.
 use super::*;
+use crate::assembly::{Code, RequestKind};
 use ast_segmenter::owned::ImportedName;
 
 #[path = "native_cjs.rs"]
@@ -14,7 +15,7 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
-) -> eyre::Result<Artifacts> {
+) -> eyre::Result<Artifacts<Code>> {
     let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
@@ -272,7 +273,7 @@ pub(super) fn emit(
         if cjs.contains(root) {
             continue;
         }
-        let path = path(graph, root);
+        let artifact_path = path(graph, root);
         let output = if changed.contains(&root) {
             segments::emit(
                 graph,
@@ -309,29 +310,42 @@ pub(super) fn emit(
                 .map(|d| {
                     let target = target_file(graph, root, d)?;
                     if cjs.contains(target) {
-                        Ok(Edit {
-                            span: d.span,
-                            replacement: if d.kind == DependencyKind::DynamicImport {
+                        Ok((
+                            d,
+                            if d.kind == DependencyKind::DynamicImport {
                                 cjs.dynamic(graph, target)?
                             } else {
                                 cjs.static_dependency(graph, root, target, d, facts, symbols)?
                             },
-                        })
+                            true,
+                        ))
                     } else {
-                        Ok(Edit {
-                            span: d.specifier_span,
-                            replacement: request(graph, owners[&target]),
-                        })
+                        Ok((
+                            d,
+                            Code::request(
+                                path(graph, owners[&target]),
+                                match d.kind {
+                                    DependencyKind::DynamicImport => RequestKind::DynamicImport,
+                                    DependencyKind::ReExport => RequestKind::ReExport,
+                                    DependencyKind::Require => RequestKind::Require,
+                                    DependencyKind::Import => RequestKind::Import,
+                                    DependencyKind::ImportType => {
+                                        eyre::bail!("type import in executable JavaScript")
+                                    }
+                                },
+                            ),
+                            false,
+                        ))
                     }
                 })
                 .collect::<eyre::Result<Vec<_>>>()?;
-            let mut imports = String::new();
+            let mut imports = Code::default();
             // Evaluation-only connectors need not own a retained statement.
             for &target in &edges[&root] {
                 if cjs.contains(target) {
-                    imports.push_str(&cjs.evaluate(graph, root, target)?);
+                    imports.push(cjs.evaluate(graph, root, target)?);
                 } else {
-                    imports.push_str(&format!("import {};\n", request(graph, owners[&target])));
+                    imports.push(Code::evaluation(path(graph, owners[&target])));
                 }
             }
             for (index, segment) in module.parsed.segments.iter().enumerate() {
@@ -346,18 +360,34 @@ pub(super) fn emit(
                     recipe,
                     recipes.get(&key).copied().unwrap_or_default(),
                 );
-                renderer.dependencies(&edits)?;
-                imports.push_str(&renderer.render(segment.span)?);
+                for (dependency, replacement, whole) in &edits {
+                    renderer.dependency(dependency, replacement.clone(), *whole);
+                }
+                imports.push(renderer.render(segment.span)?);
                 imports.push_str("\n;\n");
             }
+            imports.default_export |= facts.exports.iter().any(|export| {
+                !export.type_only
+                    && export.name.as_deref() == Some("default")
+                    && module
+                        .parsed
+                        .segments
+                        .iter()
+                        .enumerate()
+                        .any(|(index, segment)| {
+                            live.contains(&SegmentKey::new(root, index as u32))
+                                && contains(segment.span, export.span)
+                        })
+            });
             imports
         };
-        let output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;
-        rewrite::validate(&path, &output)?;
         if surfaces.contains(&root) {
-            namespaces.insert(graph.file_path(root).unwrap().to_owned(), path.clone());
+            namespaces.insert(
+                graph.file_path(root).unwrap().to_owned(),
+                artifact_path.clone(),
+            );
         }
-        files.insert(path, output);
+        files.insert(artifact_path, output);
     }
     for owner in placement.owners.values().copied().collect::<BTreeSet<_>>() {
         if matches!(owner, segments::Owner::Bindings(_)) {
@@ -374,9 +404,7 @@ pub(super) fn emit(
                 &recipes,
                 &cjs,
             )?;
-            let output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;
             let path = owner.path(graph);
-            rewrite::validate(&path, &output)?;
             files.insert(path, output);
         }
     }
@@ -384,9 +412,7 @@ pub(super) fn emit(
         namespaces.insert(graph.file_path(file).unwrap().to_owned(), path.clone());
     }
     for (path, output) in &cjs.files {
-        let output = rewrite::apply(output, &rewrite::source_hint_edits(output))?;
-        rewrite::validate(path, &output)?;
-        files.insert(path.clone(), output);
+        files.insert(path.clone(), output.clone());
     }
     let mut members = BTreeMap::new();
     let mut chunk_artifacts = BTreeMap::new();
@@ -431,22 +457,32 @@ pub(super) fn emit(
             }
         }
         let entry_path = PathBuf::from(format!("native/entry-{}.mjs", digest(&entry)));
-        let mut source = String::new();
+        let mut source = Code::default();
         for file in roots {
-            source.push_str(&format!("import {};\n", specifier(&module_path(file))));
+            source.push(Code::evaluation(module_path(file)));
         }
-        rewrite::validate(&entry_path, &source)?;
         files.insert(entry_path.clone(), source);
         entry_paths.insert(entry, entry_path);
     }
     let removable: BTreeSet<_> = groups
         .keys()
         .filter(|file| {
-            !boundaries.contains(file) && !cycles.contains(file) && !cjs.contains(**file)
+            !boundaries.contains(file)
+                && !cycles.contains(file)
+                && !cjs.contains(**file)
+                && placement
+                    .owners
+                    .iter()
+                    .filter(|(_, owner)| **owner == segments::Owner::Evaluation(**file))
+                    .all(|(key, _)| {
+                        modules[&key.file_id].parsed.facts.emission.segments
+                            [key.segment_idx as usize]
+                            .connector_only
+                    })
         })
         .map(|&file| path(graph, file))
         .collect();
-    prune_empty(&mut files, &removable, &mut members)?;
+    Code::prune(&mut files, &removable, &mut members)?;
     namespaces.retain(|_, path| files.contains_key(path));
     for (chunk, nodes) in &plan.chunks {
         chunk_artifacts.insert(
@@ -481,134 +517,6 @@ pub(super) fn emit(
     })
 }
 
-fn prune_empty(
-    files: &mut BTreeMap<PathBuf, String>,
-    candidates: &BTreeSet<PathBuf>,
-    members: &mut BTreeMap<NodeId, PathBuf>,
-) -> eyre::Result<()> {
-    let mut empty = BTreeMap::new();
-    let mut imports = BTreeMap::<_, Vec<_>>::new();
-    for (path, source) in files
-        .iter()
-        .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "mjs"))
-    {
-        let allocator = Allocator::default();
-        rewrite::count_output_parse();
-        let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
-        let mut targets = Vec::new();
-        let mut inert = candidates.contains(path);
-        for statement in &parsed.program.body {
-            match statement {
-                Statement::ImportDeclaration(import) => {
-                    let target = path.parent().unwrap().join(
-                        import
-                            .source
-                            .value
-                            .as_str()
-                            .strip_prefix("./")
-                            .ok_or_eyre("nonrelative native evaluation import")?,
-                    );
-                    targets.push((
-                        import.span,
-                        target,
-                        import.specifiers.as_ref().is_some_and(|s| !s.is_empty()),
-                    ));
-                }
-                Statement::EmptyStatement(_) => {}
-                _ => inert = false,
-            }
-        }
-        if inert {
-            empty.insert(
-                path.clone(),
-                targets
-                    .iter()
-                    .map(|(_, path, _)| path.clone())
-                    .collect::<Vec<_>>(),
-            );
-        }
-        imports.insert(path.clone(), targets);
-    }
-    fn expand(path: &PathBuf, empty: &BTreeMap<PathBuf, Vec<PathBuf>>) -> Vec<PathBuf> {
-        let mut result = Vec::new();
-        let mut pending = vec![path];
-        let mut seen = BTreeSet::new();
-        while let Some(path) = pending.pop() {
-            if !seen.insert(path) {
-                continue;
-            }
-            if let Some(targets) = empty.get(path) {
-                pending.extend(targets.iter().rev());
-            } else {
-                result.push(path.clone());
-            }
-        }
-        result
-    }
-    let mut users = BTreeMap::<_, Vec<_>>::new();
-    for (path, targets) in &imports {
-        for (_, target, _) in targets {
-            users.entry(target.clone()).or_default().push(path.clone());
-        }
-    }
-    for (path, targets) in &imports {
-        if empty.contains_key(path) {
-            continue;
-        }
-        let mut edits = Vec::new();
-        for (span, target, binding) in targets {
-            if empty.contains_key(target) {
-                eyre::ensure!(!binding, "empty native chunk still supplies a binding");
-                let replacement = expand(target, &empty)
-                    .iter()
-                    .map(|path| format!("import {};\n", specifier(path)))
-                    .collect::<String>();
-                edits.push(Edit {
-                    span: *span,
-                    replacement,
-                });
-            }
-        }
-        if !edits.is_empty() {
-            let output = rewrite::apply(&files[path], &edits)?;
-            rewrite::validate(path, &output)?;
-            files.insert(path.clone(), output);
-        }
-    }
-    let mut replacements = BTreeMap::new();
-    for path in empty.keys() {
-        let mut pending = vec![path.clone()];
-        let mut seen = BTreeSet::new();
-        let mut owner = None;
-        while let Some(candidate) = pending.pop() {
-            if !seen.insert(candidate.clone()) {
-                continue;
-            }
-            if !empty.contains_key(&candidate) {
-                owner = Some(candidate);
-                break;
-            }
-            pending.extend(users.get(&candidate).into_iter().flatten().cloned());
-        }
-        if owner.is_none() {
-            owner = expand(path, &empty).into_iter().next();
-        }
-        replacements.insert(
-            path.clone(),
-            owner.ok_or_eyre("empty private module has no retained physical consumer")?,
-        );
-    }
-    for owner in members.values_mut() {
-        if let Some(replacement) = replacements.get(owner) {
-            *owner = replacement.clone();
-        }
-    }
-    for path in empty.keys() {
-        files.remove(path);
-    }
-    Ok(())
-}
-
 fn path(graph: &SourceGraph, file: u32) -> PathBuf {
     PathBuf::from(format!(
         "native/{}.mjs",
@@ -616,11 +524,8 @@ fn path(graph: &SourceGraph, file: u32) -> PathBuf {
     ))
 }
 
-fn request(graph: &SourceGraph, file: u32) -> String {
-    quote(&format!(
-        "./{}",
-        path(graph, file).file_name().unwrap().to_str().unwrap()
-    ))
+fn request(graph: &SourceGraph, file: u32) -> Code {
+    Code::request(path(graph, file), RequestKind::DynamicImport)
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -694,7 +599,7 @@ fn concatenate(
     live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
-) -> eyre::Result<Option<String>> {
+) -> eyre::Result<Option<Code>> {
     if group.iter().any(|f| {
         cjs.contains(*f)
             || modules[f]
@@ -711,7 +616,7 @@ fn concatenate(
         .iter()
         .map(|(&file, &owner)| (file, request(graph, owner)))
         .collect();
-    let mut output = String::new();
+    let mut output = Code::default();
     let mut order = Vec::new();
     let mut pending = vec![(root, false)];
     let mut seen = BTreeSet::new();
@@ -724,7 +629,7 @@ fn concatenate(
             continue;
         }
         if !group.contains(&file) {
-            output.push_str(&format!("import {};\n", request(graph, owners[&file])));
+            output.push(Code::evaluation(path(graph, owners[&file])));
             continue;
         }
         pending.push((file, true));
@@ -788,24 +693,24 @@ fn concatenate(
                 ImportedName::Name(name) => format!("{{{} as {alias}}}", quote(name)),
                 ImportedName::Namespace => format!("* as {alias}"),
             };
-            output.push_str(&format!(
-                "import {specifier} from {};\n",
-                request(graph, owners[&target])
-            ));
+            output.push(
+                Code::request(path(graph, owners[&target]), RequestKind::Import)
+                    .surrounded(format!("import {specifier} from "), ";\n"),
+            );
             values.imports.insert((file, import.binding), alias);
         }
     }
-    let mut bodies = String::new();
+    let mut bodies = Code::default();
     for &file in &order {
         let Some((hoisted, body)) = body(graph, file, &modules[&file], &values, live, recipes)?
         else {
             return Ok(None);
         };
-        output.push_str(&hoisted);
-        bodies.push_str(&body);
+        output.push(hoisted);
+        bodies.push(body);
         bodies.push_str("\n;\n");
     }
-    output.push_str(&bodies);
+    output.push(bodies);
     for (public, linked) in &symbols.exports[&root] {
         let file = match linked.identity {
             ExportIdentity::Binding(file, _) | ExportIdentity::Namespace(file) => file,
@@ -819,22 +724,26 @@ fn concatenate(
             output.push_str(&format!("export {{{name} as {}}};\n", quote(public)));
         } else {
             let owner = owners[&file];
-            let request = request(graph, owner);
             if matches!(linked.identity, ExportIdentity::Namespace(_)) {
-                output.push_str(&format!("export * as {} from {request};\n", quote(public)));
+                output.push(
+                    Code::request(path(graph, owner), RequestKind::ReExport)
+                        .surrounded(format!("export * as {} from ", quote(public)), ";\n"),
+                );
             } else {
                 let name = symbols.exports[&owner]
                     .iter()
                     .find(|(_, e)| e.identity == linked.identity)
                     .map(|(n, _)| n)
                     .ok_or_eyre("native cross-chunk export is absent")?;
-                output.push_str(&format!(
-                    "export {{{} as {}}} from {request};\n",
-                    quote(name),
-                    quote(public)
-                ));
+                output.push(
+                    Code::request(path(graph, owner), RequestKind::ReExport).surrounded(
+                        format!("export {{{} as {}}} from ", quote(name), quote(public)),
+                        ";\n",
+                    ),
+                );
             }
         }
     }
+    output.default_export = symbols.exports[&root].contains_key("default");
     Ok(Some(output))
 }

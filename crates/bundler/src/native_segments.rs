@@ -1,5 +1,6 @@
 //! Physical ownership for pure declarations, independent of source body seams.
 use super::*;
+use crate::assembly::{Code, RequestKind};
 use crate::RetentionEdgeKind;
 
 pub(super) struct Placement {
@@ -22,13 +23,6 @@ impl Owner {
                 key.segment_idx
             )),
         }
-    }
-
-    fn request(self, graph: &SourceGraph) -> String {
-        quote(&format!(
-            "./{}",
-            self.path(graph).file_name().unwrap().to_str().unwrap()
-        ))
     }
 }
 
@@ -546,7 +540,7 @@ pub(super) fn emit(
     surfaces: &BTreeSet<u32>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
-) -> eyre::Result<String> {
+) -> eyre::Result<Code> {
     let live: BTreeSet<_> = placement
         .owners
         .iter()
@@ -557,7 +551,7 @@ pub(super) fn emit(
     values.names = local_names(graph, modules, symbols, &placement.owners, root)?;
     values.requests = seams
         .iter()
-        .map(|(&f, &o)| (f, request(graph, o)))
+        .map(|(&f, &o)| (f, Code::request(path(graph, o), RequestKind::DynamicImport)))
         .collect();
     for (&file, module) in modules {
         for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
@@ -577,15 +571,15 @@ pub(super) fn emit(
             }
         }
     }
-    let mut output = String::new();
+    let mut output = Code::default();
     if let Owner::Evaluation(file) = root {
         if let Some(name) = values.defaults.iter().find_map(|(key, name)| {
             (key.file_id == file && placement.owners.get(key) == Some(&root)).then_some(name)
         }) {
-            output.push_str(&format!(
-                "import {{default as {name}}} from {};\n",
-                root.request(graph)
-            ));
+            output.push(
+                Code::request(root.path(graph), RequestKind::Import)
+                    .surrounded(format!("import {{default as {name}}} from "), ";\n"),
+            );
             values.native_defaults.insert(file);
         }
     }
@@ -609,9 +603,9 @@ pub(super) fn emit(
                     Owner::Evaluation(file) => file,
                     Owner::Bindings(_) => unreachable!(),
                 };
-                output.push_str(&cjs.evaluate(graph, consumer, file)?);
+                output.push(cjs.evaluate(graph, consumer, file)?);
             } else {
-                output.push_str(&format!("import {};\n", request(graph, seams[&file])));
+                output.push(Code::evaluation(path(graph, seams[&file])));
             }
             continue;
         }
@@ -742,19 +736,19 @@ pub(super) fn emit(
             if imported.insert(alias.clone()) {
                 match &identity {
                     ExportIdentity::Namespace(target) if cjs.contains(*target) => {
-                        output.push_str(&cjs.import(
+                        output.push(cjs.import(
                             graph,
                             *target,
                             &ImportedName::Namespace,
                             &alias,
                         )?);
                     }
-                    ExportIdentity::Namespace(target) => output.push_str(&format!(
-                        "import * as {alias} from {};\n",
-                        request(graph, seams[target])
-                    )),
+                    ExportIdentity::Namespace(target) => output.push(
+                        Code::request(path(graph, seams[target]), RequestKind::Import)
+                            .surrounded(format!("import * as {alias} from "), ";\n"),
+                    ),
                     ExportIdentity::CommonJs(target, name) => {
-                        output.push_str(&cjs.import(
+                        output.push(cjs.import(
                             graph,
                             *target,
                             &ImportedName::Name(name.clone()),
@@ -763,26 +757,30 @@ pub(super) fn emit(
                     }
                     _ => {
                         let owner = owner.ok_or_eyre("missing lexical segment owner")?;
-                        output.push_str(&format!(
-                            "import {{{} as {alias}}} from {};\n",
-                            quote(&address(graph, &identity, owner, surfaces, &values)?),
-                            owner.request(graph)
-                        ));
+                        output.push(
+                            Code::request(owner.path(graph), RequestKind::Import).surrounded(
+                                format!(
+                                    "import {{{} as {alias}}} from ",
+                                    quote(&address(graph, &identity, owner, surfaces, &values)?)
+                                ),
+                                ";\n",
+                            ),
+                        );
                     }
                 }
             }
             values.imports.insert((file, binding.id), alias);
         }
     }
-    let mut bodies = String::new();
+    let mut bodies = Code::default();
     for file in relocated {
         let (hoisted, body) = body(graph, file, &modules[&file], &values, &live, recipes)?
             .ok_or_eyre("relocated lexical group changed compatibility")?;
-        output.push_str(&hoisted);
-        bodies.push_str(&body);
+        output.push(hoisted);
+        bodies.push(body);
         bodies.push_str("\n;\n");
     }
-    output.push_str(&bodies);
+    output.push(bodies);
     let mut exported = BTreeSet::new();
     let public_exports = match root {
         Owner::Evaluation(file) => symbols.exports.get(&file),
@@ -799,18 +797,17 @@ pub(super) fn emit(
         if let ExportIdentity::Namespace(file) = linked.identity {
             if public {
                 if cjs.contains(file) {
-                    output.push_str(&cjs.reexport(
+                    output.push(cjs.reexport(
                         graph,
                         file,
                         &ImportedName::Namespace,
                         public_name,
                     )?);
                 } else {
-                    output.push_str(&format!(
-                        "export * as {} from {};\n",
-                        quote(public_name),
-                        request(graph, seams[&file])
-                    ));
+                    output.push(
+                        Code::request(path(graph, seams[&file]), RequestKind::ReExport)
+                            .surrounded(format!("export * as {} from ", quote(public_name)), ";\n"),
+                    );
                 }
                 exported.insert(public_name.clone());
             }
@@ -818,7 +815,7 @@ pub(super) fn emit(
         }
         if let ExportIdentity::CommonJs(file, ref name) = linked.identity {
             if public {
-                output.push_str(&cjs.reexport(
+                output.push(cjs.reexport(
                     graph,
                     file,
                     &ImportedName::Name(name.clone()),
@@ -841,12 +838,16 @@ pub(super) fn emit(
             ));
             exported.insert(public_name.clone());
         } else if public {
-            output.push_str(&format!(
-                "export {{{} as {}}} from {};\n",
-                quote(&address(graph, &linked.identity, owner, surfaces, &values)?),
-                quote(public_name),
-                owner.request(graph)
-            ));
+            output.push(
+                Code::request(owner.path(graph), RequestKind::ReExport).surrounded(
+                    format!(
+                        "export {{{} as {}}} from ",
+                        quote(&address(graph, &linked.identity, owner, surfaces, &values)?),
+                        quote(public_name)
+                    ),
+                    ";\n",
+                ),
+            );
             exported.insert(public_name.clone());
         }
     }
@@ -879,6 +880,7 @@ pub(super) fn emit(
             }
         }
     }
+    output.default_export = exported.contains("default");
     Ok(output)
 }
 

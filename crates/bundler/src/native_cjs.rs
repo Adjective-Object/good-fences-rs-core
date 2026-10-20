@@ -1,5 +1,6 @@
 //! Opaque availability is pure; native interop jobs own demanded snapshots.
 use super::*;
+use crate::assembly::{self, Code, RequestKind};
 use ast_segmenter::owned::{ImportedName, ModuleFacts};
 
 struct Value {
@@ -14,7 +15,7 @@ pub(super) struct CommonJs {
     factories: BTreeMap<u32, Value>,
     demands: BTreeMap<(u32, u32), BTreeSet<NodeId>>,
     pub members: BTreeMap<NodeId, PathBuf>,
-    pub files: BTreeMap<PathBuf, String>,
+    pub files: BTreeMap<PathBuf, Code>,
     pub proxies: BTreeMap<PathBuf, (PathBuf, BTreeSet<String>)>,
     pub namespaces: BTreeMap<PathBuf, PathBuf>,
     pub entries: BTreeMap<u32, PathBuf>,
@@ -175,7 +176,7 @@ impl CommonJs {
 
     pub fn add_runtime(
         &self,
-        files: &mut BTreeMap<PathBuf, String>,
+        files: &mut BTreeMap<PathBuf, Code>,
         chunk_artifacts: &mut BTreeMap<ChunkId, BTreeSet<PathBuf>>,
     ) -> eyre::Result<()> {
         if self.factories.is_empty() {
@@ -184,22 +185,16 @@ impl CommonJs {
         let path = PathBuf::from(RUNTIME_PATH);
         // First dependency of every job, including entries that never touch CJS.
         for (file, source) in files.iter_mut() {
-            let request = specifier(&path);
             let header = if file.extension().is_some_and(|ext| ext == "cjs") {
-                format!("const {} = require({request});\n", self.runtime)
+                Code::request(path.clone(), RequestKind::Require)
+                    .surrounded(format!("\nconst {} = require(", self.runtime), ");\n")
             } else {
-                format!("import {} from {request};\n", self.runtime)
+                Code::request(path.clone(), RequestKind::Import)
+                    .surrounded(format!("\nimport {} from ", self.runtime), ";\n")
             };
-            let start = if source.starts_with("#!") {
-                source.find('\n').map_or(source.len(), |index| index + 1)
-            } else {
-                0
-            };
-            source.insert_str(start, &format!("\n{header}"));
-            rewrite::validate(file, source)?;
+            source.prepend_after_hashbang(header);
         }
-        let source = include_str!("runtime.cjs").to_owned();
-        rewrite::validate(&path, &source)?;
+        let source = Code::from(include_str!("runtime.cjs"));
         ensure!(
             files.insert(path.clone(), source).is_none(),
             "runtime path collision"
@@ -227,25 +222,22 @@ impl CommonJs {
             .ok_or_eyre("missing demanded CommonJS facade part")
     }
 
-    pub fn initialize(&self, graph: &SourceGraph, file: u32) -> eyre::Result<String> {
-        Ok(format!(
-            "import {};\n",
-            specifier(
-                &self
-                    .value(graph, file, &ImportedName::Name("default".into()))?
-                    .path
-            )
+    pub fn initialize(&self, graph: &SourceGraph, file: u32) -> eyre::Result<Code> {
+        Ok(Code::evaluation(
+            self.value(graph, file, &ImportedName::Name("default".into()))?
+                .path
+                .clone(),
         ))
     }
 
-    pub fn dynamic(&self, graph: &SourceGraph, file: u32) -> eyre::Result<String> {
+    pub fn dynamic(&self, graph: &SourceGraph, file: u32) -> eyre::Result<Code> {
         let value = self.value(graph, file, &ImportedName::Namespace)?;
-        Ok(format!(
-            "{}.apply({}.then, import({}), [ns => ns.default])",
-            self.runtime,
-            self.runtime,
-            specifier(&value.path),
-        ))
+        Ok(
+            Code::request(value.path.clone(), RequestKind::DynamicImport).surrounded(
+                format!("{}.apply({}.then, import(", self.runtime, self.runtime),
+                "), [ns => ns.default])",
+            ),
+        )
     }
 
     pub fn import(
@@ -254,13 +246,14 @@ impl CommonJs {
         file: u32,
         name: &ImportedName,
         local: &str,
-    ) -> eyre::Result<String> {
+    ) -> eyre::Result<Code> {
         let value = self.value(graph, file, name)?;
-        Ok(format!(
-            "import {{{} as {local}}} from {};\n",
-            quote(&value.exported),
-            specifier(&value.path)
-        ))
+        Ok(
+            Code::request(value.path.clone(), RequestKind::Import).surrounded(
+                format!("import {{{} as {local}}} from ", quote(&value.exported)),
+                ";\n",
+            ),
+        )
     }
 
     pub fn reexport(
@@ -269,22 +262,21 @@ impl CommonJs {
         file: u32,
         name: &ImportedName,
         public: &str,
-    ) -> eyre::Result<String> {
+    ) -> eyre::Result<Code> {
         let value = self.value(graph, file, name)?;
-        Ok(format!(
-            "export {{{} as {}}} from {};\n",
-            quote(&value.exported),
-            quote(public),
-            specifier(&value.path)
-        ))
+        let mut code = Code::request(value.path.clone(), RequestKind::ReExport).surrounded(
+            format!(
+                "export {{{} as {}}} from ",
+                quote(&value.exported),
+                quote(public)
+            ),
+            ";\n",
+        );
+        code.default_export = public == "default";
+        Ok(code)
     }
 
-    pub fn evaluate(
-        &self,
-        graph: &SourceGraph,
-        consumer: u32,
-        target: u32,
-    ) -> eyre::Result<String> {
+    pub fn evaluate(&self, graph: &SourceGraph, consumer: u32, target: u32) -> eyre::Result<Code> {
         let mut output = self.initialize(graph, target)?;
         let mut nodes: Vec<_> = self
             .demands
@@ -298,12 +290,12 @@ impl CommonJs {
             _ => unreachable!(),
         });
         for node in nodes {
-            output.push_str(&format!("import {};\n", specifier(&self.values[node].path)));
+            output.push(Code::evaluation(self.values[node].path.clone()));
         }
         Ok(output)
     }
 
-    /// Retained-source offsets are local to this parse, never original spans.
+    /// Dependencies and bindings retain their original source-local identities.
     pub fn static_dependency(
         &self,
         graph: &SourceGraph,
@@ -312,9 +304,9 @@ impl CommonJs {
         dependency: &Dependency,
         facts: &ModuleFacts,
         symbols: &Symbols,
-    ) -> eyre::Result<String> {
+    ) -> eyre::Result<Code> {
         let mut requested = BTreeMap::new();
-        let mut declarations = String::new();
+        let mut declarations = Code::default();
         if dependency.kind == DependencyKind::Import {
             for import in facts
                 .imports
@@ -326,14 +318,7 @@ impl CommonJs {
                     .iter()
                     .find(|b| b.id == import.binding)
                     .unwrap();
-                let original = graph
-                    .file_facts(file)
-                    .ok_or_eyre("missing original CommonJS consumer facts")?
-                    .bindings
-                    .iter()
-                    .find(|b| b.import && b.name == binding.name)
-                    .ok_or_eyre("missing original CommonJS import")?;
-                if !symbols.imports.contains_key(&(file, original.id))
+                if !symbols.imports.contains_key(&(file, binding.id))
                     || !self.demands.get(&(file, target)).is_some_and(|nodes| {
                         nodes.contains(&Self::node(graph, target, &import.imported))
                     })
@@ -341,12 +326,7 @@ impl CommonJs {
                     continue;
                 }
                 let value = self.value(graph, target, &import.imported)?;
-                declarations.push_str(&format!(
-                    "import {{{} as {}}} from {};\n",
-                    quote(&value.exported),
-                    binding.name,
-                    specifier(&value.path)
-                ));
+                declarations.push(self.import(graph, target, &import.imported, &binding.name)?);
                 requested.insert(import_key(&import.imported), &value.path);
             }
         } else {
@@ -370,10 +350,7 @@ impl CommonJs {
                 };
                 for (public, imported) in names {
                     let value = self.value(graph, target, &imported)?;
-                    declarations.push_str(&format!(
-                        "export {{{} as {}}} from {};\n",
-                        quote(&value.exported), quote(&public), specifier(&value.path)
-                    ));
+                    declarations.push(self.reexport(graph, target, &imported, &public)?);
                     requested.insert(import_key(&imported), &value.path);
                 }
             }
@@ -381,9 +358,9 @@ impl CommonJs {
         // Establish sorted property snapshot order independently of source aliases.
         let mut output = self.initialize(graph, target)?;
         for path in requested.values() {
-            output.push_str(&format!("import {};\n", specifier(path)));
+            output.push(Code::evaluation((*path).clone()));
         }
-        output.push_str(&declarations);
+        output.push(declarations);
         Ok(output)
     }
 
@@ -409,12 +386,28 @@ impl CommonJs {
         for &(&file, value) in &factories {
             let module = &modules[&file];
             let mut edits = Vec::new();
-            let mut imports = BTreeSet::new();
+            let mut imports = BTreeMap::new();
             if let Some(hashbang) = &module.parsed.facts.hashbang {
-                edits.push(Edit {
+                edits.push(assembly::Edit {
                     span: hashbang.span,
-                    replacement: String::new(),
+                    replacement: Code::default(),
                 });
+            }
+            for operation in module
+                .parsed
+                .facts
+                .emission
+                .segments
+                .iter()
+                .flat_map(|r| &r.operations)
+            {
+                if let ast_segmenter::emission::OperationKind::SourceHint { span } = operation.kind
+                {
+                    edits.push(assembly::Edit {
+                        span,
+                        replacement: Code::default(),
+                    });
+                }
             }
             for dependency in module
                 .parsed
@@ -431,39 +424,47 @@ impl CommonJs {
                                 && availability_imports
                                     .insert((value.path.clone(), other.name.clone()))
                             {
-                                imports.insert(format!(
-                                    "const {{{}}} = require({});\n",
-                                    other.name,
-                                    specifier(&other.path)
-                                ));
+                                imports.insert(
+                                    other.name.clone(),
+                                    Code::request(other.path.clone(), RequestKind::Require)
+                                        .surrounded(
+                                            format!("const {{{}}} = require(", other.name),
+                                            ");\n",
+                                        ),
+                                );
                             }
-                            format!("{}()", other.name)
+                            Code::from(format!("{}()", other.name))
                         } else {
                             // Native require is intentionally inside the original call site.
-                            format!("require({})", request(graph, owners[&target]))
+                            Code::request(path(graph, owners[&target]), RequestKind::Require)
+                                .surrounded("require(", ")")
                         }
                     }
                     DependencyKind::DynamicImport if self.contains(target) => {
                         self.dynamic(graph, target)?
                     }
                     DependencyKind::DynamicImport => {
-                        format!("import({})", request(graph, owners[&target]))
+                        Code::request(path(graph, owners[&target]), RequestKind::DynamicImport)
+                            .surrounded("import(", ")")
                     }
                     _ => eyre::bail!("static ESM dependency in opaque CommonJS body"),
                 };
-                edits.push(Edit {
+                edits.push(assembly::Edit {
                     span: dependency.span,
                     replacement,
                 });
             }
-            let source = rewrite::apply(module.source, &edits)?;
+            let source = assembly::apply(module.source, &edits)?;
             let output = self.files.get_mut(&value.path).unwrap();
-            for import in imports {
-                output.push_str(&import);
+            for import in imports.into_values() {
+                output.push(import);
             }
-            output.push_str(&format!(
-                "function {}_factory(exports, module, __filename, __dirname) {{\n{source}\n}}\n",
-                value.name
+            output.push(source.surrounded(
+                format!(
+                    "function {}_factory(exports, module, __filename, __dirname) {{\n",
+                    value.name
+                ),
+                "\n}\n",
             ));
         }
         // NodeId order is initialization, sorted names, then namespace per source.
@@ -480,15 +481,14 @@ impl CommonJs {
                 _ => unreachable!(),
             };
             let file = graph.file_id(module).unwrap();
-            let mut imports = String::new();
+            let mut imports = Code::default();
             let expression = match node {
                 NodeId::CommonJsProxy { name: None, .. } => {
                     let factory = &self.factories[&file];
-                    imports.push_str(&format!(
-                        "import {}_factory from {};\n",
-                        value.name,
-                        specifier(&factory.path)
-                    ));
+                    imports.push(
+                        Code::request(factory.path.clone(), RequestKind::Import)
+                            .surrounded(format!("import {}_factory from ", value.name), ";\n"),
+                    );
                     format!("{}_factory.{}(true)", value.name, factory.name)
                 }
                 _ => {
@@ -496,11 +496,12 @@ impl CommonJs {
                     if default.path != value.path
                         && imported.insert((value.path.clone(), default.path.clone()))
                     {
-                        imports.push_str(&format!(
-                            "import {{default as {}}} from {};\n",
-                            default.name,
-                            specifier(&default.path)
-                        ));
+                        imports.push(
+                            Code::request(default.path.clone(), RequestKind::Import).surrounded(
+                                format!("import {{default as {}}} from ", default.name),
+                                ";\n",
+                            ),
+                        );
                     }
                     if let NodeId::CommonJsProxy {
                         name: Some(name), ..
@@ -522,31 +523,33 @@ impl CommonJs {
                     }
                 }
             };
+            imports.push_str(&format!(
+                "\nconst {} = {expression};\nexport {{{} as {}}};\n",
+                value.name,
+                value.name,
+                quote(&value.exported)
+            ));
+            imports.default_export = value.exported == "default";
             self.files
                 .entry(value.path.clone())
                 .or_default()
-                .push_str(&format!(
-                    "{imports}\nconst {} = {expression};\nexport {{{} as {}}};\n",
-                    value.name,
-                    value.name,
-                    quote(&value.exported)
-                ));
+                .push(imports);
         }
         for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
             let original = graph.file_path(file).unwrap().to_owned();
             if let Ok(default) = self.value(graph, file, &ImportedName::Name("default".into())) {
                 let mut path = default.path.clone();
-                let mut output = String::new();
+                let mut output = Code::default();
                 let mut separate = false;
                 for name in &module.surface {
                     let value = self.value(graph, file, &ImportedName::Name(name.clone()))?;
                     separate |= value.path != default.path;
-                    output.push_str(&format!(
-                        "export {{{} as {}}} from {};\n",
-                        quote(&value.exported),
-                        quote(name),
-                        specifier(&value.path)
-                    ));
+                    output.push(self.reexport(
+                        graph,
+                        file,
+                        &ImportedName::Name(name.clone()),
+                        name,
+                    )?);
                 }
                 ensure!(
                     self.files.contains_key(&default.path),
@@ -570,11 +573,9 @@ impl CommonJs {
                 ));
                 self.files.insert(
                     path.clone(),
-                    format!(
-                        "const {{{1}}} = require({0});\n{runtime}.defineProperty(module, 'exports', {{get: {1}}});\n{1}();\n",
-                        specifier(&factory.path),
-                        factory.name
-                    ),
+                    Code::request(factory.path.clone(), RequestKind::Require)
+                        .surrounded(format!("const {{{}}} = require(", factory.name),
+                            format!(");\n{runtime}.defineProperty(module, 'exports', {{get: {0}}});\n{0}();\n", factory.name)),
                 );
                 self.entries.insert(file, path);
             }

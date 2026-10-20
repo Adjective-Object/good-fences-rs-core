@@ -124,6 +124,10 @@ and non-hoisted initialization across cyclic/async phases stay at their native
 evaluation phase; hoisted functions can relocate when their new static-import
 closure cannot activate a later native initializer early. Native anonymous
 defaults preserve instantiation semantics inside their own evaluation chunks.
+The physical plan carries source fragments and typed ordered requests, not an
+emitted AST. Cached retained-content flags select empty private jobs before final
+rendering; binding requests cannot target a deleted job. Ownership projections
+are updated with the spliced evaluation edges.
 Imported writes still address read-only native aliases. Source evaluation groups
 preserve effect/await order; they are not physical ownership units for independent
 declarations. This is not a claim of globally optimal chunk sizes. Upstream

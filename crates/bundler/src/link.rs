@@ -40,9 +40,9 @@ impl Backend {
 /// map together and execute/import `entries` with Node's ordinary loader.
 /// Each retained node has one actual executable chunk owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Artifacts {
+pub struct Artifacts<C = String> {
     pub backend: Backend,
-    pub files: BTreeMap<PathBuf, String>,
+    pub files: BTreeMap<PathBuf, C>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
     /// Independently executable source namespaces to relative paths.
@@ -62,6 +62,55 @@ pub struct Artifacts {
     /// ESM modules with source TLA or a transitive static async dependency.
     /// Native body chunks own SCC jobs and rejection.
     pub async_modules: BTreeSet<PathBuf>,
+}
+
+impl Artifacts<crate::assembly::Code> {
+    pub(crate) fn render(self) -> eyre::Result<Artifacts> {
+        let destinations = self
+            .files
+            .keys()
+            .map(|path| (path.clone(), path.clone()))
+            .collect();
+        self.render_to(&destinations)
+    }
+
+    pub(crate) fn render_to(
+        self,
+        destinations: &BTreeMap<PathBuf, PathBuf>,
+    ) -> eyre::Result<Artifacts> {
+        let files = self
+            .files
+            .iter()
+            .map(|(path, code)| {
+                let destination = destinations
+                    .get(path)
+                    .ok_or_eyre("missing artifact destination")?;
+                let source = code.render(path, destination, destinations)?;
+                let source =
+                    crate::rewrite::apply(&source, &crate::rewrite::source_hint_edits(&source))?;
+                if destination
+                    .extension()
+                    .is_some_and(|ext| matches!(ext.to_str(), Some("mjs" | "cjs" | "js")))
+                {
+                    crate::rewrite::validate(destination, &source)?;
+                }
+                Ok((destination.clone(), source))
+            })
+            .collect::<eyre::Result<_>>()?;
+        Ok(Artifacts {
+            backend: self.backend,
+            files,
+            entries: self.entries,
+            modules: self.modules,
+            members: self.members,
+            chunk_artifacts: self.chunk_artifacts,
+            manifest: self.manifest,
+            cjs_proxies: self.cjs_proxies,
+            cjs_namespaces: self.cjs_namespaces,
+            async_facades: self.async_facades,
+            async_modules: self.async_modules,
+        })
+    }
 }
 
 struct Module<'a> {
@@ -113,7 +162,7 @@ pub(crate) fn esm_with_source_checker(
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    native::emit(graph, plan, &modules, &manifest, &symbols)
+    native::emit(graph, plan, &modules, &manifest, &symbols)?.render()
 }
 
 fn async_modules(
@@ -262,13 +311,6 @@ pub(super) fn namespace_export_names(
             return names;
         }
     }
-}
-
-fn specifier(path: &std::path::Path) -> String {
-    quote(&format!(
-        "./{}",
-        path.file_name().unwrap().to_str().unwrap()
-    ))
 }
 
 pub(super) fn retained(plan: &ChunkPlan, node: GraphNode) -> bool {

@@ -1,4 +1,5 @@
 //! Retention, exact chunks and native ESM emission, independent of usage reports.
+mod assembly;
 pub mod build;
 pub mod chunks;
 mod cjs;

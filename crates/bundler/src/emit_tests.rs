@@ -4,6 +4,15 @@ use std::path::Path;
 use std::process::{Command, Output};
 use test_tmpdir::TmpDir;
 
+fn rendered(code: Code) -> String {
+    code.render(
+        Path::new("input.mjs"),
+        Path::new("input.mjs"),
+        &Default::default(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn cached_operations_compose_names_shorthand_dependencies_and_nested_pure() {
     use ast_segmenter::emission::OperationKind;
@@ -31,20 +40,16 @@ fn cached_operations_compose_names_shorthand_dependencies_and_nested_pure() {
                 renderer.replace(
                     index as u32,
                     rewrite::shorthand_replacement(source, reference.span, "renamed", shorthand)
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                 );
             }
         }
     }
     let dependency = &parsed.facts.dependencies[0];
-    renderer
-        .dependencies(&[Edit {
-            span: dependency.specifier_span,
-            replacement: "'./resolved.mjs'".into(),
-        }])
-        .unwrap();
+    renderer.dependency(dependency, "'./resolved.mjs'".into(), false);
     let count = rewrite::output_parse_count();
-    let output = renderer.render(segment.span).unwrap();
+    let output = rendered(renderer.render(segment.span).unwrap());
     assert_eq!(rewrite::output_parse_count(), count);
     assert!(output.contains("{value: renamed}"), "{output}");
     assert!(output.contains("((inner),(renamed),void 0)"), "{output}");
@@ -56,6 +61,7 @@ fn cached_operations_compose_names_shorthand_dependencies_and_nested_pure() {
 
 #[test]
 fn original_coordinate_slots_reject_invalid_utf8_and_escaping_edits() {
+    use crate::rewrite::Edit;
     for (range, edits) in [
         (Span::new(1, 2), vec![]),
         (
@@ -104,7 +110,7 @@ console.log(log.join(','));
         .unwrap()
         .id;
     let before = rewrite::output_parse_count();
-    let mut output = String::new();
+    let mut output = Code::default();
     for (segment, recipe) in parsed.segments.iter().zip(&parsed.facts.emission.segments) {
         let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
         let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, &rewrites);
@@ -120,10 +126,11 @@ console.log(log.join(','));
                 renderer.replace(index as u32, "renamed".into());
             }
         }
-        output.push_str(&renderer.render(segment.span).unwrap());
+        output.push(renderer.render(segment.span).unwrap());
         output.push_str("\n;\n");
     }
     assert_eq!(rewrite::output_parse_count(), before);
+    let output = rendered(output);
     assert!(output.contains("(renamed)"), "{output}");
     let actual = node(&output, "import './input.mjs';");
     assert!(
@@ -163,12 +170,113 @@ fn cached_await_guard_selection_does_not_parse_callees() {
             &rewrites,
         );
         let before = rewrite::output_parse_count();
-        let output = renderer.render(segment.span).unwrap();
+        let output = rendered(renderer.render(segment.span).unwrap());
         assert_eq!(rewrite::output_parse_count(), before);
         assert_eq!(
             output.contains(invocation),
             !invocation.starts_with('('),
             "{output}"
+        );
+    }
+}
+
+#[test]
+fn typed_dynamic_request_survives_nested_optional_pure_templates() {
+    use crate::assembly::RequestKind;
+    let source =
+        "/*#__PURE__*/ receiver?.[key()](import('./original.mjs'), import('./original.mjs'));";
+    let parsed = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("input.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let segment = &parsed.segments[0];
+    let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+    let mut renderer = CachedRenderer::new(
+        source,
+        &parsed.facts,
+        &parsed.facts.emission.segments[0],
+        &rewrites,
+    );
+    renderer.dependency(
+        &parsed.facts.dependencies[0],
+        Code::request("target.mjs".into(), RequestKind::DynamicImport),
+        false,
+    );
+    renderer.dependency(
+        &parsed.facts.dependencies[1],
+        Code::request("second.mjs".into(), RequestKind::DynamicImport),
+        false,
+    );
+    let before = rewrite::output_parse_count();
+    let code = renderer.render(segment.span).unwrap();
+    assert_eq!(rewrite::output_parse_count(), before);
+    assert!(code
+        .render(
+            Path::new("input.mjs"),
+            Path::new("input.mjs"),
+            &Default::default()
+        )
+        .is_err());
+    let output = code
+        .render(
+            Path::new("input.mjs"),
+            Path::new("nested/entry.mjs"),
+            &std::collections::BTreeMap::from([
+                ("target.mjs".into(), "chunks/a #é.mjs".into()),
+                ("second.mjs".into(), "other/second.mjs".into()),
+            ]),
+        )
+        .unwrap();
+    assert!(
+        output.contains("import(\"../chunks/a%20%23%C3%A9.mjs\")"),
+        "{output}"
+    );
+    assert!(!output.contains("original.mjs"), "{output}");
+    assert!(
+        output.contains("import(\"../other/second.mjs\")"),
+        "{output}"
+    );
+    rewrite::validate(Path::new("output.mjs"), &output).unwrap();
+}
+
+#[test]
+fn checked_dependency_ids_address_static_import_and_reexport_wrappers() {
+    for source in [
+        "import { value } from './original.mjs';",
+        "export { value } from './original.mjs';",
+        "export * from './original.mjs';",
+    ] {
+        let parsed = ast_segmenter::parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("input.mjs"),
+            ModuleFormat::Esm,
+        )
+        .unwrap();
+        let mut renderer = CachedRenderer::new(
+            source,
+            &parsed.facts,
+            &parsed.facts.emission.segments[0],
+            &[],
+        );
+        renderer.dependency(
+            &parsed.facts.dependencies[0],
+            "'./changed.mjs'".into(),
+            false,
+        );
+        let output = rendered(renderer.render(parsed.segments[0].span).unwrap());
+        assert_eq!(output, source.replace("./original.mjs", "./changed.mjs"));
+        renderer.dependency(
+            &parsed.facts.dependencies[0],
+            "import './evaluate.mjs';".into(),
+            true,
+        );
+        assert_eq!(
+            rendered(renderer.render(parsed.segments[0].span).unwrap()),
+            "import './evaluate.mjs';"
         );
     }
 }

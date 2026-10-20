@@ -1,13 +1,10 @@
 //! Scope-hoisted ESM, with native module jobs for observable and async seams.
 use super::*;
-use oxc_allocator::Allocator;
-use oxc_ast::ast::Statement;
-use oxc_parser::Parser;
-use oxc_span::SourceType;
 use source_graph::ExportIdentity;
 use std::collections::{HashMap, HashSet};
 
-use crate::rewrite::{self, Edit};
+use crate::assembly::{Code, Edit};
+use crate::rewrite;
 use crate::symbols::Symbols;
 
 #[path = "native_chunks.rs"]
@@ -19,7 +16,7 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
-) -> eyre::Result<Artifacts> {
+) -> eyre::Result<Artifacts<Code>> {
     if let Some(output) = single(graph, plan, modules, manifest, symbols)? {
         return Ok(output);
     }
@@ -32,7 +29,7 @@ fn single(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
-) -> eyre::Result<Option<Artifacts>> {
+) -> eyre::Result<Option<Artifacts<Code>>> {
     // Prefer whole-tree concatenation; the group planner handles native seams.
     if plan.roots.len() != 1 || plan.chunks.len() != 1 {
         return Ok(None);
@@ -104,7 +101,7 @@ fn single(
         "native root does not cover retained modules"
     );
     let values = Values::new(graph, modules, symbols);
-    let mut output = String::new();
+    let mut output = Code::default();
     let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
     let recipes: BTreeMap<_, _> = plan
         .retention
@@ -117,20 +114,20 @@ fn single(
         output.push_str(
             &modules[file].source[hashbang.span.start as usize..hashbang.span.end as usize],
         );
-        output.push('\n');
+        output.push_str("\n");
     }
-    let mut bodies = String::new();
+    let mut bodies = Code::default();
     for file in order {
         let Some((hoisted, body)) = body(graph, file, &modules[&file], &values, &live, &recipes)?
         else {
             return Ok(None);
         };
-        output.push_str(&hoisted);
-        bodies.push_str(&body);
+        output.push(hoisted);
+        bodies.push(body);
         // Separate statements even when a source lacks a final semicolon/newline.
         bodies.push_str("\n;\n");
     }
-    output.push_str(&bodies);
+    output.push(bodies);
     output.push_str("export {\n");
     for (public, linked) in &symbols.exports[file] {
         output.push_str(&format!(
@@ -143,8 +140,7 @@ fn single(
     }
     output.push_str("};\n");
     let path = PathBuf::from("native.mjs");
-    output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;
-    rewrite::validate(&path, &output)?;
+    output.default_export = symbols.exports[file].contains_key("default");
     let (chunk, nodes) = plan.chunks.first_key_value().unwrap();
     Ok(Some(Artifacts {
         backend: super::Backend::Native,
@@ -170,8 +166,8 @@ struct Values<'s> {
     defaults: BTreeMap<SegmentKey, String>,
     names: HashMap<crate::symbols::Symbol, String>,
     imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
-    requests: BTreeMap<u32, String>,
-    dynamic: BTreeMap<u32, String>,
+    requests: BTreeMap<u32, Code>,
+    dynamic: BTreeMap<u32, Code>,
     native_defaults: BTreeSet<u32>,
 }
 
@@ -334,7 +330,7 @@ fn body(
     values: &Values<'_>,
     live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
-) -> eyre::Result<Option<(String, String)>> {
+) -> eyre::Result<Option<(Code, Code)>> {
     use ast_segmenter::emission::{ExportForm, NamespaceAccess, OperationKind};
     if !compatible(graph, file, module, values, live)? {
         return Ok(None);
@@ -360,8 +356,8 @@ fn body(
             targets.insert(binding.id, name);
         }
     }
-    let mut hoisted = String::new();
-    let mut output = String::new();
+    let mut hoisted = Code::default();
+    let mut output = Code::default();
     for (index, segment) in module.parsed.segments.iter().enumerate() {
         let key = SegmentKey::new(file, index as u32);
         if !live.contains(&key) {
@@ -384,7 +380,8 @@ fn body(
                     .map(|name| {
                         rewrite::shorthand_replacement(module.source, span, name, *shorthand)
                     })
-                    .transpose()?,
+                    .transpose()?
+                    .map(Code::from),
                 OperationKind::Reference {
                     reference,
                     shorthand,
@@ -394,7 +391,8 @@ fn body(
                     .map(|name| {
                         rewrite::shorthand_replacement(module.source, span, name, *shorthand)
                     })
-                    .transpose()?,
+                    .transpose()?
+                    .map(Code::from),
                 OperationKind::Namespace { usage } => {
                     let usage = &recipe.namespaces[*usage as usize];
                     if let Some(target) = facts.references[usage.reference as usize]
@@ -409,12 +407,12 @@ fn body(
                             property,
                             source_graph::Namespace::Value,
                         )?;
-                        Some(
+                        Some(Code::from(
                             values
                                 .name(&linked.identity)
                                 .ok_or_eyre("missing native namespace value")?
                                 .to_owned(),
-                        )
+                        ))
                     } else {
                         None
                     }
@@ -482,17 +480,18 @@ fn body(
                         .ok_or_eyre("missing native default binding")?;
                     let value = renderer.slot(value)?;
                     if *is_hoisted {
-                        hoisted
-                            .push_str(&format!("var {name} = ({{default: {value}}}).default;\n"));
+                        hoisted.push(
+                            value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),
+                        );
                         ";".into()
                     } else {
-                        format!("const {name} = ({{default: {value}}}).default;")
+                        value.surrounded(format!("const {name} = ({{default: "), "}).default;")
                     }
                 }
             };
             renderer.replace(operation_index as u32, replacement);
         }
-        output.push_str(&renderer.render(segment.span)?);
+        output.push(renderer.render(segment.span)?);
         // Retention and PURE rewrites can expose a new ASI continuation.
         output.push_str("\n;\n");
     }
