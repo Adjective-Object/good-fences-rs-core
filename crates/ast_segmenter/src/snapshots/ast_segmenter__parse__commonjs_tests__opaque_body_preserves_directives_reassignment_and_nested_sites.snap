@@ -16,6 +16,70 @@ ModuleFacts {
         },
     ],
     invocations: [],
+    emission: EmissionFacts {
+        segments: [
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                48,
+                            ),
+                        },
+                    },
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                147,
+                            ),
+                        },
+                    },
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                187,
+                            ),
+                        },
+                    },
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                256,
+                            ),
+                        },
+                    },
+                ],
+            },
+        ],
+        nested_bindings: [],
+        free_references: [
+            0,
+            1,
+            3,
+            4,
+            5,
+            8,
+        ],
+    },
     bindings: [
         Binding {
             id: BindingId(

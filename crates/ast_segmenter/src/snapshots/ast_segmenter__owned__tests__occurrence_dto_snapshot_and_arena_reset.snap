@@ -82,6 +82,543 @@ ModuleFacts {
         },
     ],
     invocations: [],
+    emission: EmissionFacts {
+        segments: [
+            SegmentRecipe {
+                connector_only: true,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                34,
+                            ),
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                41,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                62,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                74,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: true,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                96,
+                            ),
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                108,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: true,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                126,
+                            ),
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [
+                        0,
+                    ],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Reference {
+                            reference: 0,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [
+                        BindingId(
+                            155,
+                        ),
+                    ],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Binding {
+                            binding: BindingId(
+                                155,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: None,
+                        kind: Reference {
+                            reference: 1,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [
+                        BindingId(
+                            172,
+                        ),
+                    ],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [
+                        3,
+                    ],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Binding {
+                            binding: BindingId(
+                                172,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: None,
+                        kind: Reference {
+                            reference: 2,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: None,
+                        kind: Reference {
+                            reference: 3,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: true,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [
+                        4,
+                    ],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Export {
+                            span: Span {
+                                start: 189,
+                                end: 229,
+                            },
+                            form: Remove,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Reference {
+                            reference: 4,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Reference {
+                            reference: 5,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: true,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Export {
+                            span: Span {
+                                start: 230,
+                                end: 270,
+                            },
+                            form: Remove,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: true,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Export {
+                            span: Span {
+                                start: 271,
+                                end: 301,
+                            },
+                            form: Remove,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [
+                        BindingId(
+                            319,
+                        ),
+                        BindingId(
+                            331,
+                        ),
+                    ],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [
+                        6,
+                    ],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [
+                    NamespaceUse {
+                        reference: 6,
+                        access: Native(
+                            Other,
+                        ),
+                    },
+                ],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Export {
+                            span: Span {
+                                start: 302,
+                                end: 342,
+                            },
+                            form: Declaration {
+                                declaration: Span {
+                                    start: 309,
+                                    end: 342,
+                                },
+                            },
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                319,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                331,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Reference {
+                            reference: 6,
+                            shorthand: None,
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [
+                        BindingId(
+                            367,
+                        ),
+                    ],
+                    hoisted: [
+                        BindingId(
+                            367,
+                        ),
+                    ],
+                    instantiable: true,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [
+                        BindingId(
+                            367,
+                        ),
+                    ],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Export {
+                            span: Span {
+                                start: 343,
+                                end: 403,
+                            },
+                            form: Declaration {
+                                declaration: Span {
+                                    start: 358,
+                                    end: 403,
+                                },
+                            },
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Binding {
+                            binding: BindingId(
+                                367,
+                            ),
+                            declaration: 0,
+                            shorthand: None,
+                        },
+                    },
+                    Operation {
+                        parent: Some(
+                            0,
+                        ),
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                384,
+                            ),
+                        },
+                    },
+                ],
+            },
+            SegmentRecipe {
+                connector_only: false,
+                placement: PlacementFacts {
+                    declarations: [],
+                    hoisted: [],
+                    instantiable: false,
+                    default_expression: false,
+                    forward_references: [],
+                    eager_reads: [],
+                    writes: [],
+                },
+                names: NameRestrictions {
+                    named: [],
+                    inference_sensitive: false,
+                },
+                namespaces: [],
+                operations: [
+                    Operation {
+                        parent: None,
+                        kind: Dependency {
+                            dependency: DependencyId(
+                                404,
+                            ),
+                        },
+                    },
+                ],
+            },
+        ],
+        nested_bindings: [],
+        free_references: [],
+    },
     bindings: [
         Binding {
             id: BindingId(

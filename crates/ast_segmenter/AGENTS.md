@@ -72,3 +72,10 @@ conservative; opaque CJS is always one effectful body.
 `invocation` owns call/new inputs, chain/reference shape, syntax value-use context
 and precisely attached PURE hint spans. Only the derived bundler evaluator may
 discard an unused invocation; input effects and optional guards must survive.
+
+`facts.emission` owns segment-indexed recipes and placement/name constraints.
+Operations address existing occurrence IDs/indices and original spans; preorder
+parents and source-slot roots precompose nesting before the arena drops.
+PURE callee steps preserve parentheses as chain boundaries and guard awaits in
+the invocation's own function scope. CJS remains one opaque recipe with only
+dependency/hint slots. Never persist chosen names, targets or transform policy.

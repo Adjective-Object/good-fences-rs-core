@@ -3,8 +3,10 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 5 /
-extractor 7, including CommonJS path-parameter declaration policy, ESM top-level await/for-await spans, effective commonjs format, invocation inputs/annotation sites and normalized member
+Syntax-local effect reasons/timing are persisted and range-checked (schema 6 /
+extractor 8, including source-local emission recipes/placement constraints,
+CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
+effective commonjs format, invocation inputs/annotation sites and normalized member
 shapes). No resolver, usage, effects-policy, graph, absolute path or arena IDs
 are stored.
 Support-policy/facts changes invalidate previous sidecars. Transitive
@@ -70,6 +72,10 @@ metadata and effect DSL configuration are deliberately absent from this cache.
 Those changes invalidate derived resolution/effects later, not source facts.
 PURE hint spans and syntactic value-use contexts are source facts; whether a
 hint permits an invocation rewrite is derived and is never persisted here.
+Emission recipes likewise contain only original-coordinate operations and
+occurrence links, precomputed nesting, connector/placement/name constraints and
+optional PURE lowering shapes. They contain neither chosen identifiers nor
+resolved requests, output variants, graph ownership or unconditional purity.
 
 Cold/warm and disabled-cache results have identical owned facts/body/ranges;
 the warm API intentionally does not reconstruct legacy `Segment` name/tag maps.

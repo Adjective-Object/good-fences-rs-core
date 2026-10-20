@@ -112,3 +112,33 @@ arrow expression bodies have required return values, not discarded statement
 results, even though OXC represents them internally as expression statements.
 
 Run `cargo test -p ast-segmenter` for extraction and scope regressions.
+
+## Cached emission recipes
+
+`facts.emission` exposes owned DTOs in `ast_segmenter::emission`, indexed by the
+existing statement segments. Each `SegmentRecipe` records `connector_only`,
+declaration/hoisted availability, forward uses, eager-read and write reference
+indices, conservative function/class/arrow name restrictions and namespace uses.
+Namespace direct-read candidates are distinct from receiver, tag, mutation,
+delete and escaping uses; whether an export can replace a candidate stays linked.
+Nested-binding IDs and free-reference indices support conservative capture checks.
+
+Sparse `OperationKind` slots address existing binding/declaration, reference,
+dependency and invocation IDs/indices, or original wrapper/comment spans.
+They describe shorthand expansion (including object-literal `__proto__`),
+import/export removal, default expression initialization/anonymous function
+hoisting, namespace alternatives and in-segment source-hint removal.
+`OperationKind::span` resolves occurrence ranges on validated facts.
+Operations are preorder with explicit parents; a replacing parent owns children.
+`SourceSlot` records already-composed operation roots for default values, PURE
+callees/arguments and chain subexpressions. Consumers need not rediscover edit
+containment or parse generated/retained text to recover lexical identity.
+
+PURE alternatives contain a source base and inner-to-outer member/call steps,
+original argument/spread facts, guard boundaries and an await-crossing veto.
+Parentheses terminate outer chains; unsupported nested optional-call/private
+chains have no lowering alternative. Await checks use the invocation's own
+function scope, not awaits in nested function bodies. These recipes never
+declare a call pure or choose names, resolved requests, retention or ownership.
+CJS keeps one opaque recipe with dependency/hint slots only. Comments outside
+all statement spans deliberately remain outside source-hint cleanup.

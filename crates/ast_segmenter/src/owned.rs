@@ -136,6 +136,7 @@ pub struct ModuleFacts {
     pub top_level_await: Vec<Span>,
     pub effects: Vec<crate::effects::EffectSite>,
     pub invocations: Vec<crate::invocation::Invocation>,
+    pub emission: crate::emission::EmissionFacts,
     pub bindings: Vec<Binding>,
     pub references: Vec<Reference>,
     pub dependencies: Vec<Dependency>,
@@ -261,6 +262,15 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         .exports
         .sort_by_key(|e| (e.span.start, e.name_span.map(|s| s.start)));
     (facts.effects, facts.invocations) = crate::effects::extract(program, &facts);
+    let segments = if facts.commonjs {
+        vec![Span::new(
+            program.hashbang.as_ref().map_or(0, |h| h.span.end),
+            program.source_text.len() as u32,
+        )]
+    } else {
+        program.body.iter().map(GetSpan::span).collect()
+    };
+    facts.emission = crate::emission::extract(program, &facts, &segments);
     Ok(facts)
 }
 
