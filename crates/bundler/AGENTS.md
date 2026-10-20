@@ -146,11 +146,22 @@ facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
 no independently executable namespace path in `Artifacts::modules`.
-Group compatible synchronous regions by entry/async-root reachability, including
-sibling dependencies and complete synchronous SCCs. Source SCCs constrain
-instantiation/evaluation, not file boundaries. Outside native jobs must remain
-a prefix of each merged region's source-ordered execution; never hoist a later
-shared initializer ahead of an earlier body. Groups do not own all source segments.
+Never greedily absorb whole modules or use SCC completeness as relocation proof.
+Mandatory execution components and consumer demand choose segment owners.
+Emit a complete exactly-once SegmentKey schedule per owner, using full cached
+MultiSpan recipes, never module DFS body discovery. Check transitive physical
+import activation against each entrance's lexical-initialization/phase projection;
+each native body event must see the same initialized lexical bindings, including
+abrupt completion and escaped namespaces. Pure events commute only between phases.
+Index owner references once per ownership revision and cache scalar activation
+summaries per owner, never transitive symbol sets or per-candidate owner scans.
+Pure prefixes before the first abrupt phase can use shared binding jobs only
+with explicit original-source imports after its static requests and before its
+body and the initialization projection proof. Preserve mandatory prefix-to-phase
+edges through those dependencies.
+Never apply prefix movement to SCCs, async closures, forward refs or opaque inputs.
+The single-entrance fast path is bounded to a complete acyclic synchronous closure
+and checks its explicit source-ordered segment schedule against mandatory edges.
 Keep initialization/await phases and observable namespace/name/read-only
 boundaries native, not cells. Logical artifact projections
 may overlap or contain several body owners; root sets do not prescribe files.

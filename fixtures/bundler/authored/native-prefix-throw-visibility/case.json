@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-prefix-throw-visibility",
+  "moduleType": "module",
+  "entryPoints": ["observe.mjs"],
+  "expectations": {
+    "stdout": ["y", "stop", "ReferenceError"],
+    "backend": "native"
+  },
+  "goals": [
+    "Preserve lexical TDZ visibility through an escaped entry namespace after native evaluation throws.",
+    "Activating y's pure prefix must not initialize x before its source's static dependencies complete."
+  ]
+}

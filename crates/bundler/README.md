@@ -6,9 +6,10 @@ The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries
 constrain output; pure segments may move according to binding dependencies.
-Compatible synchronous regions with the same entry/async-root reachability
-coalesce, including siblings, diamonds and complete synchronous cycles; source
-module SCCs are not chunk boundaries. Native jobs remain where required for
+Sparse mandatory execution components and consumer demand choose physical owners;
+pure siblings and shared declarations co-locate without whole-module absorption.
+Native SCC evaluation remains entrance-dependent, not permission to concatenate.
+Native jobs remain where required for
 public/escaped namespaces, top-level-await phases, imported writes, observable
 names or CommonJS activation. Merging never hoists a later shared dependency
 ahead of an earlier initializer.
@@ -350,16 +351,16 @@ them. It supports multiple entries, evaluation-only entries, escaped namespaces,
 computed reads, descriptors, receivers and read-only writes. Namespace values
 are actual native module namespaces, never getter objects or setter facades.
 
-The evaluation planner merges an exclusively consumed dependency group when
-it is the consumer group's only remaining dependency. It can also absorb
-body-free import/reexport connectors among siblings. Unobserved pure barrels
+There is no greedy whole-module or complete-SCC merging pass. Unobserved pure barrels
 redirect to their dependency only when their complete export-name/canonical-
 identity maps match, including `default`; subset surfaces must not widen later
-star exports or introduce ambiguity. Source-ordered static DFS
-then preserves dependency completion and statement order; identical logical root
-sets alone never authorize moving effects. Shared dependencies remain once-only
-body owners. Public entry surfaces and namespace targets keep precise native
-surfaces; internal imports/exports disappear inside a merged group. No generated
+star exports or introduce ambiguity. Each physical owner has an explicit,
+complete, exactly-once `SegmentKey` schedule, checked against mandatory constraints.
+Emission materializes cached full MultiSpan recipes in that schedule, including
+disconnected retained components; module DFS never discovers executable bodies.
+Shared dependencies remain once-only binding owners.
+Public entry surfaces and namespace targets keep precise native
+surfaces; internal imports/exports disappear inside a physical owner. No generated
 private names leak into namespace keys.
 
 Physical owners are independently assigned to retained segments, not input
@@ -367,6 +368,28 @@ modules or root-set partitions. Pure lexical components move to a unique consume
 or independent shared binding chunks; components from unrelated sources can
 co-locate. Eager local initializer reads and writes keep their lexical components
 together, preserving snapshots and mutable closures without cells or setters.
+Source-phase barriers pin non-hoisted evaluations, even when Ecco or PURE calls
+classify a site as pure. Proven initialized immutable local reads can discharge
+read-only fences; their mandatory ordering still travels with the component.
+Hoisted body-free functions can leave effectful sources without moving their effects.
+Pure initializations before a source's first abrupt phase can also share binding
+owners: the native source imports those jobs after its original static requests
+and before its body. Mandatory prefix-to-phase edges are preserved by those
+explicit native dependencies, not discarded; later initializations stay fenced.
+SCCs, async closures, forward references and opaque inputs do not use this proof.
+Physical import contraction is checked against entrance-specific native body
+events and lexical initialization visibility, including transitive activation and
+existing native cycles. Every body event must observe the same preceding lexical
+initializations, so throwing dependencies cannot eagerly expose or delay an
+export through an escaped namespace. Independent pure initializers may commute
+between these events. Unsafe candidates are anchored, not repaired by breaking
+mandatory edges. Sparse owner references are indexed once per ownership revision;
+candidates sharing a job reuse its scalar activation summary without storing
+transitive symbol sets.
+Static closures below top-level-await jobs keep their original native request
+graph: a scalar completion projection cannot prove host async pending-dependency
+accounting or sibling interleaving. Hazardous mutable/deferred sources otherwise
+remain conservative; this planner does not infer named-call execution or purity.
 Name-sensitive components split into separate chunks when co-location would
 change names or capture references. Consumer rewrites and artifact members follow
 actual segment owners, including aliases and default-expression addresses.
@@ -571,9 +594,15 @@ Hoisted function declarations and static connectors
 are not evaluation phases; these constraints neither repair TDZ nor impose an
 order across independent sources. Simple literal initializers remain movable
 when no such fence intervenes.
-This is planning infrastructure only: native placement/emission still use the
-existing algorithm; constraint-aware placement and explicit scheduling are a later
-stage, including the four `native-flatten-*` regression contracts.
+Native placement consumes these relationships directly. Mandatory lexical components
+stay together; checked native prefix dependencies and per-owner schedules preserve
+their partial order. Only effect-order analysis
+may break its own order-only cycles. The four `native-flatten-*` contracts exercise
+absorption, outside-return activation, canonical barrels and both SCC entrances.
+A bounded single-entrance fast path concatenates only a complete acyclic synchronous
+closure with no outside/native namespace boundaries. It preserves original source
+job completion order and checks every mandatory constraint against its explicit
+segment schedule. Other roots use independent native jobs and binding owners.
 Original structural edge indices retain exact occurrence/timing metadata.
 Required bodies are **available**, not scheduled eagerly: deferred requires
 keep their original call sites/timing. Async boundary edge indices are recorded

@@ -40,8 +40,8 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **36 cases / 51 entry executions**: six esbuild cases,
-six rspack cases and twenty-four authored cases. The upstream cases cover
+The corpus contains **37 cases / 52 entry executions**: six esbuild cases,
+six rspack cases and twenty-five authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
@@ -55,6 +55,8 @@ and independent demands on shared segments with live state and inferred names.
 Four flattening regressions additionally defend shared-group body
 retention, outside-job return paths, redirected-barrel ordering, and
 entrance-dependent source SCC evaluation.
+The prefix/throw regression additionally preserves uninitialized exports through
+an escaped entry namespace when another source's pure prefix evaluates first.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.

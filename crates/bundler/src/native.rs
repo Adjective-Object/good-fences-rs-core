@@ -30,7 +30,9 @@ fn single(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Option<Artifacts<Code>>> {
-    // Prefer whole-tree concatenation; the group planner handles native seams.
+    // Bounded fast path: a single entrance covers the complete acyclic synchronous
+    // closure. Native dependency completion order is unchanged, with no outside
+    // activation, namespace, async or independently executable entry boundaries.
     if modules.keys().any(|&file| has_externals(graph, file)) {
         return Ok(None);
     }
@@ -106,6 +108,31 @@ fn single(
     let values = Values::new(graph, modules, symbols);
     let mut output = Code::default();
     let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
+    let schedule: Vec<_> = order
+        .iter()
+        .flat_map(|&file| {
+            (0..modules[&file].parsed.segments.len())
+                .map(move |index| SegmentKey::new(file, index as u32))
+                .filter(|key| live.contains(key))
+        })
+        .collect();
+    let positions: BTreeMap<_, _> = schedule
+        .iter()
+        .enumerate()
+        .map(|(index, &key)| (key, index))
+        .collect();
+    if plan
+        .retention
+        .execution
+        .constraints
+        .iter()
+        .any(|constraint| {
+            constraint.kind != crate::execution_dependencies::ConstraintKind::EffectOrder
+                && positions[&constraint.before] >= positions[&constraint.after]
+        })
+    {
+        return Ok(None);
+    }
     let recipes: BTreeMap<_, _> = plan
         .retention
         .effects
@@ -120,9 +147,9 @@ fn single(
         output.push_str("\n");
     }
     let mut bodies = Code::default();
-    for file in order {
-        let Some((hoisted, body)) = body(graph, file, &modules[&file], &values, &live, &recipes)?
-        else {
+    for key in schedule {
+        let file = key.file_id;
+        let Some((hoisted, body)) = body(graph, key, &modules[&file], &values, &recipes)? else {
             return Ok(None);
         };
         output.push(hoisted);
@@ -291,8 +318,8 @@ fn compatible(
             changed.insert(binding.id);
         }
     }
-    let inference_changes = retained.iter().any(|recipe| {
-        recipe
+    for recipe in retained {
+        let inference_changes = recipe
             .placement
             .declarations
             .iter()
@@ -301,9 +328,7 @@ fn compatible(
                 facts.references[index as usize]
                     .binding
                     .is_some_and(|id| changed.contains(&id))
-            })
-    });
-    for recipe in retained {
+            });
         if recipe.names.named.iter().any(|id| changed.contains(id))
             || (inference_changes && recipe.names.inference_sensitive)
         {
@@ -332,14 +357,14 @@ fn compatible(
 
 fn body(
     graph: &SourceGraph,
-    file: u32,
+    key: SegmentKey,
     module: &Module<'_>,
     values: &Values<'_>,
-    live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
 ) -> eyre::Result<Option<(Code, Code)>> {
     use ast_segmenter::emission::{ExportForm, NamespaceAccess, OperationKind};
-    if !compatible(graph, file, module, values, live)? {
+    let file = key.file_id;
+    if !compatible(graph, file, module, values, &BTreeSet::from([key]))? {
         return Ok(None);
     }
     let facts = &module.parsed.facts;
@@ -365,147 +390,133 @@ fn body(
     }
     let mut hoisted = Code::default();
     let mut output = Code::default();
-    for index in 0..module.parsed.segments.len() {
-        let key = SegmentKey::new(file, index as u32);
-        if !live.contains(&key) {
-            continue;
-        }
-        let recipe = &facts.emission.segments[index];
-        let mut renderer = crate::emit::CachedRenderer::new(
-            module.source,
-            facts,
-            recipe,
-            recipes.get(&key).copied().unwrap_or_default(),
-        );
-        renderer.relocate_urls(module.relocations)?;
-        for (operation_index, operation) in recipe.operations.iter().enumerate() {
-            let span = operation.kind.span(facts, recipe);
-            let replacement = match &operation.kind {
-                OperationKind::Binding {
-                    binding, shorthand, ..
-                } => targets
-                    .get(binding)
-                    .map(|name| {
-                        rewrite::shorthand_replacement(module.source, span, name, *shorthand)
-                    })
-                    .transpose()?
-                    .map(Code::from),
-                OperationKind::Reference {
-                    reference,
-                    shorthand,
-                } => facts.references[*reference as usize]
+    let index = key.segment_idx as usize;
+    let recipe = &facts.emission.segments[index];
+    let mut renderer = crate::emit::CachedRenderer::new(
+        module.source,
+        facts,
+        recipe,
+        recipes.get(&key).copied().unwrap_or_default(),
+    );
+    renderer.relocate_urls(module.relocations)?;
+    for (operation_index, operation) in recipe.operations.iter().enumerate() {
+        let span = operation.kind.span(facts, recipe);
+        let replacement = match &operation.kind {
+            OperationKind::Binding {
+                binding, shorthand, ..
+            } => targets
+                .get(binding)
+                .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
+                .transpose()?
+                .map(Code::from),
+            OperationKind::Reference {
+                reference,
+                shorthand,
+            } => facts.references[*reference as usize]
+                .binding
+                .and_then(|id| targets.get(&id))
+                .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
+                .transpose()?
+                .map(Code::from),
+            OperationKind::Namespace { usage } => {
+                let usage = &recipe.namespaces[*usage as usize];
+                if let Some(target) = facts.references[usage.reference as usize]
                     .binding
-                    .and_then(|id| targets.get(&id))
-                    .map(|name| {
-                        rewrite::shorthand_replacement(module.source, span, name, *shorthand)
-                    })
-                    .transpose()?
-                    .map(Code::from),
-                OperationKind::Namespace { usage } => {
-                    let usage = &recipe.namespaces[*usage as usize];
-                    if let Some(target) = facts.references[usage.reference as usize]
-                        .binding
-                        .and_then(|id| namespaces.get(&id))
-                    {
-                        let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
-                            unreachable!()
-                        };
-                        let linked = graph.resolve_export(
-                            *target,
-                            property,
-                            source_graph::Namespace::Value,
-                        )?;
-                        Some(Code::from(
-                            values
-                                .name(&linked.identity)
-                                .ok_or_eyre("missing native namespace value")?
-                                .to_owned(),
-                        ))
-                    } else {
-                        None
-                    }
+                    .and_then(|id| namespaces.get(&id))
+                {
+                    let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
+                        unreachable!()
+                    };
+                    let linked =
+                        graph.resolve_export(*target, property, source_graph::Namespace::Value)?;
+                    Some(Code::from(
+                        values
+                            .name(&linked.identity)
+                            .ok_or_eyre("missing native namespace value")?
+                            .to_owned(),
+                    ))
+                } else {
+                    None
                 }
-                OperationKind::Dependency { dependency } => {
-                    let dependency = facts
-                        .dependencies
-                        .iter()
-                        .find(|d| d.id == *dependency)
-                        .ok_or_eyre("missing original dependency")?;
-                    if matches!(
-                        dependency.kind,
-                        DependencyKind::Import | DependencyKind::ReExport
-                    ) {
-                        Some(";".into())
-                    } else if dependency.type_only
-                        || dependency.kind != DependencyKind::DynamicImport
-                    {
-                        None
-                    } else {
-                        if let Some(dispatch) = values.contexts.get(&(file, dependency.id)) {
-                            renderer.context(dependency, dispatch.clone());
-                            continue;
-                        }
-                        let target = target_file(graph, file, dependency)?;
-                        if let Some(expression) = values.dynamic.get(&target) {
-                            Some(expression.clone())
-                        } else {
-                            renderer.edit(
-                                operation_index as u32,
-                                Edit {
-                                    span: dependency.specifier_span,
-                                    replacement: values
-                                        .requests
-                                        .get(&target)
-                                        .ok_or_eyre("missing native dynamic target")?
-                                        .clone(),
-                                },
-                            );
-                            None
-                        }
-                    }
-                }
-                _ => None,
-            };
-            if let Some(replacement) = replacement {
-                renderer.replace(operation_index as u32, replacement);
             }
-        }
-        for (operation_index, operation) in recipe.operations.iter().enumerate().rev() {
-            let OperationKind::Export { form, .. } = &operation.kind else {
-                continue;
-            };
-            let replacement = match form {
-                ExportForm::Remove => ";".into(),
-                ExportForm::Declaration { declaration } => {
-                    renderer.children(*declaration, Some(operation_index as u32))?
-                }
-                ExportForm::Default {
-                    value,
-                    hoisted: is_hoisted,
-                } => {
-                    if values.native_defaults.contains(&file) {
+            OperationKind::Dependency { dependency } => {
+                let dependency = facts
+                    .dependencies
+                    .iter()
+                    .find(|d| d.id == *dependency)
+                    .ok_or_eyre("missing original dependency")?;
+                if matches!(
+                    dependency.kind,
+                    DependencyKind::Import | DependencyKind::ReExport
+                ) {
+                    Some(";".into())
+                } else if dependency.type_only || dependency.kind != DependencyKind::DynamicImport {
+                    None
+                } else {
+                    if let Some(dispatch) = values.contexts.get(&(file, dependency.id)) {
+                        renderer.context(dependency, dispatch.clone());
                         continue;
                     }
-                    let name = values
-                        .defaults
-                        .get(&key)
-                        .ok_or_eyre("missing native default binding")?;
-                    let value = renderer.slot(value)?;
-                    if *is_hoisted {
-                        hoisted.push(
-                            value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),
-                        );
-                        ";".into()
+                    let target = target_file(graph, file, dependency)?;
+                    if let Some(expression) = values.dynamic.get(&target) {
+                        Some(expression.clone())
                     } else {
-                        value.surrounded(format!("const {name} = ({{default: "), "}).default;")
+                        renderer.edit(
+                            operation_index as u32,
+                            Edit {
+                                span: dependency.specifier_span,
+                                replacement: values
+                                    .requests
+                                    .get(&target)
+                                    .ok_or_eyre("missing native dynamic target")?
+                                    .clone(),
+                            },
+                        );
+                        None
                     }
                 }
-            };
+            }
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
             renderer.replace(operation_index as u32, replacement);
         }
-        output.push(renderer.materialize()?);
-        // Retention and PURE rewrites can expose a new ASI continuation.
-        output.push_str("\n;\n");
     }
+    for (operation_index, operation) in recipe.operations.iter().enumerate().rev() {
+        let OperationKind::Export { form, .. } = &operation.kind else {
+            continue;
+        };
+        let replacement = match form {
+            ExportForm::Remove => ";".into(),
+            ExportForm::Declaration { declaration } => {
+                renderer.children(*declaration, Some(operation_index as u32))?
+            }
+            ExportForm::Default {
+                value,
+                hoisted: is_hoisted,
+            } => {
+                if values.native_defaults.contains(&file) {
+                    continue;
+                }
+                let name = values
+                    .defaults
+                    .get(&key)
+                    .ok_or_eyre("missing native default binding")?;
+                let value = renderer.slot(value)?;
+                if *is_hoisted {
+                    hoisted.push(
+                        value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),
+                    );
+                    ";".into()
+                } else {
+                    value.surrounded(format!("const {name} = ({{default: "), "}).default;")
+                }
+            }
+        };
+        renderer.replace(operation_index as u32, replacement);
+    }
+    output.push(renderer.materialize()?);
+    // Retention and PURE rewrites can expose a new ASI continuation.
+    output.push_str("\n;\n");
     Ok(Some((hoisted, output)))
 }

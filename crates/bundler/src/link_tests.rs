@@ -1234,30 +1234,174 @@ fn native_shared_source_scc_preserves_both_entry_orders() {
 }
 
 #[test]
+fn native_synchronous_diamonds_and_cycles_preserve_native_phases() {
+    for source in [
+        sources(&[
+            (
+                "entry.mjs",
+                "import {left} from './left.mjs'; import {right} from './right.mjs'; let todo; const run = () => { todo = left() + right(); }; run(); console.log(todo, left.name, right.name, run.name);",
+            ),
+            (
+                "left.mjs",
+                "import {State} from './shared.mjs'; const template = 'left'; console.log(template); export const left = () => new State(template).value;",
+            ),
+            (
+                "right.mjs",
+                "import {State} from './shared.mjs'; const template = 'right'; console.log(template); export const right = () => new State(template).value;",
+            ),
+            (
+                "shared.mjs",
+                "console.log('shared'); export class State { constructor(todo) { this.value = todo; } }",
+            ),
+        ]),
+        sources(&[
+            (
+                "entry.mjs",
+                "import {read, value} from './a.mjs'; console.log(read(), value, read.name);",
+            ),
+            (
+                "a.mjs",
+                "import {initial} from './b.mjs'; export var value = initial + 1; export function read() { return value; }",
+            ),
+            (
+                "b.mjs",
+                "import {read, value} from './a.mjs'; console.log(typeof read, value, read()); export var initial = 4;",
+            ),
+        ]),
+    ] {
+        let output = compare(&source, "entry.mjs");
+        assert_eq!(output, build(&source, &[("entry.mjs", false)], true).1);
+
+        let mut multiple = source;
+        multiple.insert("other.mjs".into(), "export const other = 1;".into());
+        let (_, output) = build(
+            &multiple,
+            &[("entry.mjs", true), ("other.mjs", true)],
+            false,
+        );
+        assert_ne!(output.entries["entry.mjs"], output.entries["other.mjs"]);
+        assert_eq!(
+            node(&output.files, &output.entries["entry.mjs"]).stdout,
+            node(&multiple, Path::new("entry.mjs")).stdout
+        );
+    }
+}
+
+#[test]
+fn native_async_regions_keep_lazy_roots_and_shared_dependencies_separate() {
+    let source = sources(&[
+        (
+            "entry.mjs",
+            "export const left = () => import('./left.mjs'); export const right = () => import('./right.mjs'); console.log('entry'); left().then(async first => { console.log(first.value); console.log((await right()).value); });",
+        ),
+        (
+            "left.mjs",
+            "import {shared} from './shared.mjs'; import one from './one.mjs'; import two from './two.mjs'; console.log('lazy-left'); export const value = shared.value + one + two;",
+        ),
+        (
+            "right.mjs",
+            "import {shared} from './shared.mjs'; import three from './three.mjs'; console.log('lazy-right'); export const value = shared.value + three;",
+        ),
+        (
+            "shared.mjs",
+            "console.log('shared'); export const shared = Object.freeze({value: 10});",
+        ),
+        (
+            "one.mjs",
+            "class One {} console.log(One.name); export default 1;",
+        ),
+        (
+            "two.mjs",
+            "class Two {} console.log(Two.name); export default 2;",
+        ),
+        (
+            "three.mjs",
+            "class Three {} console.log(Three.name); export default 3;",
+        ),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", true)], false);
+    let actual = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, node(&source, Path::new("entry.mjs")).stdout);
+    let owner = |module: &str| &output.members[&NodeId::Module(module.into())];
+    assert_ne!(owner("left.mjs"), owner("one.mjs"));
+    assert_ne!(owner("left.mjs"), owner("two.mjs"));
+    assert_ne!(owner("right.mjs"), owner("three.mjs"));
+    assert_ne!(owner("left.mjs"), owner("right.mjs"));
+    assert_ne!(owner("left.mjs"), owner("shared.mjs"));
+    assert_ne!(owner("right.mjs"), owner("shared.mjs"));
+    let entry = &output.files[&output.entries["entry.mjs"]];
+    assert!(!entry.contains("lazy-left") && !entry.contains("lazy-right"));
+    assert_eq!(output, build(&source, &[("entry.mjs", true)], true).1);
+}
+
+#[test]
+fn native_async_regions_preserve_effects_before_a_shared_dependency() {
+    let source = sources(&[
+        (
+            "a.mjs",
+            "import './early.mjs'; import './late.mjs'; console.log('a');",
+        ),
+        ("b.mjs", "import './shared.mjs'; console.log('b');"),
+        ("early.mjs", "console.log('early');"),
+        ("late.mjs", "import './shared.mjs'; console.log('late');"),
+        ("shared.mjs", "console.log('shared');"),
+    ]);
+    let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
+    for entry in ["a.mjs", "b.mjs"] {
+        let baseline = node(&source, Path::new(entry));
+        let actual = node(&output.files, &output.entries[entry]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, baseline.stdout);
+    }
+}
+
+#[test]
 fn native_chunks_share_live_state_and_concatenate_private_chains() {
     let source = sources(&[
-        ("state.mjs", "globalThis.sharedInitializations = (globalThis.sharedInitializations || 0) + 1; export const sharedObject = {}; export let counter = 0; export function increment() { counter++; } export function strictThis() { return this; } const privateSentinel = 'state-private-body'; console.log(privateSentinel);"),
+        (
+            "state.mjs",
+            "globalThis.sharedInitializations = (globalThis.sharedInitializations || 0) + 1; export const sharedObject = {}; export let counter = 0; export function increment() { counter++; } export function strictThis() { return this; } const privateSentinel = 'state-private-body'; console.log(privateSentinel);",
+        ),
         ("pass.mjs", "export * from './state.mjs';"),
-        ("private.mjs", "import {sharedObject, counter, increment, strictThis} from './pass.mjs'; export {sharedObject as object, counter, increment}; console.log('private-chain-body', strictThis() === undefined); try { counter = 99; } catch (error) { console.log(error.name); }"),
-        ("a.mjs", "export {object, counter, increment} from './private.mjs';"),
-        ("b.mjs", "export {sharedObject as other, counter as live} from './pass.mjs';"),
+        (
+            "private.mjs",
+            "import {sharedObject, counter, increment, strictThis} from './pass.mjs'; export {sharedObject as object, counter, increment}; console.log('private-chain-body', strictThis() === undefined); try { counter = 99; } catch (error) { console.log(error.name); }",
+        ),
+        (
+            "a.mjs",
+            "export {object, counter, increment} from './private.mjs';",
+        ),
+        (
+            "b.mjs",
+            "export {sharedObject as other, counter as live} from './pass.mjs';",
+        ),
     ]);
     let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
     assert_eq!(output.backend, Backend::Native);
     let owner = |module: &str| &output.members[&NodeId::Module(module.into())];
-    assert_eq!(owner("a.mjs"), owner("private.mjs"));
+    assert_ne!(owner("a.mjs"), owner("private.mjs"));
     assert_eq!(owner("pass.mjs"), owner("state.mjs"));
     assert_ne!(owner("a.mjs"), owner("state.mjs"));
     assert!(!output.modules.contains_key(Path::new("private.mjs")));
     assert!(!output.modules.contains_key(Path::new("pass.mjs")));
-    assert!(output.files[owner("a.mjs")].contains("private-chain-body"));
-    assert!(output.files[owner("a.mjs")].contains("import {"));
+    assert!(output.files[owner("private.mjs")].contains("private-chain-body"));
+    assert!(output.files[owner("private.mjs")].contains("import {"));
     assert!(!output.files[owner("a.mjs")].contains("from './private.mjs'"));
     let check = |a: &Path, b: &Path| {
         format!(
-        "import * as a from {}; import * as b from {}; console.log(Object.keys(a).join(','), Object.keys(b).join(',')); a.increment(); console.log(a.object === b.other, a.counter, b.live, globalThis.sharedInitializations);",
-        quote(&format!("./{}", a.display())), quote(&format!("./{}", b.display()))
-    )
+            "import * as a from {}; import * as b from {}; console.log(Object.keys(a).join(','), Object.keys(b).join(',')); a.increment(); console.log(a.object === b.other, a.counter, b.live, globalThis.sharedInitializations);",
+            quote(&format!("./{}", a.display())),
+            quote(&format!("./{}", b.display()))
+        )
     };
     let mut native = source.clone();
     native.insert(
@@ -1313,13 +1457,224 @@ fn native_chunks_preserve_entry_dependent_static_effect_order() {
 }
 
 #[test]
-fn native_segment_owners_split_shared_sources_and_colocate_unrelated_declarations() {
+fn native_segment_schedule_preserves_abrupt_export_initialization_state() {
     let source = sources(&[
-        ("a.mjs", "import {left, state, bump} from './shared.mjs'; import {label} from './left.mjs'; export {left, state, bump, label};"),
-        ("b.mjs", "import {right, state, bump} from './shared.mjs'; import {label} from './right.mjs'; export {right, state, bump, label};"),
-        ("shared.mjs", "export const left = () => state; export const right = () => state; export let state = 0; export function bump() { state++; } console.log('shared');"),
-        ("left.mjs", "export const label = () => 'left'; console.log('left effect');"),
-        ("right.mjs", "export const label = () => 'right'; console.log('right effect');"),
+        (
+            "a.mjs",
+            "import './capture.mjs'; export const before = 1; throw Error('stop'); export const after = 2; export function read() { let value; try { value = after; } catch (error) { value = error.name; } return [before, value].join(' '); }",
+        ),
+        (
+            "capture.mjs",
+            "import {read} from './a.mjs'; globalThis.savedRead = read;",
+        ),
+        ("b.mjs", "export const independent = 3;"),
+    ]);
+    let entries = [("a.mjs", true), ("b.mjs", true)];
+    let (_, output) = build(&source, &entries, false);
+    let observer = "try { await import('./a.mjs'); } catch (error) { console.log(error.message); } console.log(globalThis.savedRead()); console.log((await import('./b.mjs')).independent);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), observation(&output, observer));
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    let actual = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        baseline.status.success(),
+        "{}",
+        String::from_utf8_lossy(&baseline.stderr)
+    );
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(actual.stdout, baseline.stdout);
+    insta::assert_snapshot!(String::from_utf8(actual.stdout).unwrap(), @"
+    stop
+    1 ReferenceError
+    3
+    ");
+}
+
+#[test]
+fn native_segment_schedule_preserves_escaped_namespace_initialization_on_failure() {
+    for (entry, x, y, capture, expected) in [
+        (
+            "import './capture.mjs'; export {x} from './x.mjs'; export {y} from './y.mjs';",
+            "export const x = 1; console.log('x');",
+            "export const y = 2; console.log('y');",
+            "import './y.mjs'; import * as ns from './entry.mjs'; globalThis.saved = ns; throw Error('stop');",
+            "y\nstop\nReferenceError\n",
+        ),
+        (
+            "import {x} from './x.mjs'; import './capture.mjs'; export {x};",
+            "export const x = 1;",
+            "",
+            "import * as ns from './entry.mjs'; globalThis.saved = ns; throw Error('stop');",
+            "stop\n1\n",
+        ),
+    ] {
+        let source = sources(&[
+            ("entry.mjs", entry),
+            ("x.mjs", x),
+            ("y.mjs", y),
+            ("capture.mjs", capture),
+        ]);
+        let observer = "try { await import('./entry.mjs'); } catch (e) { console.log(e.message); } try { console.log(saved.x); } catch (e) { console.log(e.name); }";
+        let mut baseline = source.clone();
+        baseline.insert("observe.mjs".into(), observer.into());
+        let baseline = node(&baseline, Path::new("observe.mjs"));
+        assert!(baseline.status.success());
+        assert!(baseline.stderr.is_empty());
+        assert_eq!(baseline.stdout, expected.as_bytes());
+        for reverse in [false, true] {
+            let (_, output) = build(&source, &[("entry.mjs", true)], reverse);
+            assert_eq!(output.backend, Backend::Native);
+            let mut actual = output.files.clone();
+            actual.insert("observe.mjs".into(), observation(&output, observer));
+            let actual = node(&actual, Path::new("observe.mjs"));
+            assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+            assert!(actual.stderr.is_empty());
+            assert_eq!(actual.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
+fn native_segment_schedule_preserves_deferred_class_and_getter_snapshots() {
+    let source = sources(&[
+        (
+            "a.mjs",
+            "export {snapshot, instance, later, getter, read} from './shared.mjs';",
+        ),
+        ("b.mjs", "export {instance, read} from './shared.mjs';"),
+        (
+            "shared.mjs",
+            "let state = 0; export const snapshot = state; class Box { field = (() => { state++; return state; })(); } const Alias = Box; export const instance = new Alias(); export const later = state; const object = {get value() { state++; return state; }}; export const getter = object.value; export function read() { return state; }",
+        ),
+    ]);
+    let entries = [("a.mjs", true), ("b.mjs", true)];
+    let (_, output) = build(&source, &entries, false);
+    let observer = "const a = await import('./a.mjs'); const b = await import('./b.mjs'); console.log(a.snapshot, a.instance.field, a.later, a.getter, a.read(), a.instance === b.instance, a.read === b.read);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), observation(&output, observer));
+    let actual = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        node(&baseline, Path::new("observe.mjs")).stdout
+    );
+    insta::assert_snapshot!(String::from_utf8(actual.stdout).unwrap(), @"0 1 1 2 2 true true");
+}
+
+#[test]
+fn native_pure_segment_schedule_colocates_independent_and_shared_components() {
+    let source = sources(&[
+        (
+            "a.mjs",
+            "export {left, token, group} from './shared.mjs'; export {first} from './left.mjs'; export {safe, early, late} from './effect.mjs'; export {otherEarly} from './effect2.mjs';",
+        ),
+        (
+            "b.mjs",
+            "export {right, token, group} from './shared.mjs'; export {second} from './right.mjs'; export {early} from './effect.mjs'; export {otherEarly} from './effect2.mjs';",
+        ),
+        (
+            "shared.mjs",
+            "export const left = 1; export const right = 2; export const token = {}; export function group() { return 3; }",
+        ),
+        ("left.mjs", "const base = 5; export const first = base;"),
+        ("right.mjs", "export const second = 6;"),
+        (
+            "effect.mjs",
+            "export const early = {}; export function safe() { return 7; } console.log('effect'); export const late = 8;",
+        ),
+        (
+            "effect2.mjs",
+            "export const otherEarly = {}; console.log('effect2');",
+        ),
+    ]);
+    let entries = [("a.mjs", true), ("b.mjs", true)];
+    let mut pure = source.clone();
+    pure.remove(Path::new("effect.mjs"));
+    pure.remove(Path::new("effect2.mjs"));
+    pure.insert(
+        "a.mjs".into(),
+        "export {left, token, group} from './shared.mjs'; export {first} from './left.mjs';".into(),
+    );
+    pure.insert(
+        "b.mjs".into(),
+        "export {right, token, group} from './shared.mjs'; export {second} from './right.mjs';"
+            .into(),
+    );
+    let (_, output) = build(&pure, &entries, false);
+    let owner = |module: &str, index| {
+        &output.members[&NodeId::Segment {
+            module: module.into(),
+            index,
+        }]
+    };
+    assert_eq!(owner("shared.mjs", 0), &output.entries["a.mjs"]);
+    assert_eq!(owner("shared.mjs", 1), &output.entries["b.mjs"]);
+    assert_eq!(owner("left.mjs", 0), &output.entries["a.mjs"]);
+    assert_eq!(owner("left.mjs", 1), &output.entries["a.mjs"]);
+    assert_eq!(owner("right.mjs", 0), &output.entries["b.mjs"]);
+    assert_eq!(owner("shared.mjs", 2), owner("shared.mjs", 3));
+    assert_ne!(owner("shared.mjs", 2), &output.entries["a.mjs"]);
+    assert_ne!(owner("shared.mjs", 2), &output.entries["b.mjs"]);
+    for module in ["shared.mjs", "left.mjs", "right.mjs"] {
+        assert!(!output.modules.contains_key(Path::new(module)));
+    }
+    assert_eq!(output, build(&pure, &entries, true).1);
+    // Adding native phases may require separate lexical jobs. Keep the original
+    // effectful program as a differential check, not a co-location requirement.
+    let (_, output) = build(&source, &entries, false);
+    assert_eq!(output, build(&source, &entries, true).1);
+    let observer = "const a = await import('./a.mjs'); const b = await import('./b.mjs'); console.log(a.left, b.right, a.first, b.second, a.safe(), a.token === b.token, a.group === b.group, a.group(), a.group.name, a.safe.name, a.early === b.early, a.otherEarly === b.otherEarly, a.late);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), observation(&output, observer));
+    let actual = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        actual.stdout,
+        node(&baseline, Path::new("observe.mjs")).stdout
+    );
+}
+
+#[test]
+fn native_segment_owners_keep_mutable_accesses_native_with_pure_prefix_jobs() {
+    let source = sources(&[
+        (
+            "a.mjs",
+            "import {left, state, bump} from './shared.mjs'; import {label} from './left.mjs'; export {left, state, bump, label};",
+        ),
+        (
+            "b.mjs",
+            "import {right, state, bump} from './shared.mjs'; import {label} from './right.mjs'; export {right, state, bump, label};",
+        ),
+        (
+            "shared.mjs",
+            "export const left = () => state; export const right = () => state; export let state = 0; export function bump() { state++; } console.log('shared');",
+        ),
+        (
+            "left.mjs",
+            "export const label = () => 'left'; console.log('left effect');",
+        ),
+        (
+            "right.mjs",
+            "export const label = () => 'right'; console.log('right effect');",
+        ),
     ]);
     let entries = [("a.mjs", true), ("b.mjs", true)];
     let (plan, output) = build(&source, &entries, false);
@@ -1331,15 +1686,19 @@ fn native_segment_owners_split_shared_sources_and_colocate_unrelated_declaration
     let right = &output.members[&segment("shared.mjs", 1)];
     assert_ne!(
         left, right,
-        "source modules are not physical placement units"
+        "independent prefix demand chooses separate owners"
     );
-    assert_eq!(left, &output.entries["a.mjs"]);
-    assert_eq!(right, &output.entries["b.mjs"]);
-    assert_eq!(left, &output.members[&segment("left.mjs", 0)]);
-    assert_eq!(right, &output.members[&segment("right.mjs", 0)]);
-    assert_ne!(left, &output.members[&segment("left.mjs", 1)]);
-    assert_ne!(right, &output.members[&segment("right.mjs", 1)]);
+    assert_ne!(left, &output.entries["a.mjs"]);
+    assert_ne!(right, &output.entries["b.mjs"]);
     assert_ne!(left, &output.members[&segment("shared.mjs", 2)]);
+    assert_eq!(
+        output.members[&segment("left.mjs", 0)],
+        output.members[&segment("left.mjs", 1)]
+    );
+    assert_eq!(
+        output.members[&segment("right.mjs", 0)],
+        output.members[&segment("right.mjs", 1)]
+    );
     assert_eq!(
         output.members[&segment("shared.mjs", 2)],
         output.members[&segment("shared.mjs", 3)]
@@ -1374,10 +1733,22 @@ fn native_segment_owners_split_shared_sources_and_colocate_unrelated_declaration
 #[test]
 fn native_segment_relocation_preserves_unchanged_imports_and_default_expressions() {
     for (shared, left_index) in [
-        ("export const left = 1; const value = 2; export {value as state}; console.log('shared', value);", 0),
-        ("export const left = 1; const value = 2; export {value as state}; export default 3; console.log('shared', value);", 0),
-        ("export const left = 1; const value = 2; const state = 4; export {value as state, state as other}; export default 3; console.log('shared', value, state);", 0),
-        ("const hidden = 2; export const left = () => hidden; const value = 4; export {value as state, value as hidden}; console.log('shared', hidden, value);", 1),
+        (
+            "export const left = 1; const value = 2; export {value as state}; console.log('shared', value);",
+            0,
+        ),
+        (
+            "export const left = 1; const value = 2; export {value as state}; export default 3; console.log('shared', value);",
+            0,
+        ),
+        (
+            "export const left = 1; const value = 2; const state = 4; export {value as state, state as other}; export default 3; console.log('shared', value, state);",
+            0,
+        ),
+        (
+            "const hidden = 2; export const left = () => hidden; const value = 4; export {value as state, value as hidden}; console.log('shared', hidden, value);",
+            1,
+        ),
     ] {
         let default = if shared.contains("export default") {
             "import value from './shared.mjs'; console.log(value);"
@@ -1385,18 +1756,24 @@ fn native_segment_relocation_preserves_unchanged_imports_and_default_expressions
             ""
         };
         let source = sources(&[
-            ("a.mjs", &format!("import {{left}} from './shared.mjs'; console.log(left); {default}")),
-            ("b.mjs", &format!("import {{state}} from './shared.mjs'; console.log(state); {default}")),
+            (
+                "a.mjs",
+                &format!("import {{left}} from './shared.mjs'; console.log(left); {default}"),
+            ),
+            (
+                "b.mjs",
+                &format!("import {{state}} from './shared.mjs'; console.log(state); {default}"),
+            ),
             ("shared.mjs", shared),
         ]);
         let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
-        assert_eq!(
+        assert_ne!(
             output.members[&NodeId::Segment {
                 module: "shared.mjs".into(),
                 index: left_index,
             }],
             output.entries["a.mjs"],
-            "keep relocation enabled while preserving the remaining addresses"
+            "abrupt source phases preserve their native addresses"
         );
         for entry in ["a.mjs", "b.mjs"] {
             let baseline = node(&source, Path::new(entry));
@@ -1414,12 +1791,18 @@ fn native_segment_relocation_preserves_unchanged_imports_and_default_expressions
 #[test]
 fn native_segment_relocation_keeps_cross_chunk_names_distinct_from_destination_locals() {
     let source = sources(&[
-        ("a.mjs", "export const x = 1; export const left = () => x; console.log('shared', x);"),
-        ("b.mjs", "import {x as other, left} from './a.mjs'; const x = 3; console.log(other, left(), x, left.name);"),
+        (
+            "a.mjs",
+            "export const x = 1; export const left = () => x; console.log('shared', x);",
+        ),
+        (
+            "b.mjs",
+            "import {x as other, left} from './a.mjs'; const x = 3; console.log(other, left(), x, left.name);",
+        ),
         ("c.mjs", "import {x} from './a.mjs'; console.log(x);"),
     ]);
     let (_, output) = build(&source, &[("b.mjs", true), ("c.mjs", true)], false);
-    assert_eq!(
+    assert_ne!(
         output.members[&NodeId::Segment {
             module: "a.mjs".into(),
             index: 1,
@@ -1441,9 +1824,18 @@ fn native_segment_relocation_keeps_cross_chunk_names_distinct_from_destination_l
 #[test]
 fn arbitrary_placement_shares_mutable_lexical_clusters_across_source_boundaries() {
     let source = sources(&[
-        ("a.mjs", "import {left, state, bump} from './shared.mjs'; import {token} from './other.mjs'; export {left, state, bump, token};"),
-        ("b.mjs", "import {right, state, bump} from './shared.mjs'; import {token} from './other.mjs'; export {right, state, bump, token};"),
-        ("shared.mjs", "export let state = 0; export function bump() { state++; } export const left = () => state; export const right = () => state; console.log('shared effect');"),
+        (
+            "a.mjs",
+            "import {left, state, bump} from './shared.mjs'; import {token} from './other.mjs'; export {left, state, bump, token};",
+        ),
+        (
+            "b.mjs",
+            "import {right, state, bump} from './shared.mjs'; import {token} from './other.mjs'; export {right, state, bump, token};",
+        ),
+        (
+            "shared.mjs",
+            "export let state = 0; export function bump() { state++; } export const left = () => state; export const right = () => state; console.log('shared effect');",
+        ),
         ("other.mjs", "export const token = {};"),
     ]);
     let entries = [("a.mjs", true), ("b.mjs", true)];
@@ -1454,15 +1846,15 @@ fn arbitrary_placement_shares_mutable_lexical_clusters_across_source_boundaries(
     };
     let state = &output.members[&segment("shared.mjs", 0)];
     assert_eq!(state, &output.members[&segment("shared.mjs", 1)]);
-    assert_eq!(state, &output.members[&segment("other.mjs", 0)]);
+    assert_ne!(state, &output.members[&segment("other.mjs", 0)]);
     assert_ne!(state, &output.entries["a.mjs"]);
     assert_ne!(state, &output.entries["b.mjs"]);
     assert_ne!(state, &output.members[&segment("shared.mjs", 4)]);
-    assert_eq!(
+    assert_ne!(
         &output.members[&segment("shared.mjs", 2)],
         &output.entries["a.mjs"]
     );
-    assert_eq!(
+    assert_ne!(
         &output.members[&segment("shared.mjs", 3)],
         &output.entries["b.mjs"]
     );
@@ -1522,24 +1914,60 @@ fn arbitrary_placement_namespaces_do_not_retain_dead_private_chunks() {
 fn arbitrary_placement_preserves_initialization_snapshots_and_async_cycle_phases() {
     for items in [
         vec![
-            ("a.mjs", "import {snapshot, read} from './shared.mjs'; console.log(snapshot, read());"),
-            ("b.mjs", "import {state, read} from './shared.mjs'; console.log(state, read());"),
-            ("shared.mjs", "export let state = 1; export const snapshot = state; export function read() { return state; } state = 2;"),
+            (
+                "a.mjs",
+                "import {snapshot, read} from './shared.mjs'; console.log(snapshot, read());",
+            ),
+            (
+                "b.mjs",
+                "import {state, read} from './shared.mjs'; console.log(state, read());",
+            ),
+            (
+                "shared.mjs",
+                "export let state = 1; export const snapshot = state; export function read() { return state; } state = 2;",
+            ),
         ],
         vec![
-            ("a.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
-            ("b.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
-            ("shared.mjs", "console.log('before await'); await 0; export const value = 3; export function read() { return value; } console.log('after await');"),
+            (
+                "a.mjs",
+                "import {read, value} from './shared.mjs'; console.log(read(), value);",
+            ),
+            (
+                "b.mjs",
+                "import {read, value} from './shared.mjs'; console.log(read(), value);",
+            ),
+            (
+                "shared.mjs",
+                "console.log('before await'); await 0; export const value = 3; export function read() { return value; } console.log('after await');",
+            ),
         ],
         vec![
-            ("a.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
-            ("b.mjs", "import {read, value} from './shared.mjs'; console.log(read(), value);"),
-            ("shared.mjs", "import './cycle.mjs'; export default function() { return 'default'; } export function read() { return 9; } export const value = 3;"),
-            ("cycle.mjs", "import fn from './shared.mjs'; console.log(fn(), fn.name);"),
+            (
+                "a.mjs",
+                "import {read, value} from './shared.mjs'; console.log(read(), value);",
+            ),
+            (
+                "b.mjs",
+                "import {read, value} from './shared.mjs'; console.log(read(), value);",
+            ),
+            (
+                "shared.mjs",
+                "import './cycle.mjs'; export default function() { return 'default'; } export function read() { return 9; } export const value = 3;",
+            ),
+            (
+                "cycle.mjs",
+                "import fn from './shared.mjs'; console.log(fn(), fn.name);",
+            ),
         ],
         vec![
-            ("a.mjs", "import './b.mjs'; import * as ns from './c.mjs'; export function f() { return ns.value; }"),
-            ("b.mjs", "import {f} from './a.mjs'; try { console.log(f()); } catch (error) { console.log(error.name); }"),
+            (
+                "a.mjs",
+                "import './b.mjs'; import * as ns from './c.mjs'; export function f() { return ns.value; }",
+            ),
+            (
+                "b.mjs",
+                "import {f} from './a.mjs'; try { console.log(f()); } catch (error) { console.log(error.name); }",
+            ),
             ("c.mjs", "console.log('c'); export const value = 1;"),
         ],
     ] {
@@ -1552,19 +1980,35 @@ fn arbitrary_placement_preserves_initialization_snapshots_and_async_cycle_phases
             ("a.mjs", "f")
         };
         let file = graph.file_id(Path::new(module)).unwrap();
-        let linked = graph.resolve_export(file, name, source_graph::Namespace::Value).unwrap();
+        let linked = graph
+            .resolve_export(file, name, source_graph::Namespace::Value)
+            .unwrap();
         let definition = crate::chunks::node_id(&graph, linked.declaration).unwrap();
         let evaluation = NodeId::Module(module.into());
-        if module == "shared.mjs" {
-            assert_ne!(output.members[&definition], output.members[&evaluation], "hoisted functions can leave their source evaluation phase");
+        if module == "shared.mjs" && !output.async_modules.contains(Path::new(module)) {
+            assert_ne!(
+                output.members[&definition], output.members[&evaluation],
+                "hoisted functions can leave their source evaluation phase"
+            );
         } else {
-            assert_eq!(output.members[&definition], output.members[&evaluation], "relocation cannot activate a later native dependency");
+            assert_eq!(
+                output.members[&definition], output.members[&evaluation],
+                "relocation cannot activate a later native dependency"
+            );
         }
         for entry in ["a.mjs", "b.mjs"] {
             let baseline = node(&source, Path::new(entry));
-            assert!(baseline.status.success(), "{}", String::from_utf8_lossy(&baseline.stderr));
+            assert!(
+                baseline.status.success(),
+                "{}",
+                String::from_utf8_lossy(&baseline.stderr)
+            );
             let actual = node(&output.files, &output.entries[entry]);
-            assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+            assert!(
+                actual.status.success(),
+                "{}",
+                String::from_utf8_lossy(&actual.stderr)
+            );
             assert_eq!(actual.stdout, baseline.stdout);
         }
     }
@@ -1573,15 +2017,27 @@ fn arbitrary_placement_preserves_initialization_snapshots_and_async_cycle_phases
 #[test]
 fn arbitrary_placement_preserves_commonjs_and_namespace_activation_order() {
     let source = sources(&[
-        ("a.mjs", "import {read, pure} from './shared.mjs'; console.log('a', read(), pure());"),
-        ("b.mjs", "import {read} from './shared.mjs'; console.log('b', read());"),
-        ("shared.mjs", "import './before.mjs'; import value from './dep.cjs'; import * as ns from './ns.mjs'; export function read() { return value + ns.value; } export const pure = () => 1;"),
+        (
+            "a.mjs",
+            "import {read, pure} from './shared.mjs'; console.log('a', read(), pure());",
+        ),
+        (
+            "b.mjs",
+            "import {read} from './shared.mjs'; console.log('b', read());",
+        ),
+        (
+            "shared.mjs",
+            "import './before.mjs'; import value from './dep.cjs'; import * as ns from './ns.mjs'; export function read() { return value + ns.value; } export const pure = () => 1;",
+        ),
         ("before.mjs", "console.log('before');"),
         ("dep.cjs", "console.log('cjs'); module.exports = 2;"),
-        ("ns.mjs", "console.log('namespace'); export const value = 3;"),
+        (
+            "ns.mjs",
+            "console.log('namespace'); export const value = 3;",
+        ),
     ]);
     let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
-    assert_eq!(
+    assert_ne!(
         output.members[&NodeId::Segment {
             module: "shared.mjs".into(),
             index: 4
@@ -1708,9 +2164,18 @@ fn connector_grouping_ignores_unretained_declarations() {
 #[test]
 fn native_segment_relocation_preserves_tdz_effect_order_and_deferred_activation() {
     let source = sources(&[
-        ("a.mjs", "import {left} from './shared.mjs'; console.log('a', left); export const load = () => import('./lazy.mjs');"),
-        ("b.mjs", "import {right} from './shared.mjs'; console.log('b', right);"),
-        ("shared.mjs", "try { console.log(left); } catch (error) { console.log(error.name); } export const left = 1; export const right = 2; console.log('shared');"),
+        (
+            "a.mjs",
+            "import {left} from './shared.mjs'; console.log('a', left); export const load = () => import('./lazy.mjs');",
+        ),
+        (
+            "b.mjs",
+            "import {right} from './shared.mjs'; console.log('b', right);",
+        ),
+        (
+            "shared.mjs",
+            "try { console.log(left); } catch (error) { console.log(error.name); } export const left = 1; export const right = 2; console.log('shared');",
+        ),
         ("lazy.mjs", "console.log('lazy'); export const value = 3;"),
     ]);
     let (_, output) = build(&source, &[("a.mjs", true), ("b.mjs", true)], false);
@@ -1722,19 +2187,29 @@ fn native_segment_relocation_preserves_tdz_effect_order_and_deferred_activation(
         module: "shared.mjs".into(),
         index: 2,
     };
-    assert_ne!(output.members[&left], output.members[&right]);
+    assert_eq!(output.members[&left], output.members[&right]);
     assert_ne!(
         output.members[&left], output.entries["a.mjs"],
         "a lexical declaration cannot cross its original TDZ observation"
     );
     for (observer, expected) in [
-        ("await import('./a.mjs'); await import('./b.mjs');", "ReferenceError\nshared\na 1\nb 2\n"),
-        ("const a = await import('./a.mjs'); console.log('before lazy'); console.log((await a.load()).value);", "ReferenceError\nshared\na 1\nbefore lazy\nlazy\n3\n"),
+        (
+            "await import('./a.mjs'); await import('./b.mjs');",
+            "ReferenceError\nshared\na 1\nb 2\n",
+        ),
+        (
+            "const a = await import('./a.mjs'); console.log('before lazy'); console.log((await a.load()).value);",
+            "ReferenceError\nshared\na 1\nbefore lazy\nlazy\n3\n",
+        ),
     ] {
         let mut actual = output.files.clone();
         actual.insert("observe.mjs".into(), observation(&output, observer));
         let actual = node(&actual, Path::new("observe.mjs"));
-        assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
         assert_eq!(actual.stdout, expected.as_bytes());
     }
 }
