@@ -12,7 +12,7 @@ pub use analysis::{
     Analysis, AnalysisResult, ExternalReference, FileAnalysis, ParsedFile, ParsedRoot,
     ParsedSymbol, Resolution, Resolver, RootId, Symbol, SymbolId,
 };
-pub use environment::{declaration_matches, DeclarationConfig};
+pub use environment::{declaration_matches, DeclarationConfig, Environment};
 pub use inference::infer_function_contracts;
 pub use javascript::{
     analyze_source, extract_from_ast, parse_from_ast, parse_from_ast_with_segments, parse_source,

@@ -8,6 +8,13 @@ Keep one validated immutable `PreparedDeclarations` per session configuration;
 share its fingerprint through memory/disk checks and extraction. Internal build
 layer keys use typed XXH3-128 fingerprints; publication/content integrity and
 resource naming retain SHA-256.
+Select Ecco host contracts from resolver target and key preparation by host plus
+declaration config; retain explicit user overrides and wrapper read contracts.
+Browser emits native ESM only, including JSON/asset/global CSS wrappers and
+finite dynamic-import contexts. Reject Node builtins even as externals, actual
+CJS and require contexts. ESM-only context diagnostics capture Error in a native
+intrinsic module before entry effects, never package a Node loader.
+Default condition lists follow target switches; custom lists stay caller policy.
 Keep native TDZ barriers and add-only forced-effect rules when refining syntax effects.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
 separate layer fingerprints, inventory config/add/delete changes, and derive
@@ -70,8 +77,9 @@ sides of each source-local phase, including unrelated lexical initializations;
 do not order independent entries or move TDZ declarations ahead of failing reads.
 Resource preparation separates original input bytes from generated JS text and
 parser paths. Graph paths retain input identity; spans/provenance describe only
-generated text. Recheck original bytes on reuse and return. JSON uses an opaque
-CJS value initializer with computed object keys, never mutable runtime JSON.parse.
+generated text. Recheck original bytes on reuse and return. JSON uses a shared
+native ESM default value for Browser and opaque CJS initializer for Node, both
+with computed object keys, never mutable runtime JSON.parse.
 Assets export validated public-base URL strings (output-root-relative by default)
 and use content-addressed byte artifacts. Relative CSS fetches resolve from the
 emitted stylesheet, never by applying the public base twice. Bases do not rename

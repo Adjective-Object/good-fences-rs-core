@@ -13,11 +13,20 @@ undeclared builtins fail. External export names are delegated to the host, not
 validated as local files. Options retain explicit canonical/preserved symlink
 policy. Graph source identities must use the same policy.
 Node defaults activate `node`, `node-addons` and `module-sync` in addition to the
-request mode; browser defaults omit those Node conditions. Package declaration
+request mode; browser defaults activate `browser` and omit those Node conditions.
+Structural browser resolution rejects bare/`node:` builtins even when external;
+it never injects polyfills. Package declaration
 order, including an early `default`, determines which active condition wins.
 An exports map is authoritative: unmatched subpaths or inactive conditions fail
 resolution, even when a matching physical file exists. Packages without exports
-retain legacy filesystem resolution. Bare-string exports intentionally expose
+retain legacy filesystem resolution. Browser resolution applies a dependency's
+object mapping to its selected legacy package entry (for example, `main` pointing
+to `server.mjs` mapped to `browser.mjs`), while preserving importer request/path
+mappings. Cached cwd-relative browser destinations are restored to absolute
+package-entry paths before normal filename resolution. Node ignores these
+browser mappings. Boolean `false` mappings do not
+currently synthesize empty modules.
+Bare-string exports intentionally expose
 the selected root plus arbitrary files within that package, equivalent to adding
 `"./*": "./*"`; unlike explicit maps, this shorthand is not Node-encapsulated.
 

@@ -121,6 +121,7 @@ impl NodeModulesResolverOptions {
                     target_env == TargetEnv::Node
                         || !matches!(*condition, "node" | "node-addons" | "module-sync")
                 })
+                .chain((target_env == TargetEnv::Browser).then_some("browser"))
                 .map(|s| s.to_string())
                 .collect(),
         }
@@ -361,9 +362,25 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
         if let Some(Some(target)) = main_fields.iter().find(|x| x.is_some()) {
             let path = pkg_dir.join(target);
-            return self
+            let resolved = self
                 .resolve_as_file(&path)
-                .or_else(|_| self.resolve_as_directory(&path, false));
+                .or_else(|_| self.resolve_as_directory(&path, false))?;
+            return resolved
+                .map(|path| {
+                    if self.target_env == TargetEnv::Browser {
+                        let absolute = join_abspath(self.monorepo_root, &path)?;
+                        let rewritten = resolution_data.rewrite_browser(&absolute)?;
+                        // BrowserCache destinations can be cwd-relative, unlike package entries.
+                        if rewritten.is_relative() {
+                            Ok(current_dir()?.join(rewritten))
+                        } else {
+                            Ok(rewritten.to_path_buf())
+                        }
+                    } else {
+                        Ok(path)
+                    }
+                })
+                .transpose();
         }
 
         Ok(None)

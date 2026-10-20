@@ -117,6 +117,17 @@ edges still belong to the bundler.
 ECMAScript 2025 and Node 24 presets with parsed `user` declaration sets. Exact
 user bindings override preset bindings; duplicate user contracts and build-wide
 local contracts are errors. Effective ordering is canonical for cache hashing.
+`effective_for_environment(Environment::Browser)` selects `presets/browser.ecco`
+instead of Node, retaining the independent `javascript` switch and user contracts.
+The `node` and `browser` switches enable only their selected host; both default
+to enabled, but `effective()` still selects Node. Browser contracts cover a bounded
+Window environment (document/navigation/storage, fetch, timers and events), not
+exhaustive DOM typings or worker environments. Host reads remain conservative,
+including inside inferred functions; DOM getters, mutations, callbacks and
+arbitrary APIs are not pure. Browser host-object member aliases are deliberately
+not expanded into trusted namespace paths, so `globalThis.document` and unknown
+`window`/`self` properties retain getter effects. Exact user read and function
+contracts remain separate overrides.
 The JavaScript preset covers globals, constructors/prototypes, collections,
 typed arrays, Math, JSON, Reflect, Atomics, promises and iterator helpers. The Node
 preset covers host globals and builtin modules, including `node:` and supported

@@ -47,6 +47,7 @@ pub struct BuildOptions {
     pub resolver: NodeModulesResolverOptions,
     pub externals: BTreeSet<String>,
     pub effects: EffectPolicy,
+    /// JavaScript and target-selected host contracts, followed by exact user overrides.
     pub declarations: ecco::DeclarationConfig,
     pub cache: CacheMode,
     pub output: OutputOptions,
@@ -180,7 +181,11 @@ pub struct BuildSession {
     sources: BTreeMap<PathBuf, Source>,
     resolutions: BTreeMap<PathBuf, HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>>,
     resolution_key: Option<Fingerprint>,
-    declarations: Option<(ecco::DeclarationConfig, PreparedDeclarations)>,
+    declarations: Option<(
+        ecco::DeclarationConfig,
+        ecco::Environment,
+        PreparedDeclarations,
+    )>,
     last: Option<Rc<BuildProduct>>,
 }
 
@@ -217,10 +222,6 @@ impl BuildSession {
             !options.resolver.preserve_symlinks,
             "build supports canonical module identities only"
         );
-        ensure!(
-            options.resolver.target_env == TargetEnv::Node,
-            "public build target is Node only"
-        );
         let mut counters = Counters::default();
         let before_parses = (
             ast_segmenter::module_parse_count(),
@@ -230,19 +231,24 @@ impl BuildSession {
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
         options.css.css_modules.validate()?;
+        let environment = match options.resolver.target_env {
+            TargetEnv::Node => ecco::Environment::Node,
+            TargetEnv::Browser => ecco::Environment::Browser,
+        };
         if self
             .declarations
             .as_ref()
-            .is_none_or(|(config, _)| config != &options.declarations)
+            .is_none_or(|(config, host, _)| config != &options.declarations || *host != environment)
         {
-            let prepared = crate::effect_analysis::prepare_declarations(&options.declarations)?;
-            self.declarations = Some((options.declarations.clone(), prepared));
+            let prepared =
+                crate::effect_analysis::prepare_declarations(&options.declarations, environment)?;
+            self.declarations = Some((options.declarations.clone(), environment, prepared));
         }
         let declarations = self
             .declarations
             .as_ref()
             .expect("prepared declarations")
-            .1
+            .2
             .clone();
         let declarations_key = declarations.fingerprint();
         let inventory = inventory(&self.root)?;
@@ -306,6 +312,10 @@ impl BuildSession {
             let format = package_format(&self.root, &path)?;
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
             let kind = crate::resource::kind(&path, &options.css.css_modules);
+            let wrapper_format = match options.resolver.target_env {
+                TargetEnv::Browser => ModuleFormat::Esm,
+                TargetEnv::Node => ModuleFormat::CommonJs,
+            };
             let prepared_css = if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
                 styles.discover(&path, &input, &resolver)?;
                 Some(options.css.load.strategy().generate_module(
@@ -315,6 +325,7 @@ impl BuildSession {
                         name_mappings: styles.name_mappings(&path).unwrap_or(&BTreeMap::new()),
                         is_module: styles.name_mappings(&path).is_some(),
                         evaluation_dependencies: &styles.evaluation_dependencies(&path),
+                        wrapper_format,
                     },
                 )?)
             } else {
@@ -330,7 +341,7 @@ impl BuildSession {
                 changed.insert(path.clone());
             }
             let parser_path = prepared_css.as_ref().map_or_else(
-                || crate::resource::parser_path(&path),
+                || crate::resource::parser_path(&path, wrapper_format),
                 |prepared| prepared.parser_path.clone(),
             );
             let parser_package = prepared_css
@@ -341,7 +352,7 @@ impl BuildSession {
                 relocations.insert(path.clone(), prepared.relocations);
                 prepared.source
             } else {
-                crate::resource::prepare(&path, &input, &public_base)?
+                crate::resource::prepare(&path, &input, &public_base, wrapper_format)?
             };
             if self.sources.get(&path).is_some_and(|s| {
                 s.input == input
@@ -387,6 +398,24 @@ impl BuildSession {
                 .expect("loaded source")
                 .css_identity = css_identity;
             let source = &self.sources[&path];
+            if options.resolver.target_env == TargetEnv::Browser {
+                ensure!(
+                    !source.record.module.facts.commonjs,
+                    "{}: browser target does not support CommonJS inputs; the native CommonJS backend requires a Node loader",
+                    path.display()
+                );
+                ensure!(
+                    source
+                        .record
+                        .module
+                        .facts
+                        .dependencies
+                        .iter()
+                        .all(|dependency| dependency.kind != ast_segmenter::owned::DependencyKind::Require),
+                    "{}: browser target does not support require or require contexts; use native imports",
+                    path.display()
+                );
+            }
             let resolved = if let Some(cached) =
                 self.resolutions.get(&path).filter(|_| !external_sources)
             {
@@ -517,6 +546,7 @@ impl BuildSession {
                     "native-node-cjs-initializers-v1\n",
                     include_str!("native_cjs.rs"),
                     include_str!("runtime.cjs"),
+                    include_str!("context_intrinsics.mjs"),
                     include_str!("commonjs_namespace.mjs")
                 )
                 .as_bytes(),
@@ -732,8 +762,8 @@ fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
 
 mod inventory;
 mod resolver;
-pub(crate) use inventory::Inventory;
 use inventory::inventory;
+pub(crate) use inventory::Inventory;
 
 #[cfg(test)]
 mod tests;
