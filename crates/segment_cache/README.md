@@ -3,8 +3,8 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 9 /
-extractor 11, including owned lazy Ecco precursors and declaration identity,
+Syntax-local effect reasons/timing are persisted and range-checked (schema 10 /
+extractor 12, including relative dependency patterns, owned lazy Ecco precursors and declaration identity,
 source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
 effective commonjs format, invocation inputs/annotation sites and normalized member

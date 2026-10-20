@@ -28,6 +28,7 @@ expression: "(&plan.node_roots, &plan.chunks)"
                 AsyncSiteId {
                     module: "nested.ts",
                     offset: 0,
+                    candidate: None,
                 },
             ),
         },
@@ -38,12 +39,14 @@ expression: "(&plan.node_roots, &plan.chunks)"
                 AsyncSiteId {
                     module: "entry.ts",
                     offset: 19,
+                    candidate: None,
                 },
             ),
             Async(
                 AsyncSiteId {
                     module: "leaf.ts",
                     offset: 0,
+                    candidate: None,
                 },
             ),
         },
@@ -75,6 +78,7 @@ expression: "(&plan.node_roots, &plan.chunks)"
                 AsyncSiteId {
                     module: "nested.ts",
                     offset: 0,
+                    candidate: None,
                 },
             ),
         },
@@ -86,12 +90,14 @@ expression: "(&plan.node_roots, &plan.chunks)"
                 AsyncSiteId {
                     module: "entry.ts",
                     offset: 19,
+                    candidate: None,
                 },
             ),
             Async(
                 AsyncSiteId {
                     module: "leaf.ts",
                     offset: 0,
+                    candidate: None,
                 },
             ),
         },
@@ -121,12 +127,14 @@ expression: "(&plan.node_roots, &plan.chunks)"
                     AsyncSiteId {
                         module: "entry.ts",
                         offset: 19,
+                        candidate: None,
                     },
                 ),
                 Async(
                     AsyncSiteId {
                         module: "leaf.ts",
                         offset: 0,
+                        candidate: None,
                     },
                 ),
             },
@@ -145,6 +153,7 @@ expression: "(&plan.node_roots, &plan.chunks)"
                     AsyncSiteId {
                         module: "nested.ts",
                         offset: 0,
+                        candidate: None,
                     },
                 ),
             },

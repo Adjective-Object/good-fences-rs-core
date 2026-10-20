@@ -22,6 +22,241 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn relative_context_imports_preserve_lazy_namespaces_and_warm_candidate_changes() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+export const load = name => import(`./parts/${name}`);
+console.log('start');
+const a = await load('a.mjs');
+console.log(a.value, a === await load('a.mjs'));
+const b = await load('b.cjs');
+console.log(b.value, b === await load('b.cjs'));
+try { const promise = load('missing.mjs'); console.log('promise', promise instanceof Promise); await promise; } catch (e) { console.log(e.code); }
+"#,
+    );
+    write(
+        dir.root(),
+        "parts/a.mjs",
+        "console.log('a'); export const value = 1;",
+    );
+    write(
+        dir.root(),
+        "parts/b.cjs",
+        "console.log('b'); exports.value = 2;",
+    );
+    write(
+        dir.root(),
+        "parts/unused.mjs",
+        "console.log('unused'); export const value = 3;",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&options()).unwrap();
+    assert_eq!(
+        observe(&first.product.artifacts),
+        b"start\na\n1 true\nb\n2 true\npromise true\nERR_MODULE_NOT_FOUND\n"
+    );
+    assert_eq!(first.product.artifacts.async_facades.len(), 3);
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.product.artifacts, first.product.artifacts);
+    write(dir.root(), "parts/added.mjs", "export const value = 4;");
+    let added = session.build(&options()).unwrap();
+    assert_eq!(added.counters.source_parses, 1);
+    assert_eq!(added.product.artifacts.async_facades.len(), 4);
+    fs::remove_file(dir.root().join("parts/unused.mjs")).unwrap();
+    let removed = session.build(&options()).unwrap();
+    assert_eq!(removed.product.artifacts.async_facades.len(), 3);
+    assert_eq!(
+        observe(&removed.product.artifacts),
+        observe(&first.product.artifacts)
+    );
+}
+
+#[test]
+fn relative_context_imports_keep_argument_rewrites_awaits_and_rejections() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import {name} from './name.mjs';
+const load = () => import('./parts/' + name + '.mjs');
+const nested = await import(`./parts/${(await import('./name.mjs')).name}.mjs`);
+console.log(nested.value, nested === await load());
+const bad = {toString() { throw new Error('argument'); }};
+try {
+  const promise = import(`./parts/${bad}.mjs`);
+  console.log('promise', promise instanceof Promise);
+  await promise;
+} catch (error) { console.log(error.message); }
+try { await import(`./empty/${name}.mjs`); } catch (error) { console.log(error.code); }
+"#,
+    );
+    write(dir.root(), "name.mjs", "export const name = 'a';");
+    write(dir.root(), "parts/a.mjs", "export const value = 5;");
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(
+        observe(&product.product.artifacts),
+        b"5 true\nargument\nERR_MODULE_NOT_FOUND\n"
+    );
+    assert_eq!(product.counters.source_reparses, 0);
+    assert_eq!(product.counters.fragment_reparses, 0);
+}
+
+#[test]
+fn relative_context_requires_capture_extensionless_and_index_aliases_without_eager_execution() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './main.cjs';");
+    write(
+        dir.root(),
+        "main.cjs",
+        r#"
+const load = name => require('./parts/' + name);
+console.log('start');
+console.log(load('a').value, load('a') === load('a.js'));
+console.log(load('nested').value, load('nested') === load('nested/'));
+try { load('missing'); } catch (e) { console.log(e.code); }
+module.exports = load;
+"#,
+    );
+    write(
+        dir.root(),
+        "parts/a.js",
+        "console.log('a'); exports.value = 1;",
+    );
+    write(
+        dir.root(),
+        "parts/nested/index.js",
+        "console.log('nested'); exports.value = 2;",
+    );
+    write(dir.root(), "parts/unused.js", "console.log('unused');");
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(
+        observe(&product.product.artifacts),
+        b"start\na\n1 true\nnested\n2 true\nMODULE_NOT_FOUND\n"
+    );
+}
+
+#[test]
+fn relative_contexts_do_not_activate_dead_sites_and_compose_nested_commonjs_dependencies() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+function dead(name) { return import(`./dead/${name}.mjs`); }
+export const kept = 1;
+import './main.cjs';
+"#,
+    );
+    write(dir.root(), "dead/unused.mjs", "console.log('dead');");
+    write(dir.root(), "name.cjs", "module.exports = 'a';");
+    write(
+        dir.root(),
+        "main.cjs",
+        r#"
+console.log(require(`./parts/${require('./name.cjs')}.js`).value);
+module.exports = import('./parts/' + 'a.js').then(ns => console.log(ns.value));
+"#,
+    );
+    write(
+        dir.root(),
+        "parts/a.js",
+        "console.log('a'); exports.value = 7;",
+    );
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(observe(&product.product.artifacts), b"a\n7\n7\n");
+    assert_eq!(product.product.artifacts.async_facades.len(), 1);
+    assert!(product
+        .product
+        .artifacts
+        .files
+        .values()
+        .all(|text| !text.contains("console.log('dead')")));
+}
+
+#[test]
+fn relative_context_requires_reject_every_async_esm_candidate() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './main.cjs';");
+    write(
+        dir.root(),
+        "main.cjs",
+        "module.exports = name => require(`./parts/${name}.mjs`);",
+    );
+    write(dir.root(), "parts/sync.mjs", "export const value = 1;");
+    write(
+        dir.root(),
+        "parts/async.mjs",
+        "await Promise.resolve(); export const value = 2;",
+    );
+    let error = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .err()
+        .unwrap();
+    assert!(
+        error.to_string().contains("require of async ESM"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn relative_contexts_separate_url_keys_from_paths_and_avoid_error_binding_capture() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+export const load = (Error, name) => import(`./parts/${name}.mjs`);
+for (const name of ['a b', 'a%20b', 'caf\u00e9', 'caf%C3%A9', 'a%25%23b']) {
+  console.log((await load(0, name)).value);
+}
+try {
+  const promise = load(0, 'absent');
+  console.log('promise', promise instanceof Promise);
+  await promise;
+} catch (e) { console.log(e.name, e.code); }
+"#,
+    );
+    write(dir.root(), "parts/a b.mjs", "export const value = 'space';");
+    write(
+        dir.root(),
+        "parts/caf\u{e9}.mjs",
+        "export const value = 'unicode';",
+    );
+    write(
+        dir.root(),
+        "parts/a%#b.mjs",
+        "export const value = 'reserved';",
+    );
+    let product = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(
+        observe(&product.product.artifacts),
+        b"space\nspace\nunicode\nunicode\nreserved\npromise true\nError ERR_MODULE_NOT_FOUND\n"
+    );
+    assert_eq!(product.product.artifacts.async_facades.len(), 3);
+}
+
+#[test]
 fn connected_effects_specialize_imported_functions_through_barrels() {
     let dir = TmpDir::new();
     write(

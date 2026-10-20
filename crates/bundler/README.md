@@ -161,6 +161,24 @@ assimilation, shared rejections and cached identity. Dynamic edges never become
 static imports or permission to invoke a nested body. Effectful deferred targets
 remain inactive until requested.
 
+Relative template/concatenation imports and requires capture a closure from the
+bounded project inventory, not runtime filesystem searches. A leading literal
+`./` or `../` is required; runtime gaps match any path depth between literal
+pieces. Runtime keys are exact relative spellings; imports capture URL-encoded
+keys as well as unescaped spaces/Unicode, without confusing URL keys with
+filesystem paths.
+Requires also capture configured extensionless and `index` aliases, not arbitrary
+package-directory aliases. Inventory additions/removals invalidate resolution on
+warm builds. Each context retains its source occurrence; async roots additionally
+identify each candidate without merging their public namespaces.
+Generated switches evaluate the original argument once at its original site,
+composing cached nested binding/dependency edits and preserving source awaits.
+Only the selected native import or cached CJS initializer executes. Unmatched
+requires throw synchronously; unmatched imports reject through native specifier
+coercion. An empty closure is not a successful empty namespace. Context dispatch
+shares the captured intrinsic shim with CJS even in ESM-only builds, so user
+bindings or later mutations of `Error` cannot intercept generated lookup errors.
+
 Dynamic namespace targets retain their complete public surfaces, without private
 exports. Source TLA status propagates over static runtime dependencies, including
 SCCs. These async modules stay body-bearing native jobs rather than concatenating
@@ -770,7 +788,7 @@ Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 | Synchronous require of sync ESM | Native namespace and evaluating-cycle errors |
 | Require of async ESM (including static transitive dependencies) | Source diagnostic before emission |
 | CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
-| Nonliteral imports/requires, options/attributes, externals/assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
+| Unconstrained/bare nonliteral imports/requires, options/attributes, externals/assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
 
 The unified public-build Node runner compares all 30 portable cases (41 entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use ahashmap::{AHashMap, AHashSet};
 use ast_segmenter::owned::{
@@ -22,6 +22,7 @@ pub enum GraphNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DependencyTarget {
     File(PathBuf),
+    Context(BTreeMap<String, PathBuf>),
     External(String),
     Missing(String),
 }
@@ -259,6 +260,27 @@ impl SourceGraph {
                 }
             }
             for dependency in &input.facts.dependencies {
+                let context = match input.resolutions.get(&dependency.id) {
+                    Some(DependencyTarget::Context(candidates)) => Some(candidates),
+                    _ => None,
+                };
+                if dependency.pattern.is_some() != context.is_some()
+                    || context.is_some_and(|candidates| {
+                        !matches!(
+                            dependency.kind,
+                            DependencyKind::DynamicImport | DependencyKind::Require
+                        ) || candidates
+                            .keys()
+                            .any(|request| !dependency.matches_specifier(request))
+                    })
+                {
+                    self.diagnostics.push(crate::LinkDiagnostic {
+                        file_id,
+                        site: dependency.span,
+                        message: "dependency context does not match its source pattern".into(),
+                    });
+                    continue;
+                }
                 let unresolved = GraphNode::Unlinked {
                     file_id,
                     dependency: dependency.id,
@@ -276,6 +298,10 @@ impl SourceGraph {
                     Some(DependencyTarget::File(path)) if self.file_id(path).is_none() => {
                         Some(format!("target not in graph: {}", path.display()))
                     }
+                    Some(DependencyTarget::Context(candidates)) => candidates
+                        .values()
+                        .find(|path| self.file_id(path).is_none())
+                        .map(|path| format!("context target not in graph: {}", path.display())),
                     None => Some(format!("unresolved dependency {:?}", dependency.specifier)),
                     _ => None,
                 };
@@ -324,6 +350,23 @@ impl SourceGraph {
                     read: false,
                     write: false,
                 };
+                if let Some(DependencyTarget::Context(candidates)) =
+                    input.resolutions.get(&dependency.id)
+                {
+                    let mut seen = AHashSet::default();
+                    for path in candidates.values() {
+                        if seen.insert(path) {
+                            edges.push(OccurrenceEdge {
+                                to: self
+                                    .file_id(path)
+                                    .map(GraphNode::Module)
+                                    .unwrap_or(unresolved),
+                                ..base.clone()
+                            });
+                        }
+                    }
+                    continue;
+                }
                 edges.push(base.clone());
                 for binding in bindings {
                     edges.push(OccurrenceEdge {
@@ -547,6 +590,51 @@ pub(crate) mod tests {
             }
             assert!(!source[edge.site.start as usize..edge.site.end as usize].is_empty());
         }
+    }
+
+    #[test]
+    fn contexts_expand_real_occurrences_and_reject_mismatched_resolutions() {
+        let mut main = input(
+            "main.mjs",
+            "export const load = name => import(`./parts/${name}.mjs`);",
+        );
+        let dependency = main.facts.dependencies[0].id;
+        let candidates = BTreeMap::from([
+            ("./parts/a.mjs".into(), "a.mjs".into()),
+            ("./parts/b.mjs".into(), "b.mjs".into()),
+        ]);
+        main.resolutions
+            .insert(dependency, DependencyTarget::Context(candidates));
+        let graph = SourceGraph::from_owned([main, input("a.mjs", ""), input("b.mjs", "")]);
+        graph.validate_links().unwrap();
+        let edges: Vec<_> = graph
+            .edges()
+            .iter()
+            .filter(|edge| edge.dependency == Some(dependency))
+            .collect();
+        assert_eq!(edges.len(), 2);
+        for edge in edges {
+            assert_eq!(edge.activation, Activation::Asynchronous);
+            assert_eq!(
+                graph
+                    .incoming(edge.to)
+                    .filter(|incoming| *incoming == edge)
+                    .count(),
+                1
+            );
+        }
+
+        let main = input(
+            "main.mjs",
+            "export const load = name => import(`./parts/${name}.mjs`);",
+        );
+        assert!(SourceGraph::from_owned([main]).validate_links().is_err());
+        let mut main = input("main.mjs", "import './a.mjs';");
+        main.resolutions.insert(
+            main.facts.dependencies[0].id,
+            DependencyTarget::Context(BTreeMap::new()),
+        );
+        assert!(SourceGraph::from_owned([main]).validate_links().is_err());
     }
 
     #[test]

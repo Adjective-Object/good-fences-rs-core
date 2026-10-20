@@ -75,6 +75,8 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("nested-pure.mjs", "async function f(){ /*#__PURE__*/ obj?.[key()](/*#__PURE__*/ inner(arg), ...iterable, await later); }", ModuleFormat::Esm),
         ("chain.mjs", "/*#__PURE__*/ object.method().next?.(...iterable); /*#__PURE__*/ (object?.method)(await argument);", ModuleFormat::Esm),
         ("split.mjs", "export const café = 1, {value: next = café} = {}, last = next; let a, b = last; var c = b, d = c;", ModuleFormat::Esm),
+        ("context.mjs", "export const load = name => import(`./parts/${name}.mjs`);", ModuleFormat::Esm),
+        ("context.cjs", "module.exports = name => require('./parts/' + name);", ModuleFormat::CommonJs),
     ] {
         let first = record(source, path, format);
         let bytes = first.encode(source).unwrap();

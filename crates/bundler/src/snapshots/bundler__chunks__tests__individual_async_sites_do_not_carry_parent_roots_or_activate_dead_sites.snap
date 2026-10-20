@@ -29,6 +29,7 @@ expression: reached
         AsyncSiteId {
             module: "entry.ts",
             offset: 20,
+            candidate: None,
         },
     ): {
         Module(
@@ -43,6 +44,7 @@ expression: reached
         AsyncSiteId {
             module: "entry.ts",
             offset: 41,
+            candidate: None,
         },
     ): {
         Module(

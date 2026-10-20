@@ -33,12 +33,12 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
             }
             "require" => {
                 let i = requires.partition_point(|d| d.span.start <= reference.span.start);
-                let direct_literal_call = i.checked_sub(1).is_some_and(|i| {
+                let direct_call = i.checked_sub(1).is_some_and(|i| {
                     let d = requires[i];
                     reference.span.end <= d.specifier_span.start
                         && reference.span.start >= d.span.start
                 });
-                if reference.write || !direct_literal_call {
+                if reference.write || !direct_call {
                     policy.reject(
                         reference.span,
                         "unsupported require reassignment, alias or indirect use",

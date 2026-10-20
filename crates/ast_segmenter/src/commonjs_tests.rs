@@ -147,7 +147,6 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
         ("require('./x', sideEffect())", "require call"),
         ("require(...paths)", "nonliteral require"),
         ("require?.('./x')", "require call"),
-        ("require(`./x`)", "nonliteral require"),
         ("require = loader; require('./x');", "require reassignment"),
         ("const load = require; load('./x');", "require reassignment"),
         ("require.resolve('./x');", "require reassignment"),

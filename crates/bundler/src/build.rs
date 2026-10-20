@@ -283,6 +283,26 @@ impl BuildSession {
                     } else {
                         ResolutionMode::Import
                     };
+                    if dependency.pattern.is_some() {
+                        let candidates = crate::context::resolve(
+                            &self.root,
+                            &path,
+                            dependency,
+                            inventory.keys(),
+                            &options.resolver.extensions,
+                            &resolver,
+                        )
+                        .wrap_err_with(|| {
+                            format!(
+                                "{}: context at bytes {}..{}",
+                                path.display(),
+                                dependency.span.start,
+                                dependency.span.end
+                            )
+                        })?;
+                        resolved.insert(dependency.id, DependencyTarget::Context(candidates));
+                        continue;
+                    }
                     let target = resolver
                         .resolve_dependency(&path, &dependency.specifier, mode)
                         .wrap_err_with(|| {
@@ -307,6 +327,8 @@ impl BuildSession {
             for target in resolved.values() {
                 if let DependencyTarget::File(path) = target {
                     queue.push_back(path.clone());
+                } else if let DependencyTarget::Context(candidates) = target {
+                    queue.extend(candidates.values().cloned());
                 }
             }
             inputs.push(OwnedSourceFileInput::from_parsed(
@@ -383,6 +405,7 @@ impl BuildSession {
                 include_str!("native_segments.rs"),
                 include_str!("native_cjs.rs"),
                 include_str!("cjs.rs"),
+                include_str!("context.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),

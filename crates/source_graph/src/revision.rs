@@ -33,6 +33,17 @@ impl SourceGraph {
 
     /// Re-resolve all occurrences, including prior misses. Call after resolver invalidation.
     pub fn refresh_resolution(&mut self, resolver: &impl DependencyResolver) -> eyre::Result<()> {
+        eyre::ensure!(
+            self.files
+                .iter()
+                .filter_map(|file| file.owned.as_ref())
+                .all(|input| input
+                    .facts
+                    .dependencies
+                    .iter()
+                    .all(|dependency| dependency.pattern.is_none())),
+            "context resolution requires a bounded file inventory; rebuild owned inputs"
+        );
         for file in &mut self.files {
             let Some(input) = &mut file.owned else {
                 continue;

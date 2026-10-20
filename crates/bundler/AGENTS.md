@@ -116,7 +116,7 @@ native .cjs-per-input fallback. Preserve early cache allocation, wrapper
 this/exports aliases/current exports and retry after throws.
 Initialize factory-local __filename/__dirname parameters from actual output
 availability paths; retain var/function redeclarations and nested shadows.
-When CJS is retained, add runtime.cjs as the first dependency of every emitted
+When CJS or a context is retained, add runtime.cjs as the first dependency of every emitted
 job after empty-job pruning. Capture shim intrinsics once before application
 code; include the support file in chunk projections and use it in CJS aliases.
 Never rewrite application built-in lookups or activate factories from the helper.
@@ -147,7 +147,12 @@ exclude lexical shadows; wildcard receivers include them; never infer aliases.
 Fingerprints include canonical patterns and annotation policy, not source-cache
 identity. Check both graph revision and policy before reusing derived plans.
 
-Root identities use entry IDs or async source occurrences, never target paths.
+Root identities use entry IDs or async source occurrences; context candidates
+extend that occurrence identity with their target, never replace the source site.
+Capture relative patterns against the bounded inventory and invalidate on
+candidate additions/removals. Expand checked edges without inventing source IDs.
+Compose original arguments through cached operations; evaluate once at the source
+site, preserving lazy activation, native rejection timing and CJS cached identity.
 Canonical diagnostic nodes use paths, not insertion-dependent file numbers.
 Root traversal follows synchronous retention constraints only; namespace
 binding demand differs from module evaluation. Empty modules keep identities.

@@ -57,7 +57,8 @@ unresolved globals have no binding ID. Repeated specifiers are not coalesced.
 Reference read/write and type-only flags, ambient declarations and merged
 type/value bindings survive independently of legacy name sets. Collections
 have deterministic source ordering; no OXC IDs or arena
-borrows escape. Nonliteral dependencies fail instead of disappearing.
+borrows escape. Relative template/concatenation dependencies store literal
+pieces separated by runtime gaps; unconstrained nonliteral dependencies fail.
 `function_scoped` includes both `var` and parameters, as in OXC's binding flags;
 the occurrence IR does not infer evaluation timing or TDZ safety.
 
@@ -86,9 +87,10 @@ unchanged.
 | --- | --- |
 | ESM imports/exports, aliases, defaults, string names, namespace/star re-exports | Owned mappings and dependency sites; export linking is a later gate |
 | Literal dynamic `import()` | One dependency per site; loading belongs to bundler |
-| Literal global CJS `require()` | Exactly one string-literal argument; parenthesized expressions accepted; shadowed calls are ordinary code |
-| Nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
-| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct literal loader calls and `module.exports` member reads are supported |
+| Global CJS `require()` | Exactly one literal or relative template/concatenation argument; parenthesized expressions accepted; shadowed calls are ordinary code |
+| Relative template/concatenation import/require | One real occurrence with owned literal pieces, a leading `./` or `../`, and the original argument span; graph capture is a later step |
+| Unconstrained/bare nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
+| Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct loader calls and `module.exports` member reads are supported |
 | CJS `require`/`module`/`exports` declarations at module scope | Diagnostic (wrapper parameters and var/function redeclarations must not be misidentified as independent locals); nested shadows and pure type-space declarations supported |
 | CJS `__filename`/`__dirname` declarations | Top-level var/function redeclarations reuse wrapper parameters; lexical redeclarations are diagnostics; nested shadows supported |
 | CJS `module`/`exports` reassignment | Preserved verbatim with reference write flags; no alias or named-export inference |

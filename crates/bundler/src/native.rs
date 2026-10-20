@@ -168,6 +168,7 @@ struct Values<'s> {
     imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
     requests: BTreeMap<u32, Code>,
     dynamic: BTreeMap<u32, Code>,
+    contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
     native_defaults: BTreeSet<u32>,
 }
 
@@ -225,6 +226,7 @@ impl<'s> Values<'s> {
             imports: HashMap::new(),
             requests: BTreeMap::new(),
             dynamic: BTreeMap::new(),
+            contexts: HashMap::new(),
             native_defaults: BTreeSet::new(),
         }
     }
@@ -433,6 +435,10 @@ fn body(
                     {
                         None
                     } else {
+                        if let Some(dispatch) = values.contexts.get(&(file, dependency.id)) {
+                            renderer.context(dependency, dispatch.clone());
+                            continue;
+                        }
                         let target = target_file(graph, file, dependency)?;
                         if let Some(expression) = values.dynamic.get(&target) {
                             Some(expression.clone())

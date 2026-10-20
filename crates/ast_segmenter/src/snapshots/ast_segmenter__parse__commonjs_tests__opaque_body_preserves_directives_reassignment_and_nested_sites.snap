@@ -327,6 +327,7 @@ ModuleFacts {
                 end: 65,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 56,
                 end: 64,
@@ -344,6 +345,7 @@ ModuleFacts {
                 end: 164,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 155,
                 end: 163,
@@ -366,6 +368,7 @@ ModuleFacts {
                 end: 204,
             },
             specifier: "./async",
+            pattern: None,
             specifier_span: Span {
                 start: 194,
                 end: 203,
@@ -388,6 +391,7 @@ ModuleFacts {
                 end: 281,
             },
             specifier: "./after-return",
+            pattern: None,
             specifier_span: Span {
                 start: 264,
                 end: 280,

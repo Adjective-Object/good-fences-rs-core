@@ -327,7 +327,7 @@ impl SourceGraph {
                     route: vec![node, declaration],
                 }))
             }
-            DependencyTarget::Missing(_) => None,
+            DependencyTarget::Missing(_) | DependencyTarget::Context(_) => None,
         }
     }
 }

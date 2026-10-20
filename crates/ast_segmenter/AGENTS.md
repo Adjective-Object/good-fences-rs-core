@@ -53,6 +53,9 @@ declaration byte offsets and dependency IDs are site byte offsets, local to
 the exact source/configuration. Keep all declaration/reference spans and
 type/value metadata; never expose OXC IDs. Sort DTO collections by source
 position before returning.
+Relative template/concatenation loaders retain one real occurrence, literal
+pieces separated by runtime gaps and the original argument span. Never persist
+resolved candidates or fabricate dependency IDs for closure capture.
 Keep the effective commonjs format in facts so graph/cache consumers never
 infer package format from extension, wrapper references or export syntax.
 Extraction provenance binds source bytes, effective parser config and owned

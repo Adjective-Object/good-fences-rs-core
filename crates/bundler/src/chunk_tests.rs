@@ -206,7 +206,8 @@ fn tombstones_empty_modules_and_policy_changes_do_not_reuse_plans() {
         &[RootSeed {
             id: RootId::Async(AsyncSiteId {
                 module: "x".into(),
-                offset: 0
+                offset: 0,
+                candidate: None,
             }),
             ..entry(1)
         }],
@@ -274,6 +275,7 @@ fn randomized_small_graphs_match_module_oracle_and_insertion_order() {
                                 RootId::Async(AsyncSiteId {
                                     module: format!("{file}.ts").into(),
                                     offset: d.id.0,
+                                    candidate: None,
                                 }),
                                 d.specifier.trim_end_matches(".ts").parse().unwrap(),
                             );

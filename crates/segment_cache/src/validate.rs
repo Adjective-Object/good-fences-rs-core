@@ -275,6 +275,18 @@ impl CacheRecord {
             );
         }
         for d in &facts.dependencies {
+            if let Some(pattern) = &d.pattern {
+                ensure!(
+                    matches!(
+                        d.kind,
+                        DependencyKind::DynamicImport | DependencyKind::Require
+                    ) && pattern
+                        .first()
+                        .is_some_and(|p| p.starts_with("./") || p.starts_with("../"))
+                        && d.specifier == pattern.join("*"),
+                    "invalid relative dependency pattern"
+                );
+            }
             span(source, d.span)?;
             span(source, d.specifier_span)?;
             ensure!(

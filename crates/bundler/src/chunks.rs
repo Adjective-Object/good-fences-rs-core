@@ -13,6 +13,8 @@ use crate::{policy::EffectPolicy, RetentionEdgeKind, RetentionPlan};
 pub struct AsyncSiteId {
     pub module: PathBuf,
     pub offset: u32,
+    /// A context candidate, still scoped by its real source occurrence.
+    pub candidate: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -107,10 +109,25 @@ pub fn async_seed(graph: &SourceGraph, edge_index: usize) -> eyre::Result<RootSe
             eyre::bail!("async consumer must be a source node")
         }
     };
+    let file = graph
+        .file_id(&module)
+        .ok_or_eyre("missing async consumer")?;
+    let candidate = if matches!(
+        graph.dependency_target(file, dependency),
+        Some(source_graph::DependencyTarget::Context(_))
+    ) {
+        let NodeId::Module(path) = node_id(graph, edge.to)? else {
+            eyre::bail!("context candidate must be a source module");
+        };
+        Some(path)
+    } else {
+        None
+    };
     Ok(RootSeed {
         id: RootId::Async(AsyncSiteId {
             module,
             offset: dependency.0,
+            candidate,
         }),
         evaluation_roots: vec![],
         binding_roots: vec![edge.to],

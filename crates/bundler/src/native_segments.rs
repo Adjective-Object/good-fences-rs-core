@@ -565,6 +565,10 @@ pub(super) fn emit(
                         )
                 })
         }) {
+            if let Some(dispatch) = cjs.context_dynamic(graph, file, dependency, seams)? {
+                values.contexts.insert((file, dependency.id), dispatch);
+                continue;
+            }
             let target = target_file(graph, file, dependency)?;
             if cjs.contains(target) {
                 values.dynamic.insert(target, cjs.dynamic(graph, target)?);

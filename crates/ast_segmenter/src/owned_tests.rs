@@ -200,7 +200,36 @@ fn nonliteral_dependencies_are_errors_but_shadowed_require_is_ordinary_code() {
         )
         .is_err());
     }
+
     assert!(parse("function f(require) { return require(path); }")
         .dependencies
         .is_empty());
+}
+
+#[test]
+fn relative_contexts_preserve_owned_patterns_and_argument_ranges() {
+    let source = "export const load = (name, suffix) => import(`./parts/${name}/view.${suffix}`);";
+    let facts = parse(source);
+    let dependency = &facts.dependencies[0];
+    assert_eq!(
+        dependency.pattern.as_ref().unwrap(),
+        &["./parts/", "/view.", ""]
+    );
+    assert_eq!(
+        &source[dependency.specifier_span.start as usize..dependency.specifier_span.end as usize],
+        "`./parts/${name}/view.${suffix}`"
+    );
+    assert!(dependency.matches_specifier("./parts/nested/name/view.mjs"));
+    assert!(!dependency.matches_specifier("./other/name/view.mjs"));
+    assert!(!dependency.matches_specifier("./parts/view.mjs"));
+    let facts = parse("export const load = name => import('./parts/' + name + '.mjs');");
+    assert_eq!(
+        facts.dependencies[0].pattern.as_ref().unwrap(),
+        &["./parts/", ".mjs"]
+    );
+    assert!(
+        parse("function f(require) { return require('./parts/' + name); }")
+            .dependencies
+            .is_empty()
+    );
 }

@@ -206,9 +206,9 @@ fn async_modules(
             .iter()
             .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
         {
-            let target = target_file(graph, file, dependency)?;
-            if let Some(&(origin, span)) = asynchronous.get(&target) {
-                eyre::bail!(
+            for target in target_files(graph, file, dependency)? {
+                if let Some(&(origin, span)) = asynchronous.get(&target) {
+                    eyre::bail!(
                     "{}: require of async ESM {} at bytes {}..{} (top-level await in {} at bytes {}..{})",
                     graph.file_path(file).unwrap().display(),
                     graph.file_path(target).unwrap().display(),
@@ -218,6 +218,7 @@ fn async_modules(
                     span.start,
                     span.end
                 );
+                }
             }
         }
     }
@@ -242,6 +243,24 @@ pub(super) fn target_file(
             dependency.span.start,
             dependency.span.end
         ),
+    }
+}
+
+pub(super) fn target_files(
+    graph: &SourceGraph,
+    file: u32,
+    dependency: &Dependency,
+) -> eyre::Result<Vec<u32>> {
+    if let Some(DependencyTarget::Context(candidates)) =
+        graph.dependency_target(file, dependency.id)
+    {
+        candidates
+            .values()
+            .map(|path| graph.file_id(path).ok_or_eyre("context target is absent"))
+            .collect::<eyre::Result<BTreeSet<_>>>()
+            .map(|targets| targets.into_iter().collect())
+    } else {
+        Ok(vec![target_file(graph, file, dependency)?])
     }
 }
 

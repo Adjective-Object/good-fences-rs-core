@@ -25,6 +25,12 @@ sync/async/function-containment metadata.
 Containment does not authorize eager execution. Evaluation and binding demand
 are distinct; this crate does not implement effects or runtime scheduling.
 
+`DependencyTarget::Context` maps captured relative request spellings to source
+paths. It expands one real dynamic-import/require occurrence into candidate
+edges, retaining its original ID, span and activation. Aliases of one target
+share an edge. Checked linking rejects mismatched patterns/targets and missing
+candidate modules; an empty closure is valid and fails only when requested.
+
 Run `cargo test -p source_graph`.
 
 `file_facts` exposes owned syntax records (None for legacy/tombstoned modules).
@@ -53,6 +59,8 @@ including prior failures, and returns errors after replacing stale results with
 current source-site diagnostics. External/missing sites retain `Unlinked` nodes;
 `dependency_target` distinguishes them. Invalidate the resolver before refresh
 when its environment changes. No source reparse is needed for resolution edits.
+Context graphs require rebuilding owned resolutions with the caller's bounded
+inventory instead; `refresh_resolution` rejects them before mutating the graph.
 
 `patch_file`/`patch_owned` reject mismatched paths (rename = remove + add).
 `remove_file` tombstones IDs; recreation appends a new ID. Mutations rebuild both

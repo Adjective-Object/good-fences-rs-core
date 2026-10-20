@@ -101,7 +101,7 @@ pub(super) fn emit(
             .iter()
             .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
         {
-            boundaries.insert(target_file(graph, file, dependency)?);
+            boundaries.extend(target_files(graph, file, dependency)?);
         }
     }
     for linked in symbols
@@ -307,6 +307,7 @@ pub(super) fn emit(
                         .partition_point(|segment| segment.span.end <= dependency.span.start);
                     live.contains(&SegmentKey::new(root, index as u32))
                 })
+                .filter(|d| d.pattern.is_none())
                 .map(|d| {
                     let target = target_file(graph, root, d)?;
                     if cjs.contains(target) {
@@ -362,6 +363,13 @@ pub(super) fn emit(
                 );
                 for (dependency, replacement, whole) in &edits {
                     renderer.dependency(dependency, replacement.clone(), *whole);
+                }
+                for dependency in facts.dependencies.iter().filter(|d| {
+                    d.pattern.is_some() && contains(module.parsed.segments[index].span, d.span)
+                }) {
+                    if let Some(dispatch) = cjs.context_dynamic(graph, root, dependency, &owners)? {
+                        renderer.context(dependency, dispatch);
+                    }
                 }
                 imports.push(renderer.materialize()?);
                 imports.push_str("\n;\n");
@@ -544,7 +552,10 @@ fn compatible_group(
             return Ok(false);
         }
         for dependency in facts.dependencies.iter().filter(|d| !d.type_only) {
-            if cjs.contains(target_file(graph, file, dependency)?) {
+            if target_files(graph, file, dependency)?
+                .iter()
+                .any(|&target| cjs.contains(target))
+            {
                 return Ok(false);
             }
         }
@@ -615,6 +626,23 @@ fn concatenate(
         .iter()
         .map(|(&file, &owner)| (file, request(graph, owner)))
         .collect();
+    for &file in group {
+        for dependency in &modules[&file].parsed.facts.dependencies {
+            if dependency.pattern.is_some()
+                && live.iter().any(|key| {
+                    key.file_id == file
+                        && contains(
+                            modules[&file].parsed.segments[key.segment_idx as usize].span,
+                            dependency.span,
+                        )
+                })
+            {
+                if let Some(dispatch) = cjs.context_dynamic(graph, file, dependency, owners)? {
+                    values.contexts.insert((file, dependency.id), dispatch);
+                }
+            }
+        }
+    }
     let mut output = Code::default();
     let mut order = Vec::new();
     let mut pending = vec![(root, false)];

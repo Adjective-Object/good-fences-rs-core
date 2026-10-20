@@ -76,12 +76,43 @@ pub struct Dependency {
     #[serde(with = "span_serde")]
     pub span: Span,
     pub specifier: String,
+    /// Literal pieces separated by runtime gaps, never resolved paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<Vec<String>>,
     #[serde(with = "span_serde")]
     pub specifier_span: Span,
     pub type_only: bool,
     /// Lexical containment only, not a claim that a module-level site runs eagerly.
     #[serde(with = "span_serde::optional")]
     pub enclosing_function: Option<Span>,
+}
+
+impl Dependency {
+    pub fn matches_specifier(&self, request: &str) -> bool {
+        let Some(parts) = &self.pattern else {
+            return request == self.specifier;
+        };
+        let Some(first) = parts.first() else {
+            return false;
+        };
+        let Some(mut rest) = request.strip_prefix(first) else {
+            return false;
+        };
+        if parts.len() == 1 {
+            return rest.is_empty();
+        }
+        let Some(middle) = rest.strip_suffix(parts.last().unwrap()) else {
+            return false;
+        };
+        rest = middle;
+        for part in &parts[1..parts.len() - 1] {
+            let Some(index) = rest.find(part) else {
+                return false;
+            };
+            rest = &rest[index + part.len()..];
+        }
+        true
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,6 +347,52 @@ struct Extractor<'s, 'a> {
 }
 
 impl Extractor<'_, '_> {
+    fn context_dependency(&mut self, kind: DependencyKind, span: Span, source: &Expression<'_>) {
+        fn pieces(source: &Expression<'_>, parts: &mut Vec<String>) {
+            match source.get_inner_expression() {
+                Expression::StringLiteral(s) => parts.last_mut().unwrap().push_str(&s.value),
+                Expression::TemplateLiteral(t) => {
+                    for (index, quasi) in t.quasis.iter().enumerate() {
+                        if index > 0 {
+                            parts.push(String::new());
+                        }
+                        if let Some(cooked) = &quasi.value.cooked {
+                            parts.last_mut().unwrap().push_str(cooked);
+                        }
+                    }
+                }
+                Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
+                    pieces(&b.left, parts);
+                    pieces(&b.right, parts);
+                }
+                _ => parts.push(String::new()),
+            }
+        }
+        let mut pattern = vec![String::new()];
+        pieces(source, &mut pattern);
+        if !pattern[0].starts_with("./") && !pattern[0].starts_with("../") {
+            self.reject(
+                span,
+                if kind == DependencyKind::Require {
+                    "nonliteral require requires a relative literal prefix"
+                } else {
+                    "nonliteral dynamic import requires a relative literal prefix"
+                },
+            );
+            return;
+        }
+        self.facts.dependencies.push(Dependency {
+            id: DependencyId(span.start),
+            kind,
+            span,
+            specifier: pattern.join("*"),
+            pattern: Some(pattern),
+            specifier_span: source.span(),
+            type_only: false,
+            enclosing_function: self.enclosing_function,
+        });
+    }
+
     fn binding(&self, id: &BindingIdentifier<'_>) -> BindingId {
         self.ids[&id.symbol_id.get().expect("validated binding")]
     }
@@ -341,6 +418,7 @@ impl Extractor<'_, '_> {
             kind,
             span,
             specifier: source.value.to_string(),
+            pattern: None,
             specifier_span: source.span,
             type_only,
             enclosing_function: self.enclosing_function,
@@ -564,7 +642,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         if let Expression::StringLiteral(source) = expr.source.get_inner_expression() {
             self.dependency(DependencyKind::DynamicImport, expr.span, source, false);
         } else {
-            self.reject(expr.span, "nonliteral dynamic import");
+            self.context_dependency(DependencyKind::DynamicImport, expr.span, &expr.source);
         }
         walk::walk_import_expression(self, expr);
     }
@@ -577,7 +655,10 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                 .get_reference(id.reference_id.get().expect("validated reference"));
             if id.name == "require" && reference.symbol_id().is_none() {
                 if expr.optional || expr.arguments.len() != 1 {
-                    self.reject(expr.span, "unsupported require call (expected one literal argument, no optional call)");
+                    self.reject(
+                        expr.span,
+                        "unsupported require call (expected one argument, no optional call)",
+                    );
                 } else if let Some(Expression::StringLiteral(source)) = expr
                     .arguments
                     .first()
@@ -585,6 +666,10 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                     .map(Expression::get_inner_expression)
                 {
                     self.dependency(DependencyKind::Require, expr.span, source, false);
+                } else if let Some(source) =
+                    expr.arguments.first().and_then(Argument::as_expression)
+                {
+                    self.context_dependency(DependencyKind::Require, expr.span, source);
                 } else {
                     self.reject(expr.span, "nonliteral require");
                 }

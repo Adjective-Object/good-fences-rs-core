@@ -1076,6 +1076,7 @@ ModuleFacts {
                 end: 95,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 86,
                 end: 94,
@@ -1093,6 +1094,7 @@ ModuleFacts {
                 end: 125,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 116,
                 end: 124,
@@ -1110,6 +1112,7 @@ ModuleFacts {
                 end: 142,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 133,
                 end: 141,
@@ -1127,6 +1130,7 @@ ModuleFacts {
                 end: 270,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 261,
                 end: 269,
@@ -1144,6 +1148,7 @@ ModuleFacts {
                 end: 301,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 292,
                 end: 300,
@@ -1161,6 +1166,7 @@ ModuleFacts {
                 end: 400,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 391,
                 end: 399,
@@ -1183,6 +1189,7 @@ ModuleFacts {
                 end: 420,
             },
             specifier: "./same",
+            pattern: None,
             specifier_span: Span {
                 start: 411,
                 end: 419,

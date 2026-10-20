@@ -67,6 +67,7 @@ DiagnosticManifest {
                     AsyncSiteId {
                         module: "entry.ts",
                         offset: 0,
+                        candidate: None,
                     },
                 ),
             },
@@ -82,6 +83,7 @@ DiagnosticManifest {
                     AsyncSiteId {
                         module: "entry.ts",
                         offset: 20,
+                        candidate: None,
                     },
                 ),
             },
@@ -118,6 +120,7 @@ DiagnosticManifest {
         AsyncSiteId {
             module: "entry.ts",
             offset: 0,
+            candidate: None,
         }: AsyncFacade {
             consumer: Segment {
                 module: "entry.ts",
@@ -132,6 +135,7 @@ DiagnosticManifest {
                     AsyncSiteId {
                         module: "entry.ts",
                         offset: 0,
+                        candidate: None,
                     },
                 ),
                 demand: FacadeDemand {
@@ -150,6 +154,7 @@ DiagnosticManifest {
                                 AsyncSiteId {
                                     module: "entry.ts",
                                     offset: 0,
+                                    candidate: None,
                                 },
                             ),
                         },
@@ -160,6 +165,7 @@ DiagnosticManifest {
         AsyncSiteId {
             module: "entry.ts",
             offset: 20,
+            candidate: None,
         }: AsyncFacade {
             consumer: Segment {
                 module: "entry.ts",
@@ -174,6 +180,7 @@ DiagnosticManifest {
                     AsyncSiteId {
                         module: "entry.ts",
                         offset: 20,
+                        candidate: None,
                     },
                 ),
                 demand: FacadeDemand {
@@ -192,6 +199,7 @@ DiagnosticManifest {
                                 AsyncSiteId {
                                     module: "entry.ts",
                                     offset: 20,
+                                    candidate: None,
                                 },
                             ),
                         },
@@ -209,12 +217,14 @@ DiagnosticManifest {
             AsyncSiteId {
                 module: "entry.ts",
                 offset: 0,
+                candidate: None,
             },
         ),
         AsyncFacade(
             AsyncSiteId {
                 module: "entry.ts",
                 offset: 20,
+                candidate: None,
             },
         ),
         ModuleIdentity {

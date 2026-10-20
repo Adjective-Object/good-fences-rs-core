@@ -1,6 +1,6 @@
 //! Opaque availability is pure; native interop jobs own demanded snapshots.
 use super::*;
-use crate::assembly::{self, Code, RequestKind};
+use crate::assembly::{Code, RequestKind};
 use ast_segmenter::owned::{ImportedName, ModuleFacts};
 
 struct Value {
@@ -11,6 +11,7 @@ struct Value {
 
 pub(super) struct CommonJs {
     runtime: String,
+    runtime_required: bool,
     values: BTreeMap<NodeId, Value>,
     factories: BTreeMap<u32, Value>,
     demands: BTreeMap<(u32, u32), BTreeSet<NodeId>>,
@@ -44,6 +45,20 @@ impl CommonJs {
             .unwrap();
         let mut result = Self {
             runtime: format!("{prefix}runtime"),
+            runtime_required: modules.iter().any(|(&file, module)| {
+                module.parsed.facts.commonjs
+                    || module.parsed.facts.dependencies.iter().any(|dependency| {
+                        dependency.pattern.is_some()
+                            && plan.retention.segments.iter().any(|segment| {
+                                segment.key.file_id == file
+                                    && contains(
+                                        module.parsed.segments[segment.key.segment_idx as usize]
+                                            .span,
+                                        dependency.span,
+                                    )
+                            })
+                    })
+            }),
             values: BTreeMap::new(),
             factories: BTreeMap::new(),
             demands: BTreeMap::new(),
@@ -179,7 +194,7 @@ impl CommonJs {
         files: &mut BTreeMap<PathBuf, Code>,
         chunk_artifacts: &mut BTreeMap<ChunkId, BTreeSet<PathBuf>>,
     ) -> eyre::Result<()> {
-        if self.factories.is_empty() {
+        if !self.runtime_required {
             return Ok(());
         }
         let path = PathBuf::from(RUNTIME_PATH);
@@ -238,6 +253,36 @@ impl CommonJs {
                 "), [ns => ns.default])",
             ),
         )
+    }
+
+    pub fn context_dynamic(
+        &self,
+        graph: &SourceGraph,
+        file: u32,
+        dependency: &Dependency,
+        owners: &BTreeMap<u32, u32>,
+    ) -> eyre::Result<Option<crate::context::Dispatch>> {
+        let Some(DependencyTarget::Context(candidates)) =
+            graph.dependency_target(file, dependency.id)
+        else {
+            return Ok(None);
+        };
+        let mut requests = BTreeMap::new();
+        for (request, target) in candidates {
+            let target = graph.file_id(target).ok_or_eyre("missing context target")?;
+            let expression = if self.contains(target) {
+                self.dynamic(graph, target)?
+            } else {
+                Code::request(path(graph, owners[&target]), RequestKind::DynamicImport)
+                    .surrounded("import(", ")")
+            };
+            requests.insert(request.clone(), expression);
+        }
+        Ok(Some(crate::context::Dispatch {
+            requests,
+            dynamic: true,
+            runtime: self.runtime.clone(),
+        }))
     }
 
     pub fn import(
@@ -385,30 +430,13 @@ impl CommonJs {
         let mut availability_imports = BTreeSet::new();
         for &(&file, value) in &factories {
             let module = &modules[&file];
-            let mut edits = Vec::new();
+            let mut renderer = crate::emit::CachedRenderer::new(
+                module.source,
+                &module.parsed.facts,
+                &module.parsed.facts.emission.segments[0],
+                &[],
+            );
             let mut imports = BTreeMap::new();
-            if let Some(hashbang) = &module.parsed.facts.hashbang {
-                edits.push(assembly::Edit {
-                    span: hashbang.span,
-                    replacement: Code::default(),
-                });
-            }
-            for operation in module
-                .parsed
-                .facts
-                .emission
-                .segments
-                .iter()
-                .flat_map(|r| &r.operations)
-            {
-                if let ast_segmenter::emission::OperationKind::SourceHint { span } = operation.kind
-                {
-                    edits.push(assembly::Edit {
-                        span,
-                        replacement: Code::default(),
-                    });
-                }
-            }
             for dependency in module
                 .parsed
                 .facts
@@ -416,45 +444,82 @@ impl CommonJs {
                 .iter()
                 .filter(|d| !d.type_only)
             {
-                let target = target_file(graph, file, dependency)?;
-                let replacement = match dependency.kind {
-                    DependencyKind::Require => {
-                        if let Some(other) = self.factories.get(&target) {
-                            if other.path != value.path
-                                && availability_imports
-                                    .insert((value.path.clone(), other.name.clone()))
-                            {
-                                imports.insert(
-                                    other.name.clone(),
-                                    Code::request(other.path.clone(), RequestKind::Require)
-                                        .surrounded(
-                                            format!("const {{{}}} = require(", other.name),
-                                            ");\n",
-                                        ),
-                                );
-                            }
-                            Code::from(format!("{}()", other.name))
-                        } else {
-                            // Native require is intentionally inside the original call site.
-                            Code::request(path(graph, owners[&target]), RequestKind::Require)
-                                .surrounded("require(", ")")
-                        }
-                    }
-                    DependencyKind::DynamicImport if self.contains(target) => {
-                        self.dynamic(graph, target)?
-                    }
-                    DependencyKind::DynamicImport => {
-                        Code::request(path(graph, owners[&target]), RequestKind::DynamicImport)
-                            .surrounded("import(", ")")
-                    }
-                    _ => eyre::bail!("static ESM dependency in opaque CommonJS body"),
+                if dependency.pattern.is_some() && dependency.kind == DependencyKind::DynamicImport
+                {
+                    renderer.context(
+                        dependency,
+                        self.context_dynamic(graph, file, dependency, owners)?
+                            .ok_or_eyre("missing dynamic context")?,
+                    );
+                    continue;
+                }
+                let targets = match graph.dependency_target(file, dependency.id) {
+                    Some(DependencyTarget::Context(candidates)) => candidates
+                        .iter()
+                        .map(|(request, path)| {
+                            Ok((
+                                request.clone(),
+                                graph
+                                    .file_id(path)
+                                    .ok_or_eyre("missing require context target")?,
+                            ))
+                        })
+                        .collect::<eyre::Result<BTreeMap<_, _>>>()?,
+                    _ => BTreeMap::from([(
+                        dependency.specifier.clone(),
+                        target_file(graph, file, dependency)?,
+                    )]),
                 };
-                edits.push(assembly::Edit {
-                    span: dependency.span,
-                    replacement,
-                });
+                let mut requests = BTreeMap::new();
+                for (request, target) in targets {
+                    let replacement = match dependency.kind {
+                        DependencyKind::Require => {
+                            if let Some(other) = self.factories.get(&target) {
+                                if other.path != value.path
+                                    && availability_imports
+                                        .insert((value.path.clone(), other.name.clone()))
+                                {
+                                    imports.insert(
+                                        other.name.clone(),
+                                        Code::request(other.path.clone(), RequestKind::Require)
+                                            .surrounded(
+                                                format!("const {{{}}} = require(", other.name),
+                                                ");\n",
+                                            ),
+                                    );
+                                }
+                                Code::from(format!("{}()", other.name))
+                            } else {
+                                // Native require is intentionally inside the original call site.
+                                Code::request(path(graph, owners[&target]), RequestKind::Require)
+                                    .surrounded("require(", ")")
+                            }
+                        }
+                        DependencyKind::DynamicImport if self.contains(target) => {
+                            self.dynamic(graph, target)?
+                        }
+                        DependencyKind::DynamicImport => {
+                            Code::request(path(graph, owners[&target]), RequestKind::DynamicImport)
+                                .surrounded("import(", ")")
+                        }
+                        _ => eyre::bail!("static ESM dependency in opaque CommonJS body"),
+                    };
+                    requests.insert(request, replacement);
+                }
+                if dependency.pattern.is_some() {
+                    renderer.context(
+                        dependency,
+                        crate::context::Dispatch {
+                            requests,
+                            dynamic: false,
+                            runtime: self.runtime.clone(),
+                        },
+                    );
+                } else {
+                    renderer.dependency(dependency, requests.into_values().next().unwrap(), true);
+                }
             }
-            let source = assembly::apply(module.source, &edits)?;
+            let source = renderer.materialize()?;
             let output = self.files.get_mut(&value.path).unwrap();
             for import in imports.into_values() {
                 output.push(import);

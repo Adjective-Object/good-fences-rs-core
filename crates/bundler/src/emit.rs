@@ -230,6 +230,7 @@ pub(crate) struct CachedRenderer<'a> {
     rewrites: &'a [crate::effects::InvocationRewrite],
     replacements: std::collections::BTreeMap<u32, Code>,
     edits: std::collections::BTreeMap<u32, Vec<Edit>>,
+    contexts: std::collections::BTreeMap<u32, (Span, crate::context::Dispatch)>,
     fresh: Fresh,
 }
 
@@ -247,6 +248,7 @@ impl<'a> CachedRenderer<'a> {
             rewrites,
             replacements: Default::default(),
             edits: Default::default(),
+            contexts: Default::default(),
             fresh: Fresh::new(facts),
         }
     }
@@ -257,6 +259,18 @@ impl<'a> CachedRenderer<'a> {
 
     pub(crate) fn edit(&mut self, operation: u32, edit: Edit) {
         self.edits.entry(operation).or_default().push(edit);
+    }
+
+    pub(crate) fn context(
+        &mut self,
+        dependency: &ast_segmenter::owned::Dependency,
+        dispatch: crate::context::Dispatch,
+    ) {
+        if let Some(index) = self.recipe.operations.iter().position(|operation| matches!(
+            operation.kind, ast_segmenter::emission::OperationKind::Dependency { dependency: id } if id == dependency.id
+        )) {
+            self.contexts.insert(index as u32, (dependency.specifier_span, dispatch));
+        }
     }
 
     pub(crate) fn dependency(
@@ -351,6 +365,10 @@ impl<'a> CachedRenderer<'a> {
         use ast_segmenter::emission::OperationKind;
         if let Some(replacement) = self.replacements.get(&index) {
             return Ok(replacement.clone());
+        }
+        if let Some((span, dispatch)) = self.contexts.get(&index).cloned() {
+            let argument = self.children(span, Some(index))?;
+            return Ok(dispatch.emit(argument));
         }
         let operation = &self.recipe.operations[index as usize];
         let span = operation.kind.span(self.facts, self.recipe);
