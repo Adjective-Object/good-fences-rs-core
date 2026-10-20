@@ -41,6 +41,9 @@ Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 Instantiate cached operation parents/source slots with original binding/request
 IDs; replacing parents own nested rewrites, never reconnect generated text.
+Materialize complete recipe MultiSpans, not just segment ownership ranges.
+Split declarators share source prefixes, not binding/effect ownership; terminate
+each reconstructed declaration independently.
 
 The symbol linker emits scope-hoisted direct ESM bindings; the rejected
 registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is

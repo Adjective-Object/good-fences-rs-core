@@ -69,6 +69,7 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("default.mjs", "export default (/*# sourceURL=inside */ () => 1);", ModuleFormat::Esm),
         ("nested-pure.mjs", "async function f(){ /*#__PURE__*/ obj?.[key()](/*#__PURE__*/ inner(arg), ...iterable, await later); }", ModuleFormat::Esm),
         ("chain.mjs", "/*#__PURE__*/ object.method().next?.(...iterable); /*#__PURE__*/ (object?.method)(await argument);", ModuleFormat::Esm),
+        ("split.mjs", "export const café = 1, {value: next = café} = {}, last = next; let a, b = last; var c = b, d = c;", ModuleFormat::Esm),
     ] {
         let first = record(source, path, format);
         let bytes = first.encode(source).unwrap();
@@ -82,6 +83,21 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
             decoded.config
         );
     }
+}
+
+#[test]
+fn rejects_invalid_or_repaired_multispan_sources() {
+    use ast_segmenter::MultiSpan;
+    assert!(MultiSpan::new([]).is_err());
+    assert!(MultiSpan::new([Span::new(0, 1); 5]).is_err());
+    let encoded = serde_cbor::to_vec(&vec![(0_u32, 1_u32); 5]).unwrap();
+    assert!(serde_cbor::from_slice::<MultiSpan>(&encoded).is_err());
+    let source = "export const a = 1, b = a;";
+    let original = record(source, "file.mjs", ModuleFormat::Esm);
+    let mut changed = original.clone();
+    changed.module.facts.emission.segments[1].source = MultiSpan::from(changed.module.segments[1]);
+    assert!(changed.to_parsed(source).is_err());
+    assert!(CacheRecord::decode(&envelope(&changed), source, original.config).is_err());
 }
 
 fn reject_emission(source: &str, mutations: &[fn(&mut ast_segmenter::emission::EmissionFacts)]) {

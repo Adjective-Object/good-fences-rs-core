@@ -263,13 +263,33 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         .sort_by_key(|e| (e.span.start, e.name_span.map(|s| s.start)));
     (facts.effects, facts.invocations) = crate::effects::extract(program, &facts);
     let segments = if facts.commonjs {
-        vec![Span::new(
+        let span = Span::new(
             program.hashbang.as_ref().map_or(0, |h| h.span.end),
             program.source_text.len() as u32,
-        )]
+        );
+        vec![(span, span.into())]
     } else {
-        program.body.iter().map(GetSpan::span).collect()
+        program
+            .body
+            .iter()
+            .flat_map(crate::multi_span::statement_sources)
+            .collect()
     };
+    if !facts.commonjs {
+        for export in &mut facts.exports {
+            if let Some(name) = export.name_span {
+                let index = segments.partition_point(|(span, _)| span.end <= name.start);
+                if let Some((span, source)) = segments.get(index) {
+                    if source.as_slice().len() > 1
+                        && span.start <= name.start
+                        && name.end <= span.end
+                    {
+                        export.span = *span;
+                    }
+                }
+            }
+        }
+    }
     facts.emission = crate::emission::extract(program, &facts, &segments);
     Ok(facts)
 }

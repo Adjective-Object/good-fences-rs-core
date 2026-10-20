@@ -230,6 +230,24 @@ fn assert_native_observation(sources: &BTreeMap<PathBuf, String>, expected: &str
 }
 
 #[test]
+fn native_chunks_materialize_split_exports_and_preserve_order_and_live_bindings() {
+    let sources = sources(&[
+        ("dep.mjs", "export let a = 1, b = a + 1; const dead = 9, used = 3; export function bump(){ a++; b += used; }"),
+        ("entry.mjs", "import {a, b, bump} from './dep.mjs'; const values = [], first = values.push(a), second = values.push(b); bump(); console.log(values.join(','), a, b, first, second); export {a, b};"),
+    ]);
+    assert_native_observation(&sources, "1,2 2 5 1 2\n");
+    let (_, output) = build(&sources, &[("entry.mjs", true), ("dep.mjs", true)], false);
+    let observed = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(
+        observed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&observed.stderr)
+    );
+    assert_eq!(observed.stdout, b"1,2 2 5 1 2\n");
+    assert!(output.files.values().all(|text| !text.contains("dead")));
+}
+
+#[test]
 fn native_concatenation_uses_canonical_live_bindings_and_exact_public_names() {
     let sources = sources(&[
         ("leaf.mjs", "console.log(hoisted()); var value = 1; var value = 2; export {value as default}; export function increment() { function identity(value) { return value; } value += identity(1); } export function hoisted() { return later; } var later = 7; var later; console.log(typeof key);"),

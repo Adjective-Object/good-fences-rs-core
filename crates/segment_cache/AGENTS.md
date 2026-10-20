@@ -2,6 +2,8 @@
 
 - Persist `ast_segmenter::owned::ModuleFacts`, body and ordered statement ranges;
   never legacy tracker tags, resolved paths, arena IDs or derived graph/effects.
+- Keep split-declarator ownership ranges disjoint; persist and validate shared
+  MultiSpan assembly prefixes through emission recipes and provenance.
 - Bump extractor identity for parser defaults, extraction or support-policy
   changes; bump schema for incompatible wire layout. Keep OXC revision in sync
   with workspace pins.

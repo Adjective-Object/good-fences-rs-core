@@ -35,6 +35,10 @@ references when merging names.
 Statement spans are zero-based, end-exclusive UTF-8 byte offsets. The legacy
 `SegmentGraph` treats execution-only imports and opaque requires as dependencies
 on all target statements, not only exports; this is not evaluation scheduling.
+Split top-level multi-declarator variables (including named exports) into
+disjoint declarator ownership ranges. Cached recipe `source: MultiSpan` owns
+assembly pieces, including shared prefixes; never use an ownership range alone
+to reconstruct split declarations. Keep destructuring and CJS bodies indivisible.
 
 ## Bundler parse policy
 

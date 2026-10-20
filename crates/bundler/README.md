@@ -50,6 +50,11 @@ compose PURE lowering, shorthand, namespace reads, default initialization and
 binding/dependency substitutions in original UTF-8 coordinates. Replacing
 operations explicitly own their nested source slots; no retained-source AST or
 name/specifier reconnection is needed.
+Multi-declarator variable statements are independently retained declarator
+segments. Both native emission paths and isolated emission materialize their
+cached `MultiSpan` pieces, reusing the original declaration/export prefix and
+adding a terminator. Binding/effect ownership stays disjoint; shared source
+prefixes do not create graph edges or merge declarator lifetimes.
 PURE guarded alternatives use cached callee steps, source slots and await-guard
 restrictions without parsing callee fragments. Annotation policy and result
 demand still select whether an invocation is retained or lowered.

@@ -56,6 +56,21 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
         "invalid emission capture links"
     );
     for (&range, recipe) in module.segments.iter().zip(&emission.segments) {
+        let pieces = recipe.source.as_slice();
+        ensure!(
+            !pieces.is_empty() && pieces.len() <= 4,
+            "invalid source pieces"
+        );
+        for &piece in pieces {
+            span(source, piece)?;
+        }
+        ensure!(
+            recipe.source.contains(range)
+                && pieces.windows(2).all(|w| w[0].end <= w[1].start)
+                && (pieces == [range]
+                    || (pieces.len() == 2 && pieces[1] == range && pieces[0].end <= range.start)),
+            "invalid segment source assembly"
+        );
         placement(facts, recipe, range)?;
         namespaces(facts, recipe, source, range)?;
         operations(facts, recipe, source, range)?;
@@ -275,7 +290,11 @@ fn operations(
                 form,
             } => {
                 ensure!(
-                    !facts.commonjs && *wrapper == range,
+                    !facts.commonjs
+                        && (*wrapper == range
+                            || (recipe.source.as_slice().len() > 1
+                                && *wrapper == recipe.source.as_slice()[0]
+                                && matches!(form, ExportForm::Declaration { .. }))),
                     "invalid export wrapper range"
                 );
                 ensure!(
@@ -335,7 +354,11 @@ fn operations(
         };
         ensure!(keys.insert(key), "duplicate emission operation");
         let operation_range = operation.kind.span(facts, recipe);
-        within(source, range, operation_range)?;
+        span(source, operation_range)?;
+        ensure!(
+            operation_range.start < operation_range.end && recipe.source.contains(operation_range),
+            "invalid emission containment"
+        );
         ranges.push(operation_range);
     }
     if !facts.commonjs {
@@ -438,7 +461,7 @@ fn operations(
     for export in &facts.exports {
         if contains(range, export.span) {
             ensure!(
-                keys.contains(&Key::Export(range.start)),
+                keys.contains(&Key::Export(recipe.source.as_slice()[0].start)),
                 "missing export wrapper"
             );
         }

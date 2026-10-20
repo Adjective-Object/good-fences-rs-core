@@ -22,6 +22,8 @@ pub struct EmissionFacts {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SegmentRecipe {
+    /// Original-source assembly pieces, independent of the segment's ownership range.
+    pub source: crate::MultiSpan,
     pub connector_only: bool,
     pub placement: PlacementFacts,
     pub names: NameRestrictions,
@@ -305,7 +307,7 @@ fn guard_start(expression: &Expression<'_>) -> Option<u32> {
 pub(crate) fn extract(
     program: &Program<'_>,
     facts: &ModuleFacts,
-    segments: &[Span],
+    segments: &[(Span, crate::MultiSpan)],
 ) -> EmissionFacts {
     let mut visitor = Extractor {
         facts,
@@ -353,18 +355,25 @@ pub(crate) fn extract(
             .collect(),
         ..EmissionFacts::default()
     };
-    for &span in segments {
-        let mut recipe = SegmentRecipe::default();
-        source_operations(&mut recipe, program, facts, span);
+    for (span, source) in segments {
+        let span = *span;
+        let mut recipe = SegmentRecipe {
+            source: source.clone(),
+            ..SegmentRecipe::default()
+        };
+        for &piece in source.as_slice() {
+            source_operations(&mut recipe, program, facts, piece);
+        }
         if facts.commonjs {
             compose(&mut recipe, facts);
             result.segments.push(recipe);
             continue;
         }
-        recipe.connector_only = program
+        let statement = program
             .body
-            .iter()
-            .find(|s| s.span() == span)
+            .get(program.body.partition_point(|s| s.span().end <= span.start));
+        recipe.connector_only = statement
+            .filter(|s| s.span() == span)
             .is_some_and(|s| match s {
                 Statement::ImportDeclaration(_)
                 | Statement::ExportAllDeclaration(_)
@@ -482,6 +491,21 @@ pub(crate) fn extract(
             .map(|kind| Operation { parent: None, kind })
             .collect();
         recipe.operations.extend(syntax);
+        if source.as_slice().len() > 1 {
+            let prefix = source.as_slice()[0];
+            if let Some(Statement::ExportNamedDeclaration(export)) = statement {
+                let declaration = export.declaration.as_ref().expect("split declaration");
+                recipe.operations.push(Operation {
+                    parent: None,
+                    kind: OperationKind::Export {
+                        span: prefix,
+                        form: ExportForm::Declaration {
+                            declaration: Span::new(declaration.span().start, prefix.end),
+                        },
+                    },
+                });
+            }
+        }
         compose(&mut recipe, facts);
         result.segments.push(recipe);
     }

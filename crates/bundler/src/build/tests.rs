@@ -914,6 +914,54 @@ console.log(log.join(','));
 }
 
 #[test]
+fn split_declarations_survive_warm_cache_and_source_edits_without_reparsing() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from './dep.mjs'; const dead = 9, result = value + 1; console.log(result);",
+    );
+    write(dir.root(), "dep.mjs", "export const unused = 0, value = 1;");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&options()).unwrap();
+    assert_eq!(cold.counters.source_parses, 2);
+    assert_eq!(observe(&cold.product.artifacts), b"2\n");
+    assert!(cold
+        .product
+        .artifacts
+        .files
+        .values()
+        .all(|text| !text.contains("dead") && !text.contains("unused")));
+    let noop = session.build(&options()).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(warm.counters.disk_hits, 2);
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(
+        (
+            warm.counters.source_reparses,
+            warm.counters.fragment_reparses
+        ),
+        (0, 0)
+    );
+    assert_eq!(cold.product.artifacts, warm.product.artifacts);
+    write(dir.root(), "dep.mjs", "export const unused = 0, value = 2;");
+    let edited = session.build(&options()).unwrap();
+    assert_eq!(edited.counters.source_parses, 1);
+    assert_eq!(
+        (
+            edited.counters.source_reparses,
+            edited.counters.fragment_reparses
+        ),
+        (0, 0)
+    );
+    assert_eq!(observe(&edited.product.artifacts), b"3\n");
+}
+
+#[test]
 fn parse_free_pipeline_counts_cover_cold_warm_noop_and_edits() {
     let dir = TmpDir::new();
     write(dir.root(), "entry.mjs",

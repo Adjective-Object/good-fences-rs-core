@@ -85,6 +85,14 @@ ModuleFacts {
     emission: EmissionFacts {
         segments: [
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 34,
+                            end: 95,
+                        },
+                    ],
+                ),
                 connector_only: true,
                 placement: PlacementFacts {
                     declarations: [],
@@ -148,6 +156,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 96,
+                            end: 125,
+                        },
+                    ],
+                ),
                 connector_only: true,
                 placement: PlacementFacts {
                     declarations: [],
@@ -187,6 +203,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 126,
+                            end: 142,
+                        },
+                    ],
+                ),
                 connector_only: true,
                 placement: PlacementFacts {
                     declarations: [],
@@ -214,6 +238,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 143,
+                            end: 149,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [],
@@ -249,6 +281,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 150,
+                            end: 165,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [
@@ -296,6 +336,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 166,
+                            end: 188,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [
@@ -352,6 +400,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 189,
+                            end: 229,
+                        },
+                    ],
+                ),
                 connector_only: true,
                 placement: PlacementFacts {
                     declarations: [],
@@ -408,6 +464,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 230,
+                            end: 270,
+                        },
+                    ],
+                ),
                 connector_only: true,
                 placement: PlacementFacts {
                     declarations: [],
@@ -437,6 +501,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 271,
+                            end: 301,
+                        },
+                    ],
+                ),
                 connector_only: true,
                 placement: PlacementFacts {
                     declarations: [],
@@ -466,6 +538,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 302,
+                            end: 342,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [
@@ -549,6 +629,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 343,
+                            end: 403,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [
@@ -617,6 +705,14 @@ ModuleFacts {
                 ],
             },
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 404,
+                            end: 421,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [],

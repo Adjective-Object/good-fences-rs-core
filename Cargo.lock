@@ -147,6 +147,7 @@ dependencies = [
  "serde",
  "serde_cbor",
  "sha2",
+ "smallvec",
  "test_tmpdir",
  "thiserror 1.0.69",
 ]

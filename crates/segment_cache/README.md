@@ -3,12 +3,16 @@
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 7 /
-extractor 9, including source-local emission recipes/placement constraints,
+Syntax-local effect reasons/timing are persisted and range-checked (schema 8 /
+extractor 10, including source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
 effective commonjs format, invocation inputs/annotation sites and normalized member
 shapes). No resolver, usage, effects-policy, graph, absolute path or arena IDs
 are stored.
+Split variable declarators retain disjoint ownership ranges and bounded
+`MultiSpan` source-assembly recipes. Shared declaration prefixes survive cache
+and graph adapters; provenance covers every piece, and decoding checks UTF-8,
+piece order and operation containment without reparsing.
 Support-policy/facts changes invalidate previous sidecars. Transitive
 async status, SCC schedules and require compatibility remain derived linker/host
 policy, never source truth. CJS records cannot carry top-level suspension sites.

@@ -19,6 +19,14 @@ ModuleFacts {
     emission: EmissionFacts {
         segments: [
             SegmentRecipe {
+                source: MultiSpan(
+                    [
+                        Span {
+                            start: 19,
+                            end: 282,
+                        },
+                    ],
+                ),
                 connector_only: false,
                 placement: PlacementFacts {
                     declarations: [],

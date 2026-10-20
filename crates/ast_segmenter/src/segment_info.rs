@@ -9,6 +9,7 @@ pub struct Segment {
     pub module_deps: RawModuleDeps,
     // The name scope from traversing the segment
     pub variables: VariableScope,
-    /// Zero-based, end-exclusive UTF-8 byte range of the statement or opaque CJS body.
+    /// Disjoint ownership range: statement, split declarator, or opaque CJS body.
+    /// Executable assembly uses `SegmentRecipe::source`, not this range alone.
     pub span: Span,
 }

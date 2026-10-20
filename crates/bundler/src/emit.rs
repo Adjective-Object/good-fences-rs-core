@@ -144,9 +144,27 @@ fn projection_edits(
     let mut edits = Vec::new();
     for (index, segment) in parsed.segments.iter().enumerate() {
         let key = SegmentKey::new(file, index as u32);
+        let recipe = &parsed.facts.emission.segments[index];
+        let edit_span = if recipe.source.as_slice().len() > 1 {
+            let prefix = recipe.source.as_slice()[0];
+            let start = if index > 0
+                && parsed.facts.emission.segments[index - 1]
+                    .source
+                    .as_slice()
+                    .first()
+                    == Some(&prefix)
+            {
+                parsed.segments[index - 1].span.end
+            } else {
+                prefix.start
+            };
+            Span::new(start, segment.span.end)
+        } else {
+            segment.span
+        };
         if !live.contains(&(index as u32)) {
             edits.push(Edit {
-                span: segment.span,
+                span: edit_span,
                 replacement: Code::default(),
             });
             continue;
@@ -157,13 +175,8 @@ fn projection_edits(
             .find(|e| e.key == key)
             .map(|e| e.summary.rewrites.as_slice())
             .unwrap_or_default();
-        let mut renderer = CachedRenderer::new(
-            source,
-            &parsed.facts,
-            &parsed.facts.emission.segments[index],
-            rewrites,
-        );
-        let replacement = renderer.render(segment.span).wrap_err_with(|| {
+        let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, rewrites);
+        let replacement = renderer.materialize().wrap_err_with(|| {
             format!(
                 "{}: PURE rewrite at bytes {}..{}",
                 path.display(),
@@ -172,7 +185,7 @@ fn projection_edits(
             )
         })?;
         edits.push(Edit {
-            span: segment.span,
+            span: edit_span,
             replacement,
         });
     }
@@ -285,6 +298,17 @@ impl<'a> CachedRenderer<'a> {
         self.children(range, None)
     }
 
+    pub(crate) fn materialize(&mut self) -> eyre::Result<Code> {
+        let mut output = Code::default();
+        for &piece in self.recipe.source.as_slice() {
+            output.push(self.render(piece)?);
+        }
+        if self.recipe.source.as_slice().len() > 1 {
+            output.push_str(";\n");
+        }
+        Ok(output)
+    }
+
     pub(crate) fn slot(
         &mut self,
         slot: &ast_segmenter::emission::SourceSlot,
@@ -298,7 +322,10 @@ impl<'a> CachedRenderer<'a> {
             .operations
             .iter()
             .enumerate()
-            .filter(|(_, operation)| operation.parent == parent)
+            .filter(|(_, operation)| {
+                operation.parent == parent
+                    && crate::link::contains(range, operation.kind.span(self.facts, self.recipe))
+            })
             .map(|(index, _)| index as u32)
             .collect();
         let edits = parent

@@ -358,7 +358,7 @@ fn body(
     }
     let mut hoisted = Code::default();
     let mut output = Code::default();
-    for (index, segment) in module.parsed.segments.iter().enumerate() {
+    for index in 0..module.parsed.segments.len() {
         let key = SegmentKey::new(file, index as u32);
         if !live.contains(&key) {
             continue;
@@ -491,7 +491,7 @@ fn body(
             };
             renderer.replace(operation_index as u32, replacement);
         }
-        output.push(renderer.render(segment.span)?);
+        output.push(renderer.materialize()?);
         // Retention and PURE rewrites can expose a new ASI continuation.
         output.push_str("\n;\n");
     }

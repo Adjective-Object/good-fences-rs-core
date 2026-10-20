@@ -35,20 +35,16 @@ fn hoisting_for_flags(flags: SymbolFlags) -> HoistingLevel {
     }
 }
 
-/// Compute `VariableScope` for every top-level `Statement` in one pass.
-/// Returned vec has one entry per `program.body[i]` in order.
+/// Compute `VariableScope` for each disjoint segment ownership range in one pass.
 ///
 /// For a file with N top-level statements and M total symbols/references,
 /// this is O(N + M log N) instead of O(N·M).
 fn variables_for_top_level_statements<'a>(
     semantic: &Semantic<'a>,
-    body: &[Statement<'a>],
+    spans: &[oxc_span::Span],
 ) -> Vec<VariableScope> {
-    let stmt_spans: Vec<(u32, u32)> = body
-        .iter()
-        .map(|s| (s.span().start, s.span().end))
-        .collect();
-    let mut out: Vec<VariableScope> = (0..body.len()).map(|_| VariableScope::default()).collect();
+    let stmt_spans: Vec<(u32, u32)> = spans.iter().map(|s| (s.start, s.end)).collect();
+    let mut out: Vec<VariableScope> = (0..spans.len()).map(|_| VariableScope::default()).collect();
 
     let find_stmt = |offset: u32| -> Option<usize> {
         // partition_point on stmt_spans by `end`; check that `start <= offset < end`.
@@ -193,31 +189,74 @@ fn statement_to_segment<'a>(
     }
 }
 
-/// Segment a parsed program into a list of `Segment`s — one per top-level
-/// `Statement`. Each segment combines variable scope analysis with module
-/// dependency extraction.
+/// Segment top-level statements, splitting ordinary multi-declarator variables.
 pub fn segment_file<'a>(
     logger: &impl SrcFileLogger,
     program: &Program<'a>,
     semantic: &Semantic<'a>,
 ) -> Vec<Segment> {
-    let mut per_stmt_variables = variables_for_top_level_statements(semantic, &program.body);
-
-    program
+    let parts: Vec<_> = program
         .body
         .iter()
-        .enumerate()
-        .filter_map(|(i, stmt)| {
-            // Take ownership of the pre-computed VariableScope for this statement.
-            let variables = std::mem::take(&mut per_stmt_variables[i]);
-            statement_to_segment(
-                logger,
-                &program.comments,
-                program.source_text,
-                semantic,
-                stmt,
-                variables,
-            )
+        .flat_map(|stmt| {
+            crate::multi_span::statement_sources(stmt)
+                .into_iter()
+                .enumerate()
+                .map(move |(index, (span, _))| (stmt, span, index))
+        })
+        .collect();
+    let spans: Vec<_> = parts.iter().map(|(_, span, _)| *span).collect();
+    let variables = variables_for_top_level_statements(semantic, &spans);
+    parts
+        .into_iter()
+        .zip(variables)
+        .filter_map(|((stmt, span, index), mut variables)| {
+            if let Some(declaration) = crate::multi_span::compound_declaration(stmt) {
+                let declarator = &declaration.declarations[index];
+                let imports =
+                    import_require_expr::find_declarator_imports_and_requires(semantic, declarator);
+                let mut module_deps = RawModuleDeps {
+                    dynamic_imports: imports.imported_paths.names().into_iter().collect(),
+                    requires: imports.require_paths.names().into_keys().collect(),
+                    ..Default::default()
+                };
+                for name in
+                    crate::visitors::import_export_statement::collect_binding_names(&declarator.id)
+                {
+                    variables.insert_local_str(&name, HoistingLevel::LetConstHoisting);
+                }
+                if matches!(stmt, Statement::ExportNamedDeclaration(_)) {
+                    let tags = crate::raw_module_deps::SymbolTags::from_comments(
+                        &program.comments,
+                        program.source_text,
+                        stmt.span().start,
+                    );
+                    for name in variables.get_locals() {
+                        module_deps.exports_locals.insert(
+                            crate::ExportedSymbol::from(name.as_str()),
+                            crate::raw_module_deps::TaggedSymbol::with_span(
+                                crate::raw_module_deps::Symbol::from(name.as_str()),
+                                tags.clone(),
+                                span,
+                            ),
+                        );
+                    }
+                }
+                Some(Segment {
+                    module_deps,
+                    variables,
+                    span,
+                })
+            } else {
+                statement_to_segment(
+                    logger,
+                    &program.comments,
+                    program.source_text,
+                    semantic,
+                    stmt,
+                    variables,
+                )
+            }
         })
         .collect()
 }
@@ -251,7 +290,13 @@ pub fn try_segment_file<'a>(
     }
     let segments = segment_file(logger, program, semantic);
     eyre::ensure!(
-        segments.len() == program.body.len(),
+        segments.len()
+            == program
+                .body
+                .iter()
+                .map(|stmt| crate::multi_span::compound_declaration(stmt)
+                    .map_or(1, |d| d.declarations.len()))
+                .sum::<usize>(),
         "statement extraction rejected part of the program"
     );
     Ok(segments)

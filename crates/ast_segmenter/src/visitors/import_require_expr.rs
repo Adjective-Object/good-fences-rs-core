@@ -167,6 +167,18 @@ pub fn find_imports_and_requires<'a>(
     visitor.inner
 }
 
+pub(crate) fn find_declarator_imports_and_requires<'a>(
+    semantic: &Semantic<'a>,
+    declarator: &oxc_ast::ast::VariableDeclarator<'a>,
+) -> ImportsAndRequires {
+    let mut visitor = ImportsAndRequiresVisitor {
+        inner: ImportsAndRequires::default(),
+        semantic,
+    };
+    visitor.visit_variable_declarator(declarator);
+    visitor.inner
+}
+
 #[cfg(test)]
 mod test {
     use crate::raw_module_deps::Symbol;

@@ -364,6 +364,28 @@ fn compare(source: &str, observer: &str, namespace: bool) -> String {
 }
 
 #[test]
+fn split_declarations_materialize_independently_with_lexical_semantics() {
+    for source in [
+        "export const a = 1, b = a + 1; console.log(a, b);",
+        "export let a, b = 2; a = b; console.log(a, b);",
+        "var a = 1, a = a + 1; console.log(a);",
+        "const {a = 1} = {}, [b = a] = []; console.log(a, b);",
+        "const a = b, b = 1; console.log(a);",
+        "const a = (() => b)(), b = 1; console.log(a);",
+    ] {
+        compare(source, "import './input.mjs';", true);
+    }
+    let output = compare(
+        "const unusedFirst = 1, live = 2, unusedLast = 3; console.log(live);",
+        "import './input.mjs';",
+        false,
+    );
+    assert!(!output.contains("unusedFirst"), "{output}");
+    assert!(!output.contains("unusedLast"), "{output}");
+    assert!(output.contains("const live = 2;"), "{output}");
+}
+
+#[test]
 fn tree_shakes_real_code_and_preserves_shadowing_hoisting_and_order() {
     let source = r#"
 #!/not-a-real-hashbang

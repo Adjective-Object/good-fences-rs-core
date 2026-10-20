@@ -376,7 +376,7 @@ fn extract_declaration_names(_logger: &impl SrcFileLogger, decl: &Declaration<'_
 }
 
 /// Recursively collect all binding identifier names from a `BindingPattern`.
-fn collect_binding_names(pattern: &oxc_ast::ast::BindingPattern<'_>) -> Vec<String> {
+pub(crate) fn collect_binding_names(pattern: &oxc_ast::ast::BindingPattern<'_>) -> Vec<String> {
     use oxc_ast::ast::BindingPattern;
     match pattern {
         BindingPattern::BindingIdentifier(ident) => vec![ident.name.to_string()],

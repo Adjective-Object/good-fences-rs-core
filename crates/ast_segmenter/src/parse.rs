@@ -166,6 +166,114 @@ mod tests {
     }
 
     #[test]
+    fn compound_declarations_have_disjoint_ownership_and_shared_source_prefixes() {
+        let source = "export const café = 1, { value: next = café } = {}, last = next;\nlet a, b = last;\nvar c = b, d = c;";
+        let parsed = parse(source, "file.mjs").unwrap();
+        assert_eq!(parsed.segments.len(), 7);
+        let pieces: Vec<_> = parsed
+            .facts
+            .emission
+            .segments
+            .iter()
+            .map(|recipe| {
+                recipe
+                    .source
+                    .as_slice()
+                    .iter()
+                    .map(|span| &source[span.start as usize..span.end as usize])
+                    .collect::<String>()
+            })
+            .collect();
+        assert_eq!(
+            pieces,
+            [
+                "export const café = 1",
+                "export const { value: next = café } = {}",
+                "export const last = next",
+                "let a",
+                "let b = last",
+                "var c = b",
+                "var d = c",
+            ]
+        );
+        assert!(parsed
+            .segments
+            .windows(2)
+            .all(|s| s[0].span.end <= s[1].span.start));
+        assert_eq!(
+            parsed.segments[1]
+                .variables
+                .get_locals()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
+            ["next"]
+        );
+        assert_eq!(
+            parsed.segments[1]
+                .variables
+                .get_escaped_symbols()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
+            ["café"]
+        );
+        for (index, export) in parsed.facts.exports.iter().enumerate() {
+            assert_eq!(export.span, parsed.segments[index].span);
+            assert_eq!(parsed.segments[index].module_deps.exports_locals.len(), 1);
+        }
+    }
+
+    #[test]
+    fn split_declarations_keep_each_dependency_and_redeclaration() {
+        use crate::raw_module_deps::Symbol;
+        let parsed = parse(
+            "var value = import('./first').then(({named}) => named), value = import('./second');",
+            "file.mjs",
+        )
+        .unwrap();
+        assert_eq!(parsed.segments.len(), 2);
+        assert_eq!(
+            parsed
+                .facts
+                .bindings
+                .iter()
+                .find(|b| b.name == "value")
+                .unwrap()
+                .declarations
+                .len(),
+            2
+        );
+        for segment in &parsed.segments {
+            assert_eq!(
+                segment
+                    .variables
+                    .get_locals()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>(),
+                ["value"]
+            );
+            assert_eq!(segment.module_deps.dynamic_imports.len(), 1);
+        }
+        assert!(parsed.segments[0].module_deps.dynamic_imports["./first"]
+            .contains(&Symbol::named("named")));
+        assert!(parsed.segments[1]
+            .module_deps
+            .dynamic_imports
+            .contains_key("./second"));
+        let cjs = parse_module(
+            &logger::StdioLogger::new(),
+            "var a = 1, b = a;",
+            Path::new("file.cjs"),
+            ModuleFormat::CommonJs,
+        )
+        .unwrap();
+        assert_eq!(cjs.segments.len(), 1);
+        assert_eq!(
+            cjs.facts.emission.segments[0].source.as_slice(),
+            [cjs.segments[0].span]
+        );
+    }
+
+    #[test]
     fn extracts_owned_records_in_each_supported_language() {
         for (path, source) in [
             ("file.js", "export const value = 1;"),

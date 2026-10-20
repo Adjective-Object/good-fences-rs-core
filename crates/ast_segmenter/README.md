@@ -2,8 +2,16 @@
 
 Extracts owned top-level statement segments from OXC-parsed JavaScript and
 TypeScript. Each segment contains module imports/exports, variable declarations
-and references, and its source span; the parser arena can then be reset.
+and references, and its ownership span; the parser arena can then be reset.
 Spans are zero-based UTF-8 byte ranges with an exclusive end.
+Top-level multi-declarator `const`/`let`/`var` declarations, including named
+exports, have one segment per declarator. Destructuring stays indivisible;
+nested declarations and opaque CommonJS bodies are not split. Segment ownership
+ranges are disjoint. Each `facts.emission.segments[i].source` is a `MultiSpan`
+(an inline `SmallVec` bounded to four original-source pieces): split segments
+share the declaration/export prefix and copy only their own declarator.
+Materialization adds a statement terminator; all occurrence and rewrite offsets
+remain in the original source, with no transformed-source reparse.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
 

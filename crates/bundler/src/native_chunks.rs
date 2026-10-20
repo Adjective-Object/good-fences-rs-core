@@ -348,7 +348,7 @@ pub(super) fn emit(
                     imports.push(Code::evaluation(path(graph, owners[&target])));
                 }
             }
-            for (index, segment) in module.parsed.segments.iter().enumerate() {
+            for index in 0..module.parsed.segments.len() {
                 let key = SegmentKey::new(root, index as u32);
                 if !live.contains(&key) {
                     continue;
@@ -363,7 +363,7 @@ pub(super) fn emit(
                 for (dependency, replacement, whole) in &edits {
                     renderer.dependency(dependency, replacement.clone(), *whole);
                 }
-                imports.push(renderer.render(segment.span)?);
+                imports.push(renderer.materialize()?);
                 imports.push_str("\n;\n");
             }
             imports.default_export |= facts.exports.iter().any(|export| {
