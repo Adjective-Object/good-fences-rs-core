@@ -59,6 +59,8 @@ function containment is syntax metadata, not eager evaluation permission.
 `policy` is the checked source-local support gate; target format, assets and
 externals remain resolver/linker checks. Low-level parsing and legacy adapters
 intentionally accept a broader syntax set.
+CommonJS path parameters allow var/function redeclarations and nested shadows;
+reject top-level lexical redeclarations before factory emission.
 `top_level_await` owns ESM await/for-await source spans outside functions;
 it is not async dependency/SCC status. CJS TLA stays rejected.
 

@@ -485,6 +485,13 @@ requires see partial exports; deferred sites execute only when called. Failed
 factories are removed from the require cache and retry on the next require.
 Successful modules execute once. Native ESM proxies carry static named/default
 requests; CJS namespace requests/entries use a canonical runtime-key bridge.
+`__filename` and `__dirname` are factory-local wrapper parameters initialized
+from the actual output availability chunk's native path bindings (the CJS
+counterpart of `import.meta.filename`/`import.meta.dirname`). They describe emitted
+files, not original source locations. `var` redeclarations retain those values;
+writes stay local to one factory, and nested lexical shadows remain ordinary JS.
+Top-level lexical redeclarations conflict with wrapper parameters and are rejected
+with source diagnostics, as in Node.
 
 ### Interop policy
 

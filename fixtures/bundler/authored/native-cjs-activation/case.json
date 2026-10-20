@@ -4,10 +4,11 @@
   "entryPoints": ["entry.mjs"],
   "expectations": {
     "backend": "native",
-    "stdout": ["shared", "before 1", "true true true", "deferred", "true 2"]
+    "stdout": ["paths string string true", "shared", "before 1", "true true true", "deferred", "true 2"]
   },
   "goals": [
     "Ambient opaque factories execute once across static, named, dynamic and require requests.",
-    "Loading a factory dependency does not execute a deferred require; wrapper this and exports replacement retain their identities."
+    "Loading a factory dependency does not execute a deferred require; wrapper this and exports replacement retain their identities.",
+    "Var redeclarations reuse initialized CommonJS filename and directory parameters."
   ]
 }

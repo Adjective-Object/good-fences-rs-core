@@ -69,7 +69,10 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         for binding in &facts.bindings {
             if binding.top_level
                 && !binding.type_only
-                && matches!(binding.name.as_str(), "require" | "module" | "exports")
+                && (matches!(binding.name.as_str(), "require" | "module" | "exports")
+                    || (matches!(binding.name.as_str(), "__filename" | "__dirname")
+                        && !binding.function_scoped
+                        && !binding.function))
             {
                 policy.reject(
                     binding.declarations[0],

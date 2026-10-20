@@ -1019,6 +1019,43 @@ fn delete_recreate_rename_and_old_success_after_failure() {
 }
 
 #[test]
+fn commonjs_path_parameters_describe_the_actual_output_owner() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {default as paths} from './paths.cjs';",
+    );
+    write(
+        dir.root(),
+        "paths.cjs",
+        "var __filename; var __dirname; module.exports = {filename: __filename, dirname: __dirname};",
+    );
+    let build = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    let owner = &build.product.artifacts.members[&chunks::NodeId::Segment {
+        module: dir.root().join("paths.cjs"),
+        index: 0,
+    }];
+    assert_eq!(
+        observe_named(
+            &build.product.artifacts,
+            &format!(
+                "import {{paths}} from './main.mjs'; \
+                 import {{fileURLToPath}} from 'node:url'; \
+                 import {{dirname}} from 'node:path'; \
+                 const filename = fileURLToPath(new URL({}, import.meta.url)); \
+                 console.log(paths.filename === filename, paths.dirname === dirname(filename));",
+                serde_json::to_string(&format!("./{}", owner.display())).unwrap()
+            )
+        ),
+        b"true true\n"
+    );
+}
+
+#[test]
 fn package_export_patterns_are_specific_across_fresh_builds() {
     let dir = TmpDir::new();
     write(
