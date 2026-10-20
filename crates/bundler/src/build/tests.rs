@@ -1053,6 +1053,68 @@ fn package_export_patterns_are_specific_across_fresh_builds() {
 }
 
 #[test]
+fn package_export_conditions_match_node_for_import_and_require() {
+    for conditions in [
+        r#"{"node":"./node.cjs","default":"./fallback.cjs"}"#,
+        r#"{"default":"./fallback.cjs","import":"./import.cjs","require":"./require.cjs"}"#,
+        r#"{"import":"./import.cjs","require":"./require.cjs","default":"./fallback.cjs"}"#,
+        r#"{"require":"./require.cjs","import":"./import.cjs","default":"./fallback.cjs"}"#,
+        r#"{"node-addons":"./node.cjs","default":"./fallback.cjs"}"#,
+        r#"{"module-sync":"./node.cjs","default":"./fallback.cjs"}"#,
+    ] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            "import value from 'pkg'; console.log('import', value);",
+        );
+        write(
+            dir.root(),
+            "main.cjs",
+            "console.log('require', require('pkg'));",
+        );
+        write(
+            dir.root(),
+            "node_modules/pkg/package.json",
+            &format!(r#"{{"exports":{{".":{conditions}}}}}"#),
+        );
+        for value in ["node", "fallback", "import", "require"] {
+            write(
+                dir.root(),
+                &format!("node_modules/pkg/{value}.cjs"),
+                &format!("module.exports = '{value}';"),
+            );
+        }
+        let mut options = options();
+        options.entries.insert(
+            "require".into(),
+            Entry {
+                path: "main.cjs".into(),
+                output_name: None,
+                namespace: true,
+            },
+        );
+        let expected = [
+            observe_entry(&dir.root().join("main.mjs")),
+            observe_entry(&dir.root().join("main.cjs")),
+        ]
+        .concat();
+        let build = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&options)
+            .unwrap();
+        assert_eq!(
+            observe_named(
+                &build.product.artifacts,
+                "await import('./main.mjs'); await import('./main.cjs');"
+            ),
+            expected,
+            "{conditions}"
+        );
+    }
+}
+
+#[test]
 fn package_exports_type_tsconfig_and_options_invalidate_independently() {
     let dir = TmpDir::new();
     let root = dir.root();

@@ -9,7 +9,6 @@ crate-type = ["lib"]
 
 [dependencies]
 hashbrown = "0.14.5"
-ahashmap = { path = "../ahashmap" }
 path-clean = { workspace = true }
 path-slash = { workspace = true }
 packagejson = { path = "../packagejson" }

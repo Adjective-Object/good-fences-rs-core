@@ -397,6 +397,38 @@ mod test {
     }
 
     #[test]
+    fn node_runtime_conditions_are_not_active_for_browser_targets() {
+        let tmp = test_tmpdir!(
+            "node_modules/pkg/package.json" => r#"{
+                "exports": {
+                    ".": {
+                        "node-addons": "./node.ts",
+                        "module-sync": "./node.ts",
+                        "node": "./node.ts",
+                        "default": "./browser.ts"
+                    }
+                }
+            }"#,
+            "node_modules/pkg/node.ts" => "export const value = 1;",
+            "node_modules/pkg/browser.ts" => "export const value = 2;"
+        );
+        for (environment, expected) in [
+            (TargetEnv::Node, "node.ts"),
+            (TargetEnv::Browser, "browser.ts"),
+        ] {
+            let caches = CombinedResolverCaches::new();
+            let resolver = caches.resolver(
+                tmp.root(),
+                NodeModulesResolverOptions::default_for_env(environment),
+            );
+            assert_eq!(
+                resolver.resolve(&tmp.root_join("entry.ts"), "pkg").unwrap().path,
+                tmp.root_join(&format!("node_modules/pkg/{expected}"))
+            );
+        }
+    }
+
+    #[test]
     pub fn test_conditional_export_heterogenous() {
         // Test that the resolver can handle a package.json with a mix of
         // single and conditional exports
@@ -465,7 +497,7 @@ mod test {
             }
         );
 
-        // check fallback behaviour with multiple conditions
+        // Active conditions are a set; package declaration order wins.
         assert_eq!(
             resolve_with_conditions(
                 "packages/my/importing/module.ts",
@@ -477,7 +509,7 @@ mod test {
                     // rewrite should not occur (tsconfig is outside the root dir)
                     tmp.root()
                         .to_owned()
-                        .join("node_modules/hetero/lib/require-target.ts")
+                        .join("node_modules/hetero/lib/import-target.ts")
                 ),
                 slug: None,
             }

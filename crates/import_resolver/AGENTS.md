@@ -36,3 +36,6 @@ node_modules caches omit conditions from their keys. Externals require exact
 explicit declarations. `invalidate` replaces both trees, including misses;
 call it after filesystem/config changes, then refresh the graph. Symlink
 identity follows explicit options; source paths must follow that same policy.
+Export conditions are active sets, not priority lists; preserve package JSON
+declaration order. Node defaults include node/node-addons/module-sync, not browser
+defaults. Select a subpath before evaluating its conditions.

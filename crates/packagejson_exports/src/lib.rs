@@ -11,41 +11,14 @@ use packagejson::{
     PackageJsonExport, PackageJsonExports,
 };
 
-// Pair path, export-condfition of form ('package-name/imported-path', 'import')
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
-struct ExportKey(String, String);
-
-// Implement Equivalent for our custom export key so we can do a key comparison
-// without having to copy strings to consturct a new ExportKey
-impl hashbrown::Equivalent<ExportKey> for (&str, &str) {
-    fn equivalent(&self, key: &ExportKey) -> bool {
-        *self.0 == key.0 && *self.1 == key.1
-    }
-}
-
 // Struct that performs the "export" field remapping from package.json
 //
 // This holds derived data from the "exports" field in a package.json file, and
 // is computed with PackageExportRewriteData::try_from(PackageJson)
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct PackageExportRewriteData {
-    // Pre-computed export map for static exports
-    // Map is of form ('package-name/imported-path', 'import') => "/absolute/path/to/exported"
-    static_exports: hashbrown::HashMap<ExportKey, ExportedPath>,
-
-    // Dynamic directory exports
-    // Map of form:
-    // {
-    //  <export_condition> => [("./local-import/", "./remapped-path/"), ..(contd.)]
-    // }
-    directory_exports: hashbrown::HashMap<String, Vec<(String, ExportedPath)>>,
-
-    // Star exports
-    // Map of form:
-    // {
-    //  <export_condition> => [("./local-import/*-foo", "./cjs/remapped-*"), ..(contd.)]
-    // }
-    star_exports: hashbrown::HashMap<String, Vec<(String, ExportedPath)>>,
+    // Subpath keys select an ordered list of conditions, never the reverse.
+    exports: hashbrown::HashMap<String, Vec<(String, ExportedPath)>>,
 }
 
 fn clean_path(p: &str) -> String {
@@ -144,33 +117,6 @@ impl Display for ExportCondition<'_> {
     }
 }
 
-fn resolve_export_condition<'a, TStr: Into<&'a str>, TItem, TOut>(
-    // The export conditions to resolve against
-    conditions: &'a hashbrown::HashMap<String, TItem>,
-    // The requested export conditions (expected to be a pointer type, which is why its Clone here)
-    requested_conditions: impl Clone + IntoIterator<Item = TStr>,
-    // callback to map over members
-    cb: impl Fn(&'a TItem) -> Option<TOut>,
-) -> Option<(TOut, ExportCondition<'a>)> {
-    for condition in requested_conditions {
-        // skip the default condition, as we will check it last
-        let cond_ref: &'a str = condition.into();
-        if cond_ref == "default" {
-            continue;
-        }
-
-        if let Some(Some(resolved)) = conditions.get(cond_ref).map(&cb) {
-            return Some((resolved, ExportCondition::Condition(cond_ref)));
-        }
-    }
-
-    if let Some(Some(resolved)) = conditions.get("default").map(&cb) {
-        return Some((resolved, ExportCondition::Default));
-    }
-
-    None
-}
-
 fn rewrite_star_export(
     // the export pattern that matched the specifier
     star_match: &str,
@@ -209,7 +155,7 @@ pub struct MatchedExport<'a> {
     pub rewritten_export: ExportedPathRef<'a>,
     // export condition that was matched against, if any.
     //
-    // Borrowed from the input list of requested export conditions
+    // Borrowed from the selected package export's condition list.
     pub export_kind: ExportCondition<'a>,
 }
 
@@ -239,6 +185,19 @@ fn reverse_match_star_pattern(star_pattern: &str, path: &str) -> bool {
     true
 }
 
+fn matches_exported_path(pattern: &str, target: &ExportedPath, path: &str) -> bool {
+    let ExportedPath::Exported(target) = target else {
+        return false;
+    };
+    if pattern.contains('*') {
+        reverse_match_star_pattern(target, path)
+    } else if pattern.ends_with('/') {
+        path.starts_with(target)
+    } else {
+        path == target
+    }
+}
+
 impl PackageExportRewriteData {
     // Rewrites an import path to a new path using only the "exports" field from package.json
     pub fn rewrite_relative_export<'a, TStr: Into<&'a str>>(
@@ -254,82 +213,54 @@ impl PackageExportRewriteData {
         let mut clean_dest = String::new();
         let clean_relative_import = clean_path_avoid_alloc(relative_import, &mut clean_dest);
 
-        // Check for literal matches in the resolution data
-        // try all literal matches before we try any directory or star matches
-        for export_condition in requested_export_conditions
-            .clone()
-            .into_iter()
-            .map(|x| x.into())
-            .chain(std::iter::once("default"))
-        {
-            let export_key = ExportKey(clean_relative_import.to_string(), export_condition.into());
-            if let Some(matched) = self.static_exports.get(&export_key) {
-                return Ok(Some(MatchedExport::with_kind(
-                    matched.as_ref(),
-                    export_condition.into(),
-                )));
-            }
-        }
-
-        // Check for directory matches in the resolution data
-        let directory_match = resolve_export_condition(
-            &self.directory_exports,
-            requested_export_conditions.clone(),
-            |x: &Vec<(String, ExportedPath)>| {
-                x.iter()
-                    .filter_map(|(directory_pattern, directory_export)| {
-                        if clean_relative_import.starts_with(directory_pattern) {
-                            Some((directory_pattern, directory_export))
-                        } else {
-                            None
-                        }
+        let selected = self
+            .exports
+            .get_key_value(clean_relative_import)
+            .filter(|(pattern, _)| !pattern.contains('*') && !pattern.ends_with('/'))
+            .or_else(|| {
+                self.exports
+                    .iter()
+                    .filter(|(pattern, _)| {
+                        pattern.ends_with('/')
+                            && clean_relative_import.starts_with(pattern.as_str())
                     })
-                    .next()
-            },
-        );
-        if let Some(((directory_pattern, directory_export), export_condition)) = directory_match {
-            return Ok(Some(MatchedExport::with_kind(
-                directory_export.as_ref().map_export(|v| {
-                    rewrite_dir_export(clean_relative_import, directory_pattern, v, out);
-                    out as &str
-                }),
-                export_condition,
-            )));
-        }
-
-        // Choose the subpath before its conditions; a broader pattern cannot win
-        // just because it supplies an earlier requested condition.
-        let best_pattern = self
-            .star_exports
-            .values()
-            .flatten()
-            .filter_map(|(pattern, _)| {
-                match_star_pattern(pattern, clean_relative_import).map(|matched| (pattern, matched))
+                    .max_by_key(|(pattern, _)| pattern.len())
             })
-            .max_by_key(|(pattern, _)| (pattern.find('*').unwrap(), pattern.len()));
-        let star_match = resolve_export_condition(
-            &self.star_exports,
-            requested_export_conditions.clone(),
-            |x: &Vec<(String, ExportedPath)>| {
-                let (best, matched) = best_pattern?;
-                x.iter()
-                    .find_map(|(pattern, target)| (pattern == best).then_some((matched, target)))
-            },
-        );
-        if let Some(((star_match, target), export_condition)) = star_match {
-            return Ok(Some(MatchedExport::with_kind(
-                // if we have a star match, rewrite the path and store it in `out`. Otherwise,
-                // do nothing
-                target.as_ref().map_export(|v| {
-                    rewrite_star_export(star_match, v, out);
-                    out as &str
-                }),
-                export_condition,
-            )));
-        }
-
-        // No matches found
-        Ok(None)
+            .or_else(|| {
+                self.exports
+                    .iter()
+                    .filter(|(pattern, _)| {
+                        match_star_pattern(pattern, clean_relative_import).is_some()
+                    })
+                    .max_by_key(|(pattern, _)| (pattern.find('*').unwrap(), pattern.len()))
+            });
+        let Some((pattern, conditions)) = selected else {
+            return Ok(None);
+        };
+        let Some((condition, target)) = conditions.iter().find(|(condition, _)| {
+            condition == "default"
+                || requested_export_conditions
+                    .clone()
+                    .into_iter()
+                    .any(|active| active.into() == condition)
+        }) else {
+            return Ok(None);
+        };
+        let rewritten = target.as_ref().map_export(|target| {
+            if let Some(matched) = match_star_pattern(pattern, clean_relative_import) {
+                rewrite_star_export(matched, target, out);
+                out as &str
+            } else if pattern.ends_with('/') {
+                rewrite_dir_export(clean_relative_import, pattern, target, out);
+                out as &str
+            } else {
+                target
+            }
+        });
+        Ok(Some(MatchedExport::with_kind(
+            rewritten,
+            condition.as_str().into(),
+        )))
     }
 
     /// Checks if a given package-relative path is exported or not.
@@ -340,39 +271,12 @@ impl PackageExportRewriteData {
 
         let mut accum: Vec<&str> = Vec::new();
 
-        for (ExportKey(_, condition), exported) in self.static_exports.iter() {
-            if accum.contains(&condition.as_str()) {
-                continue;
-            }
-            if let ExportedPath::Exported(exported_path) = exported {
-                if cleaned_path == exported_path {
-                    accum.push(condition)
-                }
-            }
-        }
-
-        for (condition, exports) in self.directory_exports.iter() {
-            if accum.contains(&condition.as_str()) {
-                continue;
-            }
-            for (_, exported) in exports {
-                if let ExportedPath::Exported(exported_dir_path) = exported {
-                    if cleaned_path.starts_with(exported_dir_path) {
-                        accum.push(condition)
-                    }
-                }
-            }
-        }
-
-        for (condition, exports) in self.star_exports.iter() {
-            if accum.contains(&condition.as_str()) {
-                continue;
-            }
-            for (_, exported) in exports {
-                if let ExportedPath::Exported(exported_star_pattern) = exported {
-                    if reverse_match_star_pattern(exported_star_pattern, cleaned_path) {
-                        accum.push(condition)
-                    }
+        for (pattern, conditions) in &self.exports {
+            for (condition, target) in conditions {
+                if matches_exported_path(pattern, target, cleaned_path)
+                    && !accum.contains(&condition.as_str())
+                {
+                    accum.push(condition.as_str());
                 }
             }
         }
@@ -386,35 +290,11 @@ impl PackageExportRewriteData {
         let mut clean_dest = String::new();
         let cleaned_path = clean_path_avoid_alloc(package_relative_path, &mut clean_dest);
 
-        for (_, exported) in self.static_exports.iter() {
-            if let ExportedPath::Exported(exported_path) = exported {
-                if cleaned_path == exported_path {
-                    return true;
-                }
-            }
-        }
-
-        for (_, exports) in self.directory_exports.iter() {
-            for (_, exported) in exports {
-                if let ExportedPath::Exported(exported_dir_path) = exported {
-                    if cleaned_path.starts_with(exported_dir_path) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        for (_, exports) in self.star_exports.iter() {
-            for (_, exported) in exports {
-                if let ExportedPath::Exported(exported_star_pattern) = exported {
-                    if reverse_match_star_pattern(exported_star_pattern, cleaned_path) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
+        self.exports.iter().any(|(pattern, conditions)| {
+            conditions
+                .iter()
+                .any(|(_, target)| matches_exported_path(pattern, target, cleaned_path))
+        })
     }
 }
 
@@ -430,64 +310,27 @@ impl TryFrom<&PackageJsonExports> for PackageExportRewriteData {
                 ));
             }
 
-            // for simple exports, simulate a conditional exports map with a single entry, "default"
-            // If needed, store it on the stack in my_cond_exp, allowing conditional_exports to be a reference type
-            let my_cond_exp: ahashmap::AHashMap<String, ExportedPath>;
-            let conditional_exports: &ahashmap::AHashMap<String, ExportedPath> = match exported {
-                PackageJsonExport::Single(export_target) => {
-                    let entry = (
-                        "default".to_string(),
-                        match export_target {
-                            Some(v) => ExportedPath::Exported(v.to_string()),
-                            None => ExportedPath::Private,
-                        },
-                    );
-                    my_cond_exp = ahashmap::AHashMap::from_iter(vec![entry].drain(..));
-                    &my_cond_exp
-                }
-                PackageJsonExport::Conditional(conditional_exports) => conditional_exports,
-            };
-
             let export_path_star_ct = export_path.chars().filter(|c| *c == '*').count();
-            if export_path_star_ct == 1 {
-                // star pattern
-                for (export_condition, export_target) in conditional_exports.iter() {
-                    resolution_data
-                        .star_exports
-                        .entry_ref(export_condition)
-                        .or_insert_with(Vec::new)
-                        .push((
-                            clean_path(export_path),
-                            export_target.map_export(clean_path),
-                        ));
-                }
-            } else if export_path_star_ct > 1 {
+            if export_path_star_ct > 1 {
                 return Err(anyhow!(
                     "Invalid star pattern '{}' in package.json exports field: \
                             Star patterns may contain at most a single star match.",
                     export_path
                 ));
-            } else if export_path.ends_with('/') {
-                // deprecated node 14.x directory pattern
-                for (export_condition, export_target) in conditional_exports.iter() {
-                    resolution_data
-                        .directory_exports
-                        .entry_ref(export_condition)
-                        .or_insert_with(Vec::new)
-                        .push((
-                            clean_path(export_path),
-                            export_target.map_export(clean_path),
-                        ));
-                }
-            } else {
-                // literal export
-                for (export_condition, export_target) in conditional_exports.iter() {
-                    resolution_data.static_exports.insert(
-                        ExportKey(clean_path(export_path), export_condition.clone()),
-                        export_target.map_export(clean_path),
-                    );
-                }
             }
+            let conditions = match exported {
+                PackageJsonExport::Single(target) => vec![(
+                    "default".to_owned(),
+                    ExportedPath::from(target.clone()).map_export(clean_path),
+                )],
+                PackageJsonExport::Conditional(conditions) => conditions
+                    .iter()
+                    .map(|(condition, target)| (condition.clone(), target.map_export(clean_path)))
+                    .collect(),
+            };
+            resolution_data
+                .exports
+                .insert(clean_path(export_path), conditions);
         }
         Ok(resolution_data)
     }
@@ -510,14 +353,8 @@ mod test {
             }"#,
         )
         .unwrap();
-        let mut rewrites = PackageExportRewriteData::try_from(&exports).unwrap();
-        for reverse in [false, true] {
-            for patterns in rewrites.star_exports.values_mut() {
-                patterns.sort_by(|a, b| a.0.cmp(&b.0));
-                if reverse {
-                    patterns.reverse();
-                }
-            }
+        for _ in 0..16 {
+            let rewrites = PackageExportRewriteData::try_from(&exports).unwrap();
             for (request, expected) in [
                 ("./feature/x", ExportedPathRef::Exported("./specific/x.mjs")),
                 (
@@ -533,6 +370,61 @@ mod test {
                     .unwrap();
                 assert_eq!(result.rewritten_export, expected);
             }
+        }
+    }
+
+    #[test]
+    fn conditions_follow_declaration_order_for_every_subpath_kind() {
+        for key in [".", "./feature/*", "./feature/"] {
+            for (conditions, expected) in [
+                (
+                    r#"{"default":"./fallback","import":"./mode"}"#,
+                    "./fallback",
+                ),
+                (r#"{"import":"./mode","default":"./fallback"}"#, "./mode"),
+                (
+                    r#"{"import":"./old","default":"./fallback","import":"./replacement"}"#,
+                    "./replacement",
+                ),
+                (r#"{"default":null,"import":"./mode"}"#, ""),
+            ] {
+                let exports =
+                    serde_json::from_str(&format!(r#"{{"{key}":{conditions}}}"#)).unwrap();
+                let rewrites = PackageExportRewriteData::try_from(&exports).unwrap();
+                let mut out = String::new();
+                let request = if key == "." { "." } else { "./feature/" };
+                let resolved = rewrites
+                    .rewrite_relative_export(request, ["import"], &mut out)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    resolved.rewritten_export,
+                    if expected.is_empty() {
+                        ExportedPathRef::Private
+                    } else {
+                        ExportedPathRef::Exported(expected)
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inactive_selected_conditions_do_not_fall_back_to_broader_subpaths() {
+        let exports = serde_json::from_str(
+            r#"{
+                "./*": "./generic/*.mjs",
+                "./feature/*": {"browser":"./browser/*.mjs"},
+                "./exact": {"browser":"./browser.mjs"}
+            }"#,
+        )
+        .unwrap();
+        let rewrites = PackageExportRewriteData::try_from(&exports).unwrap();
+        for request in ["./feature/x", "./exact"] {
+            assert!(rewrites
+                .rewrite_relative_export(request, ["node", "import"], &mut String::new())
+                .unwrap()
+                .is_none());
         }
     }
 
