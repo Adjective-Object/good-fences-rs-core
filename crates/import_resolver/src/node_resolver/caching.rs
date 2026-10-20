@@ -471,12 +471,13 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                                         }
                                     }
                                 } else {
-                                    // no matched rewrite, so just use node_modules/imported/path
-                                    tracing::debug!(
-                                    "no matched rewrite in {:#?} for {rel_import:#?}. Rewrites: {rewrite_data:#?}",
-                                    nm_pkg_path.display()
-                                );
-                                    nm_dir_path.join(NODE_MODULES).join(target)
+                                    return Err(Error::from_boxed(
+                                        eyre::eyre!(
+                                            "ERR_PACKAGE_PATH_NOT_EXPORTED: import {target:?} is not exported by {}",
+                                            nm_pkg_path.join(PACKAGE).display()
+                                        )
+                                        .into(),
+                                    ));
                                 }
                             }
                             _ => {

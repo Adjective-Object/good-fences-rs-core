@@ -15,6 +15,9 @@ policy. Graph source identities must use the same policy.
 Node defaults activate `node`, `node-addons` and `module-sync` in addition to the
 request mode; browser defaults omit those Node conditions. Package declaration
 order, including an early `default`, determines which active condition wins.
+An exports map is authoritative: unmatched subpaths or inactive conditions fail
+resolution, even when a matching physical file exists. Packages without exports
+retain legacy filesystem resolution.
 
 Call `invalidate` after filesystem/package/tsconfig edits, additions or removals;
 `set_policy` invalidates automatically. Invalidation intentionally replaces both
