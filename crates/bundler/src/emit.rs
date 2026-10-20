@@ -335,8 +335,11 @@ impl<'a> CachedRenderer<'a> {
             if let Some(recipe) = self.rewrites.iter().find(|rewrite| {
                 rewrite.invocation == self.facts.invocations[invocation as usize].span
             }) {
-                if !crosses_await_guard(self.source, recipe, &self.facts.top_level_await)? {
-                    let callee = self.slot(&lowering.callee)?;
+                if !matches!(
+                    recipe.guard,
+                    crate::effects::ArgumentGuard::OriginalChain { .. }
+                ) || !lowering.crosses_await_guard
+                {
                     let mut arguments = Vec::new();
                     for (slot, argument) in lowering.arguments.iter().zip(&recipe.arguments) {
                         let value = self.slot(slot)?;
@@ -349,9 +352,16 @@ impl<'a> CachedRenderer<'a> {
                     arguments.push("void 0".into());
                     let tail = arguments.join(",");
                     return match recipe.guard {
-                        crate::effects::ArgumentGuard::Always => Ok(format!("(({callee}),{tail})")),
+                        crate::effects::ArgumentGuard::Always => {
+                            let callee = self.slot(&lowering.callee)?;
+                            Ok(format!("(({callee}),{tail})"))
+                        }
                         crate::effects::ArgumentGuard::OriginalChain { optional_call } => {
-                            pure_chain(&callee, optional_call, &tail, &mut self.fresh)
+                            let chain = lowering.chain.as_ref().ok_or_eyre(
+                                "unsupported nested optional call/private PURE callee",
+                            )?;
+                            let base = self.slot(&chain.base)?;
+                            self.chain(&chain.steps, base, optional_call, &tail)
                         }
                     };
                 }
@@ -359,170 +369,38 @@ impl<'a> CachedRenderer<'a> {
         }
         self.children(span, Some(index))
     }
-}
 
-fn crosses_await_guard(
-    source: &str,
-    recipe: &crate::effects::InvocationRewrite,
-    awaits: &[Span],
-) -> eyre::Result<bool> {
-    let crate::effects::ArgumentGuard::OriginalChain { optional_call } = recipe.guard else {
-        return Ok(false);
-    };
-    if !awaits.iter().any(|&span| contains(recipe.invocation, span)) {
-        return Ok(false);
-    }
-    let allocator = oxc_allocator::Allocator::default();
-    let callee = &source[recipe.callee.start as usize..recipe.callee.end as usize];
-    rewrite::count_output_parse();
-    let expression = oxc_parser::Parser::new(&allocator, callee, oxc_span::SourceType::mjs())
-        .parse_expression()
-        .map_err(|e| eyre::eyre!("PURE callee parser diagnostics: {e:?}"))?;
-    let boundary = chain_guard_start(&expression)
-        .map(|offset| recipe.callee.start + offset)
-        .or_else(|| optional_call.then_some(recipe.callee.end));
-    Ok(boundary.is_some_and(|start| {
-        awaits
-            .iter()
-            .any(|span| start <= span.start && span.end <= recipe.invocation.end)
-    }))
-}
-
-fn chain_guard_start(expression: &oxc_ast::ast::Expression<'_>) -> Option<u32> {
-    use oxc_ast::ast::*;
-    use oxc_span::GetSpan;
-    // Match chain's lowering path; parentheses keep their own native chain boundary.
-    let (object, optional) = match expression {
-        Expression::ChainExpression(c) => match &c.expression {
-            ChainElement::StaticMemberExpression(m) => (&m.object, m.optional),
-            ChainElement::ComputedMemberExpression(m) => (&m.object, m.optional),
-            _ => return None,
-        },
-        Expression::StaticMemberExpression(m) => (&m.object, m.optional),
-        Expression::ComputedMemberExpression(m) => (&m.object, m.optional),
-        Expression::CallExpression(c) if !c.optional => return chain_guard_start(&c.callee),
-        _ => return None,
-    };
-    chain_guard_start(object).or_else(|| optional.then_some(object.span().end))
-}
-
-fn pure_chain(callee: &str, optional: bool, tail: &str, fresh: &mut Fresh) -> eyre::Result<String> {
-    use oxc_allocator::Allocator;
-    use oxc_parser::Parser;
-    use oxc_span::SourceType;
-    let allocator = Allocator::default();
-    rewrite::count_output_parse();
-    let expression = Parser::new(&allocator, callee, SourceType::mjs())
-        .parse_expression()
-        .map_err(|e| eyre::eyre!("PURE callee parser diagnostics: {e:?}"))?;
-    chain(&expression, callee, fresh, &|value, fresh| {
+    fn chain(
+        &mut self,
+        steps: &[ast_segmenter::emission::ChainStep],
+        value: String,
+        optional_call: bool,
+        tail: &str,
+    ) -> eyre::Result<String> {
+        use ast_segmenter::emission::ChainStep;
+        let Some((step, rest)) = steps.split_first() else {
+            return Ok(if optional_call {
+                let name = self.fresh.name();
+                format!("({name}=>{name}===null||{name}===void 0?void 0:({tail}))({value})")
+            } else {
+                format!("(({value}),{tail})")
+            });
+        };
+        let (suffix, optional) = match step {
+            ChainStep::Static { property, optional } => (format!(".{property}"), *optional),
+            ChainStep::Computed { property, optional } => {
+                (format!("[{}]", self.slot(property)?), *optional)
+            }
+            ChainStep::Call { suffix } => (self.slot(suffix)?, false),
+        };
         if optional {
-            let name = fresh.name();
+            let name = self.fresh.name();
+            let body = self.chain(rest, format!("{name}{suffix}"), optional_call, tail)?;
             Ok(format!(
-                "({name}=>{name}===null||{name}===void 0?void 0:({tail}))({value})"
+                "({name}=>{name}===null||{name}===void 0?void 0:({body}))({value})"
             ))
         } else {
-            Ok(format!("(({value}),{tail})"))
+            self.chain(rest, format!("{value}{suffix}"), optional_call, tail)
         }
-    })
-}
-
-type Continuation<'a> = dyn Fn(String, &mut Fresh) -> eyre::Result<String> + 'a;
-
-fn chain(
-    expression: &oxc_ast::ast::Expression<'_>,
-    source: &str,
-    fresh: &mut Fresh,
-    continuation: &Continuation<'_>,
-) -> eyre::Result<String> {
-    use oxc_ast::ast::*;
-    use oxc_span::GetSpan;
-    match expression {
-        Expression::ChainExpression(c) => match &c.expression {
-            ChainElement::StaticMemberExpression(m) => member(
-                &m.object,
-                &format!(".{}", m.property.name),
-                m.optional,
-                source,
-                fresh,
-                continuation,
-            ),
-            ChainElement::ComputedMemberExpression(m) => member(
-                &m.object,
-                &format!(
-                    "[{}]",
-                    &source[m.expression.span().start as usize..m.expression.span().end as usize]
-                ),
-                m.optional,
-                source,
-                fresh,
-                continuation,
-            ),
-            ChainElement::CallExpression(_) | ChainElement::PrivateFieldExpression(_) => {
-                eyre::bail!(
-                    "unsupported nested optional call/private PURE callee at bytes {}..{}",
-                    c.span.start,
-                    c.span.end
-                )
-            }
-            ChainElement::TSNonNullExpression(_) => {
-                eyre::bail!("TypeScript PURE callee is unsupported")
-            }
-        },
-        Expression::StaticMemberExpression(m) => member(
-            &m.object,
-            &format!(".{}", m.property.name),
-            m.optional,
-            source,
-            fresh,
-            continuation,
-        ),
-        Expression::ComputedMemberExpression(m) => member(
-            &m.object,
-            &format!(
-                "[{}]",
-                &source[m.expression.span().start as usize..m.expression.span().end as usize]
-            ),
-            m.optional,
-            source,
-            fresh,
-            continuation,
-        ),
-        Expression::CallExpression(c) if !c.optional => {
-            chain(&c.callee, source, fresh, &|value, fresh| {
-                let args = &source[c.callee.span().end as usize..c.span.end as usize];
-                continuation(format!("{value}{args}"), fresh)
-            })
-        }
-        Expression::CallExpression(c) if c.optional => eyre::bail!(
-            "unsupported nested optional PURE call at bytes {}..{}",
-            c.span.start,
-            c.span.end
-        ),
-        _ => continuation(
-            source[expression.span().start as usize..expression.span().end as usize].into(),
-            fresh,
-        ),
     }
-}
-
-fn member(
-    object: &oxc_ast::ast::Expression<'_>,
-    suffix: &str,
-    optional: bool,
-    source: &str,
-    fresh: &mut Fresh,
-    continuation: &Continuation<'_>,
-) -> eyre::Result<String> {
-    chain(object, source, fresh, &|receiver, fresh| {
-        if optional {
-            let name = fresh.name();
-            let body = continuation(format!("{name}{suffix}"), fresh)?;
-            Ok(format!(
-                "({name}=>{name}===null||{name}===void 0?void 0:({body}))({receiver})"
-            ))
-        } else {
-            continuation(format!("{receiver}{suffix}"), fresh)
-        }
-    })
 }

@@ -44,6 +44,9 @@ compose PURE lowering, shorthand, namespace reads, default initialization and
 binding/dependency substitutions in original UTF-8 coordinates. Replacing
 operations explicitly own their nested source slots; no retained-source AST or
 name/specifier reconnection is needed.
+PURE guarded alternatives use cached callee steps, source slots and await-guard
+restrictions without parsing callee fragments. Annotation policy and result
+demand still select whether an invocation is retained or lowered.
 Shorthand keys, free globals, nested shadows, hoisting, strict-module `this`,
 TDZ, const and live mutation keep native semantics. The output is parser/semantic
 validated and has no runtime, cells, registrations or per-module facade family.

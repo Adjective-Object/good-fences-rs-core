@@ -77,6 +77,102 @@ fn original_coordinate_slots_reject_invalid_utf8_and_escaping_edits() {
     }
 }
 
+#[test]
+fn cached_optional_chain_slots_compose_without_fragment_parses() {
+    use ast_segmenter::emission::OperationKind;
+    let source = r#"
+const log = [];
+const holder = { make(x) { log.push('make'); return { get method() { log.push('get'); return undefined; } }; } };
+function key() { log.push('key'); return 'make'; }
+function side() { log.push('WRONG'); }
+function arg() { log.push('arg'); return 1; }
+/*#__PURE__*/ holder?.[(/*#__PURE__*/ side(), key())](arg()).method?.(arg());
+console.log(log.join(','));
+"#;
+    let parsed = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("input.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let binding = parsed
+        .facts
+        .bindings
+        .iter()
+        .find(|binding| binding.name == "holder")
+        .unwrap()
+        .id;
+    let before = rewrite::output_parse_count();
+    let mut output = String::new();
+    for (segment, recipe) in parsed.segments.iter().zip(&parsed.facts.emission.segments) {
+        let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+        let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, &rewrites);
+        for (index, operation) in recipe.operations.iter().enumerate() {
+            let id = match operation.kind {
+                OperationKind::Binding { binding, .. } => Some(binding),
+                OperationKind::Reference { reference, .. } => {
+                    parsed.facts.references[reference as usize].binding
+                }
+                _ => None,
+            };
+            if id == Some(binding) {
+                renderer.replace(index as u32, "renamed".into());
+            }
+        }
+        output.push_str(&renderer.render(segment.span).unwrap());
+        output.push_str("\n;\n");
+    }
+    assert_eq!(rewrite::output_parse_count(), before);
+    assert!(output.contains("(renamed)"), "{output}");
+    let actual = node(&output, "import './input.mjs';");
+    assert!(
+        actual.status.success(),
+        "{}\n{output}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(actual.stdout).unwrap(),
+        "key,arg,make,get\n"
+    );
+}
+
+#[test]
+fn cached_await_guard_selection_does_not_parse_callees() {
+    for invocation in [
+        "globalThis.run?.(await Promise.resolve(1))",
+        "globalThis?.[await Promise.resolve('run')](1)",
+        "(await Promise.resolve(globalThis))?.run(1)",
+        "(globalThis?.run)(await Promise.resolve(1))",
+    ] {
+        let source = format!("/*#__PURE__*/ {invocation};");
+        let parsed = ast_segmenter::parse_module(
+            &logger::StdioLogger::new(),
+            &source,
+            Path::new("input.mjs"),
+            ModuleFormat::Esm,
+        )
+        .unwrap();
+        let segment = &parsed.segments[0];
+        let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+        assert_eq!(rewrites.len(), 1);
+        let mut renderer = CachedRenderer::new(
+            &source,
+            &parsed.facts,
+            &parsed.facts.emission.segments[0],
+            &rewrites,
+        );
+        let before = rewrite::output_parse_count();
+        let output = renderer.render(segment.span).unwrap();
+        assert_eq!(rewrite::output_parse_count(), before);
+        assert_eq!(
+            output.contains(invocation),
+            !invocation.starts_with('('),
+            "{output}"
+        );
+    }
+}
+
 fn emit(source: &str, namespace: bool) -> String {
     let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", source)]);
     let roots = if namespace {
