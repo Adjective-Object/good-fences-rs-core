@@ -146,6 +146,8 @@ facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
 no independently executable namespace path in `Artifacts::modules`.
+Observable namespace seams keep private declarations and local deferred readers
+in one lexical component; relocating readers must not invent private exports.
 Never greedily absorb whole modules or use SCC completeness as relocation proof.
 Mandatory execution components and consumer demand choose segment owners.
 Emit a complete exactly-once SegmentKey schedule per owner, using full cached

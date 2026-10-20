@@ -1,0 +1,19 @@
+{
+  "id": "authored/native-private-boundary",
+  "moduleType": "module",
+  "entryPoints": ["a.js", "b.js"],
+  "expectations": {
+    "stdout": [
+      "ReferenceError",
+      "[\"Self\",true,true]",
+      "[2,3,2]",
+      "read,value after,read",
+      "ReferenceError"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Keep private class heritage and deferred closure dependencies addressable when two entries share functions from an escaped native namespace.",
+    "Preserve control-flow TDZ and hoisted function access without exposing private bindings as extra namespace exports."
+  ]
+}

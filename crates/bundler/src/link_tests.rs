@@ -1457,6 +1457,54 @@ fn native_chunks_preserve_entry_dependent_static_effect_order() {
 }
 
 #[test]
+fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
+    for (dependency, expected) in [
+        (
+            "const Base = class {}; export const value = class Self extends (() => Base)() { static own() { return Self; } }; export function read() { return [value.name, value.own() === value, Object.getPrototypeOf(value) === Base]; }",
+            "[\"Self\",true,true]\nread,value\n",
+        ),
+        (
+            "let value = 0; if (true) { globalThis.capture(() => [value, after, hoisted()]); value = 2; } function hoisted() { return value; } export const after = 3; export function read() { return [value, after, hoisted()]; }",
+            "ReferenceError\n[2,3,2]\nafter,read\n",
+        ),
+    ] {
+        let source = sources(&[
+            (
+                "entry.mjs",
+                "import * as ns from './dep.mjs'; export function observe() { console.log(JSON.stringify(ns.read())); console.log(Object.keys(ns).join(',')); }",
+            ),
+            ("other.mjs", "export {read} from './dep.mjs';"),
+            ("dep.mjs", dependency),
+        ]);
+        for reverse in [false, true] {
+            let entries = if reverse {
+                [("other.mjs", true), ("entry.mjs", true)]
+            } else {
+                [("entry.mjs", true), ("other.mjs", true)]
+            };
+            let (_, output) = build(&source, &entries, reverse);
+            assert_eq!(output.backend, Backend::Native);
+            let observer = format!(
+                "globalThis.capture = f => {{ try {{ f(); }} catch (e) {{ console.log(e.name); }} }}; {} (await import('./entry.mjs')).observe();",
+                if reverse { "await import('./other.mjs');" } else { "" }
+            );
+            let mut baseline = source.clone();
+            baseline.insert("observe.mjs".into(), observer.clone());
+            let baseline = node(&baseline, Path::new("observe.mjs"));
+            assert!(baseline.status.success());
+            assert!(baseline.stderr.is_empty());
+            assert_eq!(baseline.stdout, expected.as_bytes());
+            let mut actual = output.files.clone();
+            actual.insert("observe.mjs".into(), observation(&output, &observer));
+            let actual = node(&actual, Path::new("observe.mjs"));
+            assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+            assert!(actual.stderr.is_empty());
+            assert_eq!(actual.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
 fn native_segment_schedule_preserves_abrupt_export_initialization_state() {
     let source = sources(&[
         (

@@ -40,8 +40,8 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **37 cases / 52 entry executions**: six esbuild cases,
-six rspack cases and twenty-five authored cases. The upstream cases cover
+The corpus contains **38 cases / 54 entry executions**: six esbuild cases,
+six rspack cases and twenty-six authored cases. The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
 Authored cases cover TDZ and const-write failures with preceding effects,
@@ -58,6 +58,8 @@ entrance-dependent source SCC evaluation.
 The fifth regression, `native-prefix-throw-visibility`, additionally preserves
 uninitialized exports through an escaped entry namespace when another source's
 pure prefix evaluates first.
+`native-private-boundary` keeps shared deferred readers connected to private
+class/control-flow bindings without widening observable namespaces.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -155,7 +157,7 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All thirty-seven current cases require native. Legacy reporting and
+back to legacy. All thirty-eight current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 

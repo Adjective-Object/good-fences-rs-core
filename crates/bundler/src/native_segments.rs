@@ -292,6 +292,43 @@ impl Placement {
                 }
             }
         }
+        // A public namespace cannot grow private export addresses. Keep local
+        // readers with private declarations even when their accesses are deferred;
+        // otherwise a pinned declaration can strand its relocated reader.
+        let boundary_exports: BTreeMap<_, BTreeSet<_>> = surfaces
+            .iter()
+            .map(|&file| {
+                (
+                    file,
+                    symbols.exports[&file]
+                        .values()
+                        .filter_map(|linked| match linked.identity {
+                            ExportIdentity::Binding(file, binding) => Some((file, binding.0)),
+                            _ => None,
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
+        for access in &plan.retention.execution.accesses {
+            if access.segment.file_id != access.declaration.file_id {
+                continue;
+            }
+            let file = access.segment.file_id;
+            let Some(exports) = boundary_exports.get(&seams[&file]) else {
+                continue;
+            };
+            let reference = &modules[&file].parsed.facts.references[access.reference as usize];
+            let Some(binding) = reference.binding else {
+                continue;
+            };
+            if !exports.contains(&(file, binding.0)) {
+                let before = indices[&access.declaration];
+                let after = indices[&access.segment];
+                constraints[before].insert(after);
+                constraints[after].insert(before);
+            }
+        }
         let components = crate::effect_dependencies::components(&constraints);
         let mut component_for = BTreeMap::new();
         for (index, component) in components.iter().enumerate() {

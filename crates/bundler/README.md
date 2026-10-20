@@ -368,6 +368,9 @@ modules or root-set partitions. Pure lexical components move to a unique consume
 or independent shared binding chunks; components from unrelated sources can
 co-locate. Eager local initializer reads and writes keep their lexical components
 together, preserving snapshots and mutable closures without cells or setters.
+Within an observable namespace seam, private declarations and their local
+readers also share a lexical component, including deferred function accesses.
+Moving a reader alone must not require adding private exports to that namespace.
 Source-phase barriers pin non-hoisted evaluations, even when Ecco or PURE calls
 classify a site as pure. Proven initialized immutable local reads can discharge
 read-only fences; their mandatory ordering still travels with the component.
