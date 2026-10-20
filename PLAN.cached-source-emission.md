@@ -2,16 +2,16 @@
 
 ## 1. Precompute source-local emission recipes and constraints
 
-- Extend `ast_segmenter::owned::ModuleFacts`; reuse existing bindings, references, dependencies, spans, effects and invocations.
-- Cache a compact per-segment `connector_only` flag: imports, declaration-free reexports/export lists, or empty statements; not merely effect-free code.
-- Precompute source-local placement constraints: hoisted availability, eager initialization dependencies, write co-location and name/capture restrictions.
-- Compile compact per-segment emission recipes while the AST and semantic scopes are available; parameterize names, targets and optional transforms by local IDs.
-- Bake shorthand expansion, export-wrapper removal and default initialization/hoisting into recipes; reuse existing spans rather than duplicating them.
-- Preclassify namespace accesses as direct-read candidates or native-namespace uses, preserving receiver/write/delete semantics.
-- Precompute name-sensitive rewrite restrictions instead of making consumers rediscover inference sites and scope ancestry.
-- Compile PURE lowering alternatives, including receiver evaluation, argument/spread order, parentheses, optional guards and await restrictions.
-- Include source-hint removal in recipes; store sparse operations/indices, not a serialized AST, duplicate source or expanded output variants.
-- Keep records owned, source-ordered and in original UTF-8 coordinates; never cache chosen names, purity decisions, resolved targets or chunk owners.
+- Extend [`ModuleFacts`](crates/ast_segmenter/src/owned.rs#L131); reuse existing bindings, references, dependencies, spans, effects and [invocations](crates/ast_segmenter/src/invocation.rs#L45).
+- Cache a compact per-segment `connector_only` flag: imports, declaration-free reexports/export lists, or empty statements; not merely effect-free code. Current derivation: [`native_chunks.rs:65`](crates/bundler/src/native_chunks.rs#L65).
+- Precompute source-local placement constraints: [hoisted availability](crates/bundler/src/native_segments.rs#L60), [eager initialization and write co-location](crates/bundler/src/native_segments.rs#L111), and [name/capture restrictions](crates/bundler/src/native_segments.rs#L515).
+- Compile compact per-segment emission recipes while the AST and semantic scopes are available; parameterize names, targets and optional transforms by local IDs. Replaces [`body`](crates/bundler/src/native.rs#L255) and [edit composition](crates/bundler/src/native.rs#L410).
+- Bake [shorthand expansion](crates/bundler/src/rewrite.rs#L209), [export-wrapper removal](crates/bundler/src/native.rs#L509) and [default initialization/hoisting](crates/bundler/src/native.rs#L530) into recipes; reuse existing spans rather than duplicating them.
+- Preclassify namespace accesses as [direct-read candidates](crates/bundler/src/native.rs#L586) or native-namespace uses, preserving [receiver/tag/write/delete semantics](crates/bundler/src/native.rs#L609).
+- Precompute [name-sensitive rewrite restrictions](crates/bundler/src/native.rs#L560) instead of making consumers rediscover inference sites and [scope capture](crates/bundler/src/native_segments.rs#L573).
+- Compile PURE lowering alternatives: [receiver, argument/spread and optional-chain handling](crates/bundler/src/emit.rs#L324), including [parentheses/guard boundaries](crates/bundler/src/emit.rs#L306) and [await restrictions](crates/bundler/src/emit.rs#L279).
+- Include [source-hint removal](crates/bundler/src/rewrite.rs#L94) in recipes; store sparse operations/indices, not a serialized AST, duplicate source or expanded output variants.
+- Keep records [owned and source-local](crates/segment_cache/src/lib.rs#L114), source-ordered and in original UTF-8 coordinates; never cache chosen names, purity decisions, resolved targets or chunk owners.
 
 ## 2. Persist and validate the new facts
 
