@@ -1,16 +1,16 @@
 # Cached source analysis and parse-free emission
 
-## 1. Extract additional source-local facts
+## 1. Precompute source-local emission recipes and constraints
 
 - Extend `ast_segmenter::owned::ModuleFacts`; reuse existing bindings, references, dependencies, spans, effects and invocations.
 - Cache a compact per-segment `connector_only` flag: imports, declaration-free reexports/export lists, or empty statements; not merely effect-free code.
-- Record declaration hoisting per occurrence and function/arrow containment; distinguish hoisted functions from later declarations.
-- Record import/export syntax ranges and default forms: expression, named/anonymous function/class, declaration prefix, body and terminator.
-- Record shorthand contexts, including destructuring and special `__proto__` keys.
-- Record namespace-member occurrences and receiver-sensitive call/tag/write/delete contexts.
-- Record observable function/class/name-inference sites and lexical capture constraints.
-- Extend invocation facts with optional-chain steps, receiver structure and parentheses/guard boundaries.
-- Record sourceURL/sourceMappingURL comment spans; use compact flags/indices and existing spans instead of generic AST or redundant classification records.
+- Precompute source-local placement constraints: hoisted availability, eager initialization dependencies, write co-location and name/capture restrictions.
+- Compile compact per-segment emission recipes while the AST and semantic scopes are available; parameterize names, targets and optional transforms by local IDs.
+- Bake shorthand expansion, export-wrapper removal and default initialization/hoisting into recipes; reuse existing spans rather than duplicating them.
+- Preclassify namespace accesses as direct-read candidates or native-namespace uses, preserving receiver/write/delete semantics.
+- Precompute name-sensitive rewrite restrictions instead of making consumers rediscover inference sites and scope ancestry.
+- Compile PURE lowering alternatives, including receiver evaluation, argument/spread order, parentheses, optional guards and await restrictions.
+- Include source-hint removal in recipes; store sparse operations/indices, not a serialized AST, duplicate source or expanded output variants.
 - Keep records owned, source-ordered and in original UTF-8 coordinates; never cache chosen names, purity decisions, resolved targets or chunk owners.
 
 ## 2. Persist and validate the new facts
@@ -27,8 +27,8 @@
 - Consumers: connector detection in `native_chunks.rs`, `Placement::new` in `native_segments.rs`, and name-compatibility checks.
 - Replace AST connector detection with cached `connector_only` flags; preserve the current all-source-segments classification initially.
 - For retained-only classification, reduce flags over surviving segments; keep namespace, cycle and evaluation-order checks in the planner.
-- Use declaration occurrences and function containment for hoisting/eager-read constraints.
-- Evaluate name/capture compatibility from facts, not trial `body()` emission.
+- Consume precomputed source-local availability, initialization and write constraints; resolve cross-file endpoints through checked symbols.
+- Check candidate names against precomputed capture/name restrictions, not syntax traversal or trial `body()` emission.
 - Keep actual symbol demand, initialization, effect order and activation constraints derived.
 - Preserve structural relocation tests and the SCC/await/connector timing regressions.
 
@@ -37,26 +37,27 @@
 let connector = segments.iter().all(|segment| segment.connector_only);
 ```
 
-## 4. Emit original segments without re-extraction
+## 4. Instantiate cached segment emission recipes
 
 - Consumers: `native.rs::{body, retained_source, Syntax}`, ungrouped emission in `native_chunks.rs`, and `rewrite::{Shorthand, rename_private}`.
-- Select original segments; address declarations/references by original binding IDs, never reconnect reparsed bindings by name.
-- Use cached shorthand/default/export contexts to build checked source edits.
-- Compose nested PURE/name/namespace/dependency edits before rendering; a replacing parent owns child edits explicitly.
+- Select retained recipes and supply chosen symbol names, resolved targets and policy-dependent transform choices.
+- Copy unchanged original source slices; instantiate typed replacement slots using binding/dependency IDs, never name-based reconnection.
+- Use precomputed rewrite nesting/composition; do not rediscover shorthand, scope, export forms or edit containment during emission.
+- Preserve original-coordinate edit validation; a replacing parent explicitly owns child operations.
 - Preserve name inference, nested shadows, live exports, read-only imports and TDZ.
 - Delete retained-source `parse_module`, its second AST parse and trial-render parses.
 
 ```text
-source + cached facts + retained segments + derived edits -> rendered chunk
+cached recipe + original source + link-time substitutions -> rendered chunk
 ```
 
-## 5. Lower PURE expressions from cached invocation structure
+## 5. Select precomputed PURE lowering alternatives
 
 - Consumers: `emit.rs::{crosses_await_guard, pure_chain, chain}`.
-- Replace callee-expression parsing with traversal of owned optional-chain facts.
+- Replace callee-expression parsing and chain-shape reconstruction with cached lowering recipes.
 - Preserve receiver/getter evaluation, argument order, spreads, parentheses and guards.
 - Keep annotation policy/value demand derived; do not cache unconditional purity.
-- Render nested source slices through the same edit composer as segment emission.
+- Select the retained-call or eligible lowered form; fill names and nested source slots through the segment recipe renderer.
 - Retain optional-chain, nested PURE and await/for-await regressions.
 
 ## 6. Prune chunks before rendering strings
@@ -90,7 +91,7 @@ source + cached facts + retained segments + derived edits -> rendered chunk
 ## 9. Remove hint scans; debug-validate final artifacts
 
 - Consumers: `rewrite::{source_hint_edits, validate}` and all output assembly paths.
-- Remove cached source-hint spans during source rendering; generators add none.
+- Apply precomputed source-hint removal operations during rendering; generators add none.
 - Gate final parser/semantic validation with `#[cfg(debug_assertions)]`; release emission performs no parsing.
 - In debug builds, validate once per final executable artifact after naming/alias construction; skip intermediate candidates.
 - Keep source/cache integrity, edit-range/overlap, artifact-target and output-path validation enabled in every build.
