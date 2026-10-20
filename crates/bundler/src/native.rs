@@ -10,6 +10,16 @@ use crate::symbols::Symbols;
 #[path = "native_chunks.rs"]
 mod chunks;
 
+#[cfg(test)]
+thread_local! {
+    static GLOBAL_PREPARATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn global_preparation_count() -> usize {
+    GLOBAL_PREPARATIONS.with(std::cell::Cell::get)
+}
+
 pub(super) fn emit(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -17,10 +27,11 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Artifacts<Code>> {
-    if let Some(output) = single(graph, plan, modules, manifest, symbols)? {
+    let prepared = PreparedValues::new(graph, modules, symbols);
+    if let Some(output) = single(graph, plan, modules, manifest, &prepared)? {
         return Ok(output);
     }
-    chunks::emit(graph, plan, modules, manifest, symbols)
+    chunks::emit(graph, plan, modules, manifest, &prepared)
 }
 
 fn single(
@@ -28,8 +39,9 @@ fn single(
     plan: &ChunkPlan,
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
 ) -> eyre::Result<Option<Artifacts<Code>>> {
+    let symbols = prepared.symbols;
     // Bounded fast path: a single entrance covers the complete acyclic synchronous
     // closure. Native dependency completion order is unchanged, with no outside
     // activation, namespace, async or independently executable entry boundaries.
@@ -105,7 +117,7 @@ fn single(
         order.len() == modules.len(),
         "native root does not cover retained modules"
     );
-    let values = Values::new(graph, modules, symbols);
+    let values = Values::new(prepared);
     let mut output = Code::default();
     let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
     let schedule: Vec<_> = order
@@ -193,30 +205,27 @@ fn single(
     }))
 }
 
-struct Values<'s> {
+struct PreparedValues<'s> {
     symbols: &'s Symbols,
     defaults: BTreeMap<SegmentKey, String>,
-    names: HashMap<crate::symbols::Symbol, String>,
-    imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
-    requests: BTreeMap<u32, Code>,
-    dynamic: BTreeMap<u32, Code>,
-    contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
-    native_defaults: BTreeSet<u32>,
+    occupied: HashSet<String>,
 }
 
-impl<'s> Values<'s> {
+impl<'s> PreparedValues<'s> {
     fn new(graph: &SourceGraph, modules: &BTreeMap<u32, Module<'_>>, symbols: &'s Symbols) -> Self {
-        let mut occupied: BTreeSet<_> = symbols
+        #[cfg(test)]
+        GLOBAL_PREPARATIONS.with(|count| count.set(count.get() + 1));
+        let mut occupied: HashSet<_> = symbols
             .definitions
             .values()
             .map(|d| d.name.clone())
             .collect();
-        occupied.extend(
-            symbols
-                .exports
-                .values()
-                .flat_map(|exports| exports.keys().cloned()),
-        );
+        // Export-only names constrain defaults, but not chunk-local import aliases.
+        let exports: HashSet<_> = symbols
+            .exports
+            .values()
+            .flat_map(|exports| exports.keys().map(String::as_str))
+            .collect();
         for module in modules.values() {
             occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
             occupied.extend(
@@ -243,7 +252,7 @@ impl<'s> Values<'s> {
                     let name = loop {
                         let name = format!("__gf_default_{fresh}");
                         fresh += 1;
-                        if occupied.insert(name.clone()) {
+                        if !exports.contains(name.as_str()) && occupied.insert(name.clone()) {
                             break name;
                         }
                     };
@@ -254,6 +263,46 @@ impl<'s> Values<'s> {
         Self {
             symbols,
             defaults,
+            occupied,
+        }
+    }
+}
+
+/// Owners borrow the graph-wide exclusions and store only their own additions.
+struct OccupiedNames<'s> {
+    shared: &'s HashSet<String>,
+    local: HashSet<String>,
+}
+
+impl<'s> OccupiedNames<'s> {
+    fn new(prepared: &'s PreparedValues<'_>) -> Self {
+        Self {
+            shared: &prepared.occupied,
+            local: HashSet::new(),
+        }
+    }
+
+    fn insert(&mut self, name: String) -> bool {
+        !self.shared.contains(&name) && self.local.insert(name)
+    }
+}
+
+struct Values<'s> {
+    symbols: &'s Symbols,
+    defaults: &'s BTreeMap<SegmentKey, String>,
+    names: HashMap<crate::symbols::Symbol, String>,
+    imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
+    requests: BTreeMap<u32, Code>,
+    dynamic: BTreeMap<u32, Code>,
+    contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
+    native_defaults: BTreeSet<u32>,
+}
+
+impl<'s> Values<'s> {
+    fn new(prepared: &'s PreparedValues<'_>) -> Self {
+        Self {
+            symbols: prepared.symbols,
+            defaults: &prepared.defaults,
             names: HashMap::new(),
             imports: HashMap::new(),
             requests: BTreeMap::new(),

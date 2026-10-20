@@ -55,6 +55,10 @@ remain separate from those allocations. Namespace,
 default-expression/anonymous-declaration and opaque CJS values retain typed graph
 identities, not invented lexical binding IDs; cached recipes own default
 hoisting/initialization semantics.
+Each linked emission prepares graph-wide occupied names and deterministic
+default-expression names once, sharing them across placement checks and native
+owners. Owners keep only mutable routing/name maps and local name additions;
+they do not clone the global exclusions.
 
 ## Real browser application smoke tests
 

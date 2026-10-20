@@ -19,24 +19,13 @@ pub(super) struct OwnerNames {
 pub(super) fn name_plan(
     graph: &SourceGraph,
     modules: &BTreeMap<u32, Module<'_>>,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
     owners: &BTreeMap<SegmentKey, Owner>,
     seams: &BTreeMap<u32, u32>,
 ) -> eyre::Result<BTreeMap<Owner, OwnerNames>> {
-    let defaults = Values::new(graph, modules, symbols);
-    let mut generated: BTreeSet<_> = defaults.defaults.values().cloned().collect();
-    generated.extend(symbols.definitions.values().map(|d| d.name.clone()));
-    for module in modules.values() {
-        generated.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
-        generated.extend(
-            module
-                .parsed
-                .facts
-                .references
-                .iter()
-                .map(|r| r.name.clone()),
-        );
-    }
+    let symbols = prepared.symbols;
+    let defaults = Values::new(prepared);
+    let mut generated = OccupiedNames::new(prepared);
     let mut references: BTreeMap<Owner, HashMap<crate::symbols::Symbol, bool>> = BTreeMap::new();
     for (&file, module) in modules {
         for reference in &module.parsed.facts.references {
@@ -166,12 +155,13 @@ impl Connections {
     pub fn new(
         graph: &SourceGraph,
         modules: &BTreeMap<u32, Module<'_>>,
-        symbols: &Symbols,
+        prepared: &PreparedValues<'_>,
         seams: &BTreeMap<u32, u32>,
         placement: &Placement,
         surfaces: &BTreeSet<u32>,
         cjs: &commonjs::CommonJs,
     ) -> eyre::Result<Self> {
+        let symbols = prepared.symbols;
         let mut result = Self {
             names: placement
                 .names
@@ -233,7 +223,7 @@ impl Connections {
             result.plan_native_requests(graph, modules, symbols, placement, cjs)?;
             return Ok(result);
         }
-        let defaults = Values::new(graph, modules, symbols);
+        let defaults = Values::new(prepared);
         let owners: BTreeSet<_> = placement
             .owners
             .values()
@@ -362,7 +352,7 @@ impl Connections {
             if matches!(owner, Owner::Evaluation(file) if cjs.contains(file)) {
                 continue;
             }
-            let mut values = Values::new(graph, modules, symbols);
+            let mut values = Values::new(prepared);
             values.names = result.names[&owner].clone();
             let mut output = Code::default();
             let mut exported = BTreeSet::new();

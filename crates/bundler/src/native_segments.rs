@@ -43,13 +43,14 @@ impl Placement {
         graph: &SourceGraph,
         plan: &ChunkPlan,
         modules: &BTreeMap<u32, Module<'_>>,
-        symbols: &Symbols,
+        prepared: &PreparedValues<'_>,
         seams: &BTreeMap<u32, u32>,
         phase_bound: &BTreeSet<u32>,
         wait_bound: &BTreeSet<u32>,
         surfaces: &BTreeSet<u32>,
         cjs: &commonjs::CommonJs,
     ) -> eyre::Result<Self> {
+        let symbols = prepared.symbols;
         let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
         if modules.keys().any(|&file| has_externals(graph, file)) {
             // Unknown external surfaces/evaluation stay on native source-module seams.
@@ -448,9 +449,9 @@ impl Placement {
         // physical group before applying any ownership change.
         loop {
             let mut rejected = BTreeSet::new();
-            let names = connections::name_plan(graph, modules, symbols, &owners, seams)?;
+            let names = connections::name_plan(graph, modules, prepared, &owners, seams)?;
             for (owner, members) in &activation.members {
-                let mut values = Values::new(graph, modules, symbols);
+                let mut values = Values::new(prepared);
                 values.names = names[owner].locals.clone();
                 values.requests = seams
                     .iter()
@@ -1274,7 +1275,7 @@ pub(super) fn emit(
     graph: &SourceGraph,
     root: Owner,
     modules: &BTreeMap<u32, Module<'_>>,
-    symbols: &Symbols,
+    prepared: &PreparedValues<'_>,
     placement: &Placement,
     connections: &connections::Connections,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
@@ -1286,7 +1287,7 @@ pub(super) fn emit(
         .filter(|(_, &o)| o == root)
         .map(|(&k, _)| k)
         .collect();
-    let mut values = Values::new(graph, modules, symbols);
+    let mut values = Values::new(prepared);
     values.names = connections
         .names
         .get(&root)
