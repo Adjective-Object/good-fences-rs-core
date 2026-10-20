@@ -230,7 +230,14 @@ ModuleFacts {
                     named: [],
                     inference_sensitive: false,
                 },
-                namespaces: [],
+                namespaces: [
+                    NamespaceUse {
+                        reference: 0,
+                        access: Native(
+                            Other,
+                        ),
+                    },
+                ],
                 operations: [
                     Operation {
                         parent: None,
@@ -260,7 +267,14 @@ ModuleFacts {
                     named: [],
                     inference_sensitive: false,
                 },
-                namespaces: [],
+                namespaces: [
+                    NamespaceUse {
+                        reference: 1,
+                        access: Native(
+                            Other,
+                        ),
+                    },
+                ],
                 operations: [
                     Operation {
                         parent: None,
@@ -302,7 +316,14 @@ ModuleFacts {
                     named: [],
                     inference_sensitive: false,
                 },
-                namespaces: [],
+                namespaces: [
+                    NamespaceUse {
+                        reference: 3,
+                        access: Native(
+                            Other,
+                        ),
+                    },
+                ],
                 operations: [
                     Operation {
                         parent: None,
@@ -347,7 +368,14 @@ ModuleFacts {
                     named: [],
                     inference_sensitive: false,
                 },
-                namespaces: [],
+                namespaces: [
+                    NamespaceUse {
+                        reference: 4,
+                        access: Native(
+                            Other,
+                        ),
+                    },
+                ],
                 operations: [
                     Operation {
                         parent: None,

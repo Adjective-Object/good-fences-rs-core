@@ -120,7 +120,10 @@ existing statement segments. Each `SegmentRecipe` records `connector_only`,
 declaration/hoisted availability, forward uses, eager-read and write reference
 indices, conservative function/class/arrow name restrictions and namespace uses.
 Namespace direct-read candidates are distinct from receiver, tag, mutation,
-delete and escaping uses; whether an export can replace a candidate stays linked.
+delete and escaping uses. Classification covers every import binding, including
+named/default imports that may resolve to namespace reexports; consumers select
+these alternatives only for linked namespace identities. Whether an export can
+replace a candidate stays linked.
 Nested-binding IDs and free-reference indices support conservative capture checks.
 
 Sparse `OperationKind` slots address existing binding/declaration, reference,

@@ -57,73 +57,28 @@ impl Placement {
         let mut constraints = vec![BTreeSet::new(); keys.len()];
         let mut pinned = BTreeSet::new();
         let mut declarations = BTreeSet::new();
-        let mut deferred = BTreeMap::new();
-        let mut hoisted = BTreeSet::new();
-        for (&file, module) in modules {
-            if cjs.contains(file) {
-                deferred.insert(file, Vec::new());
-                continue;
-            }
-            let allocator = Allocator::default();
-            rewrite::count_output_parse();
-            let parsed = Parser::new(&allocator, module.source, SourceType::mjs()).parse();
-            let mut functions = Functions::default();
-            functions.visit_program(&parsed.program);
-            deferred.insert(file, functions.0);
-            for statement in &parsed.program.body {
-                let function = match statement {
-                    Statement::FunctionDeclaration(function) => Some(function),
-                    Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                        Some(Declaration::FunctionDeclaration(function)) => Some(function),
-                        _ => None,
-                    },
-                    Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                        ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
-                            Some(function)
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if let Some(id) = function.and_then(|function| function.id.as_ref()) {
-                    hoisted.insert((file, id.span.start));
-                }
-            }
-        }
         for &key in &live {
             let module = &modules[&key.file_id];
-            let span = module.parsed.segments[key.segment_idx as usize].span;
             let facts = &module.parsed.facts;
-            let definitions: Vec<_> = facts
-                .bindings
+            let placement = &facts.emission.segments[key.segment_idx as usize].placement;
+            let definitions = placement
+                .declarations
                 .iter()
-                .filter(|b| {
-                    b.top_level && !b.import && b.declarations.iter().any(|&s| contains(span, s))
+                .map(|id| {
+                    facts
+                        .bindings
+                        .iter()
+                        .find(|b| b.id == *id)
+                        .ok_or_eyre("missing placement binding")
                 })
-                .collect();
-            let expression = facts
-                .exports
-                .iter()
-                .any(|e| matches!(e.value, ExportValue::Expression(s) if contains(span, s)));
-            if !definitions.is_empty() || expression {
+                .collect::<eyre::Result<Vec<_>>>()?;
+            if !definitions.is_empty() || placement.default_expression {
                 declarations.insert(key);
             }
-            let instantiable = !definitions.is_empty()
-                && definitions.iter().all(|b| {
-                    b.declarations
-                        .iter()
-                        .filter(|&&declaration| contains(span, declaration))
-                        .all(|declaration| hoisted.contains(&(key.file_id, declaration.start)))
-                });
             if cjs.contains(key.file_id)
                 || effects.contains(&key)
-                || (phase_bound.contains(&key.file_id) && !instantiable)
-                || definitions.iter().any(|b| {
-                    facts
-                        .references
-                        .iter()
-                        .any(|r| r.binding == Some(b.id) && r.span.start < span.start)
-                })
+                || (phase_bound.contains(&key.file_id) && !placement.instantiable)
+                || !placement.forward_references.is_empty()
             {
                 pinned.insert(key);
             }
@@ -140,7 +95,8 @@ impl Placement {
                     }
                 }
             }
-            for reference in facts.references.iter().filter(|r| contains(span, r.span)) {
+            for &index in &placement.writes {
+                let reference = &facts.references[index as usize];
                 let Some(binding) = reference.binding.and_then(|id| {
                     facts
                         .bindings
@@ -151,22 +107,19 @@ impl Placement {
                 };
                 let dependency =
                     declaration(graph, &ExportIdentity::Binding(key.file_id, binding.id))?.unwrap();
-                if reference.write {
-                    constraints[indices[&key]].insert(indices[&dependency]);
-                    constraints[indices[&dependency]].insert(indices[&key]);
-                }
+                constraints[indices[&key]].insert(indices[&dependency]);
+                constraints[indices[&dependency]].insert(indices[&key]);
             }
         }
         // Eager reads share their initializer's phase; deferred reads can cross
         // chunks as live imports. This also keeps snapshots ahead of later writes.
         for &key in &live {
             let module = &modules[&key.file_id];
-            let span = module.parsed.segments[key.segment_idx as usize].span;
-            for reference in module.parsed.facts.references.iter().filter(|r| {
-                r.read
-                    && contains(span, r.span)
-                    && !deferred[&key.file_id].iter().any(|&f| contains(f, r.span))
-            }) {
+            for &index in &module.parsed.facts.emission.segments[key.segment_idx as usize]
+                .placement
+                .eager_reads
+            {
+                let reference = &module.parsed.facts.references[index as usize];
                 let Some(binding) = reference.binding.and_then(|id| {
                     module
                         .parsed
@@ -440,16 +393,7 @@ impl Placement {
                     if cjs.contains(file) {
                         continue;
                     }
-                    if body(
-                        graph,
-                        file,
-                        &modules[&file],
-                        &values,
-                        &group_live,
-                        &BTreeMap::new(),
-                    )?
-                    .is_none()
-                    {
+                    if !compatible(graph, file, &modules[&file], &values, &group_live)? {
                         rejected.insert(*owner);
                     }
                 }
@@ -469,20 +413,6 @@ impl Placement {
             }
             eyre::ensure!(progress, "incompatible native lexical placement");
         }
-    }
-}
-
-#[derive(Default)]
-struct Functions(Vec<Span>);
-
-impl<'a> Visit<'a> for Functions {
-    fn visit_function(&mut self, function: &Function<'a>, flags: oxc_semantic::ScopeFlags) {
-        self.0.push(function.span);
-        walk::walk_function(self, function, flags);
-    }
-    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
-        self.0.push(function.span);
-        walk::walk_arrow_function_expression(self, function);
     }
 }
 
@@ -529,10 +459,14 @@ fn local_names(
             modules[file]
                 .parsed
                 .facts
-                .references
+                .emission
+                .free_references
                 .iter()
-                .filter(|r| r.binding.is_none())
-                .map(|r| r.name.clone())
+                .map(|&index| {
+                    modules[file].parsed.facts.references[index as usize]
+                        .name
+                        .clone()
+                })
         })
         .collect();
     let mut definitions = Vec::new();
@@ -575,9 +509,17 @@ fn local_names(
                 && modules[&other]
                     .parsed
                     .facts
-                    .bindings
+                    .emission
+                    .nested_bindings
                     .iter()
-                    .any(|b| !b.top_level && b.name == original.name)
+                    .any(|id| {
+                        modules[&other]
+                            .parsed
+                            .facts
+                            .bindings
+                            .iter()
+                            .any(|b| b.id == *id && b.name == original.name)
+                    })
         });
         let name = if !captured && occupied.insert(original.name.clone()) {
             original.name.clone()

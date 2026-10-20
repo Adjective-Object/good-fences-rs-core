@@ -54,21 +54,22 @@ pub(super) fn emit(
         .collect();
     let mut edges = BTreeMap::new();
     let mut connectors = BTreeSet::new();
+    let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
     for (&file, module) in modules {
         if module.parsed.facts.commonjs {
             edges.insert(file, Vec::new());
             continue;
         }
-        let allocator = Allocator::default();
-        rewrite::count_output_parse();
-        let parsed = Parser::new(&allocator, module.source, SourceType::mjs()).parse();
-        if parsed.program.body.iter().all(|s| match s {
-            Statement::ImportDeclaration(_)
-            | Statement::ExportAllDeclaration(_)
-            | Statement::EmptyStatement(_) => true,
-            Statement::ExportNamedDeclaration(e) => e.declaration.is_none(),
-            _ => false,
-        }) {
+        if module
+            .parsed
+            .facts
+            .emission
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| live.contains(&SegmentKey::new(file, *index as u32)))
+            .all(|(_, recipe)| recipe.connector_only)
+        {
             connectors.insert(file);
         }
         edges.insert(
@@ -157,7 +158,6 @@ pub(super) fn emit(
             *target = redirects[target];
         }
     }
-    let live = plan.retention.segments.iter().map(|s| s.key).collect();
     let recipes = plan
         .retention
         .effects
@@ -206,11 +206,7 @@ pub(super) fn emit(
                 continue;
             };
             let joined = group.union(&groups[&dependency]).copied().collect();
-            if concatenate(
-                graph, root, &joined, &owners, &redirects, modules, symbols, &live, &recipes, &cjs,
-            )?
-            .is_none()
-            {
+            if !compatible_group(graph, &joined, &redirects, modules, symbols, &live, &cjs)? {
                 continue;
             }
             for owner in owners.values_mut() {
@@ -625,6 +621,65 @@ fn request(graph: &SourceGraph, file: u32) -> String {
         "./{}",
         path(graph, file).file_name().unwrap().to_str().unwrap()
     ))
+}
+
+#[expect(clippy::too_many_arguments)]
+fn compatible_group(
+    graph: &SourceGraph,
+    group: &BTreeSet<u32>,
+    redirects: &BTreeMap<u32, u32>,
+    modules: &BTreeMap<u32, Module<'_>>,
+    symbols: &Symbols,
+    live: &BTreeSet<SegmentKey>,
+    cjs: &commonjs::CommonJs,
+) -> eyre::Result<bool> {
+    let mut values = Values::new(graph, modules, symbols);
+    for &file in group {
+        let facts = &modules[&file].parsed.facts;
+        if cjs.contains(file) {
+            return Ok(false);
+        }
+        for dependency in facts.dependencies.iter().filter(|d| !d.type_only) {
+            if cjs.contains(target_file(graph, file, dependency)?) {
+                return Ok(false);
+            }
+        }
+        for import in &facts.imports {
+            if !symbols.imports.contains_key(&(file, import.binding)) {
+                continue;
+            }
+            let dependency = facts
+                .dependencies
+                .iter()
+                .find(|d| d.id == import.dependency)
+                .ok_or_eyre("missing import dependency")?;
+            let target = redirects[&target_file(graph, file, dependency)?];
+            if group.contains(&target) {
+                if facts
+                    .references
+                    .iter()
+                    .any(|r| r.write && r.binding == Some(import.binding))
+                {
+                    return Ok(false);
+                }
+            } else {
+                let binding = facts
+                    .bindings
+                    .iter()
+                    .find(|b| b.id == import.binding)
+                    .ok_or_eyre("missing import binding")?;
+                values
+                    .imports
+                    .insert((file, binding.id), binding.name.clone());
+            }
+        }
+    }
+    for &file in group {
+        if !compatible(graph, file, &modules[&file], &values, live)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 #[expect(clippy::too_many_arguments)]

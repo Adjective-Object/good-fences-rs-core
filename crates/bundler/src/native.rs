@@ -252,6 +252,82 @@ impl<'s> Values<'s> {
     }
 }
 
+fn compatible(
+    graph: &SourceGraph,
+    file: u32,
+    module: &Module<'_>,
+    values: &Values<'_>,
+    live: &BTreeSet<SegmentKey>,
+) -> eyre::Result<bool> {
+    use ast_segmenter::emission::NamespaceAccess;
+    let facts = &module.parsed.facts;
+    let retained: Vec<_> = facts
+        .emission
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| live.contains(&SegmentKey::new(file, *index as u32)))
+        .map(|(_, recipe)| recipe)
+        .collect();
+    let mut changed = HashSet::new();
+    let mut namespaces = HashMap::new();
+    for binding in facts.bindings.iter().filter(|binding| binding.top_level) {
+        let symbol = (file, binding.id);
+        let target = if let Some(name) = values.imports.get(&symbol) {
+            Some(name.as_str())
+        } else if values.symbols.definitions.contains_key(&symbol) {
+            values.name(&ExportIdentity::Binding(file, binding.id))
+        } else if let Some(import) = values.symbols.imports.get(&symbol) {
+            if let ExportIdentity::Namespace(target) = import.identity {
+                namespaces.insert(binding.id, target);
+            }
+            values.name(&import.identity)
+        } else {
+            None
+        };
+        if target.is_some_and(|name| name != binding.name) {
+            changed.insert(binding.id);
+        }
+    }
+    let inference_changes = retained.iter().any(|recipe| {
+        recipe
+            .placement
+            .declarations
+            .iter()
+            .any(|id| changed.contains(id))
+            || recipe.placement.writes.iter().any(|&index| {
+                facts.references[index as usize]
+                    .binding
+                    .is_some_and(|id| changed.contains(&id))
+            })
+    });
+    for recipe in retained {
+        if recipe.names.named.iter().any(|id| changed.contains(id))
+            || (inference_changes && recipe.names.inference_sensitive)
+        {
+            return Ok(false);
+        }
+        for usage in &recipe.namespaces {
+            let reference = &facts.references[usage.reference as usize];
+            let Some(target) = reference.binding.and_then(|id| namespaces.get(&id)) else {
+                continue;
+            };
+            let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
+                return Ok(false);
+            };
+            let Ok(linked) =
+                graph.resolve_export(*target, property, source_graph::Namespace::Value)
+            else {
+                return Ok(false);
+            };
+            if values.name(&linked.identity).is_none() {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn body(
     graph: &SourceGraph,
     file: u32,

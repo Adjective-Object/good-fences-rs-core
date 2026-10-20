@@ -4,7 +4,7 @@ Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
 Syntax-local effect reasons/timing are persisted and range-checked (schema 6 /
-extractor 8, including source-local emission recipes/placement constraints,
+extractor 9, including source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
 effective commonjs format, invocation inputs/annotation sites and normalized member
 shapes). No resolver, usage, effects-policy, graph, absolute path or arena IDs
@@ -28,6 +28,8 @@ Diagnostics are not persisted. The codec is owned after parser arena drop.
 Recipe validation covers exact segment/capture/occurrence coverage, declaration,
 forward-use and write links, eager-read ranges, hoisted availability consistency,
 namespace-reference classification links and default/export wrapper containment.
+Namespace classification covers all import-binding references, not only `import
+* as` syntax, because named/default imports can resolve to namespace reexports.
 Operation nesting must be source-ordered canonical preorder with the nearest
 containing parent. Each source slot must list exactly its composed roots, never
 itself or an ancestor. PURE inputs link back to the invocation's original

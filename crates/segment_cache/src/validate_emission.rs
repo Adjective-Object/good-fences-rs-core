@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ast_segmenter::{
     emission::*,
-    owned::{BindingId, DependencyKind, ExportValue, ImportedName, ModuleFacts},
+    owned::{BindingId, DependencyKind, ExportValue, ModuleFacts},
 };
 use eyre::{ensure, OptionExt};
 use oxc_span::Span;
@@ -159,10 +159,7 @@ fn namespaces(
         .filter(|(_, r)| {
             !facts.commonjs
                 && contains(range, r.span)
-                && facts
-                    .imports
-                    .iter()
-                    .any(|i| i.imported == ImportedName::Namespace && Some(i.binding) == r.binding)
+                && facts.imports.iter().any(|i| Some(i.binding) == r.binding)
         })
         .map(|(i, _)| i as u32)
         .collect();

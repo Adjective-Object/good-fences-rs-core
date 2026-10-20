@@ -100,6 +100,10 @@ together, preserving snapshots and mutable closures without cells or setters.
 Name-sensitive components split into separate chunks when co-location would
 change names or capture references. Consumer rewrites and artifact members follow
 actual segment owners, including aliases and default-expression addresses.
+Placement and candidate-name compatibility consume owned source-local recipes,
+without reparsing or trial emission. Connector classification includes only
+retained segments; dead declarations do not prevent connector grouping. Namespace,
+cycle, initialization and evaluation-order barriers remain graph-derived.
 
 Namespaces and CJS-consuming modules no longer impose whole-module placement
 barriers. Namespace demand retains checked visible exports and ordinary effects,

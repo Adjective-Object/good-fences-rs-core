@@ -6,7 +6,7 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_span::{GetSpan, Span};
 use serde::{Deserialize, Serialize};
 
-use crate::owned::{BindingId, DependencyId, ExportValue, ImportedName, ModuleFacts};
+use crate::owned::{BindingId, DependencyId, ExportValue, ModuleFacts};
 
 #[cfg(test)]
 #[path = "emission_tests.rs"]
@@ -63,6 +63,7 @@ pub enum Shorthand {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamespaceUse {
+    /// Any import-binding use; only linked Namespace identities select this alternative.
     pub reference: u32,
     pub access: NamespaceAccess,
 }
@@ -628,10 +629,7 @@ impl Extractor<'_> {
         self.facts
             .imports
             .iter()
-            .any(|import| {
-                Some(import.binding) == self.facts.references[i].binding
-                    && import.imported == ImportedName::Namespace
-            })
+            .any(|import| Some(import.binding) == self.facts.references[i].binding)
             .then_some(i as u32)
     }
 

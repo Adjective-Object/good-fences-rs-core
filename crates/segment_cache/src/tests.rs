@@ -28,6 +28,8 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("async.mjs", "export const value = await Promise.resolve(1); for await (const x of [1]) { await x; } async function deferred() { await 2; }", ModuleFormat::Esm),
         ("recipes.mjs", "import * as ns from './ns'; before; export let before = ns.value; function f(){ return before; } before++; const arrow = () => before; export default function(){ return ns.value; }", ModuleFormat::Esm),
         ("namespaces.mjs", "import * as ns from './ns'; ns.method(); ns.tag`text`; ns.value = 1; ns.value++; delete ns.value; consume(ns); ns['computed']; consume(ns.value);", ModuleFormat::Esm),
+        ("named-namespace.mjs", "import {nested as alias} from './barrel'; alias.value; alias.method(); consume(alias); function shadow(alias){ return alias.value; }", ModuleFormat::Esm),
+        ("default-namespace.mjs", "import alias from './barrel'; alias.value; alias.method(); consume(alias);", ModuleFormat::Esm),
         ("proto.mjs", r"let \u005f_proto__, x; const obj = {\u005f_proto__, x}; ({__proto__, x = 1} = obj); function f({x = 2}) {}", ModuleFormat::Esm),
         ("default-class.mjs", "export default class Named {}; /*# sourceURL=ignored-outside-segments */", ModuleFormat::Esm),
         ("anonymous-class.mjs", "export default class { method(){} };", ModuleFormat::Esm),
@@ -100,6 +102,26 @@ fn rejects_malformed_emission_placement_names_and_namespace_links() {
             },
         ],
     );
+}
+
+#[test]
+fn rejects_missing_named_import_namespace_candidates() {
+    for declaration in [
+        "import {nested as alias} from './barrel';",
+        "import alias from './barrel';",
+    ] {
+        reject_emission(
+            &format!(
+                "{} alias.value; alias.method(); consume(alias);",
+                declaration
+            ),
+            &[
+                |e| e.segments[1].namespaces.clear(),
+                |e| e.segments[2].namespaces.clear(),
+                |e| e.segments[3].namespaces.clear(),
+            ],
+        );
+    }
 }
 
 #[test]
@@ -274,7 +296,7 @@ fn rejects_nonopaque_cjs_emission_and_stale_recipe_versions() {
             }
         },
         |r: &mut CacheRecord| r.schema = 5,
-        |r: &mut CacheRecord| r.extractor = 7,
+        |r: &mut CacheRecord| r.extractor = 8,
     ] {
         let mut modified = original.clone();
         mutate(&mut modified);

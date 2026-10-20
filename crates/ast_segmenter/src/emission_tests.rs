@@ -98,6 +98,44 @@ fn namespaces_distinguish_values_from_receiver_tag_and_mutation() {
 }
 
 #[test]
+fn named_and_default_imports_can_resolve_to_namespace_reexports() {
+    for declaration in [
+        "import {nested as alias} from './barrel';",
+        "import alias from './barrel';",
+    ] {
+        let facts = parse(&format!(
+            "{} alias.value; alias.method(); consume(alias); function shadow(alias){{ return alias.value; }}",
+            declaration
+        ));
+        let uses: Vec<_> = facts
+            .emission
+            .segments
+            .iter()
+            .flat_map(|r| &r.namespaces)
+            .collect();
+        assert_eq!(uses.len(), 3);
+        assert!(
+            matches!(&uses[0].access, NamespaceAccess::DirectRead { property, .. } if property == "value")
+        );
+        assert_eq!(
+            uses[1].access,
+            NamespaceAccess::Native(NamespaceReason::Receiver)
+        );
+        assert_eq!(
+            uses[2].access,
+            NamespaceAccess::Native(NamespaceReason::Other)
+        );
+        assert!(facts
+            .emission
+            .segments
+            .last()
+            .unwrap()
+            .namespaces
+            .is_empty());
+    }
+}
+
+#[test]
 fn export_wrappers_and_default_initialization_are_preclassified() {
     for (source, expected, inference) in [
         ("export default function() { return 1; }", "hoist", true),

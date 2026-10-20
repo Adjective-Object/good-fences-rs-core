@@ -67,6 +67,8 @@ their no-op artifact members; preserve public/escaped/async namespace identities
 Keep cyclic connector evaluation barriers: revisiting an evaluating job must not
 execute its remaining dependencies early. Hoisted availability cannot introduce
 new transitive native-initializer activation across a source phase.
+Use cached placement/name constraints, not trial emission. Reduce connector flags
+over retained segments only; namespace, SCC and activation guards stay derived.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree

@@ -1583,24 +1583,68 @@ fn arbitrary_placement_of_dynamic_commonjs_loaders_preserves_deferred_activation
 
 #[test]
 fn arbitrary_placement_preserves_cyclic_connector_evaluation_barriers() {
-    let source = sources(&[
-        (
-            "entry.mjs",
-            "import {v} from './x.mjs'; console.log('entry', v);",
-        ),
-        ("x.mjs", "import './a.mjs'; export {v} from './b.mjs';"),
-        ("a.mjs", "import './x.mjs'; console.log('a');"),
-        ("b.mjs", "export const v = (console.log('b'), 1);"),
-    ]);
-    let (_, output) = build(&source, &[("entry.mjs", true)], false);
-    let actual = node(&output.files, &output.entries["entry.mjs"]);
-    assert!(
-        actual.status.success(),
-        "{}",
-        String::from_utf8_lossy(&actual.stderr)
+    for dead in ["", "const unused = 17;"] {
+        let source = sources(&[
+            (
+                "entry.mjs",
+                "import {v} from './x.mjs'; console.log('entry', v);",
+            ),
+            (
+                "x.mjs",
+                &format!("import './a.mjs'; export {{v}} from './b.mjs'; {dead}"),
+            ),
+            ("a.mjs", "import './x.mjs'; console.log('a');"),
+            ("b.mjs", "export const v = (console.log('b'), 1);"),
+        ]);
+        let (_, output) = build(&source, &[("entry.mjs", true)], false);
+        let actual = node(&output.files, &output.entries["entry.mjs"]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, node(&source, Path::new("entry.mjs")).stdout);
+        assert_eq!(actual.stdout, b"a\nb\nentry 1\n");
+    }
+}
+
+#[test]
+fn connector_grouping_ignores_unretained_declarations() {
+    let make = |dead: &str| {
+        sources(&[
+            (
+                "entry.mjs",
+                "import {v} from './barrel.mjs'; import './side.mjs'; console.log('entry', v);",
+            ),
+            (
+                "other.mjs",
+                "import {v} from './barrel.mjs'; console.log('other', v);",
+            ),
+            (
+                "barrel.mjs",
+                &format!("export {{v}} from './dep.mjs'; {dead}"),
+            ),
+            ("dep.mjs", "console.log('dep'); export const v = 7;"),
+            ("side.mjs", "console.log('side');"),
+        ])
+    };
+    let (_, clean) = build(
+        &make(""),
+        &[("entry.mjs", true), ("other.mjs", true)],
+        false,
     );
-    assert_eq!(actual.stdout, node(&source, Path::new("entry.mjs")).stdout);
-    assert_eq!(actual.stdout, b"a\nb\nentry 1\n");
+    let source = make("const unused = 23;");
+    let (_, output) = build(&source, &[("entry.mjs", true), ("other.mjs", true)], false);
+    assert_eq!(output.files, clean.files);
+    for entry in ["entry.mjs", "other.mjs"] {
+        let actual = node(&output.files, &output.entries[entry]);
+        assert!(
+            actual.status.success(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(actual.stdout, node(&source, Path::new(entry)).stdout);
+    }
 }
 
 #[test]
