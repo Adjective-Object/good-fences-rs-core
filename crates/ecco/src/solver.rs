@@ -68,6 +68,7 @@ struct Value {
     closure: Option<Closure>,
     call_mutations: Effect,
     external_aliases: Effect,
+    retained_capture: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -221,6 +222,7 @@ impl Context {
             closure: None,
             call_mutations,
             external_aliases,
+            retained_capture: false,
         });
         if let Some(recording) = &mut self.recording {
             recording.instructions.push(Instruction::Value(id, hazards));
@@ -380,6 +382,12 @@ impl Context {
             return result;
         }
         let resolved = self.resolve_alias(function);
+        if !self.latent {
+            self.equations.push(Equation {
+                target: self.poison.0,
+                expression: Expression::Read(self.values[resolved.0].call_mutations.0),
+            });
+        }
         if let Some(closure) = self.values[resolved.0].closure.clone() {
             return self.call_inferred(function, resolved, closure, arguments, receiver);
         }
@@ -397,13 +405,7 @@ impl Context {
                 effects: self.opaque_effects(),
             };
         }
-        // shortcut: hypothetical callback writes widen effects; an isolated
-        // abstract heap is needed to specialize them without executing updates.
-        let effects = if self.latent && !definition.updates.is_empty() {
-            self.effectful
-        } else {
-            self.call_effects(function, arguments, receiver)
-        };
+        let effects = self.call_effects(function, arguments, receiver);
         let frame = Frame {
             definition: &definition,
             arguments,
@@ -482,6 +484,10 @@ impl Context {
             return self.hazard(function, Hazard::Call);
         };
         let definition = self.facts.definitions[index].clone();
+        // shortcut: hypothetical writes need an isolated heap to specialize.
+        if self.latent && !definition.updates.is_empty() {
+            return self.effectful;
+        }
         if !definition.variadic && arguments.len() > definition.parameters.len() {
             return self.effectful;
         }

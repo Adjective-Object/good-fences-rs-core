@@ -98,11 +98,33 @@ pub fn extract_from_ast<'a>(
         .iter()
         .map(|(symbol, named)| (*symbol, named.value))
         .collect();
+    let mut namespaces = HashMap::new();
+    for definition in collector.context.facts().definitions.clone() {
+        let prefixes: Vec<_> = match definition.binding {
+            Binding::Global(path) => (1..path.len())
+                .map(|length| Binding::Global(path[..length].to_vec()))
+                .collect(),
+            Binding::Module { module, path } => (0..path.len())
+                .map(|length| Binding::Module {
+                    module: module.clone(),
+                    path: path[..length].to_vec(),
+                })
+                .collect(),
+            Binding::Local(_) => Vec::new(),
+        };
+        for prefix in prefixes {
+            namespaces.entry(prefix).or_insert_with(|| {
+                let mut hazards = Hazards::UNKNOWN;
+                hazards.0[Hazard::PropertyRead as usize] = false;
+                collector.context.value(hazards)
+            });
+        }
+    }
     let mut extractor = Extractor {
         context: collector.context,
         semantic,
         values: collector.values,
-        namespaces: HashMap::new(),
+        namespaces,
         roots: Vec::new(),
         matches: Vec::new(),
         functions: collector.functions,
@@ -390,6 +412,7 @@ impl<'a> Extractor<'_, 'a> {
                 } else {
                     self.computed(self.context.undefined(), self.context.pure())
                 };
+                self.context.retain_captures(value.named.value, locals);
                 returns.push(value.named.value);
                 self.roots.push(SourceRoot {
                     span: statement.span,
@@ -493,33 +516,7 @@ impl<'a> Extractor<'_, 'a> {
         if let Some(value) = self.namespaces.get(binding) {
             return *value;
         }
-        let prefix = self.context.facts().definitions.iter().any(|definition| {
-            match (binding, &definition.binding) {
-                (Binding::Global(prefix), Binding::Global(path)) => path.starts_with(prefix),
-                (
-                    Binding::Module {
-                        module: left,
-                        path: prefix,
-                    },
-                    Binding::Module {
-                        module: right,
-                        path,
-                    },
-                ) => left == right && path.starts_with(prefix),
-                _ => false,
-            }
-        });
-        if prefix {
-            // Trusted environment namespaces have ordinary member reads. Their
-            // identities are still poisoned by unknown code or replacement.
-            let mut hazards = Hazards::UNKNOWN;
-            hazards.0[Hazard::PropertyRead as usize] = false;
-            let value = self.context.value(hazards);
-            self.namespaces.insert(binding.clone(), value);
-            value
-        } else {
-            self.context.unknown()
-        }
+        self.context.unknown()
     }
 
     fn member_binding(binding: Option<Binding>, property: &str) -> Option<Binding> {
@@ -1014,7 +1011,6 @@ impl<'a> Compiler<'_, '_, 'a> {
             .map(|symbol| (*symbol, extractor.values[symbol].clone()))
             .collect();
         let roots = std::mem::take(&mut extractor.roots);
-        let namespaces = std::mem::take(&mut extractor.namespaces);
         let receiver = extractor.this_value;
         extractor.this_value = info.receiver;
         extractor.deferred = true;
@@ -1086,6 +1082,7 @@ impl<'a> Compiler<'_, '_, 'a> {
                 receiver: (!info.arrow).then_some(info.receiver),
                 self_binding: info.self_binding,
                 captures,
+                constructible: !info.arrow,
             },
             returns,
             effects,
@@ -1094,7 +1091,6 @@ impl<'a> Compiler<'_, '_, 'a> {
             extractor.values.insert(symbol, named);
         }
         extractor.roots = roots;
-        extractor.namespaces = namespaces;
         extractor.this_value = receiver;
         extractor.deferred = false;
     }

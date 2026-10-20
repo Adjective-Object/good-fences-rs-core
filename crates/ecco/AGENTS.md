@@ -9,6 +9,8 @@
   graph allocations and instantiate owned summaries at calls.
 - Lexical binding slots are not value identities. Rebinding must not redirect
   existing aliases; each invocation owns its locals and closure captures.
+- Returned closures retain exited-path capture alternatives across later paths.
+- Intern namespace identities before recording; deferred reads share them.
 - Keep unspecialized callable hazards separate from call-target mutation markers.
 - Callback effect queries are latent; only execution applies external updates.
 - Unknown behavior must not become a proof of purity. Exceptions alone are not

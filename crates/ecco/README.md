@@ -70,13 +70,17 @@ Calls instantiate those summaries with actual arguments and receivers. Function
 declarations are hoisted; function expressions, arrows, nested closures, and
 callbacks retain lexical bindings. Each invocation gets independent locals,
 allocations, and captured closure environments. Ordinary functions use the call
-receiver; arrows capture lexical `this`.
+receiver; arrows capture lexical `this`. Ordinary functions expose conservative
+constructor hazards; non-constructible arrows do not execute a body when
+construction throws.
 
 Returns through `if`/`else`, blocks, conditionals, and logical expressions join
 possible identities. Fallthrough returns `undefined`; terminal returns/throws
 stop scanning that path. Both possible branches are analyzed, not proven
 reachable. Continuing branches merge their lexical bindings; reading a binding
 captures its current value without redirecting earlier aliases on rebinding.
+Captures retained by returned closures keep exited-path alternatives when later
+paths rebind the same slots.
 Initializer-free `var` declarations preserve existing bindings. Supplied
 contracts called from inferred bodies or through nested declared callbacks
 propagate their updates normally. Hazard queries of inferred callbacks remain
@@ -87,7 +91,8 @@ hypothetical heap.
 Bare `call_effects` reads cannot specialize arguments and conservatively describe
 the whole function, including declared functions. Known calls specialize the body
 and separately track replacement hazards, so later updates still invalidate
-earlier pure calls.
+earlier pure calls. Executing a potentially replaced target conservatively
+widens heap and return hazards, not only that call's effect.
 `SourceAnalysis.matches` includes matched contracts in supported deferred bodies
 as well as module roots. Summaries are shared within the context; graph
 construction is serial and fixed-point evaluation remains parallel.
@@ -102,7 +107,8 @@ bodies. Default/rest/destructured parameters, async/generator functions, loops,
 construction, spread calls, classes, and unknown object members also remain
 conservative. Imported module initialization is not included in expression roots.
 
-Trusted namespace prefixes have ordinary member reads. Replacements, unknown
+Trusted namespace prefixes have ordinary member reads and share identities
+between module roots and deferred bodies. Replacements, unknown
 execution, and potentially effectful hooks widen all value hazards until
 capture/prototype reachability is modeled. Direct `hazard` queries only consult
 facts; `operation` additionally models execution of unmodeled hooks. Conditional

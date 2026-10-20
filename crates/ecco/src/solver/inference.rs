@@ -14,6 +14,7 @@ pub(super) enum Instruction {
     Operation(ValueId, Hazard),
     Update(ValueId, Hazard, Effect),
     Read(ValueId, ValueId),
+    Retain(ValueId, Vec<ValueId>),
     Bind(ValueId, ValueId),
     Join(ValueId, Vec<ValueId>),
     Call(CallResult, ValueId, Vec<ValueId>, ValueId),
@@ -35,6 +36,7 @@ pub(crate) struct FunctionSignature {
     pub parameters: Vec<ValueId>,
     pub receiver: Option<ValueId>,
     pub self_binding: Option<ValueId>,
+    pub constructible: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -158,7 +160,38 @@ impl Context {
             return;
         }
         if target != value {
-            self.values[target.0].alias = Some(self.resolve_alias(value));
+            let value = self.resolve_alias(value);
+            let value = if self.values[target.0].retained_capture {
+                self.join_values(&[self.resolve_alias(target), value])
+            } else {
+                value
+            };
+            self.values[target.0].alias = Some(value);
+        }
+    }
+
+    pub(crate) fn retain_captures(&mut self, value: ValueId, locals: &[ValueId]) {
+        if let Some(recording) = &mut self.recording {
+            recording
+                .instructions
+                .push(Instruction::Retain(value, locals.to_vec()));
+            return;
+        }
+        let mut pending = vec![value];
+        let mut visited = HashSet::new();
+        while let Some(value) = pending.pop() {
+            let value = self.resolve_alias(value);
+            if !visited.insert(value) {
+                continue;
+            }
+            if let Some(closure) = self.values[value.0].closure.clone() {
+                for capture in closure.captures.values() {
+                    if locals.contains(capture) {
+                        self.values[capture.0].retained_capture = true;
+                    }
+                    pending.push(*capture);
+                }
+            }
         }
     }
 
@@ -232,6 +265,9 @@ impl Context {
         // from replacement hazards consulted by a known, instantiated call.
         self.initial[self.values[value.0].cells[Hazard::Call as usize]] =
             self.templates[index].effects != Some(self.pure);
+        self.initial[self.values[value.0].cells[Hazard::Construct as usize]] =
+            self.templates[index].signature.constructible
+                && self.templates[index].effects != Some(self.pure);
         self.values[value.0].closure = Some(Closure {
             template: index,
             captures,
@@ -321,6 +357,11 @@ impl Context {
                 }
                 Instruction::Read(target, source) => {
                     values.insert(*target, self.resolve_alias(mapped(&values, *source)));
+                }
+                Instruction::Retain(value, locals) => {
+                    let locals: Vec<_> =
+                        locals.iter().map(|local| mapped(&values, *local)).collect();
+                    self.retain_captures(mapped(&values, *value), &locals);
                 }
                 Instruction::Join(target, inputs) => {
                     let inputs: Vec<_> =

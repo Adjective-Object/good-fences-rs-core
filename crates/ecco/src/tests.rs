@@ -1044,8 +1044,8 @@ fn astra_declared_call_updates_invalidate_inferred_calls() {
     );
     assert_eq!(
         effects(&analysis),
-        vec![false, true, false, true],
-        "a declared call-hazard update must invalidate earlier and later specialized calls"
+        vec![false, true, true, true],
+        "executing a replaced callback invalidates specialized calls and may replace other targets"
     );
 }
 
@@ -1314,4 +1314,135 @@ fn astra_round3_mutating_join_with_unknown_widens_external_aliases() {
             "a may-alias join containing unknown must retain unknown's potential aliases when mutated"
         );
     }
+}
+
+#[test]
+fn astra_round4_returned_closure_preserves_terminated_branch_capture() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+        function choose(flag) {
+            var callback = () => console.log("must run");
+            const saved = () => callback();
+            if (flag) return saved;
+            var callback = () => 1;
+            return saved;
+        }
+        const selected = choose(true);
+        selected();
+    "#,
+    );
+    assert!(
+        *effects(&analysis).last().unwrap(),
+        "the continuing branch must not overwrite a capture belonging to the returned branch"
+    );
+}
+
+#[test]
+fn astra_round4_latent_declared_callback_accounts_for_its_updates() {
+    let mut context = context(
+        r#"
+        fn mutate_and_read(target) {
+            call_effects = target.property_read_effects
+            updates target.property_read_effects |= true
+            returns void
+        }
+        fn install(holder, callback, input) {
+            call_effects = false
+            updates holder.property_read_effects |= call(callback, input)
+            returns void
+        }
+    "#,
+    );
+    let input = context.value(Hazards::NONE);
+    let holder = context.value(Hazards::NONE);
+    context.call(
+        local(&context, "install"),
+        &[holder, local(&context, "mutate_and_read"), input],
+        None,
+    );
+    let evaluation = context.evaluate();
+    assert!(!evaluation.hazards(input).get(Hazard::PropertyRead));
+    assert!(
+        evaluation.hazards(holder).get(Hazard::PropertyRead),
+        "latent declared callbacks must account for hypothetical writes without applying them"
+    );
+}
+
+#[test]
+fn astra_round4_deferred_namespace_reads_share_global_identity() {
+    let analysis = source(
+        r#"
+        global fn library.method() {
+            call_effects = false
+            returns void
+        }
+        global fn install(target) {
+            call_effects = false
+            updates target.property_read_effects |= true
+            returns void
+        }
+    "#,
+        r#"
+        function use_library() { library.method(); }
+        install(library);
+        use_library();
+    "#,
+    );
+    assert!(
+        effects(&analysis)[2],
+        "installing a getter on the global namespace must invalidate deferred member reads"
+    );
+}
+
+#[test]
+fn astra_round4_replaced_call_target_invalidates_result_hazards() {
+    let analysis = source(
+        r#"
+        global fn replace(callback) {
+            call_effects = false
+            updates callback.call_effects |= true
+            returns void
+        }
+    "#,
+        r#"
+        const make = () => ({});
+        replace(make);
+        const result = make();
+        result.property;
+    "#,
+    );
+    assert!(effects(&analysis)[2]);
+    assert!(
+        effects(&analysis)[3],
+        "executing a replaced callable must not retain the original pure result summary"
+    );
+}
+
+#[test]
+fn astra_round4_inferred_constructor_exposes_construct_hazard() {
+    let declarations = r#"
+        global fn construct(constructor) {
+            call_effects = constructor.construct_effects
+            returns void
+        }
+        global fn log() {
+            call_effects = true
+            returns void
+        }
+    "#;
+    let analysis = source(
+        declarations,
+        r#"
+        function Constructor() { log(); }
+        construct(Constructor);
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false, true],
+        "an ordinary function's construct hazard must account for execution of its body"
+    );
+    let analysis = source(declarations, "const Arrow = () => log(); construct(Arrow);");
+    assert_eq!(effects(&analysis), vec![false; 2]);
 }
