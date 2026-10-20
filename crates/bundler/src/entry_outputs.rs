@@ -32,7 +32,8 @@ pub(super) fn apply(
             None => root
                 .join(&entry.path)
                 .canonicalize()?
-                .strip_prefix(root)?
+                .strip_prefix(root)
+                .wrap_err("linked entry outside build root requires an explicit output_name")?
                 .to_owned(),
         };
         if entry.output_name.is_none()

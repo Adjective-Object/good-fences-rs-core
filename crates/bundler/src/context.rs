@@ -24,9 +24,12 @@ pub(crate) fn resolve(
             importer.to_str().is_some() && target.to_str().is_some(),
             "context source paths must be UTF-8"
         );
-        let request = assembly::relative_request(importer, &target, false);
+        let Some(request) = assembly::relative_request(importer, &target, false) else {
+            continue;
+        };
         if dependency.kind == DependencyKind::DynamicImport {
-            let encoded = assembly::relative_request(importer, &target, true);
+            let encoded = assembly::relative_request(importer, &target, true)
+                .expect("the unencoded relative request exists");
             if dependency.matches_specifier(&encoded) {
                 requests.insert(encoded, request.clone());
             }
@@ -71,6 +74,32 @@ pub(crate) fn resolve(
             Ok((key, path))
         })
         .collect()
+}
+
+pub(crate) fn may_match_directory(
+    importer: &Path,
+    directory: &Path,
+    dependency: &Dependency,
+) -> bool {
+    if importer.starts_with(directory) || directory.to_str().is_none() {
+        return true;
+    }
+    let prefix = dependency
+        .pattern
+        .as_ref()
+        .and_then(|parts| parts.first())
+        .unwrap_or(&dependency.specifier);
+    [false, dependency.kind == DependencyKind::DynamicImport]
+        .into_iter()
+        .any(|url| {
+            assembly::relative_request(importer, directory, url).is_some_and(|mut request| {
+                request.push('/');
+                request.starts_with(prefix) || prefix.starts_with(&request)
+                    // Require also exposes a directory's index under its name.
+                    || (dependency.kind == DependencyKind::Require
+                        && dependency.matches_specifier(request.trim_end_matches('/')))
+            })
+        })
 }
 
 #[derive(Clone)]

@@ -25,8 +25,20 @@ debug validates final executable files once, release never does, no-op does neit
 Reuse hash-checked cache records
 in session emission; public low-level link::esm shares its parse-free
 source/config/facts provenance checker. Analysis-only graph inputs cannot emit.
-Project roots are bounded/canonical;
-symlinks and resolved sources outside the root are rejected.
+Input inventory follows reachable symlinks/junctions, including external packages,
+with canonical source identity. Scan each canonical directory once and retain
+named directory edges, not exponentially many paths through alias diamonds.
+Admit only inventoried sources; never enumerate unrelated ancestor trees.
+Track canonical targets, membership, JSON bytes and existing/missing ancestor
+package/tsconfig probes for invalidation and success rechecks.
+External inventories refresh resolution each build and replay actual requests
+before success; this detects ancestor node_modules shadowing without broad scans.
+Contexts expand prefix-compatible finite non-cyclic alias paths on demand,
+including physical ancestor projections; omit cross-volume relative candidates
+without losing same-volume lexical aliases.
+External CSS identities use the first sorted in-root alias; in-root identities
+remain canonical/root-relative. External entries require explicit safe output
+names; input links never relax publication/output path checks.
 Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
 Read only direct tsconfig customConditions (customSourceConditions alias);

@@ -315,7 +315,10 @@ impl Code {
                     target.display()
                 )
             })?;
-            let request = serde_json::to_string(&relative_request(destination, target, url))?;
+            let request = serde_json::to_string(
+                &relative_request(destination, target, url)
+                    .ok_or_eyre("artifact destinations cannot form a relative request")?,
+            )?;
             if evaluation {
                 output.push_str("import ");
                 output.push_str(&request);
@@ -400,14 +403,23 @@ pub(crate) fn apply_range(source: &str, range: Span, edits: &[Edit]) -> eyre::Re
     apply(text, &edits)
 }
 
-pub(crate) fn relative_request(importer: &Path, target: &Path, url: bool) -> String {
-    let parent: Vec<_> = importer.parent().unwrap().components().collect();
+pub(crate) fn relative_request(importer: &Path, target: &Path, url: bool) -> Option<String> {
+    let parent: Vec<_> = importer.parent()?.components().collect();
     let target: Vec<_> = target.components().collect();
     let shared = parent
         .iter()
         .zip(&target)
         .take_while(|(a, b)| a == b)
         .count();
+    // Source candidates can be on another Windows volume/share. Neither a
+    // prefix nor a root can be crossed by a relative module request.
+    if parent[shared..]
+        .iter()
+        .chain(&target[shared..])
+        .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return None;
+    }
     let mut request = if parent.len() == shared {
         "./".to_owned()
     } else {
@@ -417,25 +429,27 @@ pub(crate) fn relative_request(importer: &Path, target: &Path, url: bool) -> Str
         &target[shared..]
             .iter()
             .map(|part| match part {
-                Component::Normal(value) => value.to_str().unwrap(),
-                _ => unreachable!("validated artifact paths are relative"),
+                Component::Normal(value) => value.to_str(),
+                _ => None,
             })
-            .collect::<Vec<_>>()
+            .collect::<Option<Vec<_>>>()?
             .join("/"),
     );
     if !url {
-        return request;
+        return Some(request);
     }
-    request
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"/.-_~".contains(&byte) {
-                (byte as char).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
+    Some(
+        request
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || b"/.-_~".contains(&byte) {
+                    (byte as char).to_string()
+                } else {
+                    format!("%{byte:02X}")
+                }
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

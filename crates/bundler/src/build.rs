@@ -271,11 +271,8 @@ impl BuildSession {
             self.resolutions.clear();
             self.resolution_key = Some(resolution_key);
         }
-        let resolver = StructuralResolver::new(
-            self.root.clone(),
-            options.resolver.clone(),
-            options.externals.clone(),
-        );
+        let external_sources = inventory.has_external_sources(&self.root);
+        let resolver = resolver::BuildResolver::new(&self.root, options, external_sources);
         let mut queue = VecDeque::new();
         let mut entries = BTreeMap::new();
         for (name, entry) in &options.entries {
@@ -285,7 +282,11 @@ impl BuildSession {
                 .join(&entry.path)
                 .canonicalize()
                 .wrap_err_with(|| format!("entry {}: {}", name, entry.path.display()))?;
-            ensure!(path.starts_with(&self.root), "entry outside build root");
+            ensure!(
+                inventory.contains(&path),
+                "entry outside reachable build inventory: {}",
+                path.display()
+            );
             entries.insert(name.clone(), (path.clone(), entry.namespace));
             queue.push_back(path);
         }
@@ -298,13 +299,8 @@ impl BuildSession {
                 continue;
             }
             ensure!(
-                path.starts_with(&self.root),
-                "resolved source outside build root: {}",
-                path.display()
-            );
-            ensure!(
-                inventory.contains_key(path.strip_prefix(&self.root)?),
-                "source is inside a reserved/excluded build directory: {}",
+                inventory.contains(&path),
+                "source outside reachable build inventory (or reserved/excluded): {}",
                 path.display()
             );
             let format = package_format(&self.root, &path)?;
@@ -391,7 +387,9 @@ impl BuildSession {
                 .expect("loaded source")
                 .css_identity = css_identity;
             let source = &self.sources[&path];
-            let resolved = if let Some(cached) = self.resolutions.get(&path) {
+            let resolved = if let Some(cached) =
+                self.resolutions.get(&path).filter(|_| !external_sources)
+            {
                 cached.clone()
             } else {
                 let mut resolved = HashMap::new();
@@ -410,7 +408,7 @@ impl BuildSession {
                             &self.root,
                             &path,
                             dependency,
-                            inventory.keys(),
+                            inventory.candidates(&self.root, &path, dependency),
                             &options.resolver.extensions,
                             &resolver,
                         )
@@ -442,6 +440,9 @@ impl BuildSession {
                             ResolvedDependency::External(name) => DependencyTarget::External(name),
                         },
                     );
+                }
+                if self.resolutions.get(&path) != Some(&resolved) {
+                    changed.insert(path.clone());
                 }
                 self.resolutions.insert(path.clone(), resolved.clone());
                 resolved
@@ -567,6 +568,7 @@ impl BuildSession {
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &self.sources, &inventory)?;
+                resolver.recheck(&self.root, options)?;
                 styles.recheck()?;
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
@@ -618,6 +620,7 @@ impl BuildSession {
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;
         Self::recheck(&self.root, &self.sources, &inventory)?;
+        resolver.recheck(&self.root, options)?;
         styles.recheck()?;
         counters.emissions = 1;
         counters.record_parses(before_parses);
@@ -648,7 +651,7 @@ impl BuildSession {
     fn recheck(
         root: &Path,
         sources: &BTreeMap<PathBuf, Source>,
-        before: &BTreeMap<PathBuf, Option<[u8; 32]>>,
+        before: &Inventory,
     ) -> eyre::Result<()> {
         for (path, source) in sources {
             ensure!(
@@ -727,56 +730,10 @@ fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
     Ok(ModuleFormat::CommonJs)
 }
 
-/// Conservative resolver dependency inventory: all file names and all JSON
-/// config bytes, including package trees. Validate direct tsconfig conditions.
-fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
-    fn visit(
-        root: &Path,
-        dir: &Path,
-        out: &mut BTreeMap<PathBuf, Option<[u8; 32]>>,
-    ) -> eyre::Result<()> {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            let name = entry.file_name();
-            if name == ".git"
-                || name == "target"
-                || name.to_string_lossy().starts_with(".bundler-")
-                || segment_cache::is_cache_artifact(&path)
-            {
-                continue;
-            }
-            let ty = entry.file_type()?;
-            ensure!(
-                !ty.is_symlink(),
-                "symlinks in build inventory unsupported: {}",
-                path.display()
-            );
-            if ty.is_dir() {
-                visit(root, &path, out)?;
-            } else if ty.is_file() {
-                if name == "tsconfig.json" {
-                    import_resolver::node_resolver::read_custom_conditions(&path)?;
-                }
-                out.insert(
-                    path.strip_prefix(root)?.to_owned(),
-                    if path
-                        .extension()
-                        .is_some_and(|e| e == "json" || e == "jsonc")
-                    {
-                        Some(hash(&fs::read(path)?))
-                    } else {
-                        None
-                    },
-                );
-            }
-        }
-        Ok(())
-    }
-    let mut result = BTreeMap::new();
-    visit(root, root, &mut result)?;
-    Ok(result)
-}
+mod inventory;
+mod resolver;
+pub(crate) use inventory::Inventory;
+use inventory::inventory;
 
 #[cfg(test)]
 mod tests;
