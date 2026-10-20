@@ -146,7 +146,8 @@ effects, does not execute the getter.
 Unknown-alias reachability propagates through value joins. Updates through such
 aliases widen the heap only when their hazard expression becomes true, including
 after later fixed-point updates. Loose equality of one known value identity with
-itself does not execute coercion hooks; other loose comparisons stay conservative.
+itself does not execute coercion hooks unless opaque execution has invalidated
+binding identity precision; other loose comparisons stay conservative.
 
 Context graphs are reusable, but results are not persistently cached. Build a new
 context when removing source facts or changing environment contracts: monotone

@@ -1604,3 +1604,21 @@ fn astra_round5_latent_callback_tracks_later_capture_rebinding() {
         "latent getters and cached callback effects must observe later changes to live captures"
     );
 }
+
+#[test]
+fn astra_round6_opaque_capture_rebinding_invalidates_equality_identity() {
+    let analysis = source(
+        "global fn log() { call_effects = true returns void }",
+        r#"
+        let current = { valueOf() { log(); return 1; } };
+        const saved = current;
+        function change() { current = 1; }
+        change();
+        saved == current;
+    "#,
+    );
+    assert!(
+        *effects(&analysis).last().unwrap(),
+        "an opaque write can separate previously identical bindings, making equality invoke valueOf"
+    );
+}

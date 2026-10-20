@@ -145,7 +145,8 @@ impl Context {
         let left = self.resolve_alias(left);
         let right = self.resolve_alias(right);
         if left == right && left != self.unknown {
-            return self.pure;
+            // Opaque writes can separate bindings that share a recorded identity.
+            return self.poison;
         }
         let left = self.operation(left, Hazard::ToPrimitive);
         let right = self.operation(right, Hazard::ToPrimitive);
