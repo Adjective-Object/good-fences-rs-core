@@ -1,0 +1,518 @@
+use std::collections::{HashMap, HashSet};
+
+use rayon::prelude::*;
+
+use crate::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ValueId(usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Effect(usize);
+
+#[derive(Debug, Clone, Copy)]
+pub struct CallResult {
+    pub value: ValueId,
+    pub effects: Effect,
+}
+
+#[derive(Debug, Clone)]
+enum Expression {
+    Constant(bool),
+    Read(usize),
+    Or(Vec<Self>),
+}
+
+impl Expression {
+    fn evaluate(&self, state: &[bool]) -> bool {
+        match self {
+            Self::Constant(value) => *value,
+            Self::Read(cell) => state[*cell],
+            Self::Or(expressions) => expressions.iter().any(|e| e.evaluate(state)),
+        }
+    }
+
+    fn dependencies(&self, output: &mut Vec<usize>) {
+        match self {
+            Self::Constant(_) => {}
+            Self::Read(cell) => output.push(*cell),
+            Self::Or(expressions) => {
+                for expression in expressions {
+                    expression.dependencies(output);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Equation {
+    target: usize,
+    expression: Expression,
+}
+
+#[derive(Debug, Clone)]
+struct Value {
+    cells: [usize; 7],
+    definition: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Invocation {
+    function: ValueId,
+    arguments: Vec<ValueId>,
+    receiver: ValueId,
+}
+
+struct Frame<'a> {
+    definition: &'a Definition,
+    arguments: &'a [ValueId],
+    receiver: ValueId,
+    undefined: ValueId,
+}
+
+impl Frame<'_> {
+    fn value(&self, name: &str) -> ValueId {
+        if name == "this" {
+            return self.receiver;
+        }
+        let index = self
+            .definition
+            .parameters
+            .iter()
+            .position(|parameter| parameter == name)
+            .expect("validated parameter reference");
+        self.arguments.get(index).copied().unwrap_or(self.undefined)
+    }
+
+    fn call_arguments(&self, arguments: &[CallArgument]) -> Vec<ValueId> {
+        let mut values = Vec::new();
+        for argument in arguments {
+            match argument {
+                CallArgument::Value(name) => values.push(self.value(name)),
+                CallArgument::Spread(_) => values.extend(
+                    self.arguments
+                        .iter()
+                        .skip(self.definition.parameters.len())
+                        .copied(),
+                ),
+                CallArgument::Forward => values.extend_from_slice(self.arguments),
+            }
+        }
+        values
+    }
+}
+
+/// An owned graph. Construction is serial; evaluation runs independent equations
+/// in parallel against immutable snapshots and commits monotone updates.
+#[derive(Debug, Clone)]
+pub struct Context {
+    facts: LocalFacts,
+    values: Vec<Value>,
+    functions: Vec<ValueId>,
+    initial: Vec<bool>,
+    equations: Vec<Equation>,
+    calls: HashMap<Invocation, Effect>,
+    expanding: HashSet<ValueId>,
+    opaque: bool,
+    undefined: ValueId,
+    unknown: ValueId,
+    pure: Effect,
+    effectful: Effect,
+    poison: Effect,
+}
+
+impl Context {
+    pub fn from_local_facts(facts: LocalFacts) -> eyre::Result<Self> {
+        crate::parser::validate_facts(&facts)?;
+        let mut context = Self {
+            facts,
+            values: Vec::new(),
+            functions: Vec::new(),
+            initial: vec![false, true, false],
+            equations: Vec::new(),
+            calls: HashMap::new(),
+            expanding: HashSet::new(),
+            opaque: false,
+            undefined: ValueId(0),
+            unknown: ValueId(0),
+            pure: Effect(0),
+            effectful: Effect(1),
+            poison: Effect(2),
+        };
+        context.undefined = context.value(Hazards::NONE);
+        context.unknown = context.value(Hazards::UNKNOWN);
+        for index in 0..context.facts.definitions.len() {
+            let value = context.value(Hazards::NONE);
+            context.values[value.0].definition = Some(index);
+            context.functions.push(value);
+        }
+        for index in 0..context.facts.definitions.len() {
+            let definition = context.facts.definitions[index].clone();
+            let frame = Frame {
+                definition: &definition,
+                arguments: &[],
+                receiver: context.undefined,
+                undefined: context.undefined,
+            };
+            for slot in Hazard::ALL {
+                let expression = context.instantiate(&definition.hazards.get(slot), &frame);
+                let target = context.values[context.functions[index].0].cells[slot as usize];
+                context.equations.push(Equation { target, expression });
+            }
+        }
+        Ok(context)
+    }
+
+    pub fn facts(&self) -> &LocalFacts {
+        &self.facts
+    }
+
+    pub fn definition(&self, binding: &Binding) -> Option<ValueId> {
+        self.facts
+            .definitions
+            .iter()
+            .position(|definition| &definition.binding == binding)
+            .map(|index| self.functions[index])
+    }
+
+    pub fn value(&mut self, hazards: Hazards) -> ValueId {
+        let cells = std::array::from_fn(|index| {
+            let cell = self.initial.len();
+            self.initial.push(hazards.0[index]);
+            cell
+        });
+        let id = ValueId(self.values.len());
+        self.values.push(Value {
+            cells,
+            definition: None,
+        });
+        for cell in cells {
+            self.equations.push(Equation {
+                target: cell,
+                expression: Expression::Read(self.poison.0),
+            });
+        }
+        id
+    }
+
+    pub fn undefined(&self) -> ValueId {
+        self.undefined
+    }
+
+    pub fn unknown(&self) -> ValueId {
+        self.unknown
+    }
+
+    pub fn pure(&self) -> Effect {
+        self.pure
+    }
+
+    pub fn effectful(&self) -> Effect {
+        self.effectful
+    }
+
+    pub fn hazard(&self, value: ValueId, slot: Hazard) -> Effect {
+        Effect(self.values[value.0].cells[slot as usize])
+    }
+
+    /// Execute an operation whose hooks have no mutation summary. Merely
+    /// consulting a hazard with `hazard` does not execute the operation.
+    pub fn operation(&mut self, value: ValueId, slot: Hazard) -> Effect {
+        let effect = self.hazard(value, slot);
+        self.equations.push(Equation {
+            target: self.poison.0,
+            expression: Expression::Read(effect.0),
+        });
+        effect
+    }
+
+    pub fn any(&mut self, effects: impl IntoIterator<Item = Effect>) -> Effect {
+        let mut cells: Vec<_> = effects.into_iter().map(|effect| effect.0).collect();
+        cells.sort_unstable();
+        cells.dedup();
+        match cells.as_slice() {
+            [] => self.pure,
+            [cell] => Effect(*cell),
+            _ => self.expression(Expression::Or(
+                cells.into_iter().map(Expression::Read).collect(),
+            )),
+        }
+    }
+
+    pub fn update(&mut self, value: ValueId, slot: Hazard, effects: Effect) {
+        if value == self.unknown {
+            self.opaque = true;
+        }
+        self.equations.push(Equation {
+            target: self.values[value.0].cells[slot as usize],
+            expression: Expression::Read(effects.0),
+        });
+    }
+
+    /// A conservative may-alias join: later updates must reach every candidate.
+    pub fn join_values(&mut self, values: &[ValueId]) -> ValueId {
+        if let [value] = values {
+            return *value;
+        }
+        let result = self.value(Hazards::NONE);
+        for value in values {
+            for slot in Hazard::ALL {
+                self.update(result, slot, self.hazard(*value, slot));
+                self.update(*value, slot, self.hazard(result, slot));
+            }
+        }
+        result
+    }
+
+    /// Unknown code can retain arguments, invoke closures, or alter prototypes.
+    /// Until reachability is modeled, poison all value hazards, including values
+    /// constructed after the unknown operation.
+    pub fn opaque_effects(&mut self) -> Effect {
+        self.opaque = true;
+        self.effectful
+    }
+
+    pub fn call(
+        &mut self,
+        function: ValueId,
+        arguments: &[ValueId],
+        receiver: Option<ValueId>,
+    ) -> CallResult {
+        let receiver = receiver.unwrap_or(self.undefined);
+        let Some(index) = self.values[function.0].definition else {
+            return CallResult {
+                value: self.unknown,
+                effects: self.opaque_effects(),
+            };
+        };
+        let definition = self.facts.definitions[index].clone();
+        if !definition.variadic && arguments.len() > definition.parameters.len() {
+            return CallResult {
+                value: self.unknown,
+                effects: self.opaque_effects(),
+            };
+        }
+        let effects = self.call_effects(function, arguments, receiver);
+        let frame = Frame {
+            definition: &definition,
+            arguments,
+            receiver,
+            undefined: self.undefined,
+        };
+        self.execute_dependencies(&definition.hazards.get(Hazard::Call), &frame);
+        let value = match &definition.returns {
+            Returns::Argument(name) => frame.value(name),
+            Returns::Void => self.undefined,
+            Returns::Fresh => {
+                let value = self.value(Hazards::NONE);
+                for slot in Hazard::ALL {
+                    let expression = self.instantiate(&definition.return_hazards.get(slot), &frame);
+                    self.equations.push(Equation {
+                        target: self.values[value.0].cells[slot as usize],
+                        expression,
+                    });
+                }
+                value
+            }
+        };
+        for update in &definition.updates {
+            let target = frame.value(&update.target);
+            if target == self.unknown {
+                self.opaque = true;
+            }
+            let expression = self.instantiate(&update.expression, &frame);
+            for slot in Hazard::ALL {
+                if update.slot.is_none_or(|updated| updated == slot) {
+                    self.equations.push(Equation {
+                        target: self.values[target.0].cells[slot as usize],
+                        expression: expression.clone(),
+                    });
+                }
+            }
+        }
+        CallResult { value, effects }
+    }
+
+    fn expression(&mut self, expression: Expression) -> Effect {
+        let target = self.initial.len();
+        self.initial.push(false);
+        self.equations.push(Equation { target, expression });
+        Effect(target)
+    }
+
+    fn call_effects(
+        &mut self,
+        function: ValueId,
+        arguments: &[ValueId],
+        receiver: ValueId,
+    ) -> Effect {
+        let Some(index) = self.values[function.0].definition else {
+            if function != self.undefined {
+                self.opaque = true;
+            }
+            return self.hazard(function, Hazard::Call);
+        };
+        let definition = self.facts.definitions[index].clone();
+        if !definition.variadic && arguments.len() > definition.parameters.len() {
+            return self.effectful;
+        }
+        let invocation = Invocation {
+            function,
+            arguments: arguments.to_vec(),
+            receiver,
+        };
+        if let Some(effect) = self.calls.get(&invocation) {
+            return *effect;
+        }
+        // Argument forwarding can grow an unbounded family of recursive call
+        // contexts. Keep exact cycles; widen changing recursive contexts.
+        if !self.expanding.insert(function) {
+            self.opaque = true;
+            return self.effectful;
+        }
+        // Install the cell before expansion so recursive summaries share a cycle.
+        let effect = Effect(self.initial.len());
+        self.initial.push(false);
+        self.calls.insert(invocation, effect);
+        let frame = Frame {
+            definition: &definition,
+            arguments,
+            receiver,
+            undefined: self.undefined,
+        };
+        let body = self.instantiate(&definition.hazards.get(Hazard::Call), &frame);
+        self.expanding.remove(&function);
+        self.equations.push(Equation {
+            target: effect.0,
+            expression: Expression::Or(vec![
+                body,
+                Expression::Read(self.hazard(function, Hazard::Call).0),
+            ]),
+        });
+        effect
+    }
+
+    fn instantiate(&mut self, expression: &HazardExpr, frame: &Frame<'_>) -> Expression {
+        match expression {
+            HazardExpr::Bool(value) => Expression::Constant(*value),
+            HazardExpr::Read { value, slot } => {
+                Expression::Read(self.hazard(frame.value(value), *slot).0)
+            }
+            HazardExpr::Or(expressions) => Expression::Or(
+                expressions
+                    .iter()
+                    .map(|e| self.instantiate(e, frame))
+                    .collect(),
+            ),
+            HazardExpr::Call {
+                function,
+                arguments,
+                receiver,
+            } => {
+                let values = frame.call_arguments(arguments);
+                let receiver = receiver
+                    .as_ref()
+                    .map_or(self.undefined, |name| frame.value(name));
+                let effects = self.call_effects(frame.value(function), &values, receiver);
+                Expression::Read(effects.0)
+            }
+        }
+    }
+
+    fn execute_dependencies(&mut self, expression: &HazardExpr, frame: &Frame<'_>) {
+        match expression {
+            HazardExpr::Bool(_) => {}
+            HazardExpr::Read { value, slot } => {
+                self.operation(frame.value(value), *slot);
+            }
+            HazardExpr::Or(expressions) => {
+                for expression in expressions {
+                    self.execute_dependencies(expression, frame);
+                }
+            }
+            HazardExpr::Call {
+                function,
+                arguments,
+                receiver,
+            } => {
+                let function = frame.value(function);
+                let arguments = frame.call_arguments(arguments);
+                let receiver = receiver
+                    .as_ref()
+                    .map_or(self.undefined, |name| frame.value(name));
+                let effects = self.call_effects(function, &arguments, receiver);
+                // Nested callback execution has no capture/reachability graph.
+                // Keep its effects latent in other fields; widen only on a call.
+                self.equations.push(Equation {
+                    target: self.poison.0,
+                    expression: Expression::Read(effects.0),
+                });
+                if self.values[function.0]
+                    .definition
+                    .is_some_and(|index| !self.facts.definitions[index].updates.is_empty())
+                {
+                    self.opaque = true;
+                }
+            }
+        }
+    }
+
+    pub fn evaluate(&self) -> Evaluation {
+        let mut state = self.initial.clone();
+        if self.opaque {
+            state[self.poison.0] = true;
+        }
+        let mut readers = vec![Vec::new(); state.len()];
+        for (index, equation) in self.equations.iter().enumerate() {
+            let mut dependencies = Vec::new();
+            equation.expression.dependencies(&mut dependencies);
+            dependencies.sort_unstable();
+            dependencies.dedup();
+            for cell in dependencies {
+                readers[cell].push(index);
+            }
+        }
+        let mut pending: Vec<_> = (0..self.equations.len()).collect();
+        while !pending.is_empty() {
+            let mut changed: Vec<_> = pending
+                .par_iter()
+                .filter_map(|index| {
+                    let equation = &self.equations[*index];
+                    (!state[equation.target] && equation.expression.evaluate(&state))
+                        .then_some(equation.target)
+                })
+                .collect();
+            changed.sort_unstable();
+            changed.dedup();
+            let mut next = Vec::new();
+            for cell in changed {
+                state[cell] = true;
+                next.extend_from_slice(&readers[cell]);
+            }
+            next.sort_unstable();
+            next.dedup();
+            pending = next;
+        }
+        Evaluation {
+            state,
+            values: self.values.iter().map(|value| value.cells).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Evaluation {
+    state: Vec<bool>,
+    values: Vec<[usize; 7]>,
+}
+
+impl Evaluation {
+    pub fn effect(&self, effect: Effect) -> bool {
+        self.state[effect.0]
+    }
+
+    pub fn hazards(&self, value: ValueId) -> Hazards {
+        Hazards(self.values[value.0].map(|cell| self.state[cell]))
+    }
+}
