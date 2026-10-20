@@ -78,6 +78,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Unsupported,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,

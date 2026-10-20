@@ -162,6 +162,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -234,6 +235,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -282,6 +284,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -320,6 +323,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -366,6 +370,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Unsupported,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -423,6 +428,22 @@ ModuleFacts {
                     ],
                     eager_writes: [],
                     writes: [],
+                },
+                deferred: Variable {
+                    binding: BindingId(
+                        172,
+                    ),
+                    initializer: Some(
+                        SourceSlot {
+                            span: Span {
+                                start: 183,
+                                end: 187,
+                            },
+                            operations: [
+                                2,
+                            ],
+                        },
+                    ),
                 },
                 names: NameRestrictions {
                     named: [],
@@ -485,6 +506,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -548,6 +570,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -586,6 +609,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -633,6 +657,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Unsupported,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,
@@ -724,6 +749,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Unsupported,
                 names: NameRestrictions {
                     named: [
                         BindingId(
@@ -793,6 +819,7 @@ ModuleFacts {
                     eager_writes: [],
                     writes: [],
                 },
+                deferred: Effect,
                 names: NameRestrictions {
                     named: [],
                     inference_sensitive: false,

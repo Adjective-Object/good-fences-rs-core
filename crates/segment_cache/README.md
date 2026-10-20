@@ -10,6 +10,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 Syntax-local effect reasons/timing are persisted and range-checked (schema 11 /
 extractor 14, including parented execution contexts, complete occurrence timing,
 eager read/write links, relative dependency patterns, owned lazy Ecco precursors,
+deferred declaration/source-slot alternatives,
 inferred user-function contracts and declaration identity,
 source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
@@ -52,6 +53,8 @@ itself or an ancestor. PURE inputs link back to the invocation's original
 callee/arguments; chain slots remain ordered within that callee and guard
 boundaries/known module-await vetoes are checked. CJS recipes permit only
 dependency and source-hint slots, never lexical or invocation rewrites.
+Deferred alternatives validate declaration binding links and complete initializer
+source-slot roots; CommonJS cannot carry these ESM reconstruction alternatives.
 These are structural integrity checks on source-local evidence, not a second
 parser or authentication of a publisher; source/configuration hashes and bounded
 CBOR preflight remain mandatory on both codec boundaries.

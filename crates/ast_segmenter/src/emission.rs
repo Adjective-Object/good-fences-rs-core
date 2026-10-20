@@ -27,10 +27,24 @@ pub struct SegmentRecipe {
     pub source: crate::MultiSpan,
     pub connector_only: bool,
     pub placement: PlacementFacts,
+    pub deferred: DeferredForm,
     pub names: NameRestrictions,
     pub namespaces: Vec<NamespaceUse>,
     /// Preorder, with parents before children. A replacing parent owns its children.
     pub operations: Vec<Operation>,
+}
+
+/// Syntax alternatives for root bindings with separately scheduled initialization.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeferredForm {
+    #[default]
+    Unsupported,
+    Function,
+    Effect,
+    Variable {
+        binding: BindingId,
+        initializer: Option<SourceSlot>,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,6 +441,46 @@ pub(crate) fn extract(
         }
         recipe.placement.instantiable = !recipe.placement.declarations.is_empty()
             && recipe.placement.declarations == recipe.placement.hoisted;
+        let declaration = statement.and_then(|s| match s {
+            Statement::ExportNamedDeclaration(e) => e.declaration.as_ref(),
+            _ => None,
+        });
+        let variables = match statement {
+            Some(Statement::VariableDeclaration(d)) => Some(d.as_ref()),
+            _ => match declaration {
+                Some(Declaration::VariableDeclaration(d)) => Some(d.as_ref()),
+                _ => None,
+            },
+        };
+        recipe.deferred = if let Some(variables) = variables {
+            variables
+                .declarations
+                .iter()
+                .find(|d| contains(span, d.id.span()))
+                .filter(|d| matches!(d.id, BindingPattern::BindingIdentifier(_)))
+                .and_then(|d| {
+                    facts
+                        .bindings
+                        .iter()
+                        .find(|b| !b.function && b.declarations.contains(&d.id.span()))
+                        .map(|b| DeferredForm::Variable {
+                            binding: b.id,
+                            initializer: d.init.as_ref().map(|e| slot(e.span())),
+                        })
+                })
+                .unwrap_or_default()
+        } else if recipe.placement.instantiable
+            && (matches!(statement, Some(Statement::FunctionDeclaration(_)))
+                || matches!(declaration, Some(Declaration::FunctionDeclaration(_))))
+        {
+            DeferredForm::Function
+        } else if recipe.placement.declarations.is_empty()
+            && !matches!(statement, Some(Statement::ExportDefaultDeclaration(_)))
+        {
+            DeferredForm::Effect
+        } else {
+            DeferredForm::Unsupported
+        };
         recipe.placement.default_expression = facts
             .exports
             .iter()
@@ -586,6 +640,21 @@ fn compose(recipe: &mut SegmentRecipe, facts: &ModuleFacts) {
         stack.push(i);
     }
     let parents: Vec<_> = recipe.operations.iter().map(|o| o.parent).collect();
+    if let DeferredForm::Variable {
+        initializer: Some(slot),
+        ..
+    } = &mut recipe.deferred
+    {
+        slot.operations = ranges
+            .iter()
+            .enumerate()
+            .filter(|&(j, &range)| {
+                contains(slot.span, range)
+                    && !parents[j].is_some_and(|p| contains(slot.span, ranges[p as usize]))
+            })
+            .map(|(j, _)| j as u32)
+            .collect();
+    }
     for (i, operation) in recipe.operations.iter_mut().enumerate() {
         let fill = |slot: &mut SourceSlot| {
             slot.operations = ranges
