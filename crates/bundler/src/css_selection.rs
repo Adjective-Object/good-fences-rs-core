@@ -145,6 +145,7 @@ mod tests {
         for (path, expected) in [
             ("x.js", ResourceKind::Script),
             ("x.json", ResourceKind::Json),
+            ("x.jsonc", ResourceKind::Json),
             ("x.bin", ResourceKind::Asset),
         ] {
             assert_eq!(kind(Path::new(path), &CssModules::Everything), expected);

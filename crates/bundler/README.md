@@ -65,7 +65,11 @@ within that package, so nested JSON, CSS and asset requests need no extra
 wildcard map. This intentional Node-encapsulation deviation does not affect
 explicit export maps or their private subpaths.
 
-`BuildSession` accepts `.json` dependencies and entries. JSON values are shared
+`BuildSession` accepts `.json` and `.jsonc` dependencies and entries. `.jsonc`
+additionally permits `//` and `/* */` comments and trailing object/array commas,
+not other JavaScript/JSON5 syntax. Ordinary `.json` and `package.json` remain
+strict JSON. Extensionless resolution probes `.jsonc` after existing extensions.
+JSON values are shared
 between default ESM imports, dynamic-import defaults and CommonJS `require`;
 objects remain mutable and are initialized lazily when required. Inputs are
 validated as JSON, then prepared as an opaque CommonJS value initializer, not
@@ -83,7 +87,7 @@ track the original files; emission never reconstructs or reparses a wrapper.
 
 ## Asset modules
 
-Imports of non-JavaScript/TypeScript/JSON/CSS files copy exact input bytes to
+Imports of non-JavaScript/TypeScript/JSON/JSONC/CSS files copy exact input bytes to
 content-addressed `assets/<sha256>.<extension>` paths. Default imports and
 `require` return a public URL string. `BuildOptions.output.base_url` defaults to
 `"./"`: these URLs are relative to the **build output root**, not the importing
