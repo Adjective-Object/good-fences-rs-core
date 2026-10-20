@@ -12,6 +12,146 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn execution_contexts_keep_immediate_calls_defaults_and_instance_fields_distinct() {
+    use crate::execution::ContextKind;
+    let source = "let x = 0; const stored = (p = x++) => x++; (() => x++)(); class C { [x++] = x++; static value = x++; static { x++; } method(p = x++) { return () => x++; } }";
+    let facts = parse(source);
+    let execution = &facts.emission.execution;
+    let accesses: Vec<_> = facts
+        .references
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.name == "x")
+        .map(|(index, _)| {
+            let context = execution.references[index];
+            (
+                execution.is_module_evaluation(context),
+                context.map(|c| execution.contexts[c as usize].kind),
+            )
+        })
+        .collect();
+    assert_eq!(
+        accesses,
+        [
+            (false, Some(ContextKind::Callable)),
+            (false, Some(ContextKind::Callable)),
+            (true, Some(ContextKind::Callable)),
+            (true, None),
+            (false, Some(ContextKind::InstanceInitializer)),
+            (true, None),
+            (true, None),
+            (false, Some(ContextKind::Callable)),
+            (false, Some(ContextKind::Callable)),
+        ]
+    );
+    let nested = execution.contexts.last().unwrap();
+    assert!(nested.parent.is_some());
+    assert_eq!(
+        facts
+            .emission
+            .segments
+            .iter()
+            .map(|r| r.placement.eager_writes.len())
+            .collect::<Vec<_>>(),
+        [0, 0, 1, 3]
+    );
+    assert_eq!(facts.emission.segments[1].placement.writes.len(), 2);
+}
+
+#[test]
+fn only_direct_synchronous_literal_calls_prove_module_execution() {
+    let facts = parse("let x; function known(p = x) { return x; } known(); unknown(() => x); (function*(){ return x; })(); (async () => x)(); (() => () => x)(); (() => { (() => x)(); })();");
+    let timing = &facts.emission.execution;
+    let eager: Vec<_> = facts
+        .references
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.name == "x")
+        .map(|(i, _)| timing.is_module_evaluation(timing.references[i]))
+        .collect();
+    assert_eq!(eager, [false, false, false, false, false, false, true]);
+    assert!(facts.emission.segments[1].placement.eager_reads.is_empty());
+
+    let facts = parse("let x; class C { [x](){ return x; } static [x] = x; field = () => x; }");
+    let timing = &facts.emission.execution;
+    let eager: Vec<_> = facts
+        .references
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.name == "x")
+        .map(|(i, _)| timing.is_module_evaluation(timing.references[i]))
+        .collect();
+    assert_eq!(eager, [true, false, true, true, false]);
+}
+
+#[test]
+fn execution_effects_use_the_owning_operation_context_not_callable_operands() {
+    use crate::effects::EffectReason;
+    for operation in [
+        "class C extends async function() {} {}",
+        "class C { [function() {}]() {} }",
+        "class C { [() => 0] = 1; }",
+        "const object = { [function() {}]: 1 };",
+    ] {
+        for (source, eager) in [
+            (operation.to_owned(), true),
+            (format!("(() => {{ {operation} }})();"), true),
+            (
+                format!("(() => {{ (() => {{ {operation} }})(); }})();"),
+                true,
+            ),
+            (format!("function stored() {{ {operation} }}"), false),
+            (
+                format!("function stored() {{ (() => {{ {operation} }})(); }}"),
+                false,
+            ),
+            (format!("(async () => {{ {operation} }})();"), false),
+            (
+                format!("class Outer {{ field = (() => {{ {operation} }})(); }}"),
+                false,
+            ),
+        ] {
+            let facts = parse(&source);
+            let timing = &facts.emission.execution;
+            let site = facts
+                .effects
+                .iter()
+                .find(|site| {
+                    matches!(
+                        site.reason,
+                        EffectReason::ClassHeritage | EffectReason::ComputedKey
+                    )
+                })
+                .unwrap();
+            assert_eq!(site.deferred.is_none(), source == operation, "{source}");
+            assert_eq!(
+                timing.effect_is_module_evaluation(site).unwrap(),
+                eager,
+                "{source}"
+            );
+            // Every operand here is a non-immediate literal, unlike its owning operation.
+            assert!(
+                !timing.is_module_evaluation(timing.context_at(site.span)),
+                "{}",
+                source
+            );
+        }
+    }
+    let mut facts = parse("function stored() { class C extends async function() {} {} }");
+    let site = facts
+        .effects
+        .iter()
+        .find(|site| site.reason == EffectReason::ClassHeritage)
+        .unwrap();
+    facts.emission.execution.contexts.clear();
+    assert!(facts
+        .emission
+        .execution
+        .effect_is_module_evaluation(site)
+        .is_err());
+}
+
+#[test]
 fn connectors_and_placement_keep_initialization_and_writes_local() {
     let facts = parse("import {x} from './x'; export {}; ; before; let before = x; function f(){ return before; } before++; const arrow = () => before;");
     let recipes = &facts.emission.segments;

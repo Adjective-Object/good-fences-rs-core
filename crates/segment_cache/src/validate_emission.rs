@@ -33,6 +33,7 @@ fn within(source: &str, outer: Span, inner: Span) -> eyre::Result<()> {
 pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> {
     let facts = &module.facts;
     let emission = &facts.emission;
+    execution(module, source)?;
     ensure!(
         emission.segments.len() == module.segments.len(),
         "emission segment count mismatch"
@@ -91,6 +92,75 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
     Ok(())
 }
 
+fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
+    use ast_segmenter::execution::{ContextKind, ExecutionFacts};
+    let facts = &module.facts;
+    let execution = &facts.emission.execution;
+    if facts.commonjs {
+        ensure!(
+            execution == &ExecutionFacts::default(),
+            "nonopaque CommonJS execution facts"
+        );
+        return Ok(());
+    }
+    for (index, context) in execution.contexts.iter().enumerate() {
+        span(source, context.span)?;
+        ensure!(
+            context.span.start < context.span.end
+                && module.segments.iter().any(|&s| contains(s, context.span)),
+            "execution context outside segment"
+        );
+        let preceding = &execution.contexts[..index];
+        ensure!(
+            context.parent
+                == preceding
+                    .iter()
+                    .rposition(|c| contains(c.span, context.span))
+                    .map(|i| i as u32)
+                && preceding
+                    .last()
+                    .is_none_or(|p| p.span.start <= context.span.start)
+                && preceding.iter().all(|p| {
+                    p.span.end <= context.span.start || contains(p.span, context.span)
+                }),
+            "invalid execution context parent/order"
+        );
+        if let Some(call) = context.immediate {
+            ensure!(
+                context.kind == ContextKind::Callable
+                    && facts.invocations.get(call as usize).is_some_and(|call| {
+                        !call.construct && contains(call.callee, context.span)
+                    }),
+                "invalid immediate execution context"
+            );
+        }
+    }
+    ensure!(
+        execution.references
+            == facts
+                .references
+                .iter()
+                .map(|r| execution.context_at(r.span))
+                .collect::<Vec<_>>()
+            && execution.invocations
+                == facts
+                    .invocations
+                    .iter()
+                    .map(|c| execution.context_at(c.span))
+                    .collect::<Vec<_>>(),
+        "invalid execution occurrence coverage"
+    );
+    for context in &execution.contexts {
+        if let Some(call) = context.immediate {
+            ensure!(
+                execution.invocations[call as usize] == context.parent,
+                "immediate execution context escapes caller"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::Result<()> {
     let placement = &recipe.placement;
     if facts.commonjs {
@@ -135,11 +205,36 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
         "invalid default-expression placement"
     );
     ensure!(
-        strict(placement.eager_reads.iter().copied())
-            && placement.eager_reads.iter().all(|&i| facts
+        placement.eager_reads
+            == facts
                 .references
-                .get(i as usize)
-                .is_some_and(|r| r.read && contains(range, r.span)))
+                .iter()
+                .enumerate()
+                .filter(|(i, r)| {
+                    r.read
+                        && contains(range, r.span)
+                        && facts
+                            .emission
+                            .execution
+                            .is_module_evaluation(facts.emission.execution.references[*i])
+                })
+                .map(|(i, _)| i as u32)
+                .collect::<Vec<_>>()
+            && placement.eager_writes
+                == facts
+                    .references
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, r)| {
+                        r.write
+                            && contains(range, r.span)
+                            && facts
+                                .emission
+                                .execution
+                                .is_module_evaluation(facts.emission.execution.references[*i])
+                    })
+                    .map(|(i, _)| i as u32)
+                    .collect::<Vec<_>>()
             && placement.writes
                 == facts
                     .references

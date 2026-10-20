@@ -40,6 +40,347 @@ fn retained_sources<'a>(
 }
 
 #[test]
+fn execution_constraints_preserve_preinitialization_and_mutable_snapshots() {
+    use crate::execution_dependencies::{BarrierReason, ConstraintKind, ExecutionConstraint};
+    let source = "export const before = value; export let value = 0; value = 1; export const snapshot = value; value = 2; export function deferred(){ value = 3; return value; }";
+    let graph = SourceGraph::from_owned([input("entry.mjs", source)]);
+    let roots: Vec<_> = (0..6)
+        .map(|i| GraphNode::Segment(SegmentKey::new(0, i)))
+        .collect();
+    let plan = retain(&graph, &[0], &roots).unwrap();
+    let mandatory: Vec<_> = plan
+        .execution
+        .constraints
+        .iter()
+        .filter(|c| {
+            !matches!(
+                c.kind,
+                ConstraintKind::EffectOrder | ConstraintKind::AbruptCompletion
+            )
+        })
+        .copied()
+        .collect();
+    let constraint = |before, after, kind| ExecutionConstraint {
+        before: SegmentKey::new(0, before),
+        after: SegmentKey::new(0, after),
+        kind,
+    };
+    assert_eq!(
+        mandatory,
+        [
+            constraint(0, 1, ConstraintKind::PreInitialization),
+            constraint(1, 2, ConstraintKind::ReadWrite),
+            constraint(2, 3, ConstraintKind::ReadWrite),
+            constraint(2, 4, ConstraintKind::ReadWrite),
+            constraint(3, 4, ConstraintKind::ReadWrite),
+        ]
+    );
+    assert!(!mandatory
+        .iter()
+        .any(|c| c.before.segment_idx == 5 || c.after.segment_idx == 5));
+    assert!(plan
+        .execution
+        .barriers
+        .iter()
+        .any(|b| b.segment == SegmentKey::new(0, 5) && b.reason == BarrierReason::DeferredAccess));
+    assert!(plan.is_current(&graph, &policy::EffectPolicy::default()));
+    assert_eq!(plan, retain(&graph, &[0], &roots).unwrap());
+}
+
+#[test]
+fn linked_execution_accesses_bypass_barrels_without_repairing_cycle_tdz() {
+    use crate::execution_dependencies::{BarrierReason, ConstraintKind};
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.mjs",
+            "import {value} from 'barrel.mjs'; export const snapshot = value;",
+        ),
+        input("barrel.mjs", "export {value} from 'value.mjs';"),
+        input("value.mjs", "import 'entry.mjs'; export let value = 1;"),
+    ]);
+    let root = GraphNode::Segment(SegmentKey::new(0, 1));
+    let plan = retain(&graph, &[0], &[root]).unwrap();
+    let linked = plan
+        .execution
+        .accesses
+        .iter()
+        .find(|a| a.segment == SegmentKey::new(0, 1))
+        .unwrap();
+    assert_eq!(linked.declaration, SegmentKey::new(2, 1));
+    assert!(plan
+        .execution
+        .barriers
+        .iter()
+        .any(|b| b.segment == linked.segment && b.reason == BarrierReason::CrossSourceAccess));
+    assert!(!plan
+        .execution
+        .constraints
+        .iter()
+        .any(|c| c.kind != ConstraintKind::EffectOrder && c.before.file_id != c.after.file_id));
+    // New scheduling data is separate from demand edges and cannot activate any roots.
+    let mut without = plan.clone();
+    without.execution = Default::default();
+    assert_eq!(
+        chunks::reference_reachability(
+            &graph,
+            &plan,
+            &policy::EffectPolicy::default(),
+            &[chunks::RootSeed {
+                id: chunks::RootId::Entry("entry".into()),
+                evaluation_roots: vec![0],
+                binding_roots: vec![root],
+            }]
+        )
+        .unwrap(),
+        chunks::reference_reachability(
+            &graph,
+            &without,
+            &policy::EffectPolicy::default(),
+            &[chunks::RootSeed {
+                id: chunks::RootId::Entry("entry".into()),
+                evaluation_roots: vec![0],
+                binding_roots: vec![root],
+            }]
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn execution_planning_keeps_unknown_calls_conservative_even_when_effects_are_pure() {
+    use crate::execution_dependencies::BarrierReason;
+    let graph = SourceGraph::from_owned([input(
+        "entry.mjs",
+        "let value = 0; export const stored = () => value++; export const immediate = (() => value++)(); /*#__PURE__*/ unknown(stored);",
+    )]);
+    let roots: Vec<_> = (0..4)
+        .map(|i| GraphNode::Segment(SegmentKey::new(0, i)))
+        .collect();
+    let plan = retain(&graph, &[0], &roots).unwrap();
+    assert!(plan
+        .execution
+        .barriers
+        .iter()
+        .any(|b| b.segment == SegmentKey::new(0, 1) && b.reason == BarrierReason::DeferredAccess));
+    assert!(plan.execution.barriers.iter().any(
+        |b| b.segment == SegmentKey::new(0, 3) && b.reason == BarrierReason::UnknownInvocation
+    ));
+    assert!(!plan.execution.barriers.iter().any(
+        |b| b.segment == SegmentKey::new(0, 2) && b.reason == BarrierReason::UnknownInvocation
+    ));
+    assert!(plan
+        .execution
+        .constraints
+        .iter()
+        .any(|c| c.before == SegmentKey::new(0, 0) && c.after == SegmentKey::new(0, 2)));
+}
+
+#[test]
+fn execution_fences_implicit_execution_independently_of_purity() {
+    use crate::execution_dependencies::{BarrierReason, ConstraintKind, ExecutionConstraint};
+    for operation in [
+        "globalThis.tag`text`;",
+        "globalThis.receiver.value;",
+        "+globalThis.receiver;",
+        "[...globalThis.receiver];",
+        "/*#__PURE__*/ unknown(globalThis.receiver.value);",
+        "(() => globalThis.receiver.value)();",
+        "export class C extends async function() {} {}",
+        "export class C { [function() {}]() {} }",
+        "export class C { [() => 0] = 1; }",
+        "export const object = { [function() {}]: 1 };",
+        "(() => { class C extends async function() {} {} })();",
+        "(() => { class C { [function() {}]() {} } })();",
+    ] {
+        let source = format!("export const before = 1; {operation} export const other = 42;");
+        let graph = SourceGraph::from_owned([
+            input("entry.mjs", &source),
+            input("independent.mjs", "export const untouched = 2;"),
+        ]);
+        let roots = [GraphNode::Module(0), GraphNode::Module(1)];
+        for policy in [
+            policy::EffectPolicy::default(),
+            policy::EffectPolicy::default().with_pure_annotations(false),
+        ] {
+            let plan = retain_with_policy(&graph, &[0, 1], &roots, &policy).unwrap();
+            assert!(
+                plan.execution
+                    .barriers
+                    .iter()
+                    .any(|b| b.segment == SegmentKey::new(0, 1)
+                        && b.reason == BarrierReason::UnknownExecution),
+                "{operation}"
+            );
+            for (before, after) in [(0, 1), (1, 2)] {
+                assert!(
+                    plan.execution.constraints.contains(&ExecutionConstraint {
+                        before: SegmentKey::new(0, before),
+                        after: SegmentKey::new(0, after),
+                        kind: ConstraintKind::AbruptCompletion,
+                    }),
+                    "{operation}"
+                );
+            }
+            assert!(plan.execution.constraints.iter().all(|c| {
+                c.before.file_id == c.after.file_id
+                    && !(c.before.segment_idx == 0 && c.after.segment_idx == 2)
+            }));
+        }
+    }
+}
+
+#[test]
+fn execution_fences_complete_initialization_state_on_abrupt_completion() {
+    use crate::execution_dependencies::{BarrierReason, ConstraintKind, ExecutionConstraint};
+    for (source, fence, pairs) in [
+        (
+            "export const before = value; export const other = 42; let value = 0;",
+            0,
+            vec![(0, 1), (0, 2)],
+        ),
+        (
+            "export const before = 1; throw 0; export const other = 42;",
+            1,
+            vec![(0, 1), (1, 2)],
+        ),
+    ] {
+        let graph = SourceGraph::from_owned([input("entry.mjs", source)]);
+        let plan = retain(&graph, &[0], &[GraphNode::Module(0)]).unwrap();
+        assert!(plan.execution.barriers.iter().any(|b| {
+            b.segment == SegmentKey::new(0, fence) && b.reason == BarrierReason::AbruptCompletion
+        }));
+        for (before, after) in pairs {
+            assert!(plan.execution.constraints.contains(&ExecutionConstraint {
+                before: SegmentKey::new(0, before),
+                after: SegmentKey::new(0, after),
+                kind: ConstraintKind::AbruptCompletion,
+            }));
+        }
+        assert!(!plan
+            .execution
+            .constraints
+            .iter()
+            .any(|c| { c.before.segment_idx == 2 && c.after.segment_idx == 0 }));
+    }
+}
+
+#[test]
+fn execution_leaves_simple_initializers_and_deferred_implicit_work_unfenced() {
+    let graph = SourceGraph::from_owned([input(
+        "entry.mjs",
+        "export const a = 1; export const b = 'text'; export function f(){ globalThis.tag`text`; throw 0; } export const g = () => globalThis.receiver.value;",
+    )]);
+    let plan = retain(&graph, &[0], &[GraphNode::Module(0)]).unwrap();
+    assert!(plan.execution.barriers.is_empty());
+    assert!(plan.execution.constraints.is_empty());
+
+    let graph = SourceGraph::from_owned([input(
+        "entry.mjs",
+        "throw 0; export const a = 1; export const b = 2; throw 1; export function f() {}",
+    )]);
+    let plan = retain(&graph, &[0], &[GraphNode::Module(0)]).unwrap();
+    assert!(!plan.execution.constraints.iter().any(|c| {
+        (c.before.segment_idx == 1 && c.after.segment_idx == 2)
+            || c.before.segment_idx == 4
+            || c.after.segment_idx == 4
+    }));
+}
+
+#[test]
+fn execution_keeps_deferred_class_operation_effects_unfenced() {
+    use crate::execution_dependencies::{BarrierReason, ConstraintKind};
+    for operation in [
+        "class C extends async function() {} {}",
+        "class C { [function() {}]() {} }",
+        "class C { [() => 0] = 1; }",
+    ] {
+        for deferred in [
+            format!("export function stored() {{ {operation} }}"),
+            format!("export function stored() {{ (() => {{ {operation} }})(); }}"),
+            format!("export class Outer {{ field = (() => {{ {operation} }})(); }}"),
+        ] {
+            let source = format!("export const before = 1; {deferred} export const after = 42;");
+            let graph = SourceGraph::from_owned([input("entry.mjs", &source)]);
+            let plan = retain(&graph, &[0], &[GraphNode::Module(0)]).unwrap();
+            assert!(
+                !plan.execution.barriers.iter().any(|barrier| {
+                    matches!(
+                        barrier.reason,
+                        BarrierReason::AbruptCompletion | BarrierReason::UnknownExecution
+                    )
+                }),
+                "{source}"
+            );
+            assert!(
+                !plan
+                    .execution
+                    .constraints
+                    .iter()
+                    .any(|constraint| { constraint.kind == ConstraintKind::AbruptCompletion }),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn execution_source_cycle_exposes_implicit_reads_and_failed_initialization() {
+    // In-memory source modules avoid filesystem fixtures while preserving native
+    // cyclic instantiation, escaped namespaces and rejected evaluation.
+    let script = r#"
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+(async () => {
+  const cases = [
+    ['globalThis.tag`text`; export const other = 42;', ['ReferenceError'], null],
+    ['globalThis.receiver.value; export const other = 42;', ['ReferenceError'], null],
+    ['+globalThis.receiver; export const other = 42;', ['ReferenceError'], null],
+    ['[...globalThis.receiver]; export const other = 42;', ['ReferenceError'], null],
+    ['export const before = value; export const other = 42; let value = 0;', [], 'ReferenceError'],
+    ['export const before = 1; throw 0; export const other = 42;', [], 0],
+  ];
+  for (const [body, expectedReads, expectedFailure] of cases) {
+    let escaped;
+    const reads = [];
+    const read = name => {
+      try { return escaped[name]; } catch (error) { return error.name; }
+    };
+    const observe = () => { reads.push(read('other')); };
+    const context = vm.createContext({
+      capture: ns => { escaped = ns; },
+      tag: observe,
+      receiver: {
+        get value() { observe(); return 0; },
+        valueOf() { observe(); return 0; },
+        *[Symbol.iterator]() { observe(); },
+      },
+    });
+    const entry = new vm.SourceTextModule("import 'dep'; " + body, {context});
+    const dep = new vm.SourceTextModule("import * as ns from 'entry'; capture(ns);", {context});
+    await entry.link(name => name === 'dep' ? dep : entry);
+    let failure = null;
+    try { await entry.evaluate(); } catch (error) { failure = error?.name ?? error; }
+    assert.deepEqual(reads, expectedReads, body);
+    assert.equal(failure, expectedFailure, body);
+    assert.equal(read('other'), failure === null ? 42 : 'ReferenceError', body);
+    if (body.startsWith('export const before')) {
+      assert.equal(read('before'), expectedFailure === 0 ? 1 : 'ReferenceError', body);
+    }
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#;
+    let output = std::process::Command::new("node")
+        .args(["--experimental-vm-modules", "-e", script])
+        .output()
+        .expect("Node is required for source execution contracts");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn runtime_imports_evaluate_unreferenced_exports_and_no_export_modules() {
     let sources = [
         "import {unused} from 'lib.ts'; import type {T} from 'types.ts';",
@@ -307,6 +648,11 @@ fn effect_retention_and_order_edges_scale_linearly() {
     let plan = retain(&graph, &[0], &[]).unwrap();
     assert_eq!(plan.effect_order.len(), 1000);
     assert!(plan.edges.len() <= 3000, "{} edges", plan.edges.len());
+    assert!(
+        plan.execution.constraints.len() <= 3000,
+        "{} execution constraints",
+        plan.execution.constraints.len()
+    );
     let reached = chunks::reference_reachability(
         &graph,
         &plan,

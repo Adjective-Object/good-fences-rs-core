@@ -7,8 +7,9 @@ resolution and fixed-point effect solving remain build-local.
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 10 /
-extractor 13, including relative dependency patterns, owned lazy Ecco precursors,
+Syntax-local effect reasons/timing are persisted and range-checked (schema 11 /
+extractor 14, including parented execution contexts, complete occurrence timing,
+eager read/write links, relative dependency patterns, owned lazy Ecco precursors,
 inferred user-function contracts and declaration identity,
 source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
@@ -41,7 +42,7 @@ without parsing or reconstructing legacy tracker maps. Serialized provenance
 detects accidental re-pairing or mutation, not a malicious cache publisher.
 
 Recipe validation covers exact segment/capture/occurrence coverage, declaration,
-forward-use and write links, eager-read ranges, hoisted availability consistency,
+forward-use and write links, exact eager read/write classification, hoisted availability consistency,
 namespace-reference classification links and default/export wrapper containment.
 Namespace classification covers all import-binding references, not only `import
 * as` syntax, because named/default imports can resolve to namespace reexports.
@@ -54,6 +55,9 @@ dependency and source-hint slots, never lexical or invocation rewrites.
 These are structural integrity checks on source-local evidence, not a second
 parser or authentication of a publisher; source/configuration hashes and bounded
 CBOR preflight remain mandatory on both codec boundaries.
+Execution contexts validate preorder/nearest parents, original segment containment,
+immediate call links and exact reference/invocation coverage. No derived linked
+execution constraints or relocation decisions are persisted.
 
 ## Sidecar IO
 

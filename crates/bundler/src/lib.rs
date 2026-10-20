@@ -13,6 +13,7 @@ mod effect_analysis;
 mod effect_dependencies;
 pub mod effects;
 pub mod emit;
+pub mod execution_dependencies;
 pub mod link;
 pub mod manifest;
 mod output_url;
@@ -98,6 +99,9 @@ pub struct RetentionPlan {
     /// Independent of binding/availability edges and deferred/async activation.
     /// Native module jobs, not this scalar partial order, schedule async evaluation.
     pub effect_order: Vec<SegmentKey>,
+    /// Derived scheduling relationships, never retention/availability edges.
+    /// Shares this plan's graph revision and effect-policy fingerprint.
+    pub execution: execution_dependencies::ExecutionPlan,
     /// Deterministic effect-order cycle diagnostics; never binding/TDZ exemptions.
     pub warnings: Vec<String>,
 }
@@ -195,6 +199,8 @@ fn retain_with_effects(
     );
     let mut edges: Vec<_> = analysis.edges.into_iter().collect();
     edges.sort_by_key(|e| (node_key(e.from), node_key(e.to), e.kind, e.source_edge));
+    let execution =
+        execution_dependencies::plan(graph, &analysis.segments.keys().copied().collect(), &edges)?;
     Ok(RetentionPlan {
         revision: graph.revision(),
         policy_fingerprint: policy.fingerprint(),
@@ -215,6 +221,7 @@ fn retain_with_effects(
             .map(|(key, summary)| SegmentEffects { key, summary })
             .collect(),
         effect_order,
+        execution,
         warnings,
     })
 }

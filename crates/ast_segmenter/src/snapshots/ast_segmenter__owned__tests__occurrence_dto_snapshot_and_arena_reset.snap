@@ -118,6 +118,29 @@ ModuleFacts {
     ],
     invocations: [],
     emission: EmissionFacts {
+        execution: ExecutionFacts {
+            contexts: [
+                ExecutionContext {
+                    span: Span {
+                        start: 358,
+                        end: 403,
+                    },
+                    parent: None,
+                    kind: Callable,
+                    immediate: None,
+                },
+            ],
+            references: [
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ],
+            invocations: [],
+        },
         segments: [
             SegmentRecipe {
                 source: MultiSpan(
@@ -136,6 +159,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -207,6 +231,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -254,6 +279,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -291,6 +317,7 @@ ModuleFacts {
                     eager_reads: [
                         0,
                     ],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -336,6 +363,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -393,6 +421,7 @@ ModuleFacts {
                     eager_reads: [
                         3,
                     ],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -453,6 +482,7 @@ ModuleFacts {
                     eager_reads: [
                         4,
                     ],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -515,6 +545,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -552,6 +583,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -598,6 +630,7 @@ ModuleFacts {
                     eager_reads: [
                         6,
                     ],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -688,6 +721,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {
@@ -756,6 +790,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {

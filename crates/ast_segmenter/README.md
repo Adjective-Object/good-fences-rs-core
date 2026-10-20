@@ -15,6 +15,18 @@ remain in the original source, with no transformed-source reparse.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
 
+`facts.emission.execution` owns preorder callable/instance-initializer contexts,
+their parent links and reference/invocation context indices. Callable spans include
+parameter defaults; computed keys and static class initialization inherit their
+surrounding context. Only direct synchronous non-generator literal calls carry an
+immediate activation link. Named/aliased calls and callbacks remain unproven.
+Placement eager reads/writes use this classification; deferred writes remain in
+the complete `writes` collection for availability/relocation checks. These are
+syntax-local facts, not purity, a call solver or a linked execution schedule.
+Effect timing resolves the exact owning context recorded in `EffectSite.deferred`,
+not containment of its operand span; callable heritage/key operands do not defer
+the surrounding class operation. Missing recorded contexts are errors.
+
 Variable scopes retain whether an escaped name is referenced only in type
 positions. A name referenced in both type and value positions remains a runtime
 dependency. Consumers can inspect all names or their type-only classification.

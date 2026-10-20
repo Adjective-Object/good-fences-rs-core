@@ -94,3 +94,9 @@ the invocation's own function scope. CJS remains one opaque recipe with only
 dependency/hint slots. Never persist chosen names, targets or transform policy.
 Namespace-use candidates cover all import bindings; only linked namespace
 identities activate them, including named/default imports of namespace reexports.
+`emission.execution` owns parented callable/instance contexts and occurrence timing.
+Only direct synchronous literal calls prove immediate activation; parameter defaults
+belong to the callable, computed/static class work to the surrounding context.
+Eager reads/writes share this classifier; unproven calls never establish purity.
+Resolve effect timing from its recorded deferred context by exact span identity,
+never operand containment; callable heritage/key operands do not defer their owners.

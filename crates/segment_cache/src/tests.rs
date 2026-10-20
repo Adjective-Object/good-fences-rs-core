@@ -77,6 +77,7 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         ("split.mjs", "export const café = 1, {value: next = café} = {}, last = next; let a, b = last; var c = b, d = c;", ModuleFormat::Esm),
         ("context.mjs", "export const load = name => import(`./parts/${name}.mjs`);", ModuleFormat::Esm),
         ("context.cjs", "module.exports = name => require('./parts/' + name);", ModuleFormat::CommonJs),
+        ("execution.mjs", "let x = 0; const stored = (p = x++) => x++; (() => x++)(); class C { [x++] = x++; static value = x++; method(p = x++) { return () => x++; } }", ModuleFormat::Esm),
     ] {
         let first = record(source, path, format);
         let bytes = first.encode(source).unwrap();
@@ -90,6 +91,38 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
             decoded.config
         );
     }
+}
+
+#[test]
+fn rejects_corrupt_execution_contexts_and_access_timing() {
+    let source =
+        "let x; const stored = (p = x++) => () => x; (() => x++)(); class C { field = x++; }";
+    let mutations: &[fn(&mut ast_segmenter::emission::EmissionFacts)] = &[
+        |e| {
+            e.execution.references.pop();
+        },
+        |e| {
+            e.execution.invocations.clear();
+        },
+        |e| e.execution.contexts[0].parent = Some(0),
+        |e| e.execution.contexts[1].parent = None,
+        |e| e.execution.contexts[0].span.end = u32::MAX,
+        |e| e.execution.contexts[0].immediate = Some(u32::MAX),
+        |e| e.execution.contexts[3].immediate = Some(0),
+        |e| e.segments[1].placement.eager_writes.push(0),
+        |e| e.segments[2].placement.eager_reads.clear(),
+    ];
+    let original = record(source, "emission.mjs", ModuleFormat::Esm);
+    crate::validate_emission::validate(&original.module, source).unwrap();
+    for (index, mutate) in mutations.iter().enumerate() {
+        let mut modified = original.clone();
+        mutate(&mut modified.module.facts.emission);
+        assert!(
+            crate::validate_emission::validate(&modified.module, source).is_err(),
+            "structural execution validation accepted mutation {index}"
+        );
+    }
+    reject_emission(source, mutations);
 }
 
 #[test]

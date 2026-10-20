@@ -14,6 +14,7 @@ mod tests;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmissionFacts {
+    pub execution: crate::execution::ExecutionFacts,
     /// Same indices as `ParsedModule::segments`; CommonJS has one opaque recipe.
     pub segments: Vec<SegmentRecipe>,
     pub nested_bindings: Vec<BindingId>,
@@ -43,6 +44,7 @@ pub struct PlacementFacts {
     pub forward_references: Vec<BindingId>,
     /// Indices into `ModuleFacts::references`, not OXC reference IDs.
     pub eager_reads: Vec<u32>,
+    pub eager_writes: Vec<u32>,
     pub writes: Vec<u32>,
 }
 
@@ -314,7 +316,6 @@ pub(crate) fn extract(
         shorthand: HashMap::new(),
         operations: Vec::new(),
         names: Vec::new(),
-        deferred: Vec::new(),
         hoisted: Vec::new(),
         namespace_uses: HashMap::new(),
         blocked: NamespaceReason::Other,
@@ -340,6 +341,7 @@ pub(crate) fn extract(
         }
     }
     let mut result = EmissionFacts {
+        execution: crate::execution::extract(program, facts),
         nested_bindings: facts
             .bindings
             .iter()
@@ -436,13 +438,16 @@ pub(crate) fn extract(
             .filter(|(_, r)| contains(span, r.span))
         {
             let index = i as u32;
-            if reference.read
-                && !visitor
-                    .deferred
-                    .iter()
-                    .any(|&s| contains(s, reference.span))
+            if result
+                .execution
+                .is_module_evaluation(result.execution.references[i])
             {
-                recipe.placement.eager_reads.push(index);
+                if reference.read {
+                    recipe.placement.eager_reads.push(index);
+                }
+                if reference.write {
+                    recipe.placement.eager_writes.push(index);
+                }
             }
             if reference.write {
                 recipe.placement.writes.push(index);
@@ -627,7 +632,6 @@ struct Extractor<'f> {
     shorthand: HashMap<u32, Shorthand>,
     operations: Vec<OperationKind>,
     names: Vec<(Span, Option<BindingId>)>,
-    deferred: Vec<Span>,
     hoisted: Vec<u32>,
     namespace_uses: HashMap<u32, NamespaceAccess>,
     blocked: NamespaceReason,
@@ -755,7 +759,6 @@ impl<'a> Visit<'a> for Extractor<'_> {
         walk::walk_statement(self, statement);
     }
     fn visit_function(&mut self, function: &Function<'a>, flags: oxc_semantic::ScopeFlags) {
-        self.deferred.push(function.span);
         let saved = self.enclosing_function.replace(function.span);
         self.names.push((
             function.span,
@@ -772,7 +775,6 @@ impl<'a> Visit<'a> for Extractor<'_> {
         walk::walk_class(self, class);
     }
     fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
-        self.deferred.push(arrow.span);
         let saved = self.enclosing_function.replace(arrow.span);
         self.names.push((arrow.span, None));
         walk::walk_arrow_function_expression(self, arrow);

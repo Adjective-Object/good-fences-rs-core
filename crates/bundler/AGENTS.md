@@ -39,6 +39,16 @@ Keep evaluation demand and binding demand distinct. Plans are derived state;
 source caches must not contain policy conclusions. Consumer → dependency edges
 preserve source order and original deferred/async timing; they are not permission
 to execute nested function bodies eagerly.
+`RetentionPlan::execution` is scheduling-only and shares revision/policy validity.
+Mandatory initialization/pre-init/read-write constraints never use effect-SCC
+breaking. Direct linked reference/declaration relationships bypass barrels without
+inventing cross-source declaration-before-read edges. Located barriers fence the
+owning native source phase until proven safe, including other mutable accesses;
+neither deferred access nor inferred purity authorizes eager execution.
+Use original eager syntax-effect sites for implicit execution/throw fences,
+independent of PURE/Ecco. Mandatory AbruptCompletion constraints preserve both
+sides of each source-local phase, including unrelated lexical initializations;
+do not order independent entries or move TDZ declarations ahead of failing reads.
 Resource preparation separates original input bytes from generated JS text and
 parser paths. Graph paths retain input identity; spans/provenance describe only
 generated text. Recheck original bytes on reuse and return. JSON uses an opaque
@@ -136,8 +146,11 @@ facade families. Public entry/export boundaries constrain output; root sets are
 reachability analysis, not unconditional physical partitions or module seams.
 Artifact ownership names actual executable files; merged private sources have
 no independently executable namespace path in `Artifacts::modules`.
-Synchronous evaluation groups merge exclusive chains/body-free connectors only
-when source-order completion is preserved; they do not own all source segments.
+Group compatible synchronous regions by entry/async-root reachability, including
+sibling dependencies and complete synchronous SCCs. Source SCCs constrain
+instantiation/evaluation, not file boundaries. Outside native jobs must remain
+a prefix of each merged region's source-ordered execution; never hoist a later
+shared initializer ahead of an earlier body. Groups do not own all source segments.
 Keep initialization/await phases and observable namespace/name/read-only
 boundaries native, not cells. Logical artifact projections
 may overlap or contain several body owners; root sets do not prescribe files.

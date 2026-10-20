@@ -52,6 +52,11 @@ ModuleFacts {
     ],
     invocations: [],
     emission: EmissionFacts {
+        execution: ExecutionFacts {
+            contexts: [],
+            references: [],
+            invocations: [],
+        },
         segments: [
             SegmentRecipe {
                 source: MultiSpan(
@@ -70,6 +75,7 @@ ModuleFacts {
                     default_expression: false,
                     forward_references: [],
                     eager_reads: [],
+                    eager_writes: [],
                     writes: [],
                 },
                 names: NameRestrictions {

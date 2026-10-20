@@ -21,6 +21,8 @@
 - Emission validation checks segment/occurrence coverage, placement and namespace
   links, canonical operation parents, complete nonrecursive source-slot roots,
   PURE input/guard ranges and opaque CJS request/hint-only recipes. Do not reparse.
+- Validate parented execution contexts, immediate call links and exact occurrence/
+  eager-access coverage; never persist linked scheduling constraints.
 - Sidecars use requested lexical source paths; unique sibling staging plus
   tempfile atomic replacement, never unlink-before-rename. Last publisher wins;
   recheck source before publish/return. Cache failures are reported nonfatally,

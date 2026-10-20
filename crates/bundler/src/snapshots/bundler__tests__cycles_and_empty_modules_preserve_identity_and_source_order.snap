@@ -381,6 +381,109 @@ RetentionPlan {
             segment_idx: 1,
         },
     ],
+    execution: ExecutionPlan {
+        constraints: [
+            ExecutionConstraint {
+                before: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+                after: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+                kind: AbruptCompletion,
+            },
+            ExecutionConstraint {
+                before: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+                after: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+                kind: EffectOrder,
+            },
+            ExecutionConstraint {
+                before: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+                after: SegmentKey {
+                    file_id: 1,
+                    segment_idx: 1,
+                },
+                kind: EffectOrder,
+            },
+        ],
+        accesses: [],
+        barriers: [
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+                reason: UnknownInvocation,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+                reason: UnknownExecution,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 2,
+                },
+                reason: AbruptCompletion,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+                reason: UnknownInvocation,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+                reason: UnknownExecution,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 0,
+                    segment_idx: 3,
+                },
+                reason: AbruptCompletion,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 1,
+                    segment_idx: 1,
+                },
+                reason: UnknownInvocation,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 1,
+                    segment_idx: 1,
+                },
+                reason: UnknownExecution,
+            },
+            ExecutionBarrier {
+                segment: SegmentKey {
+                    file_id: 1,
+                    segment_idx: 1,
+                },
+                reason: AbruptCompletion,
+            },
+        ],
+    },
     warnings: [
         "effect-order cycle; source members in chosen order: a.ts:34..42 -> a.ts:43..52 -> b.ts:15..23",
     ],

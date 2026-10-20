@@ -3,6 +3,7 @@ use raw_module_deps::Name;
 
 pub mod effects;
 pub mod emission;
+pub mod execution;
 pub mod invocation;
 mod multi_span;
 pub use multi_span::MultiSpan;

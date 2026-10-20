@@ -6,6 +6,12 @@ The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries
 constrain output; pure segments may move according to binding dependencies.
+Compatible synchronous regions with the same entry/async-root reachability
+coalesce, including siblings, diamonds and complete synchronous cycles; source
+module SCCs are not chunk boundaries. Native jobs remain where required for
+public/escaped namespaces, top-level-await phases, imported writes, observable
+names or CommonJS activation. Merging never hoists a later shared dependency
+ahead of an earlier initializer.
 Each CJS input contributes one opaque segment plus a logical ESM facade, both
 subject to normal usage/linking/grouping, not a native `.cjs`-per-input fallback.
 
@@ -31,6 +37,9 @@ Components sources and native published output through `agent-browser` in real
 Chromium. See `fixtures/bundler-apps/README.md` for prerequisites, exact packaging
 adaptations, behavior checks, licenses and retained screenshots/diagnostics.
 This browser corpus is separate from the Node-only portable semantic fixtures.
+Both apps have no lazy imports: their browser contracts require exactly one
+loaded JavaScript output, with CSS resources and separately requested CSS entries
+outside that count.
 
 The example driver's optional `--css-auto-mount` argument selects native ESM CSS
 stubs for browser applications; its existing default is unchanged. Caller-loaded
@@ -535,6 +544,36 @@ order; `BuildResult.warnings` includes these on changed **and no-op** builds.
 Binding/link/TDZ errors are not exempted. Async imports and deferred requires do
 not gain eager order constraints; the list is not permission to activate them.
 The emitter uses native module jobs, not this scalar linker-planning order.
+`RetentionPlan::execution` adds scheduling-only inputs under the same revision/
+policy validity check. Its sparse `constraints` distinguish mandatory local
+initialization, original pre-initialization (including TDZ failure), read/write
+ordering, and `AbruptCompletion` from breakable `EffectOrder`. Direct `accesses` link
+existing reference indices to real declaration segments through canonical export resolution, including
+barrels. Deferred accesses remain availability relationships, not eager edges.
+Cross-source reads deliberately do not invent declaration-before-read edges: cyclic
+evaluation depends on the entrance. `barriers` locate conservative native source-phase
+fences for unproven calls, implicit unknown execution, abrupt completion, deferred
+captures, cross-source accesses, suspension and opaque inputs. Until a scheduler
+discharges a fence, it covers the owning source's
+phase, including other mutable reads/initializers. Neither inferred purity nor PURE
+hints discharge fences. None of this data participates in root/manifest traversal.
+Implicit-execution and abrupt-completion evidence comes from eager syntax-effect
+sites in the owned execution context, including tagged templates, getters,
+coercions, iteration, potentially throwing reads and explicit throws. Every
+site resolves its recorded owning operation context, not its operand's context:
+callable class heritage and computed keys still evaluate eagerly, while class
+definitions inside deferred callables/instance initializers stay deferred. Each
+`AbruptCompletion` phase has mandatory predecessor/successor constraints against
+other retained local evaluations/initializations, preserving the complete binding
+state when evaluation fails. Adjacent fences compose transitively with linear-size
+constraints; peer initializers between fences stay unordered.
+Hoisted function declarations and static connectors
+are not evaluation phases; these constraints neither repair TDZ nor impose an
+order across independent sources. Simple literal initializers remain movable
+when no such fence intervenes.
+This is planning infrastructure only: native placement/emission still use the
+existing algorithm; constraint-aware placement and explicit scheduling are a later
+stage, including the four `native-flatten-*` regression contracts.
 Original structural edge indices retain exact occurrence/timing metadata.
 Required bodies are **available**, not scheduled eagerly: deferred requires
 keep their original call sites/timing. Async boundary edge indices are recorded
