@@ -53,7 +53,6 @@ pub fn single_module(
         path,
         &Default::default(),
     )?;
-    let output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;
     rewrite::validate(path, &output)?;
     Ok(output)
 }

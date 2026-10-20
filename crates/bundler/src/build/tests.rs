@@ -954,7 +954,10 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     let policy = parity(&mut session, &options);
     assert_eq!(policy.counters.source_parses, 0);
     assert_eq!(policy.counters.resolutions, 0);
-    assert!(policy.counters.output_parses > 0);
+    assert_eq!(
+        policy.counters.output_parses,
+        usize::from(cfg!(debug_assertions))
+    );
     assert_eq!(
         (
             fs::read(&sidecar).unwrap(),

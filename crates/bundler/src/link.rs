@@ -86,8 +86,6 @@ impl Artifacts<crate::assembly::Code> {
                     .get(path)
                     .ok_or_eyre("missing artifact destination")?;
                 let source = code.render(path, destination, destinations)?;
-                let source =
-                    crate::rewrite::apply(&source, &crate::rewrite::source_hint_edits(&source))?;
                 if destination
                     .extension()
                     .is_some_and(|ext| matches!(ext.to_str(), Some("mjs" | "cjs" | "js")))

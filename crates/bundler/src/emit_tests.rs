@@ -61,7 +61,7 @@ fn cached_operations_compose_names_shorthand_dependencies_and_nested_pure() {
 
 #[test]
 fn original_coordinate_slots_reject_invalid_utf8_and_escaping_edits() {
-    use crate::rewrite::Edit;
+    use crate::assembly::Edit;
     for (range, edits) in [
         (Span::new(1, 2), vec![]),
         (
@@ -79,7 +79,7 @@ fn original_coordinate_slots_reject_invalid_utf8_and_escaping_edits() {
             }],
         ),
     ] {
-        assert!(rewrite::apply_range("é12", range, &edits).is_err());
+        assert!(crate::assembly::apply_range("é12", range, &edits).is_err());
     }
 }
 
@@ -369,7 +369,13 @@ fn tree_shakes_real_code_and_preserves_shadowing_hoisting_and_order() {
 #!/not-a-real-hashbang
 "#;
     // A hashbang is only valid at byte zero.
-    assert!(rewrite::validate(Path::new("bad.mjs"), source).is_err());
+    assert!(ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("bad.mjs"),
+        ast_segmenter::ModuleFormat::Esm,
+    )
+    .is_err());
     let source = r#"#!/usr/bin/env node
 // copyright é
 'use strict';
@@ -379,8 +385,7 @@ var before = 3;
 function hoisted() { return 7; }
 let x = 1;
 { let x = 2; console.log(x); }
-console.log(x, before);
-//# sourceMappingURL=obsolete.map
+console.log(x, /*# sourceMappingURL=obsolete.map */before);
 "#;
     let output = compare(source, "import './input.mjs';", false);
     assert!(!output.contains("must disappear"));

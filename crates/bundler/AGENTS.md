@@ -32,8 +32,10 @@ source caches must not contain policy conclusions. Consumer → dependency edges
 preserve source order and original deferred/async timing; they are not permission
 to execute nested function bodies eagerly.
 
-Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
-validation. Never apply overlapping recipe edits independently. Keep native ESM
+Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
+artifacts once after naming; release never parses output. Keep identifier,
+provenance, target and edit checks always on; strip hints through cached operations.
+Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
 Instantiate cached operation parents/source slots with original binding/request
 IDs; replacing parents own nested rewrites, never reconnect generated text.

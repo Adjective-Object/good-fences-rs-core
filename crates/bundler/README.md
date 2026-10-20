@@ -54,8 +54,13 @@ PURE guarded alternatives use cached callee steps, source slots and await-guard
 restrictions without parsing callee fragments. Annotation policy and result
 demand still select whether an invocation is retained or lowered.
 Shorthand keys, free globals, nested shadows, hoisting, strict-module `this`,
-TDZ, const and live mutation keep native semantics. The output is parser/semantic
-validated and has no runtime, cells, registrations or per-module facade family.
+TDZ, const and live mutation keep native semantics. Debug builds parser/semantic
+validate each final executable artifact once after naming and aliases; release
+emission never parses source fragments or output. Checked source provenance,
+identifier legality (including strict reserved names), edit ranges and artifact
+targets remain enforced in both profiles. Cached in-segment source-hint operations
+remove stale hints without output comment scans; out-of-segment hint cleanup is
+not supported. Output has no cells, registrations or per-module facade family.
 
 Public `BuildOptions.entries` keys are logical IDs. `Entry.output_name` is an
 optional relative output name/path supplied by the build config. When omitted,

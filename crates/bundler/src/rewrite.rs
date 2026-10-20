@@ -4,9 +4,13 @@ use std::path::Path;
 
 use ast_segmenter::owned::{BindingId, ExportValue};
 use eyre::{ensure, OptionExt};
+#[cfg(debug_assertions)]
 use oxc_allocator::Allocator;
+#[cfg(debug_assertions)]
 use oxc_parser::Parser;
-use oxc_span::{SourceType, Span};
+#[cfg(debug_assertions)]
+use oxc_span::SourceType;
+use oxc_span::Span;
 
 thread_local! {
     static OUTPUT_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -16,7 +20,8 @@ pub(crate) fn output_parse_count() -> usize {
     OUTPUT_PARSES.with(std::cell::Cell::get)
 }
 
-pub(crate) fn count_output_parse() {
+#[cfg(debug_assertions)]
+fn count_output_parse() {
     OUTPUT_PARSES.with(|count| count.set(count.get() + 1));
 }
 
@@ -62,27 +67,8 @@ pub fn apply(source: &str, edits: &[Edit]) -> eyre::Result<String> {
     Ok(result)
 }
 
-pub(crate) fn apply_range(source: &str, range: Span, edits: &[Edit]) -> eyre::Result<String> {
-    let text = source
-        .get(range.start as usize..range.end as usize)
-        .ok_or_eyre("invalid UTF-8 source slot")?;
-    let edits = edits
-        .iter()
-        .map(|edit| {
-            ensure!(
-                range.start <= edit.span.start && edit.span.end <= range.end,
-                "edit outside original source slot"
-            );
-            Ok(Edit {
-                span: Span::new(edit.span.start - range.start, edit.span.end - range.start),
-                replacement: edit.replacement.clone(),
-            })
-        })
-        .collect::<eyre::Result<Vec<_>>>()?;
-    apply(text, &edits)
-}
-
-/// Validate JavaScript parser/early errors; explicit `.cjs` uses wrapper grammar.
+/// Debug-only final JavaScript validation; `.cjs` uses wrapper grammar.
+#[cfg(debug_assertions)]
 pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
     count_output_parse();
     let allocator = Allocator::default();
@@ -110,30 +96,10 @@ pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
     Ok(())
 }
 
-pub(crate) fn source_hint_edits(source: &str) -> Vec<Edit> {
-    count_output_parse();
-    let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
-    parsed
-        .program
-        .comments
-        .iter()
-        .filter_map(|comment| {
-            let text = &source[comment.span.start as usize..comment.span.end as usize];
-            let body = text
-                .strip_prefix("//")
-                .or_else(|| text.strip_prefix("/*").and_then(|t| t.strip_suffix("*/")))?;
-            let directive = body
-                .strip_prefix('#')
-                .or_else(|| body.strip_prefix('@'))?
-                .trim_start();
-            (directive.starts_with("sourceMappingURL=") || directive.starts_with("sourceURL="))
-                .then(|| Edit {
-                    span: comment.span,
-                    replacement: String::new(),
-                })
-        })
-        .collect()
+/// Release output relies on checked recipes, identifiers, targets and edits.
+#[cfg(not(debug_assertions))]
+pub fn validate(_path: &Path, _source: &str) -> eyre::Result<()> {
+    Ok(())
 }
 
 /// Rename private lexical bindings only. Public import/export rewrites belong
@@ -143,7 +109,6 @@ pub fn rename_private(
     source: &str,
     names: &[(BindingId, String)],
 ) -> eyre::Result<String> {
-    validate(path, source)?;
     let parsed = ast_segmenter::parse_module(
         &logger::StdioLogger::new(),
         source,
@@ -171,14 +136,7 @@ pub fn rename_private(
             id.0
         );
         ensure!(
-            !name.is_empty()
-                && name
-                    .bytes()
-                    .enumerate()
-                    .all(|(i, b)| b.is_ascii_alphabetic()
-                        || b == b'_'
-                        || b == b'$'
-                        || (i > 0 && b.is_ascii_digit())),
+            crate::symbols::valid_rename_target(name),
             "invalid generated identifier"
         );
         ensure!(targets.insert(name), "duplicate rename target");
@@ -336,12 +294,76 @@ mod tests {
 
     #[test]
     fn source_hints_are_comments_not_matching_strings_or_ordinary_prose() {
-        let source = "const keep = '//# sourceMappingURL=inside'; // ordinary sourceMappingURL=keep\n//# sourceMappingURL=old.map\n/*@ sourceURL=old.js */\n";
-        let output = apply(source, &source_hint_edits(source)).unwrap();
+        let source = "const keep = (/*@ sourceURL=old.js */'//# sourceMappingURL=inside' // ordinary sourceMappingURL=keep\n//# sourceMappingURL=old.map\n);";
+        let parsed = ast_segmenter::parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("input.mjs"),
+            ast_segmenter::ModuleFormat::Esm,
+        )
+        .unwrap();
+        let output = crate::emit::CachedRenderer::new(
+            source,
+            &parsed.facts,
+            &parsed.facts.emission.segments[0],
+            &[],
+        )
+        .render(parsed.segments[0].span)
+        .unwrap()
+        .render(
+            Path::new("output.mjs"),
+            Path::new("output.mjs"),
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(
             output,
-            "const keep = '//# sourceMappingURL=inside'; // ordinary sourceMappingURL=keep\n\n\n"
+            "const keep = ('//# sourceMappingURL=inside' // ordinary sourceMappingURL=keep\n\n);"
         );
         validate(Path::new("output.mjs"), &output).unwrap();
+    }
+
+    #[test]
+    fn rename_legality_remains_checked_without_output_parsing() {
+        for target in [
+            "",
+            "1bad",
+            "x-y",
+            "for",
+            "await",
+            "yield",
+            "eval",
+            "arguments",
+            "implements",
+        ] {
+            assert!(
+                rename_private(
+                    Path::new("input.mjs"),
+                    "let x;",
+                    &[(BindingId(4), target.into())]
+                )
+                .is_err(),
+                "{target}"
+            );
+        }
+        assert!(rename_private(Path::new("input.mjs"), "const =;", &[]).is_err());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn final_validation_reports_semantic_diagnostics() {
+        let error = validate(Path::new("output.mjs"), "let x; let x;").unwrap_err();
+        assert!(
+            error.to_string().contains("semantic diagnostics"),
+            "{error}"
+        );
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn final_validation_does_not_parse_release_output() {
+        let before = output_parse_count();
+        validate(Path::new("output.mjs"), "not valid JavaScript !!").unwrap();
+        assert_eq!(output_parse_count(), before);
     }
 }

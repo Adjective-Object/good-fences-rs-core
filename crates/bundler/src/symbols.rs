@@ -21,21 +21,33 @@ pub(super) struct Symbols {
     pub exports: BTreeMap<u32, BTreeMap<String, LinkedExport>>,
 }
 
+fn reserved(name: &str) -> bool {
+    "await break case catch class const continue debugger default delete do else enum \
+     export extends false finally for function if implements import in instanceof \
+     interface let new null package private protected public return static super \
+     switch this throw true try typeof var void while with yield eval arguments"
+        .split_whitespace()
+        .any(|keyword| keyword == name)
+}
+
+pub(crate) fn valid_rename_target(name: &str) -> bool {
+    !name.is_empty()
+        && !reserved(name)
+        && name.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_alphabetic()
+                || byte == b'_'
+                || byte == b'$'
+                || (index > 0 && byte.is_ascii_digit())
+        })
+}
+
 fn allocate_name(
     preferred: &str,
     occupied: &mut BTreeSet<String>,
     originals: &BTreeSet<String>,
     fresh: &mut usize,
 ) -> String {
-    let unavailable = |name: &str| {
-        occupied.contains(name)
-            || "await break case catch class const continue debugger default delete do else enum \
-                export extends false finally for function if implements import in instanceof \
-                interface let new null package private protected public return static super \
-                switch this throw true try typeof var void while with yield eval arguments"
-                .split_whitespace()
-                .any(|keyword| keyword == name)
-    };
+    let unavailable = |name: &str| occupied.contains(name) || reserved(name);
     let mut name = preferred.to_owned();
     if unavailable(&name) {
         loop {
