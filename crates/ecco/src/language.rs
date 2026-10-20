@@ -9,10 +9,11 @@ pub enum Hazard {
     Call,
     Construct,
     Iterate,
+    PrototypeRead,
 }
 
 impl Hazard {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::PropertyRead,
         Self::ToPrimitive,
         Self::In,
@@ -20,6 +21,7 @@ impl Hazard {
         Self::Call,
         Self::Construct,
         Self::Iterate,
+        Self::PrototypeRead,
     ];
 
     pub fn name(self) -> &'static str {
@@ -31,6 +33,7 @@ impl Hazard {
             Self::Call => "call_effects",
             Self::Construct => "construct_effects",
             Self::Iterate => "iterate_effects",
+            Self::PrototypeRead => "prototype_read_effects",
         }
     }
 
@@ -40,11 +43,11 @@ impl Hazard {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Hazards(pub [bool; 7]);
+pub struct Hazards(pub [bool; Hazard::ALL.len()]);
 
 impl Hazards {
-    pub const UNKNOWN: Self = Self([true; 7]);
-    pub const NONE: Self = Self([false; 7]);
+    pub const UNKNOWN: Self = Self([true; Hazard::ALL.len()]);
+    pub const NONE: Self = Self([false; Hazard::ALL.len()]);
 
     pub fn get(self, slot: Hazard) -> bool {
         self.0[slot as usize]

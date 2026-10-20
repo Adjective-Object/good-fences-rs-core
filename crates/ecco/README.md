@@ -68,6 +68,10 @@ regardless of order. Expressions accept booleans, `argument.slot`, Boolean `|`, 
 and `call(callback, argument, ...rest, this = receiver)`. Bare `...` in a call
 forwards the current arguments. Named rest lists can only be spread.
 
+`prototype_read_effects` models prototype traversal, independently of ordinary
+`property_read_effects`. `instanceof` consults the left operand's prototype
+hazard and the right operand's `instanceof_effects`.
+
 Fresh results use `returns.slot = expression`. `returns = argument` preserves
 identity; `returns void` gives `undefined`. `updates argument.slot |= expression`
 monotonically adds hazards; `updates argument.*_effects |= true` sets all slots.
@@ -89,7 +93,9 @@ callbacks retain lexical bindings. Each invocation gets independent locals,
 allocations, and captured closure environments. Ordinary functions use the call
 receiver; arrows capture lexical `this`. Ordinary functions expose conservative
 constructor hazards; non-constructible arrows do not execute a body when
-construction throws.
+construction throws. Ordinary functions also own fresh implicit `arguments`
+objects; arrows inherit the enclosing arguments binding, not a same-named global.
+Arguments object members remain conservative.
 
 Inferred effect queries subscribe to live capture bindings. Later rebinding
 widens those queries, including cached declared callback queries, without

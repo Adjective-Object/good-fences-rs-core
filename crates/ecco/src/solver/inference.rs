@@ -37,6 +37,7 @@ pub(crate) struct FunctionSignature {
     pub receiver: Option<ValueId>,
     pub self_binding: Option<ValueId>,
     pub constructible: bool,
+    pub arguments: Option<ValueId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -330,6 +331,9 @@ impl Context {
         }
         if let Some(parameter) = template.signature.receiver {
             values.insert(parameter, receiver);
+        }
+        if let Some(binding) = template.signature.arguments {
+            values.insert(binding, self.value(Hazards::UNKNOWN));
         }
         if let Some(binding) = template.signature.self_binding {
             values.insert(binding, resolved);

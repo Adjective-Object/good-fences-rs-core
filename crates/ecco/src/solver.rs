@@ -62,7 +62,7 @@ struct Equation {
 
 #[derive(Debug, Clone)]
 struct Value {
-    cells: [usize; 7],
+    cells: [usize; Hazard::ALL.len()],
     definition: Option<usize>,
     alias: Option<ValueId>,
     closure: Option<Closure>,
@@ -639,7 +639,7 @@ impl Context {
 #[derive(Debug, Clone)]
 pub struct Evaluation {
     state: Vec<bool>,
-    values: Vec<[usize; 7]>,
+    values: Vec<[usize; Hazard::ALL.len()]>,
 }
 
 impl Evaluation {

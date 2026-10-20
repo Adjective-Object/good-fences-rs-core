@@ -1622,3 +1622,67 @@ fn astra_round6_opaque_capture_rebinding_invalidates_equality_identity() {
         "an opaque write can separate previously identical bindings, making equality invoke valueOf"
     );
 }
+
+#[test]
+fn astra_round7_implicit_arguments_shadows_global_accessor() {
+    let declarations = "global symbol arguments { read_effects = true }";
+    for javascript in [
+        "function own() { return arguments; } own();",
+        "function own() { return (() => arguments)(); } own();",
+        "function own() { return (() => (() => arguments)())(); } own();",
+    ] {
+        let analysis = source(declarations, javascript);
+        assert_eq!(
+            effects(&analysis),
+            vec![false; 2],
+            "the ordinary function's implicit arguments binding shadows the global accessor"
+        );
+        assert!(analysis.matches.is_empty());
+    }
+    assert_eq!(
+        effects(&source(declarations, "(() => arguments)();")),
+        vec![true]
+    );
+    let analysis = source(
+        "",
+        "function own() { return arguments; } const a = own(); const b = own();",
+    );
+    assert_ne!(analysis.roots[1].value, analysis.roots[2].value);
+}
+
+#[test]
+fn astra_round7_instanceof_checks_left_prototype_traps() {
+    let analysis = source(
+        r#"
+        global fn makeProxy() {
+            call_effects = false
+            returns.property_read_effects = false
+        }
+    "#,
+        r#"
+        function Constructor() {}
+        const proxy = makeProxy();
+        proxy instanceof Constructor;
+    "#,
+    );
+    assert!(
+        *effects(&analysis).last().unwrap(),
+        "a proxy with ordinary property reads can still execute an effectful getPrototypeOf trap"
+    );
+    for (hazards, expected) in [
+        (
+            "returns.*_effects = false returns.property_read_effects = true",
+            false,
+        ),
+        (
+            "returns.*_effects = false returns.prototype_read_effects = true",
+            true,
+        ),
+    ] {
+        let analysis = source(
+            &format!("global fn object() {{ call_effects = false {hazards} }}"),
+            "function Constructor() {} object() instanceof Constructor;",
+        );
+        assert_eq!(*effects(&analysis).last().unwrap(), expected, "{hazards}");
+    }
+}

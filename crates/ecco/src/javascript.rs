@@ -129,6 +129,7 @@ pub fn extract_from_ast<'a>(
         matches: Vec::new(),
         functions: collector.functions,
         this_value,
+        arguments_value: None,
         deferred: false,
         slots,
     };
@@ -178,6 +179,7 @@ struct FunctionInfo {
     receiver: ValueId,
     arrow: bool,
     self_binding: Option<ValueId>,
+    arguments: Option<ValueId>,
 }
 
 impl<'a> Visit<'a> for Bindings<'_, 'a> {
@@ -267,6 +269,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
             }
         }
         let receiver = self.context.value(Hazards::NONE);
+        let arguments = self.context.value(Hazards::UNKNOWN);
         self.functions.insert(
             function.span,
             FunctionInfo {
@@ -284,6 +287,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
                             .map(|symbol| self.values[&symbol].value)
                     })
                     .flatten(),
+                arguments: Some(arguments),
             },
         );
         self.stack.push(function.span);
@@ -298,15 +302,22 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
         let receiver = self.stack.last().map_or(self.context.undefined(), |span| {
             self.functions[span].receiver
         });
+        let arguments = self
+            .stack
+            .last()
+            .and_then(|span| self.functions[span].arguments);
+        let mut captures = vec![receiver];
+        captures.extend(arguments);
         self.functions.insert(
             function.span,
             FunctionInfo {
                 index: self.context.reserve_function(),
                 locals: Vec::new(),
-                captures: vec![receiver],
+                captures,
                 receiver,
                 arrow: true,
                 self_binding: None,
+                arguments,
             },
         );
         self.stack.push(function.span);
@@ -334,6 +345,7 @@ struct Extractor<'s, 'a> {
     matches: Vec<DefinitionMatch>,
     functions: HashMap<Span, FunctionInfo>,
     this_value: ValueId,
+    arguments_value: Option<ValueId>,
     deferred: bool,
     slots: HashMap<SymbolId, ValueId>,
 }
@@ -596,6 +608,12 @@ impl<'a> Extractor<'_, 'a> {
                     .semantic
                     .scoping()
                     .get_reference(identifier.reference_id.get().expect("checked reference"));
+                if reference.symbol_id().is_none() && identifier.name == "arguments" {
+                    if let Some(value) = self.arguments_value {
+                        let value = self.context.read_binding(value);
+                        return self.computed(value, self.context.pure());
+                    }
+                }
                 let named = if let Some(symbol) = reference.symbol_id() {
                     let mut named = self.values.get(&symbol).cloned().unwrap_or(NamedValue {
                         value: self.context.unknown(),
@@ -730,7 +748,7 @@ impl<'a> Extractor<'_, 'a> {
                         );
                         effects.push(
                             self.context
-                                .operation(left.named.value, Hazard::PropertyRead),
+                                .operation(left.named.value, Hazard::PrototypeRead),
                         );
                     }
                     _ => {
@@ -809,11 +827,12 @@ impl<'a> Extractor<'_, 'a> {
             Expression::ObjectExpression(object) => {
                 let mut effects = Vec::new();
                 let mut getter = false;
+                let mut prototype = false;
                 for property in &object.properties {
                     match property {
                         ObjectPropertyKind::ObjectProperty(property) => {
                             getter |= property.kind == PropertyKind::Get;
-                            getter |= !property.computed
+                            prototype |= !property.computed
                                 && property
                                     .key
                                     .static_name()
@@ -843,6 +862,8 @@ impl<'a> Extractor<'_, 'a> {
                 }
                 let mut hazards = Hazards::UNKNOWN;
                 hazards.0[Hazard::PropertyRead as usize] = getter;
+                hazards.0[Hazard::PropertyRead as usize] |= prototype;
+                hazards.0[Hazard::PrototypeRead as usize] = prototype;
                 hazards.0[Hazard::ToPrimitive as usize] = !object.properties.is_empty();
                 let value = self.context.value(hazards);
                 let effects = self.context.any(effects);
@@ -1036,7 +1057,9 @@ impl<'a> Compiler<'_, '_, 'a> {
             .collect();
         let roots = std::mem::take(&mut extractor.roots);
         let receiver = extractor.this_value;
+        let arguments_value = extractor.arguments_value;
         extractor.this_value = info.receiver;
+        extractor.arguments_value = info.arguments;
         extractor.deferred = true;
         extractor.context.start_function();
         let mut arguments = Vec::new();
@@ -1107,6 +1130,7 @@ impl<'a> Compiler<'_, '_, 'a> {
                 self_binding: info.self_binding,
                 captures,
                 constructible: !info.arrow,
+                arguments: if info.arrow { None } else { info.arguments },
             },
             returns,
             effects,
@@ -1116,6 +1140,7 @@ impl<'a> Compiler<'_, '_, 'a> {
         }
         extractor.roots = roots;
         extractor.this_value = receiver;
+        extractor.arguments_value = arguments_value;
         extractor.deferred = false;
     }
 }
