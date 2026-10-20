@@ -3,13 +3,14 @@
 ## 1. Extract additional source-local facts
 
 - Extend `ast_segmenter::owned::ModuleFacts`; reuse existing bindings, references, dependencies, spans, effects and invocations.
-- Record statement kinds, declaration kinds per occurrence, and function/arrow containment; distinguish hoisted functions from later declarations.
+- Cache a compact per-segment `connector_only` flag: imports, declaration-free reexports/export lists, or empty statements; not merely effect-free code.
+- Record declaration hoisting per occurrence and function/arrow containment; distinguish hoisted functions from later declarations.
 - Record import/export syntax ranges and default forms: expression, named/anonymous function/class, declaration prefix, body and terminator.
 - Record shorthand contexts, including destructuring and special `__proto__` keys.
 - Record namespace-member occurrences and receiver-sensitive call/tag/write/delete contexts.
 - Record observable function/class/name-inference sites and lexical capture constraints.
 - Extend invocation facts with optional-chain steps, receiver structure and parentheses/guard boundaries.
-- Record sourceURL/sourceMappingURL comment spans.
+- Record sourceURL/sourceMappingURL comment spans; use compact flags/indices and existing spans instead of generic AST or redundant classification records.
 - Keep records owned, source-ordered and in original UTF-8 coordinates; never cache chosen names, purity decisions, resolved targets or chunk owners.
 
 ## 2. Persist and validate the new facts
@@ -24,11 +25,17 @@
 ## 3. Replace placement-analysis parses
 
 - Consumers: connector detection in `native_chunks.rs`, `Placement::new` in `native_segments.rs`, and name-compatibility checks.
-- Derive connector eligibility from statement kinds and retained content.
+- Replace AST connector detection with cached `connector_only` flags; preserve the current all-source-segments classification initially.
+- For retained-only classification, reduce flags over surviving segments; keep namespace, cycle and evaluation-order checks in the planner.
 - Use declaration occurrences and function containment for hoisting/eager-read constraints.
 - Evaluate name/capture compatibility from facts, not trial `body()` emission.
 - Keep actual symbol demand, initialization, effect order and activation constraints derived.
 - Preserve structural relocation tests and the SCC/await/connector timing regressions.
+
+```rust
+// Source-local classification is cached; context-dependent merge safety is not.
+let connector = segments.iter().all(|segment| segment.connector_only);
+```
 
 ## 4. Emit original segments without re-extraction
 
