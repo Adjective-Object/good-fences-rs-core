@@ -61,12 +61,14 @@ pub struct CssOptions {
 pub enum CssLoad {
     #[default]
     CallerLoaded,
+    AutoMount,
 }
 
 impl CssLoad {
     fn strategy(self) -> &'static dyn crate::css_loading::CssLoadingStrategy {
         match self {
             Self::CallerLoaded => &crate::css_loading::CallerLoaded,
+            Self::AutoMount => &crate::css_loading::AutoMount,
         }
     }
 }
@@ -261,6 +263,7 @@ impl BuildSession {
         }
         let mut inputs = Vec::new();
         let mut sources = BTreeMap::new();
+        let mut relocations = BTreeMap::new();
         let mut changed = BTreeSet::new();
         while let Some(path) = queue.pop_front() {
             if sources.contains_key(&path) {
@@ -300,6 +303,7 @@ impl BuildSession {
                 .map_or(format, |prepared| prepared.package);
             let config = ParserConfig::for_path(&parser_path, parser_package)?;
             let prepared_resource = if let Some(prepared) = prepared_css {
+                relocations.insert(path.clone(), prepared.relocations);
                 Some(prepared.source)
             } else if crate::resource::is_asset(&path) {
                 Some(crate::resource::prepare(&path, &input, &public_base)?)
@@ -549,7 +553,8 @@ impl BuildSession {
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
-        let mut artifacts = link::esm_plan(&graph, &plan, &options.effects, &sources)?;
+        let mut artifacts =
+            link::esm_plan_prepared(&graph, &plan, &options.effects, &sources, &relocations)?;
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
             if crate::resource::is_asset(path) {

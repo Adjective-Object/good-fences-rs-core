@@ -45,7 +45,7 @@ pub struct Artifacts<C = String> {
     pub files: BTreeMap<PathBuf, C>,
     /// Non-executable, byte-preserving resources keyed by output-relative paths.
     pub resources: BTreeMap<PathBuf, Vec<u8>>,
-    /// Imported CSS roots to extracted files; callers choose when to load styles.
+    /// Imported CSS roots to extracted files, independent of loading strategy.
     pub stylesheets: BTreeMap<PathBuf, PathBuf>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
@@ -135,6 +135,7 @@ struct Module<'a> {
     source: &'a str,
     parsed: ParsedModule,
     surface: BTreeSet<String>,
+    relocations: &'a [crate::css_loading::UrlRelocation],
 }
 
 /// Emit native chunks.
@@ -153,6 +154,16 @@ pub(crate) fn esm_plan(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
+    esm_plan_prepared(graph, plan, policy, sources, &BTreeMap::new())
+}
+
+pub(crate) fn esm_plan_prepared(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+    relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
+) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = BTreeMap::new();
@@ -170,6 +181,7 @@ pub(crate) fn esm_plan(
                 source,
                 parsed,
                 surface: BTreeSet::new(),
+                relocations: relocations.get(path).map(Vec::as_slice).unwrap_or_default(),
             },
         );
     }

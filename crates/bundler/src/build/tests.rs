@@ -93,7 +93,490 @@ fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
     assert_eq!(disk.counters.fragment_reparses, 0);
     assert_eq!(disk.product.artifacts, cold.product.artifacts);
     assert_eq!(disk.product.fingerprints, cold.product.fingerprints);
-    assert!(serde_json::from_str::<CssOptions>(r#"{"load":"auto-mount"}"#).is_err());
+    assert_eq!(
+        serde_json::from_str::<CssOptions>(r#"{"load":"auto-mount"}"#)
+            .unwrap()
+            .load,
+        CssLoad::AutoMount
+    );
+}
+
+const CSS_DOM_RECORDER: &str = r#"
+import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
+const links = [];
+globalThis.document = {
+    URL: 'https://document.invalid/not/the/build/root/',
+    baseURI: 'https://document.invalid/not/the/build/root/',
+    createElement(tag) {
+        assert.equal(tag, 'link');
+        return {};
+    },
+    head: {appendChild(link) {
+        assert.equal(link.rel, 'stylesheet');
+        assert.equal(typeof link.href, 'string');
+        links.push(link);
+    }}
+};
+"#;
+
+#[test]
+fn auto_mount_css_no_document_throws_even_with_unused_url_and_pure_dom_contracts() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import unused from './style.css';");
+    write(dir.root(), "style.css", ".a { color: red; }");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    config.declarations.user.push(ecco::parse_declarations(
+        "global fn document.createElement(tag) {call_effects = false returns.*_effects = false}\n\
+         global fn document.head.appendChild(link) {call_effects = false returns.*_effects = false}"
+    ).unwrap());
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            r#"
+try {
+    await import('./main.mjs');
+    throw new Error('unexpected success');
+} catch (error) {
+    if (error.message !== 'CSS auto-mount requires document') throw error;
+    console.log(error.message);
+}
+"#
+        ),
+        b"CSS auto-mount requires document\n"
+    );
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            &format!(
+                "{CSS_DOM_RECORDER}
+await import('./main.mjs');
+assert.equal(links.length, 1);
+assert.ok(existsSync(new URL(links[0].href)));
+console.log('mounted');
+"
+            )
+        ),
+        b"mounted\n"
+    );
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            r#"
+globalThis.document = {createElement() {return {}}};
+try {await import('./main.mjs'); throw new Error('unexpected success');}
+catch (error) {if (!(error instanceof TypeError)) throw error; console.log('missing head');}
+"#
+        ),
+        b"missing head\n"
+    );
+}
+
+#[test]
+fn auto_mount_css_is_synchronous_ordered_once_per_native_evaluation_and_cache_safe() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import first from './a.css';
+import './between.mjs';
+import second from './b.css';
+if (document.links.length !== 2) throw new Error('mount was not synchronous');
+export {first, second};
+"#,
+    );
+    write(
+        dir.root(),
+        "between.mjs",
+        "if (document.links.length !== 1) throw new Error('wrong dependency order');",
+    );
+    write(dir.root(), "a.css", ".a {color: red}");
+    write(dir.root(), "b.css", ".b {color: blue}");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/app/main.mjs".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let memory = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&memory.product, &cold.product));
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.product.artifacts, cold.product.artifacts);
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.source_reparses, 0);
+    assert_eq!(disk.counters.fragment_reparses, 0);
+    let a = &cold.product.artifacts.stylesheets[&dir.root().join("a.css")];
+    let b = &cold.product.artifacts.stylesheets[&dir.root().join("b.css")];
+    let check = format!(
+        r#"{CSS_DOM_RECORDER}
+document.links = links;
+const first = await import('./deep/app/main.mjs');
+const again = await import('./deep/app/main.mjs');
+assert.strictEqual(first, again);
+assert.deepEqual(links.map(link => link.href), [first.first, first.second]);
+assert.equal(first.first, new URL({a:?}, import.meta.url).href);
+assert.equal(first.second, new URL({b:?}, import.meta.url).href);
+for (const link of links) assert.ok(existsSync(new URL(link.href)));
+console.log('ordered once');
+"#,
+        a = a.to_str().unwrap(),
+        b = b.to_str().unwrap()
+    );
+    assert_eq!(
+        observe_named(&cold.product.artifacts, &check),
+        b"ordered once\n"
+    );
+}
+
+#[test]
+fn auto_mount_css_lazy_and_dead_imports_do_not_mount_or_emit_early() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+export const load = () => import('./lazy.mjs');
+function dead() {return import('./dead.css');}
+"#,
+    );
+    write(
+        dir.root(),
+        "lazy.mjs",
+        "export {default} from './live.css';",
+    );
+    write(dir.root(), "live.css", ".live {}");
+    write(dir.root(), "dead.css", ".dead {}");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/main.mjs".into());
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(built.product.artifacts.resources.len(), 1);
+    assert!(!built
+        .product
+        .artifacts
+        .stylesheets
+        .contains_key(&dir.root().join("dead.css")));
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            &format!(
+                r#"{CSS_DOM_RECORDER}
+const main = await import('./nested/main.mjs');
+assert.equal(links.length, 0);
+const lazy = await main.load();
+assert.equal(links.length, 1);
+assert.equal(lazy.default, links[0].href);
+assert.ok(existsSync(new URL(lazy.default)));
+assert.strictEqual(await main.load(), lazy);
+assert.equal(links.length, 1);
+console.log('lazy once');
+"#
+            )
+        ),
+        b"lazy once\n"
+    );
+}
+
+#[test]
+fn auto_mount_css_deferred_require_waits_for_call_and_returns_native_default() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {default as load} from './loader.cjs';",
+    );
+    write(
+        dir.root(),
+        "loader.cjs",
+        "module.exports = () => require('./style.css');",
+    );
+    write(dir.root(), "style.css", ".a {}");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            r#"
+const {load} = await import('./main.mjs');
+try {load(); throw new Error('unexpected success');}
+catch (error) {
+    if (error.message !== 'CSS auto-mount requires document') throw error;
+    console.log('deferred error');
+}
+"#
+        ),
+        b"deferred error\n"
+    );
+    assert_eq!(
+        observe_named(
+            &built.product.artifacts,
+            &format!(
+                r#"{CSS_DOM_RECORDER}
+const main = await import('./main.mjs');
+assert.equal(links.length, 0);
+const css = main.load();
+assert.equal(links.length, 1);
+assert.equal(css.default, links[0].href);
+assert.ok(existsSync(new URL(css.default)));
+assert.strictEqual(main.load(), css);
+assert.equal(links.length, 1);
+console.log('deferred once');
+"#
+            )
+        ),
+        b"deferred once\n"
+    );
+}
+
+#[test]
+fn auto_mount_css_bases_follow_final_nested_entry_owner_not_alias_or_document() {
+    let dir = TmpDir::new();
+    write(dir.root(), "source/style.css", ".a {}");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().path = "source/style.css".into();
+    // The first public name owns the body; the other is only a namespace alias.
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/canonical/style.mjs".into());
+    config.entries.insert(
+        "z-alias".into(),
+        Entry {
+            path: "source/style.css".into(),
+            output_name: Some("other/alias.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    for base in [
+        "./",
+        "./public space/",
+        "../outside/",
+        "/static/",
+        "https://cdn.example/path/",
+    ] {
+        config.output.base_url = base.into();
+        let built = session.build(&config).unwrap();
+        assert_eq!(
+            built.product.artifacts.entries["main"],
+            Path::new("deep/canonical/style.mjs")
+        );
+        let style = &built.product.artifacts.stylesheets[&dir.root().join("source/style.css")];
+        let public = crate::output_url::PublicBase::new(base)
+            .unwrap()
+            .join(style)
+            .unwrap();
+        assert_eq!(
+            observe_named(
+                &built.product.artifacts,
+                &format!(
+                    r#"{CSS_DOM_RECORDER}
+const alias = await import('./other/alias.mjs');
+const canonical = await import('./deep/canonical/style.mjs');
+assert.equal(typeof canonical.default, 'string');
+assert.equal(alias.default, canonical.default);
+assert.equal(links.length, 1);
+assert.equal(links[0].href, canonical.default);
+assert.equal(canonical.default, new URL({public:?}, import.meta.url).href);
+console.log('correct base');
+"#
+                )
+            ),
+            b"correct base\n"
+        );
+    }
+    config.output.base_url = "./".into();
+    config.entries.clear();
+    config.entries.insert(
+        "main".into(),
+        Entry {
+            path: "source/style.css".into(),
+            output_name: None,
+            namespace: true,
+        },
+    );
+    let default_name = session.build(&config).unwrap();
+    assert_eq!(
+        default_name.product.artifacts.entries["main"],
+        Path::new("source/style.mjs")
+    );
+    assert_eq!(
+        observe_named(
+            &default_name.product.artifacts,
+            &format!(
+                r#"{CSS_DOM_RECORDER}
+const css = await import('./source/style.mjs');
+assert.equal(links.length, 1);
+assert.equal(links[0].href, css.default);
+assert.ok(existsSync(new URL(css.default)));
+console.log('esm entry');
+"#
+            )
+        ),
+        b"esm entry\n"
+    );
+}
+
+#[test]
+fn auto_mount_css_http_origin_and_cdn_urls_use_native_owner_meta_url() {
+    let dir = TmpDir::new();
+    write(dir.root(), "style.css", ".a {}");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().path = "style.css".into();
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/styles/main.mjs".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    for base in ["./", "./public/", "/static/", "https://cdn.example/static/"] {
+        config.output.base_url = base.into();
+        let built = session.build(&config).unwrap();
+        let artifacts = &built.product.artifacts;
+        let style = &artifacts.stylesheets[&dir.root().join("style.css")];
+        let public = crate::output_url::PublicBase::new(base)
+            .unwrap()
+            .join(style)
+            .unwrap();
+        let expected = url::Url::parse("https://app.example/generation-42/")
+            .unwrap()
+            .join(&public)
+            .unwrap();
+        let runner = format!(
+            r#"
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+const links = [];
+const context = vm.createContext({{URL, document: {{
+    baseURI: 'https://wrong.example/document/',
+    createElement() {{return {{}};}},
+    head: {{appendChild(link) {{links.push(link);}}}}
+}}}});
+const files = {files};
+const modules = new Map();
+function load(id) {{
+    if (modules.has(id)) return modules.get(id);
+    const path = new URL(id).pathname.slice('/generation-42/'.length);
+    assert.ok(Object.hasOwn(files, path), path);
+    const module = new vm.SourceTextModule(files[path], {{
+        context, identifier: id, initializeImportMeta(meta) {{meta.url = id;}}
+    }});
+    modules.set(id, module);
+    return module;
+}}
+const entry = load('https://app.example/generation-42/deep/styles/main.mjs');
+await entry.link((request, importer) => load(new URL(request, importer.identifier).href));
+await entry.evaluate();
+assert.equal(entry.namespace.default, {expected:?});
+assert.equal(links.length, 1);
+assert.equal(links[0].href, {expected:?});
+console.log('http origin');
+"#,
+            files = serde_json::to_string(&artifacts.files).unwrap(),
+            expected = expected.as_str()
+        );
+        write(dir.root(), "http-check.mjs", &runner);
+        let output = std::process::Command::new("node")
+            .arg("--experimental-vm-modules")
+            .arg(dir.root().join("http-check.mjs"))
+            .env_remove("NODE_OPTIONS")
+            .env_remove("NODE_PATH")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"http origin\n");
+    }
+}
+
+#[test]
+fn auto_mount_css_published_lazy_generations_keep_their_own_resources_and_alias_identity() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const load = () => import('./lazy.mjs');",
+    );
+    write(
+        dir.root(),
+        "lazy.mjs",
+        "export {default} from './style.css';",
+    );
+    write(dir.root(), "style.css", ".first {}");
+    let mut config = options();
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/main.mjs".into());
+    config.entries.insert(
+        "z-alias".into(),
+        Entry {
+            path: "main.mjs".into(),
+            output_name: Some("elsewhere/alias.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let output = dir.root().join(".bundler-published");
+    let cancel = crate::publish::Cancellation::default();
+    let (old_build, old) = session
+        .build_and_publish(&config, &output, &cancel)
+        .unwrap();
+    write(dir.root(), "style.css", ".second {}");
+    let (new_build, new) = session
+        .build_and_publish(&config, &output, &cancel)
+        .unwrap();
+    assert_ne!(old.directory, new.directory);
+    let old_style = &old_build.product.artifacts.stylesheets[&dir.root().join("style.css")];
+    let new_style = &new_build.product.artifacts.stylesheets[&dir.root().join("style.css")];
+    let old_url = url::Url::from_file_path(&old.entries["main"]).unwrap();
+    let alias_url = url::Url::from_file_path(&old.entries["z-alias"]).unwrap();
+    let new_url = url::Url::from_file_path(&new.entries["main"]).unwrap();
+    let old_href = url::Url::from_file_path(old.directory.join(old_style)).unwrap();
+    let new_href = url::Url::from_file_path(new.directory.join(new_style)).unwrap();
+    write(
+        dir.root(),
+        "published-check.mjs",
+        &format!(
+            r#"{CSS_DOM_RECORDER}
+const old = await import({old_url:?});
+const alias = await import({alias_url:?});
+const next = await import({new_url:?});
+assert.equal(links.length, 0);
+const first = await alias.load();
+assert.strictEqual(await old.load(), first);
+assert.equal(first.default, {old_href:?});
+assert.equal(links.length, 1);
+const second = await next.load();
+assert.equal(second.default, {new_href:?});
+assert.notEqual(first.default, second.default);
+assert.deepEqual(links.map(link => link.href), [first.default, second.default]);
+assert.ok(existsSync(new URL(first.default)));
+assert.ok(existsSync(new URL(second.default)));
+console.log('immutable generations');
+"#,
+            old_url = old_url.as_str(),
+            alias_url = alias_url.as_str(),
+            new_url = new_url.as_str(),
+            old_href = old_href.as_str(),
+            new_href = new_href.as_str()
+        ),
+    );
+    assert_eq!(
+        observe_entry(&dir.root().join("published-check.mjs")),
+        b"immutable generations\n"
+    );
 }
 
 #[test]

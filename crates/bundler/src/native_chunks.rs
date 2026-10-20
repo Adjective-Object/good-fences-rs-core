@@ -406,6 +406,7 @@ pub(super) fn emit(
                     recipe,
                     recipes.get(&key).copied().unwrap_or_default(),
                 );
+                renderer.relocate_urls(module.relocations)?;
                 for (dependency, replacement, whole) in &edits {
                     renderer.dependency(dependency, replacement.clone(), *whole);
                 }

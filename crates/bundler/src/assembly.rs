@@ -21,6 +21,7 @@ enum Part {
     Request(PathBuf, RequestKind),
     External(String, RequestKind),
     Evaluation(PathBuf),
+    BuildRootUrl(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -45,6 +46,13 @@ impl From<&str> for Code {
 }
 
 impl Code {
+    pub(crate) fn build_root_url(public_url: String) -> Self {
+        Self {
+            parts: vec![Part::BuildRootUrl(public_url)],
+            ..Self::default()
+        }
+    }
+
     pub fn external(specifier: String, kind: RequestKind) -> Self {
         Self {
             parts: vec![Part::External(specifier, kind)],
@@ -202,6 +210,24 @@ impl Code {
                 }
                 Part::External(specifier, _) => {
                     output.push_str(&serde_json::to_string(specifier)?);
+                    continue;
+                }
+                Part::BuildRootUrl(public_url) => {
+                    let depth = destination
+                        .parent()
+                        .ok_or_eyre("missing output parent")?
+                        .components()
+                        .count();
+                    let root = if depth == 0 {
+                        "./".to_owned()
+                    } else {
+                        "../".repeat(depth)
+                    };
+                    output.push_str(&format!(
+                        "new URL({}, new URL({}, import.meta.url))",
+                        serde_json::to_string(public_url)?,
+                        serde_json::to_string(&root)?
+                    ));
                     continue;
                 }
                 Part::Request(target, kind) => (target, *kind != RequestKind::Require, false),

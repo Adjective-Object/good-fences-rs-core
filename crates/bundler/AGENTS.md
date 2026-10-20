@@ -50,15 +50,25 @@ file_bytes includes text and resources; publication ownership/hash/
 cleanup cover both. Resource paths never become executable module routes.
 Extract CSS with parser-backed URL spans; preserve separate imports, conditions,
 layers and cycles. Closure hashes include transitive original CSS/asset bytes;
-recheck every input. Stylesheets maps CSS roots only; callers load them in their
-application order. Never add implicit DOM injection or flatten CSS imports.
+recheck every input. Stylesheets maps CSS roots only; caller-loaded styles remain
+application-ordered. Never flatten CSS imports or mount their discovered
+dependencies as unconditional JS effects.
 CSS loading strategies consume explicit stylesheet/public-URL/mapping inputs,
-never parse CSS or choose names. CallerLoaded is the sole public built-in/default.
-Carry its prepared text and parser path/format together into cache loading.
+never parse CSS or choose names. CallerLoaded is the default; AutoMount is opt-in
+native ESM with a URL-string default and synchronous link insertion, never a
+readiness promise or DOM-global deduplication. Missing document explicitly throws.
+Keep prepared CSS DOM writes/throws conservative under Ecco, even with unused
+exports or caller-supplied pure DOM contracts; activation still follows native
+static/dynamic/deferred-require timing.
+Carry prepared text and parser path/format together into cache loading.
 CSS emission accepts only sealed plain-JS modes matching module facts; never
 infer a wrapper mode from `.css` or bypass source/record provenance checks.
-Caller-loaded stubs have no relocations; add typed coordinates only with a
-strategy that needs them, never placeholder scanning.
+Caller-loaded stubs have no relocations. AutoMount carries generated construction
+operation spans into typed build-root URL assembly parts; never scan placeholders.
+Resolve relative public bases from the generation root using the actual final
+owner's import.meta.url after pruning/renaming, never the source/document/alias.
+Root-relative bases use that origin and CDN bases stay absolute. Relocation
+destinations remain derived, never persisted in source sidecars.
 
 Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
 artifacts once after naming; release never parses output. Keep identifier,

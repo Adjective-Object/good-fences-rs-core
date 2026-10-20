@@ -75,13 +75,37 @@ cleanup. They never serve as executable module routes.
 CSS default imports and `require` export a stylesheet URL using the same base;
 side-effect imports also extract the file. `BuildOptions.css.load` selects the
 built-in `CssLoad::CallerLoaded` policy by default (`"caller-loaded"` when
-serializing `CssOptions`); it is currently the only supported loading policy.
+serializing `CssOptions`).
 Global CSS keeps its CJS URL wrapper and `.cjs` entry extension.
 `Artifacts.stylesheets` maps retained
 CSS module roots to their emitted resource paths. The example driver reports
 this map and resource paths. Callers load the relevant root stylesheets in their
 application's order; there is **no implicit DOM injection** or automatic loading
 when a dynamic JavaScript chunk executes.
+
+Opt in with `CssLoad::AutoMount` (`{"load":"auto-mount"}` in `CssOptions`)
+to emit a native ESM stub instead. At module evaluation it synchronously creates
+and appends a `<link rel="stylesheet">` to `document.head`; no stylesheet readiness
+is awaited or promised. Without `document` it throws
+`CSS auto-mount requires document`; a missing/unusable head also fails rather
+than silently skipping insertion. Global CSS's native default export is the
+resolved absolute stylesheet URL string; requiring it returns the ESM namespace
+with that string as `.default`. CSS entries default to `.mjs`.
+
+Auto-mount relative bases resolve from the emitted **generation root**, anchored
+by the actual final owning chunk's `import.meta.url`, including nested entry
+renames and aliases. Root-relative bases use that URL's origin; HTTP(S) CDN bases
+stay absolute. Neither source paths nor the document URL/base participates.
+Owned resource paths remain unchanged: a custom base must actually serve those
+resources at the configured address. Mounts survive unused imports and inferred
+DOM purity. Static dependencies mount in native evaluation order, while dynamic
+imports and deferred requires mount only when activated. Native module caching
+gives one insertion per module evaluation, including aliases/repeated imports;
+there is no DOM-global deduplication. Separate published generations evaluate
+independently and default relative URLs remain inside their own generation.
+CSS `@import` dependencies are still loaded by CSS, not additional JS mounts.
+Runtime regressions use Node and a DOM recorder (plus native VM modules for
+HTTP-origin URLs); they do not test browser CSS application or network readiness.
 
 `cssparser` tokenizes CSS requests, including escaped URLs, quoted/unquoted
 `url()`, `@import` and `image-set` strings. Local imports remain separate CSS
@@ -106,6 +130,9 @@ receive the stylesheet identity, public URL and independent name mappings,
 not CSS syntax. Prepared wrapper text and explicit parser identity travel
 together into cache loading. Emission checks sealed parser provenance and
 plain-JavaScript support without parsing or assuming CSS always means CJS.
+Auto-mount additionally carries exact generated construction-operation spans
+into typed assembly URL parts, resolved after pruning, ownership and final
+naming; no emitted-string placeholder scanning is used.
 Base-only edits regenerate asset/CSS URL wrappers before memory-cache comparison;
 generated text keys parse reuse, while the normalized base also keys output
 reuse. Unchanged JavaScript stays warm, and owned resource paths stay unchanged.

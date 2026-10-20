@@ -377,6 +377,7 @@ fn body(
             recipe,
             recipes.get(&key).copied().unwrap_or_default(),
         );
+        renderer.relocate_urls(module.relocations)?;
         for (operation_index, operation) in recipe.operations.iter().enumerate() {
             let span = operation.kind.span(facts, recipe);
             let replacement = match &operation.kind {

@@ -275,6 +275,42 @@ impl<'a> CachedRenderer<'a> {
         self.replacements.insert(operation, replacement);
     }
 
+    pub(crate) fn relocate_urls(
+        &mut self,
+        relocations: &[crate::css_loading::UrlRelocation],
+    ) -> eyre::Result<()> {
+        for relocation in relocations {
+            if !self
+                .recipe
+                .source
+                .as_slice()
+                .iter()
+                .any(|span| crate::effects::contains(*span, relocation.operation))
+            {
+                continue;
+            }
+            let index = self
+                .recipe
+                .operations
+                .iter()
+                .position(|operation| {
+                    matches!(operation.kind,
+                        ast_segmenter::emission::OperationKind::Invocation { invocation, .. }
+                        if self.facts.invocations[invocation as usize].span == relocation.operation
+                            && self.facts.invocations[invocation as usize].construct
+                    )
+                })
+                .ok_or_eyre(
+                    "generated URL relocation does not match a cached construction operation",
+                )?;
+            self.replace(
+                index as u32,
+                Code::build_root_url(relocation.public_url.clone()),
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) fn edit(&mut self, operation: u32, edit: Edit) {
         self.edits.entry(operation).or_default().push(edit);
     }

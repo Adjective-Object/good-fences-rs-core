@@ -71,7 +71,14 @@ pub(crate) fn analyze(
     for (file, analyzed) in result.files {
         let facts = graph.file_facts(file).unwrap();
         let segments = graph.file_segments(file).unwrap();
-        if structural_override || facts.commonjs {
+        // Prepared CSS ESM stubs perform DOM writes and throw without a document.
+        // Caller DOM declarations must never infer those operations away.
+        if structural_override
+            || facts.commonjs
+            || graph
+                .file_path(file)
+                .is_some_and(crate::resource::is_stylesheet)
+        {
             continue;
         }
         for root in analyzed.roots {
