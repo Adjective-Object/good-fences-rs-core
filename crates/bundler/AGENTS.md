@@ -221,6 +221,15 @@ Export-only names constrain default allocation, not local import aliases.
 Sort canonical definitions once by source path/binding offset. Partition that
 order by actual segment ownership after each placement revision; reuse the final
 owner slices for local naming and private exports, never source-file seams.
+ExecutionOptions explicitly bounds scoped output-owner workers; one is inline.
+Keep preparation/retention/placement/effects/global names serial, sharing checked
+Sync graph/facts and prepared canonical order without copies. Settle cross-owner
+addresses before dispatch; each ESM/CJS owner has private renderer/name/routing
+state. Merge code/errors in canonical owner order, never completion order.
+Workers return typed requests, never publish/prune/render; finalization stays
+serial. Aggregate worker source/rewrite/validation counters onto the caller.
+Execution counts do not invalidate output; module preparation stays serial until
+the next independently reviewed stage uses this same execution configuration.
 Retain effects through shared module-evaluation hubs, not per-segment closures;
 hoist static connectors and chain newly entered synchronous static subtrees in
 source order. Propagate source TLA over static dependencies; omit async subtree

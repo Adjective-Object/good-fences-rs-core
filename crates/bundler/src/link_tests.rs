@@ -6,6 +6,9 @@ use std::path::{Component, Path};
 use std::process::{Command, Output};
 use test_tmpdir::TmpDir;
 
+#[path = "parallel_tests.rs"]
+mod parallel;
+
 fn normalize(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
     for component in path.components() {

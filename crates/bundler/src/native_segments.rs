@@ -11,6 +11,57 @@ pub(super) struct Placement {
     definitions: BTreeMap<Owner, Vec<crate::symbols::Symbol>>,
 }
 
+/// Cross-owner export addresses are fixed before any owner starts emitting.
+pub(super) struct Routing(HashMap<ExportIdentity, String>);
+
+impl Routing {
+    pub fn new(
+        graph: &SourceGraph,
+        prepared: &PreparedValues<'_>,
+        placement: &Placement,
+        surfaces: &BTreeSet<u32>,
+    ) -> eyre::Result<Self> {
+        let mut addresses = HashMap::new();
+        let identities = placement
+            .definitions
+            .iter()
+            .flat_map(|(&owner, definitions)| {
+                definitions
+                    .iter()
+                    .map(move |&(file, binding)| (owner, ExportIdentity::Binding(file, binding)))
+            })
+            .chain(prepared.defaults.keys().filter_map(|key| {
+                placement
+                    .owners
+                    .get(key)
+                    .map(|&owner| (owner, ExportIdentity::Expression(*key)))
+            }));
+        for (owner, identity) in identities {
+            if let Owner::Evaluation(file) = owner {
+                if surfaces.contains(&file)
+                    && !prepared.symbols.exports[&file]
+                        .values()
+                        .any(|e| e.identity == identity)
+                {
+                    continue;
+                }
+            }
+            addresses.insert(
+                identity.clone(),
+                allocate_address(graph, &identity, owner, surfaces, prepared)?,
+            );
+        }
+        Ok(Self(addresses))
+    }
+
+    fn address(&self, identity: &ExportIdentity) -> eyre::Result<&str> {
+        self.0
+            .get(identity)
+            .map(String::as_str)
+            .ok_or_eyre("missing boundary symbol export")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Owner {
     Evaluation(u32),
@@ -494,7 +545,10 @@ impl Placement {
                     symbols,
                     &owners,
                     *owner,
-                    definitions.get(owner).map(Vec::as_slice).unwrap_or_default(),
+                    definitions
+                        .get(owner)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default(),
                 )?;
                 let mut values = Values::new(prepared);
                 values.names = names;
@@ -1256,6 +1310,7 @@ pub(super) fn emit(
     surfaces: &BTreeSet<u32>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
+    routing: &Routing,
 ) -> eyre::Result<Code> {
     let symbols = prepared.symbols;
     let definitions = placement
@@ -1333,13 +1388,13 @@ pub(super) fn emit(
         output.push(Code::evaluation(owner.path(graph)));
     }
     let schedule = placement.schedule(root);
-    let mut relocated: Vec<_> = schedule
+    let live_files: BTreeSet<_> = schedule.iter().map(|key| key.file_id).collect();
+    let relocated: Vec<_> = prepared
+        .files
         .iter()
-        .map(|key| key.file_id)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
+        .copied()
+        .filter(|f| live_files.contains(f))
         .collect();
-    relocated.sort_by_key(|&file| graph.file_path(file));
     let mut imported = BTreeSet::new();
     let mut occupied = OccupiedNames::new(prepared);
     for name in values.names.values() {
@@ -1425,7 +1480,7 @@ pub(super) fn emit(
                             Code::request(owner.path(graph), RequestKind::Import).surrounded(
                                 format!(
                                     "import {{{} as {alias}}} from ",
-                                    quote(&address(graph, &identity, owner, surfaces, &values)?)
+                                    quote(routing.address(&identity)?)
                                 ),
                                 ";\n",
                             ),
@@ -1507,7 +1562,7 @@ pub(super) fn emit(
                 Code::request(owner.path(graph), RequestKind::ReExport).surrounded(
                     format!(
                         "export {{{} as {}}} from ",
-                        quote(&address(graph, &linked.identity, owner, surfaces, &values)?),
+                        quote(routing.address(&linked.identity)?),
                         quote(public_name)
                     ),
                     ";\n",
@@ -1519,7 +1574,7 @@ pub(super) fn emit(
     if !public {
         for &symbol @ (file, binding) in definitions {
             let identity = ExportIdentity::Binding(file, binding);
-            let address = address(graph, &identity, root, surfaces, &values)?;
+            let address = routing.address(&identity)?.to_owned();
             if !exported.insert(address.clone()) {
                 continue;
             }
@@ -1531,13 +1586,9 @@ pub(super) fn emit(
         }
         for (key, name) in values.defaults {
             if placement.owners.get(key) == Some(&root) {
-                let address = address(
-                    graph,
-                    &ExportIdentity::Expression(*key),
-                    root,
-                    surfaces,
-                    &values,
-                )?;
+                let address = routing
+                    .address(&ExportIdentity::Expression(*key))?
+                    .to_owned();
                 if exported.insert(address.clone()) {
                     output.push_str(&format!("export {{{name} as {}}};\n", quote(&address)));
                 }
@@ -1548,14 +1599,14 @@ pub(super) fn emit(
     Ok(output)
 }
 
-fn address(
+fn allocate_address(
     graph: &SourceGraph,
     identity: &ExportIdentity,
     owner: Owner,
     surfaces: &BTreeSet<u32>,
-    values: &Values<'_>,
+    prepared: &PreparedValues<'_>,
 ) -> eyre::Result<String> {
-    let symbols = values.symbols;
+    let symbols = prepared.symbols;
     let original_exports = match owner {
         Owner::Evaluation(file) => symbols.exports.get(&file),
         Owner::Bindings(_) => None,
@@ -1582,13 +1633,13 @@ fn address(
             );
             while original_exports.is_some_and(|exports| exports.contains_key(&name))
                 || symbols.definitions.values().any(|d| d.name == name)
-                || values.defaults.values().any(|n| *n == name)
+                || prepared.defaults.values().any(|n| *n == name)
             {
                 name.push('_');
             }
             Ok(name)
         }
-        ExportIdentity::Expression(key) => values
+        ExportIdentity::Expression(key) => prepared
             .defaults
             .get(key)
             .cloned()
