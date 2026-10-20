@@ -168,6 +168,36 @@ for (const [name, source, assertions] of [
     }, {'package.json': '{"type":"module"}'});
   });
 }
+test('explicit conditions select package exports while JSONC tsconfigs stay inert', () => {
+  managed(managedRoot, (root) => {
+    writeFileSync(path.join(root, 'entry.js'), "import {value} from 'choice'; console.log(value);");
+    writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
+    writeFileSync(path.join(root, 'tsconfig.json'), `{
+      // Neither the driver nor the Node observer ingests compiler conditions.
+      "extends": "./missing.json",
+      "references": [{"path": "./missing-project"},],
+      "compilerOptions": {"customConditions": ["source"], "customSourceConditions": ["source"],},
+    }`);
+    const pkg = path.join(root, 'node_modules/choice');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({
+      type: 'module',
+      exports: { '.': { source: './source.js', default: './default.js' } },
+    }));
+    writeFileSync(path.join(pkg, 'source.js'), "export const value = 'source';");
+    writeFileSync(path.join(pkg, 'default.js'), "export const value = 'hello';");
+    const driver = path.join(project, `target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`);
+    for (const [resolveConditions, value] of [[[], 'hello'], [['source'], 'source']]) {
+      const manifest = {
+        id: 'synthetic/example', entryPoints: ['entry.js'],
+        fixtureConfig: { resolveConditions }, expectations: { stdout: [value] },
+      };
+      const baseline = observeEntries(manifest, { 'entry.js': path.join(root, 'entry.js') }, root);
+      const build = buildProject(driver, root, manifest.entryPoints, 30000, manifest.fixtureConfig);
+      assert.deepEqual(observeEntries(manifest, build.entries, build.directory), baseline);
+    }
+  });
+});
 
 for (const suffix of ['.module.css', '.module.cjs']) {
   test(`explicit fixture configuration selects ${suffix} CSS transforms and preserves byte resources`, () => {
@@ -211,6 +241,9 @@ test('driver rejects unknown, malformed and oversized config before publication'
       '{"entries":[]}', '{"css":{"load":"plugin"}}',
       '{"css":{"css_modules":"ext:../css"}}',
       '{"output":{"base_url":"javascript:bad"}}', '{',
+      '{"resolveConditions":"source"}', '{"resolveConditions":[1]}',
+      '{"resolveConditions":[" "]}',
+      '{"resolveConditions":["import"]}', '{"resolveConditions":["require"]}',
       JSON.stringify({ output: { base_url: 'x'.repeat(16384) } }),
     ]) {
       writeFileSync(configFile, config);

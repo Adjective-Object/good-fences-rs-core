@@ -240,7 +240,17 @@ are build diagnostics; they are absent from the source observation.
 
 ### CSS output contracts and explicit options
 
-`fixtureConfig` exposes only the example driver's output/CSS options; it does not
+Additional package conditions use `"fixtureConfig":{"resolveConditions":["source"]}`.
+The driver extends `BuildOptions.resolver.export_conditions`; the harness explicitly
+passes each condition as `--conditions=...` to Node for both source and output
+observations. Node does not read `resolveConditions` from this manifest or any
+arbitrary config. The default is an empty additional-condition list, retaining
+Node defaults. Move previously staged tsconfig custom conditions here (or to
+the Rust resolver options); tsconfig files, including JSONC extends/references,
+are no longer interpreted or validated for resolution. TS compilation remains external.
+
+`fixtureConfig` exposes only the example driver's output/CSS options and additional
+explicit export conditions; it does not
 configure external dependencies, effects, entry renames or custom plugins:
 
 ```json

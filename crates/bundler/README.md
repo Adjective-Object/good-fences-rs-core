@@ -924,7 +924,8 @@ Use an absolute OUTPUT, or note that it is relative to the process cwd.
 
 ### Explicit fixture configuration
 
-Existing positional invocations are unchanged. To exercise output/CSS options:
+Existing positional invocations are unchanged. To exercise output/CSS options or
+explicit package conditions:
 
 ```sh
 cargo run -p bundler --example build -- PROJECT OUTPUT --fixture-config CONFIG.json ENTRY...
@@ -937,7 +938,8 @@ shipped defaults); unknown fields, including nested fields, are errors:
 ```json
 {
   "output": {"base_url": "./"},
-  "css": {"load": "caller-loaded", "css_modules": false}
+  "css": {"load": "caller-loaded", "css_modules": false},
+  "resolveConditions": []
 }
 ```
 
@@ -1067,12 +1069,32 @@ sibling trees. Sources and inventory are rechecked before returning success,
 including no-op builds. Builds with external inputs refresh resolution and replay
 actual resolver requests before success, detecting ancestor `node_modules`
 shadowing without adding unrelated trees to the inventory.
-The public API gates unsupported
-tsconfig conditions instead of silently ignoring them: use strict `tsconfig.json`
-JSON with direct `compilerOptions.customConditions` (`customSourceConditions`
-is an alias); no extends/references. `baseUrl`/`paths` never rewrite runtime
-requests. Use package exports instead, including for source-only conditions.
-Other TypeScript compiler options are not runtime transforms.
+This inventory hashes config
+bytes but never interprets `tsconfig.json`: JSONC comments/trailing commas,
+`extends` and `references` no longer block unrelated builds. Compiler configs
+cannot select package branches or create runtime `baseUrl`/`paths` aliases.
+Explicit JSONC resource imports still use the JSONC resource pipeline; removing
+compiler-config ingestion does not loosen strict JSON/package metadata parsing.
+
+**Condition migration:** move formerly staged tsconfig
+`compilerOptions.customConditions` / `customSourceConditions` into explicit
+`BuildOptions.resolver.export_conditions`, for example:
+
+```rust
+# let mut options = bundler::build::BuildOptions::default();
+options.resolver.export_conditions.push("source".into());
+```
+
+For the example driver, pass `--fixture-config FILE` before entries with
+`{"resolveConditions":["source"]}`. These additional conditions extend Node
+defaults. Previously copied profiling project configs must migrate in the
+caller/staging setup; copying tsconfig conditions alone no longer works.
+Node itself does not read this custom field: the fixture harness translates it
+to explicit `--conditions=source` arguments for source/output observations.
+Other Node launchers must supply equivalent flags themselves.
+Use package exports or relative requests instead of compiler aliases.
+TS/JSX precompilation remains external; existing browser and linked-package
+resolution is unchanged.
 `.git`, `target`, sidecars and
 reserved `.bundler-*` publication directories are excluded. Keep unrelated large
 trees outside the project root; this is measured coarse inventory, not a watcher.
@@ -1217,14 +1239,16 @@ fresh managed project roots per scenario contain a 64-module `export *` chain,
 an entry and a conditionally exported package dependency
 (**66 reached sources / 65 requests**).
 Each sample runs cold parse-cache → new-session warm disk cache → same-session
-no-op → one local declaration edit → one added public export → tsconfig condition
-switch. Timings include actual source/config IO, the full public pipeline and
+no-op → one local declaration edit → one added public export → explicit resolver
+condition switch. Timings include actual source/config IO, the full public pipeline and
 transactional publication; compilation, fixture setup and runtime execution are
 outside the timed section. “Cold” means no source sidecars/session/output,
 **not** flushed OS caches. Warm output already exists. Source/derived caches are
 not faked; assertions verify actual public counters.
 
-Cached-source migration release measurements, after the audit prerequisites:
+Historical cached-source migration release measurements, after the audit
+prerequisites (the config-edit row used the now-removed tsconfig condition input,
+not the current explicit-options benchmark):
 
 | Scenario | Before median total ms | After median total ms | After min–max ms | After build ms |
 | --- | ---: | ---: | ---: | ---: |

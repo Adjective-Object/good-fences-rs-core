@@ -854,7 +854,6 @@ dependencies = [
  "serde_json",
  "text-diff",
  "thiserror 1.0.69",
- "tsconfig_paths",
  "void",
 ]
 
@@ -1040,7 +1039,6 @@ dependencies = [
  "eyre",
  "ftree_cache",
  "hashbrown 0.14.5",
- "lazy_static",
  "normpath",
  "ouroboros",
  "packagejson",
@@ -1053,10 +1051,8 @@ dependencies = [
  "relative-path 1.9.3",
  "serde",
  "serde_derive",
- "serde_json",
  "test_tmpdir",
  "tracing",
- "tsconfig_paths",
 ]
 
 [[package]]
@@ -2736,15 +2732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tsconfig_paths"
-version = "0.2.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "typenum"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2842,7 +2829,6 @@ dependencies = [
  "tag_graph",
  "test_tmpdir",
  "thiserror 1.0.69",
- "tsconfig_paths",
 ]
 
 [[package]]

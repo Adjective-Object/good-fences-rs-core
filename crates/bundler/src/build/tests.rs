@@ -3347,7 +3347,11 @@ console.log(Object.hasOwn(data, '__proto__'), data.__proto__.own,
     assert_eq!(disk.product.artifacts, edited.product.artifacts);
 
     // Even an edit that leaves the generated value unchanged must be revalidated.
-    write(dir.root(), "data.jsonc", &format!("{edited_text}\n/* unterminated"));
+    write(
+        dir.root(),
+        "data.jsonc",
+        &format!("{edited_text}\n/* unterminated"),
+    );
     for error in [
         session.build(&config).err().unwrap(),
         BuildSession::new(dir.root())
@@ -5782,7 +5786,7 @@ fn package_exports_reject_private_subpaths_for_every_request_mode() {
 }
 
 #[test]
-fn package_exports_type_tsconfig_and_options_invalidate_independently() {
+fn package_exports_type_and_explicit_conditions_invalidate_independently() {
     let dir = TmpDir::new();
     let root = dir.root();
     write(
@@ -5827,11 +5831,6 @@ fn package_exports_type_tsconfig_and_options_invalidate_independently() {
     );
     write(
         root,
-        "tsconfig.json",
-        r#"{"compilerOptions":{"customConditions":[]}}"#,
-    );
-    write(
-        root,
         "node_modules/choices/package.json",
         r#"{"type":"module","exports":{".":{"custom":"./b.mjs","default":"./a.mjs"}}}"#,
     );
@@ -5845,29 +5844,99 @@ fn package_exports_type_tsconfig_and_options_invalidate_independently() {
         "node_modules/choices/b.mjs",
         "export const value = 5;",
     );
-    parity(&mut session, &options);
-    write(
-        root,
-        "tsconfig.json",
-        r#"{"compilerOptions":{"customConditions":["custom"]}}"#,
-    );
-    let tsconfig = parity(&mut session, &options);
-    assert_eq!(tsconfig.counters.source_parses, 1);
-    assert_eq!(tsconfig.counters.memory_hits, 1);
+    let default = parity(&mut session, &options);
+    assert_eq!(observe(&default.product.artifacts), b"4\n");
     options
         .resolver
         .export_conditions
         .insert(0, "custom".into());
     let config = parity(&mut session, &options);
-    assert_eq!(config.counters.source_parses, 0);
+    assert_eq!(config.counters.source_parses, 1);
+    assert_eq!(config.counters.memory_hits, 1);
     assert_eq!(config.counters.resolutions, 1);
-    assert_eq!(
-        config.product.fingerprints.parse,
-        tsconfig.product.fingerprints.parse
-    );
+    assert_eq!(observe(&config.product.artifacts), b"5\n");
     assert_ne!(
         config.product.fingerprints.resolution,
-        tsconfig.product.fingerprints.resolution
+        default.product.fingerprints.resolution
+    );
+    options.resolver.export_conditions.push("unmatched".into());
+    let unchanged_target = parity(&mut session, &options);
+    assert_eq!(unchanged_target.counters.source_parses, 0);
+    assert_eq!(unchanged_target.counters.resolutions, 1);
+    assert_eq!(
+        unchanged_target.product.fingerprints.parse,
+        config.product.fingerprints.parse
+    );
+    assert_ne!(
+        unchanged_target.product.fingerprints.resolution,
+        config.product.fingerprints.resolution
+    );
+}
+
+#[test]
+fn tsconfig_is_inventory_only_and_cannot_change_export_conditions() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from 'pkg'; console.log(value);",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/package.json",
+        r#"{"exports":{".":{"source":"./source.mjs","default":"./default.mjs"}}}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/source.mjs",
+        "export const value = 'source';",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/default.mjs",
+        "export const value = 'default';",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut options = options();
+    let valid = parity(&mut session, &options);
+    assert_eq!(observe(&valid.product.artifacts), b"default\n");
+    for json in [
+        r#"{
+            // Compiler configs are not runtime resolver input.
+            "extends": "./missing.json",
+            "references": [{"path":"./missing-project"},],
+            "compilerOptions": {
+                "customConditions": ["source"],
+                "customSourceConditions": ["source"],
+                "baseUrl": ".",
+                "paths": {"pkg": ["./missing.mjs"]},
+            },
+        }"#,
+        r#"{"extends":"./base.json","compilerOptions":{}}"#,
+        r#"{"references":[],"compilerOptions":{}}"#,
+        r#"{"compilerOptions":{"customConditions":["source"]}}"#,
+        r#"{"compilerOptions":{"customSourceConditions":["source"]}}"#,
+        r#"{"compilerOptions":{"customConditions":"source"}}"#,
+        r#"{"compilerOptions":{"customConditions":[1]}}"#,
+        r#"{"compilerOptions":{"customConditions":[""]}}"#,
+        r#"{"compilerOptions":{"customConditions":[],"customSourceConditions":[]}}"#,
+        "not even JSON",
+    ] {
+        write(dir.root(), "tsconfig.json", json);
+        let rebuilt = parity(&mut session, &options);
+        assert_eq!(rebuilt.product.artifacts, valid.product.artifacts, "{json}");
+        assert_eq!(rebuilt.counters.source_parses, 0);
+        assert!(rebuilt.counters.resolutions > 0);
+        assert_eq!(session.build(&options).unwrap().counters.resolutions, 0);
+    }
+
+    options.resolver.export_conditions.push("source".into());
+    let explicit = parity(&mut session, &options);
+    assert_eq!(observe(&explicit.product.artifacts), b"source\n");
+    fs::remove_file(dir.root().join("tsconfig.json")).unwrap();
+    assert_eq!(
+        parity(&mut session, &options).product.artifacts,
+        explicit.product.artifacts
     );
 }
 
@@ -5877,33 +5946,6 @@ fn unsupported_configuration_is_fallible_not_silently_ignored() {
     write(dir.root(), "main.mjs", "console.log('valid');");
     let mut session = BuildSession::new(dir.root()).unwrap();
     let options = options();
-    let valid = session.build(&options).unwrap();
-    for json in [
-        r#"{"extends":"./base.json","compilerOptions":{}}"#,
-        r#"{"references":[],"compilerOptions":{}}"#,
-        r#"{"compilerOptions":{"customConditions":"source"}}"#,
-        r#"{"compilerOptions":{"customConditions":[1]}}"#,
-        r#"{"compilerOptions":{"customConditions":[""]}}"#,
-        r#"{"compilerOptions":{"customConditions":[],"customSourceConditions":[]}}"#,
-    ] {
-        write(dir.root(), "tsconfig.json", json);
-        assert!(session.build(&options).is_err(), "{json}");
-    }
-
-    write(
-        dir.root(),
-        "tsconfig.json",
-        r#"{"compilerOptions":{"baseUrl":".","paths":{"a*b*c":["ignored"]}}}"#,
-    );
-    assert_eq!(
-        session.build(&options).unwrap().product.artifacts,
-        valid.product.artifacts
-    );
-    fs::remove_file(dir.root().join("tsconfig.json")).unwrap();
-    assert_eq!(
-        session.build(&options).unwrap().product.artifacts,
-        valid.product.artifacts
-    );
     write(
         dir.root(),
         ".bundler-hidden/entry.mjs",

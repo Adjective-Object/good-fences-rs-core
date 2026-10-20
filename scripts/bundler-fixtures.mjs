@@ -148,8 +148,13 @@ function validateCase(root, directory) {
 }
 
 function validateFixtureConfig(config) {
-  object(config, [], 'fixtureConfig', ['output', 'css']);
+  object(config, [], 'fixtureConfig', ['output', 'css', 'resolveConditions']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
+  if (Object.hasOwn(config, 'resolveConditions')) {
+    strings(config.resolveConditions, 'fixtureConfig.resolveConditions', { empty: true });
+    check(config.resolveConditions.every(condition => !['import', 'require'].includes(condition)),
+      'resolveConditions cannot override request-mode conditions import or require');
+  }
   if (Object.hasOwn(config, 'output')) {
     object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes', 'synthesize_async_boundaries']);
     if (Object.hasOwn(config.output, 'base_url')) text(config.output.base_url, 'output.base_url');
@@ -291,7 +296,8 @@ export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 
     const expected = errors && Object.hasOwn(errors, entry) ? errors[entry] : undefined;
     const label = `${manifest.id} ${mode} (${entry})`;
     const result = execute(process.execPath,
-      ['--input-type=module', '-e', observer, '--', entries[entry],
+      [...(manifest.fixtureConfig?.resolveConditions ?? []).map(condition => `--conditions=${condition}`),
+        '--input-type=module', '-e', observer, '--', entries[entry],
         ...(cssOutput ? [JSON.stringify({ ...cssOutput, entry })] : [])], cwd, timeoutMs, true);
     const lines = outputLines(successful(result, label));
     stdout.push(...lines);
