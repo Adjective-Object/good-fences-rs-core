@@ -914,6 +914,85 @@ console.log(log.join(','));
 }
 
 #[test]
+fn parse_free_pipeline_counts_cover_cold_warm_noop_and_edits() {
+    let dir = TmpDir::new();
+    write(dir.root(), "entry.mjs",
+        "import value from './dep.cjs'; export default value.answer; export function load(){ return import('./lazy.mjs'); }");
+    write(dir.root(), "dep.cjs", "exports.answer = 42;");
+    write(dir.root(), "lazy.mjs", "export const value = 7;");
+    let options = BuildOptions {
+        entries: [("a", "a.js"), ("z", "nested/z.mjs")]
+            .into_iter()
+            .map(|(id, name)| {
+                (
+                    id.into(),
+                    Entry {
+                        path: "entry.mjs".into(),
+                        output_name: Some(name.into()),
+                        namespace: true,
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let check = |build: &BuildResult, extractions, emitted| {
+        assert_eq!(build.counters.source_parses, extractions);
+        assert_eq!(
+            (
+                build.counters.source_reparses,
+                build.counters.fragment_reparses
+            ),
+            (0, 0)
+        );
+        let executable = build
+            .product
+            .artifacts
+            .files
+            .keys()
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension != "json")
+            })
+            .count();
+        assert_eq!(
+            build.counters.final_validations,
+            if cfg!(debug_assertions) && emitted {
+                executable
+            } else {
+                0
+            }
+        );
+        assert_eq!(
+            build.counters.output_parses,
+            build.counters.final_validations
+        );
+    };
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&options).unwrap();
+    check(&cold, 3, true);
+    assert_eq!(observe_named(&cold.product.artifacts,
+        "import * as ns from './nested/z.mjs'; console.log(ns.default, (await ns.load()).value);"), b"42 7\n");
+    check(&session.build(&options).unwrap(), 0, false);
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options)
+        .unwrap();
+    check(&warm, 0, true);
+    assert_eq!(warm.counters.disk_hits, 3);
+    write(dir.root(), "lazy.mjs", "export const value = 8;");
+    let edited = session.build(&options).unwrap();
+    check(&edited, 1, true);
+    assert_eq!(
+        observe_named(
+            &edited.product.artifacts,
+            "import * as ns from './nested/z.mjs'; console.log((await ns.load()).value);"
+        ),
+        b"8\n"
+    );
+}
+
+#[test]
 fn no_op_policy_roots_source_export_and_warm_counters() {
     let dir = TmpDir::new();
     let root = dir.root();

@@ -528,7 +528,6 @@ fn request(graph: &SourceGraph, file: u32) -> Code {
     Code::request(path(graph, file), RequestKind::DynamicImport)
 }
 
-#[expect(clippy::too_many_arguments)]
 fn compatible_group(
     graph: &SourceGraph,
     group: &BTreeSet<u32>,

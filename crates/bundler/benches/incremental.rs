@@ -12,8 +12,22 @@ const SAMPLES: usize = 7;
 
 struct Sample {
     total_ms: f64,
+    cache_bytes: u64,
     build: BuildResult,
     published: Published,
+}
+
+fn cache_bytes(root: &Path) -> std::io::Result<u64> {
+    let mut total = 0;
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            total += cache_bytes(&entry.path())?;
+        } else if segment_cache::is_cache_artifact(&entry.path()) {
+            total += entry.metadata()?.len();
+        }
+    }
+    Ok(total)
 }
 
 fn run(session: &mut BuildSession, options: &BuildOptions, output: &Path) -> eyre::Result<Sample> {
@@ -32,8 +46,19 @@ fn run(session: &mut BuildSession, options: &BuildOptions, output: &Path) -> eyr
     assert_eq!(artifacts.entries["main"], Path::new("main.mjs"));
     assert_eq!(artifacts.files.len(), 1);
     assert_eq!(
+        (
+            build.counters.source_reparses,
+            build.counters.fragment_reparses
+        ),
+        (0, 0),
+    );
+    assert_eq!(
+        build.counters.final_validations,
+        usize::from(cfg!(debug_assertions)) * build.counters.emissions
+    );
+    assert_eq!(
         build.counters.output_parses,
-        build.counters.emissions * (2 * (MODULES + 2) + 3),
+        build.counters.final_validations
     );
     assert_eq!(
         published.files_written,
@@ -45,6 +70,7 @@ fn run(session: &mut BuildSession, options: &BuildOptions, output: &Path) -> eyr
     );
     Ok(Sample {
         total_ms: start.elapsed().as_secs_f64() * 1000.0,
+        cache_bytes: cache_bytes(session.root())?,
         build,
         published,
     })
@@ -137,7 +163,7 @@ fn main() -> eyre::Result<()> {
         results.entry("config-edit").or_default().push(edit);
     }
     println!("64-module star chain + entry + configured dependency; {SAMPLES} fresh-root samples per scenario");
-    println!("scenario,median_total_ms,min_total_ms,max_total_ms,median_build_ms,extract,resolutions,link,output_parses,memory_hits,disk_hits,artifact_writes");
+    println!("scenario,median_total_ms,min_total_ms,max_total_ms,median_build_ms,extract,resolutions,link,output_parses,source_reparses,fragment_reparses,final_validations,memory_hits,disk_hits,artifact_writes,cache_bytes");
     for name in [
         "cold",
         "warm",
@@ -151,7 +177,7 @@ fn main() -> eyre::Result<()> {
         let middle = &samples[SAMPLES / 2];
         let c = &middle.build.counters;
         println!(
-            "{name},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{},{},{}",
+            "{name},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{}",
             middle.total_ms,
             samples[0].total_ms,
             samples[SAMPLES - 1].total_ms,
@@ -160,9 +186,13 @@ fn main() -> eyre::Result<()> {
             c.resolutions,
             c.emissions,
             c.output_parses,
+            c.source_reparses,
+            c.fragment_reparses,
+            c.final_validations,
             c.memory_hits,
             c.disk_hits,
-            middle.published.files_written
+            middle.published.files_written,
+            middle.cache_bytes
         );
     }
     Ok(())

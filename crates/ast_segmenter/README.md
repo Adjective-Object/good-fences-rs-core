@@ -4,6 +4,8 @@ Extracts owned top-level statement segments from OXC-parsed JavaScript and
 TypeScript. Each segment contains module imports/exports, variable declarations
 and references, and its source span; the parser arena can then be reset.
 Spans are zero-based UTF-8 byte ranges with an exclusive end.
+`module_parse_count()` reports source-module parser invocations on the current
+thread, distinguishing extraction from accidental re-extraction.
 
 Variable scopes retain whether an escaped name is referenced only in type
 positions. A name referenced in both type and value positions remains a runtime

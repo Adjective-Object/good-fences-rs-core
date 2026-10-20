@@ -8,6 +8,15 @@ use oxc_utils_parse::ModuleFormat;
 
 use crate::{try_segment_file, Segment};
 
+thread_local! {
+    static MODULE_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Source-module parser invocations on this thread, including re-extraction.
+pub fn module_parse_count() -> usize {
+    MODULE_PARSES.with(std::cell::Cell::get)
+}
+
 #[cfg(test)]
 #[path = "commonjs_tests.rs"]
 mod commonjs_tests;
@@ -73,6 +82,7 @@ pub fn parse_module(
     package_format: ModuleFormat,
 ) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
+    MODULE_PARSES.with(|count| count.set(count.get() + 1));
     let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)?;
     let semantic = oxc_semantic::SemanticBuilder::new()
         .with_check_syntax_error(true)

@@ -76,10 +76,25 @@ pub struct Counters {
     pub disk_hits: usize,
     pub resolutions: usize,
     pub emissions: usize,
-    /// Generated output validation/comment scans and PURE callee parsing.
-    /// These are not source fact extraction and do not populate sidecars.
+    /// Source re-extraction outside cache misses; emission must leave this zero.
+    pub source_reparses: usize,
+    /// Generated-fragment parses excluding final validation; must remain zero.
+    pub fragment_reparses: usize,
+    /// One per final executable artifact in debug builds, zero in release.
+    pub final_validations: usize,
+    /// Total emission parses, retained for compatibility with existing clients.
     pub output_parses: usize,
     pub elapsed: Duration,
+}
+
+impl Counters {
+    fn record_parses(&mut self, before: (usize, usize, usize)) {
+        self.source_reparses = ast_segmenter::module_parse_count() - before.0 - self.source_parses;
+        self.final_validations = crate::rewrite::final_validation_count() - before.2;
+        self.fragment_reparses =
+            crate::rewrite::output_parse_count() - before.1 - self.final_validations;
+        self.output_parses = self.source_reparses + self.fragment_reparses + self.final_validations;
+    }
 }
 
 pub struct BuildProduct {
@@ -153,6 +168,11 @@ impl BuildSession {
             "public build target is Node only"
         );
         let mut counters = Counters::default();
+        let before_parses = (
+            ast_segmenter::module_parse_count(),
+            crate::rewrite::output_parse_count(),
+            crate::rewrite::final_validation_count(),
+        );
         let mut warnings = Vec::new();
         let inventory = inventory(&self.root)?;
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
@@ -350,6 +370,7 @@ impl BuildSession {
         let emitter = hash(
             concat!(
                 include_str!("link.rs"),
+                include_str!("assembly.rs"),
                 include_str!("entry_outputs.rs"),
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
@@ -372,6 +393,7 @@ impl BuildSession {
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &sources, &inventory)?;
+                counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
                 warnings.extend(last.plan.retention.warnings.iter().cloned());
                 return Ok(BuildResult {
@@ -404,18 +426,12 @@ impl BuildSession {
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
-        let before = crate::rewrite::output_parse_count();
-        let mut artifacts = link::esm_plan(
-            &graph,
-            &plan,
-            &options.effects,
-            &sources,
-        )?;
+        let mut artifacts = link::esm_plan(&graph, &plan, &options.effects, &sources)?;
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;
         Self::recheck(&self.root, &sources, &inventory)?;
         counters.emissions = 1;
-        counters.output_parses = crate::rewrite::output_parse_count() - before;
+        counters.record_parses(before_parses);
         let generation = match &self.last {
             Some(last) => last
                 .generation

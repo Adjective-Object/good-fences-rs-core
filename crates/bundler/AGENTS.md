@@ -9,8 +9,10 @@ source-relative output path; include it in output invalidation, not root identit
 Renaming canonical files must rewrite requests and artifact routes together.
 Keep generated requests as typed artifact identities until empty-job pruning and
 destination/alias selection finish; never recover requests by parsing output.
-Later-layer invalidation is deliberately coarse; counters separate source
-extraction from generated-output/recipe parsing. Reuse hash-checked cache records
+Later-layer invalidation is deliberately coarse; counters separate extraction,
+source/fragment reparses and final validation. Emission reparses must stay zero;
+debug validates final executable files once, release never does, no-op does neither.
+Reuse hash-checked cache records
 in session emission; public low-level link::esm shares its parse-free
 source/config/facts provenance checker. Analysis-only graph inputs cannot emit.
 Project roots are bounded/canonical;

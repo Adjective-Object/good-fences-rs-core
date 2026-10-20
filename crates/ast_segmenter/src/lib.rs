@@ -18,7 +18,7 @@ pub mod visitor;
 pub mod visitors;
 
 pub use oxc_utils_parse::ModuleFormat;
-pub use parse::{parse_module, ModuleBody, ParsedModule};
+pub use parse::{module_parse_count, parse_module, ModuleBody, ParsedModule};
 pub use segment_info::Segment;
 pub use visitor::{segment_file, try_segment_file};
 

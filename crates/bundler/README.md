@@ -20,8 +20,8 @@ Lexical names are allocated in path/declaration order, avoiding nested bindings,
 free references, keywords and helpers. Observable function/class/inferred names
 remain separate from those allocations. Namespace,
 default-expression/anonymous-declaration and opaque CJS values retain typed graph
-identities, not invented lexical binding IDs; checked syntax still owns default
-hoisting/initialization semantics. No public product field or dependency was added.
+identities, not invented lexical binding IDs; cached recipes own default
+hoisting/initialization semantics.
 
 ## Native ESM chunks
 
@@ -417,17 +417,19 @@ suites, native baselines, public-pipeline differential mode, focused all-target
 clippy and mandatory `spot-check` (including a workspace **check**, not a full
 workspace test suite). Native-only cutover validation:
 **442 scoped Rust tests across nine crates (151 bundler)**,
-**99 harness regressions**, **30 source/emitted contracts /
-41 emitted executions**, same-runtime identity and four diagnostics, focused format,
+**107 harness regressions**, **32 source/emitted contracts /
+44 emitted executions**, same-runtime identity and four diagnostics, focused format,
 all-target bundler clippy (`--no-deps`, warnings denied) and mandatory spot-check pass.
-**All thirty contracts require/select native; zero legacy/unsupported**:
-six esbuild, six rspack and eighteen authored cases. Three new Node regressions
+**All 32 contracts require/select native; zero legacy/unsupported**:
+six esbuild, six rspack and twenty authored cases. Three new Node regressions
 exercise ordered multi-owner roots (including CJS), public/private binding-only
 roots, export-free evaluation wrappers, empty identities and namespace aliases.
 Existing async, CJS activation/retry/mixed-cycle, cached-facts, no-op identity/
 mtime and old-generation lazy-loading contracts remain release-gated.
-Spot-check additionally reruns 51 ast-segmenter tests and checks the workspace.
+Spot-check additionally reruns 59 ast-segmenter tests and checks the workspace.
 Existing unrelated dependency dead-code warnings remain.
+The release gate runs the bundler suite in both debug and release profiles,
+including cold/warm/no-op/edit parse-count and runtime checks.
 The driver exposes planning warnings
 separately; the harness reports known effect-order-cycle warnings while still
 rejecting cache/publication/unknown warnings.
@@ -447,47 +449,47 @@ outside the timed section. “Cold” means no source sidecars/session/output,
 **not** flushed OS caches. Warm output already exists. Source/derived caches are
 not faked; assertions verify actual public counters.
 
-Native-only cutover measurement on Linux 7.2.8 x86_64, AMD Ryzen 7 7840U (8 cores / 16 threads),
-Rust `1.97.0-nightly (f53b654a8 2026-04-30)`, Cargo `1.97.0-nightly`, bench
-profile optimized + debuginfo; Node conformance runtime v22.22.2:
+Cached-source migration release measurements, after the audit prerequisites:
 
-| Scenario | Median total ms | Min–max ms | Build portion at median ms |
-| --- | ---: | ---: | ---: |
-| Cold | 92.947 | 90.797–109.781 | 90.512 |
-| Warm | 43.016 | 42.557–49.721 | 42.886 |
-| No-op | 3.072 | 3.006–3.643 | 2.921 |
-| Local edit | 41.407 | 41.232–50.829 | 39.483 |
-| Export edit | 43.833 | 41.921–46.973 | 42.009 |
-| Config edit | 44.284 | 43.355–47.283 | 42.109 |
+| Scenario | Before median total ms | After median total ms | After min–max ms | After build ms |
+| --- | ---: | ---: | ---: | ---: |
+| Cold | 77.668 | 81.220 | 80.303–83.157 | 80.991 |
+| Warm | 74.931 | 78.823 | 75.996–82.620 | 78.671 |
+| No-op | 2.929 | 4.125 | 4.021–5.256 | 3.981 |
+| Local edit | 71.491 | 72.889 | 69.862–75.672 | 72.768 |
+| Export edit | 75.577 | 76.067 | 73.581–77.662 | 75.804 |
+| Config edit | 74.686 | 75.779 | 74.221–77.431 | 75.545 |
 
-| Scenario | Source parses | Resolutions | Link calls | Output/recipe parses | Artifact writes |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Cold | 66 | 65 | 1 | 134 | 1 |
-| Warm | 0 | 65 | 1 | 134 | 0 |
-| No-op | 0 | 0 | 0 | 0 | 0 |
-| Local edit | 1 | 1 | 1 | 134 | 1 |
-| Export edit | 1 | 0 | 1 | 134 | 1 |
-| Config edit | 1 | 65 | 1 | 134 | 1 |
+| Scenario | Extractions | Resolutions | Link calls | Source/fragment reparses | Release final validations | Artifact writes | Cache bytes before / after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cold | 66 | 65 | 1 | 0 / 0 | 0 | 1 | 56,308 / 110,230 |
+| Warm | 0 | 65 | 1 | 0 / 0 | 0 | 0 | 56,308 / 110,230 |
+| No-op | 0 | 0 | 0 | 0 / 0 | 0 | 0 | 56,308 / 110,230 |
+| Local edit | 1 | 1 | 1 | 0 / 0 | 0 | 0 | 56,427 / 110,590 |
+| Export edit | 1 | 0 | 1 | 0 / 0 | 0 | 1 | 56,611 / 111,088 |
+| Config edit | 1 | 65 | 1 | 0 / 0 | 0 | 1 | 57,259 / 112,312 |
 
 Warm has 66 disk hits; no-op has 66 memory hits; each edit has 65 memory hits.
 Artifact writes count actual staged files, excluding atomic pointer metadata.
 This eligible single-root fixture has **one native chunk and one total file**.
-Changes still stage a complete
-immutable generation. Each reached module has owned-occurrence and syntax parses;
-the one output has source-hint and validation scans: 2 × 66 + 2 = 134.
-Those cutover measurements predate entry-output naming. The current public
-pipeline adds one request-rewrite scan: 135 output parses per changed build,
-still zero on no-op and one emitted file named `main.mjs`.
+Changes still stage a complete immutable generation. The previous public pipeline
+performed 135 emission parses per changed build; release now performs zero.
+Debug builds validate this one final executable once, never on no-op.
+`Counters` and the example JSON report extraction, source reparses, fragment
+reparses and final validations separately; `output_parses` remains the total
+emission-parse compatibility field. Source re-extraction is measured from actual
+module-parser calls, not inferred from cache hits. Cache bytes count source
+sidecars and are measured outside the timed interval.
 The measurements apply only to this synchronous ESM benchmark, not every graph shape.
-Cached source-fact reuse still avoids redundant emitter source re-extraction.
-No timing improvement percentage is inferred from these small hardware-dependent
-samples. Evidence: `target/native-only-bench.log` (not a committed artifact).
+Eliminating parses did not improve these end-to-end timings: owned recipes and
+provenance checks increase cache size and checking work. These are local,
+hardware-dependent samples, not a speedup claim.
 
 This is a correctness-first baseline, not fine-grained later-layer incrementality:
 config changes re-resolve all requests and any derived key change rebuilds the
 whole graph/effects/partition/output, while source parsing stays selective.
-Inventory and success rechecks walk the bounded project twice. Generated-output
-validation and ownership verification remain whole-product operations.
+Inventory and success rechecks walk the bounded project twice. Ownership checking
+and debug-only final output validation remain whole-product operations.
 No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
 
 **Limits:** Linux was executed; Windows atomic replacement/OS locks rely on
@@ -607,8 +609,8 @@ CJS-specific factory/cache and namespace bridge implement the interop policy.
 ## Rewrite backend
 
 `rewrite::{Edit, apply, validate, rename_private}` uses checked original-source
-byte ranges and reparses the result with the workspace-pinned OXC parser and
-semantic checker. UTF-8 boundaries, overlapping replacements and duplicate
+byte ranges and debug-validates the final result with the workspace-pinned OXC
+parser and semantic checker. UTF-8 boundaries, overlapping replacements and duplicate
 insertions are errors. Private lexical renames use owned binding identities,
 not textual matching; object/binding shorthand expands to preserve keys.
 Capture and public-binding renames are rejected rather than guessed.
@@ -618,14 +620,15 @@ At OXC revision `87f065ebf7cde21d1229322f4c7ee58baca5648e`,
 `Codegen::build(&Program)` prints a whole arena-owned AST and its options document
 only partial leading-comment preservation. Source edits fit our owned occurrence
 spans without reconstructing/rebinding an AST. We therefore use edits, not the
-printer/transformer. Low-level `emit::single_module` / `link::esm` reparse source
-to check caller-supplied graph facts. `BuildSession` instead reuses its own
-hash-checked validated source-cache records. Both paths parse/semantically check
-generated output; source facts alone cannot validate transformed code.
+printer/transformer. Low-level `emit::single_module`, `link::esm` and `BuildSession`
+share source/configuration/facts provenance verification without reparsing.
+Structured fragments preserve original occurrence identities through pruning and
+destination selection. Debug builds parse/semantically check final output once;
+release builds rely on always-on provenance, edit, identifier and target checks.
 Output is JavaScript ESM/CJS only: no TypeScript or JSX
 lowering. The emitter must reject those language modes. No source maps are
 generated or advertised; generated offsets are not original-source positions.
-Emission removes stale `sourceMappingURL`/`sourceURL` comment directives; it
+Cached segment recipes remove stale in-segment `sourceMappingURL`/`sourceURL` directives; emission
 does not mistake matching string literals or ordinary comments for directives.
 Diagnostics for rejected edits refer to original source bytes.
 
@@ -635,9 +638,9 @@ Diagnostics for rejected edits refer to original source bytes.
 JavaScript without writing files. Supply a current retention plan; for public
 exports, request their checked binding routes or the module namespace when
 building retention. Evaluation-only entrypoints need not retain unused exports.
-The emitter reparses source, checks owned facts/ranges against the graph,
-removes dead statements and applies retention's PURE recipes. Output is reparsed
-and semantically checked. Native ESM preserves lexical scopes, hoisting, TDZ,
+The emitter checks source provenance and owned facts/ranges against the graph,
+removes dead statements and instantiates cached recipes selected by retention.
+Final output is parser/semantic checked only in debug builds. Native ESM preserves lexical scopes, hoisting, TDZ,
 live bindings and default/alias exports; no wrapper snapshots are introduced.
 
 PURE erasure evaluates callee/reference and arguments in order, consumes spread

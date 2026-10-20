@@ -14,10 +14,15 @@ use oxc_span::Span;
 
 thread_local! {
     static OUTPUT_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static FINAL_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn output_parse_count() -> usize {
     OUTPUT_PARSES.with(std::cell::Cell::get)
+}
+
+pub(crate) fn final_validation_count() -> usize {
+    FINAL_VALIDATIONS.with(std::cell::Cell::get)
 }
 
 #[cfg(debug_assertions)]
@@ -71,6 +76,7 @@ pub fn apply(source: &str, edits: &[Edit]) -> eyre::Result<String> {
 #[cfg(debug_assertions)]
 pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
     count_output_parse();
+    FINAL_VALIDATIONS.with(|count| count.set(count.get() + 1));
     let allocator = Allocator::default();
     let source_type = if path.extension().is_some_and(|e| e == "cjs") {
         SourceType::mjs().with_commonjs(true)
