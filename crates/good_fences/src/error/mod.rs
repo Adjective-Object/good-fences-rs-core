@@ -80,10 +80,10 @@ pub struct ResolvedImportNotFound {
 
 #[derive(Debug)]
 pub enum EvaluateFencesError {
-    IgnoredDir(ResolvedImportNotFound), // In case the resolve_ts_import finds a file but it matches any ignoredDirs and is not in source_file_map
-    NotScanned(ResolvedImportNotFound), // In case resolve_ts_import finds a file but is not in source_file_map and does not match any ignoredDirs (e.g. running good-fences only on packages and not in shared)
+    IgnoredDir(ResolvedImportNotFound), // In case resolve_import finds a file but it matches any ignoredDirs and is not in source_file_map
+    NotScanned(ResolvedImportNotFound), // In case resolve_import finds a file but is not in source_file_map and does not match any ignoredDirs (e.g. running good-fences only on packages and not in shared)
     ImportNotResolved {
-        // In case the resolve_ts_import fails to find file
+        // In case resolve_import fails to find file
         import_specifier: String,
         source_file_path: String,
     },

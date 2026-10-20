@@ -273,7 +273,7 @@ fn missing_added_removed_recreated_matches_rebuild_and_rejects_rename() {
 }
 
 #[test]
-fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
+fn explicit_conditions_and_package_edits_relink_without_source_change() {
     let dir = test_tmpdir! {
         "entry.cjs" => "require('pkg'); import('pkg'); require('alias');",
         "node_modules/pkg/package.json" => r#"{"name":"pkg","exports":{".":{"import":"./i.js","require":"./r.js"}}}"#,
@@ -281,8 +281,7 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
         "node_modules/pkg/r.js" => "",
         "node_modules/alias/package.json" => r#"{"exports":{".":{"two":"./two.js","default":"./one.js"}}}"#,
         "node_modules/alias/one.js" => "",
-        "node_modules/alias/two.js" => "",
-        "tsconfig.json" => r#"{"compilerOptions":{"customConditions":[]}}"#
+        "node_modules/alias/two.js" => ""
     };
     let entry = dir.root().join("entry.cjs");
     let source = fs::read_to_string(&entry).unwrap();
@@ -341,17 +340,14 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
         .map(std::path::PathBuf::from)
     );
     let before = graph.revision();
-    fs::write(
-        dir.root().join("tsconfig.json"),
-        r#"{"compilerOptions":{"customConditions":["two"]}}"#,
-    )
-    .unwrap();
+    let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+    options.export_conditions.push("two".into());
     fs::write(
         dir.root().join("node_modules/pkg/package.json"),
         r#"{"name":"pkg","exports":{".":{"import":"./r.js","require":"./i.js"}}}"#,
     )
     .unwrap();
-    resolver.invalidate();
+    resolver.set_policy(options, BTreeSet::new());
     graph.refresh_resolution(&resolver).unwrap();
     assert_eq!(graph.revision().source, before.source);
     assert!(graph.revision().resolution > before.resolution);

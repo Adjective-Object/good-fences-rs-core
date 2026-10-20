@@ -82,10 +82,6 @@ fn main() -> eyre::Result<()> {
         let dir = TmpDir::new();
         let root = dir.root();
         fs::write(root.join("package.json"), r#"{"type":"module"}"#)?;
-        fs::write(
-            root.join("tsconfig.json"),
-            r#"{"compilerOptions":{"customConditions":[]}}"#,
-        )?;
         let package = root.join("node_modules/benchmark-config");
         fs::create_dir_all(&package)?;
         fs::write(
@@ -114,7 +110,7 @@ fn main() -> eyre::Result<()> {
                 MODULES - 1
             ),
         )?;
-        let options = BuildOptions {
+        let mut options = BuildOptions {
             entries: BTreeMap::from([(
                 "main".into(),
                 Entry {
@@ -160,10 +156,7 @@ fn main() -> eyre::Result<()> {
         assert_eq!(edit.build.counters.source_parses, 1);
         results.entry("export-edit").or_default().push(edit);
 
-        fs::write(
-            root.join("tsconfig.json"),
-            r#"{"compilerOptions":{"customConditions":["alternate"]}}"#,
-        )?;
+        options.resolver.export_conditions.push("alternate".into());
         let edit = run(&mut session, &options, &output)?;
         assert_eq!(edit.build.counters.source_parses, 1);
         results.entry("config-edit").or_default().push(edit);

@@ -62,9 +62,8 @@ goodFences({...});
 
 # Using the CLI
 
-To run the `good-fences` cli we need at least two things:
-- `fence.json` configuration files.
-- A `tsconfig.json` file. (see [tsconfig reference](https://www.typescriptlang.org/tsconfig))
+To run the `good-fences` CLI, provide `fence.json` configuration files and
+directories to scan. No tsconfig file is read or required.
 
 Let's assume a project like this:
 
@@ -74,7 +73,6 @@ Let's assume a project like this:
 │   │   ├── **/*.ts
 |   |   ├── index.js
 |   │   ├── fence.json
-|   tsconfig.json
 ```
 
 From your terminal you can run this:
@@ -90,19 +88,16 @@ good-fences src
 
 ## Options
 ---
-### `--project` or `-p`
+The former `--project`/`-p` and `--baseUrl` flags and the corresponding API
+`project`/`baseUrl` fields have been removed. Fence imports no longer use compiler
+path aliases: relative imports remain local and bare imports are dependency names.
+Migrate local aliases to relative requests rather than expecting tsconfig rewrites.
 
-If you have your tsconfig file splitt and want to use the one containing `compilerOptions.paths` instead of the default `tsconfig.json`
-``` sh
-good-fences src --project tsconfig.with-paths.json
-```
-### `--baseUrl`
-
-In cases like the one above, it could be that different tsconfig files have different `compilerOptions.baseUrl` configuration, you can override that valua from your specified `--project` file with `--baseUrl` flag.
-
-``` sh
-good-fences src --project tsconfig.without-baseurl.json --baseUrl .
-```
+The cached package resolver and bundler also no longer ingest tsconfig export
+conditions. Supply `NodeModulesResolverOptions::export_conditions` or
+`BuildOptions.resolver.export_conditions` explicitly; see
+[`bundler` condition migration](crates/bundler/README.md).
+Bundler TypeScript precompilation remains the caller's responsibility.
 
 ### `--output` or `-o`
 The `--output` flag takes a path. At the end of checking, fence violation errors will be saved to the provided path as json.

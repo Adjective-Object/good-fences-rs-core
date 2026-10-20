@@ -9,7 +9,7 @@ use deadlock_ref::prelude::*;
 
 /// Represents some state which is represented by the existence of a path on the filesystem
 ///
-/// This is used to cache the result of a directory probe for tsconfig.json/package.json files,
+/// This is used to cache the result of a directory probe for context files such as package.json,
 /// and node_modules directories without redundant trips to disk for each resolve.
 pub trait ContextData<TArgs: Copy = ()>: Sized {
     /// Creates a new ContextData from a filepath
@@ -230,7 +230,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         self.cache.insert(path.to_owned(), Some(data.into()));
     }
 
-    /// Checks the given path for a context file (e.g. a package.json file or a tsconfig.json file)
+    /// Checks the given path for a context file (e.g. a package.json file)
     ///
     /// This function will probe all parent directories between the given path and the root directory
     /// for a context file. If a context file is found, it will be cached and returned.
@@ -261,7 +261,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
                 return Ok(Some((head_path, res)));
             }
 
-            // if we would walk above <root>/tsconfig.json,
+            // if we would walk above the configured root,
             // we should stop the traversal
             if is_abs && head_path == root_dir {
                 // walked to root dir, and we don't want to
@@ -273,7 +273,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         }
 
         Err(anyhow!(
-            "Max probe depth reached while searching for a tsconfig file among parent directories"
+            "Max probe depth reached while searching for {CONTEXT_FNAME} among parent directories"
         ))
     }
 
@@ -285,10 +285,10 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         ProbePathIterator::new(self, root_dir, base)
     }
 
-    // checks an individual directory for a tsconfig.json file
+    // checks an individual directory for the configured context file
     //
     // First, checks the cache. If no entry is found, checks the real
-    // filesystem for a tsconfig.json file and caches the result.
+    // filesystem for the configured context file and caches the result.
     pub fn check_dir<'a>(&'a self, base: &Path) -> Result<CtxRef<'a, Option<T>>, Error> {
         tracing::debug!("{} check_dir! {}", CONTEXT_FNAME, base.display());
         let mk_ref = || -> Result<dashmap::mapref::one::Ref<'a, PathBuf, Option<T>>, Error> {
@@ -322,7 +322,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     }
 
     fn check_dir_os_fs(&self, base: &Path) -> Result<Option<T>, Error> {
-        // probe the real FS for a tsconfig.json file
+        // probe the real FS for the configured context file
         let context_file_path = base.to_owned().join(CONTEXT_FNAME);
         let result = T::read_context_data(self.args, &context_file_path)
             .with_context(|| "in read_context_data");

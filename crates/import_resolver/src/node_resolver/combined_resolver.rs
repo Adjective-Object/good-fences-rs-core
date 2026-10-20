@@ -1,20 +1,12 @@
 use std::path::Path;
 
-use ftree_cache::context_data::FileContextCache;
-
-use super::{
-    caching::{
-        CachingNodeModulesResolver, NodeModulesCache, NodeModulesResolverOptions, PackageJsonCache,
-    },
-    tsconfig::TsconfigConditions,
+use super::caching::{
+    CachingNodeModulesResolver, NodeModulesCache, NodeModulesResolverOptions, PackageJsonCache,
 };
 use crate::resolve::{PathResolver, Resolution};
 
-type TsconfigCache = FileContextCache<TsconfigConditions, "tsconfig.json">;
-
 #[derive(Debug, Default)]
 pub struct CombinedResolverCaches {
-    tsconfig_cache: TsconfigCache,
     node_modules_cache: NodeModulesCache,
     package_json_cache: PackageJsonCache,
 }
@@ -37,7 +29,6 @@ impl CombinedResolverCaches {
     }
 
     pub fn mark_dirty_root(&mut self, root: &Path) {
-        self.tsconfig_cache.mark_dirty_root(root);
         self.node_modules_cache.mark_dirty_root(root);
         self.package_json_cache.mark_dirty_root(root);
     }
@@ -47,7 +38,7 @@ impl CombinedResolverCaches {
     }
 }
 
-/// Node/package resolution with additional tsconfig export conditions, never path rewrites.
+/// Node/package resolution with explicitly configured export conditions.
 pub struct CombinedResolver<'a> {
     root_dir: &'a Path,
     caches: &'a CombinedResolverCaches,
@@ -56,17 +47,11 @@ pub struct CombinedResolver<'a> {
 
 impl PathResolver for CombinedResolver<'_> {
     fn resolve(&self, base: &Path, specifier: &str) -> anyhow::Result<Resolution> {
-        let mut options = self.options.clone();
-        if let Some((_, config)) = self.caches.tsconfig_cache.probe_path(self.root_dir, base)? {
-            options
-                .export_conditions
-                .extend(config.value().0.iter().cloned());
-        }
         CachingNodeModulesResolver::new(
             self.root_dir,
             &self.caches.package_json_cache,
             &self.caches.node_modules_cache,
-            options,
+            self.options.clone(),
         )
         .resolve(base, specifier)
     }
@@ -79,11 +64,16 @@ mod tests {
     use test_tmpdir::test_tmpdir;
 
     #[test]
-    fn custom_conditions_are_scoped_and_cache_keys_include_the_active_set() {
+    fn explicit_conditions_key_shared_caches_and_tsconfigs_have_no_effect() {
         let dir = test_tmpdir! {
             "entry.mjs" => "",
             "nested/entry.mjs" => "",
-            "tsconfig.json" => r#"{"compilerOptions":{"customConditions":["source"],"baseUrl":".","paths":{"pkg":["./wrong.mjs"]}}}"#,
+            "tsconfig.json" => r#"{
+                // Compiler-only configuration, including unsupported inheritance.
+                "extends": "./missing.json",
+                "references": [{"path":"./missing-project"},],
+                "compilerOptions": {"customConditions":["source"],"baseUrl":".","paths":{"pkg":["./wrong.mjs"]},},
+            }"#,
             "nested/tsconfig.json" => r#"{"compilerOptions":{"customSourceConditions":["nested"]}}"#,
             "wrong.mjs" => "",
             "node_modules/pkg/package.json" => r#"{"exports":{".":{"nested":"./nested.mjs","source":"./source.mjs","default":"./default.mjs"},"./blocked":{"nested":"./nested.mjs"}}}"#,
@@ -92,31 +82,34 @@ mod tests {
             "node_modules/pkg/default.mjs" => ""
         };
         let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(
-            dir.root(),
-            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
-        );
         for _ in 0..2 {
-            for (base, expected) in [
-                ("entry.mjs", "source.mjs"),
-                ("nested/entry.mjs", "nested.mjs"),
+            for (condition, expected) in [
+                (None, "default.mjs"),
+                (Some("source"), "source.mjs"),
+                (Some("nested"), "nested.mjs"),
             ] {
-                assert_eq!(
-                    resolver.resolve(&dir.root_join(base), "pkg").unwrap().path,
-                    dir.root_join(&format!("node_modules/pkg/{expected}"))
-                );
+                let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+                options
+                    .export_conditions
+                    .extend(condition.map(str::to_owned));
+                let resolver = caches.resolver(dir.root(), options);
+                for base in ["entry.mjs", "nested/entry.mjs"] {
+                    assert_eq!(
+                        resolver.resolve(&dir.root_join(base), "pkg").unwrap().path,
+                        dir.root_join(&format!("node_modules/pkg/{expected}"))
+                    );
+                    let blocked = resolver.resolve(&dir.root_join(base), "pkg/blocked");
+                    if condition == Some("nested") {
+                        assert_eq!(
+                            blocked.unwrap().path,
+                            dir.root_join("node_modules/pkg/nested.mjs")
+                        );
+                    } else {
+                        assert!(blocked.is_err());
+                    }
+                }
             }
         }
-        assert!(resolver
-            .resolve(&dir.root_join("entry.mjs"), "pkg/blocked")
-            .is_err());
-        assert_eq!(
-            resolver
-                .resolve(&dir.root_join("nested/entry.mjs"), "pkg/blocked")
-                .unwrap()
-                .path,
-            dir.root_join("node_modules/pkg/nested.mjs")
-        );
     }
 
     #[test]
