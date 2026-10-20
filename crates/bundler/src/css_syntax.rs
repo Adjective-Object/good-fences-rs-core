@@ -2,6 +2,7 @@
 use std::{ops::Range, path::Path};
 
 use eyre::{bail, ensure, WrapErr};
+use oxc_css_parser::token::Token;
 use oxc_css_parser::{ast::*, Allocator, Parser, Span, Syntax};
 
 pub(crate) const PARSER_REVISION: &str = "6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6";
@@ -69,6 +70,15 @@ pub(crate) struct ModuleSyntax {
     pub(crate) scopes: Vec<ScopeMarker>,
     pub(crate) compositions: Vec<Composition>,
     pub(crate) selectors: Vec<Range<usize>>,
+    pub(crate) animations: Vec<Animation>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Animation {
+    pub(crate) name: Name,
+    pub(crate) span: Range<usize>,
+    pub(crate) local: Option<bool>,
+    pub(crate) definition: bool,
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> eyre::Result<ModuleSyntax> {
@@ -167,8 +177,13 @@ impl Collector<'_> {
                     {
                         self.composition(declaration, selector.clone(), rule_depth > 1)?;
                     }
+                    self.animation_declaration(declaration)?;
                 }
                 Statement::AtRule(rule) => {
+                    let keyframes = is_keyframes(rule.name.name);
+                    if keyframes {
+                        self.keyframes(rule)?;
+                    }
                     match &rule.prelude {
                         Some(AtRulePrelude::Nest(selectors)) => self.selectors(selectors, true, depth + 1)?,
                         Some(AtRulePrelude::Supports(condition)) => self.supports(condition, depth + 1)?,
@@ -200,6 +215,7 @@ impl Collector<'_> {
                             | AtRulePrelude::Layer(_)
                             | AtRulePrelude::Container(_)
                             | AtRulePrelude::Keyframes(_)) => {}
+                        Some(AtRulePrelude::Unknown(_)) if keyframes => {}
                         _ => bail!(
                             "unsupported CSS Modules at-rule prelude at {:?}; selector-bearing syntax must be handled explicitly",
                             self.span(rule.span)?
@@ -277,6 +293,14 @@ impl Collector<'_> {
                 }),
                 SimpleSelector::PseudoClass(pseudo) => {
                     let name = self.name(&pseudo.name)?;
+                    ensure!(
+                        !matches!(
+                            name.decoded.to_ascii_lowercase().as_str(),
+                            "import" | "export"
+                        ),
+                        "ICSS :import/:export are unsupported at {:?}",
+                        name.span
+                    );
                     let scope = if name.decoded.eq_ignore_ascii_case("local") {
                         Some(ScopeKind::Local)
                     } else if name.decoded.eq_ignore_ascii_case("global") {
@@ -498,7 +522,9 @@ impl Collector<'_> {
                     );
                     self.selectors(value, true, depth + 1)?;
                 }
-                SupportsInParensKind::Feature(_) => {}
+                SupportsInParensKind::Feature(feature) => {
+                    self.animation_declaration(&feature.decl)?;
+                }
                 _ => bail!(
                     "unsupported CSS Modules supports condition at {:?}",
                     self.span(condition.span)?
@@ -560,6 +586,359 @@ impl Collector<'_> {
         });
         Ok(())
     }
+
+    fn animation_scope(&self, function: &Function<'_>) -> eyre::Result<Animation> {
+        let FunctionName::Ident(ident) = &function.name else {
+            bail!(
+                "unsupported animation scope at {:?}",
+                self.span(function.span)?
+            );
+        };
+        let scope = self.name(ident)?;
+        let local = match scope.decoded.to_ascii_lowercase().as_str() {
+            "local" => true,
+            "global" => false,
+            _ => bail!("unsupported animation scope at {:?}", scope.span),
+        };
+        let [ComponentValue::InterpolableIdent(name)] = function.args.as_slice() else {
+            bail!(
+                "animation scope requires one identifier at {:?}",
+                self.span(function.span)?
+            );
+        };
+        let name = self.name(name)?;
+        ensure!(
+            !animation_reserved(&name.decoded),
+            "reserved animation name at {:?}",
+            name.span
+        );
+        Ok(Animation {
+            name,
+            span: self.span(function.span)?,
+            local: Some(local),
+            definition: false,
+        })
+    }
+
+    fn keyframes(&mut self, rule: &AtRule<'_>) -> eyre::Result<()> {
+        ensure!(
+            rule.block.is_some(),
+            "keyframes requires a block at {:?}",
+            self.span(rule.span)?
+        );
+        let animation =
+            match &rule.prelude {
+                Some(AtRulePrelude::Keyframes(KeyframesName::Ident(name))) => {
+                    let name = self.name(name)?;
+                    Animation {
+                        span: name.span.clone(),
+                        name,
+                        local: Some(true),
+                        definition: true,
+                    }
+                }
+                // Strings are data, including keyframe names written as strings.
+                Some(AtRulePrelude::Keyframes(KeyframesName::Str(_))) => return Ok(()),
+                Some(AtRulePrelude::Unknown(raw)) => {
+                    let span = self.span(*raw.span())?;
+                    let text = &self.source[span.clone()];
+                    let (normalized, scopes) = animation_scopes(text, None)
+                        .wrap_err_with(|| format!("keyframes scope at {span:?}"))?;
+                    let allocator = Allocator::default();
+                    let mut parser = Parser::new(&allocator, &normalized, Syntax::Css);
+                    let function = parser.parse::<Function>().map_err(|error| {
+                        eyre::eyre!("unsupported keyframes scope at {span:?}: {error:?}")
+                    })?;
+                    ensure!(
+                    parser.recoverable_errors().is_empty()
+                        && scopes.len() == 1
+                        && normalized[function.span.end..].trim().is_empty(),
+                    "unsupported keyframes scope at {span:?}: {} scopes, tail {:?}, recovery {:?}",
+                    scopes.len(), &normalized[function.span.end..], parser.recoverable_errors()
+                );
+                    let collector = Collector {
+                        source: self.source,
+                        offset: span.start,
+                        syntax: ModuleSyntax::default(),
+                    };
+                    let mut animation = collector.animation_scope(&function)?;
+                    animation.span.start = span.start + scopes[0].start;
+                    animation.definition = true;
+                    animation
+                }
+                _ => bail!("unsupported keyframes name at {:?}", self.span(rule.span)?),
+            };
+        self.syntax.animations.push(animation);
+        Ok(())
+    }
+
+    fn animation_declaration(&mut self, declaration: &Declaration<'_>) -> eyre::Result<()> {
+        let property = self.name(&declaration.name)?.decoded.to_ascii_lowercase();
+        if property.starts_with("--") {
+            return Ok(());
+        }
+        let span = self.span(declaration.span)?;
+        let (normalized, scopes) = animation_scopes(
+            &self.source[span.clone()],
+            Some(self.span(declaration.colon_span)?.start - span.start),
+        )
+        .wrap_err_with(|| format!("animation value at {span:?}"))?;
+        let shorthand = matches!(property.as_str(), "animation" | "-webkit-animation");
+        let names = matches!(
+            property.as_str(),
+            "animation-name" | "-webkit-animation-name"
+        );
+        ensure!(
+            scopes.iter().all(|scope| scope.start == scope.ident) || shorthand || names,
+            "module-only animation scope outside animation declaration at {span:?}"
+        );
+        if !shorthand && !names {
+            return Ok(());
+        }
+        if !scopes.is_empty() {
+            // Oxc keeps colon-prefixed module escapes raw. Remove only that colon
+            // in a same-length parse view; all owned spans still address the input.
+            let allocator = Allocator::default();
+            let mut parser = Parser::new(&allocator, &normalized, Syntax::Css);
+            let declaration = parser.parse::<Declaration>().map_err(|error| {
+                eyre::eyre!("unsupported animation scope at {span:?}: {error:?}")
+            })?;
+            ensure!(
+                !declaration.value_is_raw && parser.recoverable_errors().is_empty(),
+                "unsupported module-only animation value at {span:?}"
+            );
+            let mut collector = Collector {
+                source: self.source,
+                offset: span.start,
+                syntax: ModuleSyntax::default(),
+            };
+            collector.animation_values(&declaration.value, shorthand)?;
+            let explicit: Vec<_> = collector
+                .syntax
+                .animations
+                .iter_mut()
+                .filter(|animation| animation.local.is_some())
+                .collect();
+            ensure!(
+                explicit.len() == scopes.len(),
+                "unsupported nested/module-only animation scope at {span:?}"
+            );
+            for (animation, scope) in explicit.into_iter().zip(scopes) {
+                ensure!(
+                    animation.span.start == span.start + scope.ident,
+                    "unsupported animation scope at {span:?}"
+                );
+                animation.span.start = span.start + scope.start;
+            }
+            self.syntax.animations.extend(collector.syntax.animations);
+        } else if !declaration.value_is_raw {
+            self.animation_values(&declaration.value, shorthand)?;
+        }
+        Ok(())
+    }
+
+    fn animation_values(
+        &mut self,
+        values: &[ComponentValue<'_>],
+        shorthand: bool,
+    ) -> eyre::Result<()> {
+        for group in values.split(|value| {
+            matches!(
+                value,
+                ComponentValue::Delimiter(Delimiter {
+                    kind: DelimiterKind::Comma,
+                    ..
+                })
+            )
+        }) {
+            let mut candidates = Vec::new();
+            let mut slots = [false; 5];
+            let mut durations = 0;
+            let mut opaque = false;
+            let mut string_name = false;
+            for value in group {
+                match value {
+                    ComponentValue::InterpolableIdent(ident) => {
+                        let name = self.name(ident)?;
+                        let keyword = name.decoded.to_ascii_lowercase();
+                        if animation_reserved(&keyword) {
+                            if shorthand && keyword == "none" {
+                                slots[3] = true;
+                            } else if keyword != "none" {
+                                opaque = true;
+                            }
+                            continue;
+                        }
+                        let slot = if shorthand {
+                            animation_keyword_slot(&keyword)
+                        } else {
+                            None
+                        };
+                        if let Some(slot) = slot {
+                            if !std::mem::replace(&mut slots[slot], true) {
+                                continue;
+                            }
+                        }
+                        candidates.push(Animation {
+                            span: name.span.clone(),
+                            name,
+                            local: None,
+                            definition: false,
+                        });
+                    }
+                    ComponentValue::Function(function) => {
+                        let FunctionName::Ident(ident) = &function.name else {
+                            opaque = true;
+                            continue;
+                        };
+                        let name = self.name(ident)?.decoded.to_ascii_lowercase();
+                        if matches!(name.as_str(), "local" | "global") {
+                            candidates.push(self.animation_scope(function)?);
+                        } else if shorthand
+                            && matches!(name.as_str(), "steps" | "cubic-bezier" | "linear")
+                            && !std::mem::replace(&mut slots[0], true)
+                        {
+                        } else {
+                            opaque = true;
+                        }
+                    }
+                    ComponentValue::Dimension(dimension)
+                        if shorthand && matches!(dimension.kind, DimensionKind::Duration) =>
+                    {
+                        durations += 1;
+                        opaque |= durations > 2;
+                    }
+                    ComponentValue::Number(_) if shorthand && !slots[1] => slots[1] = true,
+                    ComponentValue::InterpolableStr(_) => {
+                        opaque = true;
+                        string_name = true;
+                    }
+                    _ => opaque = true,
+                }
+            }
+            let explicit = candidates.iter().any(|name| name.local.is_some());
+            ensure!(
+                !explicit || (candidates.len() == 1 && !string_name),
+                "ambiguous module-only animation value at {:?}",
+                candidates.first().map(|name| &name.span)
+            );
+            if candidates.len() == 1 && !opaque {
+                self.syntax.animations.extend(candidates);
+            } else if explicit {
+                // Explicit scopes identify the name even beside opaque runtime values.
+                self.syntax
+                    .animations
+                    .extend(candidates.into_iter().filter(|name| name.local.is_some()));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_keyframes(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "keyframes" | "-webkit-keyframes" | "-moz-keyframes" | "-ms-keyframes" | "-o-keyframes"
+    )
+}
+
+pub(crate) fn animation_keyword_slot(name: &str) -> Option<usize> {
+    match name {
+        "ease" | "ease-in" | "ease-out" | "ease-in-out" | "linear" | "step-start" | "step-end" => {
+            Some(0)
+        }
+        "infinite" => Some(1),
+        "normal" | "reverse" | "alternate" | "alternate-reverse" => Some(2),
+        "forwards" | "backwards" | "both" => Some(3),
+        "running" | "paused" => Some(4),
+        _ => None,
+    }
+}
+
+fn animation_reserved(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "none" | "initial" | "inherit" | "unset" | "revert" | "revert-layer" | "default"
+    )
+}
+
+struct AnimationScope {
+    start: usize,
+    ident: usize,
+}
+
+fn animation_scopes(
+    source: &str,
+    property_colon: Option<usize>,
+) -> eyre::Result<(String, Vec<AnimationScope>)> {
+    let allocator = Allocator::default();
+    // A custom-property parse exposes Oxc's balanced raw value tokens without
+    // interpreting runtime functions or strings as module syntax.
+    const PREFIX: &str = "--scope: : ";
+    let input = format!("{PREFIX}{source}");
+    let mut parser = Parser::new(&allocator, &input, Syntax::Css);
+    let raw = parser
+        .parse::<Declaration>()
+        .map_err(|error| eyre::eyre!("animation value tokenization: {error:?}"))?;
+    let tokens: Vec<_> = raw
+        .value
+        .iter()
+        .filter_map(|value| {
+            let ComponentValue::TokenWithSpan(token) = value else {
+                return None;
+            };
+            if token.span.start < PREFIX.len() {
+                return None;
+            }
+            let mut token = *token;
+            token.span.start -= PREFIX.len();
+            token.span.end -= PREFIX.len();
+            Some(token)
+        })
+        .collect();
+    let mut normalized = source.as_bytes().to_vec();
+    let mut scopes = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if !matches!(token.token, Token::Ident(_)) {
+            continue;
+        }
+        let mut parser = Parser::new(
+            &allocator,
+            &source[token.span.start..token.span.end],
+            Syntax::Css,
+        );
+        let ident = parser
+            .parse::<InterpolableIdent>()
+            .map_err(|error| eyre::eyre!("animation scope identifier: {error:?}"))?;
+        let InterpolableIdent::Literal(ident) = ident else {
+            continue;
+        };
+        if !matches!(ident.name.to_ascii_lowercase().as_str(), "local" | "global") {
+            continue;
+        }
+        let function = tokens.get(index + 1).is_some_and(|next| {
+            matches!(next.token, Token::LParen(_)) && token.span.end == next.span.start
+        });
+        let ident = token.span.start;
+        let mut start = ident;
+        if let Some(previous) = index.checked_sub(1).map(|index| &tokens[index]) {
+            if matches!(previous.token, Token::Colon(_))
+                && Some(previous.span.start) != property_colon
+            {
+                ensure!(
+                    function,
+                    "unsupported bare animation scope at {:?}",
+                    token.span
+                );
+                start = previous.span.start;
+                normalized[start] = b' ';
+            }
+        }
+        if function {
+            scopes.push(AnimationScope { start, ident });
+        }
+    }
+    Ok((String::from_utf8(normalized)?, scopes))
 }
 
 #[derive(Clone)]

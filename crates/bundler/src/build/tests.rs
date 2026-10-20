@@ -132,6 +132,74 @@ fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures()
 }
 
 #[test]
+fn css_modules_animations_are_file_local_without_extra_exports_under_both_loaders() {
+    let dir = TmpDir::new();
+    let source = r#".spin { animation: 1s ease spin; animation-name: :global(spin), spin; --name: spin }
+@media (width > 1px) { @keyframes spin { from { opacity: 0 } to { opacity: 1 } } }
+@keyframes :global(remote) {}
+"#;
+    for file in ["a.module.css", "b.module.css"] {
+        write(dir.root(), file, source);
+    }
+    let global = ".global { animation: spin 1s } @keyframes spin {}";
+    write(dir.root(), "global.css", global);
+    write(
+        dir.root(),
+        "main.mjs",
+        "export * as a from './a.module.css'; export * as b from './b.module.css'; import './global.css';",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let built = session.build(&config).unwrap();
+        let mut animations = Vec::new();
+        let mut classes = Vec::new();
+        for file in ["a.module.css", "b.module.css"] {
+            let resource = &built.product.artifacts.stylesheets[&dir.root().join(file)];
+            let css = std::str::from_utf8(&built.product.artifacts.resources[resource]).unwrap();
+            let animation = css
+                .split("@keyframes ")
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap();
+            let class = css
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .strip_prefix('.')
+                .unwrap();
+            assert_ne!(animation, class);
+            assert!(css.contains(&format!("animation: 1s ease {animation}")));
+            assert!(css.contains(&format!("animation-name: spin, {animation}")));
+            assert!(css.contains("--name: spin") && css.contains("@keyframes remote {}"));
+            animations.push(animation.to_owned());
+            classes.push(class.to_owned());
+        }
+        assert_ne!(animations[0], animations[1]);
+        let global_resource = &built.product.artifacts.stylesheets[&dir.root().join("global.css")];
+        assert_eq!(
+            built.product.artifacts.resources[global_resource],
+            global.as_bytes()
+        );
+        assert_eq!(
+            observe_named(&built.product.artifacts, &format!(
+                "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns.a), ['spin']); assert.deepEqual(Object.keys(ns.b), ['spin']); assert.equal(ns.a.spin, {:?}); assert.equal(ns.b.spin, {:?}); assert.equal(links.length, {}); console.log('animations');",
+                classes[0], classes[1], if load == CssLoad::AutoMount { 3 } else { 0 },
+            )),
+            b"animations\n",
+        );
+        assert!(Rc::ptr_eq(
+            &built.product,
+            &session.build(&config).unwrap().product
+        ));
+    }
+}
+
+#[test]
 fn css_modules_scopes_fragments_and_urls_share_original_utf8_edits_under_both_loaders() {
     let dir = TmpDir::new();
     let source = r##"@charset "UTF-8";
