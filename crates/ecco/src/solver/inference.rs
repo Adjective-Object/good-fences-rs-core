@@ -1,0 +1,351 @@
+use super::*;
+
+#[derive(Debug, Clone)]
+pub(super) struct Closure {
+    template: usize,
+    captures: HashMap<ValueId, ValueId>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum Instruction {
+    Value(ValueId, Hazards),
+    Any(Effect, Vec<Effect>),
+    Operation(ValueId, Hazard),
+    Update(ValueId, Hazard, Effect),
+    Bind(ValueId, ValueId),
+    Join(ValueId, Vec<ValueId>),
+    Call(CallResult, ValueId, Vec<ValueId>, ValueId),
+    Closure(ValueId, usize),
+    Opaque,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Recording {
+    values: usize,
+    cells: usize,
+    equations: usize,
+    pub instructions: Vec<Instruction>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FunctionSignature {
+    pub captures: Vec<ValueId>,
+    pub parameters: Vec<ValueId>,
+    pub receiver: Option<ValueId>,
+    pub self_binding: Option<ValueId>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct Template {
+    signature: FunctionSignature,
+    instructions: Vec<Instruction>,
+    returns: Vec<ValueId>,
+    effects: Option<Effect>,
+    sources: HashMap<Effect, (ValueId, Hazard)>,
+}
+
+impl Context {
+    pub(crate) fn reserve_function(&mut self) -> usize {
+        let index = self.templates.len();
+        self.templates.push(Arc::default());
+        index
+    }
+
+    pub(crate) fn start_function(&mut self) {
+        assert!(self.recording.is_none());
+        self.recording = Some(Recording {
+            values: self.values.len(),
+            cells: self.initial.len(),
+            equations: self.equations.len(),
+            instructions: Vec::new(),
+        });
+    }
+
+    pub(crate) fn function_local(&mut self, value: ValueId) {
+        self.recording
+            .as_mut()
+            .expect("function recording")
+            .instructions
+            .push(Instruction::Value(value, Hazards::NONE));
+    }
+
+    pub(crate) fn finish_function(
+        &mut self,
+        index: usize,
+        signature: FunctionSignature,
+        returns: Vec<ValueId>,
+        effects: Effect,
+    ) {
+        let recording = self.recording.take().expect("function recording");
+        let mut used = HashSet::from([effects]);
+        for instruction in &recording.instructions {
+            match instruction {
+                Instruction::Any(_, inputs) => used.extend(inputs),
+                Instruction::Update(_, _, effect) => {
+                    used.insert(*effect);
+                }
+                _ => {}
+            }
+        }
+        let sources = used
+            .into_iter()
+            .filter_map(|effect| {
+                let index = self
+                    .values
+                    .partition_point(|value| value.cells[0] <= effect.0)
+                    .checked_sub(1)?;
+                let slot = Hazard::ALL
+                    .into_iter()
+                    .find(|slot| self.values[index].cells[*slot as usize] == effect.0)?;
+                Some((effect, (ValueId(index), slot)))
+            })
+            .collect();
+        self.templates[index] = Arc::new(Template {
+            signature,
+            instructions: recording.instructions,
+            returns,
+            effects: Some(effects),
+            sources,
+        });
+        self.values.truncate(recording.values);
+        self.initial.truncate(recording.cells);
+        self.equations.truncate(recording.equations);
+    }
+
+    pub(crate) fn bind_value(&mut self, target: ValueId, value: ValueId) {
+        if let Some(recording) = &mut self.recording {
+            recording
+                .instructions
+                .push(Instruction::Bind(target, value));
+            return;
+        }
+        if target == value {
+            return;
+        }
+        self.values[target.0].alias = Some(value);
+        for slot in Hazard::ALL {
+            self.equations.push(Equation {
+                target: self.hazard(target, slot).0,
+                expression: Expression::Read(self.hazard(value, slot).0),
+            });
+            if !self.latent {
+                self.equations.push(Equation {
+                    target: self.hazard(value, slot).0,
+                    expression: Expression::Read(self.hazard(target, slot).0),
+                });
+            }
+        }
+        let target = self.values[target.0].call_mutations;
+        let value = self.values[value.0].call_mutations;
+        self.equations.push(Equation {
+            target: target.0,
+            expression: Expression::Read(value.0),
+        });
+        if !self.latent {
+            self.equations.push(Equation {
+                target: value.0,
+                expression: Expression::Read(target.0),
+            });
+        }
+    }
+
+    pub(super) fn resolve_alias(&self, mut value: ValueId) -> ValueId {
+        let mut visited = HashSet::new();
+        while let Some(alias) = self.values[value.0].alias {
+            if !visited.insert(value) {
+                return self.unknown;
+            }
+            value = alias;
+        }
+        value
+    }
+
+    pub(crate) fn function_value(&mut self, index: usize) -> ValueId {
+        let value = self.value(Hazards::NONE);
+        if let Some(recording) = &mut self.recording {
+            recording
+                .instructions
+                .push(Instruction::Closure(value, index));
+        } else {
+            self.install_closure(value, index, &HashMap::new());
+        }
+        value
+    }
+
+    fn install_closure(
+        &mut self,
+        value: ValueId,
+        index: usize,
+        environment: &HashMap<ValueId, ValueId>,
+    ) {
+        let captures = self.templates[index]
+            .signature
+            .captures
+            .iter()
+            .map(|capture| (*capture, mapped(environment, *capture)))
+            .collect();
+        // A bare call hazard has no arguments to specialize. Keep it separate
+        // from replacement hazards consulted by a known, instantiated call.
+        self.initial[self.values[value.0].cells[Hazard::Call as usize]] =
+            self.templates[index].effects != Some(self.pure);
+        self.values[value.0].closure = Some(Closure {
+            template: index,
+            captures,
+        });
+    }
+
+    pub(super) fn call_inferred(
+        &mut self,
+        function: ValueId,
+        resolved: ValueId,
+        closure: Closure,
+        arguments: &[ValueId],
+        receiver: ValueId,
+    ) -> CallResult {
+        let invocation = Invocation {
+            function: resolved,
+            arguments: arguments
+                .iter()
+                .map(|value| self.resolve_alias(*value))
+                .collect(),
+            receiver: self.resolve_alias(receiver),
+        };
+        if let Some(result) = self.inferred_calls.get(&invocation) {
+            return *result;
+        }
+        // Exact recursive contexts share graph cells; changing contexts widen.
+        if !self.expanding_templates.insert(closure.template) {
+            return CallResult {
+                value: self.unknown,
+                effects: self.opaque_effects(),
+            };
+        }
+        let pending = CallResult {
+            value: self.value(Hazards::NONE),
+            effects: self.expression(Expression::Constant(false)),
+        };
+        self.inferred_calls.insert(invocation.clone(), pending);
+        let template = self.templates[closure.template].clone();
+        let mut values = closure.captures;
+        for (index, parameter) in template.signature.parameters.iter().enumerate() {
+            let slot = self.value(Hazards::NONE);
+            self.bind_value(
+                slot,
+                arguments.get(index).copied().unwrap_or(self.undefined),
+            );
+            values.insert(*parameter, slot);
+        }
+        if let Some(parameter) = template.signature.receiver {
+            values.insert(parameter, receiver);
+        }
+        if let Some(binding) = template.signature.self_binding {
+            values.insert(binding, resolved);
+        }
+        let mut effects = HashMap::from([(self.pure, self.pure), (self.effectful, self.effectful)]);
+        let mut hypothetical_writes = false;
+        for instruction in &template.instructions {
+            match instruction {
+                Instruction::Value(target, hazards) => {
+                    let value = self.value(*hazards);
+                    values.insert(*target, value);
+                }
+                Instruction::Any(target, inputs) => {
+                    let inputs: Vec<_> = inputs
+                        .iter()
+                        .map(|effect| self.template_effect(*effect, &template, &values, &effects))
+                        .collect();
+                    effects.insert(*target, self.any(inputs));
+                }
+                Instruction::Operation(value, slot) => {
+                    self.operation(mapped(&values, *value), *slot);
+                }
+                Instruction::Update(value, slot, effect) => {
+                    if !self.latent {
+                        let effect = self.template_effect(*effect, &template, &values, &effects);
+                        self.update(mapped(&values, *value), *slot, effect);
+                    } else {
+                        hypothetical_writes = true;
+                    }
+                }
+                Instruction::Bind(target, source) => {
+                    self.bind_value(mapped(&values, *target), mapped(&values, *source));
+                }
+                Instruction::Join(target, inputs) => {
+                    let inputs: Vec<_> =
+                        inputs.iter().map(|value| mapped(&values, *value)).collect();
+                    values.insert(*target, self.join_values(&inputs));
+                }
+                Instruction::Call(target, function, arguments, receiver) => {
+                    let arguments: Vec<_> = arguments
+                        .iter()
+                        .map(|value| mapped(&values, *value))
+                        .collect();
+                    let result = self.call(
+                        mapped(&values, *function),
+                        &arguments,
+                        Some(mapped(&values, *receiver)),
+                    );
+                    values.insert(target.value, result.value);
+                    effects.insert(target.effects, result.effects);
+                }
+                Instruction::Closure(target, index) => {
+                    self.install_closure(mapped(&values, *target), *index, &values);
+                }
+                Instruction::Opaque => {
+                    self.opaque_effects();
+                }
+            }
+        }
+        let returns: Vec<_> = template
+            .returns
+            .iter()
+            .map(|value| self.resolve_alias(mapped(&values, *value)))
+            .collect();
+        let value = if returns.is_empty() {
+            self.undefined
+        } else {
+            self.join_values(&returns)
+        };
+        self.bind_value(pending.value, value);
+        let body = template.effects.map_or(self.effectful, |effect| {
+            self.template_effect(effect, &template, &values, &effects)
+        });
+        let effects = self.any([
+            body,
+            self.values[function.0].call_mutations,
+            if hypothetical_writes {
+                self.effectful
+            } else {
+                self.pure
+            },
+        ]);
+        self.equations.push(Equation {
+            target: pending.effects.0,
+            expression: Expression::Read(effects.0),
+        });
+        self.inferred_calls.remove(&invocation);
+        self.expanding_templates.remove(&closure.template);
+        CallResult {
+            value,
+            effects: pending.effects,
+        }
+    }
+
+    fn template_effect(
+        &self,
+        effect: Effect,
+        template: &Template,
+        values: &HashMap<ValueId, ValueId>,
+        effects: &HashMap<Effect, Effect>,
+    ) -> Effect {
+        if let Some(effect) = effects.get(&effect) {
+            return *effect;
+        }
+        let (value, slot) = template.sources[&effect];
+        self.hazard(mapped(values, value), slot)
+    }
+}
+
+fn mapped(values: &HashMap<ValueId, ValueId>, value: ValueId) -> ValueId {
+    values.get(&value).copied().unwrap_or(value)
+}

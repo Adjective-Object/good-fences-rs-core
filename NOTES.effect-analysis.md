@@ -151,13 +151,17 @@ a member's identity does not prove reading it effect-free.
 
 Unknown and native calls may invoke callbacks, mutate or retain reachable values,
 and run option getters. `call_effects = true` alone does not describe those
-transitive updates. Callback/async scheduling, captures, prototype dependencies,
+transitive updates. Callback/async scheduling, native captures, prototype dependencies,
 return overloads, and default module namespaces still need modeling; in particular,
 the `readFile` sketch does not yet describe its callback.
 
-The initial implementation matches trusted globals, exact imports, and supplied
-top-level local summaries using OXC binding identities. It does not yet infer
-function bodies or link source modules. Unknown execution and potentially
+The implementation matches trusted globals, exact imports, and supplied
+top-level local summaries using OXC binding identities. It also infers owned
+operation summaries for supported ordinary/arrow functions, tracing parameters,
+captures, returns, and calls through the same hazard markers as module roots.
+Bodies remain deferred; actual calls instantiate local identities and propagate
+updates. Local contracts override inference. Source modules are not linked.
+Unknown execution and potentially
 effectful hooks conservatively widen all value hazards; recursive call contexts
 that change arguments also widen. Persistent caching and bundler integration
 remain caller-side follow-up work.

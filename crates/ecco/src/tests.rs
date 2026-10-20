@@ -549,3 +549,478 @@ fn source_ast_entrypoint_does_not_need_reparsing() {
     .unwrap();
     assert_eq!(effects(&analysis), vec![false, false]);
 }
+
+#[test]
+fn inferred_identity_and_parameter_hazards() {
+    let analysis = source(
+        "",
+        r#"
+        function identity(x) { const alias = x; return alias; }
+        function read(x) { return x.value; }
+        const object = {};
+        const alias = identity(object);
+        read(alias);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 5]);
+    assert_eq!(analysis.roots[2].value, analysis.roots[3].value);
+}
+
+#[test]
+fn inferred_functions_are_deferred_and_support_arrows() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+        function unused(x) { x.value = unknown(); }
+        const unusedArrow = () => unknown();
+        const pure = x => x + 1;
+        pure(1);
+        const log = function(x) { console.log(x); };
+        log(1);
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false, false, false, false, false, true]
+    );
+}
+
+#[test]
+fn inferred_closures_capture_each_invocation_separately() {
+    let analysis = source(
+        "",
+        r#"
+        function capture(x) { return () => x; }
+        const first = {};
+        const second = {};
+        const readFirst = capture(first);
+        const readSecond = capture(second);
+        const a = readFirst();
+        const b = readSecond();
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 7]);
+    assert_eq!(analysis.roots[1].value, analysis.roots[5].value);
+    assert_eq!(analysis.roots[2].value, analysis.roots[6].value);
+    assert_ne!(analysis.roots[5].value, analysis.roots[6].value);
+}
+
+#[test]
+fn inferred_operations_track_symbols_to_hazard_markers() {
+    for (body, hazard) in [
+        ("return x.value", Hazard::PropertyRead),
+        ("const alias = x; return alias.value", Hazard::PropertyRead),
+        ("return +x", Hazard::ToPrimitive),
+        ("return `value: ${x}`", Hazard::ToPrimitive),
+        ("return 'field' in x", Hazard::In),
+        ("return 1 instanceof x", Hazard::Instanceof),
+    ] {
+        let analysis = source("", &format!("function check(x) {{ {body}; }} check(1);"));
+        assert_eq!(effects(&analysis), vec![false, false], "{body}");
+        let mut analysis = source(
+            "",
+            &format!("function check(x) {{ {body}; }} const value = 1; check(value);"),
+        );
+        let value = analysis.roots[1].value;
+        analysis
+            .context
+            .update(value, Hazard::Construct, analysis.context.effectful());
+        assert_eq!(
+            effects(&analysis),
+            vec![false; 3],
+            "{body}: unrelated hazard"
+        );
+        analysis
+            .context
+            .update(value, hazard, analysis.context.effectful());
+        assert_eq!(effects(&analysis), vec![false, false, true], "{body}");
+    }
+}
+
+#[test]
+fn inferred_wrappers_preserve_updates_and_return_aliases() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+        function install(target) {
+            const alias = target;
+            return Object.defineProperty(alias, "value", {});
+        }
+        const object = {};
+        object.value;
+        const alias = install(object);
+        alias.value;
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false, false, true, true, true]);
+    assert_eq!(analysis.roots[1].value, analysis.roots[3].value);
+    let uncalled = source(
+        DECLARATIONS,
+        r#"
+        function install(target) { Object.defineProperty(target, "value", {}); }
+        const object = {};
+        object.value;
+    "#,
+    );
+    assert_eq!(effects(&uncalled), vec![false; 3]);
+}
+
+#[test]
+fn inferred_calls_resolve_imports_callbacks_and_lexical_shadows() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+        import {join as combine} from "node:path";
+        function join(a, b) { return combine(a, b); }
+        function invoke(callback, x) { return callback(x); }
+        function read(x) { return x.value; }
+        function outer() {
+            function read(x) { return x + 1; }
+            return read(1);
+        }
+        join("a", "b");
+        invoke(read, {});
+        outer();
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 7]);
+    let effectful = source(
+        DECLARATIONS,
+        r#"
+        function invoke(callback, x) { return callback(x); }
+        invoke(console.log, 1);
+    "#,
+    );
+    assert_eq!(effects(&effectful), vec![false, true]);
+}
+
+#[test]
+fn inferred_captures_can_be_initialized_after_function_definitions() {
+    let analysis = source(
+        "",
+        r#"
+        function read() { return object.value; }
+        function forward(x) { return identity(x); }
+        function identity(x) { return x; }
+        const object = {};
+        const alias = forward(object);
+        read();
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 6]);
+    assert_eq!(analysis.roots[3].value, analysis.roots[4].value);
+}
+
+#[test]
+fn inferred_fresh_values_and_nested_declarations_are_per_call() {
+    let analysis = source(
+        "",
+        r#"
+        function fresh() {
+            function identity(x) { return x; }
+            return identity({});
+        }
+        const first = fresh();
+        const second = fresh();
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_ne!(analysis.roots[1].value, analysis.roots[2].value);
+}
+
+#[test]
+fn inferred_returns_join_branches_and_include_fallthrough() {
+    let mut analysis = source(
+        "",
+        r#"
+        function choose(flag, left, right) {
+            if (flag) { return left; } else { return right; }
+            unknown();
+        }
+        const left = {};
+        const right = {};
+        const result = choose(true, left, right);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 4]);
+    let result = analysis.roots[3].value;
+    analysis
+        .context
+        .update(result, Hazard::PropertyRead, analysis.context.effectful());
+    let evaluation = analysis.context.evaluate();
+    assert!(evaluation
+        .hazards(analysis.roots[1].value)
+        .get(Hazard::PropertyRead));
+    assert!(evaluation
+        .hazards(analysis.roots[2].value)
+        .get(Hazard::PropertyRead));
+    let analysis = source(
+        "",
+        r#"
+        function maybe(flag, x) { if (flag) return x; }
+        maybe(false, {});
+        function nothing() {}
+        const result = nothing();
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 4]);
+    assert_eq!(analysis.roots[3].value, analysis.context.undefined());
+}
+
+#[test]
+fn inferred_recursion_shares_exact_contexts_and_bounds_changing_ones() {
+    for javascript in [
+        "function recur(x) { recur(x); return x; } recur(1);",
+        "function a(x) { b(x); return x; } function b(x) { a(x); } a(1);",
+        "const recur = function self(x) { self(x); return x; }; recur(1);",
+    ] {
+        let analysis = source("", javascript);
+        assert!(
+            effects(&analysis).iter().all(|effect| !effect),
+            "{javascript}"
+        );
+    }
+    let analysis = source("", "function grow(x) { grow({}); } grow(1);");
+    assert_eq!(effects(&analysis), vec![false, true]);
+}
+
+#[test]
+fn inferred_callbacks_work_in_declarations_without_executing_latent_updates() {
+    let declarations = r#"
+        fn install(target, callback) {
+            call_effects = false
+            updates target.property_read_effects |= call(callback, this = target)
+            returns = target
+        }
+        fn mutate(target) {
+            call_effects = true
+            updates target.property_read_effects |= true
+            returns void
+        }
+        fn invoke(callback, target) { call_effects = call(callback, target) returns void }
+    "#;
+    let analysis = source(
+        declarations,
+        r#"
+        function callback() { return this.value; }
+        function install() {}
+        const object = {};
+        object.value;
+        install(object, callback);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 5]);
+    let analysis = source(
+        declarations,
+        r#"
+        function mutate(target) {}
+        function invoke(callback, target) {}
+        function callback(target) { mutate(target); }
+        const object = {};
+        object.value;
+        invoke(callback, object);
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false, false, false, false, true, true]
+    );
+}
+
+#[test]
+fn inferred_unsupported_bodies_remain_conservative_only_when_called() {
+    for function in [
+        "function f(x = unknown()) {}",
+        "function f({x}) {}",
+        "function f(...args) {}",
+        "async function f() {}",
+        "function* f() {}",
+        "function f() { while (true) unknown(); }",
+        "function f() { captured = 1; }",
+        "function f() { return arguments[0]; }",
+    ] {
+        let uncalled = source("", function);
+        assert_eq!(effects(&uncalled), vec![false], "{function}");
+        let called = source("", &format!("{function} f();"));
+        assert_eq!(effects(&called), vec![false, true], "{function}");
+    }
+}
+
+#[test]
+fn inferred_callable_hazards_do_not_replace_specialized_call_effects() {
+    let declarations = r#"
+        fn probe(callback) { call_effects = callback.call_effects returns void }
+        global fn log(...) { call_effects = true returns void }
+    "#;
+    let pure = source(
+        declarations,
+        r#"
+        function probe(callback) {}
+        const callback = () => 1;
+        probe(callback);
+        callback();
+    "#,
+    );
+    assert_eq!(effects(&pure), vec![false; 4]);
+    let effectful = source(
+        declarations,
+        r#"
+        function probe(callback) {}
+        const callback = () => log();
+        probe(callback);
+    "#,
+    );
+    assert_eq!(effects(&effectful), vec![false, false, true]);
+    let mut analysis = source(
+        "",
+        r#"
+        const read = x => x.value;
+        const object = {};
+        read(object);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    let function = analysis.roots[0].value;
+    analysis
+        .context
+        .update(function, Hazard::Call, analysis.context.effectful());
+    assert_eq!(effects(&analysis), vec![false, false, true]);
+}
+
+#[test]
+fn inferred_latent_callbacks_do_not_execute_updates_or_unknown_code() {
+    let analysis = source(
+        r#"
+        fn install(target, callback) {
+            call_effects = false
+            updates target.property_read_effects |= call(callback)
+            returns void
+        }
+    "#,
+        r#"
+        function install(target, callback) {}
+        const victim = {};
+        victim.value;
+        const callback = () => unknown();
+        const target = {};
+        install(target, callback);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 6]);
+    let evaluation = analysis.context.evaluate();
+    assert!(evaluation
+        .hazards(analysis.roots[4].value)
+        .get(Hazard::PropertyRead));
+    assert!(!evaluation
+        .hazards(analysis.roots[1].value)
+        .get(Hazard::PropertyRead));
+    let analysis = source(
+        r#"
+        fn install(target, callback, input) {
+            call_effects = false
+            updates target.property_read_effects |= call(callback, input)
+            returns void
+        }
+        global fn mutate(target) {
+            call_effects = false
+            updates target.property_read_effects |= true
+            returns void
+        }
+    "#,
+        r#"
+        function install(target, callback, input) {}
+        function callback(input) { mutate(input); return input.value; }
+        const input = {};
+        input.value;
+        const target = {};
+        install(target, callback, input);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 6]);
+    let evaluation = analysis.context.evaluate();
+    assert!(evaluation
+        .hazards(analysis.roots[4].value)
+        .get(Hazard::PropertyRead));
+    assert!(!evaluation
+        .hazards(analysis.roots[2].value)
+        .get(Hazard::PropertyRead));
+}
+
+#[test]
+fn inferred_arrows_capture_lexical_this_and_ordinary_functions_use_receiver() {
+    let mut analysis = source("", "const make = function() { return () => this; };");
+    let receiver = analysis.context.value(Hazards::NONE);
+    let make = analysis.roots[0].value;
+    let closure = analysis.context.call(make, &[], Some(receiver));
+    let other = analysis.context.value(Hazards::NONE);
+    let result = analysis.context.call(closure.value, &[], Some(other));
+    assert_eq!(result.value, receiver);
+    let evaluation = analysis.context.evaluate();
+    assert!(!evaluation.effect(closure.effects));
+    assert!(!evaluation.effect(result.effects));
+}
+
+#[test]
+fn inferred_parameters_allow_missing_and_extra_arguments_and_local_rebinding() {
+    let analysis = source(
+        "",
+        r#"
+        function identity(x) { return x; }
+        const missing = identity();
+        const value = {};
+        const extra = identity(value, 1, 2);
+        function rebind(x) { var x = 1; return x; }
+        const rebound = rebind(value);
+        const unchanged = identity(value);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 7]);
+    assert_eq!(analysis.roots[1].value, analysis.context.undefined());
+    assert_eq!(analysis.roots[2].value, analysis.roots[3].value);
+    assert_eq!(analysis.roots[2].value, analysis.roots[6].value);
+    assert_ne!(analysis.roots[2].value, analysis.roots[5].value);
+    let analysis = source(
+        "",
+        r#"
+        function identity(x) { return x; }
+        var value = {};
+        const original = value;
+        var value = {};
+        const alias = identity(original);
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 5]);
+    assert_eq!(analysis.roots[1].value, analysis.roots[4].value);
+    assert_ne!(analysis.roots[3].value, analysis.roots[4].value);
+}
+
+#[test]
+fn inferred_graphs_propagate_late_capture_hazards_across_worker_counts() {
+    let mut analysis = source(
+        "",
+        r#"
+        function make(input) { return () => input.value; }
+        const input = {};
+        const read = make(input);
+        read();
+    "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 4]);
+    let input = analysis.roots[1].value;
+    analysis
+        .context
+        .update(input, Hazard::PropertyRead, analysis.context.effectful());
+    for workers in [1, 2, 4] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .unwrap();
+        let evaluation = pool.install(|| analysis.context.evaluate());
+        let effects: Vec<_> = analysis
+            .roots
+            .iter()
+            .map(|root| evaluation.effect(root.effects))
+            .collect();
+        assert_eq!(effects, vec![false, false, true, true]);
+    }
+}

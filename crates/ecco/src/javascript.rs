@@ -7,6 +7,7 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{ScopeFlags, Semantic, SemanticBuilder, SymbolId};
 use oxc_span::{GetSpan, Span};
 
+use crate::solver::FunctionSignature;
 use crate::*;
 
 #[derive(Debug, Clone)]
@@ -58,12 +59,28 @@ pub fn extract_from_ast<'a>(
     semantic: &Semantic<'a>,
     facts: LocalFacts,
 ) -> Result<SourceAnalysis> {
+    let mut context = Context::from_local_facts(facts)?;
+    let values = semantic
+        .scoping()
+        .symbol_ids()
+        .map(|symbol| {
+            (
+                symbol,
+                NamedValue {
+                    value: context.value(Hazards::NONE),
+                    binding: None,
+                },
+            )
+        })
+        .collect();
     let mut collector = Bindings {
-        context: Context::from_local_facts(facts)?,
+        context,
         semantic,
-        values: HashMap::new(),
+        values,
         mutation: false,
         missing_reference: false,
+        functions: HashMap::new(),
+        stack: Vec::new(),
     };
     collector.visit_program(program);
     ensure!(
@@ -73,6 +90,12 @@ pub fn extract_from_ast<'a>(
     if collector.mutation {
         collector.context.opaque_effects();
     }
+    let this_value = collector.context.undefined();
+    let slots = collector
+        .values
+        .iter()
+        .map(|(symbol, named)| (*symbol, named.value))
+        .collect();
     let mut extractor = Extractor {
         context: collector.context,
         semantic,
@@ -80,7 +103,15 @@ pub fn extract_from_ast<'a>(
         namespaces: HashMap::new(),
         roots: Vec::new(),
         matches: Vec::new(),
+        functions: collector.functions,
+        this_value,
+        deferred: false,
+        slots,
     };
+    Compiler {
+        extractor: &mut extractor,
+    }
+    .visit_program(program);
     if program.source_type.is_commonjs() {
         let effects = extractor.context.opaque_effects();
         extractor.roots.push(SourceRoot {
@@ -89,6 +120,7 @@ pub fn extract_from_ast<'a>(
             effects,
         });
     } else {
+        extractor.hoist(&program.body);
         extractor.visit_program(program);
     }
     Ok(SourceAnalysis {
@@ -110,6 +142,18 @@ struct Bindings<'s, 'a> {
     values: HashMap<SymbolId, NamedValue>,
     mutation: bool,
     missing_reference: bool,
+    functions: HashMap<Span, FunctionInfo>,
+    stack: Vec<Span>,
+}
+
+#[derive(Clone)]
+struct FunctionInfo {
+    index: usize,
+    locals: Vec<SymbolId>,
+    captures: Vec<ValueId>,
+    receiver: ValueId,
+    arrow: bool,
+    self_binding: Option<ValueId>,
 }
 
 impl<'a> Visit<'a> for Bindings<'_, 'a> {
@@ -133,7 +177,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
                     self.values.insert(
                         symbol,
                         NamedValue {
-                            value: self.context.unknown(),
+                            value: self.values[&symbol].value,
                             binding: Some(Binding::Module {
                                 module: declaration.source.value.to_string(),
                                 path,
@@ -147,8 +191,18 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
 
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
         if let Some(reference) = identifier.reference_id.get() {
-            if self.semantic.scoping().get_reference(reference).is_write() {
+            let reference = self.semantic.scoping().get_reference(reference);
+            if reference.is_write() && self.stack.is_empty() {
                 self.mutation = true;
+            }
+            if let Some(symbol) = reference.symbol_id() {
+                for span in &self.stack {
+                    self.functions
+                        .get_mut(span)
+                        .expect("function")
+                        .captures
+                        .push(self.values[&symbol].value);
+                }
             }
         } else {
             self.missing_reference = true;
@@ -156,45 +210,95 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
     }
 
     fn visit_assignment_expression(&mut self, expression: &AssignmentExpression<'a>) {
-        self.mutation = true;
+        self.mutation |= self.stack.is_empty();
         walk::walk_assignment_expression(self, expression);
     }
 
     fn visit_update_expression(&mut self, expression: &UpdateExpression<'a>) {
-        self.mutation = true;
+        self.mutation |= self.stack.is_empty();
         walk::walk_update_expression(self, expression);
     }
 
     fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
-        self.mutation |= expression.operator.as_str() == "delete";
+        self.mutation |= self.stack.is_empty() && expression.operator.as_str() == "delete";
         walk::walk_unary_expression(self, expression);
     }
 
     fn visit_function(&mut self, function: &Function<'a>, _: ScopeFlags) {
+        let declaration = function.r#type == FunctionType::FunctionDeclaration;
         if let Some(identifier) = &function.id {
             if let Some(symbol) = identifier.symbol_id.get() {
-                if self.semantic.scoping().symbol_scope_id(symbol)
-                    != self.semantic.scoping().root_scope_id()
-                {
-                    return;
+                if declaration {
+                    self.visit_binding_identifier(identifier);
                 }
-                let binding = Binding::Local(identifier.name.to_string());
-                let value = self
-                    .context
-                    .definition(&binding)
-                    .unwrap_or(self.context.unknown());
-                self.values.insert(
-                    symbol,
-                    NamedValue {
-                        value,
-                        binding: Some(binding),
-                    },
-                );
+                if declaration
+                    && self.semantic.scoping().symbol_scope_id(symbol)
+                        == self.semantic.scoping().root_scope_id()
+                {
+                    let binding = Binding::Local(identifier.name.to_string());
+                    if self.context.definition(&binding).is_some() {
+                        self.values.get_mut(&symbol).expect("symbol").binding = Some(binding);
+                    }
+                }
             }
         }
+        let receiver = self.context.value(Hazards::NONE);
+        self.functions.insert(
+            function.span,
+            FunctionInfo {
+                index: self.context.reserve_function(),
+                locals: Vec::new(),
+                captures: Vec::new(),
+                receiver,
+                arrow: false,
+                self_binding: (!declaration)
+                    .then(|| {
+                        function
+                            .id
+                            .as_ref()
+                            .and_then(|id| id.symbol_id.get())
+                            .map(|symbol| self.values[&symbol].value)
+                    })
+                    .flatten(),
+            },
+        );
+        self.stack.push(function.span);
+        self.visit_formal_parameters(&function.params);
+        if let Some(body) = &function.body {
+            self.visit_function_body(body);
+        }
+        self.stack.pop();
     }
 
-    fn visit_arrow_function_expression(&mut self, _: &ArrowFunctionExpression<'a>) {}
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        let receiver = self.stack.last().map_or(self.context.undefined(), |span| {
+            self.functions[span].receiver
+        });
+        self.functions.insert(
+            function.span,
+            FunctionInfo {
+                index: self.context.reserve_function(),
+                locals: Vec::new(),
+                captures: vec![receiver],
+                receiver,
+                arrow: true,
+                self_binding: None,
+            },
+        );
+        self.stack.push(function.span);
+        walk::walk_arrow_function_expression(self, function);
+        self.stack.pop();
+    }
+
+    fn visit_binding_identifier(&mut self, identifier: &BindingIdentifier<'a>) {
+        if let (Some(span), Some(symbol)) = (self.stack.last(), identifier.symbol_id.get()) {
+            self.functions
+                .get_mut(span)
+                .expect("function")
+                .locals
+                .push(symbol);
+        }
+    }
 }
 
 struct Extractor<'s, 'a> {
@@ -204,6 +308,10 @@ struct Extractor<'s, 'a> {
     namespaces: HashMap<Binding, ValueId>,
     roots: Vec<SourceRoot>,
     matches: Vec<DefinitionMatch>,
+    functions: HashMap<Span, FunctionInfo>,
+    this_value: ValueId,
+    deferred: bool,
+    slots: HashMap<SymbolId, ValueId>,
 }
 
 #[derive(Clone)]
@@ -212,7 +320,111 @@ struct Computed {
     effects: Effect,
 }
 
-impl Extractor<'_, '_> {
+impl<'a> Extractor<'_, 'a> {
+    fn function(&mut self, function: &Function<'_>) -> ValueId {
+        if let Some(id) = &function.id {
+            if let Some(symbol) = id.symbol_id.get() {
+                if let Some(binding) = &self.values[&symbol].binding {
+                    if let Some(value) = self.context.definition(binding) {
+                        return value;
+                    }
+                }
+            }
+        }
+        self.context
+            .function_value(self.functions[&function.span].index)
+    }
+
+    fn hoist(&mut self, statements: &[Statement<'_>]) {
+        for statement in statements {
+            let function = match statement {
+                Statement::FunctionDeclaration(function) => Some(function.as_ref()),
+                Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                    Some(Declaration::FunctionDeclaration(function)) => Some(function.as_ref()),
+                    _ => None,
+                },
+                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                    ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
+                        Some(function.as_ref())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(function) = function {
+                if let Some(symbol) = function.id.as_ref().and_then(|id| id.symbol_id.get()) {
+                    let value = self.function(function);
+                    self.context.bind_value(self.slots[&symbol], value);
+                }
+            }
+        }
+    }
+
+    fn function_statements(
+        &mut self,
+        statements: &[Statement<'a>],
+        returns: &mut Vec<ValueId>,
+    ) -> bool {
+        self.hoist(statements);
+        for statement in statements {
+            if self.function_statement(statement, returns) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn function_statement(
+        &mut self,
+        statement: &Statement<'a>,
+        returns: &mut Vec<ValueId>,
+    ) -> bool {
+        match statement {
+            Statement::ReturnStatement(statement) => {
+                let value = if let Some(expression) = &statement.argument {
+                    self.expression(expression)
+                } else {
+                    self.computed(self.context.undefined(), self.context.pure())
+                };
+                returns.push(value.named.value);
+                self.roots.push(SourceRoot {
+                    span: statement.span,
+                    value: value.named.value,
+                    effects: value.effects,
+                });
+                true
+            }
+            Statement::BlockStatement(block) => self.function_statements(&block.body, returns),
+            Statement::IfStatement(statement) => {
+                let test = self.expression(&statement.test);
+                self.roots.push(SourceRoot {
+                    span: statement.test.span(),
+                    value: test.named.value,
+                    effects: test.effects,
+                });
+                let consequent = self.function_statement(&statement.consequent, returns);
+                let alternate = statement
+                    .alternate
+                    .as_ref()
+                    .is_some_and(|statement| self.function_statement(statement, returns));
+                consequent && alternate
+            }
+            Statement::ThrowStatement(statement) => {
+                let value = self.expression(&statement.argument);
+                self.roots.push(SourceRoot {
+                    span: statement.span,
+                    value: value.named.value,
+                    effects: value.effects,
+                });
+                true
+            }
+            _ => {
+                self.visit_statement(statement);
+                false
+            }
+        }
+    }
+
     fn computed(&self, value: ValueId, effects: Effect) -> Computed {
         Computed {
             named: NamedValue {
@@ -322,6 +534,7 @@ impl Extractor<'_, '_> {
             | Expression::NumericLiteral(_)
             | Expression::BigIntLiteral(_)
             | Expression::StringLiteral(_) => self.pure_value(Hazards::NONE),
+            Expression::ThisExpression(_) => self.computed(self.this_value, self.context.pure()),
             Expression::Identifier(identifier) => {
                 let reference = self
                     .semantic
@@ -569,8 +782,15 @@ impl Extractor<'_, '_> {
                 let effects = self.context.any(effects);
                 self.computed(value, effects)
             }
-            Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_) => {
-                self.pure_value(Hazards::UNKNOWN)
+            Expression::FunctionExpression(function) => {
+                let value = self.function(function);
+                self.computed(value, self.context.pure())
+            }
+            Expression::ArrowFunctionExpression(function) => {
+                let value = self
+                    .context
+                    .function_value(self.functions[&function.span].index);
+                self.computed(value, self.context.pure())
             }
             _ => self.unknown(),
         }
@@ -692,8 +912,15 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         };
         let effects = if let BindingPattern::BindingIdentifier(identifier) = &declaration.id {
             if let Some(symbol) = identifier.symbol_id.get() {
-                self.values.insert(symbol, value.named.clone());
+                let slot = self.slots[&symbol];
+                self.context.bind_value(slot, value.named.value);
+                let mut named = value.named.clone();
+                if self.deferred {
+                    named.value = slot;
+                }
+                self.values.insert(symbol, named);
             }
+
             value.effects
         } else {
             self.context.opaque_effects()
@@ -707,4 +934,127 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
 
     fn visit_function(&mut self, _: &Function<'a>, _: ScopeFlags) {}
     fn visit_arrow_function_expression(&mut self, _: &ArrowFunctionExpression<'a>) {}
+}
+
+struct Compiler<'e, 's, 'a> {
+    extractor: &'e mut Extractor<'s, 'a>,
+}
+
+impl<'a> Compiler<'_, '_, 'a> {
+    fn compile(
+        &mut self,
+        span: Span,
+        parameters: &FormalParameters<'a>,
+        body: Option<&FunctionBody<'a>>,
+        unsupported: bool,
+        expression: bool,
+    ) {
+        let extractor = &mut self.extractor;
+        let info = extractor.functions[&span].clone();
+        let values: Vec<_> = info
+            .locals
+            .iter()
+            .map(|symbol| (*symbol, extractor.values[symbol].clone()))
+            .collect();
+        let roots = std::mem::take(&mut extractor.roots);
+        let namespaces = std::mem::take(&mut extractor.namespaces);
+        let receiver = extractor.this_value;
+        extractor.this_value = info.receiver;
+        extractor.deferred = true;
+        extractor.context.start_function();
+        let mut arguments = Vec::new();
+        let mut unsupported = unsupported || parameters.rest.is_some() || body.is_none();
+        for parameter in &parameters.items {
+            if let BindingPattern::BindingIdentifier(id) = &parameter.pattern {
+                arguments.push(extractor.slots[&id.symbol_id.get().expect("parameter symbol")]);
+            } else {
+                unsupported = true;
+            }
+            unsupported |= parameter.initializer.is_some();
+        }
+        for local in &info.locals {
+            let slot = extractor.slots[local];
+            if !arguments.contains(&slot) {
+                extractor.context.function_local(slot);
+            }
+        }
+        let mut returns = Vec::new();
+        if unsupported {
+            let value = extractor.unknown();
+            returns.push(value.named.value);
+            extractor.roots.push(SourceRoot {
+                span,
+                value: value.named.value,
+                effects: value.effects,
+            });
+        } else if let Some(body) = body {
+            if expression {
+                if let Some(Statement::ExpressionStatement(statement)) = body.statements.first() {
+                    let value = extractor.expression(&statement.expression);
+                    returns.push(value.named.value);
+                    extractor.roots.push(SourceRoot {
+                        span,
+                        value: value.named.value,
+                        effects: value.effects,
+                    });
+                }
+            } else if !extractor.function_statements(&body.statements, &mut returns) {
+                returns.push(extractor.context.undefined());
+            }
+        }
+        let effects = extractor
+            .context
+            .any(extractor.roots.iter().map(|root| root.effects));
+        let mut captures = info.captures;
+        let locals: std::collections::HashSet<_> = info
+            .locals
+            .iter()
+            .map(|symbol| extractor.slots[symbol])
+            .collect();
+        captures.retain(|value| !locals.contains(value) && Some(*value) != info.self_binding);
+        captures.sort_unstable();
+        captures.dedup();
+        extractor.context.finish_function(
+            info.index,
+            FunctionSignature {
+                parameters: arguments,
+                receiver: (!info.arrow).then_some(info.receiver),
+                self_binding: info.self_binding,
+                captures,
+            },
+            returns,
+            effects,
+        );
+        for (symbol, named) in values {
+            extractor.values.insert(symbol, named);
+        }
+        extractor.roots = roots;
+        extractor.namespaces = namespaces;
+        extractor.this_value = receiver;
+        extractor.deferred = false;
+    }
+}
+
+impl<'a> Visit<'a> for Compiler<'_, '_, 'a> {
+    fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        self.compile(
+            function.span,
+            &function.params,
+            function.body.as_deref(),
+            function.r#async || function.generator,
+            false,
+        );
+        walk::walk_function(self, function, flags);
+    }
+
+    fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        self.compile(
+            function.span,
+            &function.params,
+            Some(&function.body),
+            function.r#async,
+            function.expression,
+        );
+        walk::walk_arrow_function_expression(self, function);
+    }
 }

@@ -1,10 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use rayon::prelude::*;
 
 use crate::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+mod inference;
+pub(crate) use inference::FunctionSignature;
+use inference::{Closure, Instruction, Recording, Template};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ValueId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,6 +62,9 @@ struct Equation {
 struct Value {
     cells: [usize; 7],
     definition: Option<usize>,
+    alias: Option<ValueId>,
+    closure: Option<Closure>,
+    call_mutations: Effect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -120,6 +130,11 @@ pub struct Context {
     pure: Effect,
     effectful: Effect,
     poison: Effect,
+    templates: Vec<Arc<Template>>,
+    recording: Option<Recording>,
+    inferred_calls: HashMap<Invocation, CallResult>,
+    expanding_templates: HashSet<usize>,
+    latent: bool,
 }
 
 impl Context {
@@ -139,6 +154,11 @@ impl Context {
             pure: Effect(0),
             effectful: Effect(1),
             poison: Effect(2),
+            templates: Vec::new(),
+            recording: None,
+            inferred_calls: HashMap::new(),
+            expanding_templates: HashSet::new(),
+            latent: false,
         };
         context.undefined = context.value(Hazards::NONE);
         context.unknown = context.value(Hazards::UNKNOWN);
@@ -183,11 +203,19 @@ impl Context {
             cell
         });
         let id = ValueId(self.values.len());
+        let call_mutations = Effect(self.initial.len());
+        self.initial.push(false);
         self.values.push(Value {
             cells,
             definition: None,
+            alias: None,
+            closure: None,
+            call_mutations,
         });
-        for cell in cells {
+        if let Some(recording) = &mut self.recording {
+            recording.instructions.push(Instruction::Value(id, hazards));
+        }
+        for cell in cells.into_iter().chain([call_mutations.0]) {
             self.equations.push(Equation {
                 target: cell,
                 expression: Expression::Read(self.poison.0),
@@ -220,6 +248,15 @@ impl Context {
     /// consulting a hazard with `hazard` does not execute the operation.
     pub fn operation(&mut self, value: ValueId, slot: Hazard) -> Effect {
         let effect = self.hazard(value, slot);
+        if let Some(recording) = &mut self.recording {
+            recording
+                .instructions
+                .push(Instruction::Operation(value, slot));
+            return effect;
+        }
+        if self.latent {
+            return effect;
+        }
         self.equations.push(Equation {
             target: self.poison.0,
             expression: Expression::Read(effect.0),
@@ -231,23 +268,42 @@ impl Context {
         let mut cells: Vec<_> = effects.into_iter().map(|effect| effect.0).collect();
         cells.sort_unstable();
         cells.dedup();
-        match cells.as_slice() {
+        let result = match cells.as_slice() {
             [] => self.pure,
             [cell] => Effect(*cell),
             _ => self.expression(Expression::Or(
-                cells.into_iter().map(Expression::Read).collect(),
+                cells.iter().copied().map(Expression::Read).collect(),
             )),
+        };
+        if let Some(recording) = &mut self.recording {
+            recording.instructions.push(Instruction::Any(
+                result,
+                cells.into_iter().map(Effect).collect(),
+            ));
         }
+        result
     }
 
     pub fn update(&mut self, value: ValueId, slot: Hazard, effects: Effect) {
-        if value == self.unknown {
+        if let Some(recording) = &mut self.recording {
+            recording
+                .instructions
+                .push(Instruction::Update(value, slot, effects));
+            return;
+        }
+        if self.resolve_alias(value) == self.unknown {
             self.opaque = true;
         }
         self.equations.push(Equation {
             target: self.values[value.0].cells[slot as usize],
             expression: Expression::Read(effects.0),
         });
+        if slot == Hazard::Call {
+            self.equations.push(Equation {
+                target: self.values[value.0].call_mutations.0,
+                expression: Expression::Read(effects.0),
+            });
+        }
     }
 
     /// A conservative may-alias join: later updates must reach every candidate.
@@ -256,10 +312,18 @@ impl Context {
             return *value;
         }
         let result = self.value(Hazards::NONE);
+        if let Some(recording) = &mut self.recording {
+            recording
+                .instructions
+                .push(Instruction::Join(result, values.to_vec()));
+            return result;
+        }
         for value in values {
             for slot in Hazard::ALL {
                 self.update(result, slot, self.hazard(*value, slot));
-                self.update(*value, slot, self.hazard(result, slot));
+                if !self.latent {
+                    self.update(*value, slot, self.hazard(result, slot));
+                }
             }
         }
         result
@@ -269,6 +333,13 @@ impl Context {
     /// Until reachability is modeled, poison all value hazards, including values
     /// constructed after the unknown operation.
     pub fn opaque_effects(&mut self) -> Effect {
+        if let Some(recording) = &mut self.recording {
+            recording.instructions.push(Instruction::Opaque);
+            return self.effectful;
+        }
+        if self.latent {
+            return self.effectful;
+        }
         self.opaque = true;
         self.effectful
     }
@@ -280,6 +351,27 @@ impl Context {
         receiver: Option<ValueId>,
     ) -> CallResult {
         let receiver = receiver.unwrap_or(self.undefined);
+        if self.recording.is_some() {
+            let value = self.value(Hazards::NONE);
+            let effects = self.expression(Expression::Constant(false));
+            let result = CallResult { value, effects };
+            self.recording
+                .as_mut()
+                .expect("recording")
+                .instructions
+                .push(Instruction::Call(
+                    result,
+                    function,
+                    arguments.to_vec(),
+                    receiver,
+                ));
+            return result;
+        }
+        let resolved = self.resolve_alias(function);
+        if let Some(closure) = self.values[resolved.0].closure.clone() {
+            return self.call_inferred(function, resolved, closure, arguments, receiver);
+        }
+        let function = resolved;
         let Some(index) = self.values[function.0].definition else {
             return CallResult {
                 value: self.unknown,
@@ -293,14 +385,22 @@ impl Context {
                 effects: self.opaque_effects(),
             };
         }
-        let effects = self.call_effects(function, arguments, receiver);
+        // shortcut: hypothetical callback writes widen effects; an isolated
+        // abstract heap is needed to specialize them without executing updates.
+        let effects = if self.latent && !definition.updates.is_empty() {
+            self.effectful
+        } else {
+            self.call_effects(function, arguments, receiver)
+        };
         let frame = Frame {
             definition: &definition,
             arguments,
             receiver,
             undefined: self.undefined,
         };
-        self.execute_dependencies(&definition.hazards.get(Hazard::Call), &frame);
+        if !self.latent {
+            self.execute_dependencies(&definition.hazards.get(Hazard::Call), &frame);
+        }
         let value = match &definition.returns {
             Returns::Argument(name) => frame.value(name),
             Returns::Void => self.undefined,
@@ -317,6 +417,9 @@ impl Context {
             }
         };
         for update in &definition.updates {
+            if self.latent {
+                break;
+            }
             let target = frame.value(&update.target);
             if target == self.unknown {
                 self.opaque = true;
@@ -347,8 +450,16 @@ impl Context {
         arguments: &[ValueId],
         receiver: ValueId,
     ) -> Effect {
+        let function = self.resolve_alias(function);
+        if self.values[function.0].closure.is_some() {
+            let previous = self.latent;
+            self.latent = true;
+            let result = self.call(function, arguments, Some(receiver));
+            self.latent = previous;
+            return result.effects;
+        }
         let Some(index) = self.values[function.0].definition else {
-            if function != self.undefined {
+            if !self.latent && function != self.undefined {
                 self.opaque = true;
             }
             return self.hazard(function, Hazard::Call);
@@ -368,7 +479,7 @@ impl Context {
         // Argument forwarding can grow an unbounded family of recursive call
         // contexts. Keep exact cycles; widen changing recursive contexts.
         if !self.expanding.insert(function) {
-            self.opaque = true;
+            self.opaque |= !self.latent;
             return self.effectful;
         }
         // Install the cell before expansion so recursive summaries share a cycle.
@@ -441,6 +552,13 @@ impl Context {
                 let receiver = receiver
                     .as_ref()
                     .map_or(self.undefined, |name| frame.value(name));
+                if self.values[self.resolve_alias(function).0]
+                    .closure
+                    .is_some()
+                {
+                    self.call(function, &arguments, Some(receiver));
+                    return;
+                }
                 let effects = self.call_effects(function, &arguments, receiver);
                 // Nested callback execution has no capture/reachability graph.
                 // Keep its effects latent in other fields; widen only on a call.
