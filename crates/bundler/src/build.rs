@@ -46,6 +46,29 @@ pub struct BuildOptions {
     pub declarations: ecco::DeclarationConfig,
     pub cache: CacheMode,
     pub output: OutputOptions,
+    pub css: CssOptions,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct CssOptions {
+    pub load: CssLoad,
+}
+
+/// Built-in stylesheet loading policies; custom strategies are not public API.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CssLoad {
+    #[default]
+    CallerLoaded,
+}
+
+impl CssLoad {
+    fn strategy(self) -> &'static dyn crate::css_loading::CssLoadingStrategy {
+        match self {
+            Self::CallerLoaded => &crate::css_loading::CallerLoaded,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +95,7 @@ impl Default for BuildOptions {
             declarations: ecco::DeclarationConfig::default(),
             cache: CacheMode::ReadWrite,
             output: OutputOptions::default(),
+            css: CssOptions::default(),
         }
     }
 }
@@ -253,11 +277,30 @@ impl BuildSession {
                 path.display()
             );
             let format = package_format(&self.root, &path)?;
-            let parser_path = crate::resource::parser_path(&path);
-            let config = ParserConfig::for_path(&parser_path, format)?;
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
-            let prepared_resource = if crate::resource::is_stylesheet(&path) {
-                Some(styles.prepare(&path, &input)?)
+            let prepared_css = if crate::resource::is_stylesheet(&path) {
+                styles.discover(&path, &input)?;
+                Some(options.css.load.strategy().generate_module(
+                    &crate::css_loading::CssModuleInput {
+                        stylesheet: &path,
+                        public_url: &styles.public_url(&path)?,
+                        name_mappings: &BTreeMap::new(),
+                        is_module: false,
+                    },
+                )?)
+            } else {
+                None
+            };
+            let parser_path = prepared_css.as_ref().map_or_else(
+                || crate::resource::parser_path(&path),
+                |prepared| prepared.parser_path.clone(),
+            );
+            let parser_package = prepared_css
+                .as_ref()
+                .map_or(format, |prepared| prepared.package);
+            let config = ParserConfig::for_path(&parser_path, parser_package)?;
+            let prepared_resource = if let Some(prepared) = prepared_css {
+                Some(prepared.source)
             } else if crate::resource::is_asset(&path) {
                 Some(crate::resource::prepare(&path, &input, &public_base)?)
             } else {
@@ -284,7 +327,7 @@ impl BuildSession {
                         source: &text,
                         original: &input,
                         parser_path: &parser_path,
-                        package: format,
+                        package: parser_package,
                     },
                     options.cache,
                     &declarations,
@@ -447,6 +490,7 @@ impl BuildSession {
                 include_str!("context.rs"),
                 include_str!("resource.rs"),
                 include_str!("css.rs"),
+                include_str!("css_loading.rs"),
                 include_str!("output_url.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
@@ -461,9 +505,10 @@ impl BuildSession {
         );
         fingerprints.output = hash(
             format!(
-                "{fingerprints:?}:{emitter:?}:{:?}:{}",
+                "{fingerprints:?}:{emitter:?}:{:?}:{}:{:?}",
                 options.entries,
-                public_base.as_str()
+                public_base.as_str(),
+                options.css,
             )
             .as_bytes(),
         );

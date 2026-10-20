@@ -325,6 +325,70 @@ fn source_provenance_rejects_changed_bytes_modes_and_unprovenanced_inputs() {
     assert!(check(&SourceGraph::from_owned([input]), source).is_err());
 }
 
+#[test]
+fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
+    for (parser_path, source) in [
+        ("style.css.cjs", "module.exports = './assets/style.css';"),
+        ("style.css.mjs", "export const button = '_button';"),
+    ] {
+        let input = || {
+            let mut input = crate::tests::input(parser_path, source);
+            input.path = "style.css".into();
+            input
+        };
+        let before = ast_segmenter::module_parse_count();
+        let graph = SourceGraph::from_owned([input()]);
+        let after_extraction = ast_segmenter::module_parse_count();
+        assert_eq!(after_extraction, before + 1);
+        let parsed = checked_source(&graph, 0, source).unwrap();
+        assert_eq!(parsed.provenance(), graph.file_provenance(0).unwrap());
+        assert!(checked_source(&graph, 0, &format!("{source}\n")).is_err());
+        assert_eq!(ast_segmenter::module_parse_count(), after_extraction);
+
+        let mut missing = input();
+        missing.provenance = None;
+        assert!(checked_source(&SourceGraph::from_owned([missing]), 0, source).is_err());
+
+        let mut mismatched = input();
+        mismatched.facts.commonjs = !mismatched.facts.commonjs;
+        let error = checked_source(&SourceGraph::from_owned([mismatched]), 0, source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("parser configuration mismatch"), "{error}");
+
+        for field in ["commonjs", "typescript", "jsx", "definition"] {
+            let mut forged = input();
+            let mut value = serde_json::to_value(forged.provenance.as_ref().unwrap()).unwrap();
+            let original = value["config"][field].as_bool().unwrap();
+            value["config"][field] = serde_json::Value::Bool(!original);
+            forged.provenance = Some(serde_json::from_value(value).unwrap());
+            let error = checked_source(&SourceGraph::from_owned([forged]), 0, source)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("parser configuration mismatch"),
+                "{field}: {error}"
+            );
+        }
+
+        let mut forged = input();
+        forged.facts.commonjs = !forged.facts.commonjs;
+        let mut value = serde_json::to_value(forged.provenance.as_ref().unwrap()).unwrap();
+        value["config"]["commonjs"] = serde_json::Value::Bool(forged.facts.commonjs);
+        forged.provenance = Some(serde_json::from_value(value).unwrap());
+        let error = checked_source(&SourceGraph::from_owned([forged]), 0, source).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("source facts/ranges do not match extraction provenance"),
+            "{error:#}"
+        );
+
+        let mut changed = input();
+        changed.facts.emission.segments[0].connector_only =
+            !changed.facts.emission.segments[0].connector_only;
+        assert!(checked_source(&SourceGraph::from_owned([changed]), 0, source).is_err());
+    }
+}
+
 fn node(source: &str, observer: &str) -> Output {
     let dir = TmpDir::new();
     dir.write_batch(&std::collections::HashMap::from([

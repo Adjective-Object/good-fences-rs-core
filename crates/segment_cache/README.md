@@ -64,6 +64,11 @@ input, but facts, spans, hashes and sealed provenance describe the generated
 JavaScript. The caller must prepare deterministically from the current input;
 both publication and return recheck the original bytes, including on cache hits.
 No generated source is written to the input path.
+The prepared parser path/format, not the original resource extension or package
+mode, keys sidecar reuse. Changing only that effective mode is a cache miss even
+for identical generated text. `to_parsed` preserves that checked mode in sealed
+provenance for parse-free emission; mutating the public record configuration
+cannot override its extraction identity.
 
 `load_or_parse(logger, path, package_format, CacheMode)` always reads the source,
 then checks `<source>.seg.cbor`. It returns the exact source snapshot, record,

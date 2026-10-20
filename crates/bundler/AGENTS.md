@@ -52,6 +52,13 @@ Extract CSS with parser-backed URL spans; preserve separate imports, conditions,
 layers and cycles. Closure hashes include transitive original CSS/asset bytes;
 recheck every input. Stylesheets maps CSS roots only; callers load them in their
 application order. Never add implicit DOM injection or flatten CSS imports.
+CSS loading strategies consume explicit stylesheet/public-URL/mapping inputs,
+never parse CSS or choose names. CallerLoaded is the sole public built-in/default.
+Carry its prepared text and parser path/format together into cache loading.
+CSS emission accepts only sealed plain-JS modes matching module facts; never
+infer a wrapper mode from `.css` or bypass source/record provenance checks.
+Caller-loaded stubs have no relocations; add typed coordinates only with a
+strategy that needs them, never placeholder scanning.
 
 Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
 artifacts once after naming; release never parses output. Keep identifier,

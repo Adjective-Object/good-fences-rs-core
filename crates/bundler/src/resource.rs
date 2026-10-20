@@ -19,9 +19,13 @@ pub(crate) fn url_module(
     path: &Path,
     base: &crate::output_url::PublicBase,
 ) -> eyre::Result<String> {
+    public_url_module(&base.join(path)?)
+}
+
+pub(crate) fn public_url_module(public_url: &str) -> eyre::Result<String> {
     Ok(format!(
         "module.exports = {};\n",
-        serde_json::to_string(&base.join(path)?)?
+        serde_json::to_string(public_url)?
     ))
 }
 
@@ -37,7 +41,7 @@ pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
 }
 
 pub(crate) fn parser_path(path: &Path) -> PathBuf {
-    if is_asset(path) || is_stylesheet(path) {
+    if is_asset(path) {
         path.with_extension("asset.cjs")
     } else if path
         .extension()

@@ -76,11 +76,28 @@ pub(crate) fn checked_source(
             path.display()
         )
     })?;
-    let config =
-        ast_segmenter::ParserConfig::for_path(&crate::resource::parser_path(path), format)?;
+    let config = if crate::resource::is_stylesheet(path) {
+        // CSS strategies choose the wrapper mode. Only sealed plain-JS records
+        // may supply it; original stylesheet extensions are not parser modes.
+        ast_segmenter::ParserConfig::for_path(
+            &path.with_extension(if provenance.config().commonjs {
+                "cjs"
+            } else {
+                "mjs"
+            }),
+            format,
+        )?
+    } else {
+        ast_segmenter::ParserConfig::for_path(&crate::resource::parser_path(path), format)?
+    };
     ensure!(
         provenance.config() == config,
         "{}: source parser configuration mismatch; reparse and rebuild before emission",
+        path.display()
+    );
+    ensure!(
+        config.commonjs == (format == ModuleFormat::CommonJs),
+        "{}: source parser configuration mismatch with module facts",
         path.display()
     );
     ensure!(

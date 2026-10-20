@@ -118,6 +118,49 @@ fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
     assert!(!sidecar_path(&path).exists());
     no_staging(&dir);
 }
+
+#[test]
+fn prepared_css_parser_modes_key_disk_reuse_even_when_generated_text_is_unchanged() {
+    let dir = TmpDir::new();
+    let path = dir.root_join("style.css");
+    let original = b".button { color: red; }";
+    let source = "const button = '_button';";
+    fs::write(&path, original).unwrap();
+    let declarations = ecco::LocalFacts::default();
+    for extension in ["css.cjs", "css.mjs", "css.cjs"] {
+        let parser_path = path.with_extension(extension);
+        let load = |mode| {
+            load_prepared(
+                &logger::StdioLogger::new(),
+                &path,
+                PreparedSource {
+                    source,
+                    original,
+                    parser_path: &parser_path,
+                    // The prepared extension, not the original CSS/package,
+                    // determines the effective parser mode.
+                    package: ModuleFormat::Esm,
+                },
+                mode,
+                &declarations,
+            )
+            .unwrap()
+        };
+        let before = ast_segmenter::module_parse_count();
+        let cold = load(CacheMode::ReadWrite);
+        assert!(matches!(cold.status, CacheStatus::Miss(_)));
+        assert_eq!(cold.record.config.commonjs, extension == "css.cjs");
+        let warm = load(CacheMode::ReadOnly);
+        assert_eq!(warm.status, CacheStatus::Hit);
+        assert_eq!(warm.record, cold.record);
+        assert_eq!(ast_segmenter::module_parse_count(), before + 1);
+        let parsed = warm.record.to_parsed(source).unwrap();
+        assert_eq!(parsed.provenance().config(), warm.record.config);
+        let mut forged = warm.record;
+        forged.config.commonjs = !forged.config.commonjs;
+        assert!(forged.to_parsed(source).is_err());
+    }
+}
 #[test]
 fn inferred_contracts_roundtrip_and_link_without_reparsing() {
     let dir = TmpDir::new();

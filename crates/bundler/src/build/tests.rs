@@ -22,6 +22,81 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
+    let dir = TmpDir::new();
+    write(dir.root(), "style.css", ".button { color: red; }\n");
+    write(
+        dir.root(),
+        "main.cjs",
+        "module.exports = require('./style.css');",
+    );
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().path = "style.css".into();
+    config.entries.insert(
+        "require".into(),
+        Entry {
+            path: "main.cjs".into(),
+            output_name: Some("require.cjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    let path = dir.root().join("style.css");
+    let artifact = &cold.product.artifacts.stylesheets[&path];
+    let expected =
+        crate::resource::url_module(artifact, &crate::output_url::PublicBase::new("./").unwrap())
+            .unwrap();
+    assert_eq!(session.sources[&path].text, expected);
+    assert_eq!(
+        cold.product.artifacts.entries["main"],
+        Path::new("style.cjs")
+    );
+    assert_eq!(cold.product.artifacts.resources.len(), 1);
+    assert_eq!(
+        cold.product.artifacts.resources[artifact],
+        b".button { color: red; }\n"
+    );
+    assert_eq!(cold.counters.source_parses, 2);
+    assert!(session.sources[&path].record.config.commonjs);
+    assert_eq!(
+        observe_named(
+            &cold.product.artifacts,
+            "import css from './style.cjs'; import required from './require.cjs'; console.log(css === required);"
+        ),
+        b"true\n"
+    );
+    config.css = serde_json::from_str(r#"{"load":"caller-loaded"}"#).unwrap();
+    let memory = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&memory.product, &cold.product));
+    assert_eq!(memory.counters.memory_hits, 2);
+    assert_eq!(memory.counters.output_parses, 0);
+    session
+        .sources
+        .get_mut(&path)
+        .unwrap()
+        .record
+        .config
+        .commonjs = false;
+    let mismatched_memory = session.build(&config).unwrap();
+    assert_eq!(mismatched_memory.counters.memory_hits, 1);
+    assert_eq!(mismatched_memory.counters.disk_hits, 1);
+    assert_eq!(mismatched_memory.counters.source_parses, 0);
+    assert_eq!(mismatched_memory.product.artifacts, cold.product.artifacts);
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.disk_hits, 2);
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.source_reparses, 0);
+    assert_eq!(disk.counters.fragment_reparses, 0);
+    assert_eq!(disk.product.artifacts, cold.product.artifacts);
+    assert_eq!(disk.product.fingerprints, cold.product.fingerprints);
+    assert!(serde_json::from_str::<CssOptions>(r#"{"load":"auto-mount"}"#).is_err());
+}
+
+#[test]
 fn output_base_urls_cover_resource_exports_css_fetches_and_default_bytes() {
     let dir = TmpDir::new();
     write(

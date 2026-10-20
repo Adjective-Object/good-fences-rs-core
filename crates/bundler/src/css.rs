@@ -48,7 +48,7 @@ impl<'a> Styles<'a> {
         }
     }
 
-    pub(crate) fn prepare(&mut self, path: &Path, input: &[u8]) -> eyre::Result<String> {
+    pub(crate) fn discover(&mut self, path: &Path, input: &[u8]) -> eyre::Result<()> {
         if let Some(previous) = self.inputs.get(path) {
             ensure!(
                 previous == input,
@@ -120,7 +120,11 @@ impl<'a> Styles<'a> {
             }
             self.requests.insert(path, requests);
         }
-        resource::url_module(&self.output_path(path), self.public_base)
+        Ok(())
+    }
+
+    pub(crate) fn public_url(&self, path: &Path) -> eyre::Result<String> {
+        self.public_base.join(&self.output_path(path))
     }
 
     fn closure(&self, root: &Path) -> BTreeSet<(PathBuf, bool)> {

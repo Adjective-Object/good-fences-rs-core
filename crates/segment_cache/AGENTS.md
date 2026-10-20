@@ -15,6 +15,9 @@
   never bless unrelated parsed facts by hashing separately supplied source text.
 - Prepared sources cache generated-JS coordinates and parser identity, but recheck
   original resource bytes before sidecar publication and return, including hits.
+- Prepared parser path/format overrides resource extensions/package defaults;
+  mode-only changes miss even with equal text. Preserve the checked mode in
+  sealed provenance through `to_parsed`, never trust mutable record config alone.
 - Emission validation checks segment/occurrence coverage, placement and namespace
   links, canonical operation parents, complete nonrecursive source-slot roots,
   PURE input/guard ranges and opaque CJS request/hint-only recipes. Do not reparse.

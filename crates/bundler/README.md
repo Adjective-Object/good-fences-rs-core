@@ -73,7 +73,11 @@ cleanup. They never serve as executable module routes.
 ## Extracted CSS
 
 CSS default imports and `require` export a stylesheet URL using the same base;
-side-effect imports also extract the file. `Artifacts.stylesheets` maps retained
+side-effect imports also extract the file. `BuildOptions.css.load` selects the
+built-in `CssLoad::CallerLoaded` policy by default (`"caller-loaded"` when
+serializing `CssOptions`); it is currently the only supported loading policy.
+Global CSS keeps its CJS URL wrapper and `.cjs` entry extension.
+`Artifacts.stylesheets` maps retained
 CSS module roots to their emitted resource paths. The example driver reports
 this map and resource paths. Callers load the relevant root stylesheets in their
 application's order; there is **no implicit DOM injection** or automatic loading
@@ -97,6 +101,11 @@ through cycles. All these input bytes are rechecked before accepting a build.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
 memory/CBOR cache. There is no CSS Modules, Sass compilation, CSS concatenation
 or minification.
+Resource discovery/rendering and loading-stub generation are separate: stubs
+receive the stylesheet identity, public URL and independent name mappings,
+not CSS syntax. Prepared wrapper text and explicit parser identity travel
+together into cache loading. Emission checks sealed parser provenance and
+plain-JavaScript support without parsing or assuming CSS always means CJS.
 Base-only edits regenerate asset/CSS URL wrappers before memory-cache comparison;
 generated text keys parse reuse, while the normalized base also keys output
 reuse. Unchanged JavaScript stays warm, and owned resource paths stay unchanged.
