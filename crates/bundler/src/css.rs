@@ -34,6 +34,7 @@ pub(crate) struct Styles<'a> {
     compositions: BTreeMap<PathBuf, Vec<(crate::css_syntax::Name, PathBuf)>>,
     public_base: &'a crate::output_url::PublicBase,
     selection: &'a crate::build::CssModules,
+    transform_identity: [u8; 32],
     names: BTreeMap<PathBuf, crate::css_names::PreparedNames>,
     name_registry: crate::css_names::Registry,
 }
@@ -53,6 +54,15 @@ impl<'a> Styles<'a> {
             compositions: BTreeMap::new(),
             public_base,
             selection,
+            transform_identity: {
+                let mut digest = Sha256::new();
+                digest.update(crate::css_names::REVISION);
+                digest.update(crate::css_names::TRANSFORM_REVISION);
+                digest.update(crate::css_syntax::PARSER_REVISION);
+                digest.update(include_str!("css_names.rs"));
+                digest.update(include_str!("css_syntax.rs"));
+                digest.finalize().into()
+            },
             names: BTreeMap::new(),
             name_registry: crate::css_names::Registry::default(),
         }
@@ -349,9 +359,7 @@ impl<'a> Styles<'a> {
             digest.update((input.len() as u64).to_le_bytes());
             digest.update(input);
             if style && self.names.contains_key(&path) {
-                digest.update(crate::css_names::REVISION.as_bytes());
-                digest.update(crate::css_names::TRANSFORM_REVISION.as_bytes());
-                digest.update(crate::css_syntax::PARSER_REVISION.as_bytes());
+                digest.update(self.transform_identity);
                 for (request, target) in &self.compositions[&path] {
                     let target = target
                         .strip_prefix(self.root)

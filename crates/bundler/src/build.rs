@@ -323,28 +323,20 @@ impl BuildSession {
                 .as_ref()
                 .map_or(format, |prepared| prepared.package);
             let config = ParserConfig::for_path(&parser_path, parser_package)?;
-            let prepared_resource = if let Some(prepared) = prepared_css {
+            let text = if let Some(prepared) = prepared_css {
                 relocations.insert(path.clone(), prepared.relocations);
-                Some(prepared.source)
-            } else if kind == crate::resource::ResourceKind::Asset {
-                Some(crate::resource::prepare(&path, &input, &public_base)?)
+                prepared.source
             } else {
-                None
+                crate::resource::prepare(&path, &input, &public_base)?
             };
             if self.sources.get(&path).is_some_and(|s| {
                 s.input == input
-                    && prepared_resource
-                        .as_ref()
-                        .is_none_or(|text| &s.text == text)
+                    && s.text == text
                     && s.record.config == config
                     && s.record.matches_declarations(&declarations)
             }) {
                 counters.memory_hits += 1;
             } else {
-                let text = match prepared_resource {
-                    Some(text) => text,
-                    None => crate::resource::prepare(&path, &input, &public_base)?,
-                };
                 let loaded = segment_cache::load_prepared(
                     &logger::StdioLogger::new(),
                     &path,
@@ -543,7 +535,8 @@ impl BuildSession {
         );
         fingerprints.output = hash(
             format!(
-                "{fingerprints:?}:{emitter:?}:{:?}:{}:{:?}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}",
+                crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
                 options.css,
