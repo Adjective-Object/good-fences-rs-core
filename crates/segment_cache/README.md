@@ -25,6 +25,19 @@ CBOR items and 32 levels before serde allocates; indefinite lengths and trailing
 data are rejected. This is an untrusted cache, not an authenticated artifact.
 Diagnostics are not persisted. The codec is owned after parser arena drop.
 
+Recipe validation covers exact segment/capture/occurrence coverage, declaration,
+forward-use and write links, eager-read ranges, hoisted availability consistency,
+namespace-reference classification links and default/export wrapper containment.
+Operation nesting must be source-ordered canonical preorder with the nearest
+containing parent. Each source slot must list exactly its composed roots, never
+itself or an ancestor. PURE inputs link back to the invocation's original
+callee/arguments; chain slots remain ordered within that callee and guard
+boundaries/known module-await vetoes are checked. CJS recipes permit only
+dependency and source-hint slots, never lexical or invocation rewrites.
+These are structural integrity checks on source-local evidence, not a second
+parser or authentication of a publisher; source/configuration hashes and bounded
+CBOR preflight remain mandatory on both codec boundaries.
+
 ## Sidecar IO
 
 `load_or_parse(logger, path, package_format, CacheMode)` always reads the source,

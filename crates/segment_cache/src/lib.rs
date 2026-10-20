@@ -2,6 +2,7 @@
 mod bounded;
 mod sidecar;
 mod validate;
+mod validate_emission;
 
 pub use sidecar::{
     is_cache_artifact, load_or_parse, sidecar_path, CacheMode, CacheOutcome, CacheStatus,

@@ -6,7 +6,7 @@ use oxc_span::Span;
 
 use crate::{CacheRecord, ParserConfig, EXTRACTOR_VERSION, OXC_REVISION, SCHEMA_VERSION};
 
-fn span(source: &str, range: Span) -> eyre::Result<()> {
+pub(super) fn span(source: &str, range: Span) -> eyre::Result<()> {
     ensure!(
         range.start <= range.end
             && source
@@ -17,7 +17,7 @@ fn span(source: &str, range: Span) -> eyre::Result<()> {
     Ok(())
 }
 
-fn contains(outer: Span, inner: Span) -> bool {
+pub(super) fn contains(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
 
@@ -289,6 +289,7 @@ impl CacheRecord {
         for d in facts.directives.iter().chain(facts.hashbang.iter()) {
             span(source, d.span)?;
         }
+        crate::validate_emission::validate(module, source)?;
         Ok(())
     }
 }
