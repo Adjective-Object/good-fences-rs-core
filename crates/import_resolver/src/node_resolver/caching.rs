@@ -6,6 +6,7 @@
 use super::common::AHashMap;
 use super::pkgjson_rewrites::PackageJsonRewriteData;
 use super::util;
+use crate::resolve::{PathResolver, Resolution, TargetEnv, NODE_BUILTINS};
 use abspath::join_abspath;
 use anyhow::{bail, Context, Error, Result};
 use ftree_cache::context_data::{FileContextCache, WithCache};
@@ -17,7 +18,6 @@ use std::{
     env::current_dir,
     path::{Component, Path, PathBuf},
 };
-use crate::resolve::{PathResolver, Resolution, TargetEnv, NODE_BUILTINS};
 use tracing::{debug, trace, Level};
 
 pub type PackageJsonCacheEntry = WithCache<
@@ -41,7 +41,7 @@ pub type NodeModulesCache = FileContextCache<
         (),
         // Track resolution of paths into each node_modules directory, so
         // we can optimisitcally resolve paths without hitting the filesystem
-        AHashMap<String, CachedResolution>,
+        AHashMap<(String, Vec<String>), CachedResolution>,
     >,
     NODE_MODULES,
 >;
@@ -87,8 +87,14 @@ pub struct CachingNodeModulesResolver<'a> {
 }
 
 pub const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "json", "node"];
-pub const DEFAULT_EXPORT_CODITIONS: &[&str] =
-    &["node", "node-addons", "module-sync", "import", "require", "default"];
+pub const DEFAULT_EXPORT_CODITIONS: &[&str] = &[
+    "node",
+    "node-addons",
+    "module-sync",
+    "import",
+    "require",
+    "default",
+];
 
 #[derive(Clone)]
 pub struct NodeModulesResolverOptions {
@@ -376,6 +382,10 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             return Ok(None);
         }
 
+        let mut conditions = self.export_conditions.clone();
+        conditions.sort();
+        conditions.dedup();
+        let key = (target.to_owned(), conditions);
         let abs_base = join_abspath(self.monorepo_root, base_dir)?;
 
         let mut iter = self
@@ -393,7 +403,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             tracing::debug!("found node_modules directory: {:#?}", nm_dir_path);
 
             // Use a cached resolution if it exists
-            match nm_dir_entry.get_cached().get(target) {
+            match nm_dir_entry.get_cached().get(&key) {
                 Some(CachedResolution::Resolution(path)) => {
                     // cached a resolution, return it
                     return Ok(Some(path.clone()));
@@ -506,10 +516,9 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 .flatten()
             {
                 // Resolved! Cache the result and return it.
-                nm_dir_entry.get_cached_mut().insert(
-                    target.to_string(),
-                    CachedResolution::Resolution(result.clone()),
-                );
+                nm_dir_entry
+                    .get_cached_mut()
+                    .insert(key.clone(), CachedResolution::Resolution(result.clone()));
                 tracing::debug!("resolved: {target_file_path:#?}");
                 return Ok(Some(result));
             } else {
@@ -518,7 +527,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                 // and continue the loop to try the next node_modules directory.
                 nm_dir_entry
                     .get_cached_mut()
-                    .insert(target.to_string(), CachedResolution::NoResolution);
+                    .insert(key.clone(), CachedResolution::NoResolution);
             }
         }
 
@@ -674,9 +683,6 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 impl PathResolver for CachingNodeModulesResolver<'_> {
     fn resolve(&self, base: &Path, module_specifier: &str) -> Result<Resolution, Error> {
         self.resolve_filename(base, module_specifier)
-            .map(|path| Resolution {
-                path,
-                slug: None,
-            })
+            .map(|path| Resolution { path, slug: None })
     }
 }

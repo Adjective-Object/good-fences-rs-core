@@ -1,6 +1,3 @@
-// For paths processing in tsconfig
-#![feature(iterator_try_collect)]
-
 #[cfg(test)]
 extern crate pretty_assertions;
 

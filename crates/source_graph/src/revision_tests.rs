@@ -141,9 +141,10 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
         "node_modules/pkg/package.json" => r#"{"name":"pkg","exports":{".":{"import":"./i.js","require":"./r.js"}}}"#,
         "node_modules/pkg/i.js" => "",
         "node_modules/pkg/r.js" => "",
-        "one.js" => "",
-        "two.js" => "",
-        "tsconfig.json" => r#"{"compilerOptions":{"baseUrl":".","paths":{"alias":["./one.js"]}}}"#
+        "node_modules/alias/package.json" => r#"{"exports":{".":{"two":"./two.js","default":"./one.js"}}}"#,
+        "node_modules/alias/one.js" => "",
+        "node_modules/alias/two.js" => "",
+        "tsconfig.json" => r#"{"compilerOptions":{"customConditions":[]}}"#
     };
     let entry = dir.root().join("entry.cjs");
     let source = fs::read_to_string(&entry).unwrap();
@@ -163,8 +164,8 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
         for path in [
             "node_modules/pkg/i.js",
             "node_modules/pkg/r.js",
-            "one.js",
-            "two.js",
+            "node_modules/alias/one.js",
+            "node_modules/alias/two.js",
         ] {
             inputs.push(input(dir.root().join(path).to_str().unwrap(), ""));
         }
@@ -194,12 +195,17 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
     };
     assert_eq!(
         targets(&graph),
-        ["node_modules/pkg/r.js", "node_modules/pkg/i.js", "one.js"].map(std::path::PathBuf::from)
+        [
+            "node_modules/pkg/r.js",
+            "node_modules/pkg/i.js",
+            "node_modules/alias/one.js"
+        ]
+        .map(std::path::PathBuf::from)
     );
     let before = graph.revision();
     fs::write(
         dir.root().join("tsconfig.json"),
-        r#"{"compilerOptions":{"baseUrl":".","paths":{"alias":["./two.js"]}}}"#,
+        r#"{"compilerOptions":{"customConditions":["two"]}}"#,
     )
     .unwrap();
     fs::write(
@@ -213,7 +219,12 @@ fn conditions_package_and_tsconfig_edits_relink_without_source_change() {
     assert!(graph.revision().resolution > before.resolution);
     assert_eq!(
         targets(&graph),
-        ["node_modules/pkg/i.js", "node_modules/pkg/r.js", "two.js"].map(std::path::PathBuf::from)
+        [
+            "node_modules/pkg/i.js",
+            "node_modules/pkg/r.js",
+            "node_modules/alias/two.js"
+        ]
+        .map(std::path::PathBuf::from)
     );
     let mut full = make();
     full.refresh_resolution(&resolver).unwrap();

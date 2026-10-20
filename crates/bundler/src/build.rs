@@ -568,8 +568,7 @@ fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
 }
 
 /// Conservative resolver dependency inventory: all file names and all JSON
-/// config bytes, including package trees. Unsupported tsconfig forms are gated
-/// here instead of silently ignored (or panicking in the compatibility resolver).
+/// config bytes, including package trees. Validate direct tsconfig conditions.
 fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
     fn visit(
         root: &Path,
@@ -597,7 +596,7 @@ fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
                 visit(root, &path, out)?;
             } else if ty.is_file() {
                 if name == "tsconfig.json" {
-                    check_tsconfig(&path)?;
+                    import_resolver::node_resolver::read_custom_conditions(&path)?;
                 }
                 out.insert(
                     path.strip_prefix(root)?.to_owned(),
@@ -617,46 +616,6 @@ fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
     let mut result = BTreeMap::new();
     visit(root, root, &mut result)?;
     Ok(result)
-}
-
-fn check_tsconfig(path: &Path) -> eyre::Result<()> {
-    let json: serde_json::Value = serde_json::from_slice(&fs::read(path)?)
-        .wrap_err_with(|| format!("{}: tsconfig requires strict JSON", path.display()))?;
-    ensure!(
-        json.get("extends").is_none() && json.get("references").is_none(),
-        "{}: tsconfig extends/references are unsupported by the structural resolver",
-        path.display()
-    );
-    if let Some(paths) = json
-        .pointer("/compilerOptions/paths")
-        .and_then(|v| v.as_object())
-    {
-        let patterns: Vec<_> = paths.keys().collect();
-        for pattern in &patterns {
-            ensure!(pattern.matches('*').count() <= 1 && (!pattern.contains('*') || pattern.ends_with('*')),
-                "{}: unsupported tsconfig path pattern {pattern:?}; only a single terminal wildcard is supported", path.display());
-            if let Some(prefix) = pattern.strip_suffix('*') {
-                ensure!(
-                    !patterns
-                        .iter()
-                        .any(|other| *other != *pattern && other.starts_with(prefix)),
-                    "{}: overlapping tsconfig path patterns are unsupported: {pattern:?}",
-                    path.display()
-                );
-            }
-            if let Some(targets) = paths[*pattern].as_array() {
-                for target in targets.iter().filter_map(serde_json::Value::as_str) {
-                    let maximum = usize::from(pattern.contains('*'));
-                    ensure!(
-                        target.matches('*').count() <= maximum,
-                        "{}: unsupported tsconfig wildcard target {target:?} for {pattern:?}",
-                        path.display()
-                    );
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

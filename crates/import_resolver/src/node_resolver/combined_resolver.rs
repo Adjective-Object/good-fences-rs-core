@@ -1,17 +1,18 @@
-use anyhow::Error;
 use std::path::Path;
 
-use crate::resolve::{PathResolver, Resolution};
+use ftree_cache::context_data::FileContextCache;
+
 use super::{
     caching::{
         CachingNodeModulesResolver, NodeModulesCache, NodeModulesResolverOptions, PackageJsonCache,
     },
-    tsconfig::ProcessedTsconfig,
-    tsconfig_resolver::{TsconfigCache, TsconfigPathsResolver},
+    tsconfig::TsconfigConditions,
 };
+use crate::resolve::{PathResolver, Resolution};
 
-// Caches used by the Combined resolver's sub-resolvers
-#[derive(Debug)]
+type TsconfigCache = FileContextCache<TsconfigConditions, "tsconfig.json">;
+
+#[derive(Debug, Default)]
 pub struct CombinedResolverCaches {
     tsconfig_cache: TsconfigCache,
     node_modules_cache: NodeModulesCache,
@@ -20,11 +21,7 @@ pub struct CombinedResolverCaches {
 
 impl CombinedResolverCaches {
     pub fn new() -> Self {
-        Self {
-            node_modules_cache: NodeModulesCache::new(),
-            package_json_cache: PackageJsonCache::new(),
-            tsconfig_cache: TsconfigCache::new(),
-        }
+        Self::default()
     }
 
     pub fn resolver<'a>(
@@ -32,517 +29,149 @@ impl CombinedResolverCaches {
         root_dir: &'a Path,
         options: NodeModulesResolverOptions,
     ) -> CombinedResolver<'a> {
-        CombinedResolver::<'a> {
+        CombinedResolver {
             root_dir,
-            tsconfig_cache: &self.tsconfig_cache,
-            node_modules_resolver: CachingNodeModulesResolver::new(
-                root_dir,
-                &self.package_json_cache,
-                &self.node_modules_cache,
-                options,
-            ),
+            caches: self,
+            options,
         }
     }
 
-    /// Mark the files files in the given path as dirty
     pub fn mark_dirty_root(&mut self, root: &Path) {
         self.tsconfig_cache.mark_dirty_root(root);
         self.node_modules_cache.mark_dirty_root(root);
         self.package_json_cache.mark_dirty_root(root);
     }
 
-    // pre-populate a package json cache with a package.json file
     pub fn package_json_cache(&mut self) -> &mut PackageJsonCache {
         &mut self.package_json_cache
     }
 }
 
-impl Default for CombinedResolverCaches {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// Resolver that combines the tsconfig and node_modules resolvers,
-// preferring resolution from the tsconfig resolver when possible
+/// Node/package resolution with additional tsconfig export conditions, never path rewrites.
 pub struct CombinedResolver<'a> {
     root_dir: &'a Path,
-    tsconfig_cache: &'a TsconfigCache,
-    node_modules_resolver: CachingNodeModulesResolver<'a>,
+    caches: &'a CombinedResolverCaches,
+    options: NodeModulesResolverOptions,
 }
 
 impl PathResolver for CombinedResolver<'_> {
-    fn resolve(&self, base: &Path, module_specifier: &str) -> Result<Resolution, Error> {
-        let base_path = base;
-
-        match self.tsconfig_cache.probe_path(self.root_dir, base_path)? {
-            Some((path, maybe_tsconfig)) => match maybe_tsconfig.value() {
-                ProcessedTsconfig::HasPaths(ref tsconfig) => {
-                    let resolver =
-                        TsconfigPathsResolver::new(tsconfig, &self.node_modules_resolver);
-                    tracing::debug!("matched tsconfig {} with \"paths\". resolving against tsconfig resolver (wrapping node_modules)", path.display());
-
-                    let resolution = resolver.resolve(base, module_specifier)?;
-                    tracing::debug!(
-                        "tsconfig resolved {} to {}",
-                        module_specifier,
-                        resolution.path.display(),
-                    );
-
-                    Ok(resolution)
-                }
-                ProcessedTsconfig::NoPaths => {
-                    tracing::debug!("matched tsconfig {} with no \"paths\" entry. resolving against node_modules_resolver", path.display());
-                    self.node_modules_resolver.resolve(base, module_specifier)
-                }
-            },
-            None => {
-                tracing::debug!(
-                    "No tsconfig found for {:?}, resolving against node_modules_resolver",
-                    base_path
-                );
-                self.node_modules_resolver.resolve(base, module_specifier)
-            }
+    fn resolve(&self, base: &Path, specifier: &str) -> anyhow::Result<Resolution> {
+        let mut options = self.options.clone();
+        if let Some((_, config)) = self.caches.tsconfig_cache.probe_path(self.root_dir, base)? {
+            options
+                .export_conditions
+                .extend(config.value().0.iter().cloned());
         }
+        CachingNodeModulesResolver::new(
+            self.root_dir,
+            &self.caches.package_json_cache,
+            &self.caches.node_modules_cache,
+            options,
+        )
+        .resolve(base, specifier)
     }
 }
 
 #[cfg(test)]
-mod test {
-    extern crate pretty_assertions;
-
+mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
     use crate::resolve::TargetEnv;
     use test_tmpdir::test_tmpdir;
 
-    fn check_deadlocks() {
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(10));
-            let deadlocks = parking_lot::deadlock::check_deadlock();
-            if deadlocks.is_empty() {
-                continue;
-            }
-
-            tracing::debug!("{} deadlocks detected", deadlocks.len());
-            for (i, threads) in deadlocks.iter().enumerate() {
-                tracing::debug!("Deadlock #{}", i);
-                for t in threads {
-                    tracing::debug!("Thread Id {:#?}", t.thread_id());
-                    tracing::debug!("{:#?}", t.backtrace());
-                }
-            }
-        });
-    }
-
     #[test]
-    pub fn test_bypasses_tsconfig() {
-        check_deadlocks();
-        let tmp = test_tmpdir!(
-            "tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
-                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-                    }
-                }
-            }"#,
-            "node_modules/to-node-modules/package.json" => r#"{
-                "name": "to-node-modules",
-                "main": "./index.js"
-            }"#,
-            "node_modules/to-node-modules/index.js" => r#"export const something = 1;"#
-        );
-
+    fn custom_conditions_are_scoped_and_cache_keys_include_the_active_set() {
+        let dir = test_tmpdir! {
+            "entry.mjs" => "",
+            "nested/entry.mjs" => "",
+            "tsconfig.json" => r#"{"compilerOptions":{"customConditions":["source"],"baseUrl":".","paths":{"pkg":["./wrong.mjs"]}}}"#,
+            "nested/tsconfig.json" => r#"{"compilerOptions":{"customSourceConditions":["nested"]}}"#,
+            "wrong.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":{".":{"nested":"./nested.mjs","source":"./source.mjs","default":"./default.mjs"},"./blocked":{"nested":"./nested.mjs"}}}"#,
+            "node_modules/pkg/nested.mjs" => "",
+            "node_modules/pkg/source.mjs" => "",
+            "node_modules/pkg/default.mjs" => ""
+        };
         let caches = CombinedResolverCaches::new();
         let resolver = caches.resolver(
-            tmp.root(),
+            dir.root(),
             NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
         );
-
-        let resolution = resolver
-            .resolve(
-                &tmp.root()
-                        .to_owned()
-                        .join("packages/my/importing/module.ts"),
-                "to-node-modules",
-            )
-            .unwrap();
-
-        assert_eq!(
-            resolution,
-            Resolution {
-                path: (
-                    tmp.root()
-                        .to_owned()
-                        .join("node_modules/to-node-modules/index.js")
-                ),
-                slug: None,
+        for _ in 0..2 {
+            for (base, expected) in [
+                ("entry.mjs", "source.mjs"),
+                ("nested/entry.mjs", "nested.mjs"),
+            ] {
+                assert_eq!(
+                    resolver.resolve(&dir.root_join(base), "pkg").unwrap().path,
+                    dir.root_join(&format!("node_modules/pkg/{expected}"))
+                );
             }
+        }
+        assert!(resolver
+            .resolve(&dir.root_join("entry.mjs"), "pkg/blocked")
+            .is_err());
+        assert_eq!(
+            resolver
+                .resolve(&dir.root_join("nested/entry.mjs"), "pkg/blocked")
+                .unwrap()
+                .path,
+            dir.root_join("node_modules/pkg/nested.mjs")
         );
     }
 
     #[test]
-    pub fn test_import_literal() {
-        let tmp = test_tmpdir!(
-            "tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
-                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-                    }
-                }
-            }"#,
-            "packages/non-glob-specifier/lib/index.ts" => r#"export const something = 1;"#
-        );
-
+    fn paths_and_base_url_never_create_aliases_or_local_fallbacks() {
+        let dir = test_tmpdir! {
+            "entry.mjs" => "",
+            "tsconfig.json" => r#"{"compilerOptions":{"baseUrl":".","paths":{"alias":["./value.mjs"],"a*b*c":["./value.mjs"]}}}"#,
+            "value.mjs" => ""
+        };
         let caches = CombinedResolverCaches::new();
         let resolver = caches.resolver(
-            tmp.root(),
+            dir.root(),
             NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
         );
-        let resolution = resolver
-            .resolve(
-                &tmp.root_join("packages/my/importing/module.ts"),
-                "non-glob-specifier",
-            )
-            .unwrap();
-
+        for request in ["alias", "value"] {
+            assert!(
+                resolver
+                    .resolve(&dir.root_join("entry.mjs"), request)
+                    .is_err(),
+                "{request}"
+            );
+        }
         assert_eq!(
-            resolution,
-            Resolution {
-                path: (
-                    tmp.root()
-                        .to_owned()
-                        .join("packages/non-glob-specifier/lib/index.ts")
-                ),
-                slug: None,
-            }
-        );
-    }
-
-    #[test]
-    pub fn test_import_glob() {
-        let tmp = test_tmpdir!(
-            "tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*.ts"],
-                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-                    }
-                }
-            }"#,
-            "packages/glob-specifier/src/something.ts" => r#"export const something = 1;"#
-        );
-
-        let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(
-            tmp.root(),
-            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
-        );
-        let resolution = resolver
-            .resolve(
-                &tmp.root_join("packages/my/importing/module.ts"),
-                "glob-specifier/lib/something",
-            )
-            .unwrap();
-
-        assert_eq!(
-            resolution,
-            Resolution {
-                path: (
-                    tmp.root()
-                        .to_owned()
-                        .join("packages/glob-specifier/src/something.ts")
-                ),
-                slug: None,
-            }
-        );
-    }
-
-    #[test]
-    pub fn test_precedence() {
-        let tmp = test_tmpdir!(
-            "t/tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "glob-specifier/lib/*": ["override-packages/glob-specifier/src/*"]
-                    }
-                }
-            }"#,
-            "tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "glob-specifier/lib/*": ["packages/glob-specifier/src/*"],
-                        "non-glob-specifier": ["packages/non-glob-specifier/lib/index"]
-                    }
-                }
-            }"#,
-            "packages/glob-specifier/src/bar.ts" => r#"export const something = 1;"#,
-            "t/override-packages/glob-specifier/src/bar.ts" => r#"export const something = 2;"#
-        );
-
-        let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(
-            tmp.root(),
-            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
-        );
-        let resolution = resolver
-            .resolve(
-                &tmp.root_join("t/packages/my/importing/module.ts"),
-                "glob-specifier/lib/bar",
-            )
-            .unwrap();
-
-        assert_eq!(
-            resolution,
-            Resolution {
-                path: (
-                    tmp.root()
-                        .to_owned()
-                        .join("t/override-packages/glob-specifier/src/bar.ts")
-                ),
-                slug: None,
-            }
-        );
-    }
-
-    #[test]
-    pub fn test_tsconfig_beats_node_modules() {
-        let tmp = test_tmpdir!(
-            // this tsconfig.json should match the "in-root" rewrite rule
-            "tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "in-root/lib/*": ["packages/glob-specifier/src/*"]
-                    }
-                }
-            }"#,
-            "root/node_modules/in-root/lib/bar.ts" => r#"export const something = 1;"#,
-            "packages/glob-specifier/src/bar.ts" => r#"export const something = 2;"#
-        );
-
-        let caches = CombinedResolverCaches::new();
-        let resolver = caches.resolver(
-            tmp.root(),
-            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
-        );
-        let resolution = resolver
-            .resolve(
-                &tmp.root_join("root/packages/my/importing/module.ts"),
-                "in-root/lib/bar.ts",
-            )
-            .unwrap();
-
-        assert_eq!(
-            resolution,
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root()
-                        .to_owned()
-                        .join("packages/glob-specifier/src/bar.ts")
-                ),
-                slug: None,
-            }
-        );
-    }
-
-    #[test]
-    pub fn test_no_escape_root() {
-        let tmp = test_tmpdir!(
-            // this tsconfig.json should match the "in-root" rewrite rule
-            "tsconfig.json" => r#"{
-                "compilerOptions": {
-                    "baseUrl": ".",
-                    "paths": {
-                        "in-root/lib/*": ["packages/glob-specifier/src/*"],
-                    }
-                }
-            }"#,
-            "root/node_modules/in-root/lib/bar.ts" => r#"export const something = 1;"#
-        );
-
-        let caches = CombinedResolverCaches::new();
-        let sub_root = tmp.root_join("root");
-        let resolver = caches.resolver(
-            &sub_root,
-            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
-        );
-        let resolution = resolver
-            .resolve(
-                &tmp.root_join("root/packages/my/importing/module.ts"),
-                "in-root/lib/bar.ts",
-            )
-            .unwrap();
-
-        assert_eq!(
-            resolution,
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root()
-                        .to_owned()
-                        .join("root/node_modules/in-root/lib/bar.ts")
-                ),
-                slug: None,
-            }
+            resolver
+                .resolve(&dir.root_join("entry.mjs"), "./value.mjs")
+                .unwrap()
+                .path,
+            dir.root_join("value.mjs")
         );
     }
 
     #[test]
     fn node_runtime_conditions_are_not_active_for_browser_targets() {
-        let tmp = test_tmpdir!(
-            "node_modules/pkg/package.json" => r#"{
-                "exports": {
-                    ".": {
-                        "node-addons": "./node.ts",
-                        "module-sync": "./node.ts",
-                        "node": "./node.ts",
-                        "default": "./browser.ts"
-                    }
-                }
-            }"#,
-            "node_modules/pkg/node.ts" => "export const value = 1;",
-            "node_modules/pkg/browser.ts" => "export const value = 2;"
-        );
+        let dir = test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":{".":{"node-addons":"./node.mjs","module-sync":"./node.mjs","node":"./node.mjs","default":"./browser.mjs"}}}"#,
+            "node_modules/pkg/node.mjs" => "",
+            "node_modules/pkg/browser.mjs" => ""
+        };
         for (environment, expected) in [
-            (TargetEnv::Node, "node.ts"),
-            (TargetEnv::Browser, "browser.ts"),
+            (TargetEnv::Node, "node.mjs"),
+            (TargetEnv::Browser, "browser.mjs"),
         ] {
             let caches = CombinedResolverCaches::new();
             let resolver = caches.resolver(
-                tmp.root(),
+                dir.root(),
                 NodeModulesResolverOptions::default_for_env(environment),
             );
             assert_eq!(
-                resolver.resolve(&tmp.root_join("entry.ts"), "pkg").unwrap().path,
-                tmp.root_join(&format!("node_modules/pkg/{expected}"))
+                resolver
+                    .resolve(&dir.root_join("entry.mjs"), "pkg")
+                    .unwrap()
+                    .path,
+                dir.root_join(&format!("node_modules/pkg/{expected}"))
             );
         }
-    }
-
-    #[test]
-    pub fn test_conditional_export_heterogenous() {
-        // Test that the resolver can handle a package.json with a mix of
-        // single and conditional exports
-        let tmp = test_tmpdir!(
-            "node_modules/hetero/package.json" => r#"
-            {
-                "exports": {
-                    ".": {
-                        "import": "./lib/import-target.ts",
-                        "require": "./lib/require-target.ts"
-                    },
-                    "./foo": "./lib/foo.ts"
-                }
-            }
-            "#,
-            "node_modules/hetero/lib/import-target.ts" => r#"export const something = 1;"#,
-            "node_modules/hetero/lib/require-target.ts" => r#"export const something = 2;"#,
-            "node_modules/hetero/lib/foo.ts" => r#"export const something = 3;"#
-        );
-
-        let resolve_with_conditions = |from: &str, to: &str, conditions: Vec<&str>| -> Resolution {
-            let caches = CombinedResolverCaches::new();
-
-            // resolve with import
-            let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
-            options.export_conditions = conditions.into_iter().map(|s| s.to_string()).collect();
-            let import_resolver = caches.resolver(tmp.root(), options);
-            import_resolver
-                .resolve(&tmp.root().join(from), to)
-                .unwrap()
-        };
-
-        // check "resolve" condition
-        assert_eq!(
-            resolve_with_conditions(
-                "root/packages/my/importing/module.ts",
-                "hetero",
-                vec!["require"],
-            ),
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root()
-                        .to_owned()
-                        .join("node_modules/hetero/lib/require-target.ts")
-                ),
-                slug: None,
-            }
-        );
-
-        // check "import" condition
-        assert_eq!(
-            resolve_with_conditions(
-                "root/packages/my/importing/module.ts",
-                "hetero",
-                vec!["import"],
-            ),
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root()
-                        .to_owned()
-                        .join("node_modules/hetero/lib/import-target.ts")
-                ),
-                slug: None,
-            }
-        );
-
-        // Active conditions are a set; package declaration order wins.
-        assert_eq!(
-            resolve_with_conditions(
-                "packages/my/importing/module.ts",
-                "hetero",
-                vec!["not-present", "require", "import"],
-            ),
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root()
-                        .to_owned()
-                        .join("node_modules/hetero/lib/import-target.ts")
-                ),
-                slug: None,
-            }
-        );
-
-        // check "import" condition and "resolve" condition against a non-conditional export
-        assert_eq!(
-            resolve_with_conditions(
-                "packages/my/importing/module.ts",
-                "hetero/foo",
-                vec!["require"],
-            ),
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root().to_owned().join("node_modules/hetero/lib/foo.ts")
-                ),
-                slug: None,
-            }
-        );
-        assert_eq!(
-            resolve_with_conditions(
-                "packages/my/importing/module.ts",
-                "hetero/foo",
-                vec!["import"],
-            ),
-            Resolution {
-                path: (
-                    // rewrite should not occur (tsconfig is outside the root dir)
-                    tmp.root().to_owned().join("node_modules/hetero/lib/foo.ts")
-                ),
-                slug: None,
-            }
-        );
     }
 }

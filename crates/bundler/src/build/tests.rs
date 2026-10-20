@@ -2050,20 +2050,33 @@ fn package_exports_type_tsconfig_and_options_invalidate_independently() {
     write(
         root,
         "main.mjs",
-        "import {value} from '@value'; console.log(value);",
+        "import {value} from 'choices'; console.log(value);",
     );
     write(
         root,
         "tsconfig.json",
-        r#"{"compilerOptions":{"baseUrl":".","paths":{"@value":["a.mjs"]}}}"#,
+        r#"{"compilerOptions":{"customConditions":[]}}"#,
     );
-    write(root, "a.mjs", "export const value = 4;");
-    write(root, "b.mjs", "export const value = 5;");
+    write(
+        root,
+        "node_modules/choices/package.json",
+        r#"{"type":"module","exports":{".":{"custom":"./b.mjs","default":"./a.mjs"}}}"#,
+    );
+    write(
+        root,
+        "node_modules/choices/a.mjs",
+        "export const value = 4;",
+    );
+    write(
+        root,
+        "node_modules/choices/b.mjs",
+        "export const value = 5;",
+    );
     parity(&mut session, &options);
     write(
         root,
         "tsconfig.json",
-        r#"{"compilerOptions":{"baseUrl":".","paths":{"@value":["b.mjs"]}}}"#,
+        r#"{"compilerOptions":{"customConditions":["custom"]}}"#,
     );
     let tsconfig = parity(&mut session, &options);
     assert_eq!(tsconfig.counters.source_parses, 1);
@@ -2095,16 +2108,24 @@ fn unsupported_configuration_is_fallible_not_silently_ignored() {
     for json in [
         r#"{"extends":"./base.json","compilerOptions":{}}"#,
         r#"{"references":[],"compilerOptions":{}}"#,
-        r#"{"compilerOptions":{"paths":{"a*b*c":["x"]}}}"#,
-        r#"{"compilerOptions":{"paths":{"a*b":["x"]}}}"#,
-        r#"{"compilerOptions":{"paths":{"a/*":["x"],"a/sub/*":["y"]}}}"#,
-        r#"{"compilerOptions":{"paths":{"a/*":["x/*/*"]}}}"#,
-        r#"{"compilerOptions":{"paths":{"exact":["x/*"]}}}"#,
+        r#"{"compilerOptions":{"customConditions":"source"}}"#,
+        r#"{"compilerOptions":{"customConditions":[1]}}"#,
+        r#"{"compilerOptions":{"customConditions":[""]}}"#,
+        r#"{"compilerOptions":{"customConditions":[],"customSourceConditions":[]}}"#,
     ] {
         write(dir.root(), "tsconfig.json", json);
         assert!(session.build(&options).is_err(), "{json}");
     }
 
+    write(
+        dir.root(),
+        "tsconfig.json",
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"a*b*c":["ignored"]}}}"#,
+    );
+    assert_eq!(
+        session.build(&options).unwrap().product.artifacts,
+        valid.product.artifacts
+    );
     fs::remove_file(dir.root().join("tsconfig.json")).unwrap();
     assert_eq!(
         session.build(&options).unwrap().product.artifacts,

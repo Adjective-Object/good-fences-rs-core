@@ -365,13 +365,15 @@ All resolved sources must remain inside it. In-tree symlinks (including director
 symlinks) are explicitly rejected by this orchestration API; the lower-level
 resolver retains its separate policy. Nearest package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
-supported package/tsconfig forms (not every Node resolver feature; e.g. bare
-string `exports` is currently rejected). JSON/JSONC bytes and all file names
+supported package forms, including bare-string root exports and wildcard access
+to arbitrary package files. Export maps still enforce private subpaths.
+JSON/JSONC bytes and all file names
 under the root conservatively invalidate resolution, including package trees,
 config ancestry, new files and deleted targets. The public API gates unsupported
-tsconfig forms instead of silently ignoring them: use strict `tsconfig.json`
-JSON with direct `compilerOptions.baseUrl`/`paths`; no extends/references,
-overlapping mappings, multiple wildcards or nonterminal wildcard patterns.
+tsconfig conditions instead of silently ignoring them: use strict `tsconfig.json`
+JSON with direct `compilerOptions.customConditions` (`customSourceConditions`
+is an alias); no extends/references. `baseUrl`/`paths` never rewrite runtime
+requests. Use package exports instead, including for source-only conditions.
 Other TypeScript compiler options are not runtime transforms.
 `.git`, `target`, sidecars and
 reserved `.bundler-*` publication directories are excluded. Keep unrelated large
@@ -503,9 +505,10 @@ or full workspace test claim is made.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
-an entry and a tsconfig-selected dependency (**66 reached sources / 65 requests**).
+an entry and a conditionally exported package dependency
+(**66 reached sources / 65 requests**).
 Each sample runs cold parse-cache → new-session warm disk cache → same-session
-no-op → one local declaration edit → one added public export → tsconfig target
+no-op → one local declaration edit → one added public export → tsconfig condition
 switch. Timings include actual source/config IO, the full public pipeline and
 transactional publication; compilation, fixture setup and runtime execution are
 outside the timed section. “Cold” means no source sidecars/session/output,

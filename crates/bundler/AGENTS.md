@@ -23,8 +23,8 @@ Project roots are bounded/canonical;
 symlinks and resolved sources outside the root are rejected.
 Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
-Gate unsupported tsconfig forms rather than silently ignoring extends/references
-or allowing nondeterministic overlapping patterns/compatibility-resolver panics.
+Read only direct tsconfig customConditions (customSourceConditions alias);
+never rewrite paths/baseUrl. Gate unsupported inherited/reference conditions.
 Publish immutable generations through one atomic ownership pointer; OS locking
 rejects competing publishers and spans the whole build_and_publish operation.
 Explicitly unlock before closing descriptors, including unwind; forked child

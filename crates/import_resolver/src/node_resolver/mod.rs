@@ -1,7 +1,7 @@
 use anyhow::Error;
+use caching::NodeModulesResolverOptions;
 use combined_resolver::{CombinedResolver, CombinedResolverCaches};
 use core::fmt;
-use caching::NodeModulesResolverOptions;
 use ouroboros::self_referencing;
 use std::{
     fmt::{Debug, Formatter},
@@ -10,13 +10,13 @@ use std::{
 
 use crate::resolve::{PathResolver, Resolution};
 
+pub mod caching;
 pub mod combined_resolver;
 mod common;
 pub mod internal_resolver;
-pub mod caching;
 mod pkgjson_rewrites;
 mod tsconfig;
-mod tsconfig_resolver;
+pub use tsconfig::read_custom_conditions;
 mod util;
 
 // Wrapper for Combined resolver that owns its own caches, instead of

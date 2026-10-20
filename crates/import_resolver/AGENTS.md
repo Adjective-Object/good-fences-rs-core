@@ -13,8 +13,8 @@ pub trait PathResolver: Send + Sync {
 Blanket impls exist for `&R`, `Box<R>`, and `Arc<R>`.
 
 Implementors:
-- `node_resolver::CachingResolver` — production resolver with ftree-backed
-  caching, tsconfig-paths, package.json browser/exports semantics.
+- `node_resolver::MonorepoResolver` — production resolver with ftree-backed
+  caching, tsconfig export conditions and package.json browser/exports semantics.
 - `manual_resolver::ManualResolver` — test double.
 
 ## Resolver lineage
@@ -25,14 +25,16 @@ Previously `node_resolver/` was `swc_resolver/` and consumed
 
 ## Not using oxc_resolver
 
-The custom resolver has tsconfig-paths handling, ftree caching, and
+The custom resolver has export-condition handling, ftree caching, and
 `mark_dirty_root` for incremental invalidation. Replacing it with
 `oxc_resolver` is out of scope.
 
 ## Structural graph policy
 
-`StructuralResolver` uses separate import/require cache trees because legacy
-node_modules caches omit conditions from their keys. Externals require exact
+`StructuralResolver` uses separate import/require cache trees. Package target
+keys include the active condition set, including nearest tsconfig conditions.
+Never apply cached-resolver baseUrl/paths rewrites; the legacy manual fence
+resolver remains independent. Externals require exact
 explicit declarations. `invalidate` replaces both trees, including misses;
 call it after filesystem/config changes, then refresh the graph. Symlink
 identity follows explicit options; source paths must follow that same policy.

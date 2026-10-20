@@ -103,7 +103,7 @@ impl DependencyResolver for StructuralResolver {
             }
             .to_owned(),
         );
-        // Legacy node_modules caches are keyed only by specifier, not conditions.
+        // Keep import/require cache lifetimes independent.
         let cache = match mode {
             ResolutionMode::Import => &self.import_cache,
             ResolutionMode::Require => &self.require_cache,

@@ -84,10 +84,16 @@ fn main() -> eyre::Result<()> {
         fs::write(root.join("package.json"), r#"{"type":"module"}"#)?;
         fs::write(
             root.join("tsconfig.json"),
-            r#"{"compilerOptions":{"baseUrl":".","paths":{"@config":["config-a.mjs"]}}}"#,
+            r#"{"compilerOptions":{"customConditions":[]}}"#,
         )?;
-        fs::write(root.join("config-a.mjs"), "export const config = 'a';")?;
-        fs::write(root.join("config-b.mjs"), "export const config = 'b';")?;
+        let package = root.join("node_modules/benchmark-config");
+        fs::create_dir_all(&package)?;
+        fs::write(
+            package.join("package.json"),
+            r#"{"type":"module","exports":{".":{"alternate":"./config-b.mjs","default":"./config-a.mjs"}}}"#,
+        )?;
+        fs::write(package.join("config-a.mjs"), "export const config = 'a';")?;
+        fs::write(package.join("config-b.mjs"), "export const config = 'b';")?;
         fs::write(
             root.join("m0.mjs"),
             "export let value = 1; export function bump() { value++; }",
@@ -104,7 +110,7 @@ fn main() -> eyre::Result<()> {
         fs::write(
             root.join("main.mjs"),
             format!(
-                "export * from './m{}.mjs'; import {{config}} from '@config'; console.log(config);",
+                "export * from './m{}.mjs'; import {{config}} from 'benchmark-config'; console.log(config);",
                 MODULES - 1
             ),
         )?;
@@ -156,7 +162,7 @@ fn main() -> eyre::Result<()> {
 
         fs::write(
             root.join("tsconfig.json"),
-            r#"{"compilerOptions":{"baseUrl":".","paths":{"@config":["config-b.mjs"]}}}"#,
+            r#"{"compilerOptions":{"customConditions":["alternate"]}}"#,
         )?;
         let edit = run(&mut session, &options, &output)?;
         assert_eq!(edit.build.counters.source_parses, 1);
