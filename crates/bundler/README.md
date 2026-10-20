@@ -297,6 +297,9 @@ changes cascade order.
 edits share one overlap-checked original-byte pipeline. Resource names include
 module transformation identity throughout the CSS import closure so global and
 scoped bytes cannot share an artifact name.
+That identity includes the selector/animation implementation and CSS parser
+revision, not the loading strategy or its DOM stub. Equivalent suffix selections
+therefore share resource names; changing loaders never renames stylesheet bytes.
 
 Resource discovery/rendering and loading-stub generation are separate: stubs
 receive the stylesheet identity, public URL and independent name mappings,
@@ -309,6 +312,13 @@ naming; no emitted-string placeholder scanning is used.
 Base-only edits regenerate asset/CSS URL wrappers before memory-cache comparison;
 generated text keys parse reuse, while the normalized base also keys output
 reuse. Unchanged JavaScript stays warm, and owned resource paths stay unchanged.
+Selection changes recheck the complete CSS/composition closure before comparing
+prepared text. Every input compares its newly prepared text, including custom
+stylesheet suffixes deselected back to JavaScript; stale mappings cannot bypass
+source validation. Declaration-only CSS edits can reuse generated mappings from
+CBOR, but never skip original-input checks or stylesheet output invalidation.
+No cache stores linked graph handles or solved effects; no extractor/schema bump
+is needed for these resource-layer identities.
 
 ## Native ESM chunks
 
