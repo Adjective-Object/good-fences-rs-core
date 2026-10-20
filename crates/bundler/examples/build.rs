@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use bundler::{
-    build::{BuildOptions, BuildSession, Entry},
+    build::{BuildOptions, BuildSession, CssLoad, Entry},
     publish::Cancellation,
 };
 
@@ -18,6 +18,10 @@ fn main() -> eyre::Result<()> {
     );
     let mut options = BuildOptions::default();
     for path in args {
+        if path == "--css-auto-mount" {
+            options.css.load = CssLoad::AutoMount;
+            continue;
+        }
         let path = PathBuf::from(path);
         let name = path
             .to_str()

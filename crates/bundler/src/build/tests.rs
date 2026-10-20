@@ -3814,6 +3814,46 @@ fn named_entry_outputs_infer_js_input_extensions_and_module_format() {
 }
 
 #[test]
+fn named_entry_outputs_infer_nested_source_and_resource_paths() {
+    let dir = TmpDir::new();
+    write(dir.root(), "nested/entry.mjs", "export const value = 13;");
+    write(dir.root(), "nested/style.css", "body { color: red; }");
+    let options = BuildOptions {
+        entries: ["nested/entry.mjs", "nested/style.css"]
+            .into_iter()
+            .map(|path| {
+                (
+                    path.into(),
+                    Entry {
+                        path: path.into(),
+                        output_name: None,
+                        namespace: true,
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let (build, published) = BuildSession::new(dir.root())
+        .unwrap()
+        .build_and_publish(
+            &options,
+            &dir.root().join(".bundler-output"),
+            &crate::publish::Cancellation::default(),
+        )
+        .unwrap();
+    for (entry, output) in [
+        ("nested/entry.mjs", "nested/entry.mjs"),
+        ("nested/style.css", "nested/style.cjs"),
+    ] {
+        assert_eq!(build.product.artifacts.entries[entry], Path::new(output));
+        assert_eq!(published.entries[entry], published.directory.join(output));
+        assert!(published.entries[entry].is_file());
+    }
+    assert_eq!(build.product.artifacts.stylesheets.len(), 1);
+}
+
+#[test]
 fn named_entry_outputs_publication_uses_requested_relative_paths() {
     let dir = TmpDir::new();
     write(dir.root(), "entry.mjs", "export default 42;");
@@ -3873,6 +3913,7 @@ fn named_entry_outputs_reject_unsafe_reserved_incompatible_and_colliding_paths()
         ".bundler-lock",
         "nested/.bundler-current.json",
         "C:\\entry.mjs",
+        "nested\\entry.mjs",
         "entry.cjs",
         "entry.json",
         "nested/",

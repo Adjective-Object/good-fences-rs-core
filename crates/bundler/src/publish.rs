@@ -431,8 +431,10 @@ fn relative(path: &Path) -> eyre::Result<()> {
         path.display()
     );
     ensure!(
-        path.to_str()
-            .is_some_and(|p| !p.contains('\\') && !p.contains(':') && !p.contains('\0')),
+        path.components().all(|component| component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|p| !p.contains('\\') && !p.contains(':') && !p.contains('\0'))),
         "nonportable artifact path"
     );
     Ok(())

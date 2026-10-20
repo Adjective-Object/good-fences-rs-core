@@ -53,3 +53,6 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
   chunks contain pure lexical cached initializers; only demanded facade jobs
   execute factories/snapshot properties. Multi-owner roots are evaluation-only
   native entry wrappers; they never invent a combined public namespace.
+- `fixtures/bundler-apps/` is the separate real-browser corpus. Use agent-browser
+  to compare pinned source and native public output; preserve source failures,
+  browser diagnostics, exact upstream bytes and all licenses.

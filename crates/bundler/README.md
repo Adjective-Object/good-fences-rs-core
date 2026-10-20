@@ -23,6 +23,23 @@ default-expression/anonymous-declaration and opaque CJS values retain typed grap
 identities, not invented lexical binding IDs; cached recipes own default
 hoisting/initialization semantics.
 
+## Real browser application smoke tests
+
+`cargo build -p bundler --example build` followed by
+`node scripts/bundler-browser.mjs` runs pinned TodoMVC Modern JavaScript and Web
+Components sources and native published output through `agent-browser` in real
+Chromium. See `fixtures/bundler-apps/README.md` for prerequisites, exact packaging
+adaptations, behavior checks, licenses and retained screenshots/diagnostics.
+This browser corpus is separate from the Node-only portable semantic fixtures.
+
+The example driver's optional `--css-auto-mount` argument selects native ESM CSS
+stubs for browser applications; its existing default is unchanged. Caller-loaded
+CSS URL wrappers use CommonJS and cannot execute directly in browsers.
+Inferred nested entry names normalize host separators before portable-name
+validation; explicit `Entry.output_name` values still require slash-separated
+portable paths. Publication validates path components rather than rejecting
+Windows separators introduced by native path joins.
+
 ## JSON modules
 
 Bare-string package `exports` exposes the selected root and arbitrary files

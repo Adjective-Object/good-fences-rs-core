@@ -26,6 +26,30 @@ fn fixture() -> (TmpDir, BuildSession, BuildOptions) {
     (dir, session, options)
 }
 
+#[test]
+fn owned_paths_accept_native_joins_but_reject_unsafe_components() {
+    relative(&PathBuf::from("nested").join("entry.mjs")).unwrap();
+    for path in [
+        "",
+        "../entry.mjs",
+        "/entry.mjs",
+        "bad:name.mjs",
+        "bad\0name",
+    ] {
+        assert!(relative(Path::new(path)).is_err(), "{path:?}");
+    }
+    #[cfg(unix)]
+    assert!(relative(Path::new("nested\\entry.mjs")).is_err());
+    #[cfg(windows)]
+    for path in [
+        "C:\\entry.mjs",
+        "nested\\..\\entry.mjs",
+        "\\\\server\\entry.mjs",
+    ] {
+        assert!(relative(Path::new(path)).is_err(), "{path:?}");
+    }
+}
+
 fn snapshot(directory: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)> {
     let mut result = BTreeMap::new();
     fn visit(

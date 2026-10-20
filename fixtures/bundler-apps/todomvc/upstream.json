@@ -1,0 +1,30 @@
+{
+  "repository": "https://github.com/tastejs/todomvc",
+  "commit": "ff43b02e59dfa604386bb382034b2cd07c2bcd8a",
+  "paths": [
+    "license.md",
+    "examples/javascript-es6/src",
+    "examples/javascript-es6/dist/app.css",
+    "examples/web-components/src",
+    "examples/web-components/index.html",
+    "examples/web-components/styles",
+    "examples/web-components/dist/styles/base.css"
+  ],
+  "license": "MIT AND CC-BY-4.0",
+  "adaptations": [
+    "Vendored files remain byte-identical; sha256.json records the complete imported source and license inventory.",
+    "In managed execution copies only, add .js to extensionless relative ES6 imports, remove its webpack HMR branch and CSS imports, and link the pinned upstream dist/app.css from HTML.",
+    "Replace demo-site base.js and original module script tags with one ordered native ESM entry; do not load the upstream prebundled JavaScript.",
+    "Use the Web Components dist/styles/base.css instead of installing todomvc-common; preserve constructable stylesheet JavaScript unchanged.",
+    "Build JavaScript and stylesheet entries through the public build/publish driver with --css-auto-mount so stylesheet wrappers are native ESM, not Node-only CommonJS URL exports. HTML loads extracted stylesheets in original application order.",
+    "Add a data favicon and identical browser error instrumentation to source and emitted HTML; serve only local files.",
+    "Use accessible keyboard editing for shadow-root controls and native double-click editing for the ES6 app.",
+    "Test the pinned apps' actual in-memory storage and reload reset, not hypothetical localStorage persistence."
+  ],
+  "notices": [
+    "upstream/license.md covers TodoMVC application sources.",
+    "upstream/examples/web-components/src/utils/nanoid.js retains its embedded Nano ID 3.0.2 MIT license, Copyright 2017 Andrey Sitnik.",
+    "The ES6 app.css includes todomvc-app-css (CC-BY-4.0), Copyright Sindre Sorhus; original compiled stylesheet is unmodified. See licenses/todomvc-app-css-2.4.2.txt.",
+    "todomvc-common styles retain their MIT notice in licenses/todomvc-common-1.0.5.txt."
+  ]
+}

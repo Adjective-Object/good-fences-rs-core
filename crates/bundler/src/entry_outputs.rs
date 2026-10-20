@@ -41,12 +41,16 @@ pub(super) fn apply(
         {
             requested.set_extension(if commonjs { "cjs" } else { "mjs" });
         }
-        let mut path = output_path(
-            requested
-                .to_str()
-                .ok_or_eyre("non-UTF-8 entry output path")?,
-        )
-        .wrap_err_with(|| format!("entry {name:?} output {}", requested.display()))?;
+        let requested_text = requested
+            .to_str()
+            .ok_or_eyre("non-UTF-8 entry output path")?;
+        let requested_text = if entry.output_name.is_none() {
+            requested_text.replace(std::path::MAIN_SEPARATOR, "/")
+        } else {
+            requested_text.to_owned()
+        };
+        let mut path = output_path(&requested_text)
+            .wrap_err_with(|| format!("entry {name:?} output {}", requested.display()))?;
         if path.extension().is_none() {
             let extension = entry
                 .path
