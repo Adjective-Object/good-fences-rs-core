@@ -22,7 +22,7 @@ fn options() -> BuildOptions {
 }
 
 #[test]
-fn css_modules_validate_before_graph_loading_and_refuse_unsupported_scopes() {
+fn css_modules_validate_before_graph_loading_and_preserve_failed_last_product() {
     let dir = TmpDir::new();
     let mut config = options();
     config.css.css_modules = CssModules::Extension(".bad..suffix".into());
@@ -41,19 +41,27 @@ fn css_modules_validate_before_graph_loading_and_refuse_unsupported_scopes() {
     let global = session.build(&config).unwrap();
     assert_eq!(global.product.artifacts.stylesheets.len(), 1);
     config.css.css_modules = CssModules::Enabled;
+    write(
+        dir.root(),
+        "style.module.css",
+        ":local(.你好,) { color: red }",
+    );
     for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
         config.css.load = load;
         let error = format!("{:#}", session.build(&config).err().unwrap());
         assert!(
-            error.contains(
-                "style.module.css: CSS Modules :local/:global scope syntax is unsupported"
-            ),
+            error.contains("style.module.css: CSS Modules syntax"),
             "{error}"
         );
         assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &global.product));
     }
     config.css.css_modules = CssModules::Disabled;
     config.css.load = CssLoad::CallerLoaded;
+    write(
+        dir.root(),
+        "style.module.css",
+        ":global .你好 { color: red }",
+    );
     assert_eq!(
         session.build(&config).unwrap().product.artifacts,
         global.product.artifacts
@@ -121,6 +129,148 @@ fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures()
             }
         }
     }
+}
+
+#[test]
+fn css_modules_scopes_fragments_and_urls_share_original_utf8_edits_under_both_loaders() {
+    let dir = TmpDir::new();
+    let source = r##"@charset "UTF-8";
+/* :local(.leave) url(#你好) */
+:global(.theme) :local(.button-label), #你好 {
+  filter: url(#你好); clip-path: url("#\4f60 好"); mask: url(#button-label);
+  --spaced: url(" #你好 "); --escaped: url(" \9 #你\d 好\a ");
+  --spaced-unknown: url(" #unknown "); --spaced-global: url(" #remote ");
+  --unknown: url(#unknown); --external: url(https://example.test/a.svg#你好);
+  --relative: url("./icon.svg#你好"); content: "url(#你好) :local(.leave)";
+  --ident: 你好; --color: #abc;
+}
+:global(#remote) [id="你好"][class="button-label"] { filter: url(#remote) }
+"##;
+    write(dir.root(), "style.module.css", source);
+    write(dir.root(), "icon.svg", "<svg/>");
+    write(
+        dir.root(),
+        "main.mjs",
+        "export * from './style.module.css';",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut first = None;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        let observation = observe_named(&cold.product.artifacts, &format!(
+            "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns), ['buttonLabel', '你好']); assert.equal(links.length, {}); console.log(JSON.stringify(ns));",
+            usize::from(load == CssLoad::AutoMount)
+        ));
+        let mappings: serde_json::Value = serde_json::from_slice(&observation).unwrap();
+        let button = mappings["buttonLabel"].as_str().unwrap();
+        let id = mappings["你好"].as_str().unwrap();
+        let resource = &cold.product.artifacts.stylesheets[&dir.root().join("style.module.css")];
+        let bytes = &cold.product.artifacts.resources[resource];
+        let text = std::str::from_utf8(bytes).unwrap();
+        assert!(text.contains(&format!(".theme .{button}, #{id}")), "{text}");
+        assert_eq!(
+            text.matches(&format!("url(\"#{id}\")")).count(),
+            4,
+            "{text}"
+        );
+        for untouched in [
+            "/* :local(.leave) url(#你好) */",
+            "mask: url(#button-label)",
+            "url(#unknown)",
+            r##"url(" #unknown ")"##,
+            r##"url(" #remote ")"##,
+            "url(https://example.test/a.svg#你好)",
+            r#"content: "url(#你好) :local(.leave)""#,
+            "--ident: 你好; --color: #abc",
+            r##"#remote [id="你好"][class="button-label"] { filter: url(#remote) }"##,
+        ] {
+            assert!(text.contains(untouched), "missing {untouched:?}: {text}");
+        }
+        let asset = cold
+            .product
+            .artifacts
+            .resources
+            .keys()
+            .find(|path| path.extension().is_some_and(|ext| ext == "svg"))
+            .unwrap();
+        assert!(
+            text.contains(&format!(
+                "url(\"./{}#你好\")",
+                asset.file_name().unwrap().to_str().unwrap()
+            )),
+            "{text}"
+        );
+        if let Some(first) = &first {
+            assert_eq!(bytes, first);
+        } else {
+            first = Some(bytes.clone());
+        }
+        let memory = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&cold.product, &memory.product));
+        let disk = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(cold.product.artifacts, disk.product.artifacts);
+    }
+    config.css.css_modules = CssModules::Disabled;
+    config.css.load = CssLoad::CallerLoaded;
+    let global = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    let resource = &global.product.artifacts.stylesheets[&dir.root().join("style.module.css")];
+    let text = std::str::from_utf8(&global.product.artifacts.resources[resource]).unwrap();
+    assert!(text.contains(":global(.theme) :local(.button-label), #你好"));
+    assert!(text.contains(r##"filter: url(#你好); clip-path: url("#\4f60 好")"##));
+}
+
+#[test]
+fn css_modules_transitive_scope_selection_is_per_stylesheet_not_inherited() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './root.scope';");
+    write(
+        dir.root(),
+        "root.scope",
+        "@import './global.css' layer(base) screen; @import './child.scope'; :local(.root) {}",
+    );
+    write(
+        dir.root(),
+        "global.css",
+        ":global(.theme) .global { filter: url(#target) } #target {}",
+    );
+    write(
+        dir.root(),
+        "child.scope",
+        "@import './leaf.css'; :global(.theme) :local(.child) {}",
+    );
+    write(dir.root(), "leaf.css", ".leaf {}");
+    let mut config = options();
+    config.css.css_modules = CssModules::Extension(".scope".into());
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    let styles: Vec<_> = built
+        .product
+        .artifacts
+        .resources
+        .values()
+        .map(|bytes| std::str::from_utf8(bytes).unwrap())
+        .collect();
+    assert!(styles.contains(&":global(.theme) .global { filter: url(#target) } #target {}"));
+    assert!(styles.contains(&".leaf {}"));
+    assert!(styles
+        .iter()
+        .any(|text| text.contains(".theme ._") && !text.contains(":local")));
+    assert!(styles
+        .iter()
+        .any(|text| text.contains("layer(base) screen;")
+            && text.contains("._")
+            && !text.contains(":local")));
 }
 
 #[test]

@@ -27,6 +27,7 @@ pub(crate) enum SelectorKind {
 pub(crate) struct SelectorName {
     pub(crate) kind: SelectorKind,
     pub(crate) name: Name,
+    pub(crate) local: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -40,6 +41,10 @@ pub(crate) struct ScopeMarker {
     pub(crate) kind: ScopeKind,
     pub(crate) span: Range<usize>,
     pub(crate) argument: Option<Range<usize>>,
+    pub(crate) owner: Range<usize>,
+    pub(crate) alternatives: Vec<Range<usize>>,
+    pub(crate) commas: Vec<Range<usize>>,
+    pub(crate) first_in_compound: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,6 +67,7 @@ pub(crate) struct ModuleSyntax {
     pub(crate) names: Vec<SelectorName>,
     pub(crate) scopes: Vec<ScopeMarker>,
     pub(crate) compositions: Vec<Composition>,
+    pub(crate) selectors: Vec<Range<usize>>,
 }
 
 pub(crate) fn parse(path: &Path, source: &str) -> eyre::Result<ModuleSyntax> {
@@ -90,6 +96,7 @@ fn parse_inner(source: &str) -> eyre::Result<ModuleSyntax> {
     }
     let mut collector = Collector {
         source,
+        offset: 0,
         syntax: ModuleSyntax::default(),
     };
     collector.statements(&stylesheet.statements, None, 0)?;
@@ -98,12 +105,16 @@ fn parse_inner(source: &str) -> eyre::Result<ModuleSyntax> {
 
 struct Collector<'a> {
     source: &'a str,
+    offset: usize,
     syntax: ModuleSyntax,
 }
 
 impl Collector<'_> {
     fn span(&self, span: Span) -> eyre::Result<Range<usize>> {
-        checked_span(self.source, span.start..span.end)
+        checked_span(
+            self.source,
+            span.start + self.offset..span.end + self.offset,
+        )
     }
 
     fn name(&self, name: &InterpolableIdent<'_>) -> eyre::Result<Name> {
@@ -126,7 +137,19 @@ impl Collector<'_> {
         for statement in statements {
             match statement {
                 Statement::QualifiedRule(rule) => {
-                    self.selectors(&rule.selector, depth + 1)?;
+                    if selector.is_none() {
+                        for selector in &rule.selector.selectors {
+                            ensure!(
+                                !matches!(
+                                    selector.children.first(),
+                                    Some(ComplexSelectorChild::Combinator(_))
+                                ),
+                                "relative top-level CSS selector at {:?}",
+                                self.span(selector.span)?
+                            );
+                        }
+                    }
+                    self.selectors(&rule.selector, true, depth + 1)?;
                     self.statements(
                         &rule.block.statements,
                         Some(self.span(rule.selector.span)?),
@@ -144,24 +167,25 @@ impl Collector<'_> {
                 }
                 Statement::AtRule(rule) => {
                     match &rule.prelude {
-                        Some(AtRulePrelude::Nest(selectors)) => self.selectors(selectors, depth + 1)?,
+                        Some(AtRulePrelude::Nest(selectors)) => self.selectors(selectors, true, depth + 1)?,
+                        Some(AtRulePrelude::Supports(condition)) => self.supports(condition, depth + 1)?,
                         Some(AtRulePrelude::Scope(scope)) => match scope.as_ref() {
                             ScopePrelude::StartOnly(start) => {
                                 if let Some(selectors) = &start.selector {
-                                    self.selectors(selectors, depth + 1)?;
+                                    self.selectors(selectors, true, depth + 1)?;
                                 }
                             }
                             ScopePrelude::EndOnly(end) => {
                                 if let Some(selectors) = &end.selector {
-                                    self.selectors(selectors, depth + 1)?;
+                                    self.selectors(selectors, true, depth + 1)?;
                                 }
                             }
                             ScopePrelude::Both(scope) => {
                                 if let Some(selectors) = &scope.start.selector {
-                                    self.selectors(selectors, depth + 1)?;
+                                    self.selectors(selectors, true, depth + 1)?;
                                 }
                                 if let Some(selectors) = &scope.end.selector {
-                                    self.selectors(selectors, depth + 1)?;
+                                    self.selectors(selectors, true, depth + 1)?;
                                 }
                             }
                         },
@@ -199,34 +223,54 @@ impl Collector<'_> {
         Ok(())
     }
 
-    fn selectors(&mut self, selectors: &SelectorList<'_>, depth: usize) -> eyre::Result<()> {
+    fn selectors(
+        &mut self,
+        selectors: &SelectorList<'_>,
+        local: bool,
+        depth: usize,
+    ) -> eyre::Result<()> {
         for selector in &selectors.selectors {
-            self.complex(selector, depth + 1)?;
+            self.complex(selector, self.span(selector.span)?, local, depth + 1)?;
         }
         Ok(())
     }
 
-    fn complex(&mut self, selector: &ComplexSelector<'_>, depth: usize) -> eyre::Result<()> {
+    fn complex(
+        &mut self,
+        selector: &ComplexSelector<'_>,
+        span: Range<usize>,
+        mut local: bool,
+        depth: usize,
+    ) -> eyre::Result<()> {
         ensure!(depth < 128, "CSS Modules selector nesting limit exceeded");
+        self.syntax.selectors.push(span.clone());
         for child in &selector.children {
             if let ComplexSelectorChild::CompoundSelector(selector) = child {
-                self.compound(selector, depth + 1)?;
+                self.compound(selector, &mut local, &span, depth + 1)?;
             }
         }
         Ok(())
     }
 
-    fn compound(&mut self, selector: &CompoundSelector<'_>, depth: usize) -> eyre::Result<()> {
+    fn compound(
+        &mut self,
+        selector: &CompoundSelector<'_>,
+        local: &mut bool,
+        owner: &Range<usize>,
+        depth: usize,
+    ) -> eyre::Result<()> {
         ensure!(depth < 128, "CSS Modules selector nesting limit exceeded");
-        for child in &selector.children {
+        for (index, child) in selector.children.iter().enumerate() {
             match child {
                 SimpleSelector::Class(class) => self.syntax.names.push(SelectorName {
                     kind: SelectorKind::Class,
                     name: self.name(&class.name)?,
+                    local: *local,
                 }),
                 SimpleSelector::Id(id) => self.syntax.names.push(SelectorName {
                     kind: SelectorKind::Id,
                     name: self.name(&id.name)?,
+                    local: *local,
                 }),
                 SimpleSelector::PseudoClass(pseudo) => {
                     let name = self.name(&pseudo.name)?;
@@ -238,6 +282,91 @@ impl Collector<'_> {
                         None
                     };
                     if let Some(kind) = scope {
+                        let scoped_local = kind == ScopeKind::Local;
+                        let mut alternatives = Vec::new();
+                        let mut commas = Vec::new();
+                        if let Some(arg) = &pseudo.arg {
+                            match &arg.kind {
+                                PseudoClassSelectorArgKind::SelectorList(selectors) => {
+                                    alternatives = selectors
+                                        .selectors
+                                        .iter()
+                                        .map(|selector| self.span(selector.span))
+                                        .collect::<eyre::Result<_>>()?;
+                                    commas = selectors
+                                        .comma_spans
+                                        .iter()
+                                        .map(|span| self.span(*span))
+                                        .collect::<eyre::Result<_>>()?;
+                                    self.scope_selectors(selectors, scoped_local, depth + 1)?;
+                                }
+                                PseudoClassSelectorArgKind::TokenSeq(_) => {
+                                    // Upstream recognizes :global selectors but leaves :local raw.
+                                    let start = self.span(arg.l_paren)?.end;
+                                    let end = self.span(arg.r_paren)?.start;
+                                    let mut adapted = self.source[start..end].to_owned();
+                                    adapted.push_str("{}");
+                                    let allocator = Allocator::default();
+                                    let mut parser = Parser::new(&allocator, &adapted, Syntax::Css);
+                                    let sheet = parser.parse::<Stylesheet>().map_err(|error| {
+                                        eyre::eyre!(
+                                            "Oxc CSS scope argument at {}..{}: {:?}",
+                                            start + error.span.start,
+                                            start + error.span.end,
+                                            error.kind
+                                        )
+                                    })?;
+                                    ensure!(
+                                        parser.recoverable_errors().is_empty(),
+                                        "Oxc CSS scope recovery at {start}..{end}"
+                                    );
+                                    let [Statement::QualifiedRule(rule)] =
+                                        sheet.statements.as_slice()
+                                    else {
+                                        bail!("unsupported CSS scope argument at {start}..{end}");
+                                    };
+                                    ensure!(
+                                        rule.block.statements.is_empty()
+                                            && rule.block.span.start == end - start,
+                                        "ambiguous CSS scope argument at {start}..{end}"
+                                    );
+                                    let offset = self.offset;
+                                    self.offset = start;
+                                    alternatives = rule
+                                        .selector
+                                        .selectors
+                                        .iter()
+                                        .map(|selector| self.span(selector.span))
+                                        .collect::<eyre::Result<_>>()?;
+                                    commas = rule
+                                        .selector
+                                        .comma_spans
+                                        .iter()
+                                        .map(|span| self.span(*span))
+                                        .collect::<eyre::Result<_>>()?;
+                                    self.scope_selectors(&rule.selector, scoped_local, depth + 1)?;
+                                    self.offset = offset;
+                                }
+                                _ => bail!(
+                                    "unsupported CSS scope argument at {:?}",
+                                    self.span(arg.span)?
+                                ),
+                            }
+                        } else {
+                            *local = scoped_local;
+                            ensure!(
+                                self.source[self.span(pseudo.span)?.end..owner.end]
+                                    .chars()
+                                    .any(|ch| !ch.is_whitespace()),
+                                "empty bare CSS scope at {:?}",
+                                self.span(pseudo.span)?
+                            );
+                        }
+                        ensure!(
+                            pseudo.arg.is_none() || !alternatives.is_empty(),
+                            "empty CSS scope argument at {:?}",
+                            self.span(pseudo.span)?
+                        );
                         self.syntax.scopes.push(ScopeMarker {
                             kind,
                             span: self.span(pseudo.span)?,
@@ -246,24 +375,35 @@ impl Collector<'_> {
                                 .as_ref()
                                 .map(|arg| self.span(arg.span))
                                 .transpose()?,
+                            owner: owner.clone(),
+                            alternatives,
+                            commas,
+                            first_in_compound: index == 0,
                         });
+                        continue;
                     }
                     if let Some(arg) = &pseudo.arg {
                         match &arg.kind {
-                            PseudoClassSelectorArgKind::SelectorList(selectors) => self.selectors(selectors, depth + 1)?,
+                            PseudoClassSelectorArgKind::SelectorList(selectors) => {
+                                if name.decoded.eq_ignore_ascii_case("host") || name.decoded.eq_ignore_ascii_case("host-context") {
+                                    ensure!(selectors.selectors.len() == 1 && selectors.selectors[0].children.len() == 1,
+                                        "unsupported CSS host selector argument at {:?}", self.span(arg.span)?);
+                                }
+                                self.selectors(selectors, *local, depth + 1)?;
+                            }
                             PseudoClassSelectorArgKind::CompoundSelectorList(selectors) => {
                                 for selector in &selectors.selectors {
-                                    self.compound(selector, depth + 1)?;
+                                    self.isolated_compound(selector, *local, depth + 1)?;
                                 }
                             }
                             PseudoClassSelectorArgKind::RelativeSelectorList(selectors) => {
                                 for selector in &selectors.selectors {
-                                    self.complex(&selector.complex_selector, depth + 1)?;
+                                    self.complex(&selector.complex_selector, self.span(selector.span)?, *local, depth + 1)?;
                                 }
                             }
                             PseudoClassSelectorArgKind::Nth(nth) => {
                                 if let Some(selectors) = nth.matcher.as_ref().and_then(|matcher| matcher.selector.as_ref()) {
-                                    self.selectors(selectors, depth + 1)?;
+                                    self.selectors(selectors, *local, depth + 1)?;
                                 }
                             }
                             PseudoClassSelectorArgKind::Ident(_)
@@ -276,10 +416,12 @@ impl Collector<'_> {
                 SimpleSelector::PseudoElement(pseudo) => {
                     if let Some(arg) = &pseudo.arg {
                         match &arg.kind {
-                            PseudoElementSelectorArgKind::CompoundSelector(selector) => self.compound(selector, depth + 1)?,
+                            PseudoElementSelectorArgKind::CompoundSelector(selector) => self.isolated_compound(selector, *local, depth + 1)?,
                             PseudoElementSelectorArgKind::CompoundSelectorList(selectors) => {
+                                ensure!(selectors.selectors.len() == 1,
+                                    "unsupported CSS pseudo-element selector list at {:?}", self.span(arg.span)?);
                                 for selector in &selectors.selectors {
-                                    self.compound(selector, depth + 1)?;
+                                    self.isolated_compound(selector, *local, depth + 1)?;
                                 }
                             }
                             PseudoElementSelectorArgKind::Ident(_)
@@ -288,12 +430,76 @@ impl Collector<'_> {
                         }
                     }
                 }
-                SimpleSelector::Type(_)
-                | SimpleSelector::Attribute(_)
-                | SimpleSelector::Nesting(_) => {}
+                SimpleSelector::Type(_) => ensure!(
+                    index == 0,
+                    "ambiguous CSS type selector at {:?}",
+                    self.span(selector.span)?
+                ),
+                SimpleSelector::Attribute(_) | SimpleSelector::Nesting(_) => {}
                 SimpleSelector::SassPlaceholder(_) => {
                     bail!("Sass selectors are unsupported in CSS Modules")
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn isolated_compound(
+        &mut self,
+        selector: &CompoundSelector<'_>,
+        mut local: bool,
+        depth: usize,
+    ) -> eyre::Result<()> {
+        let span = self.span(selector.span)?;
+        self.syntax.selectors.push(span.clone());
+        self.compound(selector, &mut local, &span, depth + 1)
+    }
+
+    fn scope_selectors(
+        &mut self,
+        selectors: &SelectorList<'_>,
+        local: bool,
+        depth: usize,
+    ) -> eyre::Result<()> {
+        for selector in &selectors.selectors {
+            ensure!(
+                !matches!(
+                    selector.children.first(),
+                    Some(ComplexSelectorChild::Combinator(_))
+                ),
+                "relative CSS scope argument at {:?}",
+                self.span(selector.span)?
+            );
+        }
+        self.selectors(selectors, local, depth)
+    }
+
+    fn supports(&mut self, condition: &SupportsCondition<'_>, depth: usize) -> eyre::Result<()> {
+        ensure!(depth < 128, "CSS Modules supports nesting limit exceeded");
+        for condition in &condition.conditions {
+            let condition = match condition {
+                SupportsConditionKind::Not(value) => &value.condition,
+                SupportsConditionKind::And(value) => &value.condition,
+                SupportsConditionKind::Or(value) => &value.condition,
+                SupportsConditionKind::SupportsInParens(value) => value,
+            };
+            match &condition.kind {
+                SupportsInParensKind::SupportsCondition(value) => {
+                    self.supports(value, depth + 1)?
+                }
+                SupportsInParensKind::Selector(value) => {
+                    ensure!(
+                        value.selectors.len() == 1,
+                        "unsupported CSS supports selector list at {:?}",
+                        self.span(value.span)?
+                    );
+                    self.selectors(value, true, depth + 1)?;
+                }
+                SupportsInParensKind::Feature(_) => {}
+                _ => bail!(
+                    "unsupported CSS Modules supports condition at {:?}",
+                    self.span(condition.span)?
+                ),
             }
         }
         Ok(())
@@ -365,7 +571,7 @@ fn checked_span(source: &str, span: Range<usize>) -> eyre::Result<Range<usize>> 
     Ok(span)
 }
 
-/// URL edits and future module edits share original UTF-8 coordinates.
+/// URL and selector edits share original UTF-8 coordinates.
 pub(crate) fn apply_edits(source: &str, mut edits: Vec<Edit>) -> eyre::Result<String> {
     edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
     let mut output = String::new();
@@ -578,8 +784,9 @@ mod tests {
             "50% { color: red }",
             ".a:unknown(.hidden) {}",
             ".a::unknown(.hidden) {}",
-            ":local(.hidden) {}",
-            "@supports selector(.hidden) { .a {} }",
+            ":local(.hidden,) {}",
+            ":local(.hidden; .other) {}",
+            ":local() {}",
             ".a { composes: base from; }",
         ] {
             let error = format!("{:#}", parse(source).unwrap_err());

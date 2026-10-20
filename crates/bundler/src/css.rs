@@ -84,11 +84,31 @@ impl<'a> Styles<'a> {
             let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
             let mut requests = Vec::new();
             for url in urls {
+                if self.names.get(&path).is_some_and(|names| {
+                    names.edits.iter().any(|edit| {
+                        edit.span.start <= url.span.start && url.span.end <= edit.span.end
+                    })
+                }) {
+                    continue;
+                }
                 let value = url
                     .value
                     .trim_matches(|ch| ch <= '\u{20}')
                     .replace(['\t', '\r', '\n'], "");
                 let value = value.as_str();
+                if !url.import && url.function {
+                    if let Some(names) = self.names.get_mut(&path) {
+                        if let Some(scoped) =
+                            value.strip_prefix('#').and_then(|id| names.ids.get(id))
+                        {
+                            names.edits.push(crate::css_syntax::Edit {
+                                span: url.span,
+                                replacement: format!("url(\"#{scoped}\")"),
+                            });
+                            continue;
+                        }
+                    }
+                }
                 let scheme = value.find(':').is_some_and(|end| {
                     value.as_bytes()[0].is_ascii_alphabetic()
                         && value[..end].bytes().all(|byte| {
@@ -194,6 +214,7 @@ impl<'a> Styles<'a> {
             digest.update(input);
             if style && self.names.contains_key(&path) {
                 digest.update(crate::css_names::REVISION.as_bytes());
+                digest.update(crate::css_names::TRANSFORM_REVISION.as_bytes());
                 digest.update(crate::css_syntax::PARSER_REVISION.as_bytes());
             }
         }

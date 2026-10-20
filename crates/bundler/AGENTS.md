@@ -62,9 +62,17 @@ Keep CSS Oxc pinned separately from JS Oxc and use its re-exported allocator
 spans, scope markers and composition requests; never persist its arena nodes.
 Normalize pinned CSS decoder NULs to U+FFFD at owned identifier/string boundaries.
 Recovery/raw selector syntax is an explicit error, not partially scoped success.
-Functional :local and @supports preludes are currently explicit parse boundaries.
-Selected modules default classes/IDs to local; explicit :local/:global and
-composes stay unsupported. Scope identities hash css-local-v1 plus normalized
+Selected modules default classes/IDs to local; bare scopes last to the selector
+list boundary, functional scopes restore their caller's scope. Selector-bearing
+pseudos and @supports selector() recurse through Oxc. Reparse only Oxc's raw
+functional scope arguments as complete synthetic rules, rejecting recovery,
+extra statements and incomplete consumption; translate every owned span back.
+Expand functional scope lists at their owning complex selector, never through
+:is() (which changes specificity). Preserve comment trivia without introducing
+descendant whitespace; cap expansions and reject ambiguous type-selector joins.
+Export locals only; fragment URLs rewrite only known local IDs, not classes or
+global/unknown/external fragments. Names in attributes/strings/comments stay data.
+Composes stays unsupported. Scope identities hash css-local-v1 plus normalized
 project-relative path and decoded symbol into _ plus ten base64url characters;
 class/ID identities coincide. Reject detected hash and camelCase export collisions.
 Keep each mapping a pure native ESM binding with safe private names/string aliases,

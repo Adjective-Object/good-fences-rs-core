@@ -172,11 +172,29 @@ It requires Rust **1.95 or newer**; the repository's
 at 0.137.0; the JavaScript Oxc revision is unchanged.
 Recoverable parse errors, raw selectors/unknown pseudo arguments and unsupported
 selector-bearing at-rule preludes fail closed with path/span diagnostics.
-Explicit `:local`/`:global` forms (bare or functional) remain unsupported and fail
-closed; all accepted class/ID selectors are local by default. `composes` also
-fails explicitly. `@supports` preludes currently form an unsupported boundary,
-including `selector(...)`. Local fragment references and animation identifiers
-are not transformed yet. `cssparser` still owns URL tokenization; URL and selector
+Classes/IDs default to local. Bare `:local`/`:global` switches the rest of its
+complex selector, resetting at each list comma; functional forms scope only their
+selector arguments. Both forms are removed from emitted CSS. Lists, combinators,
+nesting, selector-bearing pseudos (`:is`, `:not`, `:has`, nth matchers and slotted
+selectors), `@scope`, `@nest` and `@supports selector(...)` preserve their selector
+boundaries. Functional lists expand into alternatives, not `:is()` wrappers that
+would change specificity; relative `:has()` alternatives each retain their leading
+combinator. Expansions exceeding 4096 alternatives per complex
+selector and ambiguous type-selector joins such as `.a:global(div)` fail closed.
+Expanding lists into a singleton-only context (for example `@supports selector()`
+or `::slotted()`) also fails rather than emitting an invalid selector.
+The pinned parser leaves functional `:local(...)` arguments raw; the owned AST
+boundary reparses only these scope arguments as complete rules, rejects recovery
+or trailing syntax, and translates their spans back to original UTF-8 bytes.
+Only local names become exports; globals are neither renamed nor exported.
+`url(#id)` and quoted/escaped equivalents use normal URL whitespace normalization
+before rewriting only a known local **ID**,
+not a class-only name. Unknown/global fragments, external URL fragments,
+attributes, strings, comments and unrelated identifiers remain untouched.
+Every transitive `@import` uses its own suffix/selection rule, never inheriting
+module mode from its importer; imports and their conditions remain separate.
+`composes` still fails explicitly, and animation identifiers are not scoped yet.
+`cssparser` still owns URL tokenization; URL and selector
 edits share one overlap-checked original-byte pipeline. Resource names include
 module transformation identity throughout the CSS import closure so global and
 scoped bytes cannot share an artifact name.
