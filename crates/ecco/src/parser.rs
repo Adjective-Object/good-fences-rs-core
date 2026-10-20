@@ -104,6 +104,23 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
             }
         } else {
             let global = parser.word("global");
+            if global && parser.word("symbol") {
+                let name = parser.name()?;
+                parser.symbol('{')?;
+                parser.keyword("read_effects")?;
+                parser.symbol('=')?;
+                let read_effects = if parser.word("true") {
+                    true
+                } else {
+                    parser.keyword("false")?;
+                    false
+                };
+                parser.symbol('}')?;
+                facts
+                    .global_symbols
+                    .push(GlobalSymbol { name, read_effects });
+                continue;
+            }
             parser.keyword("fn")?;
             let path = parser.path()?;
             ensure!(
@@ -123,6 +140,16 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
 }
 
 pub(crate) fn validate_facts(facts: &LocalFacts) -> Result<()> {
+    for (index, symbol) in facts.global_symbols.iter().enumerate() {
+        ensure!(!symbol.name.is_empty(), "empty global symbol name");
+        ensure!(
+            !facts.global_symbols[..index]
+                .iter()
+                .any(|previous| previous.name == symbol.name),
+            "duplicate global symbol: {}",
+            symbol.name
+        );
+    }
     for (index, definition) in facts.definitions.iter().enumerate() {
         ensure!(
             !facts.definitions[..index]

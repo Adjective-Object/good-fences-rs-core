@@ -505,6 +505,28 @@ impl<'a> Extractor<'_, 'a> {
         self.computed(self.context.unknown(), effects)
     }
 
+    fn global_read(&mut self, name: &str, span: Span) -> Effect {
+        let Some(symbol) = self
+            .context
+            .facts()
+            .global_symbols
+            .iter()
+            .find(|symbol| symbol.name == name)
+        else {
+            return self.context.pure();
+        };
+        let read_effects = symbol.read_effects;
+        self.matches.push(DefinitionMatch {
+            span,
+            binding: Binding::Global(vec![name.to_owned()]),
+        });
+        if read_effects {
+            self.context.opaque_effects()
+        } else {
+            self.context.pure()
+        }
+    }
+
     fn resolve(&mut self, binding: &Binding, span: Span) -> ValueId {
         if let Some(value) = self.context.definition(binding) {
             self.matches.push(DefinitionMatch {
@@ -597,12 +619,11 @@ impl<'a> Extractor<'_, 'a> {
                         binding: Some(binding),
                     }
                 };
-                let effects =
-                    if reference.symbol_id().is_none() && named.value == self.context.unknown() {
-                        self.context.opaque_effects()
-                    } else {
-                        self.context.pure()
-                    };
+                let effects = if reference.symbol_id().is_none() {
+                    self.global_read(identifier.name.as_str(), identifier.span)
+                } else {
+                    self.context.pure()
+                };
                 Computed { named, effects }
             }
             Expression::StaticMemberExpression(member) => {

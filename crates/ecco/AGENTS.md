@@ -5,6 +5,7 @@
 - Hazards only grow within a solve; record dependencies even on false facts.
 - Evaluate against immutable rounds and merge writes before scheduling readers.
 - Binding matching uses OXC semantics, never identifier spelling alone.
+- Global reads default pure; callers declare effectful global symbol accessors.
 - Record function operations without executing them; rollback recording-only
   graph allocations and instantiate owned summaries at calls.
 - Lexical binding slots are not value identities. Rebinding must not redirect

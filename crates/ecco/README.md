@@ -46,8 +46,25 @@ top-level local function declarations respectively. Fixed signatures accept
 missing parameters as `undefined`; extra arguments require `...` or `...name`.
 Supplied local contracts override inferred bodies.
 
-Hazards default to true; explicit slots override `*_effects` regardless of
-order. Expressions accept booleans, `argument.slot`, Boolean `|`, parentheses,
+Global accessor reads are declared separately from value hazards:
+
+```text
+global symbol ambient {
+  read_effects = true
+}
+```
+
+`read_effects` is a required boolean. Undeclared global reads are pure; callers
+must declare every global whose getter has effects. This applies to bare reads,
+`typeof`, and reads inside inferred functions, but not to shadowing lexical or
+imported bindings. `read_effects = false` explicitly declares a pure read. A
+symbol declaration can coexist with a `global fn` declaration of the same name:
+one describes reading the binding, the other describes the callable value.
+Reading an undeclared global is pure, but calling it or accessing its unknown
+members remains conservative. Symbol names are single identifiers.
+
+Function/value hazards default to true; explicit slots override `*_effects`
+regardless of order. Expressions accept booleans, `argument.slot`, Boolean `|`, parentheses,
 and `call(callback, argument, ...rest, this = receiver)`. Bare `...` in a call
 forwards the current arguments. Named rest lists can only be spread.
 
@@ -122,9 +139,9 @@ Declared calls widen growing argument lists; inferred calls widen changing
 recursive contexts rather than grow without bound. Each explicit call site gets
 its own fresh result identity.
 
-Unmodeled ambient identifier reads may execute global accessors, including inside
-`typeof`; lexical/imported bindings and trusted global contracts do not incur
-that fallback.
+Declared effectful global getters conservatively widen heap hazards when read.
+Creating a function that reads such a global, or querying that callback's latent
+effects, does not execute the getter.
 
 Unknown-alias reachability propagates through value joins. Updates through such
 aliases widen the heap only when their hazard expression becomes true, including

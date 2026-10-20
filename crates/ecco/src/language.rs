@@ -130,4 +130,11 @@ pub struct Definition {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LocalFacts {
     pub definitions: Vec<Definition>,
+    pub global_symbols: Vec<GlobalSymbol>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalSymbol {
+    pub name: String,
+    pub read_effects: bool,
 }

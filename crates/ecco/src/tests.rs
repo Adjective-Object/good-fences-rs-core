@@ -100,11 +100,44 @@ fn parser_reports_bad_syntax_and_references() {
         "fn f(x) { call_effects = call(x, ...missing) }",
         "fn f(x) { returns = x | x }",
         "fn f() { returns void returns void }",
+        "global symbol ambient {}",
+        "global symbol ambient { read_effects = maybe }",
+        "global symbol ambient { call_effects = true }",
+        "global symbol ambient { read_effects = false read_effects = true }",
+        "global symbol ambient { read_effects = true } global symbol ambient { read_effects = false }",
+        "symbol ambient { read_effects = true }",
     ] {
         assert!(parse_declarations(text).is_err(), "accepted {text}");
     }
     let error = parse_declarations("fn f() { @ }").unwrap_err().to_string();
     assert!(error.contains("byte 9"), "{error}");
+}
+
+#[test]
+fn global_symbol_declarations_validate_owned_facts() {
+    let facts = parse_declarations(
+        "global symbol ambient { read_effects=true } global symbol ordinary { read_effects=false }",
+    )
+    .unwrap();
+    insta::assert_debug_snapshot!(facts.global_symbols, @r#"
+    [
+        GlobalSymbol {
+            name: "ambient",
+            read_effects: true,
+        },
+        GlobalSymbol {
+            name: "ordinary",
+            read_effects: false,
+        },
+    ]
+    "#);
+    Context::from_local_facts(facts.clone()).unwrap();
+    let mut invalid = facts.clone();
+    invalid.global_symbols[0].name.clear();
+    assert!(Context::from_local_facts(invalid).is_err());
+    let mut invalid = facts.clone();
+    invalid.global_symbols.push(facts.global_symbols[0].clone());
+    assert!(Context::from_local_facts(invalid).is_err());
 }
 
 #[test]
@@ -1452,19 +1485,83 @@ fn astra_round4_inferred_constructor_exposes_construct_hazard() {
 
 #[test]
 fn astra_round5_ambient_identifier_reads_can_execute_global_getters() {
-    let observed: Vec<_> = [
+    let cases = [
         "ambient;",
         "typeof ambient;",
         "function read() { return ambient; } read();",
-    ]
-    .into_iter()
-    .map(|javascript| *effects(&source("", javascript)).last().unwrap())
-    .collect();
-    assert_eq!(
-        observed,
-        vec![true; 3],
-        "bare reads, typeof, and deferred reads can each execute an ambient global accessor"
+    ];
+    for (declarations, expected) in [
+        ("", false),
+        ("global symbol ambient { read_effects = false }", false),
+        ("global symbol ambient { read_effects = true }", true),
+    ] {
+        let observed: Vec<_> = cases
+            .into_iter()
+            .map(|javascript| *effects(&source(declarations, javascript)).last().unwrap())
+            .collect();
+        assert_eq!(observed, vec![expected; 3], "{declarations}");
+    }
+}
+
+#[test]
+fn global_symbol_reads_respect_lexical_bindings_and_callable_contracts() {
+    let declarations = "global symbol ambient { read_effects = true }";
+    for javascript in [
+        "const ambient = 1; ambient; typeof ambient;",
+        "function read(ambient) { return ambient; } read(1);",
+        "import { ambient } from 'unknown'; ambient;",
+    ] {
+        let analysis = source(declarations, javascript);
+        assert!(
+            effects(&analysis).iter().all(|effect| !effect),
+            "{javascript}"
+        );
+        assert!(analysis.matches.is_empty(), "{javascript}");
+    }
+    let analysis = source(
+        "global symbol ambient { read_effects = false } global fn ambient() { call_effects = false returns void }",
+        "ambient; ambient();",
     );
+    assert_eq!(effects(&analysis), vec![false; 2]);
+    assert_eq!(analysis.matches.len(), 4);
+    let analysis = source(
+        "global symbol library { read_effects = true } global fn library.method() { call_effects = false returns void }",
+        "library.method();",
+    );
+    assert_eq!(effects(&analysis), vec![true]);
+}
+
+#[test]
+fn global_symbol_getters_are_deferred_and_latent_until_execution() {
+    let declarations = r#"
+        global symbol ambient { read_effects = true }
+        global fn install(holder, getter) {
+            call_effects = false
+            updates holder.property_read_effects |= call(getter)
+            returns void
+        }
+    "#;
+    let analysis = source(
+        declarations,
+        "function unused() { return ambient; } const object = {}; object.property;",
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_eq!(analysis.matches.len(), 1);
+    let analysis = source(
+        declarations,
+        "const object = {}; object.property; const holder = {}; install(holder, () => ambient);",
+    );
+    assert_eq!(effects(&analysis), vec![false; 4]);
+    assert!(analysis
+        .context
+        .evaluate()
+        .hazards(analysis.roots[2].value)
+        .get(Hazard::PropertyRead));
+    let analysis = source(
+        declarations,
+        "const object = {}; object.property; ambient; object.property;",
+    );
+    assert_eq!(effects(&analysis), vec![false, true, true, true]);
 }
 
 #[test]
