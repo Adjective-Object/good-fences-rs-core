@@ -1,6 +1,6 @@
 //! Versioned, checkout-independent CSS selector identities and export surfaces.
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Component, Path},
 };
 
@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::css_syntax::{self, Edit, Name};
 
 pub(crate) const REVISION: &str = "css-local-v1";
-pub(crate) const TRANSFORM_REVISION: &str = "css-scopes-v2";
+pub(crate) const TRANSFORM_REVISION: &str = "css-composes-v3";
 
 #[derive(Default)]
 pub(crate) struct Registry {
@@ -42,15 +42,6 @@ impl Registry {
         hash: impl Fn(&str, &str) -> String,
     ) -> eyre::Result<PreparedNames> {
         let syntax = css_syntax::parse(path, source)?;
-        ensure!(
-            syntax.compositions.is_empty(),
-            "{}: CSS Modules composes is unsupported at {:?}",
-            path.display(),
-            syntax
-                .compositions
-                .first()
-                .map(|composition| &composition.span)
-        );
         let relative = path.strip_prefix(root)?;
         let relative = relative
             .components()
@@ -109,6 +100,8 @@ impl Registry {
         }
         prepared.edits = Self::scope_edits(source, &syntax, &prepared.edits)
             .wrap_err_with(|| format!("{}: CSS Modules scopes", path.display()))?;
+        Self::compose(source, &syntax, &mut prepared)
+            .wrap_err_with(|| format!("{}: CSS Modules composes", path.display()))?;
         let transformed = css_syntax::apply_edits(source, prepared.edits.clone())?;
         css_syntax::parse(path, &transformed).map_err(|error| {
             eyre::eyre!(
@@ -118,6 +111,139 @@ impl Registry {
             )
         })?;
         Ok(prepared)
+    }
+
+    fn compose(
+        source: &str,
+        syntax: &css_syntax::ModuleSyntax,
+        prepared: &mut PreparedNames,
+    ) -> eyre::Result<()> {
+        use css_syntax::{CompositionSource, SelectorKind};
+
+        if syntax.compositions.is_empty() {
+            return Ok(());
+        }
+        let own: BTreeMap<_, _> = syntax
+            .names
+            .iter()
+            .filter(|name| name.local)
+            .map(|name| {
+                let name = name.name.decoded.as_str();
+                (name, prepared.mappings[&camel_case(name)].clone())
+            })
+            .collect();
+        let mut dependencies: BTreeMap<&str, Vec<(&Name, bool)>> = BTreeMap::new();
+        for composition in &syntax.compositions {
+            let span = &composition.span;
+            ensure!(
+                !matches!(composition.source, CompositionSource::File(_)),
+                "cross-file composition is unsupported at {span:?}"
+            );
+            let selector = composition.selector.as_ref().ok_or_else(|| {
+                eyre::eyre!(
+                    "illegal placement at {span:?}; composes requires a single local class rule"
+                )
+            })?;
+            let names: Vec<_> = syntax
+                .names
+                .iter()
+                .filter(|name| {
+                    selector.start <= name.name.span.start && name.name.span.end <= selector.end
+                })
+                .collect();
+            let selector_edits = prepared
+                .edits
+                .iter()
+                .filter(|edit| selector.start <= edit.span.start && edit.span.end <= selector.end)
+                .map(|edit| Edit {
+                    span: edit.span.start - selector.start..edit.span.end - selector.start,
+                    replacement: edit.replacement.clone(),
+                })
+                .collect();
+            let transformed = css_syntax::apply_edits(&source[selector.clone()], selector_edits)?;
+            let mut input = cssparser::ParserInput::new(&transformed);
+            let mut parser = cssparser::Parser::new(&mut input);
+            let single_class = matches!(parser.next(), Ok(cssparser::Token::Delim('.')))
+                && matches!(parser.next(), Ok(cssparser::Token::Ident(_)))
+                && parser.is_exhausted();
+            ensure!(
+                !composition.nested
+                    && single_class
+                    && names.len() == 1
+                    && names[0].local
+                    && names[0].kind == SelectorKind::Class,
+                "illegal placement/multi-target selector at {selector:?}, declaration {span:?}; composes requires a single local class rule"
+            );
+            let global = composition.source == CompositionSource::Global;
+            let target = dependencies
+                .entry(names[0].name.decoded.as_str())
+                .or_default();
+            for name in &composition.names {
+                ensure!(
+                    global || own.contains_key(name.decoded.as_str()),
+                    "unknown local name {:?} at {:?}, declaration {span:?}",
+                    name.decoded,
+                    name.span
+                );
+                target.push((name, global));
+            }
+            prepared.edits.push(Edit {
+                span: span.clone(),
+                replacement: String::new(),
+            });
+        }
+
+        let mut resolved: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+        for &root in own.keys() {
+            if resolved.contains_key(root) {
+                continue;
+            }
+            let mut stack = vec![(root, 0)];
+            let mut active = BTreeSet::from([root]);
+            while let Some((name, index)) = stack.last_mut() {
+                let edges = dependencies.get(name).map_or(&[][..], Vec::as_slice);
+                if let Some((dependency, global)) = edges.get(*index) {
+                    *index += 1;
+                    let next = dependency.decoded.as_str();
+                    if *global || resolved.contains_key(next) {
+                        continue;
+                    }
+                    ensure!(
+                        active.insert(next),
+                        "composition cycle {} -> {next} at {:?}",
+                        stack
+                            .iter()
+                            .map(|(name, _)| *name)
+                            .collect::<Vec<_>>()
+                            .join(" -> "),
+                        dependency.span
+                    );
+                    stack.push((next, 0));
+                    continue;
+                }
+                let mut tokens = vec![own[name].clone()];
+                let mut seen = BTreeSet::from([tokens[0].clone()]);
+                for (dependency, global) in edges {
+                    let values = if *global {
+                        std::slice::from_ref(&dependency.decoded)
+                    } else {
+                        &resolved[dependency.decoded.as_str()]
+                    };
+                    for token in values {
+                        if seen.insert(token.clone()) {
+                            tokens.push(token.clone());
+                        }
+                    }
+                }
+                resolved.insert(name, tokens);
+                active.remove(name);
+                stack.pop();
+            }
+        }
+        for (name, tokens) in resolved {
+            prepared.mappings.insert(camel_case(name), tokens.join(" "));
+        }
+        Ok(())
     }
 
     fn scope_edits(
@@ -572,6 +698,88 @@ mod tests {
             error.contains("a.module.css") && error.contains("expansion limit exceeded at"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn composition_resolves_forward_chains_in_declaration_order_with_own_token_first() {
+        let source = r#"
+:local(.button) { composes: mid base mid; color: red; composes: shared base from global; }
+.unused { composes: button; color: blue }
+.mid { composes: b\61 se; composes: shared shared from global; }
+.base { color: green }
+.button { composes: base; }
+:local .global-only { composes: 你好 你好 other from global; }
+"#;
+        let prepared = Registry::default()
+            .prepare_with(
+                Path::new("/project"),
+                Path::new("/project/style.module.css"),
+                source,
+                |_, name| format!("_{name}"),
+            )
+            .unwrap();
+        assert_eq!(prepared.mappings["base"], "_base");
+        assert_eq!(prepared.mappings["mid"], "_mid _base shared");
+        assert_eq!(
+            prepared.mappings["button"],
+            "_button _mid _base shared base"
+        );
+        assert_eq!(
+            prepared.mappings["unused"],
+            "_unused _button _mid _base shared base"
+        );
+        assert_eq!(prepared.mappings["globalOnly"], "_global-only 你好 other");
+        let css = css_syntax::apply_edits(source, prepared.edits).unwrap();
+        assert!(!css.contains("composes"));
+        assert!(css.contains("color: red") && css.contains("color: blue"));
+    }
+
+    #[test]
+    fn composition_errors_include_original_paths_and_spans_even_for_unused_names() {
+        for (source, message, span) in [
+            (".a { composes: missing }", "unknown local name", "15..22"),
+            (".a { composes: a }", "a -> a", "15..16"),
+            (
+                ".a { composes: b } .b { composes: a }",
+                "a -> b -> a",
+                "34..35",
+            ),
+            (".a,.b { composes: a }", "multi-target", "0..5"),
+            (".a.b { composes: a }", "multi-target", "0..4"),
+            (".a:hover { composes: a }", "multi-target", "0..8"),
+            (
+                ":global(.a) { composes: a from global }",
+                "illegal placement",
+                "0..11",
+            ),
+            ("#a { composes: a }", "illegal placement", "0..2"),
+            (".a { .b { composes: a } }", "illegal placement", "5..7"),
+            (".a { & { composes: a } }", "illegal placement", "5..6"),
+            ("@font-face { composes: a }", "illegal placement", "13..24"),
+            (
+                ".a { composes: a from './b.module.css' }",
+                "cross-file composition is unsupported",
+                "5..38",
+            ),
+        ] {
+            let error = format!(
+                "{:#}",
+                Registry::default()
+                    .prepare(
+                        Path::new("/project"),
+                        Path::new("/project/style.module.css"),
+                        source,
+                    )
+                    .err()
+                    .unwrap()
+            );
+            assert!(
+                error.contains("style.module.css")
+                    && error.contains(message)
+                    && error.contains(span),
+                "{source}: {error}"
+            );
+        }
     }
 
     #[test]

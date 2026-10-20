@@ -72,7 +72,14 @@ Expand functional scope lists at their owning complex selector, never through
 descendant whitespace; cap expansions and reject ambiguous type-selector joins.
 Export locals only; fragment URLs rewrite only known local IDs, not classes or
 global/unknown/external fragments. Names in attributes/strings/comments stay data.
-Composes stays unsupported. Scope identities hash css-local-v1 plus normalized
+Collect module composes independently of selector edits; resolve all local forward
+references and explicit global tokens before generating loader mappings. Keep
+own scoped tokens first and declaration order with deterministic deduplication.
+Only single local class rule targets are legal; reject nested/multi-target/global
+targets, unknown locals and cycles with original paths/spans, even when unused.
+Remove declarations through checked original-byte edits; global CSS stays intact.
+Mapping pruning never prunes stylesheet rules. Cross-file composes stays unsupported.
+Scope identities hash css-local-v1 plus normalized
 project-relative path and decoded symbol into _ plus ten base64url characters;
 class/ID identities coincide. Reject detected hash and camelCase export collisions.
 Keep each mapping a pure native ESM binding with safe private names/string aliases,

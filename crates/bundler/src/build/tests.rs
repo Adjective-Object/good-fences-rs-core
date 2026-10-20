@@ -577,6 +577,158 @@ fn css_modules_prune_bindings_not_stylesheets_and_keep_loader_effects() {
 }
 
 #[test]
+fn css_modules_composition_resolves_before_pruning_under_both_loaders() {
+    let dir = TmpDir::new();
+    let source = r#"
+:local(.button) { composes: mid base mid; color: red; composes: shared shared from global; }
+.unused { composes: button; color: blue }
+@media screen { .mid { composes: b\61 se; composes: shared from global; } }
+.base { color: green }
+.button { composes: base; }
+"#;
+    write(dir.root(), "style.module.css", source);
+    write(
+        dir.root(),
+        "main.mjs",
+        "export { button, mid, base } from './style.module.css'; import './global.css';",
+    );
+    let global = ".global { composes: unknown from './missing.css'; color: black }";
+    write(dir.root(), "global.css", global);
+    let unused = crate::css_names::Registry::default()
+        .prepare(
+            dir.root(),
+            &dir.root().join("style.module.css"),
+            ".unused {}",
+        )
+        .unwrap()
+        .mappings["unused"]
+        .clone();
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(
+            &cold.product,
+            &session.build(&config).unwrap().product
+        ));
+        let disk = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(cold.product.artifacts, disk.product.artifacts);
+        assert_eq!(disk.counters.source_parses, 0);
+        let artifacts = &cold.product.artifacts;
+        assert!(artifacts.files.values().all(|text| !text.contains(&unused)));
+        let stylesheet = &artifacts.stylesheets[&dir.root().join("style.module.css")];
+        let css = std::str::from_utf8(&artifacts.resources[stylesheet]).unwrap();
+        assert!(!css.contains("composes"));
+        assert!(css.contains(&format!(".{unused}")));
+        assert!(css.contains("color: blue"));
+        assert!(css.find("color: red").unwrap() < css.find("color: blue").unwrap());
+        assert!(css.find("color: blue").unwrap() < css.find("color: green").unwrap());
+        let global_path = &artifacts.stylesheets[&dir.root().join("global.css")];
+        assert_eq!(artifacts.resources[global_path], global.as_bytes());
+        let check = format!(
+            r#"{CSS_DOM_RECORDER}
+const {{button, mid, base}} = await import('./main.mjs');
+const buttonTokens = button.split(' ');
+const midTokens = mid.split(' ');
+assert.equal(buttonTokens.length, 4);
+assert.deepEqual(buttonTokens.slice(1), midTokens);
+assert.deepEqual(midTokens.slice(1), [base, 'shared']);
+assert.equal(new Set(buttonTokens).size, buttonTokens.length);
+assert.ok({css:?}.includes('.' + buttonTokens[0]));
+assert.ok({css:?}.includes('.' + midTokens[0]));
+assert.ok({css:?}.includes('.' + base));
+assert.equal(links.length, {mounts});
+console.log('composed');
+"#,
+            mounts = if load == CssLoad::AutoMount { 2 } else { 0 }
+        );
+        assert_eq!(observe_named(artifacts, &check), b"composed\n");
+
+        write(
+            dir.root(),
+            "main.mjs",
+            "import './style.module.css'; import './global.css'; export const value = 1;",
+        );
+        let unused_mappings = session.build(&config).unwrap();
+        assert_eq!(
+            unused_mappings.product.artifacts.resources[stylesheet],
+            artifacts.resources[stylesheet]
+        );
+        assert_eq!(
+            observe_named(
+                &unused_mappings.product.artifacts,
+                &format!(
+                    "{CSS_DOM_RECORDER}\nawait import('./main.mjs'); assert.equal(links.length, {}); console.log('unpruned');",
+                    if load == CssLoad::AutoMount { 2 } else { 0 }
+                )
+            ),
+            b"unpruned\n"
+        );
+        write(
+            dir.root(),
+            "main.mjs",
+            "export { button, mid, base } from './style.module.css'; import './global.css';",
+        );
+    }
+}
+
+#[test]
+fn css_modules_composition_errors_reject_unused_exports_under_both_loaders() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './style.module.css';");
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        write(dir.root(), "style.module.css", ".base {}");
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let previous = session.build(&config).unwrap();
+        for (source, message) in [
+            (".a { composes: missing }", "unknown local name"),
+            (".a { composes: a }", "composition cycle a -> a"),
+            (
+                ".a { composes: b } .b { composes: c } .c { composes: a }",
+                "a -> b -> c -> a",
+            ),
+            (".a,.b { composes: a }", "multi-target"),
+            (".a .b { composes: a }", "multi-target"),
+            (".a:hover { composes: a }", "illegal placement"),
+            (
+                ":global(.a) { composes: a from global }",
+                "illegal placement",
+            ),
+            (".a { & { composes: a } }", "illegal placement"),
+            ("@font-face { composes: a }", "illegal placement"),
+            (
+                ".a { composes: b from './missing.module.css' }",
+                "cross-file composition is unsupported",
+            ),
+            (".a { composes: b !important }", "important composes"),
+            (".a { composes: b from global extra }", "trailing composes"),
+            (".a { composes: }", "empty composes"),
+        ] {
+            write(dir.root(), "style.module.css", source);
+            let error = format!("{:#}", session.build(&config).err().unwrap());
+            assert!(
+                error.contains("style.module.css")
+                    && error.contains(message)
+                    && error.contains(".."),
+                "{load:?} {source}: {error}"
+            );
+            assert!(Rc::ptr_eq(
+                session.last.as_ref().unwrap(),
+                &previous.product
+            ));
+        }
+    }
+}
+
+#[test]
 fn css_modules_stability_content_order_root_and_transitive_selection_invalidate_resources() {
     let mut original = None;
     for reverse in [false, true] {

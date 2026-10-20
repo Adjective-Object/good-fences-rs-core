@@ -193,7 +193,17 @@ not a class-only name. Unknown/global fragments, external URL fragments,
 attributes, strings, comments and unrelated identifiers remain untouched.
 Every transitive `@import` uses its own suffix/selection rule, never inheriting
 module mode from its importer; imports and their conditions remain separate.
-`composes` still fails explicitly, and animation identifiers are not scoped yet.
+Module `composes` declarations resolve stylesheet-local forward references and
+explicit `from global` names, then disappear from emitted CSS. Each mapping keeps
+its own scoped name first, followed by composition tokens in declaration order
+with deterministic deduplication. Targets must be single local class selectors
+(including explicit `:local` forms), not selector lists, compound/complex
+selectors, IDs or nested rules. Unknown local names, illegal placement and cycles
+fail with source paths/byte spans, even for unused exports. Cross-file `from
+"./other.module.css"` remains explicitly unsupported; animation identifiers are
+not scoped yet. Ordinary global-CSS `composes` declarations remain untouched.
+Extraction is stylesheet-wide: pruning JS mappings never removes CSS rules or
+changes cascade order.
 `cssparser` still owns URL tokenization; URL and selector
 edits share one overlap-checked original-byte pipeline. Resource names include
 module transformation identity throughout the CSS import closure so global and

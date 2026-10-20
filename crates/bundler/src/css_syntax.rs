@@ -58,6 +58,7 @@ pub(crate) enum CompositionSource {
 pub(crate) struct Composition {
     pub(crate) span: Range<usize>,
     pub(crate) selector: Option<Range<usize>>,
+    pub(crate) nested: bool,
     pub(crate) names: Vec<Name>,
     pub(crate) source: CompositionSource,
 }
@@ -99,7 +100,7 @@ fn parse_inner(source: &str) -> eyre::Result<ModuleSyntax> {
         offset: 0,
         syntax: ModuleSyntax::default(),
     };
-    collector.statements(&stylesheet.statements, None, 0)?;
+    collector.statements(&stylesheet.statements, None, 0, 0)?;
     Ok(collector.syntax)
 }
 
@@ -132,12 +133,13 @@ impl Collector<'_> {
         statements: &[Statement<'_>],
         selector: Option<Range<usize>>,
         depth: usize,
+        rule_depth: usize,
     ) -> eyre::Result<()> {
         ensure!(depth < 128, "CSS Modules nesting limit exceeded");
         for statement in statements {
             match statement {
                 Statement::QualifiedRule(rule) => {
-                    if selector.is_none() {
+                    if rule_depth == 0 {
                         for selector in &rule.selector.selectors {
                             ensure!(
                                 !matches!(
@@ -154,6 +156,7 @@ impl Collector<'_> {
                         &rule.block.statements,
                         Some(self.span(rule.selector.span)?),
                         depth + 1,
+                        rule_depth + 1,
                     )?;
                 }
                 Statement::Declaration(declaration) => {
@@ -162,7 +165,7 @@ impl Collector<'_> {
                         .decoded
                         .eq_ignore_ascii_case("composes")
                     {
-                        self.composition(declaration, selector.clone())?;
+                        self.composition(declaration, selector.clone(), rule_depth > 1)?;
                     }
                 }
                 Statement::AtRule(rule) => {
@@ -203,11 +206,11 @@ impl Collector<'_> {
                         ),
                     }
                     if let Some(block) = &rule.block {
-                        self.statements(&block.statements, selector.clone(), depth + 1)?;
+                        self.statements(&block.statements, None, depth + 1, rule_depth)?;
                     }
                 }
                 Statement::KeyframeBlock(block) => {
-                    self.statements(&block.block.statements, None, depth + 1)?;
+                    self.statements(&block.block.statements, None, depth + 1, rule_depth)?;
                 }
                 Statement::UnknownQualifiedRule(rule) => bail!(
                     "raw CSS selector at {:?}; cannot safely transform CSS Modules",
@@ -509,6 +512,7 @@ impl Collector<'_> {
         &mut self,
         declaration: &Declaration<'_>,
         selector: Option<Range<usize>>,
+        nested: bool,
     ) -> eyre::Result<()> {
         let span = self.span(declaration.span)?;
         ensure!(
@@ -550,6 +554,7 @@ impl Collector<'_> {
         self.syntax.compositions.push(Composition {
             span,
             selector,
+            nested,
             names,
             source,
         });
