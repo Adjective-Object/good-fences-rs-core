@@ -728,7 +728,7 @@ fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
 }
 
 /// Conservative resolver dependency inventory: all file names and all JSON
-/// config bytes, including package trees. Validate direct tsconfig conditions.
+/// config bytes, including package trees, without interpreting compiler configs.
 fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
     fn visit(
         root: &Path,
@@ -755,9 +755,6 @@ fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
             if ty.is_dir() {
                 visit(root, &path, out)?;
             } else if ty.is_file() {
-                if name == "tsconfig.json" {
-                    import_resolver::node_resolver::read_custom_conditions(&path)?;
-                }
                 out.insert(
                     path.strip_prefix(root)?.to_owned(),
                     if path

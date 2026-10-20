@@ -14,8 +14,9 @@ Blanket impls exist for `&R`, `Box<R>`, and `Arc<R>`.
 
 Implementors:
 - `node_resolver::MonorepoResolver` — production resolver with ftree-backed
-  caching, tsconfig export conditions and package.json browser/exports semantics.
-- `manual_resolver::ManualResolver` — test double.
+  caching, explicit export conditions and package.json browser/exports semantics.
+The separate `manual_resolver` classifies imports for fence checks without
+compiler path aliases; it is not a `PathResolver` implementation.
 
 ## Resolver lineage
 
@@ -32,9 +33,11 @@ The custom resolver has export-condition handling, ftree caching, and
 ## Structural graph policy
 
 `StructuralResolver` uses separate import/require cache trees. Package target
-keys include the active condition set, including nearest tsconfig conditions.
-Never apply cached-resolver baseUrl/paths rewrites; the legacy manual fence
-resolver remains independent. Externals require exact
+keys include the explicit active condition set. Never discover or interpret
+tsconfig files, including customConditions/customSourceConditions or
+extends/references; no baseUrl/paths rewrites in either resolver.
+Conditions come from NodeModulesResolverOptions::export_conditions.
+Externals require exact
 explicit declarations. `invalidate` replaces both trees, including misses;
 call it after filesystem/config changes, then refresh the graph. Symlink
 identity follows explicit options; source paths must follow that same policy.

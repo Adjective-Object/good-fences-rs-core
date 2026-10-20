@@ -11,6 +11,8 @@ use bundler::{
 struct FixtureConfig {
     output: FixtureOutput,
     css: FixtureCss,
+    #[serde(rename = "resolveConditions")]
+    resolve_conditions: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -56,6 +58,24 @@ fn main() -> eyre::Result<()> {
             .read_to_end(&mut bytes)?;
         eyre::ensure!(bytes.len() <= 16 * 1024, "fixture config exceeds 16 KiB");
         let config: FixtureConfig = serde_json::from_slice(&bytes)?;
+        eyre::ensure!(
+            config
+                .resolve_conditions
+                .iter()
+                .all(|condition| !condition.trim().is_empty()),
+            "resolveConditions must contain nonempty strings"
+        );
+        eyre::ensure!(
+            config
+                .resolve_conditions
+                .iter()
+                .all(|condition| !matches!(condition.as_str(), "import" | "require")),
+            "resolveConditions cannot override request-mode conditions import or require"
+        );
+        options
+            .resolver
+            .export_conditions
+            .extend(config.resolve_conditions);
         options.output.base_url = config.output.base_url;
         options.css.load = config.css.load;
         options.css.css_modules = config.css.css_modules;

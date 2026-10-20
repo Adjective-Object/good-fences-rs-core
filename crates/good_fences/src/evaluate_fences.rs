@@ -4,7 +4,7 @@ use crate::fence_collection::FenceCollection;
 use crate::file_extension::no_ext;
 use crate::walk_dirs::SourceFile;
 use glob_match::glob_match;
-use import_resolver::manual_resolver::{resolve_ts_import, ResolvedImport, SOURCE_EXTENSIONS};
+use import_resolver::manual_resolver::{resolve_import, ResolvedImport, SOURCE_EXTENSIONS};
 use path_slash::PathBufExt;
 use relative_path::RelativePath;
 use serde::Serialize;
@@ -13,7 +13,6 @@ use std::fmt::Display;
 use std::iter::{FromIterator, Iterator};
 use std::path::{Path, PathBuf};
 use std::vec::Vec;
-use tsconfig_paths::TsconfigPathsJson;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub enum ViolatedFenceClause<'a> {
@@ -156,7 +155,6 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
     fence_collection: &'fencecollectionlifetime FenceCollection,
     source_files: &HashMap<String, SourceFile>,
     source_file: &'sourcefilelifetime SourceFile,
-    tsconfig_paths_json: &'sourcefilelifetime TsconfigPathsJson,
 ) -> FenceEvaluationResult<'fencecollectionlifetime, 'sourcefilelifetime> {
     let mut violations = Vec::<ImportRuleViolation>::new();
     let mut unresolved_files = Vec::<EvaluateFencesError>::new();
@@ -171,8 +169,7 @@ pub fn evaluate_fences<'fencecollectionlifetime, 'sourcefilelifetime>(
 
     for (import_specifier, _imported_names) in source_file.imports.iter() {
         let importer_rel_path = RelativePath::from_path(&source_file.source_file_path).unwrap();
-        let resolved_src_import =
-            resolve_ts_import(tsconfig_paths_json, importer_rel_path, import_specifier);
+        let resolved_src_import = resolve_import(importer_rel_path, import_specifier);
         let resolved_import = match resolved_src_import {
             Ok(resolved_import) => match &resolved_import {
                 ResolvedImport::ProjectLocalImport(import_specifier) => {
@@ -421,7 +418,6 @@ mod test {
     use relative_path::RelativePathBuf;
     use std::collections::{HashMap, HashSet};
     use std::iter::FromIterator;
-    use tsconfig_paths::{TsconfigPathsCompilerOptions, TsconfigPathsJson};
 
     macro_rules! map(
         { $($key:expr => $value:expr),+ } => {
@@ -479,15 +475,6 @@ mod test {
         );
     }
 
-    lazy_static! {
-        static ref TSCONFIG_PATHS_JSON: TsconfigPathsJson = TsconfigPathsJson {
-            compiler_options: TsconfigPathsCompilerOptions {
-                paths: HashMap::new(),
-                base_url: Option::None,
-            },
-        };
-    }
-
     #[test]
     pub fn test_imports_allow_list_empty_violation() {
         let fence_collection = FenceCollection {
@@ -509,7 +496,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(
@@ -548,7 +534,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(
@@ -587,7 +572,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(
@@ -626,7 +610,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(
@@ -671,7 +654,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/friend/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -703,7 +685,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         let d = ExportRule {
@@ -752,7 +733,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         let d = ExportRule {
@@ -807,7 +787,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/friend/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -830,7 +809,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(
@@ -865,7 +843,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -893,7 +870,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         let d = DependencyRule {
@@ -946,7 +922,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/friend/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(violations.violations, Vec::new());
@@ -982,7 +957,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/friend/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         let r = DependencyRule {
@@ -1039,7 +1013,6 @@ mod test {
             SOURCE_FILES
                 .get("tests/evaluate_fences/path/to/source/friend/index.ts")
                 .unwrap(),
-            &TSCONFIG_PATHS_JSON,
         );
 
         assert_eq!(violations.violations, Vec::new());

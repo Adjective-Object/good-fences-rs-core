@@ -3,8 +3,6 @@ use napi_derive::napi;
 #[napi(object)]
 pub struct GoodFencesOptions {
     pub paths: Vec<String>,
-    pub project: String,
-    pub base_url: Option<String>,
     pub err_output_path: Option<String>,
     pub ignore_external_fences: Option<ExternalFences>,
     pub ignored_dirs: Option<Vec<String>>,
@@ -14,8 +12,6 @@ impl From<GoodFencesOptions> for good_fences::GoodFencesOptions {
     fn from(val: GoodFencesOptions) -> Self {
         good_fences::GoodFencesOptions {
             paths: val.paths,
-            project: val.project,
-            base_url: val.base_url,
             err_output_path: val.err_output_path,
             ignore_external_fences: val.ignore_external_fences.map(Into::into),
             ignored_dirs: val.ignored_dirs,
