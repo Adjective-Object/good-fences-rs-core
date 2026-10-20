@@ -1115,6 +1115,65 @@ fn package_export_conditions_match_node_for_import_and_require() {
 }
 
 #[test]
+fn package_exports_reject_private_subpaths_for_every_request_mode() {
+    for (entry, source) in [
+        (
+            "main.mjs",
+            "import value from 'pkg/private.cjs'; console.log(value);",
+        ),
+        (
+            "main.mjs",
+            "console.log((await import('pkg/private.cjs')).default);",
+        ),
+        ("main.cjs", "console.log(require('pkg/private.cjs'));"),
+    ] {
+        let dir = TmpDir::new();
+        write(dir.root(), entry, source);
+        write(
+            dir.root(),
+            "node_modules/pkg/package.json",
+            r#"{"exports":{".":"./public.cjs"}}"#,
+        );
+        write(
+            dir.root(),
+            "node_modules/pkg/public.cjs",
+            "module.exports = 0;",
+        );
+        write(
+            dir.root(),
+            "node_modules/pkg/private.cjs",
+            "module.exports = 42;",
+        );
+        let mut options = options();
+        options.entries.get_mut("main").unwrap().path = entry.into();
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let error = format!("{:#}", session.build(&options).err().unwrap());
+        assert!(error.contains("ERR_PACKAGE_PATH_NOT_EXPORTED"), "{error}");
+        assert!(error.contains("pkg/private.cjs"), "{error}");
+        assert!(error.contains("package.json"), "{error}");
+
+        write(
+            dir.root(),
+            "node_modules/pkg/package.json",
+            r#"{"exports":{".":"./public.cjs","./private.cjs":"./private.cjs"}}"#,
+        );
+        let allowed = session.build(&options).unwrap();
+        assert_eq!(observe(&allowed.product.artifacts), b"42\n");
+
+        write(
+            dir.root(),
+            "node_modules/pkg/package.json",
+            r#"{"exports":{".":"./public.cjs"}}"#,
+        );
+        assert!(session.build(&options).is_err());
+
+        write(dir.root(), "node_modules/pkg/package.json", "{}");
+        let legacy = session.build(&options).unwrap();
+        assert_eq!(observe(&legacy.product.artifacts), b"42\n");
+    }
+}
+
+#[test]
 fn package_exports_type_tsconfig_and_options_invalidate_independently() {
     let dir = TmpDir::new();
     let root = dir.root();
