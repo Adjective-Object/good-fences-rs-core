@@ -5,10 +5,8 @@ use std::path::Path;
 use ast_segmenter::owned::{BindingId, ExportValue};
 use eyre::{ensure, OptionExt};
 use oxc_allocator::Allocator;
-use oxc_ast::ast::*;
-use oxc_ast_visit::{walk, Visit};
 use oxc_parser::Parser;
-use oxc_span::{GetSpan, SourceType, Span};
+use oxc_span::{SourceType, Span};
 
 thread_local! {
     static OUTPUT_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -59,8 +57,29 @@ pub fn apply(source: &str, edits: &[Edit]) -> eyre::Result<String> {
         end = next;
         previous = Some(edit.span.start);
     }
+
     result.push_str(&source[end..]);
     Ok(result)
+}
+
+pub(crate) fn apply_range(source: &str, range: Span, edits: &[Edit]) -> eyre::Result<String> {
+    let text = source
+        .get(range.start as usize..range.end as usize)
+        .ok_or_eyre("invalid UTF-8 source slot")?;
+    let edits = edits
+        .iter()
+        .map(|edit| {
+            ensure!(
+                range.start <= edit.span.start && edit.span.end <= range.end,
+                "edit outside original source slot"
+            );
+            Ok(Edit {
+                span: Span::new(edit.span.start - range.start, edit.span.end - range.start),
+                replacement: edit.replacement.clone(),
+            })
+        })
+        .collect::<eyre::Result<Vec<_>>>()?;
+    apply(text, &edits)
 }
 
 /// Validate JavaScript parser/early errors; explicit `.cjs` uses wrapper grammar.
@@ -131,12 +150,8 @@ pub fn rename_private(
         path,
         ast_segmenter::ModuleFormat::Esm,
     )?;
-    let allocator = Allocator::default();
-    let program = Parser::new(&allocator, source, SourceType::mjs()).parse();
-    let mut shorthand = Shorthand::default();
-    shorthand.visit_program(&program.program);
     let mut targets = BTreeSet::new();
-    let mut edits = Vec::new();
+    let mut renamed = BTreeMap::new();
     for (id, name) in names {
         let binding = parsed
             .facts
@@ -181,72 +196,61 @@ pub fn rename_private(
             "rename would capture {}",
             name
         );
-        let spans: BTreeSet<_> = binding
-            .declarations
-            .iter()
-            .chain(
-                parsed
-                    .facts
-                    .references
-                    .iter()
-                    .filter(|r| r.binding == Some(*id))
-                    .map(|r| &r.span),
-            )
-            .map(|s| (s.start, s.end))
-            .collect();
-        for (start, end) in spans {
-            let span = Span::new(start, end);
-            let replacement = shorthand.replacement(source, span, name);
-            edits.push(Edit { span, replacement });
+        renamed.insert(id.0, name);
+    }
+    let mut edits = BTreeMap::new();
+    for recipe in &parsed.facts.emission.segments {
+        for operation in &recipe.operations {
+            use ast_segmenter::emission::OperationKind;
+            let (binding, shorthand) = match operation.kind {
+                OperationKind::Binding {
+                    binding, shorthand, ..
+                } => (Some(binding), shorthand),
+                OperationKind::Reference {
+                    reference,
+                    shorthand,
+                } => (
+                    parsed.facts.references[reference as usize].binding,
+                    shorthand,
+                ),
+                _ => continue,
+            };
+            let Some(name) = binding.and_then(|id| renamed.get(&id.0)) else {
+                continue;
+            };
+            let span = operation.kind.span(&parsed.facts, recipe);
+            edits.insert(
+                (span.start, span.end),
+                Edit {
+                    span,
+                    replacement: shorthand_replacement(source, span, name, shorthand)?,
+                },
+            );
         }
     }
+    let edits: Vec<_> = edits.into_values().collect();
     let output = apply(source, &edits)?;
     validate(path, &output)?;
     Ok(output)
 }
 
-#[derive(Default)]
-pub(crate) struct Shorthand(BTreeMap<u32, bool>);
-
-impl Shorthand {
-    pub(crate) fn replacement(&self, source: &str, span: Span, name: &str) -> String {
-        match self.0.get(&span.start) {
-            // Only an object literal's noncomputed __proto__ key is a setter.
-            Some(true) => format!("[\"__proto__\"]: {name}"),
-            Some(false) => format!(
-                "{}: {name}",
-                &source[span.start as usize..span.end as usize]
-            ),
-            None => name.to_owned(),
-        }
-    }
-}
-
-impl<'a> Visit<'a> for Shorthand {
-    fn visit_assignment_target_property_identifier(
-        &mut self,
-        property: &AssignmentTargetPropertyIdentifier<'a>,
-    ) {
-        self.0.insert(property.binding.span.start, false);
-        walk::walk_assignment_target_property_identifier(self, property);
-    }
-
-    fn visit_object_property(&mut self, property: &ObjectProperty<'a>) {
-        if property.shorthand {
-            self.0.insert(
-                property.value.span().start,
-                matches!(&property.key, PropertyKey::StaticIdentifier(key) if key.name == "__proto__"),
-            );
-        }
-        walk::walk_object_property(self, property);
-    }
-
-    fn visit_binding_property(&mut self, property: &BindingProperty<'a>) {
-        if property.shorthand {
-            self.0.insert(property.value.span().start, false);
-        }
-        walk::walk_binding_property(self, property);
-    }
+pub(crate) fn shorthand_replacement(
+    source: &str,
+    span: Span,
+    name: &str,
+    shorthand: ast_segmenter::emission::Shorthand,
+) -> eyre::Result<String> {
+    Ok(match shorthand {
+        // Only an object literal's noncomputed __proto__ key is a setter.
+        ast_segmenter::emission::Shorthand::Proto => format!("[\"__proto__\"]: {name}"),
+        ast_segmenter::emission::Shorthand::Property => format!(
+            "{}: {name}",
+            source
+                .get(span.start as usize..span.end as usize)
+                .ok_or_eyre("invalid UTF-8 shorthand span")?
+        ),
+        ast_segmenter::emission::Shorthand::None => name.to_owned(),
+    })
 }
 
 #[cfg(test)]

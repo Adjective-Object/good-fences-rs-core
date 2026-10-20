@@ -4,6 +4,79 @@ use std::path::Path;
 use std::process::{Command, Output};
 use test_tmpdir::TmpDir;
 
+#[test]
+fn cached_operations_compose_names_shorthand_dependencies_and_nested_pure() {
+    use ast_segmenter::emission::OperationKind;
+    let source = "let value = 3; /*#__PURE__*/ remove(({value}), (/*#__PURE__*/ inner(value), 1), import(/*# sourceURL=obsolete */'./original.mjs'));";
+    let parsed = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("input.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let segment = &parsed.segments[1];
+    let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+    assert_eq!(rewrites.len(), 2);
+    let recipe = &parsed.facts.emission.segments[1];
+    let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, &rewrites);
+    for (index, operation) in recipe.operations.iter().enumerate() {
+        if let OperationKind::Reference {
+            reference,
+            shorthand,
+        } = operation.kind
+        {
+            let reference = &parsed.facts.references[reference as usize];
+            if reference.name == "value" {
+                renderer.replace(
+                    index as u32,
+                    rewrite::shorthand_replacement(source, reference.span, "renamed", shorthand)
+                        .unwrap(),
+                );
+            }
+        }
+    }
+    let dependency = &parsed.facts.dependencies[0];
+    renderer
+        .dependencies(&[Edit {
+            span: dependency.specifier_span,
+            replacement: "'./resolved.mjs'".into(),
+        }])
+        .unwrap();
+    let count = rewrite::output_parse_count();
+    let output = renderer.render(segment.span).unwrap();
+    assert_eq!(rewrite::output_parse_count(), count);
+    assert!(output.contains("{value: renamed}"), "{output}");
+    assert!(output.contains("((inner),(renamed),void 0)"), "{output}");
+    assert!(output.contains("import('./resolved.mjs')"), "{output}");
+    assert!(!output.contains("obsolete"), "{output}");
+    assert!(!output.contains("remove("), "{output}");
+    rewrite::validate(Path::new("output.mjs"), &output).unwrap();
+}
+
+#[test]
+fn original_coordinate_slots_reject_invalid_utf8_and_escaping_edits() {
+    for (range, edits) in [
+        (Span::new(1, 2), vec![]),
+        (
+            Span::new(2, 4),
+            vec![Edit {
+                span: Span::new(0, 2),
+                replacement: "".into(),
+            }],
+        ),
+        (
+            Span::new(0, 4),
+            vec![Edit {
+                span: Span::new(2, 5),
+                replacement: "".into(),
+            }],
+        ),
+    ] {
+        assert!(rewrite::apply_range("é12", range, &edits).is_err());
+    }
+}
+
 fn emit(source: &str, namespace: bool) -> String {
     let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", source)]);
     let roots = if namespace {

@@ -32,6 +32,8 @@ to execute nested function bodies eagerly.
 Rewrites use checked original UTF-8 byte spans and pinned-OXC JS semantic
 validation. Never apply overlapping recipe edits independently. Keep native ESM
 live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
+Instantiate cached operation parents/source slots with original binding/request
+IDs; replacing parents own nested rewrites, never reconnect generated text.
 
 The symbol linker emits scope-hoisted direct ESM bindings; the rejected
 registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is

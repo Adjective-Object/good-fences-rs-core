@@ -112,7 +112,6 @@ fn projection_edits(
         .map(|s| s.key.segment_idx)
         .collect();
     let mut edits = Vec::new();
-    let mut fresh = Fresh::new(&parsed.facts);
     for (index, segment) in parsed.segments.iter().enumerate() {
         let key = SegmentKey::new(file, index as u32);
         if let Some(edit) = dependency_edits.iter().find(|e| e.span == segment.span) {
@@ -155,32 +154,25 @@ fn projection_edits(
             .find(|e| e.key == key)
             .map(|e| e.summary.rewrites.as_slice())
             .unwrap_or_default();
-        let replacement =
-            render_range(source, segment.span, rewrites, &mut fresh).wrap_err_with(|| {
-                format!(
-                    "{}: PURE rewrite at bytes {}..{}",
-                    path.display(),
-                    segment.span.start,
-                    segment.span.end
-                )
-            })?;
-        // Dependency edits and PURE invocation edits must not overlap.
-        if rewrites.is_empty() {
-            edits.extend(
-                dependency_edits
-                    .iter()
-                    .filter(|e| contains(segment.span, e.span))
-                    .cloned(),
-            );
-        } else {
-            ensure!(!dependency_edits.iter().any(|e| contains(segment.span, e.span)),
-                "{}: dependency inside PURE-rewritten statement needs composed linking at bytes {}..{}",
-                path.display(), segment.span.start, segment.span.end);
-            edits.push(Edit {
-                span: segment.span,
-                replacement,
-            });
-        }
+        let mut renderer = CachedRenderer::new(
+            source,
+            &parsed.facts,
+            &parsed.facts.emission.segments[index],
+            rewrites,
+        );
+        renderer.dependencies(dependency_edits)?;
+        let replacement = renderer.render(segment.span).wrap_err_with(|| {
+            format!(
+                "{}: PURE rewrite at bytes {}..{}",
+                path.display(),
+                segment.span.start,
+                segment.span.end
+            )
+        })?;
+        edits.push(Edit {
+            span: segment.span,
+            replacement,
+        });
     }
     Ok(edits)
 }
@@ -191,7 +183,6 @@ fn contains(outer: Span, inner: Span) -> bool {
 
 struct Fresh {
     names: BTreeSet<String>,
-    awaits: Vec<Span>,
     next: usize,
 }
 
@@ -204,7 +195,6 @@ impl Fresh {
                 .map(|b| b.name.clone())
                 .chain(facts.references.iter().map(|r| r.name.clone()))
                 .collect(),
-            awaits: facts.top_level_await.clone(),
             next: 0,
         }
     }
@@ -220,60 +210,155 @@ impl Fresh {
     }
 }
 
-pub(crate) fn render_segment(
-    source: &str,
-    range: Span,
-    recipes: &[crate::effects::InvocationRewrite],
-    facts: &ast_segmenter::owned::ModuleFacts,
-) -> eyre::Result<String> {
-    render_range(source, range, recipes, &mut Fresh::new(facts))
+/// Instantiate only checked original-coordinate operations. Replacing operations
+/// own their children; source slots carry the precomputed child roots.
+pub(crate) struct CachedRenderer<'a> {
+    source: &'a str,
+    facts: &'a ast_segmenter::owned::ModuleFacts,
+    recipe: &'a ast_segmenter::emission::SegmentRecipe,
+    rewrites: &'a [crate::effects::InvocationRewrite],
+    replacements: std::collections::BTreeMap<u32, String>,
+    edits: std::collections::BTreeMap<u32, Vec<Edit>>,
+    fresh: Fresh,
 }
 
-fn render_range(
-    source: &str,
-    range: Span,
-    recipes: &[crate::effects::InvocationRewrite],
-    fresh: &mut Fresh,
-) -> eyre::Result<String> {
-    let mut edits = Vec::new();
-    let mut end = range.start;
-    for recipe in recipes.iter().filter(|r| contains(range, r.invocation)) {
-        if recipe.invocation.start < end {
-            continue;
+impl<'a> CachedRenderer<'a> {
+    pub(crate) fn new(
+        source: &'a str,
+        facts: &'a ast_segmenter::owned::ModuleFacts,
+        recipe: &'a ast_segmenter::emission::SegmentRecipe,
+        rewrites: &'a [crate::effects::InvocationRewrite],
+    ) -> Self {
+        Self {
+            source,
+            facts,
+            recipe,
+            rewrites,
+            replacements: Default::default(),
+            edits: Default::default(),
+            fresh: Fresh::new(facts),
         }
-        if crosses_await_guard(source, recipe, &fresh.awaits)? {
-            // Keep the invocation rather than introduce a function boundary or async timing.
-            end = recipe.invocation.end;
-            continue;
+    }
+
+    pub(crate) fn replace(&mut self, operation: u32, replacement: String) {
+        self.replacements.insert(operation, replacement);
+    }
+
+    pub(crate) fn edit(&mut self, operation: u32, edit: Edit) {
+        self.edits.entry(operation).or_default().push(edit);
+    }
+
+    pub(crate) fn dependencies(&mut self, edits: &[Edit]) -> eyre::Result<()> {
+        use ast_segmenter::emission::{ExportForm, OperationKind};
+        for (index, operation) in self.recipe.operations.iter().enumerate() {
+            if !matches!(
+                operation.kind,
+                OperationKind::Dependency { .. }
+                    | OperationKind::Export {
+                        form: ExportForm::Remove,
+                        ..
+                    }
+            ) {
+                continue;
+            }
+            let span = operation.kind.span(self.facts, self.recipe);
+            let edits: Vec<_> = edits
+                .iter()
+                .filter(|edit| contains(span, edit.span))
+                .cloned()
+                .collect();
+            if !edits.is_empty() {
+                if let Some(edit) = edits.iter().find(|edit| edit.span == span) {
+                    self.replace(index as u32, edit.replacement.clone());
+                } else {
+                    self.edits.insert(index as u32, edits);
+                }
+            }
         }
-        let callee = render_range(source, recipe.callee, recipes, fresh)?;
-        let mut arguments = Vec::new();
-        for argument in &recipe.arguments {
-            let value = render_range(source, argument.span, recipes, fresh)?;
-            arguments.push(if argument.spread {
-                format!("[...({value})]")
-            } else {
-                format!("({value})")
+        Ok(())
+    }
+
+    pub(crate) fn render(&mut self, range: Span) -> eyre::Result<String> {
+        self.children(range, None)
+    }
+
+    pub(crate) fn slot(
+        &mut self,
+        slot: &ast_segmenter::emission::SourceSlot,
+    ) -> eyre::Result<String> {
+        self.roots(slot.span, &slot.operations, Vec::new())
+    }
+
+    pub(crate) fn children(&mut self, range: Span, parent: Option<u32>) -> eyre::Result<String> {
+        let roots: Vec<_> = self
+            .recipe
+            .operations
+            .iter()
+            .enumerate()
+            .filter(|(_, operation)| operation.parent == parent)
+            .map(|(index, _)| index as u32)
+            .collect();
+        let edits = parent
+            .and_then(|index| self.edits.get(&index))
+            .cloned()
+            .unwrap_or_default();
+        self.roots(range, &roots, edits)
+    }
+
+    fn roots(&mut self, range: Span, roots: &[u32], mut edits: Vec<Edit>) -> eyre::Result<String> {
+        for &index in roots {
+            let operation = &self.recipe.operations[index as usize];
+            let span = operation.kind.span(self.facts, self.recipe);
+            edits.push(Edit {
+                span,
+                replacement: self.operation(index)?,
             });
         }
-        arguments.push("void 0".into());
-        let tail = arguments.join(",");
-        let replacement = match recipe.guard {
-            crate::effects::ArgumentGuard::Always => format!("(({callee}),{tail})"),
-            crate::effects::ArgumentGuard::OriginalChain { optional_call } => {
-                pure_chain(&callee, optional_call, &tail, fresh)?
-            }
-        };
-        edits.push(Edit {
-            span: Span::new(
-                recipe.invocation.start - range.start,
-                recipe.invocation.end - range.start,
-            ),
-            replacement,
-        });
-        end = recipe.invocation.end;
+        rewrite::apply_range(self.source, range, &edits)
     }
-    rewrite::apply(&source[range.start as usize..range.end as usize], &edits)
+
+    fn operation(&mut self, index: u32) -> eyre::Result<String> {
+        use ast_segmenter::emission::OperationKind;
+        if let Some(replacement) = self.replacements.get(&index) {
+            return Ok(replacement.clone());
+        }
+        let operation = &self.recipe.operations[index as usize];
+        let span = operation.kind.span(self.facts, self.recipe);
+        if let OperationKind::SourceHint { .. } = operation.kind {
+            return Ok(String::new());
+        }
+        if let OperationKind::Invocation {
+            invocation,
+            ref lowering,
+        } = operation.kind
+        {
+            if let Some(recipe) = self.rewrites.iter().find(|rewrite| {
+                rewrite.invocation == self.facts.invocations[invocation as usize].span
+            }) {
+                if !crosses_await_guard(self.source, recipe, &self.facts.top_level_await)? {
+                    let callee = self.slot(&lowering.callee)?;
+                    let mut arguments = Vec::new();
+                    for (slot, argument) in lowering.arguments.iter().zip(&recipe.arguments) {
+                        let value = self.slot(slot)?;
+                        arguments.push(if argument.spread {
+                            format!("[...({value})]")
+                        } else {
+                            format!("({value})")
+                        });
+                    }
+                    arguments.push("void 0".into());
+                    let tail = arguments.join(",");
+                    return match recipe.guard {
+                        crate::effects::ArgumentGuard::Always => Ok(format!("(({callee}),{tail})")),
+                        crate::effects::ArgumentGuard::OriginalChain { optional_call } => {
+                            pure_chain(&callee, optional_call, &tail, &mut self.fresh)
+                        }
+                    };
+                }
+            }
+        }
+        self.children(span, Some(index))
+    }
 }
 
 fn crosses_await_guard(

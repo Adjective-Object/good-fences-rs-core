@@ -293,43 +293,28 @@ pub(super) fn emit(
             )?
             .ok_or_eyre("native group became incompatible")?
         } else {
-            let source = retained_source(root, &modules[&root], &live, &recipes)?;
-            rewrite::count_output_parse();
-            let parsed = ast_segmenter::parse_module(
-                &logger::StdioLogger::new(),
-                &source,
-                graph.file_path(root).unwrap(),
-                ast_segmenter::ModuleFormat::Esm,
-            )?;
-            let edits = parsed
-                .facts
+            let module = &modules[&root];
+            let facts = &module.parsed.facts;
+            let edits = facts
                 .dependencies
                 .iter()
                 .filter(|d| !d.type_only)
-                .map(|d| {
-                    // Retention changes occurrence offsets; resolve by original request.
-                    let original = modules[&root]
+                .filter(|dependency| {
+                    let index = module
                         .parsed
-                        .facts
-                        .dependencies
-                        .iter()
-                        .find(|o| o.specifier == d.specifier && o.kind == d.kind)
-                        .ok_or_eyre("missing retained native dependency")?;
-                    let target = target_file(graph, root, original)?;
+                        .segments
+                        .partition_point(|segment| segment.span.end <= dependency.span.start);
+                    live.contains(&SegmentKey::new(root, index as u32))
+                })
+                .map(|d| {
+                    let target = target_file(graph, root, d)?;
                     if cjs.contains(target) {
                         Ok(Edit {
                             span: d.span,
                             replacement: if d.kind == DependencyKind::DynamicImport {
                                 cjs.dynamic(graph, target)?
                             } else {
-                                cjs.static_dependency(
-                                    graph,
-                                    root,
-                                    target,
-                                    d,
-                                    &parsed.facts,
-                                    symbols,
-                                )?
+                                cjs.static_dependency(graph, root, target, d, facts, symbols)?
                             },
                         })
                     } else {
@@ -349,7 +334,22 @@ pub(super) fn emit(
                     imports.push_str(&format!("import {};\n", request(graph, owners[&target])));
                 }
             }
-            imports.push_str(&rewrite::apply(&source, &edits)?);
+            for (index, segment) in module.parsed.segments.iter().enumerate() {
+                let key = SegmentKey::new(root, index as u32);
+                if !live.contains(&key) {
+                    continue;
+                }
+                let recipe = &facts.emission.segments[index];
+                let mut renderer = crate::emit::CachedRenderer::new(
+                    module.source,
+                    facts,
+                    recipe,
+                    recipes.get(&key).copied().unwrap_or_default(),
+                );
+                renderer.dependencies(&edits)?;
+                imports.push_str(&renderer.render(segment.span)?);
+                imports.push_str("\n;\n");
+            }
             imports
         };
         let output = rewrite::apply(&output, &rewrite::source_hint_edits(&output))?;

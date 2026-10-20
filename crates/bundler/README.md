@@ -39,8 +39,11 @@ declarations retain their own binding and function-hoisting/class-TDZ behavior.
 Public names are explicit output export aliases; private
 exports and import declarations disappear. Declarations, all retained var
 contributions and statements stay in source order within dependency-first
-static-import DFS order, never path-sorted body order. PURE recipes compose before
-owned occurrences are re-extracted and checked OXC-aware edits are applied.
+static-import DFS order, never path-sorted body order. Cached segment recipes
+compose PURE lowering, shorthand, namespace reads, default initialization and
+binding/dependency substitutions in original UTF-8 coordinates. Replacing
+operations explicitly own their nested source slots; no retained-source AST or
+name/specifier reconnection is needed.
 Shorthand keys, free globals, nested shadows, hoisting, strict-module `this`,
 TDZ, const and live mutation keep native semantics. The output is parser/semantic
 validated and has no runtime, cells, registrations or per-module facade family.
