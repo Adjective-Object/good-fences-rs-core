@@ -15,6 +15,7 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
+    execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     let symbols = prepared.symbols;
     let mut entry_owners = BTreeMap::new();
@@ -186,11 +187,9 @@ pub(super) fn emit(
         .filter(|&&f| redirects[&f] == f)
         .map(|&f| (f, BTreeSet::from([f])))
         .collect();
-    let mut roots: Vec<_> = modules.keys().copied().collect();
-    roots.sort_by_key(|&f| graph.file_path(f));
     loop {
         let mut changed = false;
-        for &root in &roots {
+        for &root in &prepared.files {
             let Some(group) = groups.get(&root) else {
                 continue;
             };
@@ -282,11 +281,45 @@ pub(super) fn emit(
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
-    cjs.emit(graph, modules, &owners, &entry_files)?;
-    for (&root, group) in &groups {
-        if cjs.contains(root) {
-            continue;
-        }
+    let routing = segments::Routing::new(graph, prepared, &placement, &surfaces)?;
+    cjs.emit(graph, modules, &owners, &entry_files, execution)?;
+    let mut jobs: Vec<_> = groups
+        .keys()
+        .filter(|&&root| !cjs.contains(root))
+        .map(|&root| segments::Owner::Evaluation(root))
+        .chain(
+            placement
+                .owners
+                .values()
+                .copied()
+                .filter(|owner| matches!(owner, segments::Owner::Bindings(_))),
+        )
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    jobs.sort_by_key(|owner| match owner {
+        segments::Owner::Evaluation(file) => (graph.file_path(*file), 0, 0),
+        segments::Owner::Bindings(key) => (graph.file_path(key.file_id), 1, key.segment_idx),
+    });
+    let outputs = execution.map(&jobs, |&owner| -> eyre::Result<_> {
+        let segments::Owner::Evaluation(root) = owner else {
+            let output = segments::emit(
+                graph,
+                owner,
+                &BTreeSet::new(),
+                &owners,
+                &redirects,
+                modules,
+                prepared,
+                &placement,
+                &surfaces,
+                &recipes,
+                &cjs,
+                &routing,
+            )?;
+            return Ok((owner.path(graph), output, None));
+        };
+        let group = &groups[&root];
         let artifact_path = path(graph, root);
         let output = if changed.contains(&root) {
             segments::emit(
@@ -301,6 +334,7 @@ pub(super) fn emit(
                 &surfaces,
                 &recipes,
                 &cjs,
+                &routing,
             )?
         } else if group.len() > 1 {
             concatenate(
@@ -436,32 +470,17 @@ pub(super) fn emit(
             });
             imports
         };
-        if surfaces.contains(&root) {
-            namespaces.insert(
-                graph.file_path(root).unwrap().to_owned(),
-                artifact_path.clone(),
-            );
+        let namespace = surfaces
+            .contains(&root)
+            .then(|| graph.file_path(root).unwrap().to_owned());
+        Ok((artifact_path, output, namespace))
+    })?;
+    for output in outputs {
+        let (artifact_path, output, namespace) = output?;
+        if let Some(namespace) = namespace {
+            namespaces.insert(namespace, artifact_path.clone());
         }
         files.insert(artifact_path, output);
-    }
-    for owner in placement.owners.values().copied().collect::<BTreeSet<_>>() {
-        if matches!(owner, segments::Owner::Bindings(_)) {
-            let output = segments::emit(
-                graph,
-                owner,
-                &BTreeSet::new(),
-                &owners,
-                &redirects,
-                modules,
-                prepared,
-                &placement,
-                &surfaces,
-                &recipes,
-                &cjs,
-            )?;
-            let path = owner.path(graph);
-            files.insert(path, output);
-        }
     }
     for (&file, path) in &cjs.entries {
         namespaces.insert(graph.file_path(file).unwrap().to_owned(), path.clone());

@@ -26,12 +26,13 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
+    execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     let prepared = PreparedValues::new(graph, modules, symbols);
     if let Some(output) = single(graph, plan, modules, manifest, &prepared)? {
         return Ok(output);
     }
-    chunks::emit(graph, plan, modules, manifest, &prepared)
+    chunks::emit(graph, plan, modules, manifest, &prepared, execution)
 }
 
 fn single(
@@ -180,6 +181,7 @@ fn single(
 
 struct PreparedValues<'s> {
     symbols: &'s Symbols,
+    files: Vec<u32>,
     definitions: Vec<crate::symbols::Symbol>,
     defaults: BTreeMap<SegmentKey, String>,
     occupied: HashSet<String>,
@@ -217,7 +219,7 @@ impl<'s> PreparedValues<'s> {
         files.sort_by_key(|&file| graph.file_path(file));
         let mut defaults = BTreeMap::new();
         let mut fresh = 0;
-        for file in files {
+        for &file in &files {
             let module = &modules[&file];
             for export in &module.parsed.facts.exports {
                 if let ExportValue::Expression(span) = export.value {
@@ -238,6 +240,7 @@ impl<'s> PreparedValues<'s> {
         }
         Self {
             symbols,
+            files,
             definitions,
             defaults,
             occupied,

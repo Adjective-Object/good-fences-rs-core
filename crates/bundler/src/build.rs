@@ -42,6 +42,8 @@ pub struct Entry {
 
 #[derive(Clone)]
 pub struct BuildOptions {
+    /// Explicit bounded workers; defaults to inline serial execution.
+    pub execution: crate::execution::ExecutionOptions,
     /// Logical entry IDs mapped to source entries and optional output names.
     pub entries: BTreeMap<String, Entry>,
     pub resolver: NodeModulesResolverOptions,
@@ -95,6 +97,7 @@ impl Default for OutputOptions {
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
+            execution: crate::execution::ExecutionOptions::default(),
             entries: BTreeMap::new(),
             resolver: NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
             externals: BTreeSet::new(),
@@ -138,7 +141,7 @@ pub struct Counters {
 
 impl Counters {
     fn record_parses(&mut self, before: (usize, usize, usize)) {
-        self.source_reparses = ast_segmenter::module_parse_count() - before.0 - self.source_parses;
+        self.source_reparses = crate::rewrite::source_parse_count() - before.0 - self.source_parses;
         self.final_validations = crate::rewrite::final_validation_count() - before.2;
         self.fragment_reparses =
             crate::rewrite::output_parse_count() - before.1 - self.final_validations;
@@ -223,7 +226,7 @@ impl BuildSession {
         );
         let mut counters = Counters::default();
         let before_parses = (
-            ast_segmenter::module_parse_count(),
+            crate::rewrite::source_parse_count(),
             crate::rewrite::output_parse_count(),
             crate::rewrite::final_validation_count(),
         );
@@ -601,8 +604,14 @@ impl BuildSession {
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
-        let mut artifacts =
-            link::esm_plan_prepared(&graph, &plan, &options.effects, &sources, &relocations)?;
+        let mut artifacts = link::esm_plan_prepared(
+            &graph,
+            &plan,
+            &options.effects,
+            &sources,
+            &relocations,
+            options.execution,
+        )?;
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
             let kind = crate::resource::kind(path, &options.css.css_modules);
