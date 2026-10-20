@@ -41,8 +41,12 @@ Resource preparation separates original input bytes from generated JS text and
 parser paths. Graph paths retain input identity; spans/provenance describe only
 generated text. Recheck original bytes on reuse and return. JSON uses an opaque
 CJS value initializer with computed object keys, never mutable runtime JSON.parse.
-Assets export output-root-relative URL strings and use content-addressed byte
-artifacts. file_bytes includes text and resources; publication ownership/hash/
+Assets export validated public-base URL strings (output-root-relative by default)
+and use content-addressed byte artifacts. Relative CSS fetches resolve from the
+emitted stylesheet, never by applying the public base twice. Bases do not rename
+owned paths or native requests. Prepare resource wrappers before memory-hit
+checks; generated text keys parse reuse and normalized bases key output reuse.
+file_bytes includes text and resources; publication ownership/hash/
 cleanup cover both. Resource paths never become executable module routes.
 Extract CSS with parser-backed URL spans; preserve separate imports, conditions,
 layers and cycles. Closure hashes include transitive original CSS/asset bytes;

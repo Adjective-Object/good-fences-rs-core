@@ -45,6 +45,21 @@ pub struct BuildOptions {
     pub effects: EffectPolicy,
     pub declarations: ecco::DeclarationConfig,
     pub cache: CacheMode,
+    pub output: OutputOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputOptions {
+    /// Public resource directory URL, relative to the output root by default.
+    pub base_url: String,
+}
+
+impl Default for OutputOptions {
+    fn default() -> Self {
+        Self {
+            base_url: "./".into(),
+        }
+    }
 }
 
 impl Default for BuildOptions {
@@ -56,6 +71,7 @@ impl Default for BuildOptions {
             effects: EffectPolicy::default(),
             declarations: ecco::DeclarationConfig::default(),
             cache: CacheMode::ReadWrite,
+            output: OutputOptions::default(),
         }
     }
 }
@@ -177,10 +193,11 @@ impl BuildSession {
             crate::rewrite::final_validation_count(),
         );
         let mut warnings = Vec::new();
+        let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
         let declarations = options.declarations.effective()?;
         let declarations_key = hash(&serde_json::to_vec(&declarations)?);
         let inventory = inventory(&self.root)?;
-        let mut styles = crate::css::Styles::new(&self.root, &inventory);
+        let mut styles = crate::css::Styles::new(&self.root, &inventory, &public_base);
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
         let resolution_key = hash(
@@ -239,22 +256,26 @@ impl BuildSession {
             let parser_path = crate::resource::parser_path(&path);
             let config = ParserConfig::for_path(&parser_path, format)?;
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
-            let prepared_style = if crate::resource::is_stylesheet(&path) {
+            let prepared_resource = if crate::resource::is_stylesheet(&path) {
                 Some(styles.prepare(&path, &input)?)
+            } else if crate::resource::is_asset(&path) {
+                Some(crate::resource::prepare(&path, &input, &public_base)?)
             } else {
                 None
             };
             if self.sources.get(&path).is_some_and(|s| {
                 s.input == input
-                    && prepared_style.as_ref().is_none_or(|text| &s.text == text)
+                    && prepared_resource
+                        .as_ref()
+                        .is_none_or(|text| &s.text == text)
                     && s.record.config == config
                     && s.record.matches_declarations(&declarations)
             }) {
                 counters.memory_hits += 1;
             } else {
-                let text = match prepared_style {
+                let text = match prepared_resource {
                     Some(text) => text,
-                    None => crate::resource::prepare(&path, &input)?,
+                    None => crate::resource::prepare(&path, &input, &public_base)?,
                 };
                 let loaded = segment_cache::load_prepared(
                     &logger::StdioLogger::new(),
@@ -426,6 +447,7 @@ impl BuildSession {
                 include_str!("context.rs"),
                 include_str!("resource.rs"),
                 include_str!("css.rs"),
+                include_str!("output_url.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
@@ -437,8 +459,14 @@ impl BuildSession {
             )
             .as_bytes(),
         );
-        fingerprints.output =
-            hash(format!("{fingerprints:?}:{emitter:?}:{:?}", options.entries).as_bytes());
+        fingerprints.output = hash(
+            format!(
+                "{fingerprints:?}:{emitter:?}:{:?}:{}",
+                options.entries,
+                public_base.as_str()
+            )
+            .as_bytes(),
+        );
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &self.sources, &inventory)?;

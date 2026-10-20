@@ -50,9 +50,17 @@ track the original files; emission never reconstructs or reparses a wrapper.
 
 Imports of non-JavaScript/TypeScript/JSON/CSS files copy exact input bytes to
 content-addressed `assets/<sha256>.<extension>` paths. Default imports and
-`require` return a URL string relative to the **build output root**, not the
-importing chunk. Resolve it against your output-root URL; renaming entries does
-not change it. Equal bytes with equal extensions share one resource file.
+`require` return a public URL string. `BuildOptions.output.base_url` defaults to
+`"./"`: these URLs are relative to the **build output root**, not the importing
+chunk. Resolve relative URLs against your output-root URL; renaming entries does
+not change them. `OutputOptions { base_url: "/static/".into() }` instead exports
+`/static/assets/<hash>.<extension>`; HTTP(S) CDN bases and relative subdirectories
+such as `"./public/"` are also supported. Directory bases gain a trailing slash,
+and URL paths are percent-escaped without double-encoding existing escapes.
+Empty bases, protocol-relative URLs, non-HTTP(S) schemes, credentials, malformed
+hosts/percent escapes, queries, fragments, backslashes and control characters
+are errors. Public bases never rename owned resource files or executable import
+requests. Equal bytes with equal extensions share one resource file.
 Asset entries emit a `.cjs` URL-exporting wrapper by default. Unreached dynamic
 assets are not emitted.
 
@@ -64,7 +72,7 @@ cleanup. They never serve as executable module routes.
 
 ## Extracted CSS
 
-CSS default imports and `require` export an output-root-relative stylesheet URL;
+CSS default imports and `require` export a stylesheet URL using the same base;
 side-effect imports also extract the file. `Artifacts.stylesheets` maps retained
 CSS module roots to their emitted resource paths. The example driver reports
 this map and resource paths. Callers load the relevant root stylesheets in their
@@ -75,7 +83,9 @@ when a dynamic JavaScript chunk executes.
 `url()`, `@import` and `image-set` strings. Local imports remain separate CSS
 files: source order, media queries, supports conditions, layers, charset
 declarations and import cycles are not flattened. Local asset URLs are copied
-and rewritten relative to the emitted stylesheet, retaining queries/fragments;
+and rewritten relative to the emitted stylesheet for relative bases (the base
+is not applied twice), or through the configured root-relative/HTTP(S) base,
+retaining queries/fragments;
 percent-encoded filenames resolve to original files. Remote, data, fragment and
 host-root-relative URLs remain unchanged. Namespace/document URLs remain
 identifiers rather than file dependencies. Local files must be inside the same
@@ -87,6 +97,9 @@ through cycles. All these input bytes are rechecked before accepting a build.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
 memory/CBOR cache. There is no CSS Modules, Sass compilation, CSS concatenation
 or minification.
+Base-only edits regenerate asset/CSS URL wrappers before memory-cache comparison;
+generated text keys parse reuse, while the normalized base also keys output
+reuse. Unchanged JavaScript stays warm, and owned resource paths stay unchanged.
 
 ## Native ESM chunks
 

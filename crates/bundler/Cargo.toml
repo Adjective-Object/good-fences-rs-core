@@ -24,6 +24,7 @@ segment_cache = { path = "../segment_cache" }
 import_resolver = { path = "../import_resolver" }
 serde.workspace = true
 tempfile = "3.27.0"
+url = "2"
 
 [dev-dependencies]
 insta = { version = "1", default-features = false }

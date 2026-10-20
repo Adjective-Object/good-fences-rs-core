@@ -15,10 +15,13 @@ pub(crate) fn is_stylesheet(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "css")
 }
 
-pub(crate) fn url_module(path: &Path) -> eyre::Result<String> {
+pub(crate) fn url_module(
+    path: &Path,
+    base: &crate::output_url::PublicBase,
+) -> eyre::Result<String> {
     Ok(format!(
         "module.exports = {};\n",
-        serde_json::to_string(&format!("./{}", path.display()))?
+        serde_json::to_string(&base.join(path)?)?
     ))
 }
 
@@ -46,9 +49,13 @@ pub(crate) fn parser_path(path: &Path) -> PathBuf {
     }
 }
 
-pub(crate) fn prepare(path: &Path, input: &[u8]) -> eyre::Result<String> {
+pub(crate) fn prepare(
+    path: &Path,
+    input: &[u8],
+    base: &crate::output_url::PublicBase,
+) -> eyre::Result<String> {
     if is_asset(path) {
-        return url_module(&asset_path(path, input));
+        return url_module(&asset_path(path, input), base);
     }
     let text = std::str::from_utf8(input)
         .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;

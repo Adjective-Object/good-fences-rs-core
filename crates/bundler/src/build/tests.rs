@@ -22,6 +22,266 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn output_base_urls_cover_resource_exports_css_fetches_and_default_bytes() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {default as css} from './style.css'; export {default as image} from './image.png';",
+    );
+    write(dir.root(), "theme.css", ".theme { color: red; }\n");
+    write(
+        dir.root(),
+        "style.css",
+        "@import './theme.css' layer(theme);\n.a { background: url('./image.png?v=1#icon'); }\n\
+.b { background: url('/original.png'); mask: url(https://origin.invalid/a); cursor: url(data:image/png,a), auto; }\n",
+    );
+    fs::write(dir.root().join("image.png"), [0, 255, 42]).unwrap();
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/main.mjs".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let default = session.build(&config).unwrap();
+    let paths: BTreeSet<_> = default
+        .product
+        .artifacts
+        .resources
+        .keys()
+        .cloned()
+        .collect();
+    let style = &default.product.artifacts.stylesheets[&dir.root().join("style.css")];
+    let theme = paths
+        .iter()
+        .find(|path| path.extension().is_some_and(|ext| ext == "css") && *path != style)
+        .unwrap();
+    let image = paths
+        .iter()
+        .find(|path| path.extension().is_some_and(|ext| ext == "png"))
+        .unwrap();
+    let original = ".b { background: url('/original.png'); mask: url(https://origin.invalid/a); cursor: url(data:image/png,a), auto; }\n";
+    assert_eq!(
+        default.product.artifacts.resources[style],
+        format!(
+            "@import \"./{}\" layer(theme);\n.a {{ background: url(\"./{}?v=1#icon\"); }}\n{original}",
+            theme.file_name().unwrap().to_str().unwrap(),
+            image.file_name().unwrap().to_str().unwrap(),
+        )
+        .as_bytes()
+    );
+    assert_eq!(
+        crate::resource::url_module(image, &crate::output_url::PublicBase::new("./").unwrap())
+            .unwrap(),
+        format!("module.exports = \"./{}\";\n", image.display())
+    );
+    for (base, normalized, relative) in [
+        ("./", "./", true),
+        ("/static", "/static/", false),
+        ("/", "/", false),
+        (
+            "https://cdn.example/static",
+            "https://cdn.example/static/",
+            false,
+        ),
+        (
+            "http://cdn.example:8080/static/",
+            "http://cdn.example:8080/static/",
+            false,
+        ),
+        ("./public", "./public/", true),
+        ("../public/", "../public/", true),
+        ("public/", "public/", true),
+        ("./café a\"%20/", "./caf%C3%A9%20a%22%20/", true),
+        ("/café a\"%20/", "/caf%C3%A9%20a%22%20/", false),
+        (
+            "https://cdn.example/café a\"%20 ",
+            "https://cdn.example/caf%C3%A9%20a%22%20%20/",
+            false,
+        ),
+    ] {
+        config.output.base_url = base.into();
+        let built = session.build(&config).unwrap();
+        assert_eq!(
+            built
+                .product
+                .artifacts
+                .resources
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            paths,
+            "{base}"
+        );
+        assert_eq!(
+            built.product.artifacts.stylesheets,
+            default.product.artifacts.stylesheets
+        );
+        assert_eq!(
+            observe_named(
+                &built.product.artifacts,
+                "import {css, image} from './nested/main.mjs'; console.log(JSON.stringify([css, image]));"
+            ),
+            format!(
+                "{}\n",
+                serde_json::to_string(&[
+                    format!("{normalized}{}", style.display()),
+                    format!("{normalized}{}", image.display()),
+                ]).unwrap()
+            ).as_bytes(),
+            "{base}"
+        );
+        let css = std::str::from_utf8(&built.product.artifacts.resources[style]).unwrap();
+        let fetch = |path: &Path| {
+            if relative {
+                format!("./{}", path.file_name().unwrap().to_str().unwrap())
+            } else {
+                format!("{normalized}{}", path.display())
+            }
+        };
+        assert_eq!(
+            css,
+            format!(
+                "@import \"{}\" layer(theme);\n.a {{ background: url(\"{}?v=1#icon\"); }}\n{original}",
+                fetch(theme), fetch(image)
+            ),
+            "{base}"
+        );
+        // Resolve actual browser-style fetches, not just the emitted text.
+        let root = url::Url::parse("https://application.example/generation/").unwrap();
+        let stylesheet_url = root
+            .join(&format!("{normalized}{}", style.display()))
+            .unwrap();
+        for target in [theme, image] {
+            assert_eq!(
+                stylesheet_url.join(&fetch(target)).unwrap(),
+                root.join(&format!("{normalized}{}", target.display()))
+                    .unwrap(),
+                "{base}"
+            );
+        }
+        assert_eq!(built.counters.source_reparses, 0);
+        assert_eq!(built.counters.fragment_reparses, 0);
+    }
+}
+
+#[test]
+fn output_base_edits_invalidate_generated_asset_and_css_sources_before_memory_hits() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {default as image} from './image.png'; export {default as css} from './style.css';",
+    );
+    write(
+        dir.root(),
+        "style.css",
+        ".a { background: url('./image.png'); }",
+    );
+    fs::write(dir.root().join("image.png"), [255, 42]).unwrap();
+    let mut config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    assert_eq!(cold.counters.source_parses, 3);
+    config.output.base_url = "/static".into();
+    let edited = session.build(&config).unwrap();
+    assert_eq!(edited.counters.memory_hits, 1);
+    assert_eq!(edited.counters.source_parses, 2);
+    assert_ne!(
+        cold.product.fingerprints.parse,
+        edited.product.fingerprints.parse
+    );
+    assert_ne!(
+        cold.product.fingerprints.output,
+        edited.product.fingerprints.output
+    );
+    assert_eq!(
+        cold.product.fingerprints.roots,
+        edited.product.fingerprints.roots
+    );
+    assert!(edited.invalidated.contains(&dir.root().join("main.mjs")));
+    assert_eq!(
+        cold.product.artifacts.resources.keys().collect::<Vec<_>>(),
+        edited
+            .product
+            .artifacts
+            .resources
+            .keys()
+            .collect::<Vec<_>>()
+    );
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.counters.disk_hits, 3);
+    assert_eq!(warm.product.artifacts, edited.product.artifacts);
+    config.output.base_url = "/static/".into();
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&noop.product, &edited.product));
+    assert_eq!(noop.counters.memory_hits, 3);
+    assert_eq!(noop.counters.output_parses, 0);
+    config.output.base_url = "./".into();
+    let restored = session.build(&config).unwrap();
+    assert_eq!(restored.counters.memory_hits, 1);
+    assert_eq!(restored.product.artifacts, cold.product.artifacts);
+    assert_eq!(restored.product.fingerprints, cold.product.fingerprints);
+}
+
+#[test]
+fn output_base_is_validated_even_without_resources_and_errors_preserve_last_product() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "export const value = 1;");
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut config = options();
+    let cold = session.build(&config).unwrap();
+    config.output.base_url = "/static/".into();
+    let edited = session.build(&config).unwrap();
+    assert_eq!(
+        cold.product.fingerprints.parse,
+        edited.product.fingerprints.parse
+    );
+    assert_ne!(
+        cold.product.fingerprints.output,
+        edited.product.fingerprints.output
+    );
+    assert_eq!(edited.counters.memory_hits, 1);
+    assert_eq!(edited.counters.source_parses, 0);
+    assert_eq!(cold.product.artifacts, edited.product.artifacts);
+    for invalid in [
+        "",
+        "//cdn.example/a",
+        "///cdn.example/a",
+        "https:/cdn.example",
+        "https:///a",
+        "https://",
+        "ftp://cdn.example/",
+        "javascript:alert(1)",
+        "data:text/plain,a",
+        "https://user:password@cdn.example/",
+        "https://@cdn.example/",
+        "https://bad host/",
+        "https://cdn.example:bad/",
+        "https://[::1/",
+        "/static?query",
+        "./static#fragment",
+        "./bad\\path",
+        "./bad\npath",
+        "./bad\tpath",
+        "./bad\u{7f}path",
+        "./bad%GG",
+        "./bad%",
+        "./bad%0a",
+        "./bad%5c",
+    ] {
+        config.output.base_url = invalid.into();
+        let error = session.build(&config).err().unwrap();
+        assert!(
+            format!("{error:#}").contains("output.base_url"),
+            "{invalid:?}: {error:#}"
+        );
+        assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &edited.product));
+    }
+}
+
+#[test]
 fn bare_string_package_exports_allow_nested_json_css_and_asset_modules() {
     let dir = TmpDir::new();
     write(

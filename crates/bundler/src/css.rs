@@ -30,15 +30,21 @@ pub(crate) struct Styles<'a> {
     inventory: &'a BTreeMap<PathBuf, Option<[u8; 32]>>,
     inputs: BTreeMap<PathBuf, Vec<u8>>,
     requests: BTreeMap<PathBuf, Vec<Request>>,
+    public_base: &'a crate::output_url::PublicBase,
 }
 
 impl<'a> Styles<'a> {
-    pub(crate) fn new(root: &'a Path, inventory: &'a BTreeMap<PathBuf, Option<[u8; 32]>>) -> Self {
+    pub(crate) fn new(
+        root: &'a Path,
+        inventory: &'a BTreeMap<PathBuf, Option<[u8; 32]>>,
+        public_base: &'a crate::output_url::PublicBase,
+    ) -> Self {
         Self {
             root,
             inventory,
             inputs: BTreeMap::new(),
             requests: BTreeMap::new(),
+            public_base,
         }
     }
 
@@ -114,7 +120,7 @@ impl<'a> Styles<'a> {
             }
             self.requests.insert(path, requests);
         }
-        resource::url_module(&self.output_path(path))
+        resource::url_module(&self.output_path(path), self.public_base)
     }
 
     fn closure(&self, root: &Path) -> BTreeSet<(PathBuf, bool)> {
@@ -161,6 +167,7 @@ impl<'a> Styles<'a> {
 
     fn render(&self, path: &Path) -> eyre::Result<Vec<u8>> {
         let text = std::str::from_utf8(&self.inputs[path])?;
+        let stylesheet = self.output_path(path);
         let mut output = String::new();
         let mut start = 0;
         for request in &self.requests[path] {
@@ -170,8 +177,8 @@ impl<'a> Styles<'a> {
                 resource::asset_path(&request.path, &self.inputs[&request.path])
             };
             let url = format!(
-                "./{}{}",
-                target.file_name().unwrap().to_str().unwrap(),
+                "{}{}",
+                self.public_base.css_fetch(&stylesheet, &target)?,
                 request.suffix
             );
             output.push_str(&text[start..request.url.span.start]);
