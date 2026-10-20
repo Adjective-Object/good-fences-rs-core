@@ -150,11 +150,10 @@ pub(crate) fn validate_facts(facts: &LocalFacts) -> Result<()> {
             symbol.name
         );
     }
-    for (index, definition) in facts.definitions.iter().enumerate() {
+    let mut bindings = std::collections::HashSet::new();
+    for definition in &facts.definitions {
         ensure!(
-            !facts.definitions[..index]
-                .iter()
-                .any(|previous| previous.binding == definition.binding),
+            bindings.insert(&definition.binding),
             "duplicate definition: {:?}",
             definition.binding
         );
@@ -208,7 +207,7 @@ fn validate_definition(definition: &Definition) -> Result<()> {
         scalar: &impl Fn(&str) -> bool,
     ) -> Result<()> {
         match expression {
-            HazardExpr::Bool(_) => {}
+            HazardExpr::Bool(_) | HazardExpr::Unknown => {}
             HazardExpr::Read { value, .. } => ensure!(scalar(value), "unknown value {value}"),
             HazardExpr::Or(expressions) => {
                 for expression in expressions {
@@ -423,6 +422,8 @@ impl Parser {
                     return_mode = true;
                     definition.returns = if self.word("void") {
                         Returns::Void
+                    } else if self.word("unknown") {
+                        Returns::Unknown
                     } else {
                         self.symbol('=')?;
                         Returns::Argument(self.name()?)
@@ -471,6 +472,14 @@ impl Parser {
         }
         if self.word("false") {
             return Ok(HazardExpr::Bool(false));
+        }
+        if matches!(self.peek(), Some(Token::Name(name)) if name == "unknown")
+            && self.tokens.get(self.cursor + 1).map(|(_, token)| token) == Some(&Token::Symbol('('))
+        {
+            self.next()?;
+            self.symbol('(')?;
+            self.symbol(')')?;
+            return Ok(HazardExpr::Unknown);
         }
         if self.take_symbol('(') {
             let expression = self.expression()?;

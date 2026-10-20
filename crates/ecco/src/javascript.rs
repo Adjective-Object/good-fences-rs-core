@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use eyre::{ensure, Result};
 use oxc_allocator::Allocator;
@@ -72,8 +75,16 @@ pub fn extract_from_ast<'a>(
 pub fn parse_from_ast<'a>(
     program: &Program<'a>,
     semantic: &Semantic<'a>,
-    facts: LocalFacts,
+    mut facts: LocalFacts,
 ) -> Result<ParsedFile> {
+    let mut contracts: HashSet<_> = facts
+        .definitions
+        .iter()
+        .map(|definition| definition.binding.clone())
+        .collect();
+    let (inferred, usable) = crate::inference::infer_contracts(program, semantic, &facts)?;
+    contracts.extend(usable);
+    facts.definitions.extend(inferred.definitions);
     let mut context = Context::recording_context(facts)?;
     let values = semantic
         .scoping()
@@ -91,6 +102,7 @@ pub fn parse_from_ast<'a>(
         })
         .collect();
     let mut collector = Bindings {
+        contracts,
         context,
         semantic,
         values,
@@ -111,6 +123,7 @@ pub fn parse_from_ast<'a>(
         .map(|(symbol, named)| (*symbol, named.value))
         .collect();
     let mut extractor = Extractor {
+        contracts: collector.contracts,
         context: collector.context,
         semantic,
         values: collector.values,
@@ -222,6 +235,7 @@ struct NamedValue {
 }
 
 struct Bindings<'s, 'a> {
+    contracts: HashSet<Binding>,
     context: Context,
     semantic: &'s Semantic<'a>,
     values: HashMap<OxcSymbolId, NamedValue>,
@@ -322,7 +336,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
                         == self.semantic.scoping().root_scope_id()
                 {
                     let binding = Binding::Local(identifier.name.to_string());
-                    if self.context.definition(&binding).is_some() {
+                    if self.contracts.contains(&binding) {
                         self.values.get_mut(&symbol).expect("symbol").binding = Some(binding);
                     }
                 }
@@ -397,6 +411,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
 }
 
 struct Extractor<'s, 'a> {
+    contracts: HashSet<Binding>,
     context: Context,
     semantic: &'s Semantic<'a>,
     values: HashMap<OxcSymbolId, NamedValue>,
@@ -1112,7 +1127,31 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
 
     fn visit_variable_declarator(&mut self, declaration: &VariableDeclarator<'a>) {
         let value = if let Some(initializer) = &declaration.init {
-            self.expression(initializer)
+            let contract = match (&declaration.id, initializer.get_inner_expression()) {
+                (
+                    BindingPattern::BindingIdentifier(identifier),
+                    Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_),
+                ) if identifier.symbol_id.get().is_some_and(|symbol| {
+                    self.semantic.scoping().symbol_scope_id(symbol)
+                        == self.semantic.scoping().root_scope_id()
+                }) =>
+                {
+                    let binding = Binding::Local(identifier.name.to_string());
+                    self.contracts
+                        .contains(&binding)
+                        .then(|| self.context.definition(&binding))
+                        .flatten()
+                        .map(|value| Computed {
+                            named: NamedValue {
+                                value,
+                                binding: Some(binding),
+                            },
+                            effects: self.context.pure(),
+                        })
+                }
+                _ => None,
+            };
+            contract.unwrap_or_else(|| self.expression(initializer))
         } else {
             self.computed(self.context.undefined(), self.context.pure())
         };

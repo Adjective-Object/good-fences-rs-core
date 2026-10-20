@@ -1,10 +1,15 @@
 # segment_cache
 
+Per-file Ecco precursors include owned user-function contracts inferred during
+shared-AST extraction. Warm sidecar loads reuse those contracts; linked symbol
+resolution and fixed-point effect solving remain build-local.
+
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
 Syntax-local effect reasons/timing are persisted and range-checked (schema 10 /
-extractor 12, including relative dependency patterns, owned lazy Ecco precursors and declaration identity,
+extractor 13, including relative dependency patterns, owned lazy Ecco precursors,
+inferred user-function contracts and declaration identity,
 source-local emission recipes/placement constraints,
 CommonJS path-parameter declaration policy, ESM top-level await/for-await spans,
 effective commonjs format, invocation inputs/annotation sites and normalized member
@@ -100,8 +105,9 @@ dependency again using the new root. Package `type` is discovered by the caller
 and passed as `ModuleFormat`; `.mjs`/`.mts` and `.cjs`/`.cts` still override it.
 JS/TS/JSX/definition or effective module-mode changes miss even with identical
 source bytes. Resolver extensions/conditions, package exports, `sideEffects`
-metadata and effect DSL configuration are deliberately absent from this cache.
-Those changes invalidate derived resolution/effects later, not source facts.
+metadata are deliberately absent from this cache. Those changes invalidate
+derived resolution/effects later, not source facts. Effect DSL configuration
+keys extraction and invalidates source precursors when declarations change.
 PURE hint spans and syntactic value-use contexts are source facts; whether a
 hint permits an invocation rewrite is derived and is never persisted here.
 Emission recipes likewise contain only original-coordinate operations and

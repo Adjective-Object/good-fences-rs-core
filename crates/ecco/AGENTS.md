@@ -3,8 +3,11 @@
 - Target statement-level bundler analysis for massive applications; throughput,
   memory usage, and parallel scalability are explicit design goals.
 - Infer contracts from inputs and referenced symbols; already-defined dependency
-  functions may be consulted, but avoid caller-specific body re-analysis and
-  live binding histories.
+  functions may be consulted. Persist inferred contracts during AST extraction;
+  only closed, fully representable contracts replace lazy operation summaries.
+  Keep linked captures and alias joins in owned summaries, never inferred guesses.
+- Process dependencies before consumers and bound contract expansion; cycles and
+  unsupported bodies produce unknown contracts whose execution stays deferred.
 - Keep declarations and extracted graphs owned; never retain OXC arena data.
 - Persist only `ParsedFile` precursors. Instantiate roots/functions in a fresh
   `Analysis`; external resolutions come from the caller's canonical graph.

@@ -127,6 +127,7 @@ pub struct Context {
     facts: LocalFacts,
     values: Vec<Value>,
     functions: Vec<ValueId>,
+    bindings: HashMap<Binding, usize>,
     initial: Vec<bool>,
     equations: Vec<Equation>,
     calls: HashMap<Invocation, Effect>,
@@ -161,6 +162,7 @@ impl Context {
             facts,
             values: Vec::new(),
             functions: Vec::new(),
+            bindings: HashMap::new(),
             initial: vec![false, true, false],
             equations: Vec::new(),
             calls: HashMap::new(),
@@ -188,6 +190,9 @@ impl Context {
             let value = context.value(Hazards::NONE);
             context.values[value.0].definition = Some(index);
             context.functions.push(value);
+            context
+                .bindings
+                .insert(context.facts.definitions[index].binding.clone(), index);
         }
         Ok(context)
     }
@@ -215,11 +220,9 @@ impl Context {
     }
 
     pub fn definition(&self, binding: &Binding) -> Option<ValueId> {
-        self.facts
-            .definitions
-            .iter()
-            .position(|definition| &definition.binding == binding)
-            .map(|index| self.functions[index])
+        self.bindings
+            .get(binding)
+            .map(|index| self.functions[*index])
     }
 
     pub fn value(&mut self, hazards: Hazards) -> ValueId {
@@ -468,6 +471,7 @@ impl Context {
         let value = match &definition.returns {
             Returns::Argument(name) => frame.value(name),
             Returns::Void => self.undefined,
+            Returns::Unknown => self.unknown,
             Returns::Fresh => {
                 let value = self.value(Hazards::NONE);
                 for slot in Hazard::ALL {
@@ -571,6 +575,7 @@ impl Context {
     fn instantiate(&mut self, expression: &HazardExpr, frame: &Frame<'_>) -> Expression {
         match expression {
             HazardExpr::Bool(value) => Expression::Constant(*value),
+            HazardExpr::Unknown => Expression::Constant(true),
             HazardExpr::Read { value, slot } => {
                 Expression::Read(self.hazard(frame.value(value), *slot).0)
             }
@@ -601,6 +606,9 @@ impl Context {
     fn execute_dependencies(&mut self, expression: &HazardExpr, frame: &Frame<'_>) {
         match expression {
             HazardExpr::Bool(_) => {}
+            HazardExpr::Unknown => {
+                self.opaque_effects();
+            }
             HazardExpr::Read { value, slot } => {
                 self.operation(frame.value(value), *slot);
             }

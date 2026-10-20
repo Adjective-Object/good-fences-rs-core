@@ -63,9 +63,10 @@ pub enum Binding {
     Local(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HazardExpr {
     Bool(bool),
+    Unknown,
     Read {
         value: String,
         slot: Hazard,
@@ -78,7 +79,7 @@ pub enum HazardExpr {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CallArgument {
     Value(String),
     Spread(String),
@@ -110,6 +111,7 @@ pub enum Returns {
     Fresh,
     Argument(String),
     Void,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

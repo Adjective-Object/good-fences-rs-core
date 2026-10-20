@@ -53,6 +53,36 @@ fn source(declarations: &str, javascript: &str) -> SourceAnalysis {
     .unwrap()
 }
 
+#[test]
+fn unknown_contract_behavior_is_not_executed_while_building_facts() {
+    let mut context = context("fn opaque() { call_effects = unknown() returns unknown }");
+    let value = context.value(Hazards::NONE);
+    assert_eq!(context.evaluate().hazards(value), Hazards::NONE);
+    let result = context.call(local(&context, "opaque"), &[], None);
+    assert_eq!(result.value, context.unknown());
+    assert!(context.evaluate().effect(result.effects));
+    assert_eq!(context.evaluate().hazards(value), Hazards::UNKNOWN);
+    parse_declarations("fn f(unknown) { call_effects = unknown.call_effects returns = unknown }")
+        .unwrap();
+}
+
+#[test]
+fn argument_dependent_contracts_specialize_without_losing_bare_callable_hazards() {
+    let mut context = context(
+        r#"
+        fn read(value) { call_effects = value.property_read_effects returns void }
+        fn invoke(callback, value) { call_effects = call(callback, value) returns void }
+    "#,
+    );
+    let read = local(&context, "read");
+    let value = context.value(Hazards::NONE);
+    let result = context.call(local(&context, "invoke"), &[read, value], None);
+    assert!(context.evaluate().hazards(read).get(Hazard::Call));
+    assert!(!context.evaluate().effect(result.effects));
+    context.update(read, Hazard::Call, context.effectful());
+    assert!(context.evaluate().effect(result.effects));
+}
+
 fn effects(analysis: &SourceAnalysis) -> Vec<bool> {
     let evaluation = analysis.context.evaluate();
     analysis
@@ -764,8 +794,495 @@ fn lexical_shadows_and_wrong_modules_do_not_match() {
     ] {
         let analysis = source(DECLARATIONS, javascript);
         assert_eq!(effects(&analysis).last(), Some(&true), "{javascript}");
-        assert!(analysis.matches.is_empty(), "{javascript}");
+        assert!(
+            analysis
+                .matches
+                .iter()
+                .all(|matched| matches!(matched.binding, Binding::Local(_))),
+            "{javascript}"
+        );
     }
+}
+
+fn inferred<'s>(analysis: &'s SourceAnalysis, name: &str) -> &'s Definition {
+    analysis
+        .context
+        .facts()
+        .definitions
+        .iter()
+        .find(|definition| definition.binding == Binding::Local(name.into()))
+        .unwrap()
+}
+
+#[test]
+fn isolated_inference_produces_contracts_independent_of_callers() {
+    let declarations = r#"
+            global fn Array.push(target, value) { call_effects = true returns void }
+            global fn myhelper(value) { call_effects = false returns.*_effects = false }
+        "#;
+    let javascript = r#"
+            function user_function(a) {
+                Array.push(a, "hello");
+                return myhelper(a);
+            }
+        "#;
+    let standalone = source(declarations, javascript);
+    let called = source(
+        declarations,
+        &format!("{javascript} user_function(unknown); user_function(1);"),
+    );
+    let definition = inferred(&standalone, "user_function");
+    assert_eq!(definition, inferred(&called, "user_function"));
+    insta::assert_debug_snapshot!((
+            &definition.binding, &definition.parameters,
+            definition.hazards.get(Hazard::Call), &definition.returns,
+            definition.return_hazards.get(Hazard::PropertyRead),
+            &definition.updates,
+        ), @r#"
+        (
+            Local(
+                "user_function",
+            ),
+            [
+                "a",
+            ],
+            Bool(
+                true,
+            ),
+            Fresh,
+            Bool(
+                false,
+            ),
+            [],
+        )
+        "#);
+}
+
+#[test]
+fn isolated_parameter_hazards_and_return_aliases_apply_at_calls() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+            function read(value) { return value.field; }
+            function convert(value) { return Number(value); }
+            function identity(value) { const alias = value; return alias; }
+            const double = value => value + value;
+            const object = {};
+            identity(object);
+            read(object);
+            convert(1);
+            double(2);
+        "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 9]);
+    assert_eq!(analysis.roots[4].value, analysis.roots[5].value);
+    assert_eq!(
+        inferred(&analysis, "read").hazards.get(Hazard::Call),
+        HazardExpr::Read {
+            value: "value".into(),
+            slot: Hazard::PropertyRead
+        }
+    );
+    assert_eq!(
+        inferred(&analysis, "convert").hazards.get(Hazard::Call),
+        HazardExpr::Read {
+            value: "value".into(),
+            slot: Hazard::ToPrimitive
+        }
+    );
+    assert_eq!(
+        inferred(&analysis, "identity").returns,
+        Returns::Argument("value".into())
+    );
+    assert_eq!(
+        inferred(&analysis, "double").hazards.get(Hazard::Construct),
+        HazardExpr::Bool(false)
+    );
+    let unsafe_read = source(
+        "",
+        "function read(value) { return value.field; } read(unknown);",
+    );
+    assert_eq!(effects(&unsafe_read), vec![false, true]);
+}
+
+#[test]
+fn isolated_dependencies_compose_without_source_order_or_caller_values() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+            function first(input) { return second(input); }
+            const second = input => Number(input);
+            first(1);
+        "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_eq!(
+        inferred(&analysis, "first").hazards.get(Hazard::Call),
+        HazardExpr::Read {
+            value: "input".into(),
+            slot: Hazard::ToPrimitive
+        }
+    );
+    let imported = source(
+        DECLARATIONS,
+        r#"
+            import { join as combine } from "node:path";
+            const wrapper = input => combine(input);
+            wrapper("hello");
+        "#,
+    );
+    assert_eq!(effects(&imported), vec![false; 2]);
+    let overridden = source(
+        "fn supplied() { call_effects = false returns void }",
+        "function supplied() { unknown(); } supplied();",
+    );
+    assert_eq!(effects(&overridden), vec![false; 2]);
+    let exported = source(
+        "",
+        r#"
+        export function named(value) { return value; }
+        export default function fallback(value) { return named(value); }
+        export const expression = function internal(value) { return fallback(value); };
+        expression(1);
+    "#,
+    );
+    assert_eq!(effects(&exported), vec![false; 4]);
+    for name in ["named", "fallback", "expression"] {
+        assert_eq!(
+            inferred(&exported, name).returns,
+            Returns::Argument("value".into())
+        );
+    }
+}
+
+#[test]
+fn isolated_callbacks_remain_symbolic_and_specialize_in_contract_solver() {
+    let analysis = source(
+        "",
+        r#"
+            function invoke(callback, value) { return callback(value); }
+            function read(input) { return input.field; }
+            invoke(read, {});
+        "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_eq!(
+        inferred(&analysis, "invoke").hazards.get(Hazard::Call),
+        HazardExpr::Call {
+            function: "callback".into(),
+            arguments: vec![CallArgument::Value("value".into())],
+            receiver: None
+        }
+    );
+    assert_eq!(inferred(&analysis, "invoke").returns, Returns::Unknown);
+}
+
+#[test]
+fn isolated_known_updates_and_receiver_dependencies_are_composed() {
+    let declarations = r#"
+            global fn mutate(value) {
+                call_effects = true
+                updates value.property_read_effects |= true
+                returns = value
+            }
+            global fn Number(value) { call_effects = value.toprimitive_effects returns.*_effects = false }
+            global fn install(target, getter) {
+                call_effects = false
+                updates target.property_read_effects |= call(getter, this = target)
+                returns = target
+            }
+        "#;
+    let analysis = source(
+        declarations,
+        r#"
+            function wrapper(input) { return mutate(input); }
+            function getter() { return Number(this); }
+            function register(target) { return install(target, getter); }
+            const target = {};
+            register(target);
+            target.field;
+        "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 6]);
+    let wrapper = inferred(&analysis, "wrapper");
+    assert_eq!(wrapper.returns, Returns::Argument("input".into()));
+    assert_eq!(
+        wrapper.updates,
+        vec![Update {
+            target: "input".into(),
+            slot: Some(Hazard::PropertyRead),
+            expression: HazardExpr::Bool(true)
+        }]
+    );
+    assert_eq!(
+        inferred(&analysis, "register").updates,
+        vec![Update {
+            target: "target".into(),
+            slot: Some(Hazard::PropertyRead),
+            expression: HazardExpr::Read {
+                value: "target".into(),
+                slot: Hazard::ToPrimitive
+            },
+        }]
+    );
+}
+
+#[test]
+fn isolated_callbacks_propagate_known_updates_without_executing_queries() {
+    let analysis = source(
+        r#"
+            global fn mutate(value) { call_effects = false updates value.property_read_effects |= true returns void }
+            global fn invoke(callback, value) { call_effects = call(callback, value) returns void }
+        "#,
+        r#"
+            function change(input) { mutate(input); }
+            function wrapper(target) { invoke(change, target); }
+        "#,
+    );
+    assert_eq!(effects(&analysis), vec![false; 2]);
+    assert_eq!(
+        inferred(&analysis, "wrapper").updates,
+        vec![Update {
+            target: "target".into(),
+            slot: Some(Hazard::PropertyRead),
+            expression: HazardExpr::Bool(true),
+        }]
+    );
+}
+
+#[test]
+fn isolated_returns_join_conservatively_without_live_identity_tracking() {
+    let analysis = source(
+        "",
+        r#"
+            function choose(flag, left, right) { if (flag) return left; return right; }
+            function fresh(flag) { if (flag) return {}; return 1; }
+            function empty() {}
+            function stopped() { return 1; unknown(); }
+        "#,
+    );
+    assert_eq!(inferred(&analysis, "choose").returns, Returns::Unknown);
+    assert_eq!(inferred(&analysis, "fresh").returns, Returns::Fresh);
+    assert_eq!(inferred(&analysis, "empty").returns, Returns::Void);
+    assert_eq!(
+        inferred(&analysis, "stopped").hazards.get(Hazard::Call),
+        HazardExpr::Bool(false)
+    );
+}
+
+#[test]
+fn isolated_unsupported_bodies_and_cycles_are_conservative_but_deferred() {
+    for function in [
+        "function f(value) { let alias = value; return alias; }",
+        "function f(value) { value.field = 1; return value; }",
+        "function f(value) { while (value) unknown(); }",
+        "function f(...values) { return values; }",
+        "function f({ value }) { return value; }",
+        "async function f(value) { return value; }",
+        "function f(value) { return f(value); }",
+    ] {
+        let uncalled = source("", &format!("{function} +1;"));
+        assert_eq!(effects(&uncalled), vec![false; 2], "{function}");
+        assert_eq!(
+            inferred(&uncalled, "f").hazards.get(Hazard::Call),
+            HazardExpr::Unknown,
+            "{function}"
+        );
+        assert_eq!(
+            inferred(&uncalled, "f").returns,
+            Returns::Unknown,
+            "{function}"
+        );
+        let mut context = Context::from_local_facts(uncalled.context.facts().clone()).unwrap();
+        let argument = context.value(Hazards::NONE);
+        let function = context.definition(&Binding::Local("f".into())).unwrap();
+        let called = context.call(function, &[argument], None);
+        assert!(context.evaluate().effect(called.effects));
+    }
+}
+
+#[test]
+fn isolated_contracts_respect_lexical_shadows() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+            function Number(value) { unknown(value); }
+            function wrapper(value) { return Number(value); }
+            function parameter(Number, value) { return Number(value); }
+        "#,
+    );
+    assert_eq!(
+        inferred(&analysis, "wrapper").hazards.get(Hazard::Call),
+        HazardExpr::Unknown
+    );
+    assert_eq!(
+        inferred(&analysis, "parameter").hazards.get(Hazard::Call),
+        HazardExpr::Call {
+            function: "Number".into(),
+            arguments: vec![CallArgument::Value("value".into())],
+            receiver: None
+        }
+    );
+}
+
+#[test]
+fn isolated_contract_growth_is_bounded_for_shared_dependencies_and_large_bodies() {
+    let mut javascript = "function f0(input) { return input.value; }\n".to_owned();
+    for index in 1..1000 {
+        javascript.push_str(&format!(
+            "function f{index}(input) {{ f{}(input); return f{}(input); }}\n",
+            index - 1,
+            index - 1
+        ));
+    }
+    let analysis = source("", &javascript);
+    assert_eq!(analysis.context.facts().definitions.len(), 1000);
+    assert_eq!(
+        inferred(&analysis, "f999").hazards.get(Hazard::Call),
+        HazardExpr::Read {
+            value: "input".into(),
+            slot: Hazard::PropertyRead
+        }
+    );
+    let large = source(
+        "",
+        &format!(
+            "function large(value) {{ {} return value; }}",
+            "value.field;".repeat(5000)
+        ),
+    );
+    assert_eq!(
+        inferred(&large, "large").hazards.get(Hazard::Call),
+        HazardExpr::Unknown
+    );
+    let parameters = (0..80)
+        .map(|index| format!("p{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut growing = format!("function growing({parameters}) {{");
+    let mut previous = "p0".to_owned();
+    for index in 1..80 {
+        growing.push_str(&format!("const v{index} = merge({previous}, p{index});"));
+        previous = format!("v{index}");
+    }
+    growing.push_str(&format!("return {previous}; }}"));
+    let expanded = source(
+        r#"
+        global fn merge(left, right) {
+            call_effects = false
+            returns.*_effects = left.property_read_effects | right.property_read_effects
+        }
+    "#,
+        &growing,
+    );
+    assert_eq!(
+        inferred(&expanded, "growing").hazards.get(Hazard::Call),
+        HazardExpr::Unknown
+    );
+    assert_eq!(inferred(&expanded, "growing").returns, Returns::Unknown);
+}
+
+#[test]
+fn isolated_contract_api_returns_owned_facts_without_an_analysis_context() {
+    use oxc_allocator::Allocator;
+    use oxc_semantic::SemanticBuilder;
+    let inferred = {
+        let allocator = Allocator::default();
+        let parsed = oxc_utils_parse::parse_bundler_file(
+            &allocator,
+            "function identity(value) { return value; }",
+            Path::new("input.js"),
+            oxc_utils_parse::ModuleFormat::Esm,
+        )
+        .unwrap();
+        let semantic = SemanticBuilder::new()
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        infer_function_contracts(&parsed.program, &semantic.semantic, &LocalFacts::default())
+            .unwrap()
+    };
+    assert_eq!(
+        inferred.definitions[0].returns,
+        Returns::Argument("value".into())
+    );
+    Context::from_local_facts(inferred).unwrap();
+}
+
+#[test]
+fn installed_contract_lookup_preserves_first_file_binding() {
+    let first = parsed("function identity(value) { return value; }");
+    let second = parsed("function identity(value) { return value; }");
+    let id = symbol(&first, "identity");
+    let mut analysis = Analysis::new();
+    analysis.add_file("first", first).unwrap();
+    analysis.add_file("second", second).unwrap();
+    let result = analysis
+        .solve(&|_: &&str, _: &ExternalReference| Ok(Resolution::Unknown))
+        .unwrap();
+    let value = result
+        .context
+        .definition(&Binding::Local("identity".into()))
+        .unwrap();
+    assert_eq!(value, result.files["first"].symbols[&id]);
+    assert_ne!(value, result.files["second"].symbols[&id]);
+    let single = source(
+        "fn supplied() { call_effects = false returns void }",
+        "supplied();",
+    );
+    assert!(single
+        .context
+        .definition(&Binding::Local("supplied".into()))
+        .is_some());
+}
+
+#[test]
+fn commonjs_duplicate_parameters_produce_valid_unknown_contracts() {
+    let parsed = parse_source(
+        "function repeated(value, value) { return value; }",
+        Path::new("input.cjs"),
+        LocalFacts::default(),
+    )
+    .unwrap();
+    parsed.validate().unwrap();
+    assert_eq!(
+        parsed.declarations().definitions[0]
+            .hazards
+            .get(Hazard::Call),
+        HazardExpr::Unknown
+    );
+}
+
+#[test]
+fn cached_contracts_preserve_redeclarations_getters_pure_and_nested_shadows() {
+    let analysis = source(
+        "global symbol ambient { read_effects = true }",
+        "function read() { return ambient; } function unused() { /*@__PURE__*/ unknown(); }",
+    );
+    assert_eq!(
+        inferred(&analysis, "read").hazards.get(Hazard::Call),
+        HazardExpr::Unknown
+    );
+    assert_eq!(
+        inferred(&analysis, "unused").hazards.get(Hazard::Call),
+        HazardExpr::Bool(false)
+    );
+    let redeclared = parse_source(
+        "function changed() { return 1; } function changed() { unknown(); } changed();",
+        Path::new("redeclaration.cjs"),
+        LocalFacts::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        redeclared.declarations().definitions[0]
+            .hazards
+            .get(Hazard::Call),
+        HazardExpr::Unknown
+    );
+    let analysis = source(
+        "",
+        "const identity = value => value; function outer() { const identity = () => unknown(); identity(); } outer();",
+    );
+    assert!(effects(&analysis).last().unwrap());
 }
 
 #[test]
@@ -1907,7 +2424,13 @@ fn global_symbol_reads_respect_lexical_bindings_and_callable_contracts() {
             effects(&analysis).iter().all(|effect| !effect),
             "{javascript}"
         );
-        assert!(analysis.matches.is_empty(), "{javascript}");
+        assert!(
+            !analysis
+                .matches
+                .iter()
+                .any(|matched| matches!(matched.binding, Binding::Global(_))),
+            "{javascript}"
+        );
     }
     let analysis = source(
         "global symbol ambient { read_effects = false } global fn ambient() { call_effects = false returns void }",

@@ -150,7 +150,8 @@ members remains conservative. Symbol names are single identifiers.
 
 Function/value hazards default to true; explicit slots override `*_effects`
 regardless of order. Expressions accept booleans, `argument.slot`, Boolean `|`, parentheses,
-and `call(callback, argument, ...rest, this = receiver)`. Bare `...` in a call
+`unknown()` for unmodeled execution, and
+`call(callback, argument, ...rest, this = receiver)`. Bare `...` in a call
 forwards the current arguments. Named rest lists can only be spread.
 
 `prototype_read_effects` models prototype traversal, independently of ordinary
@@ -158,7 +159,8 @@ forwards the current arguments. Named rest lists can only be spread.
 hazard and the right operand's `instanceof_effects`.
 
 Fresh results use `returns.slot = expression`. `returns = argument` preserves
-identity; `returns void` gives `undefined`. `updates argument.slot |= expression`
+identity; `returns void` gives `undefined`, while `returns unknown` makes no
+identity claim. `updates argument.slot |= expression`
 monotonically adds hazards; `updates argument.*_effects |= true` sets all slots.
 Call expressions in hazard assignments describe latent hazards, not execution
 at declaration time.
@@ -224,6 +226,20 @@ construction is serial and fixed-point evaluation remains parallel.
 
 ## Conservative boundaries
 
+`infer_function_contracts` analyzes top-level named functions and `const`
+functions/arrows once, including exports, and returns owned `LocalFacts`;
+`parse_from_ast` includes these contracts in the serializable `ParsedFile`
+automatically, before any connected analysis. Dependencies are
+processed before consumers, regardless of source order. Parameters, immutable
+local aliases, branches, callback calls, declared updates, and return hazards
+are expressed using the existing contract model. Closed contracts with fully
+representable results replace body interpretation at calls. Functions requiring
+linked symbols, live captures, unknown returns, or unsupported syntax keep their
+owned lazy summaries, preserving connected-graph resolution, alias identities,
+and PURE behavior rather than treating incomplete inference as authoritative.
+Cycles, unsupported bodies, and exhausted per-function work/expansion budgets
+produce unknown contracts without executing their bodies during inference.
+
 The extractor handles simple declarations, calls, object literals, member reads,
 operators, templates, conditional/logical expressions, aliases, and the function
 bodies described above. Function creation remains safe even for unsupported
@@ -255,5 +271,5 @@ binding identity precision; other loose comparisons stay conservative.
 
 Context graphs are reusable, but results are not persistently cached. Build a new
 context when removing source facts or changing environment contracts: monotone
-updates cannot retract hazards. A complete Node/browser preset and bundler
-cache/configuration integration are not implemented.
+updates cannot retract hazards. The bundler owns cache/configuration integration;
+Ecco provides the independent JavaScript and Node declaration presets.

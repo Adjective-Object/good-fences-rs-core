@@ -61,6 +61,72 @@ fn cold_warm_and_cache_modes() {
 }
 
 #[test]
+fn inferred_contracts_roundtrip_and_link_without_reparsing() {
+    let dir = TmpDir::new();
+    let path = dir.root_join("library.mjs");
+    fs::write(
+        &path,
+        "export function identity(value) { return value; } \
+        export function forward(value) { return identity(value); }",
+    )
+    .unwrap();
+    let cold = run(&path).unwrap();
+    let bytes = fs::read(sidecar_path(&path)).unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let warm = run(&path).unwrap();
+    assert_eq!(warm.status, CacheStatus::Hit);
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    assert_eq!(cold.record, warm.record);
+    let library = warm.record.module.facts.ecco.as_ref().unwrap();
+    let contract = library
+        .declarations()
+        .definitions
+        .iter()
+        .find(|definition| definition.binding == ecco::Binding::Local("forward".into()))
+        .unwrap();
+    assert_eq!(contract.returns, ecco::Returns::Argument("value".into()));
+    let forward = library
+        .symbols()
+        .iter()
+        .find(|symbol| symbol.name == "forward")
+        .unwrap()
+        .id;
+    let entry = std::sync::Arc::new(
+        ecco::parse_source(
+            "import {forward} from './library.mjs'; forward({});",
+            Path::new("entry.mjs"),
+            ecco::LocalFacts::default(),
+        )
+        .unwrap(),
+    );
+    for _ in 0..2 {
+        let mut analysis = ecco::Analysis::new();
+        analysis
+            .add_file("library", std::sync::Arc::new(library.clone()))
+            .unwrap();
+        analysis.add_file("entry", entry.clone()).unwrap();
+        let result = analysis
+            .solve(&|_: &&str, reference: &ecco::ExternalReference| {
+                Ok(match &reference.binding {
+                    ecco::Binding::Module { module, .. } if module == "./library.mjs" => {
+                        ecco::Resolution::Symbol(ecco::Symbol {
+                            file: "library",
+                            local: forward,
+                        })
+                    }
+                    _ => ecco::Resolution::Unknown,
+                })
+            })
+            .unwrap();
+        assert!(result.files["entry"]
+            .roots
+            .iter()
+            .all(|root| !result.evaluation.effect(root.effects)));
+    }
+    assert_eq!(fs::read(sidecar_path(&path)).unwrap(), bytes);
+}
+
+#[test]
 fn declaration_changes_invalidate_disk_and_opaque_commonjs() {
     let dir = TmpDir::new();
     for name in ["entry.mjs", "entry.cjs"] {

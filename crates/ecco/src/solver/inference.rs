@@ -586,6 +586,9 @@ impl Context {
             };
             if let Some(definition) = value.definition {
                 self.values[runtime.0].definition = Some(start + definition);
+                self.bindings
+                    .entry(parsed.facts.definitions[definition].binding.clone())
+                    .or_insert(start + definition);
                 self.functions.push(runtime);
             }
             values.insert(ValueId(index), runtime);
