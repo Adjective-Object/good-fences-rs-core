@@ -12,6 +12,10 @@ ranges are disjoint. Each `facts.emission.segments[i].source` is a `MultiSpan`
 share the declaration/export prefix and copy only their own declarator.
 Materialization adds a statement terminator; all occurrence and rewrite offsets
 remain in the original source, with no transformed-source reparse.
+Recipes also retain syntax-only deferred reconstruction alternatives: named root
+functions, simple identifier variables with composed original initializer slots,
+effect statements, or unsupported syntax. Scheduling/eligibility and chosen
+names remain linker decisions, never cached policy.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
 

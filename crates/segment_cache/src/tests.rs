@@ -122,6 +122,53 @@ fn reject_emission(source: &str, mutations: &[fn(&mut ast_segmenter::emission::E
 }
 
 #[test]
+fn deferred_recipe_roundtrip_and_invalid_binding_or_source_slots() {
+    use ast_segmenter::{emission::*, owned::BindingId};
+    let source =
+        "export const first = make(), second = {first}; function read(){return second;} effect();";
+    let original = record(source, "deferred.mjs", ModuleFormat::Esm);
+    let bytes = original.encode(source).unwrap();
+    let decoded = CacheRecord::decode(&bytes, source, original.config).unwrap();
+    assert_eq!(
+        decoded.to_parsed(source).unwrap().facts.emission,
+        original.module.facts.emission
+    );
+    reject_emission(
+        source,
+        &[
+            |e| {
+                let DeferredForm::Variable { binding, .. } = &mut e.segments[0].deferred else {
+                    panic!()
+                };
+                *binding = BindingId(u32::MAX);
+            },
+            |e| {
+                let DeferredForm::Variable {
+                    initializer: Some(slot),
+                    ..
+                } = &mut e.segments[0].deferred
+                else {
+                    panic!()
+                };
+                slot.operations.clear();
+            },
+            |e| {
+                let DeferredForm::Variable {
+                    initializer: Some(slot),
+                    ..
+                } = &mut e.segments[0].deferred
+                else {
+                    panic!()
+                };
+                slot.span.start = 0;
+            },
+            |e| e.segments[0].deferred = DeferredForm::Function,
+            |e| e.segments[0].deferred = DeferredForm::Effect,
+        ],
+    );
+}
+
+#[test]
 fn rejects_malformed_emission_placement_names_and_namespace_links() {
     use ast_segmenter::{emission::*, owned::BindingId};
     let source = "import * as ns from './ns'; before; export let before = ns.value; function f(){ return before; } before++; const arrow = () => before; export default function(){ return ns.value; }";

@@ -123,6 +123,219 @@ fn canonical(
     (graph, plan, symbols)
 }
 
+fn deferred(sources: &BTreeMap<PathBuf, String>) -> Option<DeferredEsm> {
+    let (graph, plan, _) = canonical(sources, false);
+    let parses = ast_segmenter::module_parse_count();
+    let output = deferred_esm(&graph, &plan, &EffectPolicy::default(), sources).unwrap();
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    output
+}
+
+fn observe_deferred(mut output: DeferredEsm, observer: &str) {
+    let entry = &output.artifacts.entries["entry"];
+    output.artifacts.files.insert(
+        PathBuf::from("observe.mjs"),
+        format!(
+            "import assert from 'node:assert/strict';\n\
+             globalThis.trace = [];\n\
+             globalThis.makeSecret = () => {{ trace.push('secret'); return {{}}; }};\n\
+             const ns = await import('./{}');\n\
+             const initName = {};\n\
+             const init = ns[initName];\n{}",
+            entry.display(),
+            quote(&output.initializer),
+            observer,
+        ),
+    );
+    let actual = node(&output.artifacts.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+}
+
+#[test]
+fn deferred_esm_keeps_root_captures_live_bindings_and_function_identity() {
+    let input = sources(&[(
+        "entry.mjs",
+        "const secret = makeSecret();\n\
+         export let count = 0;\n\
+         export function read() { return secret; }\n\
+         export function increment() { return ++count; }\n\
+         trace.push(this === undefined);",
+    )]);
+    let output = deferred(&input).expect("synchronous binding island");
+    observe_deferred(
+        output,
+        "assert.deepEqual(trace, []);\n\
+         const read = ns.read;\n\
+         assert.equal(read(), undefined);\n\
+         ns[initName]();\n\
+         const secret = read();\n\
+         assert.equal(typeof secret, 'object');\n\
+         assert.equal(ns.read, read);\n\
+         assert.equal(ns.count, 0);\n\
+         assert.equal(ns.increment(), 1);\n\
+         init(); init();\n\
+         assert.equal(ns.count, 1);\n\
+         assert.equal(read(), secret);\n\
+         assert.deepEqual(trace, ['secret', true]);",
+    );
+}
+
+#[test]
+fn deferred_esm_caches_every_thrown_value_without_retry() {
+    for thrown in [
+        "undefined",
+        "null",
+        "false",
+        "0",
+        "'failure'",
+        "{reason: 1}",
+    ] {
+        let input = sources(&[(
+            "entry.mjs",
+            "trace.push('entered'); export let partial = {}; throw globalThis.thrown;",
+        )]);
+        observe_deferred(
+            deferred(&input).unwrap(),
+            &format!(
+                "globalThis.thrown = {thrown};\n\
+                 assert.deepEqual(trace, []);\n\
+                 for (let attempt = 0; attempt < 3; attempt++) {{\n\
+                   let caught = false;\n\
+                   try {{ init(); }} catch (error) {{\n\
+                     caught = true; assert.equal(error, globalThis.thrown);\n\
+                   }}\n\
+                   assert.equal(caught, true);\n\
+                 }}\n\
+                 assert.equal(typeof ns.partial, 'object');\n\
+                 assert.deepEqual(trace, ['entered']);"
+            ),
+        );
+    }
+}
+
+#[test]
+fn deferred_esm_reentry_is_rejected_without_repeating_effects() {
+    let input = sources(&[(
+        "entry.mjs",
+        "trace.push('entered'); reenter(); export const value = 1;",
+    )]);
+    observe_deferred(
+        deferred(&input).unwrap(),
+        "globalThis.reenter = init;\n\
+         const rejected = error => error === 'Unsupported deferred ESM reentry';\n\
+         assert.throws(init, rejected);\n\
+         assert.throws(init, rejected);\n\
+         assert.deepEqual(trace, ['entered']);",
+    );
+}
+
+#[test]
+fn deferred_esm_reconstructs_split_declarations_and_static_dependency_order() {
+    let input = sources(&[
+        ("entry.mjs",
+         "import {dep} from './z-dependency.mjs';\n\
+          export const first = (trace.push('first'), dep), second = (trace.push('second'), first);\n\
+          export function read() { return second; }\n\
+          trace.push('entry');"),
+        ("z-dependency.mjs", "export const dep = (trace.push('dependency'), {});"),
+    ]);
+    observe_deferred(
+        deferred(&input).unwrap(),
+        "assert.deepEqual(trace, []);\n\
+         init();\n\
+         assert.equal(ns.first, ns.second);\n\
+         assert.equal(ns.read(), ns.first);\n\
+         init();\n\
+         assert.deepEqual(trace, ['dependency', 'first', 'second', 'entry']);",
+    );
+}
+
+#[test]
+fn deferred_esm_names_and_declaration_kinds_preserve_existing_restrictions() {
+    let input = sources(&[(
+        "entry.mjs",
+        "export const __gf_init = makeSecret();\n\
+         const __gf_init_failure = 3;\n\
+         export const arrow = () => __gf_init;\n\
+         export function read() { return __gf_init_failure; }\n\
+         export var value; value = 4; var value;\n\
+         export let empty;\n\
+         trace.push(typeof __gf_init_state, typeof __gf_init_caught);",
+    )]);
+    observe_deferred(
+        deferred(&input).unwrap(),
+        "assert.deepEqual(trace, []);\n\
+         init();\n\
+         const arrow = ns.arrow;\n\
+         assert.equal(arrow.name, 'arrow');\n\
+         assert.equal(arrow(), ns.__gf_init);\n\
+         assert.equal(ns.read.name, 'read');\n\
+         assert.equal(ns.read(), 3);\n\
+         assert.equal(ns.value, 4);\n\
+         assert.equal(ns.empty, undefined);\n\
+         init();\n\
+         assert.equal(ns.arrow, arrow);\n\
+         assert.deepEqual(trace, ['secret', 'undefined', 'undefined']);",
+    );
+}
+
+#[test]
+fn deferred_esm_unsupported_shapes_keep_native_evaluation() {
+    for source in [
+        "export const {x} = {x: 1};",
+        "export class Thing {}",
+        "export const value = await Promise.resolve(1);",
+        "export const value = 1; export function write() { value = 2; }",
+        "if (true) { var value = 1; } export {value};",
+        "export default function () {}",
+    ] {
+        let input = sources(&[("entry.mjs", source)]);
+        assert!(deferred(&input).is_none(), "{source}");
+        let (_, native) = build(&input, &[("entry.mjs", true)], false);
+        assert!(!native
+            .files
+            .values()
+            .any(|code| code.contains("Unsupported deferred ESM reentry")));
+    }
+
+    for input in [
+        sources(&[
+            ("entry.mjs", "import './dep.mjs'; export const value = 1;"),
+            ("dep.mjs", "import './entry.mjs';"),
+        ]),
+        sources(&[
+            (
+                "entry.mjs",
+                "import * as ns from './dep.mjs'; export const value = ns;",
+            ),
+            ("dep.mjs", "export const x = 1;"),
+        ]),
+        sources(&[
+            (
+                "entry.mjs",
+                "import {x} from './dep.mjs'; x = 2; export {x};",
+            ),
+            ("dep.mjs", "export let x = 1;"),
+        ]),
+    ] {
+        assert!(deferred(&input).is_none());
+    }
+}
+
+#[test]
+fn deferred_esm_rejects_repaired_source_and_stale_policy() {
+    let input = sources(&[("entry.mjs", "export const value = 1;")]);
+    let (graph, plan, _) = canonical(&input, false);
+    let changed = sources(&[("entry.mjs", "export const value = 2;")]);
+    assert!(deferred_esm(&graph, &plan, &EffectPolicy::default(), &changed).is_err());
+    let changed_policy = EffectPolicy::parse(["makeSecret(...)"]).unwrap();
+    assert!(deferred_esm(&graph, &plan, &changed_policy, &input).is_err());
+}
+
 #[test]
 fn native_concatenation_preserves_late_import_statement_boundaries() {
     assert_native_observation(

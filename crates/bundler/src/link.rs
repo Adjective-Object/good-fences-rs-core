@@ -149,6 +149,36 @@ pub fn esm(
     esm_plan(graph, plan, policy, sources)?.render()
 }
 
+/// Explicit reconstruction only: no activation calls or physical placement policy.
+/// `None` means the island must retain ordinary native evaluation.
+pub fn deferred_esm(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+) -> eyre::Result<Option<DeferredEsm>> {
+    let manifest = diagnostic_manifest(graph, plan, policy)?;
+    graph.validate_links()?;
+    let relocations = BTreeMap::new();
+    let modules = load_modules(graph, plan, sources, &relocations)?;
+    let symbols = crate::symbols::Symbols::link(graph, plan)?;
+    native::deferred(graph, plan, &modules, &manifest, &symbols)?
+        .map(|(artifacts, initializer)| {
+            Ok(DeferredEsm {
+                artifacts: artifacts.render()?,
+                initializer,
+            })
+        })
+        .transpose()
+}
+
+/// A native ESM island whose root bindings are initialized by one exported guard.
+/// Loading `artifacts.entries` alone never invokes `initializer`.
+pub struct DeferredEsm {
+    pub artifacts: Artifacts,
+    pub initializer: String,
+}
+
 pub(crate) fn esm_plan(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -167,6 +197,20 @@ pub(crate) fn esm_plan_prepared(
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
+    let mut modules = load_modules(graph, plan, sources, relocations)?;
+    let symbols = crate::symbols::Symbols::link(graph, plan)?;
+    for (&file, module) in &mut modules {
+        module.surface = symbols.exports[&file].keys().cloned().collect();
+    }
+    native::emit(graph, plan, &modules, &manifest, &symbols)
+}
+
+fn load_modules<'a>(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    sources: &'a BTreeMap<PathBuf, String>,
+    relocations: &'a BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
+) -> eyre::Result<BTreeMap<u32, Module<'a>>> {
     let mut modules = BTreeMap::new();
     for &file in &plan.retention.modules {
         let path = graph.file_path(file).ok_or_eyre("missing linked module")?;
@@ -186,11 +230,7 @@ pub(crate) fn esm_plan_prepared(
             },
         );
     }
-    let symbols = crate::symbols::Symbols::link(graph, plan)?;
-    for (&file, module) in &mut modules {
-        module.surface = symbols.exports[&file].keys().cloned().collect();
-    }
-    native::emit(graph, plan, &modules, &manifest, &symbols)
+    Ok(modules)
 }
 
 fn async_modules(

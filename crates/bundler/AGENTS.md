@@ -141,6 +141,10 @@ IDs; replacing parents own nested rewrites, never reconnect generated text.
 Materialize complete recipe MultiSpans, not just segment ownership ranges.
 Split declarators share source prefixes, not binding/effect ownership; terminate
 each reconstructed declaration independently.
+Explicit deferred reconstruction shares native recipes/name gates: keep functions
+and var-lowered bindings at ESM root, defer assignments/effects in source order,
+cache success/all thrown values separately, and reject reentry. Only this opt-in
+synchronous acyclic mode waives TDZ; ordinary native emission remains unchanged.
 
 The symbol linker emits scope-hoisted direct ESM bindings; the rejected
 registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is

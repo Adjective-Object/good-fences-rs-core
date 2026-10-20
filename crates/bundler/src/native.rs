@@ -17,10 +17,89 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Artifacts<Code>> {
-    if let Some(output) = single(graph, plan, modules, manifest, symbols)? {
+    if let Some(output) = single(graph, plan, modules, manifest, symbols, None)? {
         return Ok(output);
     }
     chunks::emit(graph, plan, modules, manifest, symbols)
+}
+
+struct Initialization {
+    init: String,
+    state: String,
+    failure: String,
+    caught: String,
+}
+
+impl Initialization {
+    fn new(modules: &BTreeMap<u32, Module<'_>>, symbols: &Symbols) -> Self {
+        let mut occupied: BTreeSet<_> = modules
+            .values()
+            .flat_map(|m| {
+                m.parsed
+                    .facts
+                    .bindings
+                    .iter()
+                    .map(|b| b.name.clone())
+                    .chain(m.parsed.facts.references.iter().map(|r| r.name.clone()))
+            })
+            .chain(symbols.definitions.values().map(|d| d.name.clone()))
+            .chain(symbols.exports.values().flat_map(|e| e.keys().cloned()))
+            .collect();
+        let mut fresh = |base: &str| {
+            let mut name = base.to_owned();
+            while !occupied.insert(name.clone()) {
+                name.push('$');
+            }
+            name
+        };
+        Self {
+            init: fresh("__gf_init"),
+            state: fresh("__gf_init_state"),
+            failure: fresh("__gf_init_failure"),
+            caught: fresh("__gf_init_caught"),
+        }
+    }
+
+    fn guard(&self, body: Code) -> Code {
+        let Self {
+            init,
+            state,
+            failure,
+            caught,
+        } = self;
+        body.surrounded(
+            format!(
+                "var {state} = 0, {failure};\nvar {init} = () => {{\n\
+                 if ({state} === 2) return;\n\
+                 if ({state} === 3) throw {failure};\n\
+                 if ({state} === 1) throw 'Unsupported deferred ESM reentry';\n\
+                 {state} = 1;\ntry {{\n"
+            ),
+            format!(
+                "\n{state} = 2;\n}} catch ({caught}) {{\n\
+                 {failure} = {caught}; {state} = 3; throw {caught};\n}}\n}};\n"
+            ),
+        )
+    }
+}
+
+pub(super) fn deferred(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    symbols: &Symbols,
+) -> eyre::Result<Option<(Artifacts<Code>, String)>> {
+    let initialization = Initialization::new(modules, symbols);
+    Ok(single(
+        graph,
+        plan,
+        modules,
+        manifest,
+        symbols,
+        Some(&initialization),
+    )?
+    .map(|artifacts| (artifacts, initialization.init)))
 }
 
 fn single(
@@ -29,6 +108,7 @@ fn single(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
+    initialization: Option<&Initialization>,
 ) -> eyre::Result<Option<Artifacts<Code>>> {
     // Prefer whole-tree concatenation; the group planner handles native seams.
     if modules.keys().any(|&file| has_externals(graph, file)) {
@@ -66,6 +146,19 @@ fn single(
         .values()
         .any(|e| matches!(e.identity, ExportIdentity::Namespace(_)))
     {
+        return Ok(None);
+    }
+    if initialization.is_some()
+        && modules.values().any(|module| {
+            let facts = &module.parsed.facts;
+            facts.references.iter().any(|r| {
+                r.write
+                    && r.binding
+                        .is_some_and(|id| facts.bindings.iter().any(|b| b.id == id && b.constant))
+            })
+        })
+    {
+        // Lowering const to var must not make existing illegal writes succeed.
         return Ok(None);
     }
 
@@ -121,7 +214,15 @@ fn single(
     }
     let mut bodies = Code::default();
     for file in order {
-        let Some((hoisted, body)) = body(graph, file, &modules[&file], &values, &live, &recipes)?
+        let Some((hoisted, body)) = reconstruct(
+            graph,
+            file,
+            &modules[&file],
+            &values,
+            &live,
+            &recipes,
+            initialization.is_some(),
+        )?
         else {
             return Ok(None);
         };
@@ -130,8 +231,14 @@ fn single(
         // Separate statements even when a source lacks a final semicolon/newline.
         bodies.push_str("\n;\n");
     }
-    output.push(bodies);
+    output.push(match initialization {
+        Some(initialization) => initialization.guard(bodies),
+        None => bodies,
+    });
     output.push_str("export {\n");
+    if let Some(initialization) = initialization {
+        output.push_str(&format!("{},\n", initialization.init));
+    }
     for (public, linked) in &symbols.exports[file] {
         output.push_str(&format!(
             "{} as {},\n",
@@ -338,6 +445,18 @@ fn body(
     live: &BTreeSet<SegmentKey>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
 ) -> eyre::Result<Option<(Code, Code)>> {
+    reconstruct(graph, file, module, values, live, recipes, false)
+}
+
+fn reconstruct(
+    graph: &SourceGraph,
+    file: u32,
+    module: &Module<'_>,
+    values: &Values<'_>,
+    live: &BTreeSet<SegmentKey>,
+    recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
+    deferred: bool,
+) -> eyre::Result<Option<(Code, Code)>> {
     use ast_segmenter::emission::{ExportForm, NamespaceAccess, OperationKind};
     if !compatible(graph, file, module, values, live)? {
         return Ok(None);
@@ -503,7 +622,42 @@ fn body(
             };
             renderer.replace(operation_index as u32, replacement);
         }
-        output.push(renderer.materialize()?);
+        if deferred {
+            use ast_segmenter::emission::DeferredForm;
+            match &recipe.deferred {
+                DeferredForm::Unsupported => return Ok(None),
+                DeferredForm::Function => {
+                    hoisted.push(renderer.materialize()?);
+                    hoisted.push_str("\n;\n");
+                }
+                DeferredForm::Variable {
+                    binding,
+                    initializer,
+                } => {
+                    let definition = facts
+                        .bindings
+                        .iter()
+                        .find(|b| b.id == *binding)
+                        .ok_or_eyre("missing deferred variable")?;
+                    let name = values
+                        .name(&ExportIdentity::Binding(file, *binding))
+                        .ok_or_eyre("missing deferred variable name")?;
+                    hoisted.push_str(&format!("var {name};\n"));
+                    if let Some(initializer) = initializer {
+                        output.push(
+                            renderer
+                                .slot(initializer)?
+                                .surrounded(format!("{name} = ("), ");\n"),
+                        );
+                    } else if !definition.function_scoped {
+                        output.push_str(&format!("{name} = void 0;\n"));
+                    }
+                }
+                DeferredForm::Effect => output.push(renderer.materialize()?),
+            }
+        } else {
+            output.push(renderer.materialize()?);
+        }
         // Retention and PURE rewrites can expose a new ASI continuation.
         output.push_str("\n;\n");
     }

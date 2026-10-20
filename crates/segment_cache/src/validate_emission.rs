@@ -78,6 +78,7 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
             ensure!(
                 !recipe.connector_only
                     && recipe.placement == PlacementFacts::default()
+                    && recipe.deferred == DeferredForm::Unsupported
                     && recipe.names == NameRestrictions::default()
                     && recipe.namespaces.is_empty()
                     && recipe.operations.iter().all(|o| matches!(
@@ -409,6 +410,58 @@ fn operations(
                 lowering,
             } => pure(facts, *invocation, lowering, owner, recipe, source, &ranges)?,
             _ => {}
+        }
+    }
+    match &recipe.deferred {
+        DeferredForm::Unsupported => {}
+        DeferredForm::Function => ensure!(
+            recipe.placement.instantiable && !recipe.placement.default_expression,
+            "invalid deferred function"
+        ),
+        DeferredForm::Effect => ensure!(
+            recipe.placement.declarations.is_empty() && !recipe.placement.default_expression,
+            "invalid deferred effect"
+        ),
+        DeferredForm::Variable {
+            binding,
+            initializer,
+        } => {
+            let binding = bindings
+                .get(binding)
+                .ok_or_eyre("dangling deferred binding")?;
+            ensure!(
+                !facts.commonjs
+                    && !binding.import
+                    && !binding.function
+                    && recipe.placement.declarations == [binding.id]
+                    && !recipe.placement.default_expression,
+                "invalid deferred variable"
+            );
+            if let Some(slot) = initializer {
+                within(source, range, slot.span)?;
+                ensure!(
+                    binding
+                        .declarations
+                        .iter()
+                        .any(|s| contains(range, *s) && s.end < slot.span.start),
+                    "invalid deferred initializer range"
+                );
+                let expected: Vec<_> = ranges
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, &range)| {
+                        contains(slot.span, range)
+                            && !recipe.operations[i]
+                                .parent
+                                .is_some_and(|p| contains(slot.span, ranges[p as usize]))
+                    })
+                    .map(|(i, _)| i as u32)
+                    .collect();
+                ensure!(
+                    slot.operations == expected,
+                    "invalid deferred source-slot composition"
+                );
+            }
         }
     }
     for (binding, info) in &bindings {

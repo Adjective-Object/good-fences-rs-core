@@ -12,6 +12,46 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn deferred_forms_keep_split_initializer_slots_in_original_coordinates() {
+    let source = "export const secret = makeSecret(), other = {secret}; function read() { return secret; } trace(); class Unsupported {} const {x} = {};";
+    let facts = parse(source);
+    let recipes = &facts.emission.segments;
+    for (index, name, text) in [(0, "secret", "makeSecret()"), (1, "other", "{secret}")] {
+        let DeferredForm::Variable {
+            binding,
+            initializer: Some(slot),
+        } = &recipes[index].deferred
+        else {
+            panic!("missing split variable alternative");
+        };
+        assert_eq!(
+            facts
+                .bindings
+                .iter()
+                .find(|b| b.id == *binding)
+                .unwrap()
+                .name,
+            name
+        );
+        assert_eq!(
+            &source[slot.span.start as usize..slot.span.end as usize],
+            text
+        );
+        assert!(!slot.operations.is_empty());
+        assert!(slot.operations.iter().all(|&i| contains(
+            slot.span,
+            recipes[index].operations[i as usize]
+                .kind
+                .span(&facts, &recipes[index])
+        )));
+    }
+    assert_eq!(recipes[2].deferred, DeferredForm::Function);
+    assert_eq!(recipes[3].deferred, DeferredForm::Effect);
+    assert_eq!(recipes[4].deferred, DeferredForm::Unsupported);
+    assert_eq!(recipes[5].deferred, DeferredForm::Unsupported);
+}
+
+#[test]
 fn connectors_and_placement_keep_initialization_and_writes_local() {
     let facts = parse("import {x} from './x'; export {}; ; before; let before = x; function f(){ return before; } before++; const arrow = () => before;");
     let recipes = &facts.emission.segments;
