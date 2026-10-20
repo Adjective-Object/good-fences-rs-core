@@ -1988,6 +1988,18 @@ fn arbitrary_placement_shares_mutable_lexical_clusters_across_source_boundaries(
     assert_ne!(state, &output.entries["a.mjs"]);
     assert_ne!(state, &output.entries["b.mjs"]);
     assert_ne!(state, &output.members[&segment("shared.mjs", 4)]);
+    insta::assert_snapshot!(
+        output.files[state]
+            .lines()
+            .filter(|line| line.starts_with("export {"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        @r###"
+    export {token as "token"};
+    export {state as "state"};
+    export {bump as "bump"};
+    "###
+    );
     assert_ne!(
         &output.members[&segment("shared.mjs", 2)],
         &output.entries["a.mjs"]

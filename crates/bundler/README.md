@@ -33,6 +33,10 @@ Each linked emission prepares graph-wide occupied names and deterministic
 default-expression names once, sharing them across placement checks and native
 owners. Owners keep only mutable routing/name maps and local name additions;
 they do not clone the global exclusions.
+Canonical definitions are sorted once by path/binding offset and partitioned by
+actual segment ownership. Local naming and private exports reuse each owner's
+ordered definitions, including relocated bindings, rather than scanning and
+sorting all graph definitions per owner.
 
 ## Real browser application smoke tests
 
