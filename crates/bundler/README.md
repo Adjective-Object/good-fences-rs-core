@@ -41,6 +41,23 @@ provenance belong to the generated parser path/text. Warm sidecars reuse those
 facts without extraction. Input rechecks, invalidation and publication still
 track the original files; emission never reconstructs or reparses a wrapper.
 
+## Asset modules
+
+Imports of non-JavaScript/TypeScript/JSON/CSS files copy exact input bytes to
+content-addressed `assets/<sha256>.<extension>` paths. Default imports and
+`require` return a URL string relative to the **build output root**, not the
+importing chunk. Resolve it against your output-root URL; renaming entries does
+not change it. Equal bytes with equal extensions share one resource file.
+Asset entries emit a `.cjs` URL-exporting wrapper by default. Unreached dynamic
+assets are not emitted.
+
+`Artifacts.files` retains executable/metadata strings; `Artifacts.resources`
+contains byte-preserving non-executable files. Use `Artifacts::file_bytes()` to
+write the complete output or use the publisher. Resources participate in content
+hashing, immutable generations, cancellation, ownership validation and stale
+cleanup. They never serve as executable module routes. CSS extraction is not
+implemented yet.
+
 ## Native ESM chunks
 
 Public `link::esm`, isolated emission and `BuildSession` share parse-free source

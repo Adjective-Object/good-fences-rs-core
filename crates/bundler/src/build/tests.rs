@@ -22,6 +22,129 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn binary_assets_preserve_bytes_urls_cache_and_published_generations() {
+    let dir = TmpDir::new();
+    let original = [0, 255, 128, 10, 13, 42];
+    fs::write(dir.root().join("image.png"), original).unwrap();
+    fs::write(dir.root().join("duplicate.png"), original).unwrap();
+    write(
+        dir.root(),
+        "loader.cjs",
+        "exports.load = () => require('./image.png');",
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import image from './image.png';
+import duplicate from './duplicate.png';
+import loader from './loader.cjs';
+export {image, duplicate};
+export const same = () => image === loader.load();
+export const dynamic = () => import('./image.png');
+"#,
+    );
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/main.mjs".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    assert_eq!(cold.product.artifacts.resources.len(), 1);
+    let (asset, bytes) = cold.product.artifacts.resources.first_key_value().unwrap();
+    assert_eq!(bytes.as_slice(), original);
+    assert_eq!(
+        observe_named(
+            &cold.product.artifacts,
+            r#"
+import {image, duplicate, same, dynamic} from './nested/main.mjs';
+import {readFileSync} from 'node:fs';
+console.log(image === duplicate, same(), (await dynamic()).default === image,
+    [...readFileSync(new URL(image, import.meta.url))].join(','));
+"#
+        ),
+        b"true true true 0,255,128,10,13,42\n"
+    );
+    assert_eq!(cold.counters.source_reparses, 0);
+    assert_eq!(cold.counters.fragment_reparses, 0);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.product.artifacts, cold.product.artifacts);
+    let output = TmpDir::new();
+    let cancel = crate::publish::Cancellation::default();
+    let published =
+        crate::publish::publish(output.root(), &cold.product.artifacts, &cancel).unwrap();
+    assert_eq!(fs::read(published.directory.join(asset)).unwrap(), original);
+    assert!(
+        !crate::publish::publish(output.root(), &cold.product.artifacts, &cancel)
+            .unwrap()
+            .changed
+    );
+    fs::write(dir.root().join("image.png"), [254, 253, 0]).unwrap();
+    let edited = session.build(&config).unwrap();
+    assert_eq!(edited.counters.source_parses, 1);
+    assert_eq!(edited.product.artifacts.resources.len(), 2);
+    let next = crate::publish::publish(output.root(), &edited.product.artifacts, &cancel).unwrap();
+    assert_ne!(next.directory, published.directory);
+    assert_eq!(fs::read(published.directory.join(asset)).unwrap(), original);
+    assert_eq!(
+        crate::publish::prune_stale(output.root()).unwrap().removed,
+        vec![published.directory]
+    );
+    for (path, bytes) in &edited.product.artifacts.resources {
+        assert_eq!(&fs::read(next.directory.join(path)).unwrap(), bytes);
+    }
+    let mut unsafe_artifacts = edited.product.artifacts.clone();
+    unsafe_artifacts
+        .resources
+        .insert("../escape".into(), vec![255]);
+    assert!(crate::publish::publish(output.root(), &unsafe_artifacts, &cancel).is_err());
+    unsafe_artifacts.resources.remove(Path::new("../escape"));
+    unsafe_artifacts
+        .resources
+        .insert(unsafe_artifacts.entries["main"].clone(), vec![255]);
+    assert!(crate::publish::publish(output.root(), &unsafe_artifacts, &cancel).is_err());
+}
+
+#[test]
+fn binary_asset_entries_export_urls_and_dead_dynamic_assets_are_not_emitted() {
+    let dir = TmpDir::new();
+    fs::write(dir.root().join("data.wasm"), [0, 97, 115, 109, 255]).unwrap();
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().path = "data.wasm".into();
+    let entry = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(
+        entry.product.artifacts.entries["main"],
+        PathBuf::from("data.cjs")
+    );
+    let asset = entry.product.artifacts.resources.keys().next().unwrap();
+    assert_eq!(
+        observe_named(
+            &entry.product.artifacts,
+            "import url from './data.cjs'; console.log(url);"
+        ),
+        format!("./{}\n", asset.display()).as_bytes()
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        "function dead() { return import('./data.wasm'); } console.log('main');",
+    );
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert!(built.product.artifacts.resources.is_empty());
+    assert_eq!(observe(&built.product.artifacts), b"main\n");
+}
+
+#[test]
 fn json_modules_share_values_across_import_require_dynamic_and_warm_builds() {
     let dir = TmpDir::new();
     write(
@@ -793,8 +916,10 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
 
 fn observe(artifacts: &Artifacts) -> Vec<u8> {
     let dir = TmpDir::new();
-    for (path, text) in &artifacts.files {
-        write(dir.root(), path.to_str().unwrap(), text);
+    for (path, bytes) in artifacts.file_bytes() {
+        let path = dir.root().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
     }
     observe_entry(&dir.root().join(&artifacts.entries["main"]))
 }
@@ -830,8 +955,10 @@ fn observe_named(artifacts: &Artifacts, check: &str) -> Vec<u8> {
             path.display()
         );
     }
-    for (path, source) in &artifacts.files {
-        write(dir.root(), path.to_str().unwrap(), source);
+    for (path, bytes) in artifacts.file_bytes() {
+        let path = dir.root().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
     }
     write(dir.root(), "check.mjs", check);
     observe_entry(&dir.root().join("check.mjs"))

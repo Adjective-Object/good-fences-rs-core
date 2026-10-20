@@ -36,10 +36,11 @@ pub(super) fn apply(
                 .to_owned(),
         };
         if entry.output_name.is_none()
-            && entry
-                .path
-                .extension()
-                .is_some_and(|extension| extension == "json")
+            && (crate::resource::is_asset(&entry.path)
+                || entry
+                    .path
+                    .extension()
+                    .is_some_and(|extension| extension == "json"))
         {
             requested.set_extension(if commonjs { "cjs" } else { "mjs" });
         }
@@ -87,12 +88,18 @@ pub(super) fn apply(
     let project = |path: &PathBuf| renames.get(path).cloned().unwrap_or_else(|| path.clone());
     let mut destinations = BTreeSet::new();
     let mut portable_destinations = BTreeSet::new();
-    for path in artifacts.files.keys().map(&project).chain(
-        aliases
-            .iter()
-            .map(|(alias, _, _, _)| alias.clone())
-            .chain(packages.keys().cloned()),
-    ) {
+    for path in artifacts
+        .files
+        .keys()
+        .map(&project)
+        .chain(artifacts.resources.keys().cloned())
+        .chain(
+            aliases
+                .iter()
+                .map(|(alias, _, _, _)| alias.clone())
+                .chain(packages.keys().cloned()),
+        )
+    {
         ensure!(
             portable_destinations.insert(PathBuf::from(
                 path.to_str()

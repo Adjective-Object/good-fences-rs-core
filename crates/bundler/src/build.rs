@@ -465,6 +465,15 @@ impl BuildSession {
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let mut artifacts = link::esm_plan(&graph, &plan, &options.effects, &sources)?;
+        for &file in &plan.retention.modules {
+            let path = graph.file_path(file).expect("retained source");
+            if crate::resource::is_asset(path) {
+                let input = &self.sources[path].input;
+                artifacts
+                    .resources
+                    .insert(crate::resource::asset_path(path, input), input.clone());
+            }
+        }
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;
         Self::recheck(&self.root, &self.sources, &inventory)?;

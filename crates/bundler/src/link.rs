@@ -43,6 +43,8 @@ impl Backend {
 pub struct Artifacts<C = String> {
     pub backend: Backend,
     pub files: BTreeMap<PathBuf, C>,
+    /// Non-executable, byte-preserving resources keyed by output-relative paths.
+    pub resources: BTreeMap<PathBuf, Vec<u8>>,
     /// Direct native files; multi-module low-level roots are evaluation-only.
     pub entries: BTreeMap<String, PathBuf>,
     /// Independently executable source namespaces to relative paths.
@@ -98,6 +100,7 @@ impl Artifacts<crate::assembly::Code> {
         Ok(Artifacts {
             backend: self.backend,
             files,
+            resources: self.resources,
             entries: self.entries,
             modules: self.modules,
             members: self.members,
@@ -108,6 +111,20 @@ impl Artifacts<crate::assembly::Code> {
             async_facades: self.async_facades,
             async_modules: self.async_modules,
         })
+    }
+}
+
+impl Artifacts {
+    /// All owned output bytes, including executable text, metadata and resources.
+    pub fn file_bytes(&self) -> impl Iterator<Item = (&PathBuf, &[u8])> {
+        self.files
+            .iter()
+            .map(|(path, text)| (path, text.as_bytes()))
+            .chain(
+                self.resources
+                    .iter()
+                    .map(|(path, bytes)| (path, bytes.as_slice())),
+            )
     }
 }
 

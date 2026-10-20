@@ -147,6 +147,7 @@ fn single(
     let (chunk, nodes) = plan.chunks.first_key_value().unwrap();
     Ok(Some(Artifacts {
         backend: super::Backend::Native,
+        resources: BTreeMap::new(),
         files: BTreeMap::from([(path.clone(), output)]),
         entries: BTreeMap::from([(entry.clone(), path.clone())]),
         // Only the public entry namespace is executable as an independent module.

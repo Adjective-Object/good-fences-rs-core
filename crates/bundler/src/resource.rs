@@ -2,9 +2,30 @@
 use std::path::{Path, PathBuf};
 
 use eyre::WrapErr;
+use sha2::{Digest, Sha256};
+
+pub(crate) fn is_asset(path: &Path) -> bool {
+    !matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" | "json" | "css")
+    )
+}
+
+pub(crate) fn asset_path(path: &Path, input: &[u8]) -> PathBuf {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| {
+            extension.len() <= 16 && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+        .unwrap_or("bin");
+    PathBuf::from(format!("assets/{:x}.{extension}", Sha256::digest(input)))
+}
 
 pub(crate) fn parser_path(path: &Path) -> PathBuf {
-    if path
+    if is_asset(path) {
+        path.with_extension("asset.cjs")
+    } else if path
         .extension()
         .is_some_and(|extension| extension == "json")
     {
@@ -15,6 +36,12 @@ pub(crate) fn parser_path(path: &Path) -> PathBuf {
 }
 
 pub(crate) fn prepare(path: &Path, input: &[u8]) -> eyre::Result<String> {
+    if is_asset(path) {
+        return Ok(format!(
+            "module.exports = {};\n",
+            serde_json::to_string(&format!("./{}", asset_path(path, input).display()))?
+        ));
+    }
     let text = std::str::from_utf8(input)
         .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;
     if !path

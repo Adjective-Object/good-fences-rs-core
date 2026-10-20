@@ -149,8 +149,23 @@ fn validate_artifacts(artifacts: &Artifacts) -> eyre::Result<()> {
         !artifacts.files.is_empty(),
         "cannot publish an empty artifact map"
     );
-    for path in artifacts.files.keys() {
+    let mut paths = BTreeSet::new();
+    for (path, _) in artifacts.file_bytes() {
         relative(path)?;
+        ensure!(
+            paths.insert(path.to_string_lossy().to_lowercase()),
+            "duplicate owned artifact path: {}",
+            path.display()
+        );
+    }
+    for path in &paths {
+        ensure!(
+            !Path::new(path)
+                .ancestors()
+                .skip(1)
+                .any(|parent| parent.to_str().is_some_and(|parent| paths.contains(parent))),
+            "owned artifact file/directory collision: {path}"
+        );
     }
     for path in artifacts
         .modules
@@ -260,9 +275,8 @@ fn publish_locked(
     validate_artifacts(artifacts)?;
     let previous = read_state(output)?;
     let owned: BTreeMap<_, _> = artifacts
-        .files
-        .iter()
-        .map(|(p, s)| (p.clone(), hash(s.as_bytes())))
+        .file_bytes()
+        .map(|(p, bytes)| (p.clone(), hash(bytes)))
         .collect();
     let generation = format!(
         ".bundler-generation-{}",
@@ -286,12 +300,12 @@ fn publish_locked(
         );
         let stage = create_stage(output)?;
         let staged = (|| {
-            for (path, text) in &artifacts.files {
+            for (path, bytes) in artifacts.file_bytes() {
                 cancel.check()?;
                 let file = stage.join(path);
                 fs::create_dir_all(file.parent().expect("artifact parent"))?;
                 let mut file = OpenOptions::new().write(true).create_new(true).open(file)?;
-                file.write_all(text.as_bytes())?;
+                file.write_all(bytes)?;
                 file.sync_all()?;
                 files_written += 1;
             }
