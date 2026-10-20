@@ -706,7 +706,7 @@ fn css_modules_composition_errors_reject_unused_exports_under_both_loaders() {
             ("@font-face { composes: a }", "illegal placement"),
             (
                 ".a { composes: b from './missing.module.css' }",
-                "cross-file composition is unsupported",
+                "missing.module.css",
             ),
             (".a { composes: b !important }", "important composes"),
             (".a { composes: b from global extra }", "trailing composes"),
@@ -725,6 +725,451 @@ fn css_modules_composition_errors_reject_unused_exports_under_both_loaders() {
                 &previous.product
             ));
         }
+    }
+}
+
+#[test]
+fn css_modules_cross_file_composition_is_lazy_shared_ordered_and_render_imports_stay_conditional() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const load = () => import('./lazy.mjs');",
+    );
+    write(
+        dir.root(),
+        "node_modules/styles/package.json",
+        r#"{"exports":{"./base":"./base.module.css"}}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/styles/base.module.css",
+        r#".b\61 se-name { color: green; background: url('./pixel.bin') }"#,
+    );
+    write(dir.root(), "node_modules/styles/pixel.bin", "pixel");
+    write(
+        dir.root(),
+        "mid.module.css",
+        r#".mid { composes: b\61 se-name from "styles/base" }"#,
+    );
+    write(
+        dir.root(),
+        "button.module.css",
+        r#"@import './conditional.module.css' layer(theme) supports(display: grid) screen;
+.button { composes: mid from "./m\69 d.module.css"; composes: mid from './mid.module.css'; color: red }"#,
+    );
+    write(
+        dir.root(),
+        "peer.module.css",
+        r#".peer { composes: base-name from "styles/base" }"#,
+    );
+    write(
+        dir.root(),
+        "conditional.module.css",
+        ".render { composes: support from './render-only.module.css' }",
+    );
+    write(
+        dir.root(),
+        "render-only.module.css",
+        "@import './conditional.module.css' print; .support { color: blue }",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/main.mjs".into());
+    let mut resources = None;
+    for reverse in [false, true] {
+        write(
+            dir.root(),
+            "lazy.mjs",
+            if reverse {
+                "export {peer} from './peer.module.css'; export {button} from './button.module.css';"
+            } else {
+                "export {button} from './button.module.css'; export {peer} from './peer.module.css';"
+            },
+        );
+        for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+            config.css.load = load;
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let built = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(
+                &built.product,
+                &session.build(&config).unwrap().product
+            ));
+            let disk = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .unwrap();
+            assert_eq!(disk.counters.source_parses, 0);
+            assert_eq!(built.product.artifacts, disk.product.artifacts);
+            let artifacts = &built.product.artifacts;
+            assert_eq!(artifacts.stylesheets.len(), 4);
+            assert_eq!(artifacts.resources.len(), 7);
+            for path in ["conditional.module.css", "render-only.module.css"] {
+                assert!(built
+                    .product
+                    .graph
+                    .file_id(&dir.root().join(path))
+                    .is_none());
+            }
+            let button_css = std::str::from_utf8(
+                &artifacts.resources[&artifacts.stylesheets[&dir.root().join("button.module.css")]],
+            )
+            .unwrap();
+            assert!(button_css.contains("layer(theme) supports(display: grid) screen;"));
+            assert!(!button_css.contains("composes"));
+            if let Some(previous) = &resources {
+                assert_eq!(previous, &artifacts.resources);
+            }
+            resources = Some(artifacts.resources.clone());
+            let ordered = if reverse {
+                [
+                    "node_modules/styles/base.module.css",
+                    "peer.module.css",
+                    "mid.module.css",
+                    "button.module.css",
+                ]
+            } else {
+                [
+                    "node_modules/styles/base.module.css",
+                    "mid.module.css",
+                    "button.module.css",
+                    "peer.module.css",
+                ]
+            };
+            let ordered: Vec<_> = ordered
+                .into_iter()
+                .map(|path| {
+                    artifacts.stylesheets[&dir.root().join(path)]
+                        .to_str()
+                        .unwrap()
+                })
+                .collect();
+            let check = format!(
+                r#"{CSS_DOM_RECORDER}
+const main = await import('./deep/main.mjs');
+assert.equal(links.length, 0);
+const result = await main.load();
+assert.equal(result.button.split(' ').length, 3);
+assert.equal(result.peer.split(' ').length, 2);
+assert.equal(result.button.split(' ')[2], result.peer.split(' ')[1]);
+assert.equal(new Set(result.button.split(' ')).size, 3);
+assert.strictEqual(await main.load(), result);
+assert.equal(links.length, {mounts});
+if ({mounts}) assert.deepEqual(links.map(link => link.href), {ordered:?}.map(path => new URL(path, import.meta.url).href));
+for (const link of links) assert.ok(existsSync(new URL(link.href)));
+console.log('cross-file');
+"#,
+                mounts = if load == CssLoad::AutoMount { 4 } else { 0 },
+            );
+            assert_eq!(observe_named(artifacts, &check), b"cross-file\n");
+        }
+    }
+}
+
+#[test]
+fn css_modules_cross_file_composition_rechecks_closure_and_invalidates_reverse_users() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {button} from './button.module.css';",
+    );
+    write(
+        dir.root(),
+        "button.module.css",
+        ".button { composes: mid from './mid.module.css' }",
+    );
+    write(
+        dir.root(),
+        "mid.module.css",
+        ".mid { composes: base from './base.module.css' }",
+    );
+    write(dir.root(), "imported.css", ".global { color: red }");
+    write(dir.root(), "pixel.bin", "one");
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let base = "@import './imported.css'; .base { composes: old from global; background: url('./pixel.bin') }";
+        write(dir.root(), "base.module.css", base);
+        write(dir.root(), "pixel.bin", "one");
+        write(dir.root(), "imported.css", ".global { color: red }");
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        let consumer = dir.root().join("button.module.css");
+        let before = session.sources[&consumer].record.source_hash;
+        write(dir.root(), "base.module.css", &base.replace("old", "new"));
+        let changed = session.build(&config).unwrap();
+        assert_ne!(before, session.sources[&consumer].record.source_hash);
+        assert!(session.sources[&consumer].text.contains(" new"));
+        assert_eq!(changed.counters.source_parses, 3);
+        for path in [
+            "main.mjs",
+            "button.module.css",
+            "mid.module.css",
+            "base.module.css",
+        ] {
+            assert!(
+                changed.invalidated.contains(&dir.root().join(path)),
+                "{path}"
+            );
+        }
+        assert_ne!(
+            cold.product.artifacts.stylesheets,
+            changed.product.artifacts.stylesheets
+        );
+        let mapping_hash = session.sources[&consumer].record.source_hash;
+        for (path, text) in [
+            ("pixel.bin", "two"),
+            ("imported.css", ".global { color: blue }"),
+        ] {
+            write(dir.root(), path, text);
+            let resource_edit = session.build(&config).unwrap();
+            assert_eq!(
+                resource_edit.counters.source_parses,
+                if load == CssLoad::CallerLoaded { 0 } else { 3 }
+            );
+            if load == CssLoad::CallerLoaded {
+                assert_eq!(mapping_hash, session.sources[&consumer].record.source_hash);
+            }
+            for path in [
+                "main.mjs",
+                "button.module.css",
+                "mid.module.css",
+                "base.module.css",
+            ] {
+                assert!(
+                    resource_edit.invalidated.contains(&dir.root().join(path)),
+                    "{path}"
+                );
+            }
+            assert_ne!(
+                changed.product.artifacts.stylesheets,
+                resource_edit.product.artifacts.stylesheets
+            );
+            let disk = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .unwrap();
+            assert_eq!(resource_edit.product.artifacts, disk.product.artifacts);
+            assert_eq!(disk.counters.source_parses, 0);
+        }
+        let last = session.last.clone().unwrap();
+        fs::remove_file(dir.root().join("base.module.css")).unwrap();
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(
+            error.contains("base.module.css") && error.contains(".."),
+            "{error}"
+        );
+        assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &last));
+        write(dir.root(), "base.module.css", &base.replace("old", "new"));
+        fs::remove_file(dir.root().join("pixel.bin")).unwrap();
+        assert!(session.build(&config).is_err());
+        assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &last));
+    }
+}
+
+#[test]
+fn css_modules_cross_file_composition_hashes_resolved_edges_not_only_closure_members() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {button} from './button.module.css';",
+    );
+    write(
+        dir.root(),
+        "button.module.css",
+        "@import './node_modules/pkg/a.module.css' print; @import './node_modules/pkg/b.module.css' print; .button { composes: base from 'pkg' }",
+    );
+    for path in ["a.module.css", "b.module.css"] {
+        write(dir.root(), &format!("node_modules/pkg/{path}"), ".base {}");
+    }
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut previous = None;
+    for target in ["a", "b"] {
+        write(
+            dir.root(),
+            "node_modules/pkg/package.json",
+            &format!(r#"{{"exports":{{".":"./{target}.module.css"}}}}"#),
+        );
+        let built = session.build(&config).unwrap();
+        let consumer = dir.root().join("button.module.css");
+        let identity = built.product.artifacts.stylesheets[&consumer].clone();
+        let mapping = session.sources[&consumer].record.source_hash;
+        if let Some((previous_identity, previous_mapping)) = previous {
+            assert_ne!(identity, previous_identity);
+            assert_ne!(mapping, previous_mapping);
+            assert!(built.invalidated.contains(&consumer));
+            assert!(built.invalidated.contains(&dir.root().join("main.mjs")));
+        }
+        previous = Some((identity, mapping));
+        let disk = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(disk.product.artifacts, built.product.artifacts);
+        assert_eq!(disk.counters.source_parses, 0);
+    }
+}
+
+#[test]
+fn css_modules_everything_rejects_non_css_composition_targets_under_both_loaders() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './button.css';");
+    write(
+        dir.root(),
+        "button.css",
+        ".button { composes: base from './base.txt' }",
+    );
+    write(dir.root(), "base.txt", ".base { color: red }");
+    let mut config = options();
+    config.css.css_modules = CssModules::Everything;
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        let error = format!(
+            "{:#}",
+            BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .err()
+                .unwrap()
+        );
+        assert!(
+            error.contains("non-module composition target")
+                && error.contains("button.css")
+                && error.contains("base.txt"),
+            "{load:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn css_modules_cross_file_composition_rejects_nonlocal_targets_and_file_cycles() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "import './button.module.css';");
+    write(dir.root(), "global.css", ".base {}");
+    write(
+        dir.root(),
+        "private.module.css",
+        ":global(.base) {} .base-name {}",
+    );
+    write(dir.root(), "module.mjs", "export const base = 'base';");
+    write(
+        dir.root(),
+        "node_modules/pkg/package.json",
+        r#"{"exports":{".":"./index.module.css"}}"#,
+    );
+    write(dir.root(), "node_modules/pkg/index.module.css", ".base {}");
+    write(
+        dir.root(),
+        "node_modules/pkg/private.module.css",
+        ".base {}",
+    );
+    write(
+        dir.root(),
+        "a.module.css",
+        ".a { composes: b from './b.module.css' }",
+    );
+    write(
+        dir.root(),
+        "b.module.css",
+        ".b { composes: a from './a.module.css' }",
+    );
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    config.externals.insert("external".into());
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        config.css.load = load;
+        for (name, request, message) in [
+            ("base", "./global.css", "non-module composition target"),
+            ("base", "./module.mjs", "non-module composition target"),
+            (
+                "base",
+                "./private.module.css",
+                "missing/private exported local mapping",
+            ),
+            (
+                "baseName",
+                "./private.module.css",
+                "missing/private exported local mapping",
+            ),
+            ("base", "pkg/private.module.css", "composes request"),
+            ("base", "external", "target must be a local CSS module"),
+            ("a", "./a.module.css", "cross-file composition cycle"),
+            ("base", "./missing.module.css", "composes request"),
+        ] {
+            write(
+                dir.root(),
+                "button.module.css",
+                &format!(".button {{ composes: {name} from '{request}' }}"),
+            );
+            let error = format!(
+                "{:#}",
+                BuildSession::new(dir.root())
+                    .unwrap()
+                    .build(&config)
+                    .err()
+                    .unwrap()
+            );
+            assert!(
+                error.contains(message) && error.contains(".module.css") && error.contains(".."),
+                "{load:?}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn css_modules_cross_file_composition_rejects_outside_inventory_and_symlinks() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    write(&root, "main.mjs", "import './button.module.css';");
+    write(dir.root(), "outside.module.css", ".base {}");
+    write(&root, ".bundler-hidden/base.module.css", ".base {}");
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    for request in ["../outside.module.css", "./.bundler-hidden/base.module.css"] {
+        write(
+            &root,
+            "button.module.css",
+            &format!(".button {{ composes: base from '{request}' }}"),
+        );
+        let error = format!(
+            "{:#}",
+            BuildSession::new(&root)
+                .unwrap()
+                .build(&config)
+                .err()
+                .unwrap()
+        );
+        assert!(
+            error.contains("outside bounded source inventory") && error.contains(".."),
+            "{error}"
+        );
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("../outside.module.css", root.join("alias.module.css")).unwrap();
+        write(
+            &root,
+            "button.module.css",
+            ".button { composes: base from './alias.module.css' }",
+        );
+        let error = format!(
+            "{:#}",
+            BuildSession::new(&root)
+                .unwrap()
+                .build(&config)
+                .err()
+                .unwrap()
+        );
+        assert!(
+            error.contains("symlinks in build inventory unsupported"),
+            "{error}"
+        );
     }
 }
 

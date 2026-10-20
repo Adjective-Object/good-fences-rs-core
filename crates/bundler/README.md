@@ -119,9 +119,10 @@ host-root-relative URLs remain unchanged. Namespace/document URLs remain
 identifiers rather than file dependencies. Local files must be inside the same
 bounded inventory as JavaScript sources.
 
-Stylesheet names include the complete reachable resource closure, so edits to
-imported CSS or referenced binary bytes invalidate parent stylesheet URLs, even
-through cycles. All these input bytes are rechecked before accepting a build.
+Stylesheet names include the complete reachable resource/composition closure and
+resolved composition identities, so edits to imported/composed CSS or referenced
+binary bytes invalidate parent stylesheet URLs, even through CSS import cycles.
+All these input bytes are rechecked before accepting a build.
 These resource identities independently invalidate output reuse, including
 CSS-only edits that leave caller-loaded module mappings unchanged.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
@@ -199,9 +200,28 @@ its own scoped name first, followed by composition tokens in declaration order
 with deterministic deduplication. Targets must be single local class selectors
 (including explicit `:local` forms), not selector lists, compound/complex
 selectors, IDs or nested rules. Unknown local names, illegal placement and cycles
-fail with source paths/byte spans, even for unused exports. Cross-file `from
-"./other.module.css"` remains explicitly unsupported; animation identifiers are
-not scoped yet. Ordinary global-CSS `composes` declarations remain untouched.
+fail with source paths/byte spans, even for unused exports. Cross-file
+`composes: base-name from "./other.module.css"` uses the same bounded import
+resolver/inventory as JavaScript, including package exports and CSS string
+escapes. Names refer to decoded original local selectors, not their camelCase JS
+aliases. Targets must be selected CSS modules exporting that local name,
+classified as stylesheets by their `.css` or configured custom suffix. Unlike
+CSS `@import`, `composes` cannot treat arbitrary filenames as stylesheets,
+even under `"everything"`;
+missing/global-only names, non-module targets, externals, private package paths,
+out-of-root/excluded files and inventory symlinks are errors.
+Composition closure discovery precedes loader generation. Mappings resolve
+dependency-first; composition file cycles fail even for otherwise unrelated
+names, while ordinary CSS `@import` cycles remain supported. Generated native
+static evaluation imports mount composed dependencies before their consumer,
+once per native evaluation, without activating a lazy consumer early. Styles
+discovered only through CSS `@import` (including their composition closures)
+remain render-only: conditions never become unconditional JS mounts.
+Composed mapping changes invalidate consumer source records and reverse users
+even when consumer input bytes do not change. Resource-only edits invalidate
+closure/output identities without reparsing unchanged caller-loaded mappings.
+Animation identifiers are not scoped yet. Ordinary global-CSS `composes`
+declarations remain untouched.
 Extraction is stylesheet-wide: pruning JS mappings never removes CSS rules or
 changes cascade order.
 `cssparser` still owns URL tokenization; URL and selector

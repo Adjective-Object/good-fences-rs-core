@@ -13,6 +13,7 @@ pub(crate) struct CssModuleInput<'a> {
     pub public_url: &'a str,
     pub name_mappings: &'a BTreeMap<String, String>,
     pub is_module: bool,
+    pub evaluation_dependencies: &'a [&'a str],
 }
 
 pub(crate) struct PreparedCssModule {
@@ -38,7 +39,8 @@ impl CssLoadingStrategy for CallerLoaded {
     fn generate_module(&self, input: &CssModuleInput<'_>) -> eyre::Result<PreparedCssModule> {
         if input.is_module {
             return Ok(PreparedCssModule {
-                source: named_exports(input.name_mappings)?,
+                source: evaluation_imports(input.evaluation_dependencies)?
+                    + &named_exports(input.name_mappings)?,
                 parser_path: input.stylesheet.with_extension("css.mjs"),
                 package: ModuleFormat::Esm,
                 relocations: Vec::new(),
@@ -67,7 +69,8 @@ impl CssLoadingStrategy for AutoMount {
             "{}: global CSS cannot have name mappings",
             input.stylesheet.display()
         );
-        let mut source = String::from(
+        let mut source = evaluation_imports(input.evaluation_dependencies)?;
+        source.push_str(
             "if (typeof document === \"undefined\") throw new Error(\"CSS auto-mount requires document\");\nconst href = ",
         );
         let start = source.len() as u32;
@@ -97,6 +100,14 @@ impl CssLoadingStrategy for AutoMount {
     }
 }
 
+fn evaluation_imports(dependencies: &[&str]) -> eyre::Result<String> {
+    let mut source = String::new();
+    for request in dependencies {
+        source.push_str(&format!("import {};\n", serde_json::to_string(request)?));
+    }
+    Ok(source)
+}
+
 fn named_exports(mappings: &BTreeMap<String, String>) -> eyre::Result<String> {
     let mut source = String::new();
     for (index, (name, value)) in mappings.iter().enumerate() {
@@ -123,6 +134,7 @@ mod tests {
             public_url: "./assets/a\"b.css",
             name_mappings: &mappings,
             is_module: false,
+            evaluation_dependencies: &[],
         };
         let prepared = CallerLoaded.generate_module(&input).unwrap();
         assert_eq!(

@@ -78,7 +78,16 @@ own scoped tokens first and declaration order with deterministic deduplication.
 Only single local class rule targets are legal; reject nested/multi-target/global
 targets, unknown locals and cycles with original paths/spans, even when unused.
 Remove declarations through checked original-byte edits; global CSS stays intact.
-Mapping pruning never prunes stylesheet rules. Cross-file composes stays unsupported.
+Mapping pruning never prunes stylesheet rules. Discover cross-file composition
+closure through the bounded import resolver/inventory before preparing stubs;
+require exported original local names, not camelCase aliases or global-only names.
+Solve file composition dependencies before consumers; reject file composition
+cycles independently of supported CSS @import cycles. Only actual JS/composition
+evaluation dependencies get native static stub imports, in declaration order;
+render-only CSS discovery never makes conditional @imports unconditional mounts.
+Hash resolved composition identities and their complete CSS/resource closures;
+recheck all originals and invalidate consumer/reverse users on closure edits,
+including unchanged caller-loaded stub bytes. Persist no resolved CSS graph state.
 Scope identities hash css-local-v1 plus normalized
 project-relative path and decoded symbol into _ plus ten base64url characters;
 class/ID identities coincide. Reject detected hash and camelCase export collisions.

@@ -165,6 +165,7 @@ pub struct BuildResult {
 }
 
 struct Source {
+    css_identity: Option<PathBuf>,
     input: Vec<u8>,
     text: String,
     record: CacheRecord,
@@ -292,18 +293,28 @@ impl BuildSession {
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
             let kind = crate::resource::kind(&path, &options.css.css_modules);
             let prepared_css = if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
-                styles.discover(&path, &input)?;
+                styles.discover(&path, &input, &resolver)?;
                 Some(options.css.load.strategy().generate_module(
                     &crate::css_loading::CssModuleInput {
                         stylesheet: &path,
                         public_url: &styles.public_url(&path)?,
                         name_mappings: styles.name_mappings(&path).unwrap_or(&BTreeMap::new()),
                         is_module: styles.name_mappings(&path).is_some(),
+                        evaluation_dependencies: &styles.evaluation_dependencies(&path),
                     },
                 )?)
             } else {
                 None
             };
+            let css_identity = matches!(kind, crate::resource::ResourceKind::Stylesheet { .. })
+                .then(|| styles.identity(&path));
+            if self
+                .sources
+                .get(&path)
+                .is_some_and(|source| source.css_identity != css_identity)
+            {
+                changed.insert(path.clone());
+            }
             let parser_path = prepared_css.as_ref().map_or_else(
                 || crate::resource::parser_path(&path),
                 |prepared| prepared.parser_path.clone(),
@@ -358,12 +369,17 @@ impl BuildSession {
                 self.sources.insert(
                     path.clone(),
                     Source {
+                        css_identity: css_identity.clone(),
                         input,
                         text: loaded.source,
                         record: loaded.record,
                     },
                 );
             }
+            self.sources
+                .get_mut(&path)
+                .expect("loaded source")
+                .css_identity = css_identity;
             let source = &self.sources[&path];
             let resolved = if let Some(cached) = self.resolutions.get(&path) {
                 cached.clone()
