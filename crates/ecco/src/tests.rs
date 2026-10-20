@@ -1024,3 +1024,122 @@ fn inferred_graphs_propagate_late_capture_hazards_across_worker_counts() {
         assert_eq!(effects, vec![false, false, true, true]);
     }
 }
+
+#[test]
+fn astra_declared_call_updates_invalidate_inferred_calls() {
+    let analysis = source(
+        r#"
+        global fn replace(callback) {
+            call_effects = false
+            updates callback.call_effects |= true
+            returns void
+        }
+    "#,
+        r#"
+        const callback = () => 1;
+        callback();
+        replace(callback);
+        callback();
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false, true, false, true],
+        "a declared call-hazard update must invalidate earlier and later specialized calls"
+    );
+}
+
+#[test]
+fn astra_inferred_rebinding_preserves_saved_callable_identity() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+        function save(callback) {
+            const saved = callback;
+            var callback = () => 1;
+            return saved;
+        }
+        const original = () => console.log("must run");
+        const saved = save(original);
+        saved();
+    "#,
+    );
+    assert!(
+        *effects(&analysis).last().unwrap(),
+        "rebinding a parameter must not redirect a saved alias to a different, pure function"
+    );
+    assert_eq!(analysis.roots[1].value, analysis.roots[2].value);
+}
+
+#[test]
+fn astra_declared_bare_call_hazards_are_unspecialized() {
+    let analysis = source(
+        r#"
+        global fn read(value) {
+            call_effects = value.property_read_effects
+            returns void
+        }
+        global fn probe(callback) {
+            call_effects = callback.call_effects
+            returns void
+        }
+    "#,
+        "probe(read);",
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![true],
+        "a bare hazard query cannot assume that read will only receive undefined"
+    );
+}
+
+#[test]
+fn astra_inferred_branch_bindings_preserve_effectful_alternatives() {
+    let analysis = source(
+        DECLARATIONS,
+        r#"
+        function choose(flag) {
+            if (flag) {
+                var callback = () => console.log("must run");
+            } else {
+                var callback = () => 1;
+            }
+            return callback;
+        }
+        const callback = choose(true);
+        callback();
+    "#,
+    );
+    assert!(
+        *effects(&analysis).last().unwrap(),
+        "an alternate branch must not overwrite the callable selected by the consequent"
+    );
+}
+
+#[test]
+fn astra_latent_unknown_callback_does_not_poison_unrelated_reads() {
+    let analysis = source(
+        r#"
+        global fn install(target, callback) {
+            call_effects = false
+            updates target.property_read_effects |= call(callback)
+            returns void
+        }
+    "#,
+        r#"
+        const unrelated = {};
+        unrelated.value;
+        const target = {};
+        install(target, unknownCallback);
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false; 4],
+        "describing a future getter must not execute an unknown callback"
+    );
+    let evaluation = analysis.context.evaluate();
+    assert!(evaluation
+        .hazards(analysis.roots[2].value)
+        .get(Hazard::PropertyRead));
+}

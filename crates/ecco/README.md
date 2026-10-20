@@ -75,14 +75,17 @@ receiver; arrows capture lexical `this`.
 Returns through `if`/`else`, blocks, conditionals, and logical expressions join
 possible identities. Fallthrough returns `undefined`; terminal returns/throws
 stop scanning that path. Both possible branches are analyzed, not proven
-reachable. Supplied contracts called from inferred bodies propagate their
+reachable. Continuing branches merge their lexical bindings; reading a binding
+captures its current value without redirecting earlier aliases on rebinding.
+Supplied contracts called from inferred bodies propagate their
 updates normally. Hazard queries of inferred callbacks remain latent: querying
 an effect does not execute its mutations. Queries involving mutation contracts
 conservatively widen effects rather than simulate a hypothetical heap.
 
 Bare `call_effects` reads cannot specialize arguments and conservatively describe
-the whole function. Known calls specialize the body and separately track
-replacement hazards, so later updates still invalidate earlier pure calls.
+the whole function, including declared functions. Known calls specialize the body
+and separately track replacement hazards, so later updates still invalidate
+earlier pure calls.
 `SourceAnalysis.matches` includes matched contracts in supported deferred bodies
 as well as module roots. Summaries are shared within the context; graph
 construction is serial and fixed-point evaluation remains parallel.

@@ -354,7 +354,7 @@ impl<'a> Extractor<'_, 'a> {
             if let Some(function) = function {
                 if let Some(symbol) = function.id.as_ref().and_then(|id| id.symbol_id.get()) {
                     let value = self.function(function);
-                    self.context.bind_value(self.slots[&symbol], value);
+                    self.context.set_binding(self.slots[&symbol], value);
                 }
             }
         }
@@ -364,10 +364,11 @@ impl<'a> Extractor<'_, 'a> {
         &mut self,
         statements: &[Statement<'a>],
         returns: &mut Vec<ValueId>,
+        locals: &[ValueId],
     ) -> bool {
         self.hoist(statements);
         for statement in statements {
-            if self.function_statement(statement, returns) {
+            if self.function_statement(statement, returns, locals) {
                 return true;
             }
         }
@@ -378,6 +379,7 @@ impl<'a> Extractor<'_, 'a> {
         &mut self,
         statement: &Statement<'a>,
         returns: &mut Vec<ValueId>,
+        locals: &[ValueId],
     ) -> bool {
         match statement {
             Statement::ReturnStatement(statement) => {
@@ -394,7 +396,9 @@ impl<'a> Extractor<'_, 'a> {
                 });
                 true
             }
-            Statement::BlockStatement(block) => self.function_statements(&block.body, returns),
+            Statement::BlockStatement(block) => {
+                self.function_statements(&block.body, returns, locals)
+            }
             Statement::IfStatement(statement) => {
                 let test = self.expression(&statement.test);
                 self.roots.push(SourceRoot {
@@ -402,11 +406,42 @@ impl<'a> Extractor<'_, 'a> {
                     value: test.named.value,
                     effects: test.effects,
                 });
-                let consequent = self.function_statement(&statement.consequent, returns);
+                let before: Vec<_> = locals
+                    .iter()
+                    .map(|slot| self.context.read_binding(*slot))
+                    .collect();
+                let names = self.values.clone();
+                let consequent = self.function_statement(&statement.consequent, returns, locals);
+                let left: Vec<_> = locals
+                    .iter()
+                    .map(|slot| self.context.read_binding(*slot))
+                    .collect();
+                let left_names = std::mem::replace(&mut self.values, names);
+                for (slot, value) in locals.iter().zip(&before) {
+                    self.context.set_binding(*slot, *value);
+                }
                 let alternate = statement
                     .alternate
                     .as_ref()
-                    .is_some_and(|statement| self.function_statement(statement, returns));
+                    .is_some_and(|statement| self.function_statement(statement, returns, locals));
+                for (slot, left) in locals.iter().zip(left) {
+                    let right = self.context.read_binding(*slot);
+                    let value = match (consequent, alternate) {
+                        (false, false) => self.context.join_values(&[left, right]),
+                        (false, true) => left,
+                        _ => right,
+                    };
+                    self.context.set_binding(*slot, value);
+                }
+                for (symbol, named) in &mut self.values {
+                    if !consequent && (alternate || named.binding != left_names[symbol].binding) {
+                        named.binding = if alternate {
+                            left_names[symbol].binding.clone()
+                        } else {
+                            None
+                        };
+                    }
+                }
                 consequent && alternate
             }
             Statement::ThrowStatement(statement) => {
@@ -547,6 +582,8 @@ impl<'a> Extractor<'_, 'a> {
                     });
                     if let Some(binding) = &named.binding {
                         named.value = self.resolve(binding, identifier.span);
+                    } else if self.deferred {
+                        named.value = self.context.read_binding(named.value);
                     }
                     named
                 } else {
@@ -913,7 +950,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         let effects = if let BindingPattern::BindingIdentifier(identifier) = &declaration.id {
             if let Some(symbol) = identifier.symbol_id.get() {
                 let slot = self.slots[&symbol];
-                self.context.bind_value(slot, value.named.value);
+                self.context.set_binding(slot, value.named.value);
                 let mut named = value.named.clone();
                 if self.deferred {
                     named.value = slot;
@@ -998,7 +1035,15 @@ impl<'a> Compiler<'_, '_, 'a> {
                         effects: value.effects,
                     });
                 }
-            } else if !extractor.function_statements(&body.statements, &mut returns) {
+            } else if !extractor.function_statements(
+                &body.statements,
+                &mut returns,
+                &info
+                    .locals
+                    .iter()
+                    .map(|symbol| extractor.slots[symbol])
+                    .collect::<Vec<_>>(),
+            ) {
                 returns.push(extractor.context.undefined());
             }
         }

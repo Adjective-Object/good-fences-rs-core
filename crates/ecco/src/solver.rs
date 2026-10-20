@@ -169,10 +169,11 @@ impl Context {
         }
         for index in 0..context.facts.definitions.len() {
             let definition = context.facts.definitions[index].clone();
+            let arguments = vec![context.unknown; definition.parameters.len()];
             let frame = Frame {
                 definition: &definition,
-                arguments: &[],
-                receiver: context.undefined,
+                arguments: &arguments,
+                receiver: context.unknown,
                 undefined: context.undefined,
             };
             for slot in Hazard::ALL {
@@ -308,8 +309,10 @@ impl Context {
 
     /// A conservative may-alias join: later updates must reach every candidate.
     pub fn join_values(&mut self, values: &[ValueId]) -> ValueId {
-        if let [value] = values {
-            return *value;
+        if let Some(value) = values.first() {
+            if values.iter().all(|candidate| candidate == value) {
+                return *value;
+            }
         }
         let result = self.value(Hazards::NONE);
         if let Some(recording) = &mut self.recording {
@@ -421,16 +424,11 @@ impl Context {
                 break;
             }
             let target = frame.value(&update.target);
-            if target == self.unknown {
-                self.opaque = true;
-            }
             let expression = self.instantiate(&update.expression, &frame);
+            let effects = self.expression(expression);
             for slot in Hazard::ALL {
                 if update.slot.is_none_or(|updated| updated == slot) {
-                    self.equations.push(Equation {
-                        target: self.values[target.0].cells[slot as usize],
-                        expression: expression.clone(),
-                    });
+                    self.update(target, slot, effects);
                 }
             }
         }
@@ -498,7 +496,7 @@ impl Context {
             target: effect.0,
             expression: Expression::Or(vec![
                 body,
-                Expression::Read(self.hazard(function, Hazard::Call).0),
+                Expression::Read(self.values[function.0].call_mutations.0),
             ]),
         });
         effect
@@ -525,7 +523,10 @@ impl Context {
                 let receiver = receiver
                     .as_ref()
                     .map_or(self.undefined, |name| frame.value(name));
+                let previous = self.latent;
+                self.latent = true;
                 let effects = self.call_effects(frame.value(function), &values, receiver);
+                self.latent = previous;
                 Expression::Read(effects.0)
             }
         }

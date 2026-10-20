@@ -12,6 +12,7 @@ pub(super) enum Instruction {
     Any(Effect, Vec<Effect>),
     Operation(ValueId, Hazard),
     Update(ValueId, Hazard, Effect),
+    Read(ValueId, ValueId),
     Bind(ValueId, ValueId),
     Join(ValueId, Vec<ValueId>),
     Call(CallResult, ValueId, Vec<ValueId>, ValueId),
@@ -112,13 +113,33 @@ impl Context {
         self.equations.truncate(recording.equations);
     }
 
-    pub(crate) fn bind_value(&mut self, target: ValueId, value: ValueId) {
+    pub(crate) fn read_binding(&mut self, source: ValueId) -> ValueId {
+        if self.recording.is_some() {
+            let value = self.value(Hazards::NONE);
+            self.recording
+                .as_mut()
+                .expect("function recording")
+                .instructions
+                .push(Instruction::Read(value, source));
+            value
+        } else {
+            self.resolve_alias(source)
+        }
+    }
+
+    pub(crate) fn set_binding(&mut self, target: ValueId, value: ValueId) {
         if let Some(recording) = &mut self.recording {
             recording
                 .instructions
                 .push(Instruction::Bind(target, value));
             return;
         }
+        if target != value {
+            self.values[target.0].alias = Some(self.resolve_alias(value));
+        }
+    }
+
+    pub(crate) fn bind_value(&mut self, target: ValueId, value: ValueId) {
         if target == value {
             return;
         }
@@ -229,7 +250,7 @@ impl Context {
         let mut values = closure.captures;
         for (index, parameter) in template.signature.parameters.iter().enumerate() {
             let slot = self.value(Hazards::NONE);
-            self.bind_value(
+            self.set_binding(
                 slot,
                 arguments.get(index).copied().unwrap_or(self.undefined),
             );
@@ -268,7 +289,10 @@ impl Context {
                     }
                 }
                 Instruction::Bind(target, source) => {
-                    self.bind_value(mapped(&values, *target), mapped(&values, *source));
+                    self.set_binding(mapped(&values, *target), mapped(&values, *source));
+                }
+                Instruction::Read(target, source) => {
+                    values.insert(*target, self.resolve_alias(mapped(&values, *source)));
                 }
                 Instruction::Join(target, inputs) => {
                     let inputs: Vec<_> =
@@ -313,6 +337,7 @@ impl Context {
         let effects = self.any([
             body,
             self.values[function.0].call_mutations,
+            self.values[resolved.0].call_mutations,
             if hypothetical_writes {
                 self.effectful
             } else {
