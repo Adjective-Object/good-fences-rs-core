@@ -247,8 +247,24 @@ remain render-only: conditions never become unconditional JS mounts.
 Composed mapping changes invalidate consumer source records and reverse users
 even when consumer input bytes do not change. Resource-only edits invalidate
 closure/output identities without reparsing unchanged caller-loaded mappings.
-Animation identifiers are not scoped yet. Ordinary global-CSS `composes`
-declarations remain untouched.
+Module-local identifier `@keyframes` names (including nested/vendor-prefixed rules)
+and matching `animation-name`/`animation` references are scoped through Oxc
+declaration/value ASTs. Animation identities use a separate `css-animation-v1`
+domain with the same project-relative path/symbol hashing; they add no JS exports.
+Explicit `local(name)`/`global(name)` and `:local(name)`/`:global(name)` escapes
+select reference/definition scope and disappear from output. Each escape requires
+one identifier; nested, ambiguous or unsupported module-only values fail with
+path/span diagnostics. Unmarked references rewrite only known local keyframes.
+Shorthand lists disambiguate timing, iteration, direction, fill and play-state
+slots before interpreting an identifier as a name; `auto` is an ordinary name
+candidate. Explicit global keyword names emit as strings to retain their name
+semantics in both shorthand and `animation-name`. Removing scope wrappers keeps
+adjacent tokens lexically separate. Timing functions, strings (including quoted
+keyframe names), custom properties and opaque runtime values
+remain intact; an opaque shorthand group is not guessed, so use an explicit
+scope when its animation name must be local. ICSS `:import`/`:export` and `@value`
+remain unsupported, not partially transformed. Ordinary global-CSS animation
+and `composes` declarations remain untouched.
 Extraction is stylesheet-wide: pruning JS mappings never removes CSS rules or
 changes cascade order.
 `cssparser` still owns URL tokenization; URL and selector
