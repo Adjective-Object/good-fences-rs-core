@@ -5,6 +5,7 @@ use crate::RetentionEdgeKind;
 
 pub(super) struct Placement {
     pub owners: BTreeMap<SegmentKey, Owner>,
+    definitions: BTreeMap<Owner, Vec<crate::symbols::Symbol>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,11 +43,13 @@ impl Placement {
         let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
         if modules.keys().any(|&file| has_externals(graph, file)) {
             // Unknown external surfaces/evaluation stay on native source-module seams.
+            let owners = live
+                .into_iter()
+                .map(|key| (key, Owner::Evaluation(seams[&key.file_id])))
+                .collect();
             return Ok(Self {
-                owners: live
-                    .into_iter()
-                    .map(|key| (key, Owner::Evaluation(seams[&key.file_id])))
-                    .collect(),
+                definitions: partition_definitions(graph, prepared, &owners)?,
+                owners,
             });
         }
         let effects: BTreeSet<_> = plan
@@ -358,10 +361,17 @@ impl Placement {
         // Source-name-sensitive syntax stays lexical. Verify each proposed
         // physical group before applying any ownership change.
         loop {
+            let definitions = partition_definitions(graph, prepared, &owners)?;
             let changed: BTreeSet<_> = owners.values().copied().collect();
             let mut rejected = BTreeSet::new();
             for owner in &changed {
-                let names = local_names(graph, modules, symbols, &owners, *owner)?;
+                let names = local_names(
+                    modules,
+                    symbols,
+                    &owners,
+                    *owner,
+                    definitions.get(owner).map(Vec::as_slice).unwrap_or_default(),
+                )?;
                 let mut values = Values::new(prepared);
                 values.names = names;
                 values.requests = seams
@@ -403,7 +413,10 @@ impl Placement {
                 }
             }
             if rejected.is_empty() {
-                return Ok(Self { owners });
+                return Ok(Self {
+                    owners,
+                    definitions,
+                });
             }
             let mut progress = false;
             for component in &candidates {
@@ -418,6 +431,23 @@ impl Placement {
             eyre::ensure!(progress, "incompatible native lexical placement");
         }
     }
+}
+
+fn partition_definitions(
+    graph: &SourceGraph,
+    prepared: &PreparedValues<'_>,
+    owners: &BTreeMap<SegmentKey, Owner>,
+) -> eyre::Result<BTreeMap<Owner, Vec<crate::symbols::Symbol>>> {
+    let mut definitions: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    // Partition the canonical order without sorting by graph-local owner IDs.
+    for &symbol @ (file, binding) in &prepared.definitions {
+        if let Some(owner) = declaration(graph, &ExportIdentity::Binding(file, binding))?
+            .and_then(|key| owners.get(&key))
+        {
+            definitions.entry(*owner).or_default().push(symbol);
+        }
+    }
+    Ok(definitions)
 }
 
 fn declaration(graph: &SourceGraph, identity: &ExportIdentity) -> eyre::Result<Option<SegmentKey>> {
@@ -447,11 +477,11 @@ fn declaration(graph: &SourceGraph, identity: &ExportIdentity) -> eyre::Result<O
 }
 
 fn local_names(
-    graph: &SourceGraph,
     modules: &BTreeMap<u32, Module<'_>>,
     symbols: &Symbols,
     owners: &BTreeMap<SegmentKey, Owner>,
     owner: Owner,
+    definitions: &[crate::symbols::Symbol],
 ) -> eyre::Result<HashMap<crate::symbols::Symbol, String>> {
     let files: BTreeSet<_> = owners
         .iter()
@@ -473,34 +503,31 @@ fn local_names(
                 })
         })
         .collect();
-    let mut definitions = Vec::new();
-    for &(file, binding) in symbols.definitions.keys() {
-        if declaration(graph, &ExportIdentity::Binding(file, binding))?
-            .is_some_and(|key| owners.get(&key) == Some(&owner))
-        {
-            definitions.push((file, binding));
-        } else if modules[&file]
-            .parsed
-            .facts
-            .references
-            .iter()
-            .any(|reference| {
-                if reference.binding != Some(binding) {
-                    return false;
-                }
-                let index = modules[&file]
-                    .parsed
-                    .segments
-                    .partition_point(|segment| segment.span.end <= reference.span.start);
-                owners.get(&SegmentKey::new(file, index as u32)) == Some(&owner)
-            })
-        {
-            occupied.insert(symbols.definitions[&(file, binding)].name.clone());
+    let local: HashSet<_> = definitions.iter().copied().collect();
+    for &file in &files {
+        let module = &modules[&file];
+        for reference in &module.parsed.facts.references {
+            let Some(binding) = reference.binding else {
+                continue;
+            };
+            let symbol = (file, binding);
+            if local.contains(&symbol) {
+                continue;
+            }
+            let Some(definition) = symbols.definitions.get(&symbol) else {
+                continue;
+            };
+            let index = module
+                .parsed
+                .segments
+                .partition_point(|segment| segment.span.end <= reference.span.start);
+            if owners.get(&SegmentKey::new(file, index as u32)) == Some(&owner) {
+                occupied.insert(definition.name.clone());
+            }
         }
     }
-    definitions.sort_by_key(|&(file, binding)| (graph.file_path(file), binding.0));
     let mut names = HashMap::new();
-    for symbol @ (file, binding) in definitions {
+    for &symbol @ (file, binding) in definitions {
         let original = modules[&file]
             .parsed
             .facts
@@ -552,6 +579,11 @@ pub(super) fn emit(
     cjs: &commonjs::CommonJs,
 ) -> eyre::Result<Code> {
     let symbols = prepared.symbols;
+    let definitions = placement
+        .definitions
+        .get(&root)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let live: BTreeSet<_> = placement
         .owners
         .iter()
@@ -559,7 +591,7 @@ pub(super) fn emit(
         .map(|(&k, _)| k)
         .collect();
     let mut values = Values::new(prepared);
-    values.names = local_names(graph, modules, symbols, &placement.owners, root)?;
+    values.names = local_names(modules, symbols, &placement.owners, root, definitions)?;
     values.requests = seams
         .iter()
         .map(|(&f, &o)| (f, Code::request(path(graph, o), RequestKind::DynamicImport)))
@@ -853,18 +885,17 @@ pub(super) fn emit(
         }
     }
     if !public {
-        let mut definitions: Vec<_> = symbols.definitions.iter().collect();
-        definitions.sort_by_key(|(&(file, binding), _)| (graph.file_path(file), binding.0));
-        for (&symbol @ (file, binding), definition) in definitions {
+        for &symbol @ (file, binding) in definitions {
             let identity = ExportIdentity::Binding(file, binding);
-            if declaration(graph, &identity)?.is_some_and(|k| placement.owners[&k] == root) {
-                let address = address(graph, &identity, root, surfaces, &values)?;
-                if !exported.insert(address.clone()) {
-                    continue;
-                }
-                let name = values.names.get(&symbol).unwrap_or(&definition.name);
-                output.push_str(&format!("export {{{name} as {}}};\n", quote(&address)));
+            let address = address(graph, &identity, root, surfaces, &values)?;
+            if !exported.insert(address.clone()) {
+                continue;
             }
+            let name = values
+                .names
+                .get(&symbol)
+                .unwrap_or(&symbols.definitions[&symbol].name);
+            output.push_str(&format!("export {{{name} as {}}};\n", quote(&address)));
         }
         for (key, name) in values.defaults {
             if placement.owners.get(key) == Some(&root) {
@@ -931,5 +962,107 @@ fn address(
             .cloned()
             .ok_or_eyre("missing relocated expression address"),
         _ => eyre::bail!("unsupported nonlexical relocated address"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn definitions_follow_actual_owners_in_canonical_path_and_binding_order() {
+        let mut previous = None;
+        for reverse in [false, true] {
+            let mut inputs: Vec<_> = [
+                ("a.mjs", "const z = 1; const a = 2; const unused = 3;"),
+                ("z.mjs", "const z = 4; const a = 5;"),
+                ("opaque.cjs", "module.exports = 6;"),
+            ]
+            .into_iter()
+            .map(|(path, source)| {
+                let parsed = ast_segmenter::parse_module(
+                    &logger::StdioLogger::new(),
+                    source,
+                    Path::new(path),
+                    ast_segmenter::ModuleFormat::Esm,
+                )
+                .unwrap();
+                source_graph::OwnedSourceFileInput::from_parsed(
+                    path.into(),
+                    parsed,
+                    Default::default(),
+                )
+            })
+            .collect();
+            if reverse {
+                inputs.reverse();
+            }
+            let graph = SourceGraph::from_owned(inputs);
+            let a = graph.file_id(Path::new("a.mjs")).unwrap();
+            let z = graph.file_id(Path::new("z.mjs")).unwrap();
+            let cjs = graph.file_id(Path::new("opaque.cjs")).unwrap();
+            let shared = Owner::Bindings(SegmentKey::new(z, 0));
+            let evaluation = Owner::Evaluation(cjs);
+            let owners = BTreeMap::from([
+                (SegmentKey::new(a, 0), shared),
+                (SegmentKey::new(a, 1), evaluation),
+                (SegmentKey::new(z, 0), shared),
+                (SegmentKey::new(z, 1), shared),
+                (SegmentKey::new(cjs, 0), evaluation),
+            ]);
+            let symbols = Symbols {
+                definitions: [a, z]
+                    .into_iter()
+                    .flat_map(|file| {
+                        graph
+                            .file_facts(file)
+                            .unwrap()
+                            .bindings
+                            .iter()
+                            .map(move |binding| {
+                                (
+                                    (file, binding.id),
+                                    crate::symbols::Definition {
+                                        name: binding.name.clone(),
+                                    },
+                                )
+                            })
+                    })
+                    .collect(),
+                imports: HashMap::new(),
+                exports: BTreeMap::new(),
+            };
+            let prepared = PreparedValues::new(&graph, &BTreeMap::new(), &symbols);
+            let definitions = partition_definitions(&graph, &prepared, &owners).unwrap();
+            let canonical = |owner| {
+                definitions[&owner]
+                    .iter()
+                    .map(|&(file, binding)| {
+                        (
+                            graph.file_path(file).unwrap().to_owned(),
+                            symbols.definitions[&(file, binding)].name.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let actual = (canonical(shared), canonical(evaluation));
+            assert_eq!(
+                actual,
+                (
+                    vec![
+                        ("a.mjs".into(), "z".into()),
+                        ("z.mjs".into(), "z".into()),
+                        ("z.mjs".into(), "a".into()),
+                    ],
+                    vec![("a.mjs".into(), "a".into())],
+                )
+            );
+            assert_eq!(definitions.values().map(Vec::len).sum::<usize>(), 4);
+            if let Some(previous) = previous {
+                assert_eq!(actual, previous);
+            }
+            previous = Some(actual);
+        }
     }
 }

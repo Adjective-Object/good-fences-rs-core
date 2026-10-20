@@ -180,6 +180,7 @@ fn single(
 
 struct PreparedValues<'s> {
     symbols: &'s Symbols,
+    definitions: Vec<crate::symbols::Symbol>,
     defaults: BTreeMap<SegmentKey, String>,
     occupied: HashSet<String>,
 }
@@ -188,6 +189,8 @@ impl<'s> PreparedValues<'s> {
     fn new(graph: &SourceGraph, modules: &BTreeMap<u32, Module<'_>>, symbols: &'s Symbols) -> Self {
         #[cfg(test)]
         GLOBAL_PREPARATIONS.with(|count| count.set(count.get() + 1));
+        let mut definitions: Vec<_> = symbols.definitions.keys().copied().collect();
+        definitions.sort_by_key(|&(file, binding)| (graph.file_path(file), binding.0));
         let mut occupied: HashSet<_> = symbols
             .definitions
             .values()
@@ -235,6 +238,7 @@ impl<'s> PreparedValues<'s> {
         }
         Self {
             symbols,
+            definitions,
             defaults,
             occupied,
         }
