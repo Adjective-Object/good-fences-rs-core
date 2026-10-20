@@ -84,6 +84,29 @@ validation; explicit `Entry.output_name` values still require slash-separated
 portable paths. Publication validates path components rather than rejecting
 Windows separators introduced by native path joins.
 
+### Bounded output emission
+
+`BuildOptions.execution` and low-level `link::esm_with_execution` accept
+`execution::ExecutionOptions::new(NonZeroUsize::new(4).unwrap())`. The default is
+one worker, running inline; existing `link::esm` callers remain serial. The
+explicit count bounds scoped workers, additionally capped by each batch's
+actual owner count. No environment variable or global pool selects concurrency.
+
+Retention, effects/order, placement, global names and cross-owner export
+addresses are prepared serially. Checked graphs and owned syntax facts are
+already `Sync` and are borrowed without copies or unsafe trait implementations.
+ESM evaluation/binding owners and CJS availability/facade owners emit into
+private code, routing and name state. CJS factory order within each actual
+availability owner remains unchanged. Workers return typed requests, never
+publish. Results/errors merge in canonical owner order before serial pruning,
+destination/alias selection, rendering and final validation.
+
+Worker parser/rewrite counts are aggregated back to the caller, including
+failed jobs. Debug final validation remains once per executable artifact;
+release never validates output. Worker count does not affect fingerprints or
+invalidate a successful no-op generation. This configuration is reserved for
+future module preparation too; preparation is **not** parallelized yet.
+
 ## JSON modules
 
 Bare-string package `exports` exposes the selected root and arbitrary files

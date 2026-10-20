@@ -15,6 +15,42 @@ use oxc_span::Span;
 thread_local! {
     static OUTPUT_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static FINAL_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static WORKER_SOURCE_PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ParseCounts {
+    pub(crate) source: usize,
+    pub(crate) output: usize,
+    pub(crate) validation: usize,
+}
+
+impl ParseCounts {
+    pub(crate) fn difference(self, before: Self) -> Self {
+        Self {
+            source: self.source - before.source,
+            output: self.output - before.output,
+            validation: self.validation - before.validation,
+        }
+    }
+}
+
+pub(crate) fn source_parse_count() -> usize {
+    ast_segmenter::module_parse_count() + WORKER_SOURCE_PARSES.with(std::cell::Cell::get)
+}
+
+pub(crate) fn parse_counts() -> ParseCounts {
+    ParseCounts {
+        source: source_parse_count(),
+        output: output_parse_count(),
+        validation: final_validation_count(),
+    }
+}
+
+pub(crate) fn record_worker_parses(counts: ParseCounts) {
+    WORKER_SOURCE_PARSES.with(|count| count.set(count.get() + counts.source));
+    OUTPUT_PARSES.with(|count| count.set(count.get() + counts.output));
+    FINAL_VALIDATIONS.with(|count| count.set(count.get() + counts.validation));
 }
 
 pub(crate) fn output_parse_count() -> usize {

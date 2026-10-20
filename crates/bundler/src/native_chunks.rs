@@ -18,6 +18,7 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
+    execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     let symbols = prepared.symbols;
     let mut entry_owners = BTreeMap::new();
@@ -260,11 +261,39 @@ pub(super) fn emit(
     let connections = connections::Connections::new(
         graph, modules, prepared, &owners, &placement, &surfaces, &cjs,
     )?;
-    cjs.emit(graph, modules, &connections.namespaces, &entry_files)?;
-    for &root in &jobs {
-        if cjs.contains(root) {
-            continue;
-        }
+    cjs.emit(graph, modules, &connections.namespaces, &entry_files, execution)?;
+    let mut emission_jobs: Vec<_> = jobs
+        .iter()
+        .filter(|&&root| !cjs.contains(root))
+        .map(|&root| segments::Owner::Evaluation(root))
+        .chain(
+            placement
+                .owners
+                .values()
+                .copied()
+                .filter(|owner| matches!(owner, segments::Owner::Bindings(_))),
+        )
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    emission_jobs.sort_by_key(|owner| match owner {
+        segments::Owner::Evaluation(file) => (graph.file_path(*file), 0, 0),
+        segments::Owner::Bindings(key) => (graph.file_path(key.file_id), 1, key.segment_idx),
+    });
+    let outputs = execution.map(&emission_jobs, |&owner| -> eyre::Result<_> {
+        let segments::Owner::Evaluation(root) = owner else {
+            let output = segments::emit(
+                graph,
+                owner,
+                modules,
+                prepared,
+                &placement,
+                &connections,
+                &recipes,
+                &cjs,
+            )?;
+            return Ok((owner.path(graph), output, None));
+        };
         let artifact_path = path(graph, root);
         let output = if changed.contains(&root) {
             segments::emit(
@@ -349,29 +378,18 @@ pub(super) fn emit(
             });
             imports
         };
-        if surfaces.contains(&root) {
-            namespaces.insert(
-                graph.file_path(root).unwrap().to_owned(),
-                connections.namespaces[&root].clone(),
-            );
+        let namespace = surfaces
+            .contains(&root)
+            .then(|| graph.file_path(root).unwrap().to_owned());
+        Ok((artifact_path, output, namespace))
+    })?;
+    for output in outputs {
+        let (artifact_path, output, namespace) = output?;
+        if let Some(namespace) = namespace {
+            let file = graph.file_id(&namespace).ok_or_eyre("missing native namespace source")?;
+            namespaces.insert(namespace, connections.namespaces[&file].clone());
         }
         files.insert(artifact_path, output);
-    }
-    for owner in placement.owners.values().copied().collect::<BTreeSet<_>>() {
-        if matches!(owner, segments::Owner::Bindings(_)) {
-            let output = segments::emit(
-                graph,
-                owner,
-                modules,
-                prepared,
-                &placement,
-                &connections,
-                &recipes,
-                &cjs,
-            )?;
-            let path = owner.path(graph);
-            files.insert(path, output);
-        }
     }
     for (&file, path) in &cjs.entries {
         namespaces.insert(graph.file_path(file).unwrap().to_owned(), path.clone());
