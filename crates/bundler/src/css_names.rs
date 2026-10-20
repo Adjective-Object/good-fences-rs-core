@@ -10,11 +10,12 @@ use sha2::{Digest, Sha256};
 use crate::css_syntax::{self, Edit, Name};
 
 pub(crate) const REVISION: &str = "css-local-v1";
-pub(crate) const TRANSFORM_REVISION: &str = "css-composes-v4";
+pub(crate) const TRANSFORM_REVISION: &str = "css-animations-v6";
+const ANIMATION_DOMAIN: &str = "css-animation-v1";
 
 #[derive(Default)]
 pub(crate) struct Registry {
-    identities: BTreeMap<String, (String, String)>,
+    identities: BTreeMap<String, (String, String, String)>,
 }
 
 #[derive(Default)]
@@ -96,7 +97,7 @@ impl Registry {
                 );
             }
             let scoped = hash(&relative, &name.decoded);
-            let identity = (relative.clone(), name.decoded.clone());
+            let identity = (REVISION.to_owned(), relative.clone(), name.decoded.clone());
             if let Some(previous) = self.identities.insert(scoped.clone(), identity.clone()) {
                 ensure!(
                     previous == identity,
@@ -129,6 +130,63 @@ impl Registry {
                 )
             })
             .collect();
+        let local_animations: BTreeSet<_> = syntax
+            .animations
+            .iter()
+            .filter(|animation| animation.definition && animation.local == Some(true))
+            .map(|animation| animation.name.decoded.as_str())
+            .collect();
+        for animation in &syntax.animations {
+            let name = &animation.name;
+            let local = animation
+                .local
+                .unwrap_or_else(|| local_animations.contains(name.decoded.as_str()));
+            let mut replacement = if local {
+                let scoped = scoped_name_in(ANIMATION_DOMAIN, &relative, &name.decoded);
+                let identity = (
+                    ANIMATION_DOMAIN.to_owned(),
+                    relative.clone(),
+                    name.decoded.clone(),
+                );
+                if let Some(previous) = self.identities.insert(scoped.clone(), identity.clone()) {
+                    ensure!(previous == identity,
+                        "CSS Modules scoped-name collision {scoped:?}: {previous:?} and {identity:?} at {:?}",
+                        name.span);
+                }
+                scoped
+            } else if animation.local == Some(false)
+                && !animation.definition
+                && css_syntax::animation_keyword_slot(&name.decoded.to_ascii_lowercase()).is_some()
+            {
+                // Identifier escapes still parse as shorthand keywords; strings force a name.
+                let mut quoted = String::new();
+                cssparser::serialize_string(&name.decoded, &mut quoted)?;
+                quoted
+            } else {
+                source[name.span.clone()].to_owned()
+            };
+            if animation.span != name.span {
+                // Comments separate tokens even when adjacent hex escapes consume whitespace.
+                let needs_separator =
+                    |byte: &u8| !byte.is_ascii_whitespace() && !b":,;{}/".contains(byte);
+                if source.as_bytes()[..animation.span.start]
+                    .last()
+                    .is_some_and(needs_separator)
+                {
+                    replacement.insert_str(0, "/**/");
+                }
+                if source.as_bytes()[animation.span.end..]
+                    .first()
+                    .is_some_and(needs_separator)
+                {
+                    replacement.push_str("/**/");
+                }
+            }
+            prepared.edits.push(Edit {
+                span: animation.span.clone(),
+                replacement,
+            });
+        }
         let transformed = css_syntax::apply_edits(source, prepared.edits.clone())?;
         css_syntax::parse(path, &transformed).map_err(|error| {
             eyre::eyre!(
@@ -476,8 +534,12 @@ fn camel_case(name: &str) -> String {
 }
 
 fn scoped_name(path: &str, symbol: &str) -> String {
+    scoped_name_in(REVISION, path, symbol)
+}
+
+fn scoped_name_in(domain: &str, path: &str, symbol: &str) -> String {
     let mut digest = Sha256::new();
-    digest.update(REVISION.as_bytes());
+    digest.update(domain.as_bytes());
     digest.update([0]);
     for value in [path, symbol] {
         digest.update((value.len() as u64).to_le_bytes());
@@ -810,6 +872,277 @@ mod tests {
                 error.contains("style.module.css")
                     && error.contains(message)
                     && error.contains(span),
+                "{source}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn animation_shorthands_disambiguate_keywords_lists_and_timing_functions() {
+        let source = r#"
+.spin {
+  animation: 1s ease spin, 2s steps(4, end) 1s infinite alternate both paused spin;
+  animation: ease 1s ease, linear(0, .5 50%, 1) 2s spin;
+  animation-name: spin, ease, linear, running, none, inherit;
+  animation: running 1s running, forwards 1s forwards;
+  animation: none 1s forwards, ease 1s linear;
+  animation: var(--duration) spin, mystery(spin) 1s spin, "spin" 1s;
+  animation-name: var(--name, spin), "spin", unknown;
+  --animation: spin :local(spin);
+  content: "spin";
+}
+@font-face { font-family: spin; src: local("spin"), local(spin); }
+@media (width > 1px) {
+  @keyframes spin { from { opacity: 0 } to { opacity: 1 } }
+}
+@keyframes ease {}
+@keyframes linear {}
+@keyframes running {}
+@keyframes forwards {}
+"#;
+        let prepared = Registry::default()
+            .prepare(
+                Path::new("/project"),
+                Path::new("/project/a.module.css"),
+                source,
+            )
+            .unwrap();
+        assert_eq!(prepared.mappings.len(), 1);
+        let mut css = css_syntax::apply_edits(source, prepared.edits).unwrap();
+        css = css.replace(&prepared.mappings["spin"], "_class");
+        for name in ["spin", "ease", "linear", "running", "forwards"] {
+            css = css.replace(
+                &scoped_name_in(ANIMATION_DOMAIN, "a.module.css", name),
+                &format!("_{name}"),
+            );
+        }
+        insta::assert_snapshot!(css.trim(), @r#"
+        ._class {
+          animation: 1s ease _spin, 2s steps(4, end) 1s infinite alternate both paused _spin;
+          animation: ease 1s _ease, linear(0, .5 50%, 1) 2s _spin;
+          animation-name: _spin, _ease, _linear, _running, none, inherit;
+          animation: running 1s _running, forwards 1s _forwards;
+          animation: none 1s _forwards, ease 1s _linear;
+          animation: var(--duration) spin, mystery(spin) 1s spin, "spin" 1s;
+          animation-name: var(--name, spin), "spin", unknown;
+          --animation: spin :local(spin);
+          content: "spin";
+        }
+        @font-face { font-family: spin; src: local("spin"), local(spin); }
+        @media (width > 1px) {
+          @keyframes _spin { from { opacity: 0 } to { opacity: 1 } }
+        }
+        @keyframes _ease {}
+        @keyframes _linear {}
+        @keyframes _running {}
+        @keyframes _forwards {}
+        "#);
+    }
+
+    #[test]
+    fn animation_scopes_handle_escaped_names_vendor_rules_and_explicit_references() {
+        let source = r#"
+:global(.theme) {
+  animation: :global(spin) 1s, local(spin) 2s, :local(external) var(--duration);
+  animation-name: global(spin),:local(spin), :glo\62 al(你好), :local(你好);
+}
+@keyframes :global(spin) {}
+@supports (display: grid) {
+  @-webkit-keyframes :local(spin) { 50% { -webkit-animation: spin 1s } }
+  @keyframes local(你好) {}
+}
+@keyframes "spin" {}
+"#;
+        let prepared = Registry::default()
+            .prepare(
+                Path::new("/project"),
+                Path::new("/project/a.module.css"),
+                source,
+            )
+            .unwrap();
+        assert!(prepared.mappings.is_empty());
+        let mut css = css_syntax::apply_edits(source, prepared.edits).unwrap();
+        for name in ["spin", "external", "你好"] {
+            css = css.replace(
+                &scoped_name_in(ANIMATION_DOMAIN, "a.module.css", name),
+                &format!("_{name}"),
+            );
+        }
+        insta::assert_snapshot!(css.trim(), @r#"
+        .theme {
+          animation: spin 1s, _spin 2s, _external var(--duration);
+          animation-name: spin,_spin, 你好, _你好;
+        }
+        @keyframes spin {}
+        @supports (display: grid) {
+          @-webkit-keyframes _spin { 50% { -webkit-animation: _spin 1s } }
+          @keyframes _你好 {}
+        }
+        @keyframes "spin" {}
+        "#);
+    }
+
+    #[test]
+    fn animation_auto_is_a_name_when_matching_local_keyframes_exist() {
+        let source = "a { animation: 1s auto, auto 2s; animation-name: auto }\n@keyframes auto {}";
+        let prepared = Registry::default()
+            .prepare(
+                Path::new("/project"),
+                Path::new("/project/a.module.css"),
+                source,
+            )
+            .unwrap();
+        let css = css_syntax::apply_edits(source, prepared.edits).unwrap();
+        let name = scoped_name_in(ANIMATION_DOMAIN, "a.module.css", "auto");
+        assert_eq!(
+            css,
+            format!("a {{ animation: 1s {name}, {name} 2s; animation-name: {name} }}\n@keyframes {name} {{}}")
+        );
+        let source = "a { animation: 1s auto; animation-name: auto }";
+        let prepared = Registry::default()
+            .prepare(
+                Path::new("/project"),
+                Path::new("/project/a.module.css"),
+                source,
+            )
+            .unwrap();
+        assert_eq!(
+            css_syntax::apply_edits(source, prepared.edits).unwrap(),
+            source
+        );
+    }
+
+    #[test]
+    fn explicit_global_animation_keywords_remain_names() {
+        for name in [
+            "ease",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "linear",
+            "step-start",
+            "step-end",
+            "infinite",
+            "normal",
+            "reverse",
+            "alternate",
+            "alternate-reverse",
+            "forwards",
+            "backwards",
+            "both",
+            "running",
+            "paused",
+            "EASE",
+        ] {
+            // Escaping the first character also checks decoding before string emission.
+            let escaped = format!("\\{:x} {}", name.as_bytes()[0], &name[1..]);
+            let source = format!(
+                "a {{ animation: global({escaped}) 1s, 2s ease :global({escaped}); animation-name: :global({escaped}) }}\n@keyframes :global({escaped}) {{}}"
+            );
+            let prepared = Registry::default()
+                .prepare(
+                    Path::new("/project"),
+                    Path::new("/project/a.module.css"),
+                    &source,
+                )
+                .unwrap();
+            assert_eq!(
+                css_syntax::apply_edits(&source, prepared.edits).unwrap(),
+                format!(
+                    "a {{ animation: \"{name}\" 1s, 2s ease \"{name}\"; animation-name: \"{name}\" }}\n@keyframes {escaped} {{}}"
+                ),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn animation_scope_replacements_preserve_adjacent_token_boundaries() {
+        let source = r"a { animation: local(spin)1s, 1s:local(spin), global(spin)1s, 1s:global(spin), local(spin)/**/1s, 1s/**/:global(spin), global(ease)1s, global(spin\31)1s }";
+        let prepared = Registry::default()
+            .prepare(
+                Path::new("/project"),
+                Path::new("/project/a.module.css"),
+                source,
+            )
+            .unwrap();
+        let css = css_syntax::apply_edits(source, prepared.edits).unwrap();
+        let local = scoped_name_in(ANIMATION_DOMAIN, "a.module.css", "spin");
+        assert_eq!(
+            css,
+            format!(
+                r#"a {{ animation: {local}/**/1s, 1s/**/{local}, spin/**/1s, 1s/**/spin, {local}/**/1s, 1s/**/spin, "ease"/**/1s, spin\31/**/1s }}"#
+            )
+        );
+    }
+
+    #[test]
+    fn animation_names_are_stable_separate_from_selectors_and_not_exports() {
+        let mut registry = Registry::default();
+        let prepare = |registry: &mut Registry, root: &str, file: &str, source| {
+            let root = Path::new(root);
+            let prepared = registry.prepare(root, &root.join(file), source).unwrap();
+            let css = css_syntax::apply_edits(source, prepared.edits).unwrap();
+            (prepared.mappings, css)
+        };
+        let source = ".spin { animation-name: sp\\69 n } @keyframes spin {}";
+        let (mappings, css) = prepare(&mut registry, "/one", "a.module.css", source);
+        let (_, other) = prepare(&mut registry, "/one", "b.module.css", source);
+        let (_, moved) = prepare(&mut registry, "/two", "a.module.css", source);
+        let (_, changed) = prepare(
+            &mut registry,
+            "/one",
+            "a.module.css",
+            "@keyframes spin {} .spin { color: red; animation-name: spin }",
+        );
+        let animation = css
+            .split("@keyframes ")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap();
+        assert_ne!(animation, mappings["spin"]);
+        assert!(css.contains(&format!("animation-name: {animation}")));
+        assert!(changed.contains(animation));
+        assert_eq!(css, moved);
+        assert!(!other.contains(animation));
+        assert_eq!(mappings.len(), 1);
+    }
+
+    #[test]
+    fn unsupported_module_value_and_icss_constructs_fail_with_paths_and_spans() {
+        for source in [
+            ".a { animation: :local() 1s }",
+            ".a { animation: :local spin 1s }",
+            ".a { animation-name: :global }",
+            ".a { animation: :global(a, b) 1s }",
+            ".a { animation: :local(a) :local(b) 1s }",
+            ".a { animation: :local(a) 'b' 1s }",
+            ".a { animation: var(--x, local(a)) 1s }",
+            ".a { animation: var(--x, :global(a)) 1s }",
+            ".a { color: :local(a) }",
+            ".a { animation-name: :global('a') }",
+            "@keyframes :local(a, b) {}",
+            "@keyframes :unknown(a) {}",
+            ":export { name: a }",
+            ":EXPORT { name: a }",
+            ":import('./a.css') { name: a }",
+            "@value a: red;",
+        ] {
+            let error = format!(
+                "{:#}",
+                Registry::default()
+                    .prepare(
+                        Path::new("/project"),
+                        Path::new("/project/a.module.css"),
+                        source,
+                    )
+                    .err()
+                    .unwrap()
+            );
+            assert!(
+                error.contains("a.module.css") && error.contains(".."),
                 "{source}: {error}"
             );
         }
