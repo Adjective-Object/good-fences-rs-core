@@ -49,9 +49,15 @@ fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
     }
     Ok(
         Option::<Exports>::deserialize(deserializer)?.map(|exports| match exports {
-            Exports::Root(path) => [(".".to_owned(), PackageJsonExport::Single(Some(path)))]
-                .into_iter()
-                .collect(),
+            Exports::Root(path) => [
+                (".".to_owned(), PackageJsonExport::Single(Some(path))),
+                (
+                    "./*".to_owned(),
+                    PackageJsonExport::Single(Some("./*".to_owned())),
+                ),
+            ]
+            .into_iter()
+            .collect(),
             Exports::Subpaths(paths) => paths,
         }),
     )
@@ -144,10 +150,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn string_exports_normalize_to_the_root_subpath() {
+    fn string_exports_normalize_to_root_and_package_file_access() {
         let shorthand: PackageJson = serde_json::from_str(r#"{"exports":"./index.mjs"}"#).unwrap();
         let explicit: PackageJson =
-            serde_json::from_str(r#"{"exports":{".":"./index.mjs"}}"#).unwrap();
+            serde_json::from_str(r#"{"exports":{".":"./index.mjs","./*":"./*"}}"#).unwrap();
         assert_eq!(shorthand, explicit);
         for invalid in ["false", "42", "[]"] {
             assert!(

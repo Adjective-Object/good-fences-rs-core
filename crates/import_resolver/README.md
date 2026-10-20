@@ -17,7 +17,9 @@ request mode; browser defaults omit those Node conditions. Package declaration
 order, including an early `default`, determines which active condition wins.
 An exports map is authoritative: unmatched subpaths or inactive conditions fail
 resolution, even when a matching physical file exists. Packages without exports
-retain legacy filesystem resolution.
+retain legacy filesystem resolution. Bare-string exports intentionally expose
+the selected root plus arbitrary files within that package, equivalent to adding
+`"./*": "./*"`; unlike explicit maps, this shorthand is not Node-encapsulated.
 
 The nearest bounded `tsconfig.json` adds `compilerOptions.customConditions`
 to the active export conditions. `customSourceConditions` is a compatibility

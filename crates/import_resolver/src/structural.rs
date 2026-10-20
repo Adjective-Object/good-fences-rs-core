@@ -137,6 +137,7 @@ mod tests {
             "entry.mjs" => "",
             "node_modules/closed/package.json" => r#"{"exports":"./index.mjs"}"#,
             "node_modules/closed/index.mjs" => "",
+            "node_modules/closed/data/nested/file.json" => "{}",
             "node_modules/open/package.json" => r#"{"exports":{".":"./index.mjs","./*":"./*","./private/*":null}}"#,
             "node_modules/open/index.mjs" => "",
             "node_modules/open/data/nested/file.json" => "{}",
@@ -150,6 +151,11 @@ mod tests {
         for mode in [ResolutionMode::Import, ResolutionMode::Require] {
             for (request, target) in [
                 ("closed", "closed/index.mjs"),
+                ("closed/index.mjs", "closed/index.mjs"),
+                (
+                    "closed/data/nested/file.json",
+                    "closed/data/nested/file.json",
+                ),
                 ("open", "open/index.mjs"),
                 ("open/data/nested/file.json", "open/data/nested/file.json"),
             ] {
@@ -161,7 +167,8 @@ mod tests {
                 );
             }
             for request in [
-                "closed/index.mjs",
+                "closed/missing.json",
+                "closed/../open/index.mjs",
                 "open/private/file.json",
                 "open/missing.json",
             ] {

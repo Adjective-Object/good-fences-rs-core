@@ -22,6 +22,50 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn bare_string_package_exports_allow_nested_json_css_and_asset_modules() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "node_modules/pkg/package.json",
+        r#"{"exports":"./index.mjs"}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/index.mjs",
+        "export default 7;",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/data/nested/value.json",
+        r#"{"value":9}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/style/theme.css",
+        ".theme { background: url('../assets/pixel.bin'); }",
+    );
+    write(dir.root(), "node_modules/pkg/assets/pixel.bin", "binary");
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import root from 'pkg';
+import data from 'pkg/data/nested/value.json';
+import style from 'pkg/style/theme.css';
+import image from 'pkg/assets/pixel.bin';
+console.log(root, data.value, style.endsWith('.css'), image.endsWith('.bin'));
+"#,
+    );
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(observe(&built.product.artifacts), b"7 9 true true\n");
+    assert_eq!(built.product.artifacts.resources.len(), 2);
+    assert_eq!(built.product.artifacts.stylesheets.len(), 1);
+}
+
+#[test]
 fn css_feature_query_urls_are_not_dependencies_and_url_whitespace_is_normalized() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "import './style.css';");

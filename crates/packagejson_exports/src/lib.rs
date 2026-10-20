@@ -212,6 +212,21 @@ impl PackageExportRewriteData {
         // destination String which may be used to store a mutated cleaned path, if the input path is not already clean
         let mut clean_dest = String::new();
         let clean_relative_import = clean_path_avoid_alloc(relative_import, &mut clean_dest);
+        if std::path::Path::new(clean_relative_import)
+            .components()
+            .any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return Err(anyhow!(
+                "package subpath escapes package root: {relative_import}"
+            ));
+        }
 
         let selected = self
             .exports
@@ -343,7 +358,7 @@ mod test {
     use test_tmpdir::map2;
 
     #[test]
-    fn string_roots_and_arbitrary_wildcard_files_keep_export_encapsulation() {
+    fn string_roots_expose_package_files_and_explicit_maps_keep_encapsulation() {
         for json in [
             r#"{"exports":"./index.mjs"}"#,
             r#"{"exports":{".":"./index.mjs","./*":"./*","./private/*":null}}"#,
@@ -360,15 +375,21 @@ mod test {
                     .rewritten_export,
                 ExportedPathRef::Exported("./index.mjs")
             );
+            assert_eq!(
+                rewrites
+                    .rewrite_relative_export("./data/nested/file.json", ["import"], &mut output)
+                    .unwrap()
+                    .unwrap()
+                    .rewritten_export,
+                ExportedPathRef::Exported("./data/nested/file.json")
+            );
+            assert!(rewrites
+                .rewrite_relative_export("../outside.json", ["import"], &mut output)
+                .is_err());
+            assert!(rewrites
+                .rewrite_relative_export("./../../outside.json", ["import"], &mut output)
+                .is_err());
             if json.contains("./*") {
-                assert_eq!(
-                    rewrites
-                        .rewrite_relative_export("./data/nested/file.json", ["import"], &mut output)
-                        .unwrap()
-                        .unwrap()
-                        .rewritten_export,
-                    ExportedPathRef::Exported("./data/nested/file.json")
-                );
                 assert_eq!(
                     rewrites
                         .rewrite_relative_export("./private/file.json", ["import"], &mut output)
@@ -378,10 +399,14 @@ mod test {
                     ExportedPathRef::Private
                 );
             } else {
-                assert!(rewrites
-                    .rewrite_relative_export("./index.mjs", ["import"], &mut output)
-                    .unwrap()
-                    .is_none());
+                assert_eq!(
+                    rewrites
+                        .rewrite_relative_export("./index.mjs", ["import"], &mut output)
+                        .unwrap()
+                        .unwrap()
+                        .rewritten_export,
+                    ExportedPathRef::Exported("./index.mjs")
+                );
             }
         }
     }

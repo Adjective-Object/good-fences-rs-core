@@ -25,6 +25,11 @@ hoisting/initialization semantics.
 
 ## JSON modules
 
+Bare-string package `exports` exposes the selected root and arbitrary files
+within that package, so nested JSON, CSS and asset requests need no extra
+wildcard map. This intentional Node-encapsulation deviation does not affect
+explicit export maps or their private subpaths.
+
 `BuildSession` accepts `.json` dependencies and entries. JSON values are shared
 between default ESM imports, dynamic-import defaults and CommonJS `require`;
 objects remain mutable and are initialized lazily when required. Inputs are

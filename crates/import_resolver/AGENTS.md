@@ -42,3 +42,6 @@ Export conditions are active sets, not priority lists; preserve package JSON
 declaration order. Node defaults include node/node-addons/module-sync, not browser
 defaults. Select a subpath before evaluating its conditions.
 An existing exports map forbids filesystem fallback for unmatched/private paths.
+Bare-string exports normalize to root plus "./*":"./*" for arbitrary package
+files (intentional Node deviation); explicit maps keep encapsulation. Reject
+request subpaths that traverse outside the package root.
