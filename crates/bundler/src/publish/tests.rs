@@ -53,6 +53,79 @@ fn snapshot(directory: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTi
 }
 
 #[test]
+fn stylesheet_routes_require_owned_css_and_cannot_be_executable_routes() {
+    let (dir, mut session, mut options) = fixture();
+    fs::write(
+        dir.root().join("main.mjs"),
+        "export {button} from './style.custom';",
+    )
+    .unwrap();
+    fs::write(dir.root().join("style.custom"), ".button {color: red}").unwrap();
+    options.css.css_modules = crate::build::CssModules::Extension(".custom".into());
+    options.output.base_url = "https://cdn.example/styles/".into();
+    let output = dir.root().join(".bundler-output");
+    let (build, published) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let artifacts = &build.product.artifacts;
+    let input = dir.root().join("style.custom");
+    let stylesheet = &artifacts.stylesheets[&input];
+    assert!(!stylesheet.is_absolute());
+    assert_eq!(stylesheet.extension().unwrap(), "css");
+    assert_eq!(
+        fs::read(published.directory.join(stylesheet)).unwrap(),
+        artifacts.resources[stylesheet]
+    );
+    let before = snapshot(&output);
+    let mut invalid = artifacts.clone();
+    invalid.resources.remove(stylesheet);
+    assert!(publish(&output, &invalid, &Cancellation::default())
+        .unwrap_err()
+        .to_string()
+        .contains("stylesheet route is not an owned CSS resource"));
+    let mut invalid = artifacts.clone();
+    invalid
+        .stylesheets
+        .insert(input, PathBuf::from("https://cdn.example/styles/style.css"));
+    assert!(publish(&output, &invalid, &Cancellation::default())
+        .unwrap_err()
+        .to_string()
+        .contains("stylesheet route is not an owned CSS resource"));
+    let mut invalid = artifacts.clone();
+    invalid.entries.insert("css".into(), stylesheet.clone());
+    assert!(publish(&output, &invalid, &Cancellation::default())
+        .unwrap_err()
+        .to_string()
+        .contains("module route is not an owned executable"));
+    assert_eq!(snapshot(&output), before);
+
+    fs::write(
+        published.directory.join(stylesheet),
+        "modified owned stylesheet",
+    )
+    .unwrap();
+    assert!(publish(&output, artifacts, &Cancellation::default()).is_err());
+    fs::write(dir.root().join("main.mjs"), "export const value = 2;").unwrap();
+    let (_, next) = session
+        .build_and_publish(&options, &output, &Cancellation::default())
+        .unwrap();
+    let cleanup = prune_stale(&output).unwrap();
+    assert!(!cleanup.warnings.is_empty());
+    assert!(published.directory.join(stylesheet).is_file());
+    assert_eq!(current_directory(&output).unwrap(), next.directory);
+    fs::write(
+        published.directory.join(stylesheet),
+        &artifacts.resources[stylesheet],
+    )
+    .unwrap();
+    let cleanup = prune_stale(&output).unwrap();
+    assert!(cleanup.warnings.is_empty());
+    assert_eq!(cleanup.removed, vec![published.directory.clone()]);
+    assert!(!published.directory.exists());
+    assert!(next.entries["main"].is_file());
+}
+
+#[test]
 fn named_js_entries_publish_with_owned_module_type_metadata() {
     for (input, source, format) in [
         (

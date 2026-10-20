@@ -78,7 +78,8 @@ built-in `CssLoad::CallerLoaded` policy by default (`"caller-loaded"` when
 serializing `CssOptions`).
 Global CSS keeps its CJS URL wrapper and `.cjs` entry extension.
 `Artifacts.stylesheets` maps retained
-CSS module roots to their emitted resource paths. The example driver reports
+input stylesheet roots to owned output-relative `.css` paths, never public URLs
+or executable aliases (including custom-suffix CSS Modules). The example driver reports
 this map and resource paths. Callers load the relevant root stylesheets in their
 application's order; there is **no implicit DOM injection** or automatic loading
 when a dynamic JavaScript chunk executes.
@@ -106,6 +107,9 @@ independently and default relative URLs remain inside their own generation.
 CSS `@import` dependencies are still loaded by CSS, not additional JS mounts.
 Runtime regressions use Node and a DOM recorder (plus native VM modules for
 HTTP-origin URLs); they do not test browser CSS application or network readiness.
+Publication regressions also exercise shared CSS Modules, renamed aliases and
+nested static/dynamic/CJS activation across two immutable generations, checking
+mapping values and local stylesheet/asset references against actual emitted URLs.
 
 `cssparser` tokenizes CSS requests, including escaped URLs, quoted/unquoted
 `url()`, `@import` and `image-set` strings. Local imports remain separate CSS
