@@ -1,5 +1,7 @@
 # Incremental JavaScript bundler plan
 
+Next: [cached source analysis and parse-free emission](PLAN.cached-source-emission.md).
+
 ## Completed segment-owned physical placement
 
 The native-only cutover removed the rejected runtime. Physical placement now
