@@ -380,6 +380,9 @@ Public `BuildOptions.entries` keys are logical IDs. `Entry.output_name` is an
 optional relative output name/path supplied by the build config. When omitted,
 the output preserves the canonical source path relative to the project root:
 input `"./entry.mjs"` emits `entry.mjs`, regardless of its entry ID.
+Nested default outputs use `/` separators on every platform, including Windows.
+Explicit output names must also use `/`; native backslashes, drive prefixes and
+UNC paths are rejected rather than normalized.
 `output_name: Some("appstart".into())` emits `appstart.mjs` for that input;
 `Some("app/start.mjs".into())` preserves the nested output path. Missing extensions inherit supported
 input `.mjs`/`.cjs`/`.js` extensions, otherwise the emitted ESM/CJS format.

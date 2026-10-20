@@ -478,6 +478,23 @@ fn missing_targets_and_unlinked_root_escape_are_explicit_errors() {
 }
 
 #[test]
+fn default_entry_outputs_follow_in_root_canonical_links() {
+    let dir = TmpDir::new();
+    write(dir.root(), "source/main.mjs", "console.log('canonical');");
+    let alias = dir.root().join("alias");
+    directory_link(&dir.root().join("source"), &alias);
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().path = alias.join("main.mjs");
+    let built = fresh_parity(&mut BuildSession::new(dir.root()).unwrap(), &config);
+    assert_eq!(
+        built.product.artifacts.entries["main"].to_str(),
+        Some("source/main.mjs")
+    );
+    assert_eq!(observe(&built.product.artifacts), b"canonical\n");
+    remove_directory_link(&alias);
+}
+
+#[test]
 fn linked_entry_requires_explicit_safe_output_name() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");

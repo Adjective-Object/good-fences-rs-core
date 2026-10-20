@@ -29,12 +29,12 @@ pub(super) fn apply(
         let commonjs = original.extension().is_some_and(|e| e == "cjs");
         let mut requested = match &entry.output_name {
             Some(output) => output.clone(),
-            None => root
-                .join(&entry.path)
-                .canonicalize()?
-                .strip_prefix(root)
-                .wrap_err("linked entry outside build root requires an explicit output_name")?
-                .to_owned(),
+            None => portable_path(
+                root.join(&entry.path)
+                    .canonicalize()?
+                    .strip_prefix(root)
+                    .wrap_err("linked entry outside build root requires an explicit output_name")?,
+            )?,
         };
         if entry.output_name.is_none()
             && crate::resource::kind(&entry.path, &options.css.css_modules)
@@ -68,7 +68,7 @@ pub(super) fn apply(
             if commonjs { "CommonJS" } else { "ESM" }
         );
         if extension == Some("js") {
-            let package = path.parent().unwrap().join("package.json");
+            let package = portable_path(&path.parent().unwrap().join("package.json"))?;
             let format = if commonjs { "commonjs" } else { "module" };
             if let Some(previous) = packages.insert(package.clone(), format) {
                 ensure!(
@@ -191,6 +191,18 @@ pub(super) fn apply(
     Ok(destinations)
 }
 
+// Filesystem-derived names use native separators; artifact names use `/`.
+// Explicit output names must pass output_path's checks before this conversion.
+fn portable_path(path: &Path) -> eyre::Result<PathBuf> {
+    path.components()
+        .map(|component| match component {
+            Component::Normal(value) => value.to_str().ok_or_eyre("non-UTF-8 output path"),
+            _ => eyre::bail!("output path contains non-normal components"),
+        })
+        .collect::<eyre::Result<Vec<_>>>()
+        .map(|parts| PathBuf::from(parts.join("/")))
+}
+
 fn output_path(name: &str) -> eyre::Result<PathBuf> {
     ensure!(
         !name.is_empty()
@@ -228,5 +240,5 @@ fn output_path(name: &str) -> eyre::Result<PathBuf> {
         !segment_cache::is_cache_artifact(&result),
         "reserved source-cache output path"
     );
-    Ok(result)
+    portable_path(&result)
 }
