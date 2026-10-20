@@ -307,6 +307,14 @@ code; include the support file in chunk projections and use it in CJS aliases.
 Never rewrite application built-in lookups or activate factories from the helper.
 Chunk helper identifiers must avoid all
 source bindings and free references, including in opaque factories.
+ESM environment probes remain native free reads; name allocation must not capture
+module/exports/require with merged lexical bindings or helpers. Never inject CJS
+globals, fold guards to false, or infer format from those probes.
+Preserve unresolved probe read sites during Ecco refinement, independently of
+graph-wide TDZ barriers; default global purity cannot erase getters/errors.
+Public builds add missing probe read-effect contracts before preparing/fingerprinting
+declarations; preserve explicit user contracts. Propagate through inferred calls.
+Low-level undeclared deferred probes disable refinement, never silently infer purity.
 Pure CJS factories group by availability roots, with one lexical cache per
 initializer, never a global ESM table. Facade parts group only at equal consumer
 evaluation seams; adjacent sorted snapshots may share a native job. Namespace

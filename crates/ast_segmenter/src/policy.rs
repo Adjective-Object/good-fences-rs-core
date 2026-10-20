@@ -15,6 +15,9 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         arguments_depth: 0,
         wrapper_arguments: HashSet::new(),
         module_receivers: HashSet::new(),
+        typeof_names: HashSet::new(),
+        wrapper_operations: HashSet::new(),
+        operation: false,
         errors: Vec::new(),
     };
     policy.visit_program(program);
@@ -28,10 +31,16 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
             continue;
         }
         match reference.name.as_str() {
-            "require" | "module" | "exports" if !policy.commonjs => {
+            "require" | "module" | "exports"
+                if !policy.commonjs
+                    && (reference.write
+                        || policy.wrapper_operations.contains(&reference.span.start)
+                        || (reference.name == "require"
+                            && !policy.typeof_names.contains(&reference.span.start))) =>
+            {
                 policy.reject(reference.span, "mixed ESM/CommonJS wrapper reference");
             }
-            "require" => {
+            "require" if policy.commonjs => {
                 let i = requires.partition_point(|d| d.span.start <= reference.span.start);
                 let direct_call = i.checked_sub(1).is_some_and(|i| {
                     let d = requires[i];
@@ -46,7 +55,9 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
                 }
             }
             "module"
-                if !reference.write && !policy.module_receivers.contains(&reference.span.start) =>
+                if policy.commonjs
+                    && !reference.write
+                    && !policy.module_receivers.contains(&reference.span.start) =>
             {
                 policy.reject(
                     reference.span,
@@ -91,6 +102,9 @@ struct Policy {
     arguments_depth: usize,
     wrapper_arguments: HashSet<u32>,
     module_receivers: HashSet<u32>,
+    typeof_names: HashSet<u32>,
+    wrapper_operations: HashSet<u32>,
+    operation: bool,
     errors: Vec<String>,
 }
 
@@ -123,9 +137,113 @@ impl Policy {
 
 impl<'a> Visit<'a> for Policy {
     fn visit_identifier_reference(&mut self, reference: &IdentifierReference<'a>) {
+        if !self.commonjs
+            && self.operation
+            && matches!(reference.name.as_str(), "require" | "module" | "exports")
+        {
+            self.wrapper_operations.insert(reference.span.start);
+        }
         if self.arguments_depth == 0 && reference.name == "arguments" {
             self.wrapper_arguments.insert(reference.span.start);
         }
+    }
+
+    fn visit_unary_expression(&mut self, expression: &UnaryExpression<'a>) {
+        if expression.operator == UnaryOperator::Typeof {
+            if let Expression::Identifier(id) = expression.argument.get_inner_expression() {
+                self.typeof_names.insert(id.span.start);
+            }
+        }
+        let saved = self.operation;
+        self.operation = expression.operator == UnaryOperator::Delete;
+        walk::walk_unary_expression(self, expression);
+        self.operation = saved;
+    }
+
+    fn visit_assignment_target(&mut self, target: &AssignmentTarget<'a>) {
+        let saved = self.operation;
+        self.operation = true;
+        walk::walk_assignment_target(self, target);
+        self.operation = saved;
+    }
+
+    fn visit_conditional_expression(&mut self, expression: &ConditionalExpression<'a>) {
+        let saved = self.operation;
+        self.operation = false;
+        self.visit_expression(&expression.test);
+        self.operation = saved;
+        self.visit_expression(&expression.consequent);
+        self.visit_expression(&expression.alternate);
+    }
+
+    fn visit_sequence_expression(&mut self, expression: &SequenceExpression<'a>) {
+        let saved = self.operation;
+        let length = expression.expressions.len();
+        for (index, expression) in expression.expressions.iter().enumerate() {
+            self.operation = saved && index + 1 == length;
+            self.visit_expression(expression);
+        }
+        self.operation = saved;
+    }
+
+    fn visit_binary_expression(&mut self, expression: &BinaryExpression<'a>) {
+        let saved = self.operation;
+        self.operation = false;
+        walk::walk_binary_expression(self, expression);
+        self.operation = saved;
+    }
+
+    fn visit_logical_expression(&mut self, expression: &LogicalExpression<'a>) {
+        // Either operand can supply the result. Unlike a conditional test or
+        // discarded sequence prefix, conservatively check both as operations.
+        walk::walk_logical_expression(self, expression);
+    }
+
+    fn visit_update_expression(&mut self, expression: &UpdateExpression<'a>) {
+        let saved = self.operation;
+        self.operation = true;
+        walk::walk_update_expression(self, expression);
+        self.operation = saved;
+    }
+
+    fn visit_call_expression(&mut self, expression: &CallExpression<'a>) {
+        let saved = self.operation;
+        self.operation = true;
+        self.visit_expression(&expression.callee);
+        self.operation = false;
+        for argument in &expression.arguments {
+            self.visit_argument(argument);
+        }
+        if let Some(arguments) = &expression.type_arguments {
+            self.visit_ts_type_parameter_instantiation(arguments);
+        }
+        self.operation = saved;
+    }
+
+    fn visit_new_expression(&mut self, expression: &NewExpression<'a>) {
+        let saved = self.operation;
+        self.operation = true;
+        self.visit_expression(&expression.callee);
+        self.operation = false;
+        for argument in &expression.arguments {
+            self.visit_argument(argument);
+        }
+        if let Some(arguments) = &expression.type_arguments {
+            self.visit_ts_type_parameter_instantiation(arguments);
+        }
+        self.operation = saved;
+    }
+
+    fn visit_tagged_template_expression(&mut self, expression: &TaggedTemplateExpression<'a>) {
+        let saved = self.operation;
+        self.operation = true;
+        self.visit_expression(&expression.tag);
+        self.operation = false;
+        self.visit_template_literal(&expression.quasi);
+        if let Some(arguments) = &expression.type_arguments {
+            self.visit_ts_type_parameter_instantiation(arguments);
+        }
+        self.operation = saved;
     }
 
     fn visit_import_declaration(&mut self, declaration: &ImportDeclaration<'a>) {
@@ -177,7 +295,11 @@ impl<'a> Visit<'a> for Policy {
     fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
         self.module_receiver(&member.object,
             matches!(member.expression.get_inner_expression(), Expression::StringLiteral(s) if s.value == "exports"));
-        walk::walk_computed_member_expression(self, member);
+        self.visit_expression(&member.object);
+        let saved = self.operation;
+        self.operation = false;
+        self.visit_expression(&member.expression);
+        self.operation = saved;
     }
 
     fn visit_with_statement(&mut self, statement: &WithStatement<'a>) {
@@ -205,17 +327,23 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
+        let saved = self.operation;
+        self.operation = false;
         self.function_depth += 1;
         self.arguments_depth += 1;
         walk::walk_function(self, function, flags);
         self.arguments_depth -= 1;
         self.function_depth -= 1;
+        self.operation = saved;
     }
 
     fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
+        let saved = self.operation;
+        self.operation = false;
         self.function_depth += 1;
         walk::walk_arrow_function_expression(self, function);
         self.function_depth -= 1;
+        self.operation = saved;
     }
 
     fn visit_variable_declaration(&mut self, declaration: &VariableDeclaration<'a>) {

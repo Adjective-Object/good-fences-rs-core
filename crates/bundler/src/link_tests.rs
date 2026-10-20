@@ -872,6 +872,58 @@ fn compare(sources: &BTreeMap<PathBuf, String>, entry: &str) -> Artifacts {
 }
 
 #[test]
+fn esm_environment_probe_calls_without_read_contracts_remain_conservative() {
+    for (expression, name, absent) in [
+        ("module", "module", "ReferenceError"),
+        ("exports", "exports", "ReferenceError"),
+        ("typeof module", "module", "loaded"),
+        ("typeof exports", "exports", "loaded"),
+        ("typeof require", "require", "loaded"),
+    ] {
+        let sources = sources(&[
+            (
+                "entry.mjs",
+                "import { helper } from './helper.mjs'; helper();",
+            ),
+            (
+                "helper.mjs",
+                &format!(
+                    "function probe() {{ return {expression}; }}
+                     export function helper() {{ return probe(); }}"
+                ),
+            ),
+        ]);
+        let graph = graph(&sources, false);
+        assert!(
+            crate::effect_analysis::analyze(&graph, &EffectPolicy::default())
+                .unwrap()
+                .is_empty()
+        );
+        let (_, output) = build(&sources, &[("entry.mjs", false)], false);
+        for (host, expected) in [
+            ("".to_owned(), format!("[\"{absent}\",[]]")),
+            (
+                format!(
+                    "Object.defineProperty(globalThis, '{name}', {{ get() {{ log.push('{name}'); }} }});"
+                ),
+                format!("[\"loaded\",[\"{name}\"]]"),
+            ),
+        ] {
+            let check = format!(
+                "const log = []; {host}
+                 const result = await import('./entry.mjs').then(() => 'loaded', error => error.name);
+                 console.log(JSON.stringify([result, log]));"
+            );
+            let mut files = output.files.clone();
+            files.insert("check.mjs".into(), observation(&output, &check));
+            let actual = node(&files, Path::new("check.mjs"));
+            assert!(actual.status.success(), "{:?}", actual);
+            assert_eq!(String::from_utf8_lossy(&actual.stdout).trim(), expected);
+        }
+    }
+}
+
+#[test]
 fn executable_files_expose_static_exports_without_any_source_loader() {
     let source = sources(&[
         ("src/main.js", "export {value, bump, default} from './state.js';"),

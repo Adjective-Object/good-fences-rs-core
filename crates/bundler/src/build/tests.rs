@@ -3730,9 +3730,10 @@ fn declaration_changes_invalidate_memory_disk_and_build_products() {
     assert_eq!(declaration_fingerprint_count(), hashes + 4);
     assert_eq!(restored.product.artifacts, first.product.artifacts);
 
-    config.declarations.user.push(
-        ecco::parse_declarations("global fn invalid() { call_effects = false }").unwrap(),
-    );
+    config
+        .declarations
+        .user
+        .push(ecco::parse_declarations("global fn invalid() { call_effects = false }").unwrap());
     config
         .declarations
         .user
@@ -5482,6 +5483,450 @@ fn async_root_add_remove_and_entry_replacement_match_full_rebuild() {
     assert!(removed.product.artifacts.async_facades.is_empty());
     assert_eq!(removed.product.graph.file_count(), 1);
     assert!(removed.invalidated.contains(&dir.root().join("lazy.mjs")));
+}
+
+#[test]
+fn unused_esm_environment_probes_preserve_effects_with_ecco_refinement() {
+    for (expression, name, absent) in [
+        ("typeof module", "module", "loaded"),
+        ("module", "module", "ReferenceError"),
+        ("typeof exports", "exports", "loaded"),
+        ("exports", "exports", "ReferenceError"),
+        ("typeof require", "require", "loaded"),
+    ] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            &format!("const unused = {expression}; Math.abs(-1);"),
+        );
+        let built = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&options())
+            .unwrap();
+        let graph = &built.product.graph;
+        let inferred = crate::effect_analysis::analyze(graph, &EffectPolicy::default()).unwrap();
+        let file = graph.file_id(&dir.root().join("main.mjs")).unwrap();
+        let key = source_graph::SegmentKey::new(file, 0);
+        // No deferred TDZ or CJS elsewhere in this graph may mask refinement.
+        assert_eq!(inferred.get(&key), Some(&true), "{expression}");
+        let summary = crate::effect_analysis::summarize(
+            graph,
+            file,
+            graph.file_facts(file).unwrap(),
+            graph.file_segments(file).unwrap()[0].span,
+            false,
+            &EffectPolicy::default(),
+            inferred.get(&key).copied(),
+        );
+        assert!(summary.is_effectful(), "{expression}");
+        let entry = built.product.artifacts.entries["main"]
+            .to_string_lossy()
+            .replace('\\', "/");
+        for (host, expected) in [
+            ("".to_owned(), format!("[\"{absent}\",[]]")),
+            (
+                format!(
+                    "Object.defineProperty(globalThis, '{name}', {{get() {{
+                        log.push('{name}'); Math.abs = () => log.push('abs'); return {{}};
+                    }} }});"
+                ),
+                format!("[\"loaded\",[\"{name}\",\"abs\"]]"),
+            ),
+        ] {
+            let check = |entry: &str| format!(
+                "const log = []; {host}
+                 const result = await import('./{entry}').then(() => 'loaded', error => error.name);
+                 console.log(JSON.stringify([result, log]));"
+            );
+            write(dir.root(), "check.mjs", &check("main.mjs"));
+            let original = observe_entry(&dir.root().join("check.mjs"));
+            assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
+            assert_eq!(
+                observe_named(&built.product.artifacts, &check(&entry)),
+                original,
+                "{expression}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unused_esm_environment_probe_calls_preserve_deferred_reads() {
+    for (expression, name, absent) in [
+        ("module", "module", "ReferenceError"),
+        ("exports", "exports", "ReferenceError"),
+        ("typeof module", "module", "loaded"),
+        ("typeof exports", "exports", "loaded"),
+        ("typeof require", "require", "loaded"),
+    ] {
+        for indirect in [false, true] {
+            let dir = TmpDir::new();
+            let probe = format!("function probe() {{ return {expression}; }}");
+            write(
+                dir.root(),
+                "main.mjs",
+                &if indirect {
+                    write(
+                        dir.root(),
+                        "helper.mjs",
+                        &format!("export {probe} export function helper() {{ return probe(); }}"),
+                    );
+                    "import { helper } from './helper.mjs'; helper(); Math.abs(-1);".to_owned()
+                } else {
+                    format!("{probe} probe(); Math.abs(-1);")
+                },
+            );
+            let built = BuildSession::new(dir.root())
+                .unwrap()
+                .build(&options())
+                .unwrap();
+            let inferred =
+                crate::effect_analysis::analyze(&built.product.graph, &EffectPolicy::default())
+                    .unwrap();
+            // No TDZ or CJS barrier: the read contract must propagate to callers,
+            // without relying on the graph-wide structural override.
+            assert!(inferred.values().any(|effect| *effect), "{expression}");
+            let entry = built.product.artifacts.entries["main"]
+                .to_string_lossy()
+                .replace('\\', "/");
+            for (host, expected) in [
+                ("".to_owned(), format!("[\"{absent}\",[]]")),
+                (
+                    format!(
+                        "Object.defineProperty(globalThis, '{name}', {{get() {{ log.push('{name}'); return {{}}; }} }});"
+                    ),
+                    format!("[\"loaded\",[\"{name}\"]]"),
+                ),
+            ] {
+                let check = |entry: &str| format!(
+                    "const log = []; {host}
+                     const result = await import('./{entry}').then(() => 'loaded', error => error.name);
+                     console.log(JSON.stringify([result, log]));"
+                );
+                write(dir.root(), "check.mjs", &check("main.mjs"));
+                let original = observe_entry(&dir.root().join("check.mjs"));
+                assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
+                assert_eq!(
+                    observe_named(&built.product.artifacts, &check(&entry)),
+                    original,
+                    "{expression}, indirect={indirect}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn esm_environment_probe_declarations_preserve_overrides_and_cache_identity() {
+    use ast_segmenter::fingerprint::declaration_fingerprint_count;
+
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "function probe() { return typeof module; } probe();",
+    );
+    let mut config = options();
+    config.declarations.javascript = false;
+    config.declarations.node = false;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let hashes = declaration_fingerprint_count();
+    let first = session.build(&config).unwrap();
+    assert_eq!(declaration_fingerprint_count(), hashes + 1);
+    assert_eq!(
+        observe_named(
+            &first.product.artifacts,
+            "Object.defineProperty(globalThis, 'module', { get() { console.log('read'); } });
+             await import('./main.mjs');"
+        ),
+        b"read\n"
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert_eq!(declaration_fingerprint_count(), hashes + 1);
+
+    config
+        .declarations
+        .user
+        .push(ecco::parse_declarations("global symbol module { read_effects = false }").unwrap());
+    let pure = session.build(&config).unwrap();
+    assert_eq!(pure.counters.source_parses, 1);
+    assert_eq!(declaration_fingerprint_count(), hashes + 2);
+    assert_ne!(
+        first.product.fingerprints.parse,
+        pure.product.fingerprints.parse
+    );
+    assert!(pure
+        .product
+        .artifacts
+        .files
+        .values()
+        .all(|text| !text.contains("typeof module")));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.disk_hits, 1);
+    assert_eq!(warm.product.artifacts, pure.product.artifacts);
+    assert_eq!(declaration_fingerprint_count(), hashes + 3);
+
+    config
+        .declarations
+        .user
+        .push(config.declarations.user[0].clone());
+    assert!(session.build(&config).is_err());
+    assert_eq!(declaration_fingerprint_count(), hashes + 3);
+    config.declarations.user.clear();
+    let restored = session.build(&config).unwrap();
+    assert_eq!(restored.product.artifacts, first.product.artifacts);
+    assert_eq!(declaration_fingerprint_count(), hashes + 4);
+}
+
+#[test]
+fn unused_esm_environment_probe_functions_do_not_disable_refinement() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "function probe() { return module; } Math.abs(-1);",
+    );
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert!(built
+        .product
+        .artifacts
+        .files
+        .values()
+        .all(|text| !text.contains("module") && !text.contains("Math.abs")));
+}
+
+#[test]
+fn esm_environment_probes_select_callees_without_invoking_wrappers() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+function nodeImpl() { return 'node'; }
+function browserImpl() { return 'browser'; }
+console.log(JSON.stringify([
+    (typeof module === 'object' && module ? nodeImpl : browserImpl)(),
+    (typeof module, browserImpl)(),
+    (typeof module === 'object' && nodeImpl || browserImpl)()
+]));
+"#,
+    );
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    let entry = built.product.artifacts.entries["main"]
+        .to_string_lossy()
+        .replace('\\', "/");
+    for (host, expected) in [
+        ("", r#"["browser","browser","browser"]"#),
+        ("globalThis.module = {};", r#"["node","browser","node"]"#),
+    ] {
+        write(
+            dir.root(),
+            "check.mjs",
+            &format!("{host} await import('./main.mjs');"),
+        );
+        let original = observe_entry(&dir.root().join("check.mjs"));
+        assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
+        assert_eq!(
+            observe_named(
+                &built.product.artifacts,
+                &format!("{host} await import('./{entry}');")
+            ),
+            original
+        );
+    }
+}
+
+#[test]
+fn esm_environment_probes_preserve_lodash_guards_host_reads_and_safe_names() {
+    let dir = TmpDir::new();
+    write(dir.root(), "package.json", r#"{"type":"module"}"#);
+    write(
+        dir.root(),
+        "names.js",
+        "export const module = 'local-module', exports = 'local-exports', require = 'local-require';",
+    );
+    write(
+        dir.root(),
+        "probes.js",
+        r#"
+var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
+var freeModule = freeExports && typeof module == 'object' && module && !module.nodeType && module;
+var moduleExports = freeModule && freeModule.exports === freeExports;
+var Buffer = moduleExports ? globalThis.Buffer : undefined;
+var nativeIsBuffer = Buffer ? Buffer.isBuffer : undefined;
+export const isBuffer = nativeIsBuffer || (() => false);
+export const nodeUtil = freeModule && freeModule.require && freeModule.require('util');
+export const allocUnsafe = Buffer && Buffer.allocUnsafe;
+export function guarded() {
+    if (typeof module !== 'undefined') return module['exports'] === freeExports;
+    return typeof exports === 'undefined' ? 'absent' : exports.nodeType;
+}
+export function shadow(module, exports, require) {
+    module.exports = exports;
+    return require(module.exports);
+}
+export function tdz() {
+    try { return typeof exports; let exports; }
+    catch (error) { return error.name; }
+}
+export function unguarded() {
+    try { return module.exports === freeExports; }
+    catch (error) { return error.name; }
+}
+export const loaderType = (function () { return (() => typeof require)(); })();
+"#,
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import { module, exports, require } from './names.js';
+import { isBuffer, nodeUtil, allocUnsafe, guarded, shadow, tdz, unguarded, loaderType } from './probes.js';
+console.log(JSON.stringify([
+    module, exports, require, isBuffer(globalThis.Buffer.from('x')),
+    !!nodeUtil, !!allocUnsafe, guarded(),
+    shadow({}, 'shadow', value => value), tdz(), unguarded(), loaderType,
+    globalThis.probeLog
+]));
+"#,
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let built = session.build(&options()).unwrap();
+    assert_eq!(
+        built.product.artifacts.backend,
+        crate::link::Backend::Native
+    );
+    assert!(session
+        .sources
+        .values()
+        .all(|source| !source.record.config.commonjs));
+    let entry = built.product.artifacts.entries["main"]
+        .to_string_lossy()
+        .replace('\\', "/");
+    for (host, expected) in [
+        (
+            "",
+            r#"["local-module","local-exports","local-require",false,false,false,"absent","shadow","ReferenceError","ReferenceError","undefined",[]]"#,
+        ),
+        (
+            r#"
+globalThis.exports = { get nodeType() { probeLog.push('exports'); return 0; } };
+globalThis.module = {
+    get nodeType() { probeLog.push('module'); return 0; },
+    get exports() { probeLog.push('get-exports'); return globalThis.exports; },
+    require(name) { probeLog.push(name); return {}; }
+};
+"#,
+            r#"["local-module","local-exports","local-require",true,true,true,true,"shadow","ReferenceError",true,"undefined",["exports","module","get-exports","util","get-exports","get-exports"]]"#,
+        ),
+        (
+            "globalThis.exports = { nodeType: 1 };",
+            r#"["local-module","local-exports","local-require",false,false,false,1,"shadow","ReferenceError","ReferenceError","undefined",[]]"#,
+        ),
+    ] {
+        let setup = format!("globalThis.probeLog = []; {host}\n");
+        write(
+            dir.root(),
+            "check.mjs",
+            &format!("{setup}await import('./main.mjs');"),
+        );
+        let original = observe_entry(&dir.root().join("check.mjs"));
+        assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
+        let bundled = observe_named(
+            &built.product.artifacts,
+            &format!("{setup}await import('./{entry}');"),
+        );
+        assert_eq!(bundled, original);
+    }
+    let warm = session.build(&options()).unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.product.artifacts, built.product.artifacts);
+}
+
+#[test]
+fn esm_environment_probes_reject_real_mixed_wrapper_operations() {
+    let dir = TmpDir::new();
+    for source in [
+        "export const value = 1; module.exports = value;",
+        "if (typeof exports === 'object') exports.value = 1;",
+        "export const value = module.require('./dep.cjs');",
+    ] {
+        write(dir.root(), "main.mjs", source);
+        let error = format!(
+            "{:#}",
+            BuildSession::new(dir.root())
+                .unwrap()
+                .build(&options())
+                .err()
+                .unwrap()
+        );
+        assert!(
+            error.contains("mixed ESM/CommonJS") && error.contains("main.mjs"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn esm_javascript_package_format_diagnostic_is_actionable_and_recoverable() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import { value } from 'compiled'; console.log(value);",
+    );
+    write(
+        dir.root(),
+        "node_modules/compiled/package.json",
+        r#"{"name":"compiled","main":"index.js"}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/compiled/index.js",
+        "export const value = 42;",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let error = format!("{:#}", session.build(&options()).err().unwrap());
+    assert!(error.contains("index.js"), "{error}");
+    assert!(
+        error.contains("missing required \"type\":\"module\""),
+        "{error}"
+    );
+    assert!(error.contains("use .mjs instead of .js"), "{error}");
+    write(
+        dir.root(),
+        "node_modules/compiled/package.json",
+        r#"{"name":"compiled","main":"index.js","type":"module"}"#,
+    );
+    assert_eq!(
+        observe(&session.build(&options()).unwrap().product.artifacts),
+        b"42\n"
+    );
+    write(
+        dir.root(),
+        "node_modules/compiled/package.json",
+        r#"{"name":"compiled","main":"index.mjs"}"#,
+    );
+    fs::rename(
+        dir.root().join("node_modules/compiled/index.js"),
+        dir.root().join("node_modules/compiled/index.mjs"),
+    )
+    .unwrap();
+    assert_eq!(
+        observe(&session.build(&options()).unwrap().product.artifacts),
+        b"42\n"
+    );
 }
 
 #[test]

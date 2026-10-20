@@ -2397,6 +2397,9 @@ fn astra_round5_ambient_identifier_reads_can_execute_global_getters() {
         "ambient;",
         "typeof ambient;",
         "function read() { return ambient; } read();",
+        "function read() { return typeof ambient; } read();",
+        "function read() { return ambient; } function helper() { return read(); } helper();",
+        "function read() { return typeof ambient; } function helper() { return read(); } helper();",
     ];
     for (declarations, expected) in [
         ("", false),
@@ -2407,7 +2410,7 @@ fn astra_round5_ambient_identifier_reads_can_execute_global_getters() {
             .into_iter()
             .map(|javascript| *effects(&source(declarations, javascript)).last().unwrap())
             .collect();
-        assert_eq!(observed, vec![expected; 3], "{declarations}");
+        assert_eq!(observed, vec![expected; cases.len()], "{declarations}");
     }
 }
 
