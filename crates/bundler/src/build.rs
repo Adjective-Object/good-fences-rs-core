@@ -28,6 +28,7 @@ use crate::{
 
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
+mod prepare;
 
 pub use crate::css_selection::CssModules;
 
@@ -131,6 +132,8 @@ pub struct Fingerprints {
 pub struct Counters {
     /// Actual source extraction cache misses (emission checks are separate).
     pub source_parses: usize,
+    /// Actual declaration serializations/hashes, including worker-local calls.
+    pub declaration_fingerprints: usize,
     pub memory_hits: usize,
     pub disk_hits: usize,
     pub resolutions: usize,
@@ -147,11 +150,12 @@ pub struct Counters {
 }
 
 impl Counters {
-    fn record_parses(&mut self, before: (usize, usize, usize)) {
-        self.source_reparses = crate::rewrite::source_parse_count() - before.0 - self.source_parses;
-        self.final_validations = crate::rewrite::final_validation_count() - before.2;
-        self.fragment_reparses =
-            crate::rewrite::output_parse_count() - before.1 - self.final_validations;
+    fn record_parses(&mut self, before: crate::rewrite::ParseCounts) {
+        let counts = crate::rewrite::parse_counts().difference(before);
+        self.source_reparses = counts.source - self.source_parses;
+        self.final_validations = counts.validation;
+        self.fragment_reparses = counts.output - self.final_validations;
+        self.declaration_fingerprints = counts.declarations;
         self.output_parses = self.source_reparses + self.fragment_reparses + self.final_validations;
     }
 }
@@ -195,6 +199,7 @@ pub struct BuildSession {
         ecco::Environment,
         PreparedDeclarations,
     )>,
+    pending_invalidated: BTreeSet<PathBuf>,
     last: Option<Rc<BuildProduct>>,
 }
 
@@ -213,6 +218,7 @@ impl BuildSession {
             resolutions: BTreeMap::new(),
             resolution_key: None,
             declarations: None,
+            pending_invalidated: BTreeSet::new(),
             last: None,
         })
     }
@@ -232,11 +238,7 @@ impl BuildSession {
             "build supports canonical module identities only"
         );
         let mut counters = Counters::default();
-        let before_parses = (
-            crate::rewrite::source_parse_count(),
-            crate::rewrite::output_parse_count(),
-            crate::rewrite::final_validation_count(),
-        );
+        let before_parses = crate::rewrite::parse_counts();
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
         options.css.css_modules.validate()?;
@@ -284,6 +286,7 @@ impl BuildSession {
         let resolution_changed = self.resolution_key != Some(resolution_key);
         if resolution_changed {
             self.resolutions.clear();
+            self.pending_invalidated.extend(self.sources.keys().cloned());
             self.resolution_key = Some(resolution_key);
         }
         let external_sources = inventory.has_external_sources(&self.root);
@@ -305,217 +308,270 @@ impl BuildSession {
             entries.insert(name.clone(), (path.clone(), entry.namespace));
             queue.push_back(path);
         }
+        let mut scheduled = BTreeSet::new();
+        let mut resources = BTreeSet::new();
+        let initial: BTreeSet<_> = queue.into_iter().collect();
+        let mut jobs = prepare::enqueue(initial, &mut scheduled, &mut resources, options);
         let mut inputs = Vec::new();
         let mut sources = BTreeMap::new();
+        let mut loaded_sources = BTreeMap::new();
+        let previous = &self.sources;
         let mut relocations = BTreeMap::new();
         let mut require_defaults = BTreeSet::new();
         let mut changed = BTreeSet::new();
-        while let Some(path) = queue.pop_front() {
-            if sources.contains_key(&path) {
-                continue;
-            }
-            ensure!(
-                inventory.contains(&path),
-                "source outside reachable build inventory (or reserved/excluded): {}",
-                path.display()
+        let mut errors = BTreeMap::new();
+        let root = &self.root;
+        #[cfg(test)]
+        let observer = prepare::AFTER_PREPARE.with(|observer| observer.borrow().clone());
+        let read = |path: PathBuf| {
+            let result = prepare::read(
+                root,
+                &path,
+                &inventory,
+                previous.get(&path),
+                options,
+                &declarations,
+                &public_base,
             );
-            let format = package_format(&self.root, &path)?;
-            let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
-            let kind = crate::resource::kind(&path, &options.css.css_modules);
-            if matches!(
-                kind,
-                crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset
-            )
-                || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
-                    && options.css.load == CssLoad::CallerLoaded)
-            {
-                require_defaults.insert(path.clone());
+            #[cfg(test)]
+            if let Some(observer) = &observer {
+                observer(&path);
             }
-            let wrapper_format = match options.resolver.target_env {
-                TargetEnv::Browser => ModuleFormat::Esm,
-                TargetEnv::Node => ModuleFormat::CommonJs,
-            };
-            let prepared_css = if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
-                styles.discover(&path, &input, &resolver)?;
-                Some(options.css.load.strategy().generate_module(
-                    &crate::css_loading::CssModuleInput {
-                        stylesheet: &path,
-                        public_url: &styles.public_url(&path)?,
-                        name_mappings: styles.name_mappings(&path).unwrap_or(&BTreeMap::new()),
-                        is_module: styles.name_mappings(&path).is_some(),
-                        evaluation_dependencies: &styles.evaluation_dependencies(&path),
-                        wrapper_format,
-                    },
-                )?)
-            } else {
-                None
-            };
-            let css_identity = matches!(kind, crate::resource::ResourceKind::Stylesheet { .. })
-                .then(|| styles.identity(&path));
-            if self
-                .sources
-                .get(&path)
-                .is_some_and(|source| source.css_identity != css_identity)
-            {
-                changed.insert(path.clone());
-            }
-            let parser_path = prepared_css.as_ref().map_or_else(
-                || crate::resource::parser_path(&path, wrapper_format),
-                |prepared| prepared.parser_path.clone(),
-            );
-            let parser_package = prepared_css
-                .as_ref()
-                .map_or(format, |prepared| prepared.package);
-            let config = ParserConfig::for_path(&parser_path, parser_package)?;
-            let text = if let Some(prepared) = prepared_css {
-                relocations.insert(path.clone(), prepared.relocations);
-                prepared.source
-            } else {
-                crate::resource::prepare(&path, &input, &public_base, wrapper_format)?
-            };
-            if self.sources.get(&path).is_some_and(|s| {
-                s.input == input
-                    && s.text == text
-                    && s.record.config == config
-                    && s.record.matches_prepared_declarations(&declarations)
-            }) {
-                counters.memory_hits += 1;
-            } else {
-                let loaded = segment_cache::load_prepared_with_declarations(
-                    &logger::StdioLogger::new(),
-                    &path,
-                    segment_cache::PreparedSource {
-                        source: &text,
-                        original: &input,
-                        parser_path: &parser_path,
-                        package: parser_package,
-                    },
-                    options.cache,
-                    &declarations,
-                )?;
-                match loaded.status {
-                    CacheStatus::Hit => counters.disk_hits += 1,
-                    CacheStatus::Miss(_) => counters.source_parses += 1,
+            (path, result)
+        };
+        let mut integrate = |(path, prepared): (PathBuf, eyre::Result<prepare::Prepared>)| {
+            let mut discovered = BTreeSet::new();
+            let result = (|| -> eyre::Result<()> {
+                let kind = crate::resource::kind(&path, &options.css.css_modules);
+                if matches!(kind, crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset)
+                    || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
+                        && options.css.load == CssLoad::CallerLoaded)
+                {
+                    require_defaults.insert(path.clone());
                 }
-                if let CacheWrite::Failed(message) = loaded.write {
-                    warnings.push(format!("{}: cache write: {message}", path.display()));
-                }
-                changed.insert(path.clone());
-                self.resolutions.remove(&path);
-                self.sources.insert(
-                    path.clone(),
-                    Source {
-                        css_identity: css_identity.clone(),
-                        input,
-                        text: loaded.source,
-                        record: loaded.record,
-                    },
-                );
-            }
-            self.sources
-                .get_mut(&path)
-                .expect("loaded source")
-                .css_identity = css_identity;
-            let source = &self.sources[&path];
-            let resolved = if let Some(cached) =
-                self.resolutions.get(&path).filter(|_| !external_sources)
-            {
-                cached.clone()
-            } else {
-                let mut resolved = HashMap::new();
-                for dependency in &source.record.module.facts.dependencies {
-                    if dependency.type_only {
-                        continue;
-                    }
-                    counters.resolutions += 1;
-                    let mode = if dependency.kind == DependencyKind::Require {
-                        ResolutionMode::Require
-                    } else {
-                        ResolutionMode::Import
-                    };
-                    if dependency.pattern.is_some() {
-                        let candidates = crate::context::resolve(
-                            &self.root,
+                let wrapper_format = match options.resolver.target_env {
+                    TargetEnv::Browser => ModuleFormat::Esm,
+                    TargetEnv::Node => ModuleFormat::CommonJs,
+                };
+                let mut css_identity = None;
+                let loaded = match prepared? {
+                    prepare::Prepared::Script(loaded) => loaded,
+                    prepare::Prepared::Resource { input, format } => {
+                        let prepared_css =
+                            if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
+                                styles.discover(&path, &input, &resolver)?;
+                                Some(options.css.load.strategy().generate_module(
+                                    &crate::css_loading::CssModuleInput {
+                                        stylesheet: &path,
+                                        public_url: &styles.public_url(&path)?,
+                                        name_mappings:
+                                            styles.name_mappings(&path).unwrap_or(&BTreeMap::new()),
+                                        is_module: styles.name_mappings(&path).is_some(),
+                                        evaluation_dependencies:
+                                            &styles.evaluation_dependencies(&path),
+                                        wrapper_format,
+                                    },
+                                )?)
+                            } else {
+                                None
+                            };
+                        css_identity =
+                            matches!(kind, crate::resource::ResourceKind::Stylesheet { .. })
+                                .then(|| styles.identity(&path));
+                        let parser_path = prepared_css.as_ref().map_or_else(
+                            || crate::resource::parser_path(&path, wrapper_format),
+                            |prepared| prepared.parser_path.clone(),
+                        );
+                        let parser_package = prepared_css
+                            .as_ref()
+                            .map_or(format, |prepared| prepared.package);
+                        let text = if let Some(prepared) = prepared_css {
+                            relocations.insert(path.clone(), prepared.relocations);
+                            prepared.source
+                        } else {
+                            crate::resource::prepare(&path, &input, &public_base, wrapper_format)?
+                        };
+                        prepare::load(
                             &path,
-                            dependency,
-                            inventory.candidates(&self.root, &path, dependency),
-                            &options.resolver.extensions,
-                            &resolver,
-                        )
-                        .wrap_err_with(|| {
-                            format!(
-                                "{}: context at bytes {}..{}",
-                                path.display(),
-                                dependency.span.start,
-                                dependency.span.end
-                            )
-                        })?;
-                        resolved.insert(dependency.id, DependencyTarget::Context(candidates));
-                        continue;
+                            input,
+                            text,
+                            &parser_path,
+                            parser_package,
+                            previous.get(&path),
+                            options.cache,
+                            &declarations,
+                        )?
                     }
-                    let target = resolver
-                        .resolve_dependency(&path, &dependency.specifier, mode)
-                        .wrap_err_with(|| {
-                            format!(
-                                "{}: bytes {}..{}",
-                                path.display(),
-                                dependency.span.start,
-                                dependency.span.end
-                            )
-                        })?;
-                    resolved.insert(
-                        dependency.id,
-                        match target {
-                            ResolvedDependency::File(target) => {
-                                ensure!(
-                                    inventory.contains(&target),
-                                    "{}: bytes {}..{} resolving {:?}: source outside reachable build inventory (or reserved/excluded): {}",
-                                    path.display(),
-                                    dependency.span.start,
-                                    dependency.span.end,
-                                    dependency.specifier,
-                                    target.display()
-                                );
-                                DependencyTarget::File(target)
-                            }
-                            ResolvedDependency::External(name) => DependencyTarget::External(name),
-                        },
-                    );
-                }
-                if self.resolutions.get(&path) != Some(&resolved) {
+                };
+                if previous
+                    .get(&path)
+                    .is_some_and(|source| source.css_identity != css_identity)
+                {
                     changed.insert(path.clone());
                 }
-                self.resolutions.insert(path.clone(), resolved.clone());
-                resolved
-            };
-            for target in resolved.values() {
-                if let DependencyTarget::File(path) = target {
-                    queue.push_back(path.clone());
-                } else if let DependencyTarget::Context(candidates) = target {
-                    queue.extend(candidates.values().cloned());
+                match loaded.status {
+                    None => counters.memory_hits += 1,
+                    Some(CacheStatus::Hit) => counters.disk_hits += 1,
+                    Some(CacheStatus::Miss(_)) => counters.source_parses += 1,
+                }
+                if let Some(warning) = loaded.warning {
+                    warnings.push(warning);
+                }
+                if let Some(mut source) = loaded.source {
+                    changed.insert(path.clone());
+                    source.css_identity = css_identity.clone();
+                    self.resolutions.remove(&path);
+                    loaded_sources.insert(path.clone(), source);
+                }
+                let source = loaded_sources
+                    .get(&path)
+                    .or_else(|| previous.get(&path))
+                    .expect("loaded source");
+                let resolved = if let Some(cached) = self.resolutions.get(&path).filter(|_| !external_sources) {
+                    cached.clone()
+                } else {
+                    let mut resolved = HashMap::new();
+                    for dependency in &source.record.module.facts.dependencies {
+                        if dependency.type_only {
+                            continue;
+                        }
+                        counters.resolutions += 1;
+                        let mode = if dependency.kind == DependencyKind::Require {
+                            ResolutionMode::Require
+                        } else {
+                            ResolutionMode::Import
+                        };
+                        if dependency.pattern.is_some() {
+                            let candidates = crate::context::resolve(
+                                &self.root,
+                                &path,
+                                dependency,
+                                inventory.candidates(&self.root, &path, dependency),
+                                &options.resolver.extensions,
+                                &resolver,
+                            )
+                            .wrap_err_with(|| {
+                                format!(
+                                    "{}: context at bytes {}..{}",
+                                    path.display(),
+                                    dependency.span.start,
+                                    dependency.span.end
+                                )
+                            })?;
+                            resolved.insert(dependency.id, DependencyTarget::Context(candidates));
+                            continue;
+                        }
+                        let target = resolver
+                            .resolve_dependency(&path, &dependency.specifier, mode)
+                            .wrap_err_with(|| {
+                                format!(
+                                    "{}: bytes {}..{}",
+                                    path.display(),
+                                    dependency.span.start,
+                                    dependency.span.end
+                                )
+                            })?;
+                        resolved.insert(
+                            dependency.id,
+                            match target {
+                                ResolvedDependency::File(target) => {
+                                    ensure!(inventory.contains(&target),
+                                        "{}: resolving {:?}: source outside reachable build inventory (or reserved/excluded): {}",
+                                        path.display(), dependency.specifier, target.display());
+                                    DependencyTarget::File(target)
+                                },
+                                ResolvedDependency::External(name) => {
+                                    DependencyTarget::External(name)
+                                }
+                            },
+                        );
+                    }
+                    if self.resolutions.get(&path) != Some(&resolved) {
+                        changed.insert(path.clone());
+                    }
+                    self.resolutions.insert(path.clone(), resolved.clone());
+                    resolved
+                };
+                for target in resolved.values() {
+                    if let DependencyTarget::File(path) = target {
+                        discovered.insert(path.clone());
+                    } else if let DependencyTarget::Context(candidates) = target {
+                        discovered.extend(candidates.values().cloned());
+                    }
+                }
+                let graph_input = if kind == crate::resource::ResourceKind::Script {
+                    OwnedSourceFileInput::from_parsed
+                } else {
+                    OwnedSourceFileInput::from_prepared_resource
+                };
+                inputs.push(graph_input(
+                    path.clone(),
+                    loaded.parsed,
+                    resolved.into_iter().collect(),
+                ));
+                sources.insert(path.clone(), source.text.clone());
+                Ok(())
+            })();
+            let failed = result.is_err();
+            if let Err(error) = result {
+                errors.insert(path, error);
+            }
+            (discovered, failed)
+        };
+        'frontier: loop {
+            let result = options.execution.replenish(jobs, &read, |result| {
+                let (discovered, _) = integrate(result);
+                prepare::enqueue(discovered, &mut scheduled, &mut resources, options)
+            });
+            if let Err(error) = result {
+                self.resolutions.clear();
+                self.pending_invalidated.extend(changed);
+                return Err(error);
+            }
+            // Stateful resources have a canonical serial frontier, not a buffer
+            // of worker-read bytes. Scripts above replenish without wave barriers.
+            jobs = Vec::new();
+            while let Some(path) = resources.pop_first() {
+                let (discovered, failed) = integrate(read(path));
+                if failed {
+                    break 'frontier;
+                }
+                jobs = prepare::enqueue(discovered, &mut scheduled, &mut resources, options);
+                if !jobs.is_empty() {
+                    break;
                 }
             }
-            let graph_input = if kind == crate::resource::ResourceKind::Script {
-                OwnedSourceFileInput::from_parsed
-            } else {
-                OwnedSourceFileInput::from_prepared_resource
-            };
-            inputs.push(graph_input(
-                path.clone(),
-                source.record.to_parsed(&source.text)?,
-                resolved.into_iter().collect(),
-            ));
-            sources.insert(path, source.text.clone());
+            if jobs.is_empty() {
+                break;
+            }
         }
-        for path in self.sources.keys() {
-            if !sources.contains_key(path) {
-                changed.insert(path.clone());
+        self.sources.extend(loaded_sources);
+        // CSS closure identity can change while its generated module stays equal.
+        for path in sources.keys() {
+            if matches!(
+                crate::resource::kind(path, &options.css.css_modules),
+                crate::resource::ResourceKind::Stylesheet { .. }
+            ) {
+                self.sources
+                    .get_mut(path)
+                    .expect("loaded source")
+                    .css_identity = Some(styles.identity(path));
             }
         }
         if resolution_changed {
             changed.extend(self.sources.keys().cloned());
         }
-        let invalidated = self.reverse_users(changed);
+        self.pending_invalidated.extend(changed);
+        if let Some((_, error)) = errors.into_iter().next() {
+            return Err(error);
+        }
+        warnings.sort();
+        for path in self.sources.keys() {
+            if !sources.contains_key(path) {
+                self.pending_invalidated.insert(path.clone());
+            }
+        }
+        let invalidated = self.reverse_users(self.pending_invalidated.clone());
         self.sources.retain(|path, _| sources.contains_key(path));
         self.resolutions
             .retain(|path, _| sources.contains_key(path));
@@ -620,6 +676,7 @@ impl BuildSession {
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
                 warnings.extend(last.plan.retention.warnings.iter().cloned());
+                self.pending_invalidated.clear();
                 return Ok(BuildResult {
                     product: last.clone(),
                     counters,
@@ -697,6 +754,7 @@ impl BuildSession {
             fingerprints,
         });
         self.last = Some(product.clone());
+        self.pending_invalidated.clear();
         counters.elapsed = start.elapsed();
         Ok(BuildResult {
             product,

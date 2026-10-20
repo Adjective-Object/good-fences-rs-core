@@ -45,8 +45,11 @@ function assertFailure(run, stage, expected, options = {}) {
 }
 
 test('real public pipeline executes emitted output without modifying original fixtures', () => {
-  withCorpus("console.log('hello');", ({ run }) => {
-    assert.deepEqual(run(), [{ id: 'synthetic/example', status: 'passed', backend: 'native', executions: 1, stdout: ['hello'] }]);
+  withCorpus("console.log('hello');", ({ run, configure }) => {
+    for (const workers of [1, 2, 4, 6]) {
+      configure({ fixtureConfig: { workers } });
+      assert.deepEqual(run(), [{ id: 'synthetic/example', status: 'passed', backend: 'native', executions: 1, stdout: ['hello'] }]);
+    }
   });
 });
 
@@ -244,6 +247,7 @@ test('driver rejects unknown, malformed and oversized config before publication'
       '{"resolveConditions":"source"}', '{"resolveConditions":[1]}',
       '{"resolveConditions":[" "]}',
       '{"resolveConditions":["import"]}', '{"resolveConditions":["require"]}',
+      ...[0, -1, 1.5, 65, '2', null].map(workers => JSON.stringify({ workers })),
       JSON.stringify({ output: { base_url: 'x'.repeat(16384) } }),
     ]) {
       writeFileSync(configFile, config);
