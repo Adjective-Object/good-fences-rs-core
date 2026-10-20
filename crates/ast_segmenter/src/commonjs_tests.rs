@@ -152,6 +152,9 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
         ("var require; require('./x');", "wrapper redeclaration"),
         ("var module; module.exports = 1;", "wrapper redeclaration"),
         ("function exports() {}", "wrapper redeclaration"),
+        ("let __filename = 'local';", "wrapper redeclaration"),
+        ("const __dirname = 'local';", "wrapper redeclaration"),
+        ("class __filename {}", "wrapper redeclaration"),
         ("arguments[1]('./x');", "wrapper arguments"),
         (
             "const load = () => arguments[1]('./x');",
@@ -178,6 +181,19 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
         .references
         .iter()
         .any(|r| r.commonjs == Some(CommonJsGlobal::Module) && r.write));
+}
+
+#[test]
+fn commonjs_path_parameters_allow_var_function_and_nested_shadowing() {
+    for source in [
+        "var __filename; var __dirname; console.log(__filename, __dirname);",
+        "function __filename() {} function __dirname() {}",
+        "function shadow(__filename, __dirname) { return [__filename, __dirname]; }",
+        "{ const __filename = 'local'; let __dirname = 'local'; }",
+        "if (false) { var __filename; var __dirname; }",
+    ] {
+        parse(source, "paths.cjs").unwrap();
+    }
 }
 
 #[test]

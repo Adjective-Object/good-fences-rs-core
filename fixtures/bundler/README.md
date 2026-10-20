@@ -49,7 +49,7 @@ hoisting, default snapshots/live aliases, inferred names, `__proto__` shorthand
 and destructuring, reverse-path static import ordering, namespace observations,
 ambient deferred effects and once-only shared identity, native TLA sibling/SCC
 jobs, cached rejection/TDZ, dynamic exported-then assimilation, and native CJS
-ambient activation/identity, failure retry and mixed-cycle error contracts,
+ambient activation/identity, path-wrapper redeclarations, failure retry and mixed-cycle error contracts,
 and independent demands on shared segments with live state and inferred names.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's

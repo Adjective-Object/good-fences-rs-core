@@ -359,7 +359,7 @@ impl CommonJs {
         factories.sort_by_key(|(_, value)| &value.name);
         for (_, value) in &factories {
             self.files.entry(value.path.clone()).or_default().push_str(&format!(
-                "let {0}_record;\nexports.{0} = {0};\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw Object.assign(new Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {0}_factory.call(module.exports, module.exports, module); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
+                "let {0}_record;\nexports.{0} = {0};\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw Object.assign(new Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {0}_factory.call(module.exports, module.exports, module, __filename, __dirname); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
                 value.name
             ));
         }
@@ -420,7 +420,7 @@ impl CommonJs {
                 output.push_str(&import);
             }
             output.push_str(&format!(
-                "function {}_factory(exports, module) {{\n{source}\n}}\n",
+                "function {}_factory(exports, module, __filename, __dirname) {{\n{source}\n}}\n",
                 value.name
             ));
         }

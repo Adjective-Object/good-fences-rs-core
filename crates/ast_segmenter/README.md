@@ -64,7 +64,8 @@ unchanged.
 | Literal global CJS `require()` | Exactly one string-literal argument; parenthesized expressions accepted; shadowed calls are ordinary code |
 | Nonliteral import/require, extra/spread require arguments, optional require call | Diagnostic, never a missing dependency |
 | Require reassignment, escaped/aliased loader, `require.resolve`, `module.require`, unknown module access | Diagnostic; only direct literal loader calls and `module.exports` member reads are supported |
-| CJS runtime wrapper-name declarations at module scope | Diagnostic (wrapper parameters and var/function redeclarations must not be misidentified as independent locals); nested shadows and pure type-space declarations supported |
+| CJS `require`/`module`/`exports` declarations at module scope | Diagnostic (wrapper parameters and var/function redeclarations must not be misidentified as independent locals); nested shadows and pure type-space declarations supported |
+| CJS `__filename`/`__dirname` declarations | Top-level var/function redeclarations reuse wrapper parameters; lexical redeclarations are diagnostics; nested shadows supported |
 | CJS `module`/`exports` reassignment | Preserved verbatim with reference write flags; no alias or named-export inference |
 | CJS directives/hashbang/top-level return | Preserved; hashbang recorded separately; one opaque body even when empty |
 | CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |

@@ -2391,6 +2391,55 @@ fn tla_rejection_is_shared_and_propagates_through_static_cycles() {
 }
 
 #[test]
+fn commonjs_path_parameters_preserve_redeclarations_and_factory_local_writes() {
+    compare(
+        &sources(&[
+            (
+                "entry.mjs",
+                "import first from './first.cjs'; import second from './second.cjs'; \
+                 console.log(first.types, second.types, first.nested()); \
+                 first.change(); console.log(first.current(), second.unchanged());",
+            ),
+            (
+                "first.cjs",
+                "var __filename; if (false) { var __dirname; } \
+                 exports.types = typeof __filename + ' ' + typeof __dirname; \
+                 exports.nested = () => { const __filename = 'nested'; return __filename; }; \
+                 exports.change = () => { __filename = 'changed'; __dirname = 'changed'; }; \
+                 exports.current = () => __filename + ' ' + __dirname;",
+            ),
+            (
+                "second.cjs",
+                "var __filename; var __dirname; \
+                 const filename = __filename, dirname = __dirname; \
+                 exports.types = typeof __filename + ' ' + typeof __dirname; \
+                 exports.unchanged = () => __filename === filename && __dirname === dirname;",
+            ),
+        ]),
+        "entry.mjs",
+    );
+    compare(
+        &sources(&[(
+            "entry.cjs",
+            "'use strict'; var __filename; var __dirname; \
+             console.log(typeof __filename, typeof __dirname); \
+             function shadow(__filename, __dirname) { return __filename + __dirname; } \
+             console.log(shadow('nested', ' local'));",
+        )]),
+        "entry.cjs",
+    );
+    compare(
+        &sources(&[(
+            "entry.cjs",
+            "function __filename() { return 'filename'; } \
+             function __dirname() { return 'dirname'; } \
+             console.log(__filename(), __dirname());",
+        )]),
+        "entry.cjs",
+    );
+}
+
+#[test]
 fn tla_dynamic_commonjs_keeps_deferred_factory_in_a_separate_native_file() {
     let source = sources(&[
         ("entry.mjs", "console.log('before'); const ns = await import('./a.cjs'); console.log('after', ns.default.value);"),

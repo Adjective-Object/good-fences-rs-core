@@ -4,10 +4,10 @@ Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
 Syntax-local effect reasons/timing are persisted and range-checked (schema 5 /
-extractor 6, including ESM top-level await/for-await spans, effective commonjs format, invocation inputs/annotation sites and normalized member
+extractor 7, including CommonJS path-parameter declaration policy, ESM top-level await/for-await spans, effective commonjs format, invocation inputs/annotation sites and normalized member
 shapes). No resolver, usage, effects-policy, graph, absolute path or arena IDs
 are stored.
-The TLA support-policy/facts change invalidates previous sidecars. Transitive
+Support-policy/facts changes invalidate previous sidecars. Transitive
 async status, SCC schedules and require compatibility remain derived linker/host
 policy, never source truth. CJS records cannot carry top-level suspension sites.
 

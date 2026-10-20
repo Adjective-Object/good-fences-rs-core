@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const SCHEMA_VERSION: u32 = 5;
-pub const EXTRACTOR_VERSION: u32 = 6;
+pub const EXTRACTOR_VERSION: u32 = 7;
 pub const OXC_REVISION: &str = "87f065ebf7cde21d1229322f4c7ee58baca5648e";
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
 
