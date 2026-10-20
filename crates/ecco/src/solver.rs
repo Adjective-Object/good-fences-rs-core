@@ -28,6 +28,7 @@ enum Expression {
     Constant(bool),
     Read(usize),
     Or(Vec<Self>),
+    And(Vec<Self>),
 }
 
 impl Expression {
@@ -36,6 +37,7 @@ impl Expression {
             Self::Constant(value) => *value,
             Self::Read(cell) => state[*cell],
             Self::Or(expressions) => expressions.iter().any(|e| e.evaluate(state)),
+            Self::And(expressions) => expressions.iter().all(|e| e.evaluate(state)),
         }
     }
 
@@ -43,7 +45,7 @@ impl Expression {
         match self {
             Self::Constant(_) => {}
             Self::Read(cell) => output.push(*cell),
-            Self::Or(expressions) => {
+            Self::Or(expressions) | Self::And(expressions) => {
                 for expression in expressions {
                     expression.dependencies(output);
                 }
@@ -65,6 +67,7 @@ struct Value {
     alias: Option<ValueId>,
     closure: Option<Closure>,
     call_mutations: Effect,
+    external_aliases: Effect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -164,6 +167,7 @@ impl Context {
         };
         context.undefined = context.value(Hazards::NONE);
         context.unknown = context.value(Hazards::UNKNOWN);
+        context.initial[context.values[context.unknown.0].external_aliases.0] = true;
         for index in 0..context.facts.definitions.len() {
             let value = context.value(Hazards::NONE);
             context.values[value.0].definition = Some(index);
@@ -208,12 +212,15 @@ impl Context {
         let id = ValueId(self.values.len());
         let call_mutations = Effect(self.initial.len());
         self.initial.push(false);
+        let external_aliases = Effect(self.initial.len());
+        self.initial.push(false);
         self.values.push(Value {
             cells,
             definition: None,
             alias: None,
             closure: None,
             call_mutations,
+            external_aliases,
         });
         if let Some(recording) = &mut self.recording {
             recording.instructions.push(Instruction::Value(id, hazards));
@@ -294,9 +301,14 @@ impl Context {
                 .push(Instruction::Update(value, slot, effects));
             return;
         }
-        if self.resolve_alias(value) == self.unknown {
-            self.opaque = true;
-        }
+        let value = self.resolve_alias(value);
+        self.equations.push(Equation {
+            target: self.poison.0,
+            expression: Expression::And(vec![
+                Expression::Read(self.values[value.0].external_aliases.0),
+                Expression::Read(effects.0),
+            ]),
+        });
         self.equations.push(Equation {
             target: self.values[value.0].cells[slot as usize],
             expression: Expression::Read(effects.0),

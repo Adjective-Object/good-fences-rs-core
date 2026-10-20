@@ -80,8 +80,9 @@ captures its current value without redirecting earlier aliases on rebinding.
 Initializer-free `var` declarations preserve existing bindings. Supplied
 contracts called from inferred bodies or through nested declared callbacks
 propagate their updates normally. Hazard queries of inferred callbacks remain
-latent: querying an effect does not execute its mutations. Queries involving mutation contracts
-conservatively widen effects rather than simulate a hypothetical heap.
+latent: querying an effect does not execute its mutations. Queries involving
+mutation contracts conservatively widen effects rather than simulate a
+hypothetical heap.
 
 Bare `call_effects` reads cannot specialize arguments and conservatively describe
 the whole function, including declared functions. Known calls specialize the body
@@ -110,6 +111,11 @@ call hazards as replacements. Recursive summary calls share exact contexts.
 Declared calls widen growing argument lists; inferred calls widen changing
 recursive contexts rather than grow without bound. Each explicit call site gets
 its own fresh result identity.
+
+Unknown-alias reachability propagates through value joins. Updates through such
+aliases widen the heap only when their hazard expression becomes true, including
+after later fixed-point updates. Loose equality of one known value identity with
+itself does not execute coercion hooks; other loose comparisons stay conservative.
 
 Context graphs are reusable, but results are not persistently cached. Build a new
 context when removing source facts or changing environment contracts: monotone

@@ -689,6 +689,12 @@ impl<'a> Extractor<'_, 'a> {
                 let mut effects = vec![left.effects, right.effects];
                 match binary.operator.as_str() {
                     "===" | "!==" => {}
+                    "==" | "!=" => {
+                        effects.push(
+                            self.context
+                                .loose_equality(left.named.value, right.named.value),
+                        );
+                    }
                     "in" => {
                         effects.push(
                             self.context

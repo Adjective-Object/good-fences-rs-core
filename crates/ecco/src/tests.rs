@@ -1239,3 +1239,79 @@ fn astra_round2_nested_declared_callback_execution_applies_updates() {
         "executing invoke(invoke, mutate, target) must propagate mutate's property-read update"
     );
 }
+
+#[test]
+fn astra_round3_false_update_on_unknown_does_not_poison() {
+    let analysis = source(
+        r#"
+        global fn noop(target) {
+            call_effects = false
+            updates target.property_read_effects |= false
+            returns void
+        }
+    "#,
+        r#"
+        const unrelated = {};
+        noop(unknownValue);
+        unrelated.property;
+    "#,
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false; 3],
+        "merging a false hazard into an unknown target is not unknown execution or a mutation"
+    );
+}
+
+#[test]
+fn astra_round3_self_loose_equality_does_not_coerce() {
+    let declarations = r#"
+        global fn object() {
+            call_effects = false
+            returns.*_effects = false
+            returns.toprimitive_effects = true
+        }
+    "#;
+    let analysis = source(
+        declarations,
+        "const value = object(); value == value; value != value;",
+    );
+    assert_eq!(
+        effects(&analysis),
+        vec![false; 3],
+        "loose equality of a value with itself never invokes ToPrimitive, even with effectful hooks"
+    );
+    let analysis = source(
+        declarations,
+        "function equal(x, y) { return x == y; } const value = object(); equal(value, value);",
+    );
+    assert_eq!(effects(&analysis), vec![false; 3]);
+    assert_eq!(
+        effects(&source("", "unknownLeft == unknownRight;")),
+        vec![true]
+    );
+}
+
+#[test]
+fn astra_round3_mutating_join_with_unknown_widens_external_aliases() {
+    let mut context = context("");
+    let unrelated = context.value(Hazards::NONE);
+    let known = context.value(Hazards::NONE);
+    let target = context.join_values(&[known, context.unknown()]);
+    let read = context.hazard(unrelated, Hazard::PropertyRead);
+    let signal = context.value(Hazards::NONE);
+    let mutation = context.hazard(signal, Hazard::Call);
+    context.update(target, Hazard::PropertyRead, mutation);
+    assert!(!context.evaluate().effect(read));
+    context.update(signal, Hazard::Call, context.effectful());
+    for workers in [1, 2, 4] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .unwrap();
+        assert!(
+            pool.install(|| context.evaluate()).effect(read),
+            "a may-alias join containing unknown must retain unknown's potential aliases when mutated"
+        );
+    }
+}

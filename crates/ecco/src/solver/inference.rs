@@ -10,6 +10,7 @@ pub(super) struct Closure {
 pub(super) enum Instruction {
     Value(ValueId, Hazards),
     Any(Effect, Vec<Effect>),
+    Equality(Effect, ValueId, ValueId),
     Operation(ValueId, Hazard),
     Update(ValueId, Hazard, Effect),
     Read(ValueId, ValueId),
@@ -129,6 +130,26 @@ impl Context {
         }
     }
 
+    pub(crate) fn loose_equality(&mut self, left: ValueId, right: ValueId) -> Effect {
+        if self.recording.is_some() {
+            let effect = self.expression(Expression::Constant(false));
+            self.recording
+                .as_mut()
+                .expect("function recording")
+                .instructions
+                .push(Instruction::Equality(effect, left, right));
+            return effect;
+        }
+        let left = self.resolve_alias(left);
+        let right = self.resolve_alias(right);
+        if left == right && left != self.unknown {
+            return self.pure;
+        }
+        let left = self.operation(left, Hazard::ToPrimitive);
+        let right = self.operation(right, Hazard::ToPrimitive);
+        self.any([left, right])
+    }
+
     pub(crate) fn set_binding(&mut self, target: ValueId, value: ValueId) {
         if let Some(recording) = &mut self.recording {
             recording
@@ -150,14 +171,14 @@ impl Context {
     }
 
     pub(super) fn link_hazards(&mut self, target: ValueId, value: ValueId) {
-        let targets = self.values[target.0]
-            .cells
-            .into_iter()
-            .chain([self.values[target.0].call_mutations.0]);
-        let values = self.values[value.0]
-            .cells
-            .into_iter()
-            .chain([self.values[value.0].call_mutations.0]);
+        let targets = self.values[target.0].cells.into_iter().chain([
+            self.values[target.0].call_mutations.0,
+            self.values[target.0].external_aliases.0,
+        ]);
+        let values = self.values[value.0].cells.into_iter().chain([
+            self.values[value.0].call_mutations.0,
+            self.values[value.0].external_aliases.0,
+        ]);
         for (target, value) in targets.zip(values) {
             self.equations.push(Equation {
                 target,
@@ -278,6 +299,11 @@ impl Context {
                         .map(|effect| self.template_effect(*effect, &template, &values, &effects))
                         .collect();
                     effects.insert(*target, self.any(inputs));
+                }
+                Instruction::Equality(target, left, right) => {
+                    let effect =
+                        self.loose_equality(mapped(&values, *left), mapped(&values, *right));
+                    effects.insert(*target, effect);
                 }
                 Instruction::Operation(value, slot) => {
                     self.operation(mapped(&values, *value), *slot);
