@@ -23,6 +23,24 @@ default-expression/anonymous-declaration and opaque CJS values retain typed grap
 identities, not invented lexical binding IDs; cached recipes own default
 hoisting/initialization semantics.
 
+## JSON modules
+
+`BuildSession` accepts `.json` dependencies and entries. JSON values are shared
+between default ESM imports, dynamic-import defaults and CommonJS `require`;
+objects remain mutable and are initialized lazily when required. Inputs are
+validated as JSON, then prepared as an opaque CommonJS value initializer, not
+loaded or parsed at runtime. Computed object keys preserve own `__proto__`
+properties, duplicate-key semantics, negative zero, large numbers and escaped
+surrogates without consulting mutable `JSON.parse`. UTF-8 BOMs are accepted.
+Named JSON exports and import attributes remain unsupported; use a default import
+or `require`. A JSON entry defaults to a `.cjs` output file.
+
+Resource preparation separates original input bytes from generated JavaScript.
+Graph identities remain original resource paths, while cached spans and sealed
+provenance belong to the generated parser path/text. Warm sidecars reuse those
+facts without extraction. Input rechecks, invalidation and publication still
+track the original files; emission never reconstructs or reparses a wrapper.
+
 ## Native ESM chunks
 
 Public `link::esm`, isolated emission and `BuildSession` share parse-free source

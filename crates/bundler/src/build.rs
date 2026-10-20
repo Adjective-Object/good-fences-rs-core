@@ -120,6 +120,7 @@ pub struct BuildResult {
 }
 
 struct Source {
+    input: Vec<u8>,
     text: String,
     record: CacheRecord,
 }
@@ -234,20 +235,26 @@ impl BuildSession {
                 path.display()
             );
             let format = package_format(&self.root, &path)?;
-            let config = ParserConfig::for_path(&path, format)?;
-            let text =
-                fs::read_to_string(&path).wrap_err_with(|| format!("source {}", path.display()))?;
+            let parser_path = crate::resource::parser_path(&path);
+            let config = ParserConfig::for_path(&parser_path, format)?;
+            let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
             if self.sources.get(&path).is_some_and(|s| {
-                s.text == text
+                s.input == input
                     && s.record.config == config
                     && s.record.matches_declarations(&declarations)
             }) {
                 counters.memory_hits += 1;
             } else {
-                let loaded = segment_cache::load_or_parse_with_declarations(
+                let text = crate::resource::prepare(&path, &input)?;
+                let loaded = segment_cache::load_prepared(
                     &logger::StdioLogger::new(),
                     &path,
-                    format,
+                    segment_cache::PreparedSource {
+                        source: &text,
+                        original: &input,
+                        parser_path: &parser_path,
+                        package: format,
+                    },
                     options.cache,
                     &declarations,
                 )?;
@@ -263,6 +270,7 @@ impl BuildSession {
                 self.sources.insert(
                     path.clone(),
                     Source {
+                        input,
                         text: loaded.source,
                         record: loaded.record,
                     },
@@ -406,6 +414,7 @@ impl BuildSession {
                 include_str!("native_cjs.rs"),
                 include_str!("cjs.rs"),
                 include_str!("context.rs"),
+                include_str!("resource.rs"),
                 include_str!("emit.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
@@ -421,7 +430,7 @@ impl BuildSession {
             hash(format!("{fingerprints:?}:{emitter:?}:{:?}", options.entries).as_bytes());
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
-                Self::recheck(&self.root, &sources, &inventory)?;
+                Self::recheck(&self.root, &self.sources, &inventory)?;
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
                 warnings.extend(last.plan.retention.warnings.iter().cloned());
@@ -458,7 +467,7 @@ impl BuildSession {
         let mut artifacts = link::esm_plan(&graph, &plan, &options.effects, &sources)?;
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;
-        Self::recheck(&self.root, &sources, &inventory)?;
+        Self::recheck(&self.root, &self.sources, &inventory)?;
         counters.emissions = 1;
         counters.record_parses(before_parses);
         let generation = match &self.last {
@@ -487,12 +496,12 @@ impl BuildSession {
 
     fn recheck(
         root: &Path,
-        sources: &BTreeMap<PathBuf, String>,
+        sources: &BTreeMap<PathBuf, Source>,
         before: &BTreeMap<PathBuf, Option<[u8; 32]>>,
     ) -> eyre::Result<()> {
-        for (path, text) in sources {
+        for (path, source) in sources {
             ensure!(
-                fs::read(path)? == text.as_bytes(),
+                fs::read(path)? == source.input,
                 "source changed during build: {}",
                 path.display()
             );

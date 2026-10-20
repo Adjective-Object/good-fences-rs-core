@@ -27,7 +27,7 @@ pub(super) fn apply(
             .get(name)
             .ok_or_eyre("missing emitted public entry")?;
         let commonjs = original.extension().is_some_and(|e| e == "cjs");
-        let requested = match &entry.output_name {
+        let mut requested = match &entry.output_name {
             Some(output) => output.clone(),
             None => root
                 .join(&entry.path)
@@ -35,6 +35,14 @@ pub(super) fn apply(
                 .strip_prefix(root)?
                 .to_owned(),
         };
+        if entry.output_name.is_none()
+            && entry
+                .path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+        {
+            requested.set_extension(if commonjs { "cjs" } else { "mjs" });
+        }
         let mut path = output_path(
             requested
                 .to_str()

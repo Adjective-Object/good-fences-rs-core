@@ -37,6 +37,10 @@ Keep evaluation demand and binding demand distinct. Plans are derived state;
 source caches must not contain policy conclusions. Consumer → dependency edges
 preserve source order and original deferred/async timing; they are not permission
 to execute nested function bodies eagerly.
+Resource preparation separates original input bytes from generated JS text and
+parser paths. Graph paths retain input identity; spans/provenance describe only
+generated text. Recheck original bytes on reuse and return. JSON uses an opaque
+CJS value initializer with computed object keys, never mutable runtime JSON.parse.
 
 Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
 artifacts once after naming; release never parses output. Keep identifier,

@@ -13,6 +13,8 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
+- Prepared sources cache generated-JS coordinates and parser identity, but recheck
+  original resource bytes before sidecar publication and return, including hits.
 - Emission validation checks segment/occurrence coverage, placement and namespace
   links, canonical operation parents, complete nonrecursive source-slot roots,
   PURE input/guard ranges and opaque CJS request/hint-only recipes. Do not reparse.

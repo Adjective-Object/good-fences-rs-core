@@ -22,6 +22,132 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn json_modules_share_values_across_import_require_dynamic_and_warm_builds() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import data from './data.json';
+import load from './loader.cjs';
+const dynamic = await import('./data.json');
+data.changed = 3;
+console.log(data === load(), data === dynamic.default, load().changed, data.value);
+"#,
+    );
+    write(
+        dir.root(),
+        "loader.cjs",
+        "module.exports = () => require('./data.json');",
+    );
+    write(dir.root(), "data.json", r#"{"value": 7}"#);
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/main.mjs".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    assert_eq!(observe(&cold.product.artifacts), b"true true 3 7\n");
+    assert_eq!(cold.counters.source_reparses, 0);
+    assert_eq!(cold.counters.fragment_reparses, 0);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&cold.product, &noop.product));
+    let warm = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(warm.counters.source_parses, 0);
+    assert_eq!(warm.counters.disk_hits, 3);
+    assert_eq!(cold.product.artifacts, warm.product.artifacts);
+    write(dir.root(), "data.json", r#"{"value": 9}"#);
+    let edited = session.build(&config).unwrap();
+    assert_eq!(edited.counters.source_parses, 1);
+    assert!(edited
+        .invalidated
+        .contains(&dir.root().join("main.mjs").canonicalize().unwrap()));
+    assert_eq!(observe(&edited.product.artifacts), b"true true 3 9\n");
+    let output = TmpDir::new();
+    let published = crate::publish::publish(
+        output.root(),
+        &edited.product.artifacts,
+        &crate::publish::Cancellation::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        observe_entry(&published.directory.join(&published.entries["main"])),
+        b"true true 3 9\n"
+    );
+    write(dir.root(), "data.json", "{ broken json }");
+    let error = session.build(&config).err().unwrap();
+    assert!(format!("{error:#}").contains("data.json: invalid JSON module"));
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &edited.product));
+}
+
+#[test]
+fn json_modules_preserve_literal_semantics_without_mutable_host_parsers() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import read from './loader.cjs';
+JSON.parse = () => { throw Error('must not parse at runtime'); };
+const data = read();
+console.log(Object.hasOwn(data, '__proto__'), data.__proto__.own,
+    Object.getPrototypeOf(data) === Object.prototype, data.duplicate,
+    Object.is(data.zero, -0), data.large, data.surrogate.charCodeAt(0), data.escaped);
+"#,
+    );
+    write(
+        dir.root(),
+        "loader.cjs",
+        "module.exports = () => require('./data.json');",
+    );
+    write(
+        dir.root(),
+        "data.json",
+        concat!(
+            "\u{feff}",
+            r#"{
+"__proto__": {"own": true}, "duplicate": 1, "duplicate": 2,
+"zero": -0, "large": 1e400, "surrogate": "\ud800", "escaped": "quote\"slash\\"
+}"#
+        ),
+    );
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(
+        observe(&built.product.artifacts),
+        b"true true true 2 true Infinity 55296 quote\"slash\\\n"
+    );
+}
+
+#[test]
+fn json_entry_exports_values_and_uses_a_javascript_output_extension() {
+    let dir = TmpDir::new();
+    for json in ["null", "false", "42", r#""hello""#, "[1,2]"] {
+        write(dir.root(), "data.json", json);
+        let mut config = options();
+        config.entries.get_mut("main").unwrap().path = "data.json".into();
+        let built = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(
+            built.product.artifacts.entries["main"],
+            PathBuf::from("data.cjs")
+        );
+        assert_eq!(
+            observe_named(
+                &built.product.artifacts,
+                "import value from './data.cjs'; console.log(JSON.stringify(value));"
+            ),
+            format!("{json}\n").as_bytes()
+        );
+    }
+}
+
+#[test]
 fn native_externals_preserve_imports_reexports_dynamic_identity_and_entry_renaming() {
     let dir = TmpDir::new();
     write(

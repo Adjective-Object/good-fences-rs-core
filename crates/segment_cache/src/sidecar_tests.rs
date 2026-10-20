@@ -61,6 +61,64 @@ fn cold_warm_and_cache_modes() {
 }
 
 #[test]
+fn prepared_sources_cache_generated_coordinates_and_recheck_original_bytes() {
+    let dir = TmpDir::new();
+    let path = dir.root_join("data.json");
+    let original = br#"{"value": 1}"#;
+    let source = r#"module.exports = ({["value"]: 1});"#;
+    let parser_path = path.with_extension("json.cjs");
+    fs::write(&path, original).unwrap();
+    let declarations = ecco::LocalFacts::default();
+    let prepared = || PreparedSource {
+        source,
+        original,
+        parser_path: &parser_path,
+        package: ModuleFormat::CommonJs,
+    };
+    let cold = load_prepared(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadWrite,
+        &declarations,
+    )
+    .unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let warm = load_prepared(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadOnly,
+        &declarations,
+    )
+    .unwrap();
+    assert_eq!(warm.status, CacheStatus::Hit);
+    assert_eq!(warm.source, source);
+    assert_eq!(warm.record, cold.record);
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    assert!(warm.record.to_parsed(source).is_ok());
+    assert!(warm
+        .record
+        .to_parsed(std::str::from_utf8(original).unwrap())
+        .is_err());
+    fs::remove_file(sidecar_path(&path)).unwrap();
+    let error = load_prepared_inner(
+        &logger::StdioLogger::new(),
+        &path,
+        prepared(),
+        CacheMode::ReadWrite,
+        &declarations,
+        || {
+            fs::write(&path, b"changed input")?;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("source changed"));
+    assert!(!sidecar_path(&path).exists());
+    no_staging(&dir);
+}
+#[test]
 fn inferred_contracts_roundtrip_and_link_without_reparsing() {
     let dir = TmpDir::new();
     let path = dir.root_join("library.mjs");
@@ -188,7 +246,7 @@ fn interrupted_publication_preserves_valid_destination_and_cleans_staging() {
     let (dir, path) = setup();
     let cold = run(&path).unwrap();
     let previous = fs::read(sidecar_path(&path)).unwrap();
-    let error = publish(&path, SOURCE, &cold.record, || {
+    let error = publish(&path, SOURCE, SOURCE.as_bytes(), &cold.record, || {
         eyre::bail!("injected interruption")
     })
     .unwrap_err();
@@ -196,14 +254,16 @@ fn interrupted_publication_preserves_valid_destination_and_cleans_staging() {
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
     assert!(std::panic::catch_unwind(|| {
-        let _ = publish(&path, SOURCE, &cold.record, || panic!("cancelled writer"));
+        let _ = publish(&path, SOURCE, SOURCE.as_bytes(), &cold.record, || {
+            panic!("cancelled writer")
+        });
     })
     .is_err());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
     let mut invalid = cold.record;
     invalid.source_len += 1;
-    assert!(publish(&path, SOURCE, &invalid, || Ok(())).is_err());
+    assert!(publish(&path, SOURCE, SOURCE.as_bytes(), &invalid, || Ok(())).is_err());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
 }
@@ -278,7 +338,7 @@ fn concurrent_publishers_always_leave_one_complete_record() {
             let record = &cold.record;
             scope.spawn(move || {
                 for _ in 0..8 {
-                    publish(path, SOURCE, record, || Ok(())).unwrap();
+                    publish(path, SOURCE, SOURCE.as_bytes(), record, || Ok(())).unwrap();
                     assert_eq!(run(path).unwrap().record, *record);
                 }
             });
@@ -293,7 +353,7 @@ fn deletion_during_staging_preserves_previous_record() {
     let (dir, path) = setup();
     let cold = run(&path).unwrap();
     let previous = fs::read(sidecar_path(&path)).unwrap();
-    assert!(publish(&path, SOURCE, &cold.record, || {
+    assert!(publish(&path, SOURCE, SOURCE.as_bytes(), &cold.record, || {
         fs::remove_file(&path)?;
         Ok(())
     })

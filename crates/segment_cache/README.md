@@ -57,6 +57,14 @@ CBOR preflight remain mandatory on both codec boundaries.
 
 ## Sidecar IO
 
+`load_prepared(logger, path, PreparedSource, mode, declarations)` supports resource
+loaders. `PreparedSource` separates exact original input bytes from generated
+JavaScript text and its parser path/format. Sidecars remain next to the original
+input, but facts, spans, hashes and sealed provenance describe the generated
+JavaScript. The caller must prepare deterministically from the current input;
+both publication and return recheck the original bytes, including on cache hits.
+No generated source is written to the input path.
+
 `load_or_parse(logger, path, package_format, CacheMode)` always reads the source,
 then checks `<source>.seg.cbor`. It returns the exact source snapshot, record,
 hit/miss reason and write outcome. Invalid/unreadable caches are misses. Source

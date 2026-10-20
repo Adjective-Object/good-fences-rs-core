@@ -12,6 +12,7 @@ pub mod link;
 pub mod manifest;
 pub mod policy;
 pub mod publish;
+mod resource;
 pub mod rewrite;
 mod symbols;
 

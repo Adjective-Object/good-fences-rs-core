@@ -45,6 +45,24 @@ pub struct CacheOutcome {
     pub write: CacheWrite,
 }
 
+/// Generated JavaScript and the exact on-disk input from which it was prepared.
+pub struct PreparedSource<'a> {
+    pub source: &'a str,
+    pub original: &'a [u8],
+    pub parser_path: &'a Path,
+    pub package: ModuleFormat,
+}
+
+pub fn load_prepared(
+    logger: &impl logger::Logger,
+    path: &Path,
+    prepared: PreparedSource<'_>,
+    mode: CacheMode,
+    declarations: &ecco::LocalFacts,
+) -> eyre::Result<CacheOutcome> {
+    load_prepared_inner(logger, path, prepared, mode, declarations, || Ok(()))
+}
+
 pub fn sidecar_path(source: &Path) -> PathBuf {
     let mut name = source.as_os_str().to_owned();
     name.push(".seg.cbor");
@@ -102,10 +120,10 @@ fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
     Ok(bytes)
 }
 
-fn unchanged(path: &Path, source: &str) -> eyre::Result<()> {
+fn unchanged(path: &Path, original: &[u8]) -> eyre::Result<()> {
     ensure!(
         fs::read(path).wrap_err_with(|| format!("{}: source recheck failed", path.display()))?
-            == source.as_bytes(),
+            == original,
         "{}: source changed during cache operation",
         path.display()
     );
@@ -122,12 +140,36 @@ fn load(
 ) -> eyre::Result<CacheOutcome> {
     let source = fs::read_to_string(path)
         .wrap_err_with(|| format!("{}: source read failed", path.display()))?;
-    let config = ParserConfig::for_path(path, package)?;
+    load_prepared_inner(
+        logger,
+        path,
+        PreparedSource {
+            source: &source,
+            original: source.as_bytes(),
+            parser_path: path,
+            package,
+        },
+        mode,
+        declarations,
+        before_publish,
+    )
+}
+
+fn load_prepared_inner(
+    logger: &impl logger::Logger,
+    path: &Path,
+    prepared: PreparedSource<'_>,
+    mode: CacheMode,
+    declarations: &ecco::LocalFacts,
+    before_publish: impl FnOnce() -> eyre::Result<()>,
+) -> eyre::Result<CacheOutcome> {
+    let source = prepared.source;
+    let config = ParserConfig::for_path(prepared.parser_path, prepared.package)?;
     let cached = if mode == CacheMode::Disabled {
         Err(MissReason::Disabled)
     } else {
         read_cache(&sidecar_path(path)).and_then(|bytes| {
-            CacheRecord::decode_with_declarations(&bytes, &source, config, declarations)
+            CacheRecord::decode_with_declarations(&bytes, source, config, declarations)
                 .map_err(|e| MissReason::InvalidRecord(format!("{e:#}")))
         })
     };
@@ -136,14 +178,14 @@ fn load(
         Err(reason) => {
             let parsed = ast_segmenter::parse_module_with_declarations(
                 logger,
-                &source,
-                path,
-                package,
+                source,
+                prepared.parser_path,
+                prepared.package,
                 declarations.clone(),
             )?;
-            let record = CacheRecord::from_parsed(&source, &parsed)?;
+            let record = CacheRecord::from_parsed(source, &parsed)?;
             let write = if mode == CacheMode::ReadWrite {
-                match publish(path, &source, &record, before_publish) {
+                match publish(path, source, prepared.original, &record, before_publish) {
                     Ok(()) => CacheWrite::Stored,
                     Err(e) => CacheWrite::Failed(format!("{e:#}")),
                 }
@@ -153,9 +195,9 @@ fn load(
             (record, CacheStatus::Miss(reason), write)
         }
     };
-    unchanged(path, &source)?;
+    unchanged(path, prepared.original)?;
     Ok(CacheOutcome {
-        source,
+        source: source.to_owned(),
         record,
         status,
         write,
@@ -165,6 +207,7 @@ fn load(
 fn publish(
     path: &Path,
     source: &str,
+    original: &[u8],
     record: &CacheRecord,
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<()> {
@@ -186,7 +229,7 @@ fn publish(
     staging.flush()?;
     staging.as_file().sync_all()?;
     before_publish()?;
-    unchanged(path, source)?;
+    unchanged(path, original)?;
     staging
         .persist(&destination)
         .map_err(|e| eyre::eyre!("cache replacement failed: {e}"))?;

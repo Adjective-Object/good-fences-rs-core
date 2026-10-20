@@ -76,7 +76,8 @@ pub(crate) fn checked_source(
             path.display()
         )
     })?;
-    let config = ast_segmenter::ParserConfig::for_path(path, format)?;
+    let config =
+        ast_segmenter::ParserConfig::for_path(&crate::resource::parser_path(path), format)?;
     ensure!(
         provenance.config() == config,
         "{}: source parser configuration mismatch; reparse and rebuild before emission",
