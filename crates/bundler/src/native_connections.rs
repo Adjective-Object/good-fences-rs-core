@@ -5,8 +5,8 @@ use segments::{Owner, Placement};
 #[derive(Clone)]
 pub(super) struct BindingConnection {
     pub symbol: crate::symbols::Symbol,
-    identity: ExportIdentity,
-    owner: Option<Owner>,
+    pub(super) identity: ExportIdentity,
+    pub(super) owner: Option<Owner>,
     pub alias: String,
 }
 
@@ -29,35 +29,14 @@ pub(super) fn name_plan(
     let defaults = Values::new(prepared);
     let mut generated = OccupiedNames::new(prepared);
     let mut references: BTreeMap<Owner, HashMap<crate::symbols::Symbol, bool>> = BTreeMap::new();
-    let generated_references: BTreeSet<_> = plan
-        .generated_boundaries
-        .values()
-        .map(|boundary| {
-            let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
-                unreachable!()
-            };
-            (consumer.file_id, boundary.reference)
-        })
-        .collect();
-    for (&file, module) in modules {
-        for (index, reference) in module.parsed.facts().references().iter().enumerate() {
-            if generated_references.contains(&(file, index as u32)) {
-                continue;
-            }
-            let Some(binding) = reference.binding() else {
-                continue;
-            };
-            let index = module
-                .parsed
-                .segments()
-                .partition_point(|s| s.span.end <= reference.span().start);
-            if let Some(&owner) = owners.get(&SegmentKey::new(file, index as u32)) {
-                *references
-                    .entry(owner)
-                    .or_default()
-                    .entry((file, binding))
-                    .or_default() |= reference.write();
-            }
+    let effective = references::References::new(graph, plan)?;
+    for (key, reference) in effective.iter() {
+        if let Some(&owner) = owners.get(&key) {
+            *references
+                .entry(owner)
+                .or_default()
+                .entry(reference.symbol)
+                .or_default() |= reference.write;
         }
     }
     let mut result = BTreeMap::new();

@@ -82,7 +82,7 @@ pub(crate) fn plan(
     retained: &BTreeSet<SegmentKey>,
     edges: &[RetentionEdge],
     lazy: Option<&crate::lazy_modules::Certification>,
-    values: &std::collections::HashSet<SegmentKey>,
+    effects: &BTreeMap<SegmentKey, crate::effects::StatementEffects>,
 ) -> eyre::Result<ExecutionPlan> {
     let mut constraints = BTreeSet::new();
     let mut accesses = BTreeSet::new();
@@ -172,7 +172,13 @@ pub(crate) fn plan(
                 matches!(
                     site.reason(),
                     EffectReason::Invocation | EffectReason::Construction
-                ) && lazy.invocation_removable(segment, site.span(), values.contains(&segment))
+                ) && lazy.allocation(segment, site.span())
+                    && !effects.get(&segment).is_some_and(|summary| {
+                        summary
+                            .known_effects
+                            .iter()
+                            .any(|effect| effect.invocation == site.span())
+                    })
                     || site.reason() == EffectReason::BindingRead
                         && lazy.consumed_read(graph, segment, site.span())
             }) {
@@ -202,7 +208,13 @@ pub(crate) fn plan(
             .filter(|(_, c)| crate::effects::contains(range, c.span()))
         {
             if lazy.is_some_and(|lazy| {
-                lazy.invocation_removable(segment, call.span(), values.contains(&segment))
+                lazy.allocation(segment, call.span())
+                    && !effects.get(&segment).is_some_and(|summary| {
+                        summary
+                            .known_effects
+                            .iter()
+                            .any(|effect| effect.invocation == call.span())
+                    })
             }) {
                 continue;
             }
@@ -232,6 +244,9 @@ pub(crate) fn plan(
             .filter(|(_, r)| !r.type_only() && crate::effects::contains(range, r.span()))
         {
             let index = reference_start + relative;
+            if lazy.is_some_and(|lazy| lazy.consumed_constructor(segment, index as u32)) {
+                continue;
+            }
             if reference.binding().is_some_and(|binding| {
                 lazy.is_some_and(|lazy| lazy.consumes_binding(file, binding))
             }) {

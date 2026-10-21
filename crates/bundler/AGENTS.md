@@ -450,9 +450,17 @@ Only live selector values activate independent selected-export roots, carrying
 original-barrel evaluation, to a nested/dead fixed point. Lazy activation origins
 identify declaration/candidate/selector; their source_edge is original-import
 provenance, not a fabricated or retained dependency. Configured certified emission
-errors until selector placement and post-placement wiring exist; never emit broad
+errors until phase-6 post-placement wiring exists; never emit broad
 or hollow replacements. Stamp graph revision, effect policy and canonical runtime
 configuration; configuration-only edits reuse source extraction.
+Registered allocation values are not unconditional ModuleEffect demands.
+Keep residual argument/forced effects and original initialization/throw phases;
+compare transformed per-entrance binding projections during native placement.
+Share effective reference identities through naming/activation/placement checks,
+including generated module-constructor reads at selectors, never removed bindings.
+`link::native_placement` exposes immutable graph/plan-local owners, schedules,
+cut bindings and LazyWiring inputs for later Connections synthesis. Options name
+one original PreservedOptionsValue owner/span, never copied expressions.
 
 `partition` and public builds use precise planning; `partition_conservative`
 is the explicit namespace reference. Per-requested-name `AsyncExport` roots

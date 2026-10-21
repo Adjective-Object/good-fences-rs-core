@@ -10,6 +10,18 @@ use crate::symbols::Symbols;
 #[path = "native_chunks.rs"]
 mod chunks;
 
+pub(super) fn placement(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    symbols: &Symbols,
+    min_chunk_bytes: usize,
+) -> eyre::Result<NativePlacement> {
+    let prepared = PreparedValues::new(graph, modules, symbols);
+    chunks::placement(graph, plan, modules, manifest, &prepared, min_chunk_bytes)
+}
+
 #[cfg(test)]
 thread_local! {
     static GLOBAL_PREPARATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };

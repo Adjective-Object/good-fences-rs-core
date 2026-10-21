@@ -14,6 +14,51 @@ mod connections;
 #[path = "native_libraries.rs"]
 mod libraries;
 
+#[path = "native_references.rs"]
+mod references;
+
+enum Planned {
+    Artifacts(Artifacts<Code>),
+    Placement(NativePlacement),
+}
+
+impl Planned {
+    fn artifacts(self) -> eyre::Result<Artifacts<Code>> {
+        match self {
+            Self::Artifacts(artifacts) => Ok(artifacts),
+            Self::Placement(_) => eyre::bail!("expected native artifacts"),
+        }
+    }
+}
+
+pub(super) fn placement(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    prepared: &PreparedValues<'_>,
+    min_chunk_bytes: usize,
+) -> eyre::Result<NativePlacement> {
+    match emit_inner(
+        graph,
+        plan,
+        modules,
+        manifest,
+        prepared,
+        false,
+        &BTreeSet::new(),
+        None,
+        min_chunk_bytes,
+        Default::default(),
+        true,
+    )? {
+        Planned::Placement(placement) => Ok(placement),
+        Planned::Artifacts(_) => {
+            eyre::bail!("native placement requires conservative emission fallback")
+        }
+    }
+}
+
 pub(super) fn emit(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -35,7 +80,9 @@ pub(super) fn emit(
         None,
         0,
         execution,
-    )
+        false,
+    )?
+    .artifacts()
 }
 
 pub(super) fn emit_activated(
@@ -63,7 +110,9 @@ pub(super) fn emit_activated(
             None,
             min_chunk_bytes,
             execution,
-        );
+            false,
+        )?
+        .artifacts();
     }
     let Some(activations) = Activations::checked(graph, plan, modules, symbols, placements)? else {
         return super::ordinary(
@@ -88,7 +137,9 @@ pub(super) fn emit_activated(
         Some(&activations),
         min_chunk_bytes,
         execution,
-    )
+        false,
+    )?
+    .artifacts()
 }
 
 fn emit_inner(
@@ -102,7 +153,8 @@ fn emit_inner(
     activations: Option<&Activations>,
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
-) -> eyre::Result<Artifacts<Code>> {
+    placement_only: bool,
+) -> eyre::Result<Planned> {
     let _span = tracing::info_span!("emit.chunks").entered();
     let planning_span = tracing::info_span!("emit.planning").entered();
     let symbols = prepared.symbols;
@@ -321,6 +373,10 @@ fn emit_inner(
                 continue;
             }
             if cjs.contains(owner) || asynchronous.contains(&owner) || cycles.contains(&owner) {
+                eyre::ensure!(
+                    !placement_only,
+                    "native placement requires activation fallback"
+                );
                 return super::ordinary(
                     graph,
                     plan,
@@ -330,7 +386,8 @@ fn emit_inner(
                     browser,
                     require_defaults,
                     execution,
-                );
+                )
+                .map(Planned::Artifacts);
             }
             jobs.remove(&file);
             for assigned in owners.values_mut() {
@@ -377,6 +434,10 @@ fn emit_inner(
                 .collect::<BTreeSet<_>>()
             {
                 if !compatible(graph, file, &modules[&file], &values, &retained)? {
+                    eyre::ensure!(
+                        !placement_only,
+                        "native placement requires lexical fallback"
+                    );
                     return super::ordinary(
                         graph,
                         plan,
@@ -386,7 +447,8 @@ fn emit_inner(
                         browser,
                         require_defaults,
                         execution,
-                    );
+                    )
+                    .map(Planned::Artifacts);
                 }
             }
         }
@@ -394,6 +456,9 @@ fn emit_inner(
     placement.cluster(graph, plan, modules, prepared, &owners, min_chunk_bytes)?;
     placement.hoist_generated(graph, plan, modules, min_chunk_bytes)?;
     placement.reschedule(graph, plan, modules, prepared, &owners)?;
+    if placement_only {
+        return Ok(Planned::Placement(placement.lazy_wiring(graph, plan)?));
+    }
     let resolved_activations = activations
         .map(|activations| {
             let mut resolved = activations.clone();
@@ -455,7 +520,8 @@ fn emit_inner(
                 browser,
                 require_defaults,
                 execution,
-            );
+            )
+            .map(Planned::Artifacts);
         }
     }
     let mut changed = BTreeSet::new();
@@ -841,7 +907,7 @@ fn emit_inner(
         &cjs,
         activations,
     )?;
-    Ok(Artifacts {
+    Ok(Planned::Artifacts(Artifacts {
         resources: BTreeMap::new(),
         stylesheets: BTreeMap::new(),
         backend: Backend::Native,
@@ -861,7 +927,7 @@ fn emit_inner(
             }))
             .collect(),
         async_modules,
-    })
+    }))
 }
 
 pub(super) fn selected_activation(

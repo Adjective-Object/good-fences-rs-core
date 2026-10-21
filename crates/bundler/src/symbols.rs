@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ast_segmenter::owned::BindingId;
-use ast_segmenter::views::ImportedName;
+use ast_segmenter::views::{ExportValue, ImportedName};
 use eyre::{ensure, OptionExt};
 use source_graph::{ExportIdentity, GraphNode, LinkedExport, Namespace, SegmentKey, SourceGraph};
 
@@ -71,6 +71,16 @@ impl Symbols {
         );
         graph.validate_links()?;
         let retained: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
+        let generated_constructors: std::collections::HashSet<_> = plan.lazy_modules.modules().iter()
+            .filter(|module| plan.async_activations.values().any(|activation| {
+                matches!(activation.origin, crate::chunks::AsyncOrigin::Lazy { declaration, module_candidate, .. }
+                    if declaration == module.owner && module_candidate == module.candidate)
+            }))
+            .filter_map(|module| graph.file_facts(module.owner.file_id)
+                .and_then(|facts| facts.references().get(module.constructor_reference as usize))
+                .and_then(|reference| reference.binding())
+                .map(|binding| (module.owner.file_id, binding)))
+            .collect();
         let route_retained = |linked: &LinkedExport| {
             linked.route.iter().all(|node| match node {
                 GraphNode::Segment(key) => retained.contains(key),
@@ -147,8 +157,41 @@ impl Symbols {
                     continue;
                 }
                 if binding.import() {
+                    let source_used = if plan.lazy_modules.modules().is_empty() {
+                        crate::cjs::binding_used(graph, &plan.retention, file, binding.id())
+                    } else {
+                        facts
+                            .references()
+                            .iter()
+                            .enumerate()
+                            .any(|(index, reference)| {
+                                let segment = SegmentKey::new(
+                                    file,
+                                    segments
+                                        .partition_point(|s| s.span.end <= reference.span().start)
+                                        as u32,
+                                );
+                                !reference.type_only()
+                                    && reference.binding() == Some(binding.id())
+                                    && retained.contains(&segment)
+                                    && !plan
+                                        .lazy_modules
+                                        .consumed_constructor(segment, index as u32)
+                            })
+                            || facts.exports().iter().any(|export| {
+                                !export.type_only()
+                                    && export.value() == ExportValue::Binding(binding.id())
+                                    && retained.contains(&SegmentKey::new(
+                                        file,
+                                        segments
+                                            .partition_point(|s| s.span.end <= export.span().start)
+                                            as u32,
+                                    ))
+                            })
+                    };
                     if plan.precise_dynamic_imports
-                        && !crate::cjs::binding_used(graph, &plan.retention, file, binding.id())
+                        && !source_used
+                        && !generated_constructors.contains(&(file, binding.id()))
                     {
                         continue;
                     }

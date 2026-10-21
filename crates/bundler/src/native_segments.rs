@@ -12,11 +12,7 @@ pub(super) struct Placement {
     pub(super) phase_dependencies: BTreeMap<Owner, BTreeSet<Owner>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum Owner {
-    Evaluation(u32),
-    Bindings(SegmentKey),
-}
+pub(super) use crate::link::NativeOwner as Owner;
 
 impl Owner {
     pub fn path(self, graph: &SourceGraph) -> PathBuf {
@@ -32,6 +28,91 @@ impl Owner {
 }
 
 impl Placement {
+    pub(super) fn lazy_wiring(
+        &self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+    ) -> eyre::Result<NativePlacement> {
+        let mut lazy = Vec::new();
+        for activation in plan.async_activations.values() {
+            let crate::chunks::AsyncOrigin::Lazy {
+                declaration,
+                module_candidate,
+                selector,
+            } = activation.origin
+            else {
+                continue;
+            };
+            let module = plan
+                .lazy_modules
+                .modules()
+                .iter()
+                .find(|module| module.owner == declaration && module.candidate == module_candidate)
+                .ok_or_eyre("missing lazy placement module")?;
+            let selector = module
+                .selectors
+                .iter()
+                .find(|candidate| candidate.candidate == selector)
+                .ok_or_eyre("missing lazy placement selector")?;
+            let destination = super::segments::declaration(graph, &selector.selected.identity)?
+                .ok_or_eyre("lazy selected export has no native declaration")?;
+            let binding = graph
+                .file_facts(declaration.file_id)
+                .unwrap()
+                .references()
+                .get(module.constructor_reference as usize)
+                .and_then(|reference| reference.binding())
+                .ok_or_eyre("missing lazy placement constructor")?;
+            lazy.push(LazyWiring {
+                declaration,
+                module_candidate,
+                selector: selector.candidate,
+                selector_segment: selector.owner,
+                source: self.owners[&selector.owner],
+                selected: selector.selected.identity.clone(),
+                destination: self.owners[&destination],
+                roots: activation.roots.clone(),
+                evaluation_target: module.target,
+                constructor: module.constructor.clone(),
+                constructor_owner: self.owners[&super::segments::declaration(
+                    graph,
+                    &module.constructor,
+                )?
+                .ok_or_eyre("lazy constructor has no native declaration")?],
+                constructor_symbol: (declaration.file_id, binding),
+                options: module.options.as_ref().map(|slot| PreservedOptionsValue {
+                    segment: declaration,
+                    owner: self.owners[&declaration],
+                    span: slot.span,
+                }),
+            });
+        }
+        let bindings = self
+            .names
+            .iter()
+            .map(|(&owner, names)| {
+                (
+                    owner,
+                    names
+                        .bindings
+                        .iter()
+                        .map(|binding| NativeBinding {
+                            symbol: binding.symbol,
+                            identity: binding.identity.clone(),
+                            owner: binding.owner,
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
+        Ok(NativePlacement {
+            owners: self.owners.clone(),
+            lazy,
+            bindings,
+            schedules: self.schedules.clone(),
+        })
+    }
+
     fn generated_islands(
         graph: &SourceGraph,
         plan: &ChunkPlan,
@@ -44,6 +125,7 @@ impl Placement {
                 if !island.insert(key) {
                     continue;
                 }
+
                 eyre::ensure!(
                     matches!(
                         graph
@@ -275,7 +357,7 @@ impl Placement {
                 }
                 // A pure library must not import an evaluation job on another member's behalf.
                 // Reject new import cycles as well: they could expose eager-read TDZs.
-                if !binding_closure_safe(graph, modules, prepared.symbols, &proposed, owner)? {
+                if !binding_closure_safe(graph, plan, prepared.symbols, &proposed, owner)? {
                     return Ok(None);
                 }
                 let mut values = Values::new(prepared);
@@ -325,6 +407,7 @@ impl Placement {
         cjs: &commonjs::CommonJs,
     ) -> eyre::Result<Self> {
         let symbols = prepared.symbols;
+        let references = references::References::new(graph, plan)?;
         let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
         if modules.keys().any(|&file| has_externals(graph, file)) {
             // Unknown external surfaces/evaluation stay on native source-module seams.
@@ -338,9 +421,10 @@ impl Placement {
             .retention
             .effects
             .iter()
-            .filter(|s| s.summary.is_effectful())
+            .filter(|s| plan.lazy_modules.residual_effectful(s.key, &s.summary))
             .map(|s| s.key)
             .collect();
+        let lazy_values = lazy_value_segments(plan);
         let keys: Vec<_> = live.iter().copied().collect();
         let indices: BTreeMap<_, _> = keys.iter().enumerate().map(|(i, &key)| (key, i)).collect();
         let mut constraints = vec![BTreeSet::new(); keys.len()];
@@ -454,6 +538,7 @@ impl Placement {
                     && !wait_bound.contains(&key.file_id)
                     && !cjs.contains(key.file_id)
                     && !effects.contains(key)
+                    && !lazy_values.contains(key)
                     && !placement.instantiable()
                     && (!placement.declarations().is_empty() || placement.default_expression())
                     && first_abrupt
@@ -510,7 +595,44 @@ impl Placement {
                 || (phase_bound.contains(&key.file_id) && !placement.instantiable())
                 || (fenced.contains(&key.file_id)
                     && !placement.instantiable()
-                    && !prefixes.contains(&key))
+                    && !prefixes.contains(&key)
+                    && !plan.lazy_modules.modules().iter().any(|module| {
+                        module
+                            .selectors
+                            .iter()
+                            .any(|selector| selector.owner == key)
+                            && !effects.contains(&key)
+                            && plan
+                                .retention
+                                .execution
+                                .barriers
+                                .iter()
+                                .filter(|barrier| barrier.segment == key)
+                                .all(|barrier| {
+                                    matches!(
+                                        barrier.reason,
+                                        BarrierReason::CrossSourceAccess
+                                            | BarrierReason::DeferredAccess
+                                            | BarrierReason::UnknownInvocation
+                                    )
+                                })
+                            && facts.invocations().iter().enumerate().all(|(index, call)| {
+                                !contains(
+                                    graph.file_segments(key.file_id).unwrap()
+                                        [key.segment_idx as usize]
+                                        .span,
+                                    call.span(),
+                                ) || plan.lazy_modules.allocation(key, call.span())
+                                    || !facts.emission().execution().is_module_evaluation(
+                                        facts
+                                            .emission()
+                                            .execution()
+                                            .invocations()
+                                            .get(index)
+                                            .unwrap(),
+                                    )
+                            })
+                    }))
                 || !placement.forward_references().is_empty()
             {
                 pinned.insert(key);
@@ -530,6 +652,12 @@ impl Placement {
             }
             for index in placement.writes() {
                 let reference = facts.references().get(index as usize).unwrap();
+                if reference
+                    .binding()
+                    .is_some_and(|binding| plan.lazy_modules.consumes_binding(key.file_id, binding))
+                {
+                    continue;
+                }
                 let Some(binding) = reference.binding().and_then(|id| {
                     facts
                         .bindings()
@@ -549,23 +677,12 @@ impl Placement {
         // chunks as live imports. This also keeps snapshots ahead of later writes.
         for &key in &live {
             let module = &modules[&key.file_id];
-            for index in module
-                .parsed
-                .facts()
-                .emission()
-                .segments()
-                .get(key.segment_idx as usize)
-                .unwrap()
-                .placement()
-                .eager_reads()
+            for reference in references
+                .get(key)
+                .iter()
+                .filter(|reference| reference.eager)
             {
-                let reference = module
-                    .parsed
-                    .facts()
-                    .references()
-                    .get(index as usize)
-                    .unwrap();
-                let Some(binding) = reference.binding().and_then(|id| {
+                let Some(binding) = Some(reference.symbol.1).and_then(|id| {
                     module
                         .parsed
                         .facts()
@@ -709,7 +826,7 @@ impl Placement {
                 .filter(|owner| {
                     !cjs.contains(*owner)
                         && !wait_bound.contains(owner)
-                        && !component.iter().any(|key| prefixes.contains(key))
+                        && !reached.iter().any(|key| prefixes.contains(key))
                         && !component.iter().any(|key| {
                             readonly_users
                                 .get(key)
@@ -750,7 +867,7 @@ impl Placement {
         let mut anchored = BTreeSet::new();
         let mut activation = loop {
             let mut activation =
-                ActivationIndex::new(graph, modules, symbols, seams, &owners, cjs)?;
+                ActivationIndex::new(graph, plan, symbols, seams, &owners, cjs, &references)?;
             let mut rejected = Vec::new();
             for component in &candidates {
                 let origin = Owner::Evaluation(seams[&component[0].file_id]);
@@ -814,8 +931,7 @@ impl Placement {
                     Self::scheduled(graph, plan, modules, owners.clone(), &prefixes)?;
                 placement.names = names;
                 let (safe, initializers) = activation_safe(
-                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes, None,
-                    None, None,
+                    graph, plan, modules, symbols, seams, surfaces, &placement, None, None, None,
                 )?;
                 if !safe {
                     // Reject contraction, not native cycles. Prefer retaining
@@ -861,8 +977,15 @@ impl Placement {
                         progress,
                         "native activation proof failed without relocation"
                     );
-                    activation =
-                        ActivationIndex::new(graph, modules, symbols, seams, &owners, cjs)?;
+                    activation = ActivationIndex::new(
+                        graph,
+                        plan,
+                        symbols,
+                        seams,
+                        &owners,
+                        cjs,
+                        &references,
+                    )?;
                     continue;
                 }
                 return Ok(placement);
@@ -878,7 +1001,8 @@ impl Placement {
                 }
             }
             eyre::ensure!(progress, "incompatible native lexical placement");
-            activation = ActivationIndex::new(graph, modules, symbols, seams, &owners, cjs)?;
+            activation =
+                ActivationIndex::new(graph, plan, symbols, seams, &owners, cjs, &references)?;
         }
     }
     fn scheduled(
@@ -936,6 +1060,50 @@ impl Placement {
                 }
             }
         }
+        for edge in plan
+            .retention
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == RetentionEdgeKind::PreservedSlot)
+        {
+            if let (GraphNode::Segment(from), GraphNode::Segment(to)) = (edge.from, edge.to) {
+                if from != to && owners[&from] == owners[&to] {
+                    dependencies.get_mut(&from).unwrap().insert(to);
+                }
+            }
+        }
+        for module in plan.lazy_modules.modules() {
+            let Some(constructor) = declaration(graph, &module.constructor)? else {
+                continue;
+            };
+            for selector in &module.selectors {
+                if !plan.async_activations.values().any(|activation| {
+                    matches!(activation.origin, crate::chunks::AsyncOrigin::Lazy { declaration, module_candidate, selector: candidate }
+                        if declaration == module.owner && module_candidate == module.candidate && candidate == selector.candidate)
+                }) {
+                    continue;
+                }
+                let facts = graph.file_facts(selector.owner.file_id).unwrap();
+                if owners.contains_key(&selector.owner)
+                    && owners.contains_key(&constructor)
+                    && selector.owner != constructor
+                    && owners[&selector.owner] == owners[&constructor]
+                    && facts.emission().execution().is_module_evaluation(
+                        facts
+                            .emission()
+                            .execution()
+                            .references()
+                            .get(selector.constructor_reference as usize)
+                            .unwrap(),
+                    )
+                {
+                    dependencies
+                        .get_mut(&selector.owner)
+                        .unwrap()
+                        .insert(constructor);
+                }
+            }
+        }
         // Preserve each remaining source's native statement order. This is local
         // to physical owners, never a global order between independent entries.
         let mut previous = BTreeMap::new();
@@ -969,7 +1137,22 @@ impl Placement {
             schedules.values().map(Vec::len).sum::<usize>() == owners.len(),
             "mandatory native segment schedule contains a cycle"
         );
-        let phase_dependencies = phase_dependencies(&owners, prefixes);
+        let mut phase_dependencies = phase_dependencies(&owners, prefixes);
+        for edge in plan
+            .retention
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == RetentionEdgeKind::PreservedSlot)
+        {
+            if let (GraphNode::Segment(from), GraphNode::Segment(to)) = (edge.from, edge.to) {
+                if owners[&from] != owners[&to] {
+                    phase_dependencies
+                        .entry(owners[&from])
+                        .or_default()
+                        .insert(owners[&to]);
+                }
+            }
+        }
         Ok(Self {
             owners,
             names: BTreeMap::new(),
@@ -1025,54 +1208,60 @@ impl ActivationIndex {
 
     fn new(
         graph: &SourceGraph,
-        modules: &BTreeMap<u32, Module<'_>>,
+        plan: &ChunkPlan,
         symbols: &Symbols,
         seams: &BTreeMap<u32, u32>,
         owners: &BTreeMap<SegmentKey, Owner>,
         cjs: &commonjs::CommonJs,
+        references: &references::References,
     ) -> eyre::Result<Self> {
         let mut index = Self::from_owners(owners);
-        for (&file, module) in modules {
-            for reference in module.parsed.facts().references() {
-                let segment = module
-                    .parsed
-                    .segments()
-                    .partition_point(|s| s.span.end <= reference.span().start);
-                let key = SegmentKey::new(file, segment as u32);
-                let Some(&owner) = owners.get(&key) else {
-                    continue;
-                };
-                let Some(binding) = reference.binding() else {
-                    continue;
-                };
-                let identity = if symbols.definitions.contains_key(&(file, binding)) {
-                    ExportIdentity::Binding(file, binding)
-                } else if let Some(linked) = symbols.imports.get(&(file, binding)) {
-                    linked.identity.clone()
-                } else {
-                    continue;
-                };
-                let target = if let Some(key) = declaration(graph, &identity)? {
-                    Some(owners[&key])
-                } else if let ExportIdentity::Namespace(file) = identity {
-                    if cjs.contains(file) {
-                        index.opaque.insert(owner);
-                    }
-                    index
-                        .namespaces
-                        .entry(owner)
-                        .or_default()
-                        .include(Owner::Evaluation(seams[&file]));
-                    None
-                } else {
-                    if matches!(identity, ExportIdentity::CommonJs(..)) {
-                        index.opaque.insert(owner);
-                    }
-                    None
-                };
-                if let Some(target) = target {
-                    index.references.entry(owner).or_default().insert(target);
+        for (key, reference) in references.iter() {
+            let (file, binding) = reference.symbol;
+            let Some(&owner) = owners.get(&key) else {
+                continue;
+            };
+            let identity = if symbols.definitions.contains_key(&(file, binding)) {
+                ExportIdentity::Binding(file, binding)
+            } else if let Some(linked) = symbols.imports.get(&(file, binding)) {
+                linked.identity.clone()
+            } else {
+                continue;
+            };
+            let target = if let Some(key) = declaration(graph, &identity)? {
+                Some(owners[&key])
+            } else if let ExportIdentity::Namespace(file) = identity {
+                if cjs.contains(file) {
+                    index.opaque.insert(owner);
                 }
+                index
+                    .namespaces
+                    .entry(owner)
+                    .or_default()
+                    .include(Owner::Evaluation(seams[&file]));
+                None
+            } else {
+                if matches!(identity, ExportIdentity::CommonJs(..)) {
+                    index.opaque.insert(owner);
+                }
+                None
+            };
+            if let Some(target) = target {
+                index.references.entry(owner).or_default().insert(target);
+            }
+        }
+        for edge in plan
+            .retention
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == RetentionEdgeKind::PreservedSlot)
+        {
+            if let (GraphNode::Segment(from), GraphNode::Segment(to)) = (edge.from, edge.to) {
+                index
+                    .references
+                    .entry(owners[&from])
+                    .or_default()
+                    .insert(owners[&to]);
             }
         }
         Ok(index)
@@ -1187,6 +1376,26 @@ fn phase_dependencies(
     dependencies
 }
 
+fn lazy_value_segments(plan: &ChunkPlan) -> BTreeSet<SegmentKey> {
+    let selectors: BTreeSet<_> = plan
+        .lazy_modules
+        .modules()
+        .iter()
+        .flat_map(|module| module.selectors.iter().map(|selector| selector.owner))
+        .collect();
+    plan.retention
+        .effects
+        .iter()
+        .filter_map(|effect| {
+            (selectors.contains(&effect.key)
+                && !plan
+                    .lazy_modules
+                    .residual_effectful(effect.key, &effect.summary))
+            .then_some(effect.key)
+        })
+        .collect()
+}
+
 /// Compare initialization visibility at every native body event, independently
 /// for each entrance. Pure initializers may commute only between those events:
 /// a throw must expose exactly the same initialized lexical bindings.
@@ -1199,12 +1408,12 @@ fn activation_safe(
     seams: &BTreeMap<u32, u32>,
     surfaces: &BTreeSet<u32>,
     placement: &Placement,
-    prefixes: &BTreeSet<SegmentKey>,
     connections: Option<(&BTreeMap<PathBuf, Code>, &BTreeMap<RootId, PathBuf>)>,
     cjs: Option<&commonjs::CommonJs>,
     activations: Option<&Activations>,
 ) -> eyre::Result<(bool, BTreeSet<SegmentKey>)> {
     let owners = &placement.owners;
+    let references = references::References::new(graph, plan)?;
     let mut native = BTreeMap::new();
     let mut physical: BTreeMap<Owner, Vec<Owner>> =
         owners.values().map(|&owner| (owner, Vec::new())).collect();
@@ -1236,8 +1445,8 @@ fn activation_safe(
             );
         native.insert(file, dependencies);
     }
-    for (owner, dependencies) in phase_dependencies(owners, prefixes) {
-        let mut dependencies: Vec<_> = dependencies.into_iter().collect();
+    for (&owner, dependencies) in &placement.phase_dependencies {
+        let mut dependencies: Vec<_> = dependencies.iter().copied().collect();
         dependencies.sort_by_key(|owner| owner.path(graph));
         physical.entry(owner).or_default().extend(dependencies);
     }
@@ -1260,16 +1469,11 @@ fn activation_safe(
                 .iter()
                 .filter(|binding| binding.top_level())
             {
-                if !module.parsed.facts().references().iter().any(|reference| {
-                    if reference.binding() != Some(binding.id()) {
-                        return false;
-                    }
-                    let index = module
-                        .parsed
-                        .segments()
-                        .partition_point(|segment| segment.span.end <= reference.span().start);
-                    owners.get(&SegmentKey::new(file, index as u32)) == Some(&owner)
-                }) {
+                if !schedule
+                    .iter()
+                    .flat_map(|&key| references.get(key))
+                    .any(|reference| reference.symbol == (file, binding.id()))
+                {
                     continue;
                 }
                 let identity = if symbols.definitions.contains_key(&(file, binding.id())) {
@@ -1333,7 +1537,10 @@ fn activation_safe(
         .retention
         .effects
         .iter()
-        .filter(|effect| effect.summary.is_effectful())
+        .filter(|effect| {
+            plan.lazy_modules
+                .residual_effectful(effect.key, &effect.summary)
+        })
         .map(|effect| effect.key)
         .collect();
     let mut lexical = BTreeSet::new();
@@ -1412,10 +1619,22 @@ fn activation_safe(
             entrances.into_iter().map(|file| vec![file]).collect()
         };
         for entrances in groups {
+            // Certified value allocations are no longer unconditional source
+            // events. Compare this entrance's transformed binding projection,
+            // while retaining every original observable/throwing phase.
             let before = projection(
                 completion(entrances.clone(), &native)
                     .into_iter()
                     .flat_map(|file| native_events.get(&file).into_iter().flatten().copied())
+                    .filter(|key| {
+                        plan.lazy_modules.modules().is_empty()
+                            || !lexical.contains(key)
+                            || plan.node_roots[&NodeId::Segment {
+                                module: graph.file_path(key.file_id).unwrap().to_owned(),
+                                index: key.segment_idx,
+                            }]
+                                .contains(root)
+                    })
                     .collect(),
             );
             let after = if let Some((dependencies, schedules, routes)) = &reconstructed {
@@ -1508,7 +1727,6 @@ pub(super) fn validate_connections(
         seams,
         surfaces,
         placement,
-        &BTreeSet::new(),
         Some((files, routes)),
         Some(cjs),
         activations,
@@ -1539,33 +1757,21 @@ pub(super) fn partition_definitions(
 
 fn binding_closure_safe(
     graph: &SourceGraph,
-    modules: &BTreeMap<u32, Module<'_>>,
+    plan: &ChunkPlan,
     symbols: &Symbols,
     owners: &BTreeMap<SegmentKey, Owner>,
     root: Owner,
 ) -> eyre::Result<bool> {
     let mut edges = BTreeMap::<Owner, BTreeSet<Owner>>::new();
+    let references = references::References::new(graph, plan)?;
     for (&key, &owner) in owners {
-        let facts = &modules[&key.file_id].parsed.facts();
-        let span = modules[&key.file_id]
-            .parsed
-            .segments()
-            .get(key.segment_idx as usize)
-            .unwrap()
-            .span;
-        for reference in facts
-            .references()
-            .iter()
-            .filter(|r| !r.type_only() && contains(span, r.span()))
-        {
-            let Some(binding) = reference.binding() else {
-                continue;
-            };
+        for reference in references.get(key) {
+            let (file, binding) = reference.symbol;
             let identity = symbols
                 .imports
-                .get(&(key.file_id, binding))
+                .get(&(file, binding))
                 .map(|s| s.identity.clone())
-                .unwrap_or(ExportIdentity::Binding(key.file_id, binding));
+                .unwrap_or(ExportIdentity::Binding(file, binding));
             let Some(target) = declaration(graph, &identity)? else {
                 if matches!(
                     identity,
@@ -1580,6 +1786,18 @@ fn binding_closure_safe(
             };
             if let Some(&target) = owners.get(&target).filter(|&&target| target != owner) {
                 edges.entry(owner).or_default().insert(target);
+            }
+        }
+    }
+    for edge in plan
+        .retention
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == RetentionEdgeKind::PreservedSlot)
+    {
+        if let (GraphNode::Segment(from), GraphNode::Segment(to)) = (edge.from, edge.to) {
+            if owners[&from] != owners[&to] {
+                edges.entry(owners[&from]).or_default().insert(owners[&to]);
             }
         }
     }

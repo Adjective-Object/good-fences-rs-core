@@ -28,6 +28,8 @@ pub struct ConstructorExport {
 /// Ordinary library methods and LazyImport/LazyAction wrappers are not replaced:
 /// selection caches, governance, loaded-state reads, action options and arguments
 /// remain the actual registered library's responsibility.
+/// Registered wrapper allocations are removable value initializers, not
+/// independent source effects; their genuine argument execution is never waived.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LazyRuntime {
     pub module: ConstructorExport,
@@ -128,8 +130,18 @@ impl Certification {
         let edge = &graph.edges()[index];
         self.modules.iter().any(|module| {
             edge.from == GraphNode::Segment(module.owner)
-                && edge.kind == EdgeKind::DynamicImport
-                && edge.dependency == Some(module.dependency)
+                && (edge.kind == EdgeKind::DynamicImport
+                    && edge.dependency == Some(module.dependency)
+                    || graph
+                        .file_facts(module.owner.file_id)
+                        .and_then(|facts| {
+                            facts
+                                .references()
+                                .get(module.constructor_reference as usize)
+                        })
+                        .is_some_and(|reference| {
+                            edge.site == reference.span() && edge.binding == reference.binding()
+                        }))
                 || module.selectors.iter().any(|selector| {
                     edge.from == GraphNode::Segment(selector.owner)
                         && edge.binding == Some(module.binding)
@@ -153,6 +165,39 @@ impl Certification {
                     .iter()
                     .any(|selector| selector.owner == key)
         })
+    }
+
+    pub(crate) fn allocation(&self, key: SegmentKey, span: Span) -> bool {
+        self.modules.iter().any(|module| {
+            module.owner == key && module.construction == span
+                || module
+                    .selectors
+                    .iter()
+                    .any(|selector| selector.owner == key && selector.construction == span)
+        })
+    }
+
+    pub(crate) fn consumed_constructor(&self, key: SegmentKey, reference: u32) -> bool {
+        self.modules
+            .iter()
+            .any(|module| module.owner == key && module.constructor_reference == reference)
+    }
+
+    /// Registered allocations remain real values, but only residual argument
+    /// execution is an unconditional source event. Forced-effect policy wins.
+    pub(crate) fn residual_effectful(
+        &self,
+        key: SegmentKey,
+        summary: &crate::effects::StatementEffects,
+    ) -> bool {
+        !summary.known_effects.is_empty()
+            || summary.sites.iter().any(|site| {
+                !matches!(
+                    site.reason(),
+                    ast_segmenter::effects::EffectReason::Invocation
+                        | ast_segmenter::effects::EffectReason::Construction
+                ) || !self.allocation(key, site.span())
+            })
     }
 
     pub(crate) fn invocation_removable(&self, key: SegmentKey, span: Span, demanded: bool) -> bool {

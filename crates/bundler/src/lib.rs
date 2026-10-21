@@ -216,6 +216,13 @@ fn retain_with_effects(
         &analysis.effects,
         &mut analysis.edges,
     );
+    // A live registered allocation is a binding initializer, not an
+    // unconditional module effect that makes every sibling selector reachable.
+    analysis.edges.retain(|edge| {
+        edge.kind != RetentionEdgeKind::ModuleEffect
+            || !matches!(edge.to, GraphNode::Segment(key)
+                if lazy_modules.is_some_and(|lazy| !lazy.residual_effectful(key, &analysis.effects[&key])))
+    });
     let mut edges: Vec<_> = analysis.edges.into_iter().collect();
     edges.sort_by_key(|e| (node_key(e.from), node_key(e.to), e.kind, e.source_edge));
     let execution = execution_dependencies::plan(
@@ -223,7 +230,7 @@ fn retain_with_effects(
         &analysis.segments.keys().copied().collect(),
         &edges,
         lazy_modules,
-        &analysis.values,
+        &analysis.effects,
     )?;
     Ok(RetentionPlan {
         revision: graph.revision(),
@@ -357,7 +364,10 @@ impl Retention<'_, '_> {
                 });
             }
             let summary = self.summarize(key, statement.span, self.values.contains(&key))?;
-            if summary.is_effectful() {
+            if self.lazy_modules.map_or_else(
+                || summary.is_effectful(),
+                |lazy| lazy.residual_effectful(key, &summary),
+            ) {
                 let node = GraphNode::Segment(key);
                 self.queue
                     .push_back(Demand::Binding(node, RetentionReason::TopLevelEffect));

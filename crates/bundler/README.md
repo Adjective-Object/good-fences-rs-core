@@ -149,10 +149,32 @@ symbol root. `AsyncActivation::origin` distinguishes source imports from
 identify selector constructions, never invented source dependency IDs.
 Diagnostic async facades report the selector consumer and original import target.
 
+`link::native_placement(graph, plan, policy, sources, options)` solves native
+ownership without emitting or reparsing source. Its immutable `NativePlacement`
+exposes actual `NativeOwner` assignments, owner schedules, canonical cut-binding
+inputs and `LazyWiring` requests. These are graph/plan-generation-local analysis
+results, not artifact filenames or reusable source-cache records.
+Each request identifies the final selector owner, original module/candidate and
+selector, exact selected roots/canonical destination owner, original barrel
+evaluation, generated constructor symbol/owner and optional `PreservedOptionsValue`
+at its single original owner/span. Post-placement connections can consume these
+typed inputs without inspecting rendered code.
+
+Registered wrapper allocations remain real value initializers, not unconditional
+module effects that retain every sibling selector. Placement uses their residual
+argument obligations and entrance-specific binding projections; unknown argument
+execution, forced effects and original initialization/throw fences remain binding.
+Generated constructor reads participate in symbol linking, owner-local naming,
+activation checks and scheduling at the selector instead of at the removed
+module declaration. Preserved option values remain genuine once-only inputs.
+Eligible selectors declared in one source can therefore belong to separate
+consumer owners, with independent implementation owners and ordinary shared
+helper/effect masks. Conservative constraints may still prevent relocation.
+
 **Native emission of a certified transformation currently returns an explicit
-error** requiring phases 5/6. It does not silently emit the original broad demand
-or an incomplete replacement. Remaining work is final selector/implementation
-placement and typed post-placement `Connections` reconstruction: synthesized
+error** requiring phase 6. It does not silently emit the original broad demand
+or an incomplete replacement. Remaining work is typed post-placement
+`Connections` reconstruction: synthesized
 module instances keyed by source chunkgroup × original module identity ×
 destination projection, callbacks against selected projections, and selector
 module-argument rewrites. The original options slot must supply one preserved

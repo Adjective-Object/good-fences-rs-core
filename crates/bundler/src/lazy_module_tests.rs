@@ -107,6 +107,258 @@ fn mask<'a>(
 }
 
 #[test]
+fn lazy_native_placement_separates_selectors_and_their_selected_implementations() {
+    let mut input = input(
+        "const mod = new M(() => import('./target.mjs'));
+        function captured() { return 7; }
+        export const a = new R(mod, ns => ns.first, () => captured());
+        export const b = new A(mod, ns => ns.second, {other: () => captured()});",
+    );
+    let selectors = input.remove(Path::new("entry.mjs")).unwrap();
+    input.insert("selectors.mjs".into(), selectors);
+    input.insert(
+        "entry.mjs".into(),
+        "import {a} from './selectors.mjs'; globalThis.a = a;".into(),
+    );
+    input.insert(
+        "other.mjs".into(),
+        "import {b} from './selectors.mjs'; globalThis.b = b;".into(),
+    );
+    input.insert("leaf.mjs".into(),
+        "function shared() { return 1; } export function first() { return shared(); } export function second() { return shared() + 1; }".into());
+    for wire in [false, true] {
+        let graph = graph_with_storage(&input, wire, ModuleFormat::Esm, wire);
+        let options = OutputOptions {
+            lazy_runtimes: vec![runtime()],
+            ..Default::default()
+        };
+        let roots: Vec<_> = ["entry.mjs", "other.mjs"]
+            .into_iter()
+            .map(|name| RootSeed {
+                id: RootId::Entry(name.into()),
+                evaluation_roots: vec![graph.file_id(Path::new(name)).unwrap()],
+                binding_roots: vec![],
+            })
+            .collect();
+        let plan = crate::chunks::partition_with_options(
+            &graph,
+            &roots,
+            &EffectPolicy::default(),
+            &options,
+        )
+        .unwrap();
+        let parses = ast_segmenter::module_parse_count();
+        let placement =
+            native_placement(&graph, &plan, &EffectPolicy::default(), &input, &options).unwrap();
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+        let a = segment(&graph, &input, "selectors.mjs", "const a");
+        let b = segment(&graph, &input, "selectors.mjs", "const b");
+        assert_ne!(placement.owners()[&a], placement.owners()[&b]);
+        assert_eq!(
+            placement.owners()[&a],
+            NativeOwner::Evaluation(graph.file_id(Path::new("entry.mjs")).unwrap())
+        );
+        assert_eq!(
+            placement.owners()[&b],
+            NativeOwner::Evaluation(graph.file_id(Path::new("other.mjs")).unwrap())
+        );
+        let first = segment(&graph, &input, "leaf.mjs", "function first");
+        let second = segment(&graph, &input, "leaf.mjs", "function second");
+        assert_ne!(placement.owners()[&first], placement.owners()[&second]);
+        assert_eq!(
+            mask(&graph, &plan, a),
+            &BTreeSet::from([RootId::Entry("entry.mjs".into())])
+        );
+        assert_eq!(
+            mask(&graph, &plan, b),
+            &BTreeSet::from([RootId::Entry("other.mjs".into())])
+        );
+        assert_eq!(placement.lazy().len(), 2);
+        let module = &plan.lazy_modules.modules()[0];
+        assert!(!placement.owners().contains_key(&module.owner));
+        assert!(plan
+            .retention
+            .edges
+            .iter()
+            .all(|edge| edge.to != GraphNode::Segment(module.owner)));
+        for wiring in placement.lazy() {
+            assert_eq!(wiring.source, placement.owners()[&wiring.selector_segment]);
+            assert_eq!(
+                &wiring.roots,
+                mask(
+                    &graph,
+                    &plan,
+                    if wiring.selector_segment == a {
+                        first
+                    } else {
+                        second
+                    }
+                )
+            );
+            assert_eq!(
+                wiring.destination,
+                placement.owners()[&if wiring.selector_segment == a {
+                    first
+                } else {
+                    second
+                }]
+            );
+            assert_eq!(
+                wiring.evaluation_target,
+                graph.file_id(Path::new("target.mjs")).unwrap()
+            );
+            assert!(wiring.options.is_none());
+            assert!(placement.bindings()[&wiring.source].iter().any(|binding| {
+                binding.symbol == wiring.constructor_symbol
+                    && binding.identity == wiring.constructor
+                    && binding.owner == Some(wiring.constructor_owner)
+            }));
+        }
+        let union: BTreeSet<_> = mask(&graph, &plan, first)
+            .union(mask(&graph, &plan, second))
+            .cloned()
+            .collect();
+        assert_eq!(
+            *mask(
+                &graph,
+                &plan,
+                segment(&graph, &input, "leaf.mjs", "function shared")
+            ),
+            union
+        );
+        assert_eq!(
+            *mask(
+                &graph,
+                &plan,
+                segment(&graph, &input, "effects.mjs", "barrelEffect")
+            ),
+            union
+        );
+        assert_eq!(
+            *mask(
+                &graph,
+                &plan,
+                segment(&graph, &input, "selectors.mjs", "function captured")
+            ),
+            BTreeSet::from([
+                RootId::Entry("entry.mjs".into()),
+                RootId::Entry("other.mjs".into())
+            ])
+        );
+        assert!(format!(
+            "{:#}",
+            esm_with_options(&graph, &plan, &EffectPolicy::default(), &input, &options)
+                .err()
+                .unwrap()
+        )
+        .contains("post-placement lazy wiring"));
+    }
+}
+
+#[test]
+fn lazy_effect_only_options_do_not_retain_the_removed_constructor_reference() {
+    let input = input(
+        "function record() { globalThis.optionEffect = true; return 'name'; }
+        globalThis.runtime = R;
+        const mod = new M(() => import('./target.mjs'), {name: record()});
+        const dead = new R(mod, ns => ns.first);",
+    );
+    for wire in [false, true] {
+        let (graph, plan) = planned(&input, wire);
+        assert_eq!(plan.lazy_modules.modules().len(), 1);
+        assert!(plan.async_activations.is_empty());
+        let options = OutputOptions {
+            lazy_runtimes: vec![runtime()],
+            ..Default::default()
+        };
+        let placement =
+            native_placement(&graph, &plan, &EffectPolicy::default(), &input, &options).unwrap();
+        assert!(placement.lazy().is_empty());
+        let constructor = segment(&graph, &input, "runtime.mjs", "class ModuleCtor");
+        assert!(mask(&graph, &plan, constructor).is_empty());
+        assert!(!placement.owners().contains_key(&constructor));
+    }
+}
+
+#[test]
+fn lazy_native_placement_keeps_one_options_value_and_original_effect_fences() {
+    for options_value in [
+        "{other: () => captured}",
+        "{name: record(), other: () => captured}",
+    ] {
+        let input = input(&format!(
+            "const captured = {{}};
+            function record() {{ globalThis.optionsEffect = true; return captured; }}
+            globalThis.beforeOptions = true;
+            const mod = new M(() => import('./target.mjs'), {options_value});
+            export const a = new R(mod, ns => ns.first);
+            export const b = new A(mod, ns => ns.second);
+            globalThis.afterOptions = true;"
+        ));
+        for wire in [false, true] {
+            let (graph, plan) = planned(&input, wire);
+            let options = OutputOptions {
+                lazy_runtimes: vec![runtime()],
+                ..Default::default()
+            };
+            let placement =
+                native_placement(&graph, &plan, &EffectPolicy::default(), &input, &options)
+                    .unwrap();
+            let module = &plan.lazy_modules.modules()[0];
+            let value = placement.lazy()[0].options.as_ref().unwrap();
+            assert_eq!(value.segment, module.owner);
+            assert_eq!(value.span, module.options.as_ref().unwrap().span);
+            assert!(placement
+                .lazy()
+                .iter()
+                .all(|wiring| wiring.options.as_ref() == Some(value)));
+            let schedule = placement.schedule(value.owner);
+            assert_eq!(
+                schedule.iter().filter(|&&key| key == module.owner).count(),
+                1
+            );
+            let before = segment(&graph, &input, "entry.mjs", "beforeOptions");
+            let after = segment(&graph, &input, "entry.mjs", "afterOptions");
+            assert_eq!(placement.owners()[&before], value.owner);
+            assert_eq!(placement.owners()[&after], value.owner);
+            let position = |key| {
+                schedule
+                    .iter()
+                    .position(|&scheduled| scheduled == key)
+                    .unwrap()
+            };
+            assert!(position(before) < position(module.owner));
+            assert!(position(module.owner) < position(after));
+            assert!(plan
+                .retention
+                .execution
+                .constraints
+                .iter()
+                .any(|constraint| {
+                    constraint.before == before
+                        && constraint.after == module.owner
+                        && constraint.kind
+                            == crate::execution_dependencies::ConstraintKind::AbruptCompletion
+                }));
+            assert!(!plan.retention.execution.accesses.iter().any(|access| {
+                access.segment == module.owner && access.reference == module.constructor_reference
+            }));
+            assert!(placement
+                .bindings()
+                .values()
+                .flatten()
+                .all(|binding| binding.symbol != (module.owner.file_id, module.binding)));
+            assert!(!mask(
+                &graph,
+                &plan,
+                segment(&graph, &input, "entry.mjs", "const captured")
+            )
+            .is_empty());
+        }
+    }
+}
+
+#[test]
 fn lazy_overlays_replace_broad_demand_with_independent_selector_roots() {
     let mut input = input(
         "const mod = new M(() => import('./target.mjs'));

@@ -141,6 +141,108 @@ struct Module<'a> {
     relocations: &'a [crate::css_loading::UrlRelocation],
 }
 
+/// A physical native body identity, independent of artifact naming.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativeOwner {
+    Evaluation(u32),
+    Bindings(source_graph::SegmentKey),
+}
+
+/// Immutable final owners and typed lazy reconstruction requests. No emitted
+/// text or output filenames participate in placement.
+pub struct NativePlacement {
+    owners: BTreeMap<source_graph::SegmentKey, NativeOwner>,
+    lazy: Vec<LazyWiring>,
+    bindings: BTreeMap<NativeOwner, Vec<NativeBinding>>,
+    schedules: BTreeMap<NativeOwner, Vec<source_graph::SegmentKey>>,
+}
+
+impl NativePlacement {
+    pub fn owners(&self) -> &BTreeMap<source_graph::SegmentKey, NativeOwner> {
+        &self.owners
+    }
+
+    pub fn lazy(&self) -> &[LazyWiring] {
+        &self.lazy
+    }
+
+    pub fn bindings(&self) -> &BTreeMap<NativeOwner, Vec<NativeBinding>> {
+        &self.bindings
+    }
+
+    pub fn schedule(&self, owner: NativeOwner) -> &[source_graph::SegmentKey] {
+        self.schedules
+            .get(&owner)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeBinding {
+    pub symbol: (u32, ast_segmenter::owned::BindingId),
+    pub identity: source_graph::ExportIdentity,
+    pub owner: Option<NativeOwner>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LazyWiring {
+    pub declaration: source_graph::SegmentKey,
+    pub module_candidate: u32,
+    pub selector: u32,
+    pub selector_segment: source_graph::SegmentKey,
+    pub source: NativeOwner,
+    pub selected: source_graph::ExportIdentity,
+    pub destination: NativeOwner,
+    pub roots: BTreeSet<RootId>,
+    pub evaluation_target: u32,
+    pub constructor: source_graph::ExportIdentity,
+    /// Canonical constructor definition; a retained local alias may have its own owner.
+    pub constructor_owner: NativeOwner,
+    pub constructor_symbol: (u32, ast_segmenter::owned::BindingId),
+    /// The single original options value, never an expression to duplicate.
+    pub options: Option<PreservedOptionsValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedOptionsValue {
+    pub segment: source_graph::SegmentKey,
+    pub owner: NativeOwner,
+    pub span: oxc_span::Span,
+}
+
+/// Solve native segment placement under checked transformed obligations without
+/// emitting code. Results are local to this graph/plan generation; no optional
+/// source-island activation is inferred. Lazy emission still requires synthesis.
+pub fn native_placement(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+    options: &crate::build::OutputOptions,
+) -> eyre::Result<NativePlacement> {
+    ensure!(
+        plan.is_current_with_options(graph, policy, options),
+        "stale native placement plan"
+    );
+    let manifest = diagnostic_manifest(graph, plan, policy)?;
+    graph.validate_links()?;
+    let relocations = BTreeMap::new();
+    let mut modules = load_modules(graph, plan, sources, &relocations)?;
+    let symbols = crate::symbols::Symbols::link(graph, plan)?;
+    for (&file, module) in &mut modules {
+        module.surface = symbols.exports[&file].keys().cloned().collect();
+    }
+    native::placement(
+        graph,
+        plan,
+        &modules,
+        &manifest,
+        &symbols,
+        options.min_chunk_bytes,
+    )
+}
+
 /// Emit native chunks.
 pub fn esm(
     graph: &SourceGraph,
@@ -200,7 +302,7 @@ pub fn deferred_esm(
 ) -> eyre::Result<Option<DeferredEsm>> {
     ensure!(
         plan.lazy_modules.modules().is_empty(),
-        "certified lazy-module emission requires selector placement and post-placement lazy wiring (phases 5/6)"
+        "certified lazy-module emission requires post-placement lazy wiring (phase 6)"
     );
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
@@ -327,7 +429,7 @@ pub(crate) fn esm_plan_configured(
     let _span = tracing::info_span!("build.link").entered();
     ensure!(
         plan.lazy_modules.modules().is_empty(),
-        "certified lazy-module emission requires selector placement and post-placement lazy wiring (phases 5/6)"
+        "certified lazy-module emission requires post-placement lazy wiring (phase 6)"
     );
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
