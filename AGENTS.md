@@ -26,6 +26,14 @@ Before commiting any changes, check:
 
 ## Organization
 
+Persisted cache trees are read through borrowed accessors, including nested
+syntax/emission/execution records and Ecco precursors. Keep storage fields
+private in record modules; scoped construction APIs are for extraction before
+provenance sealing, not consumer mutation. Owned adapter moves are explicit.
+Scalar IDs/spans and enum discriminants/payload matching remain value APIs.
+Accessor-only changes must preserve Serde field order/attributes and CBOR bytes;
+do not couple consumers to serialization or deserialize a tree just to read it.
+
 Leave CONCISE notes on persistent design in AGENTS.md files in the roots of the crates, or the repo root for cross-cutting concerns.
 Any temporary notes about mid-refactor or mid-implementation belong in the NOTES file instead.
 
