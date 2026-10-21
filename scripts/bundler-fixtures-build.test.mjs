@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { buildProject, execute, observeEntries, runBundlerCases, runFixtures } from './bundler-fixtures.mjs';
+import { buildProject, execute, managed, observeEntries, runBundlerCases, runFixtures } from './bundler-fixtures.mjs';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const managedRoot = path.join(project, 'target/p1-test-tmp');
@@ -49,6 +49,45 @@ test('real public pipeline executes emitted output without modifying original fi
     assert.deepEqual(run(), [{ id: 'synthetic/example', status: 'passed', backend: 'native', executions: 1, stdout: ['hello'] }]);
   });
 });
+
+for (const [name, relocated] of [
+  ['barrels', []],
+  ['bridge', ['x.mjs', 'y.mjs', 'z.mjs']],
+  ['diamond', ['hub.mjs', 'left.mjs', 'right.mjs']],
+  ['failure-cache', ['x.mjs', 'y.mjs']],
+  ['helper-names', ['x.mjs', 'y.mjs']],
+  ['native-fallback', []],
+  ['write-restrictions', ['state.mjs', 'writer.mjs']],
+]) {
+  test(`adversarial library ${name} proves placement or explicit native fallback`, () => {
+    const fixture = path.join(project, 'fixtures/bundler/authored', `adversarial-library-${name}`);
+    const manifest = JSON.parse(readFileSync(path.join(fixture, 'case.json'), 'utf8'));
+    managed(managedRoot, directory => {
+      const root = path.join(directory, 'source');
+      cpSync(path.join(fixture, 'files'), root, {recursive: true});
+      const members = [0, manifest.fixtureConfig.output.min_chunk_bytes].map(min_chunk_bytes => {
+        const build = buildProject(path.join(project, 'target/debug/examples/build'),
+          root, manifest.entryPoints, 30000, {
+            ...manifest.fixtureConfig,
+            output: {...manifest.fixtureConfig.output, min_chunk_bytes},
+          });
+        assert.equal(build.backend, 'native');
+        return new Map(build.segmentMembers.map(member =>
+          [`${path.relative(root, member.source)}:${member.segment}`, member.artifact]));
+      });
+      assert.deepEqual([...members[0].keys()], [...members[1].keys()], 'placement must preserve retained segments');
+      if (relocated.length === 0) {
+        assert.deepEqual(members[0], members[1], 'unsupported islands must retain native owners');
+      } else {
+        for (const source of relocated) {
+          assert([...members[0]].some(([key, owner]) =>
+            key.startsWith(`${source}:`) && members[1].get(key) !== owner),
+          `${source} must have a genuinely relocated segment`);
+        }
+      }
+    });
+  });
+}
 
 for (const [name, source, assertions] of [
   ['guarded arguments and spread', `

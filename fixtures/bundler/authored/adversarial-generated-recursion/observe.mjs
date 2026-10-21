@@ -20,6 +20,8 @@ export async function observe({entries, entry, mode, generatedBoundaries, direct
   const identities = await Promise.all([ns.identity(), ns.identity(), ns.identity()]);
   assert.deepEqual(events, ['eager']);
   for (const pair of identities) {
+    assert.equal(typeof pair.even, 'function');
+    assert.equal(typeof pair.odd, 'function');
     assert.equal(pair.even, identities[0].even);
     assert.equal(pair.odd, identities[0].odd);
     assert.notEqual(pair.even, pair.odd);
