@@ -1,0 +1,27 @@
+[package]
+name = "quickjs-bundler-harness-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+eyre = "0.6"
+ast-segmenter = { path = "../../ast_segmenter" }
+bundler = { path = "../../bundler" }
+logger = { path = "../../logger" }
+quickjs-bundler-harness = { path = ".." }
+source_graph = { path = "../../source_graph" }
+
+[[bin]]
+name = "bundle_effects"
+path = "fuzz_targets/bundle_effects.rs"
+test = false
+doc = false
+bench = false
