@@ -1,5 +1,8 @@
 use eyre::{bail, ensure, eyre, Result};
 
+use crate::views::{
+    BindingView, CallArgumentView, DefinitionView, HazardExprView, LocalFactsView, ReturnsView,
+};
 use crate::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,11 +143,17 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
 }
 
 pub(crate) fn validate_facts(facts: &LocalFacts) -> Result<()> {
+    validate_facts_view(facts.into())
+}
+
+pub(crate) fn validate_facts_view(facts: LocalFactsView<'_>) -> Result<()> {
     for (index, symbol) in facts.global_symbols().iter().enumerate() {
         ensure!(!symbol.name().is_empty(), "empty global symbol name");
         ensure!(
-            !facts.global_symbols()[..index]
+            !facts
+                .global_symbols()
                 .iter()
+                .take(index)
                 .any(|previous| previous.name() == symbol.name()),
             "duplicate global symbol: {}",
             symbol.name()
@@ -157,26 +166,34 @@ pub(crate) fn validate_facts(facts: &LocalFacts) -> Result<()> {
             "duplicate definition: {:?}",
             definition.binding()
         );
-        validate_definition(definition)?;
+        validate_definition_view(definition)?;
     }
     Ok(())
 }
 
 fn validate_definition(definition: &Definition) -> Result<()> {
+    validate_definition_view(definition.into())
+}
+
+fn validate_definition_view(definition: DefinitionView<'_>) -> Result<()> {
     match definition.binding() {
-        Binding::Global(path) | Binding::Module { path, .. } => {
+        BindingView::Global(path) | BindingView::Module { path, .. } => {
             ensure!(
                 !path.is_empty() && path.iter().all(|name| !name.is_empty()),
                 "empty definition path"
             );
         }
-        Binding::Local(name) => ensure!(!name.is_empty(), "empty local definition name"),
+        BindingView::Local(name) => ensure!(!name.is_empty(), "empty local definition name"),
     }
     for (index, parameter) in definition.parameters().iter().enumerate() {
         ensure!(
             !parameter.is_empty()
                 && parameter != "this"
-                && !definition.parameters()[..index].contains(parameter),
+                && !definition
+                    .parameters()
+                    .iter()
+                    .take(index)
+                    .any(|v| v == parameter),
             "duplicate or reserved parameter {parameter}"
         );
     }
@@ -195,8 +212,10 @@ fn validate_definition(definition: &Definition) -> Result<()> {
     for fields in [definition.hazards(), definition.return_hazards()] {
         for (index, (slot, _)) in fields.fields().iter().enumerate() {
             ensure!(
-                !fields.fields()[..index]
+                !fields
+                    .fields()
                     .iter()
+                    .take(index)
                     .any(|(previous, _)| previous == slot),
                 "duplicate hazard field {}",
                 slot.name()
@@ -205,19 +224,19 @@ fn validate_definition(definition: &Definition) -> Result<()> {
     }
     let scalar = |name: &str| name == "this" || definition.parameters().iter().any(|p| p == name);
     fn validate(
-        expression: &HazardExpr,
-        definition: &Definition,
+        expression: HazardExprView<'_>,
+        definition: DefinitionView<'_>,
         scalar: &impl Fn(&str) -> bool,
     ) -> Result<()> {
         match expression {
-            HazardExpr::Bool(_) | HazardExpr::Unknown => {}
-            HazardExpr::Read { value, .. } => ensure!(scalar(value), "unknown value {value}"),
-            HazardExpr::Or(expressions) => {
+            HazardExprView::Bool(_) | HazardExprView::Unknown => {}
+            HazardExprView::Read { value, .. } => ensure!(scalar(value), "unknown value {value}"),
+            HazardExprView::Or(expressions) => {
                 for expression in expressions {
                     validate(expression, definition, scalar)?;
                 }
             }
-            HazardExpr::Call {
+            HazardExprView::Call {
                 function,
                 arguments,
                 receiver,
@@ -228,14 +247,14 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                 }
                 for argument in arguments {
                     match argument {
-                        CallArgument::Value(name) => {
+                        CallArgumentView::Value(name) => {
                             ensure!(scalar(name), "unknown argument {name}")
                         }
-                        CallArgument::Spread(name) => ensure!(
+                        CallArgumentView::Spread(name) => ensure!(
                             definition.rest() == Some(name),
                             "unknown argument list {name}"
                         ),
-                        CallArgument::Forward => {}
+                        CallArgumentView::Forward => {}
                     }
                 }
             }
@@ -243,7 +262,7 @@ fn validate_definition(definition: &Definition) -> Result<()> {
         Ok(())
     }
     ensure!(
-        matches!(definition.returns(), Returns::Fresh)
+        matches!(definition.returns(), ReturnsView::Fresh)
             || (definition.return_hazards().default_expression().is_none()
                 && definition.return_hazards().fields().is_empty()),
         "return hazard assignments require an implicit fresh return"
@@ -262,12 +281,12 @@ fn validate_definition(definition: &Definition) -> Result<()> {
     }
     for update in definition.updates() {
         ensure!(
-            scalar(&update.target()),
+            scalar(update.target()),
             "unknown update target {}",
             update.target()
         );
     }
-    if let Returns::Argument(name) = definition.returns() {
+    if let ReturnsView::Argument(name) = definition.returns() {
         ensure!(scalar(name), "unknown return value {name}");
     }
     Ok(())

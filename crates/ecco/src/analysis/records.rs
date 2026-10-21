@@ -93,7 +93,7 @@ impl ParsedRoot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ParsedValue {
+pub struct ParsedValue {
     hazards: Hazards,
     definition: Option<usize>,
     alias: Option<ValueId>,

@@ -3,6 +3,12 @@
 - Read persisted precursors and nested contracts through borrowed accessors.
   Keep extraction construction distinct from immutable parsed files and mutable
   interpreter state; retain Serde names/order when moving record definitions.
+- `views` returns Copy owned-or-wire records and generated-vector iterators;
+  never unpack a cache tree. Analysis retains `ParsedFileSource` owners and
+  function indices through replay. Only explicit mutable interpreter contracts,
+  call environments and result matches become owned during solving.
+- Encode extraction with `ParsedFile::encode_flatbuffer` into the containing
+  module builder; standalone `WireEcco` is not production cache integration.
 
 - Target statement-level bundler analysis for massive applications; throughput,
   memory usage, and parallel scalability are explicit design goals.

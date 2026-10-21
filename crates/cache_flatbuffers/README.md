@@ -2,7 +2,8 @@
 
 **Integration foundation, not the completed production cache migration.**
 `segment_cache` still uses schema 12/extractor 14 and `.seg.cbor`. This crate is
-not currently a dependency of `segment_cache`, `ast-segmenter`, or `ecco`.
+not yet the storage backend of `segment_cache` or `ast-segmenter`. Ecco now uses
+its tables through borrowed precursor views and a construction-only encoder.
 No existing cache hit is made zero-copy by this addition alone.
 
 ## Schema coverage
@@ -57,7 +58,7 @@ The reserved wire constants are schema 13/extractor 15; they do not change the
 currently active production identity. The production migration still needs:
 
 - Owned extraction-to-wire construction and private provenance sealing.
-- Owned/borrowed read facades for AST/Ecco consumers without recursively cloning
+- Owned/borrowed read facades for AST consumers without recursively cloning
   or unpacking cache trees in validation, `to_parsed`, graph creation, or emission.
 - Replacement of production CBOR encode/decode and obsolete preflight logic.
 - `.seg.fb` publication and inventory integration, with old `.seg.cbor` misses.
@@ -65,6 +66,15 @@ currently active production identity. The production migration still needs:
 
 Existing Serde and CBOR uses remain untouched because production integration is
 not complete. Serde in this new crate's handwritten wire path is not used.
+
+Ecco's precursor substage is usable independently: `WireEcco` bounds and
+structurally verifies a standalone typed `ParsedFile`, then owns its immutable
+bytes. `validate_ecco` also checks discriminants, effect-source order and ID
+widths for embedded roots. Ecco's own view-based semantic validation remains a
+separate gate before analysis. Function templates retain byte owners and read
+instructions directly, while mutable interpreter state may allocate.
+The `CallInstruction.pure` field represents the invocation annotation override,
+not construction; its schema name now matches the existing interpreter meaning.
 
 ## Regeneration
 

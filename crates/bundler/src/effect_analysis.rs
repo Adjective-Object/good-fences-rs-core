@@ -20,16 +20,18 @@ pub(crate) fn analyze(
         };
         analysis.add_file(file, Arc::new(parsed.clone()))?;
     }
-    let result = analysis.solve(&|file: &u32, reference: &ecco::ExternalReference| {
-        resolve(graph, *file, reference).wrap_err_with(|| {
-            format!(
-                "{}: effect reference at bytes {}..{}",
-                graph.file_path(*file).unwrap().display(),
-                reference.span().start,
-                reference.span().end
-            )
-        })
-    })?;
+    let result = analysis.solve(
+        &|file: &u32, reference: ecco::views::ExternalReferenceView<'_>| {
+            resolve(graph, *file, reference).wrap_err_with(|| {
+                format!(
+                    "{}: effect reference at bytes {}..{}",
+                    graph.file_path(*file).unwrap().display(),
+                    reference.span().start,
+                    reference.span().end
+                )
+            })
+        },
+    )?;
     let mut effects = BTreeMap::new();
     // shortcut: deferred policy/TDZ barriers disable inferred pruning until Ecco
     // exposes invocation-specific policy and initialization-error dependencies.
@@ -202,21 +204,23 @@ fn binding_may_throw(
 fn resolve(
     graph: &SourceGraph,
     file: u32,
-    reference: &ecco::ExternalReference,
+    reference: ecco::views::ExternalReferenceView<'_>,
 ) -> eyre::Result<ecco::Resolution<u32>> {
     let facts = graph.file_facts(file).ok_or_eyre("missing effect source")?;
     let parsed = facts.ecco().ok_or_eyre("missing Ecco precursors")?;
-    if ecco::declaration_matches(parsed.declarations(), &reference.binding()) {
-        return Ok(ecco::Resolution::Declaration(reference.binding().clone()));
+    if ecco::declaration_matches(parsed.declarations(), reference.binding()) {
+        return Ok(ecco::Resolution::Declaration(
+            reference.binding().to_owned(),
+        ));
     }
-    let ecco::Binding::Module { module, path } = &reference.binding() else {
+    let ecco::views::BindingView::Module { module, path } = reference.binding() else {
         return Ok(ecco::Resolution::Unknown);
     };
     let dependency = facts
         .dependencies()
         .iter()
         .find(|dependency| {
-            dependency.specifier() == *module
+            dependency.specifier() == module
                 && !dependency.type_only()
                 && matches!(
                     dependency.kind(),
@@ -230,18 +234,18 @@ fn resolve(
             let file = graph
                 .file_id(target)
                 .ok_or_eyre("missing effect import target")?;
-            exported(graph, file, &path)
+            exported(graph, file, &mut path.iter())
         }
         _ => eyre::bail!("unresolved effect import {module:?}"),
     }
 }
 
-fn exported(
+fn exported<'a>(
     graph: &SourceGraph,
     file: u32,
-    path: &[String],
+    path: &mut impl ExactSizeIterator<Item = &'a str>,
 ) -> eyre::Result<ecco::Resolution<u32>> {
-    let Some((name, rest)) = path.split_first() else {
+    let Some(name) = path.next() else {
         if graph.file_facts(file).is_some_and(|facts| facts.commonjs()) {
             return Ok(ecco::Resolution::Unknown);
         }
@@ -251,8 +255,8 @@ fn exported(
         return Ok(ecco::Resolution::Unknown);
     };
     match linked.identity {
-        ExportIdentity::Namespace(file) => exported(graph, file, rest),
-        _ if !rest.is_empty() => Ok(ecco::Resolution::Unknown),
+        ExportIdentity::Namespace(file) => exported(graph, file, path),
+        _ if path.len() != 0 => Ok(ecco::Resolution::Unknown),
         ExportIdentity::Binding(file, binding) => Ok(ecco::Resolution::Symbol(ecco::Symbol {
             file,
             local: ecco::SymbolId(binding.0),

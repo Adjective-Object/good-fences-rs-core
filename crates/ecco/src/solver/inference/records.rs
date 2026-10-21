@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FunctionSignature {
+pub struct FunctionSignature {
     captures: Vec<ValueId>,
     parameters: Vec<ValueId>,
     receiver: Option<ValueId>,

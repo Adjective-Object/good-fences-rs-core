@@ -7,6 +7,8 @@ mod javascript;
 mod language;
 mod parser;
 mod solver;
+pub mod views;
+mod wire_encode;
 
 pub use analysis::{
     Analysis, AnalysisResult, ExternalReference, FileAnalysis, ParsedFile, ParsedRoot,
@@ -24,3 +26,5 @@ pub use solver::{CallResult, Context, Effect, Evaluation, OwnedFunction, ValueId
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wire_tests;

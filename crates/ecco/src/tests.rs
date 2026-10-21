@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::views::{BindingView, ExternalReferenceView};
 use crate::*;
 
 const DECLARATIONS: &str = r#"
@@ -123,7 +124,7 @@ fn owned_precursors_roundtrip_without_executing_or_saving_analysis() {
         let mut analysis = Analysis::new();
         analysis.add_file((), parsed.clone()).unwrap();
         let result = analysis
-            .solve(&|_: &(), _: &ExternalReference| Ok(Resolution::Unknown))
+            .solve(&|_: &(), _: ExternalReferenceView<'_>| Ok(Resolution::Unknown))
             .unwrap();
         assert!(result.files[&()]
             .roots
@@ -155,11 +156,11 @@ fn graph_calls_use_external_symbol_resolutions_and_actual_arguments() {
                 analysis.add_file(key, file).unwrap();
             }
             let result = analysis
-                .solve(&|from: &&str, reference: &ExternalReference| {
+                .solve(&|from: &&str, reference: ExternalReferenceView<'_>| {
                     assert_eq!(*from, "entry");
                     assert_eq!(
-                        reference.binding(),
-                        &Binding::Module {
+                        reference.binding().to_owned(),
+                        Binding::Module {
                             module: "resolved-by-caller".into(),
                             path: vec!["read".into()],
                         }
@@ -201,19 +202,15 @@ fn graph_links_cyclic_functions_before_instantiating_calls() {
         }
         let result = analysis
             .solve(
-                &|_: &&str, reference: &ExternalReference| match &reference.binding() {
-                    Binding::Module { module, .. } if module == "a" => {
-                        Ok(Resolution::Symbol(Symbol {
-                            file: "a",
-                            local: a_symbol,
-                        }))
-                    }
-                    Binding::Module { module, .. } if module == "b" => {
-                        Ok(Resolution::Symbol(Symbol {
-                            file: "b",
-                            local: b_symbol,
-                        }))
-                    }
+                &|_: &&str, reference: ExternalReferenceView<'_>| match reference.binding() {
+                    BindingView::Module { module: "a", .. } => Ok(Resolution::Symbol(Symbol {
+                        file: "a",
+                        local: a_symbol,
+                    })),
+                    BindingView::Module { module: "b", .. } => Ok(Resolution::Symbol(Symbol {
+                        file: "b",
+                        local: b_symbol,
+                    })),
                     _ => eyre::bail!("unexpected reference"),
                 },
             )
@@ -244,12 +241,14 @@ fn graph_materializes_foreign_initializers_and_anonymous_default_roots_lazily() 
         }
         let result = analysis
             .solve(
-                &|_: &&str, reference: &ExternalReference| match &reference.binding() {
-                    Binding::Module { path, .. } if path == &["default"] => Ok(Resolution::Root {
-                        file: "library",
-                        root: RootId(1),
-                    }),
-                    Binding::Module { path, .. } if path == &["input"] => {
+                &|_: &&str, reference: ExternalReferenceView<'_>| match reference.binding() {
+                    BindingView::Module { path, .. } if path.iter().eq(["default"]) => {
+                        Ok(Resolution::Root {
+                            file: "library",
+                            root: RootId(1),
+                        })
+                    }
+                    BindingView::Module { path, .. } if path.iter().eq(["input"]) => {
                         Ok(Resolution::Symbol(Symbol {
                             file: "library",
                             local: input,
@@ -279,12 +278,12 @@ fn graph_resolver_failures_and_invalid_saved_ids_are_errors() {
     assert!(analysis.add_file((), file.clone()).is_err());
     let error = analysis
         .clone()
-        .solve(&|_: &(), _: &ExternalReference| eyre::bail!("ambiguous caller export"))
+        .solve(&|_: &(), _: ExternalReferenceView<'_>| eyre::bail!("ambiguous caller export"))
         .unwrap_err();
     assert!(error.to_string().contains("ambiguous caller export"));
     assert!(analysis
         .clone()
-        .solve(&|_: &(), _: &ExternalReference| {
+        .solve(&|_: &(), _: ExternalReferenceView<'_>| {
             Ok(Resolution::Symbol(Symbol {
                 file: (),
                 local: SymbolId(u32::MAX),
@@ -292,7 +291,7 @@ fn graph_resolver_failures_and_invalid_saved_ids_are_errors() {
         })
         .is_err());
     assert!(analysis
-        .solve(&|_: &(), _: &ExternalReference| {
+        .solve(&|_: &(), _: ExternalReferenceView<'_>| {
             Ok(Resolution::Root {
                 file: (),
                 root: RootId(1000),
@@ -317,11 +316,11 @@ fn graph_namespace_aliases_resolve_static_members_with_shared_identity() {
     analysis.add_file("library", library).unwrap();
     let result = analysis
         .solve(
-            &|_: &&str, reference: &ExternalReference| match &reference.binding() {
-                Binding::Module { path, .. } if path.is_empty() => {
+            &|_: &&str, reference: ExternalReferenceView<'_>| match reference.binding() {
+                BindingView::Module { path, .. } if path.is_empty() => {
                     Ok(Resolution::Namespace("library"))
                 }
-                Binding::Module { path, .. } if path == &["read"] => {
+                BindingView::Module { path, .. } if path.iter().eq(["read"]) => {
                     Ok(Resolution::Symbol(Symbol {
                         file: "library",
                         local: read,
@@ -362,13 +361,13 @@ fn graph_callback_queries_subscribe_to_foreign_live_bindings() {
         analysis.add_file("library", library).unwrap();
         let result = analysis
             .solve(
-                &|_: &&str, reference: &ExternalReference| match &reference.binding() {
-                    Binding::Module { .. } => Ok(Resolution::Symbol(Symbol {
+                &|_: &&str, reference: ExternalReferenceView<'_>| match reference.binding() {
+                    BindingView::Module { .. } => Ok(Resolution::Symbol(Symbol {
                         file: "library",
                         local: callback,
                     })),
-                    Binding::Global(path) if path == &["query"] => {
-                        Ok(Resolution::Declaration(reference.binding().clone()))
+                    BindingView::Global(path) if path.iter().eq(["query"]) => {
+                        Ok(Resolution::Declaration(reference.binding().to_owned()))
                     }
                     _ => Ok(Resolution::Unknown),
                 },
@@ -414,12 +413,12 @@ fn graph_initializers_execute_updates_even_when_demanded_by_latent_queries() {
     analysis.add_file("library", library).unwrap();
     let result = analysis
         .solve(
-            &|_: &&str, reference: &ExternalReference| match &reference.binding() {
-                Binding::Module { .. } => Ok(Resolution::Symbol(Symbol {
+            &|_: &&str, reference: ExternalReferenceView<'_>| match reference.binding() {
+                BindingView::Module { .. } => Ok(Resolution::Symbol(Symbol {
                     file: "library",
                     local: value,
                 })),
-                _ => Ok(Resolution::Declaration(reference.binding().clone())),
+                _ => Ok(Resolution::Declaration(reference.binding().to_owned())),
             },
         )
         .unwrap();
@@ -437,7 +436,7 @@ fn graph_named_default_roots_preserve_the_hoisted_function_identity() {
     analysis.add_file("entry", entry).unwrap();
     analysis.add_file("library", library).unwrap();
     let result = analysis
-        .solve(&|_: &&str, _: &ExternalReference| {
+        .solve(&|_: &&str, _: ExternalReferenceView<'_>| {
             Ok(Resolution::Root {
                 file: "library",
                 root: RootId(0),
@@ -469,7 +468,7 @@ fn graph_local_contracts_are_scoped_to_their_parsed_files() {
         analysis.add_file(key, Arc::new(file)).unwrap();
     }
     let result = analysis
-        .solve(&|_: &&str, _: &ExternalReference| Ok(Resolution::Unknown))
+        .solve(&|_: &&str, _: ExternalReferenceView<'_>| Ok(Resolution::Unknown))
         .unwrap();
     assert!(!result
         .evaluation
@@ -1226,7 +1225,7 @@ fn installed_contract_lookup_preserves_first_file_binding() {
     analysis.add_file("first", first).unwrap();
     analysis.add_file("second", second).unwrap();
     let result = analysis
-        .solve(&|_: &&str, _: &ExternalReference| Ok(Resolution::Unknown))
+        .solve(&|_: &&str, _: ExternalReferenceView<'_>| Ok(Resolution::Unknown))
         .unwrap();
     let value = result
         .context

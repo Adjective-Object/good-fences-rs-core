@@ -645,7 +645,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "ecco"
 version = "0.1.0"
 dependencies = [
+ "cache_flatbuffers",
  "eyre",
+ "flatbuffers",
  "insta",
  "oxc_allocator 0.132.0",
  "oxc_ast",

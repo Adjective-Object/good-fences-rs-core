@@ -135,7 +135,11 @@ fn fields(fields: w::HazardFields<'_>) -> Result<()> {
     Ok(())
 }
 
-fn ecco(file: w::ParsedFile<'_>) -> Result<()> {
+pub(super) fn ecco(file: w::ParsedFile<'_>) -> Result<()> {
+    for value in file.values() {
+        ids(value.definition().into_iter().chain(value.alias()))?;
+    }
+    ids(file.symbols().iter().map(|v| v.value()))?;
     for definition in file.facts().definitions() {
         binding(definition.binding())?;
         fields(definition.hazards())?;
@@ -165,8 +169,18 @@ fn ecco(file: w::ParsedFile<'_>) -> Result<()> {
 }
 
 fn function(function: w::OwnedFunction<'_>) -> Result<()> {
+    let signature = function.signature();
+    ids(signature
+        .captures()
+        .iter()
+        .chain(signature.parameters())
+        .chain(signature.receiver())
+        .chain(signature.self_binding())
+        .chain(signature.arguments()))?;
+    ids(function.returns().iter().chain(function.effects()))?;
     let mut previous = None;
     for source in function.sources() {
+        ids([source.effect(), source.value()])?;
         known!(source.hazard());
         ensure!(
             previous.is_none_or(|previous| previous < source.effect()),
@@ -176,12 +190,58 @@ fn function(function: w::OwnedFunction<'_>) -> Result<()> {
     }
     for instruction in function.instructions() {
         union!(instruction.value_type());
+        if let Some(v) = instruction.value_as_value_instruction() {
+            ids([v.value()])?;
+        }
+        if let Some(v) = instruction.value_as_any_instruction() {
+            ids(std::iter::once(v.effect()).chain(v.inputs()))?;
+        }
+        if let Some(v) = instruction.value_as_equality_instruction() {
+            ids([v.effect(), v.left(), v.right()])?;
+        }
         if let Some(operation) = instruction.value_as_operation_instruction() {
             known!(operation.hazard());
+            ids([operation.value()])?;
         }
         if let Some(update) = instruction.value_as_update_instruction() {
             known!(update.hazard());
+            ids([update.value(), update.effect()])?;
         }
+        if let Some(v) = instruction.value_as_read_instruction() {
+            ids([v.value(), v.source()])?;
+        }
+        if let Some(v) = instruction.value_as_retain_instruction() {
+            ids(std::iter::once(v.value()).chain(v.locals()))?;
+        }
+        if let Some(v) = instruction.value_as_bind_instruction() {
+            ids([v.target(), v.value()])?;
+        }
+        if let Some(v) = instruction.value_as_join_instruction() {
+            ids(std::iter::once(v.value()).chain(v.inputs()))?;
+        }
+        if let Some(v) = instruction.value_as_call_instruction() {
+            ids([
+                v.result().value(),
+                v.result().effects(),
+                v.function(),
+                v.receiver(),
+            ]
+            .into_iter()
+            .chain(v.arguments()))?;
+        }
+        if let Some(v) = instruction.value_as_closure_instruction() {
+            ids([v.value(), v.function()])?;
+        }
+        if let Some(v) = instruction.value_as_external_instruction() {
+            ids([v.value(), v.reference()])?;
+        }
+    }
+    Ok(())
+}
+
+fn ids(values: impl IntoIterator<Item = u64>) -> Result<()> {
+    for value in values {
+        ensure!(usize::try_from(value).is_ok(), "Ecco ID exceeds host width");
     }
     Ok(())
 }
