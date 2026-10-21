@@ -75,3 +75,64 @@ isolated small packages, increase dependency graph size, then attempt the full
 mail workload with all application and worker entries. Distinguish preparation,
 resolution, build, output and runtime failures; never count a successful
 transpilation or build as runtime correctness.
+
+### Small-package checkpoint
+
+Release example built through `mbx`; the wrapper also reported nine cache hits
+on the all-targets check. All 65 portable runtime fixtures pass with the release
+driver and native backend. The fixture invocation initially returned failure
+because the local wrapper expected status `pass`, whereas the harness returns
+`passed`; inspection of all 65 actual result records confirmed no fixture failure.
+
+Local client harness runs three fresh processes per case, validates native backend,
+syntax-checks every emitted executable, compares output filenames/content hashes,
+and requires zero source parses and zero artifact writes on the second/third runs.
+Initial timings below are observations, not benchmarks: portable validation ran
+concurrently, and later preparation introduced additional filesystem contention.
+They are not a pre/post-migration speedup comparison.
+
+| Input | Script/resource cache hits on warm run | Initial / two warm builds | Observations |
+| --- | ---: | --- | --- |
+| debounce | 2 | 2.21 s / 70, 75 ms | One export; cancellation/latest-arguments behavior matches source |
+| error codes | 29 | 328 ms / 167, 171 ms | 29 exports; exported data and validation/accumulation behavior match source on corrected harness rerun |
+| lodash browser adaptation | 641 | 9.08 s / 6.83, 6.86 s | 322 exports; nine value/collection/template/chaining cases match source |
+| service-worker common | 7 | 10.56 s / 10.70, 8.06 s | Build, syntax and repeated-byte checks only; no worker runtime claim |
+| expansion animation | 4 | 7.61 s / 7.00, 6.84 s | Build, Sass/CSS output and repeated-byte checks only; no browser runtime claim |
+
+The source comparison host needs a local loader for extensionless relative
+imports in transpiled TypeScript. It probes `.js`/`index.js` only inside staged
+source, never generated bundler output. Independent module namespaces/functions
+cannot be compared by identity; compare exported data and observed function
+results instead. Both harness issues were corrected rather than reported as
+bundler failures.
+
+Preparation uses installed tsgo with ES2020/ESNext, React JSX and legacy
+decorators, `noCheck`/`noResolve`; this is transpilation, not typechecking.
+Sass compiles using installed dependencies and preserves `.scss` import spelling
+for `ext:.scss`. Resolver conditions are `browser`, `fluentIconFont`, `style`,
+not `source` for the compiled tree. Staged workspace manifests use ESM package
+mode. The existing isolated lodash browser corpus disables the three vendor
+CommonJS-detection probes; these observations do not cover an unadapted Node
+lodash build. No original client source/manifests were changed.
+
+### Performance observations
+
+A warm service-worker trace in the larger prepared root took 14.16 s.
+`build.recheck` alone took 6.25 s; preparation took 11 ms, aggregate seven-file
+cache decoding 4.2 ms, linking 7 ms and publication 4 ms. Initial inventory is
+outside a dedicated span; the remaining multi-second gap and code path point
+to filesystem inventory as well, but that part is inference, not an independently
+measured stage. The inventory recursively canonicalizes/stat-checks input-tree
+entries, then repeats the work during final recheck. Seven reachable files in a
+much larger staged root therefore cost seconds despite complete FlatBuffers
+hits. Preserve correctness rechecks; a reachable-input/directory-invalidation
+design needs separate work rather than skipping them.
+
+### Full application preparation
+
+Preparing the complete dependency closure in a separate session-local root,
+using the actual `OWA Mail` workflow: mail bootstrap, data worker, analytics
+worker, and the vendor editor index-readjuster worker. Unlike the earlier
+45-package probe corpus, dependencies of application roots are included.
+Preparation reports missing packages, version collisions, transpilation and
+Sass failures separately. Full-app output/runtime coverage is not yet established.
