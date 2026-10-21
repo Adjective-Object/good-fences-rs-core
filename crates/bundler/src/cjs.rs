@@ -1,7 +1,8 @@
 //! Interop demands come from the checked reverse occurrence index, not source guesses.
 use std::collections::BTreeSet;
 
-use ast_segmenter::owned::{BindingId, ExportValue, ImportedName};
+use ast_segmenter::owned::{BindingId, ImportedName};
+use ast_segmenter::views::ExportValue;
 use source_graph::{DependencyTarget, ExportIdentity, GraphNode, Namespace, SourceGraph};
 
 use crate::RetentionPlan;
@@ -102,9 +103,10 @@ pub(crate) fn binding_used(
         .references()
         .iter()
         .any(|r| !r.type_only() && r.binding() == Some(binding) && live(r.span()))
-        || facts.exports().iter().any(|e| {
-            !e.type_only() && *e.value() == ExportValue::Binding(binding) && live(e.span())
-        })
+        || facts
+            .exports()
+            .iter()
+            .any(|e| !e.type_only() && e.value() == ExportValue::Binding(binding) && live(e.span()))
 }
 
 fn retained(retention: &RetentionPlan, node: GraphNode) -> bool {

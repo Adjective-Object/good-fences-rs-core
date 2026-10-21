@@ -2,7 +2,7 @@
 
 Owns source modules and consumer → dependency structure, independently of usage
 tags and bundler effects. `SourceFileInput` is the legacy tracker adapter.
-`OwnedSourceFileInput` accepts the existing `ast_segmenter::owned::ModuleFacts`
+`OwnedSourceFileInput` retains `ast_segmenter::views::FactsStorage`
 and per-occurrence resolution results (also reusable from `segment_cache`).
 
 `edges`, `outgoing` and `incoming` expose one authoritative edge collection.
@@ -36,10 +36,12 @@ candidate modules; an empty closure is valid and fails only when requested.
 
 Run `cargo test -p source_graph`.
 
-`file_facts` exposes owned syntax records (None for legacy/tombstoned modules).
-Traverse their borrowed accessors rather than depending on persisted field
-layout. `from_parsed` consumes `ParsedModule::into_parts` without cloning the
-fact tree; graph-derived identities and indexes remain separate from storage.
+`file_facts` returns Copy owned-or-wire syntax views (None for legacy/tombstoned
+modules). Collections expose value iterators and `get`, not owned slice layout.
+`file_fact_storage` retains the immutable owner for emission/Ecco adapters.
+`from_parsed` consumes `ParsedModule::into_parts` without cloning or unpacking the
+fact tree; only graph-owned statement ranges are constructed for wire inputs.
+Graph-derived identities and indexes remain separate from storage.
 `outgoing_indexed` exposes shared occurrence indices for derived plans; indices
 are revision-local, not persistent IDs. The `bundler` library consumes these
 without adding effects policy or usage tags to the shared graph.

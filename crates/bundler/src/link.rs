@@ -2,7 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use ast_segmenter::owned::{Dependency, DependencyKind, ExportValue};
+use ast_segmenter::owned::DependencyKind;
+use ast_segmenter::views::{Dependency, ExportValue};
 use ast_segmenter::ParsedModule;
 use eyre::{ensure, OptionExt};
 use oxc_span::Span;
@@ -228,7 +229,7 @@ fn async_modules(
                 .facts()
                 .top_level_await()
                 .first()
-                .map(|&span| (file, (file, span)))
+                .map(|span| (file, (file, span)))
         })
         .collect();
     // Static dependency closure also propagates async status around SCCs.
@@ -294,7 +295,7 @@ fn async_modules(
 pub(super) fn target_file(
     graph: &SourceGraph,
     file: u32,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
 ) -> eyre::Result<u32> {
     match graph.dependency_target(file, dependency.id()) {
         Some(DependencyTarget::File(path)) => {
@@ -312,7 +313,7 @@ pub(super) fn target_file(
 pub(super) fn target_files(
     graph: &SourceGraph,
     file: u32,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
 ) -> eyre::Result<Vec<u32>> {
     if matches!(
         graph.dependency_target(file, dependency.id()),
@@ -389,7 +390,7 @@ pub(super) fn namespace_export_names(
             {
                 if let ExportValue::ReExport { dependency, .. } = export.value() {
                     if let Some(DependencyTarget::File(path)) =
-                        graph.dependency_target(file, *dependency)
+                        graph.dependency_target(file, dependency)
                     {
                         if let Some(target) = graph.file_id(path) {
                             names.get_mut(&file).unwrap().extend(

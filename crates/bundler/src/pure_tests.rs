@@ -4,7 +4,7 @@ use effects::{ArgumentGuard, StatementEffects};
 
 fn summary(source: &str, demanded: bool) -> StatementEffects {
     let parsed = crate::tests::input("file.ts", source);
-    effects::summarize(&parsed.facts, parsed.segments[0].span, demanded)
+    effects::summarize(parsed.facts.view(), parsed.segments[0].span, demanded)
 }
 
 #[test]
@@ -189,10 +189,10 @@ fn value_contexts_are_source_facts_not_policy_and_deferred_bodies_stay_intact() 
     let parsed = crate::tests::input("file.ts",
         "function f(x = /*PURE?*/ defaults()) { return /*@__PURE__*/ g(); } const v = (/*@__PURE__*/ a(), /*@__PURE__*/ b());");
     let calls = &parsed.facts.invocations();
-    assert_eq!(calls[1].value_use(), ValueUse::Required);
-    assert!(calls[1].deferred().is_some());
-    assert_eq!(calls[2].value_use(), ValueUse::Discarded);
-    assert_eq!(calls[3].value_use(), ValueUse::StatementValue);
+    assert_eq!(calls.get(1).unwrap().value_use(), ValueUse::Required);
+    assert!(calls.get(1).unwrap().deferred().is_some());
+    assert_eq!(calls.get(2).unwrap().value_use(), ValueUse::Discarded);
+    assert_eq!(calls.get(3).unwrap().value_use(), ValueUse::StatementValue);
     let graph = SourceGraph::from_owned([parsed]);
     let plan = retain(&graph, &[], &[GraphNode::Segment(SegmentKey::new(0, 0))]).unwrap();
     assert!(plan.effects[0].summary.rewrites.is_empty());

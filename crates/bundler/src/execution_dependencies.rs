@@ -1,10 +1,7 @@
 //! Scheduling inputs only. These relationships must never participate in demand traversal.
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use ast_segmenter::{
-    effects::EffectReason,
-    owned::{BindingId, ImportedName},
-};
+use ast_segmenter::{effects::EffectReason, owned::BindingId, views::ImportedName};
 use eyre::OptionExt;
 use source_graph::{
     DependencyTarget, ExportIdentity, GraphNode, Namespace, SegmentKey, SourceGraph,
@@ -115,7 +112,7 @@ pub(crate) fn plan(
                 .or_default()
                 .push(segment);
         }
-        for &binding in recipe.placement().declarations() {
+        for binding in recipe.placement().declarations() {
             declarations
                 .entry((segment.file_id, binding))
                 .or_insert(segment);
@@ -159,7 +156,9 @@ pub(crate) fn plan(
         let effect_start = facts
             .effects()
             .partition_point(|e| e.span().start < range.start);
-        for site in facts.effects()[effect_start..]
+        for site in facts
+            .effects()
+            .slice(effect_start..)
             .iter()
             .take_while(|e| e.span().start < range.end)
             .filter(|e| crate::effects::contains(range, e.span()))
@@ -179,7 +178,9 @@ pub(crate) fn plan(
         let call_start = facts
             .invocations()
             .partition_point(|c| c.span().start < range.start);
-        for (relative, _) in facts.invocations()[call_start..]
+        for (relative, _) in facts
+            .invocations()
+            .slice(call_start..)
             .iter()
             .enumerate()
             .take_while(|(_, c)| c.span().start < range.end)
@@ -195,14 +196,16 @@ pub(crate) fn plan(
             }
             // Even syntactically immediate calls inside deferred contexts do not
             // authorize moving the surrounding callable's captured accesses.
-            if !timing.is_module_evaluation(timing.invocations()[index]) {
+            if !timing.is_module_evaluation(timing.invocations().get(index).unwrap()) {
                 pin(BarrierReason::UnknownInvocation);
             }
         }
         let reference_start = facts
             .references()
             .partition_point(|r| r.span().start < range.start);
-        for (relative, reference) in facts.references()[reference_start..]
+        for (relative, reference) in facts
+            .references()
+            .slice(reference_start..)
             .iter()
             .enumerate()
             .take_while(|(_, r)| r.span().start < range.end)
@@ -217,7 +220,7 @@ pub(crate) fn plan(
             }) else {
                 continue;
             };
-            let eager = timing.is_module_evaluation(timing.references()[index]);
+            let eager = timing.is_module_evaluation(timing.references().get(index).unwrap());
             if !eager {
                 pin(BarrierReason::DeferredAccess);
             }

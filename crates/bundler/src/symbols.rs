@@ -1,7 +1,8 @@
 //! Canonical source identities; allocated names are not yet source rewrites.
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use ast_segmenter::owned::{BindingId, ImportedName};
+use ast_segmenter::owned::BindingId;
+use ast_segmenter::views::ImportedName;
 use eyre::{ensure, OptionExt};
 use source_graph::{ExportIdentity, GraphNode, LinkedExport, Namespace, SegmentKey, SourceGraph};
 
@@ -123,7 +124,7 @@ impl Symbols {
             bindings.sort_by_key(|b| b.id().0);
             for binding in bindings {
                 let mut declarations = BTreeSet::new();
-                for &span in binding.declarations() {
+                for span in binding.declarations() {
                     let index = segments.partition_point(|s| s.span.end <= span.start);
                     ensure!(
                         segments
@@ -162,7 +163,7 @@ impl Symbols {
                                 identity: ExportIdentity::External(
                                     specifier.clone(),
                                     match &import.imported() {
-                                        ImportedName::Name(name) => Some(name.clone()),
+                                        ImportedName::Name(name) => Some((*name).to_owned()),
                                         ImportedName::Namespace => None,
                                     },
                                 ),

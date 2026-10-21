@@ -72,6 +72,8 @@ pub struct SourceProvenance {
     source_hash: [u8; 32],
     config: ParserConfig,
     records_hash: [u8; 32],
+    #[serde(skip)]
+    wire: bool,
 }
 
 fn records_hash(body: ModuleBody, ranges: &[Span], facts: &ModuleFacts) -> eyre::Result<[u8; 32]> {
@@ -91,6 +93,7 @@ impl SourceProvenance {
             source_hash: Sha256::digest(source.as_bytes()).into(),
             config,
             records_hash: records_hash(body, ranges, facts)?,
+            wire: false,
         })
     }
 
@@ -104,7 +107,7 @@ impl SourceProvenance {
         config: ParserConfig,
         body: ModuleBody,
         ranges: &[Span],
-        facts: &ModuleFacts,
+        facts: crate::views::ModuleFacts<'_>,
     ) -> eyre::Result<()> {
         ensure!(
             self.source_hash == <[u8; 32]>::from(Sha256::digest(source.as_bytes())),
@@ -114,10 +117,57 @@ impl SourceProvenance {
             self.config == config,
             "source parser configuration mismatch"
         );
-        ensure!(
-            self.records_hash == records_hash(body, ranges, facts)?,
-            "source facts/ranges do not match extraction provenance"
-        );
+        match facts {
+            crate::views::ModuleFacts::Owned(facts) => ensure!(
+                !self.wire && self.records_hash == records_hash(body, ranges, facts)?,
+                "source facts/ranges do not match extraction provenance"
+            ),
+            crate::views::ModuleFacts::Wire(facts) => {
+                ensure!(self.wire, "wire facts require wire extraction provenance");
+                let bytes = facts._tab.buf();
+                ensure!(
+                    self.records_hash == <[u8; 32]>::from(Sha256::digest(bytes)),
+                    "wire facts do not match extraction provenance"
+                );
+                // The supplied facts borrow the independently verified nested root.
+                let module = flatbuffers::root::<cache_flatbuffers::wire::CachedModule<'_>>(bytes)?;
+                ensure!(
+                    module.facts()._tab.loc() == facts._tab.loc()
+                        && crate::views::module_body(module) == body
+                        && module
+                            .segments()
+                            .iter()
+                            .map(crate::views::span)
+                            .eq(ranges.iter().copied()),
+                    "wire module/ranges do not match extraction provenance"
+                );
+            }
+        }
         Ok(())
+    }
+
+    pub(crate) fn from_wire(
+        source: &str,
+        wire: &cache_flatbuffers::WireRecord,
+    ) -> eyre::Result<Self> {
+        let root = wire.root();
+        let p = root.provenance();
+        let c = p.config();
+        let result = Self {
+            source_hash: std::array::from_fn(|i| p.source_hash().bytes().get(i)),
+            config: ParserConfig {
+                typescript: c.typescript(),
+                jsx: c.jsx(),
+                definition: c.definition(),
+                commonjs: c.commonjs(),
+            },
+            records_hash: std::array::from_fn(|i| p.records_hash().bytes().get(i)),
+            wire: true,
+        };
+        ensure!(
+            result.source_hash == <[u8; 32]>::from(Sha256::digest(source.as_bytes())),
+            "source provenance content mismatch"
+        );
+        Ok(result)
     }
 }

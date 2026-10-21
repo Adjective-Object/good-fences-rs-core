@@ -16,12 +16,25 @@ remain in the original source, with no transformed-source reparse.
 thread, distinguishing extraction from accidental re-extraction.
 
 Read persisted records through borrowed accessors, for example
-`parsed.facts().emission().segments()[i].source()`. Strings and collections
-borrow their storage; optional records return `Option<&T>`. Construction and
-finalization stay inside extraction, before provenance is sealed. `into_parts`
-and `into_facts` transfer ownership only at owned-adapter boundaries.
-This API encapsulation does not change Serde/CBOR layout or introduce a
-byte-backed representation.
+`parsed.facts().emission().segments().get(i).unwrap().source().spans()`.
+`views` provides Copy owned-or-wire tables, value enums and indexed/iterable
+`Sequence`s; strings borrow the original storage. Construction and finalization
+stay inside extraction, before provenance is sealed. `FactsStorage` retains an
+`Arc` of owned facts or a verified `WireRecord`. `ParsedModule::from_wire` retains
+that owner without unpacking facts, Ecco precursors or statement ranges.
+`into_parts` explicitly constructs graph-owned scalar ranges at the graph boundary;
+`into_facts` transfers storage. Owned-only adapters use `owned_facts`,
+`owned_segments` or `FactsStorage::into_owned`, never a hidden wire conversion.
+
+`ParsedModule::to_flatbuffer(source, oxc_revision)` checks extraction provenance
+before encoding the complete typed module, including Ecco's existing encoder.
+The wire seal hashes exact nested-module bytes independently of the outer
+checksum. `from_wire` checks source/provenance but is not a semantic validation
+gate: persistent callers must also run `segment_cache::validate_parsed`.
+Source/configuration/range/fact validation, graph linking, effect solving and native
+emission consume these views. Production sidecar loading/publication deliberately
+remains CBOR until the separate lifecycle integration; existing CBOR bytes are
+unchanged.
 
 `facts.emission.execution` owns preorder callable/instance-initializer contexts,
 their parent links and reference/invocation context indices. Callable spans include
@@ -74,7 +87,7 @@ reconstitutes matching cache records without parsing; it rejects re-paired text,
 changed records and parser modes. These integrity hashes prevent ordinary API
 misuse, not deliberate forgery by a cache publisher.
 
-`ParsedModule::facts` contains the owned occurrence IR in `owned`: effective
+`ParsedModule::facts` views the occurrence IR extracted into `owned`: effective
 `commonjs` parser-format bit (including package policy for `.js`), bindings,
 declaration and reference ranges, import aliases, export mappings, directives,
 hashbang and individual static/dynamic/require dependencies. Binding and

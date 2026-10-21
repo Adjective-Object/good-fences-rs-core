@@ -3,6 +3,9 @@
 - `records` owns private cache storage; validation/sidecar consumers use accessors.
   Corruption tests edit a serialized test-only projection, never add production
   setters or mutable views of sealed facts.
+- Production sidecars remain CBOR. Shared semantic validation reads AST views;
+  `validate_parsed` also checks wire-backed modules without unpacking. Keep the
+  final wire loading/publication/suffix transition separate.
 
 - Persist `ast_segmenter::owned::ModuleFacts`, body and ordered statement ranges;
   never legacy tracker tags, resolved paths, arena IDs or derived graph/effects.

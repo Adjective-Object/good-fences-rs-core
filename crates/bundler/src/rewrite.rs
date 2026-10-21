@@ -2,7 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use ast_segmenter::owned::{BindingId, ExportValue};
+use ast_segmenter::owned::BindingId;
+use ast_segmenter::views::ExportValue;
 use eyre::{ensure, OptionExt};
 #[cfg(debug_assertions)]
 use oxc_allocator::Allocator;
@@ -179,7 +180,7 @@ pub fn rename_private(
                     .facts()
                     .exports()
                     .iter()
-                    .any(|e| matches!(e.value(), ExportValue::Binding(value) if *value == *id)),
+                    .any(|e| matches!(e.value(), ExportValue::Binding(value) if value == *id)),
             "{}: public binding rename needs linker at bytes {}",
             path.display(),
             id.0
@@ -208,8 +209,8 @@ pub fn rename_private(
     let mut edits = BTreeMap::new();
     for recipe in parsed.facts().emission().segments() {
         for operation in recipe.operations() {
-            use ast_segmenter::emission::OperationKind;
-            let (binding, shorthand) = match operation.kind() {
+            use ast_segmenter::views::OperationKind;
+            let (binding, shorthand) = match &operation.kind() {
                 OperationKind::Binding {
                     binding, shorthand, ..
                 } => (Some(*binding), *shorthand),
@@ -217,7 +218,12 @@ pub fn rename_private(
                     reference,
                     shorthand,
                 } => (
-                    parsed.facts().references()[*reference as usize].binding(),
+                    parsed
+                        .facts()
+                        .references()
+                        .get(*reference as usize)
+                        .unwrap()
+                        .binding(),
                     *shorthand,
                 ),
                 _ => continue,
@@ -225,7 +231,7 @@ pub fn rename_private(
             let Some(name) = binding.and_then(|id| renamed.get(&id.0)) else {
                 continue;
             };
-            let span = operation.kind().span(&parsed.facts(), recipe);
+            let span = operation.kind().span(parsed.facts(), recipe);
             edits.insert(
                 (span.start, span.end),
                 Edit {
@@ -353,11 +359,11 @@ mod tests {
         .unwrap();
         let output = crate::emit::CachedRenderer::new(
             source,
-            &parsed.facts(),
-            &parsed.facts().emission().segments()[0],
+            parsed.facts(),
+            parsed.facts().emission().segments().get(0).unwrap(),
             &[],
         )
-        .render(parsed.segments()[0].span)
+        .render(parsed.segments().get(0).unwrap().span)
         .unwrap()
         .render(
             Path::new("output.mjs"),

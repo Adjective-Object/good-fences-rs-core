@@ -49,7 +49,7 @@ declare class Ambient extends Unresolved { [key]: unknown }
     insta::assert_debug_snapshot!(reasons);
     assert_eq!(module.facts().effects(), parse(source).facts().effects());
     for index in [0, 1, 2] {
-        let span = module.segments()[index].span;
+        let span = module.segments().get(index).unwrap().span;
         assert!(!module
             .facts()
             .effects()
@@ -126,7 +126,7 @@ fn commonjs_stays_opaque_even_when_empty_or_only_declarations() {
         .unwrap();
         assert_eq!(parsed.facts().effects().len(), 1);
         assert_eq!(
-            parsed.facts().effects()[0].reason(),
+            parsed.facts().effects().get(0).unwrap().reason(),
             EffectReason::OpaqueCommonJs
         );
     }

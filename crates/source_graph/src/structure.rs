@@ -1,10 +1,9 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use ahashmap::{AHashMap, AHashSet};
-use ast_segmenter::owned::{
-    BindingId, DependencyId, DependencyKind, ExportValue, ImportedName, ModuleFacts,
-};
+use ast_segmenter::owned::{BindingId, DependencyId, DependencyKind, ImportedName};
 use ast_segmenter::segment_info::Segment;
+use ast_segmenter::views::{ExportValue, FactsStorage, ModuleFacts};
 use oxc_span::Span;
 
 use crate::{SegmentKey, SourceFileInput, SourceGraph};
@@ -32,7 +31,7 @@ pub enum DependencyTarget {
 pub struct OwnedSourceFileInput {
     pub path: PathBuf,
     pub segments: Vec<Segment>,
-    pub facts: ModuleFacts,
+    pub facts: FactsStorage,
     pub resolutions: AHashMap<DependencyId, DependencyTarget>,
     pub provenance: Option<ast_segmenter::SourceProvenance>,
     prepared_resource: Option<PreparedResource>,
@@ -96,12 +95,12 @@ impl OwnedSourceFileInput {
     pub fn from_ranges(
         path: PathBuf,
         ranges: impl IntoIterator<Item = Span>,
-        facts: ModuleFacts,
+        facts: impl Into<FactsStorage>,
         resolutions: AHashMap<DependencyId, DependencyTarget>,
     ) -> Self {
         Self {
             path,
-            facts,
+            facts: facts.into(),
             resolutions,
             provenance: None,
             prepared_resource: None,
@@ -200,8 +199,15 @@ impl SourceGraph {
         &self.edges
     }
 
-    /// Checked consumers must distinguish owned inputs from lossy tracker adapters.
-    pub fn file_facts(&self, file_id: u32) -> Option<&ModuleFacts> {
+    /// Checked consumers must distinguish full extraction from lossy tracker adapters.
+    pub fn file_facts(&self, file_id: u32) -> Option<ModuleFacts<'_>> {
+        self.live_file(file_id)?
+            .owned
+            .as_ref()
+            .map(|i| i.facts.view())
+    }
+
+    pub fn file_fact_storage(&self, file_id: u32) -> Option<&FactsStorage> {
         self.live_file(file_id)?.owned.as_ref().map(|i| &i.facts)
     }
 
@@ -277,7 +283,7 @@ impl SourceGraph {
                 };
                 let from = self.segment_at(file_id, reference.span());
                 let mut targets = AHashSet::default();
-                for &span in declaration.declarations() {
+                for span in declaration.declarations() {
                     let to = self.segment_at(file_id, span);
                     if targets.insert(to) {
                         edges.push(OccurrenceEdge {
@@ -413,7 +419,7 @@ impl SourceGraph {
                 for binding in bindings {
                     edges.push(OccurrenceEdge {
                         purpose: EdgePurpose::Binding,
-                        imported: Some(binding.imported().clone()),
+                        imported: Some(binding.imported().to_owned()),
                         binding: Some(binding.binding()),
                         type_only: binding.type_only(),
                         site: binding.span(),
@@ -429,7 +435,7 @@ impl SourceGraph {
                         if *id == dependency.id() {
                             edges.push(OccurrenceEdge {
                                 purpose: EdgePurpose::Binding,
-                                imported: Some(imported.clone()),
+                                imported: Some((*imported).to_owned()),
                                 type_only: export.type_only(),
                                 site: export.span(),
                                 ..base.clone()
@@ -641,7 +647,7 @@ pub(crate) mod tests {
             "main.mjs",
             "export const load = name => import(`./parts/${name}.mjs`);",
         );
-        let dependency = main.facts.dependencies()[0].id();
+        let dependency = main.facts.dependencies().get(0).unwrap().id();
         let candidates = BTreeMap::from([
             ("./parts/a.mjs".into(), "a.mjs".into()),
             ("./parts/b.mjs".into(), "b.mjs".into()),
@@ -674,7 +680,7 @@ pub(crate) mod tests {
         assert!(SourceGraph::from_owned([main]).validate_links().is_err());
         let mut main = input("main.mjs", "import './a.mjs';");
         main.resolutions.insert(
-            main.facts.dependencies()[0].id(),
+            main.facts.dependencies().get(0).unwrap().id(),
             DependencyTarget::Context(BTreeMap::new()),
         );
         assert!(SourceGraph::from_owned([main]).validate_links().is_err());

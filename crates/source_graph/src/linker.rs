@@ -1,5 +1,6 @@
 use ahashmap::AHashSet;
-use ast_segmenter::owned::{BindingId, ExportValue, ImportedName};
+use ast_segmenter::owned::BindingId;
+use ast_segmenter::views::{ExportValue, ImportedName};
 use ast_segmenter::{ExportedSymbol, ImportTarget};
 
 use crate::{DependencyTarget, GraphNode, SegmentKey, SourceGraph};
@@ -65,7 +66,7 @@ impl SourceGraph {
     pub fn resolve_binding(&self, file_id: u32, id: BindingId) -> Option<GraphNode> {
         let input = self.live_file(file_id)?.owned.as_ref()?;
         let binding = input.facts.bindings().iter().find(|b| b.id() == id)?;
-        Some(self.segment_at(file_id, *binding.declarations().first()?))
+        Some(self.segment_at(file_id, binding.declarations().first()?))
     }
 
     /// Fails on missing or ambiguous bindings; a cycle alone does not define an export.
@@ -142,7 +143,7 @@ impl SourceGraph {
                 .filter(|export| !export.type_only() && export.name().is_none())
             {
                 if let ExportValue::ReExport { dependency, .. } = export.value() {
-                    match self.dependency_target(file, *dependency) {
+                    match self.dependency_target(file, dependency) {
                         Some(DependencyTarget::External(_)) => return true,
                         Some(DependencyTarget::File(path)) => pending.extend(self.file_id(path)),
                         _ => {}
@@ -221,7 +222,7 @@ impl SourceGraph {
                             if let Some(candidate) = self.resolved_candidate(
                                 file_id,
                                 import.dependency(),
-                                &import.imported(),
+                                import.imported(),
                                 node,
                             ) {
                                 explicit.push(candidate);
@@ -238,7 +239,7 @@ impl SourceGraph {
                                             .iter()
                                             .filter(|b| b.id() == *binding)
                                             .flat_map(|b| b.declarations())
-                                            .map(|&span| self.segment_at(file_id, span)),
+                                            .map(|span| self.segment_at(file_id, span)),
                                     )
                                     .collect(),
                             }));
@@ -259,7 +260,7 @@ impl SourceGraph {
                     } => {
                         if is_explicit {
                             if let Some(candidate) =
-                                self.resolved_candidate(file_id, *dependency, &imported, node)
+                                self.resolved_candidate(file_id, *dependency, *imported, node)
                             {
                                 explicit.push(candidate);
                             }
@@ -267,7 +268,7 @@ impl SourceGraph {
                             if let Some(candidate) = self.resolved_candidate(
                                 file_id,
                                 *dependency,
-                                &ImportedName::Name(name.to_owned()),
+                                ImportedName::Name(name),
                                 node,
                             ) {
                                 stars.push(candidate);
@@ -319,11 +320,11 @@ impl SourceGraph {
                         if is_explicit {
                             let imported = match &export.imported_as {
                                 ImportTarget::ExportedSymbol(s) => {
-                                    ImportedName::Name(exported_name(s).to_owned())
+                                    ImportedName::Name(exported_name(s))
                                 }
                                 ImportTarget::Namespace => ImportedName::Namespace,
                             };
-                            explicit.push(self.import_candidate(target, &imported, node));
+                            explicit.push(self.import_candidate(target, imported, node));
                         } else if exported.is_none() && name != "default" {
                             stars.push(Candidate::Indirect(target, name.to_owned(), node));
                         }
@@ -347,9 +348,14 @@ impl SourceGraph {
         results
     }
 
-    fn import_candidate(&self, target: u32, imported: &ImportedName, node: GraphNode) -> Candidate {
+    fn import_candidate(
+        &self,
+        target: u32,
+        imported: ImportedName<'_>,
+        node: GraphNode,
+    ) -> Candidate {
         match imported {
-            ImportedName::Name(name) => Candidate::Indirect(target, name.clone(), node),
+            ImportedName::Name(name) => Candidate::Indirect(target, name.to_owned(), node),
             ImportedName::Namespace => Candidate::Local(LinkedExport {
                 identity: ExportIdentity::Namespace(target),
                 declaration: GraphNode::Module(target),
@@ -361,7 +367,7 @@ impl SourceGraph {
         &self,
         file_id: u32,
         dependency: ast_segmenter::owned::DependencyId,
-        imported: &ImportedName,
+        imported: ImportedName<'_>,
         node: GraphNode,
     ) -> Option<Candidate> {
         match self.dependency_target(file_id, dependency)? {
@@ -377,7 +383,7 @@ impl SourceGraph {
                     identity: ExportIdentity::External(
                         specifier.clone(),
                         match imported {
-                            ImportedName::Name(name) => Some(name.clone()),
+                            ImportedName::Name(name) => Some(name.to_owned()),
                             ImportedName::Namespace => None,
                         },
                     ),

@@ -343,7 +343,7 @@ pub(super) fn emit(
                             if d.kind() == DependencyKind::DynamicImport {
                                 cjs.dynamic(graph, target)?
                             } else {
-                                cjs.static_dependency(graph, root, target, d, facts, symbols)?
+                                cjs.static_dependency(graph, root, target, d, *facts, symbols)?
                             },
                             true,
                         ))
@@ -395,20 +395,20 @@ pub(super) fn emit(
                     "relocated segment in unchanged native job"
                 );
                 let index = key.segment_idx as usize;
-                let recipe = &facts.emission().segments()[index];
+                let recipe = facts.emission().segments().get(index).unwrap();
                 let mut renderer = crate::emit::CachedRenderer::new(
                     module.source,
-                    facts,
+                    *facts,
                     recipe,
                     recipes.get(&key).copied().unwrap_or_default(),
                 );
                 renderer.relocate_urls(module.relocations)?;
                 for (dependency, replacement, whole) in &edits {
-                    renderer.dependency(dependency, replacement.clone(), *whole);
+                    renderer.dependency(*dependency, replacement.clone(), *whole);
                 }
                 for dependency in facts.dependencies().iter().filter(|d| {
                     d.pattern().is_some()
-                        && contains(module.parsed.segments()[index].span, d.span())
+                        && contains(module.parsed.segments().get(index).unwrap().span, d.span())
                 }) {
                     if let Some(dispatch) = cjs.context_dynamic(graph, root, dependency, &owners)? {
                         renderer.context(dependency, dispatch);
@@ -521,8 +521,13 @@ pub(super) fn emit(
                     .iter()
                     .filter(|(_, owner)| **owner == segments::Owner::Evaluation(**file))
                     .all(|(key, _)| {
-                        modules[&key.file_id].parsed.facts().emission().segments()
-                            [key.segment_idx as usize]
+                        modules[&key.file_id]
+                            .parsed
+                            .facts()
+                            .emission()
+                            .segments()
+                            .get(key.segment_idx as usize)
+                            .unwrap()
                             .connector_only()
                     })
         })

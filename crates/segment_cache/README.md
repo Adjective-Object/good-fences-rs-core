@@ -18,7 +18,13 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-This accessor-only migration retains the existing CBOR bytes and versions.
+Production loading/publication still uses the existing CBOR bytes and versions.
+Facts now expose the same Copy/value-iterator API as byte-backed AST records.
+`validate_parsed(source, parsed)` shares the source-local semantic checks with
+the current codec and accepts `ParsedModule::from_wire` without decoding a fact
+tree. Wire callers must apply this check after structural/source verification;
+`WireRecord` alone does not prove span/link/recipe validity. Switching sidecar
+framing, suffixes and lifecycle ownership remains a separate integration.
 Syntax-local effect reasons/timing are persisted and range-checked (schema 12 /
 extractor 14, including parented execution contexts, complete occurrence timing,
 eager read/write links, relative dependency patterns, owned lazy Ecco precursors,

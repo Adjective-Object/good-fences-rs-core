@@ -71,7 +71,7 @@ fn provenance_rejects_repaired_source_config_and_fact_pairings() {
             ParserConfig::from_source_type(oxc_span::SourceType::ts()),
             body,
             &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
-            &facts
+            facts.view()
         )
         .is_err());
 }
@@ -109,6 +109,14 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         assert_eq!(first, decoded);
         assert_eq!(bytes, decoded.encode(source).unwrap());
         let parsed = decoded.to_parsed(source).unwrap();
+        let wire_bytes = parsed.to_flatbuffer(source, OXC_REVISION).unwrap();
+        assert_eq!(wire_bytes, parsed.to_flatbuffer(source, OXC_REVISION).unwrap());
+        let wire = ast_segmenter::WireRecord::new(wire_bytes.into(), source, decoded.config().wire(), OXC_REVISION).unwrap();
+        let borrowed = ParsedModule::from_wire(source, wire).unwrap();
+        crate::validate_parsed(source, &borrowed).unwrap();
+        assert!(CacheRecord::from_parsed(source, &borrowed).is_err());
+        assert_eq!(borrowed.body(), parsed.body());
+        assert_eq!(borrowed.facts().bindings().iter().map(|b| (b.id(), b.name())).collect::<Vec<_>>(), parsed.facts().bindings().iter().map(|b| (b.id(), b.name())).collect::<Vec<_>>());
         assert_eq!(
             ParserConfig::from_source_type(parsed.source_type()),
             decoded.config()
@@ -136,16 +144,62 @@ fn rejects_corrupt_execution_contexts_and_access_timing() {
         |e| e.clear("segments.2.placement.eager_reads"),
     ];
     let original = record(source, "emission.mjs", ModuleFormat::Esm);
-    crate::validate_emission::validate(&original.module(), source).unwrap();
+    crate::validate_emission::validate(&original.module().into(), source).unwrap();
     for (index, mutate) in mutations.iter().enumerate() {
         let mut modified = original.clone();
         modified = corrupt(&modified, |value| mutate(value.at("module.facts.emission")));
         assert!(
-            crate::validate_emission::validate(&modified.module(), source).is_err(),
+            crate::validate_emission::validate(&modified.module().into(), source).is_err(),
             "structural execution validation accepted mutation {index}"
         );
     }
     reject_emission(source, mutations);
+}
+
+#[test]
+fn wire_semantics_reject_resealed_execution_self_parent() {
+    let source = "let x; export const stored = () => () => x;";
+    let parsed = record(source, "execution.mjs", ModuleFormat::Esm)
+        .to_parsed(source)
+        .unwrap();
+    let config = parsed.provenance().config().wire();
+    let wire = ast_segmenter::WireRecord::new(
+        parsed.to_flatbuffer(source, OXC_REVISION).unwrap().into(),
+        source,
+        config,
+        OXC_REVISION,
+    )
+    .unwrap();
+    let root = wire.root();
+    let module = root.module().bytes();
+    let module_start = module.as_ptr() as usize - wire.bytes().as_ptr() as usize;
+    let contexts = wire.module().facts().emission().execution().contexts();
+    let (index, context) = contexts
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.parent().is_some())
+        .unwrap();
+    let parent = context
+        ._tab
+        .vtable()
+        .get(cache_flatbuffers::wire::ExecutionContext::VT_PARENT) as usize;
+    assert_ne!(parent, 0);
+    let offset = module_start + context._tab.loc() + parent;
+    let seal =
+        root.provenance().records_hash() as *const _ as usize - wire.bytes().as_ptr() as usize;
+    let mut bytes = wire.bytes().to_vec();
+    bytes[offset..offset + 4].copy_from_slice(&(index as u32).to_le_bytes());
+    let hash = digest(&bytes[module_start..module_start + module.len()]);
+    bytes[seal..seal + 32].copy_from_slice(&hash);
+    let checksum = bytes.len() - 32;
+    let hash = digest(&bytes[..checksum]);
+    bytes[checksum..].copy_from_slice(&hash);
+
+    // Structural checks and both hashes pass; source-local semantics must not.
+    let malformed =
+        ast_segmenter::WireRecord::new(bytes.into(), source, config, OXC_REVISION).unwrap();
+    let borrowed = ParsedModule::from_wire(source, malformed).unwrap();
+    assert!(crate::validate_parsed(source, &borrowed).is_err());
 }
 
 #[test]

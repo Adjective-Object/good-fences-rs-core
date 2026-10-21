@@ -3,6 +3,11 @@
 `records` submodules own private persisted fields. Extraction uses restricted
 constructors/finalizers; all readers, including extraction queries and tests,
 use borrowed accessors. Never expose mutable facts through `ParsedModule`.
+`views` yields Copy tables/scalars and value iterators over owned or verified
+wire storage. `ParsedModule` keeps wire ranges lazy; only graph adapters build
+owned ranges. Encoding is cold-path and checks extraction provenance first.
+Wire readers never unpack Ecco or AST trees; semantic validation is a separate
+required gate from structural/source verification.
 
 ## Parser stack
 

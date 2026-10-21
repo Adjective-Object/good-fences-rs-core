@@ -9,6 +9,8 @@ fn parse(source: &str) -> ModuleFacts {
     )
     .unwrap()
     .into_facts()
+    .into_owned()
+    .unwrap()
 }
 
 #[test]
@@ -400,12 +402,13 @@ fn hints_and_opaque_cjs_keep_only_source_local_request_slots() {
         crate::ModuleFormat::CommonJs,
     )
     .unwrap();
-    let recipe = &parsed.facts().emission().segments()[0];
+    let recipe = parsed.facts().emission().segments().get(0).unwrap();
     assert!(!recipe.connector_only());
     assert!(recipe.placement().declarations().is_empty());
     assert_eq!(recipe.operations().len(), 3);
     assert!(recipe.operations().iter().all(|o| matches!(
         o.kind(),
-        OperationKind::Dependency { .. } | OperationKind::SourceHint { .. }
+        crate::views::OperationKind::Dependency { .. }
+            | crate::views::OperationKind::SourceHint { .. }
     )));
 }

@@ -198,7 +198,7 @@ mod tests {
                 parsed.facts().ecco_declarations_hash(),
                 prepared.fingerprint()
             );
-            let mut changed = parsed.facts().clone();
+            let mut changed = parsed.owned_facts().unwrap().clone();
             *changed.ecco_declarations_hash_mut() = Default::default();
             assert!(parsed
                 .provenance()
@@ -207,7 +207,7 @@ mod tests {
                     crate::ParserConfig::from_source_type(parsed.source_type()),
                     parsed.body(),
                     &parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>(),
-                    &changed,
+                    (&changed).into(),
                 )
                 .is_err());
         }
@@ -243,7 +243,7 @@ mod tests {
             .map(|recipe| {
                 recipe
                     .source()
-                    .as_slice()
+                    .spans()
                     .iter()
                     .map(|span| &source[span.start as usize..span.end as usize])
                     .collect::<String>()
@@ -262,11 +262,12 @@ mod tests {
             ]
         );
         assert!(parsed
-            .segments()
+            .owned_segments()
+            .unwrap()
             .windows(2)
             .all(|s| s[0].span.end <= s[1].span.start));
         assert_eq!(
-            parsed.segments()[1]
+            parsed.owned_segments().unwrap()[1]
                 .variables
                 .get_locals()
                 .map(|s| s.as_str())
@@ -274,7 +275,7 @@ mod tests {
             ["next"]
         );
         assert_eq!(
-            parsed.segments()[1]
+            parsed.owned_segments().unwrap()[1]
                 .variables
                 .get_escaped_symbols()
                 .map(|s| s.as_str())
@@ -282,8 +283,14 @@ mod tests {
             ["café"]
         );
         for (index, export) in parsed.facts().exports().iter().enumerate() {
-            assert_eq!(export.span(), parsed.segments()[index].span);
-            assert_eq!(parsed.segments()[index].module_deps.exports_locals.len(), 1);
+            assert_eq!(export.span(), parsed.segments().get(index).unwrap().span);
+            assert_eq!(
+                parsed.owned_segments().unwrap()[index]
+                    .module_deps
+                    .exports_locals
+                    .len(),
+                1
+            );
         }
     }
 
@@ -300,9 +307,9 @@ mod tests {
             assert!(segment.span.start <= root.span().start && root.span().end <= segment.span.end);
         }
         assert!(ecco.symbols().iter().any(|s| s.name() == "lazy"));
-        let encoded = serde_cbor::to_vec(&parsed.facts()).unwrap();
+        let encoded = serde_cbor::to_vec(parsed.owned_facts().unwrap()).unwrap();
         let decoded: crate::owned::ModuleFacts = serde_cbor::from_slice(&encoded).unwrap();
-        assert_eq!(&decoded, parsed.facts());
+        assert_eq!(&decoded, parsed.owned_facts().unwrap());
         assert_eq!(serde_cbor::to_vec(&decoded).unwrap(), encoded);
         parsed
             .provenance()
@@ -311,7 +318,7 @@ mod tests {
                 crate::ParserConfig::from_source_type(parsed.source_type()),
                 parsed.body(),
                 &parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>(),
-                &decoded,
+                (&decoded).into(),
             )
             .unwrap();
     }
@@ -336,7 +343,7 @@ mod tests {
                 .len(),
             2
         );
-        for segment in parsed.segments() {
+        for segment in parsed.owned_segments().unwrap() {
             assert_eq!(
                 segment
                     .variables
@@ -347,9 +354,11 @@ mod tests {
             );
             assert_eq!(segment.module_deps.dynamic_imports.len(), 1);
         }
-        assert!(parsed.segments()[0].module_deps.dynamic_imports["./first"]
+        assert!(parsed.owned_segments().unwrap()[0]
+            .module_deps
+            .dynamic_imports["./first"]
             .contains(&Symbol::named("named")));
-        assert!(parsed.segments()[1]
+        assert!(parsed.owned_segments().unwrap()[1]
             .module_deps
             .dynamic_imports
             .contains_key("./second"));
@@ -362,8 +371,14 @@ mod tests {
         .unwrap();
         assert_eq!(cjs.segments().len(), 1);
         assert_eq!(
-            cjs.facts().emission().segments()[0].source().as_slice(),
-            [cjs.segments()[0].span]
+            cjs.facts()
+                .emission()
+                .segments()
+                .get(0)
+                .unwrap()
+                .source()
+                .spans(),
+            [cjs.segments().get(0).unwrap().span]
         );
     }
 
@@ -377,8 +392,17 @@ mod tests {
         ] {
             let module = parse(source, path).unwrap();
             assert_eq!(module.segments().len(), 1);
-            assert_eq!(module.segments()[0].span.end as usize, source.len());
-            assert_eq!(module.segments()[0].module_deps.exports_locals.len(), 1);
+            assert_eq!(
+                module.segments().get(0).unwrap().span.end as usize,
+                source.len()
+            );
+            assert_eq!(
+                module.owned_segments().unwrap()[0]
+                    .module_deps
+                    .exports_locals
+                    .len(),
+                1
+            );
         }
     }
 

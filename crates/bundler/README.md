@@ -2,6 +2,12 @@
 
 ## Replacement direction and current status
 
+Graph linking, effect policy, Ecco registration, execution constraints and native
+recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
+verified owners, including Ecco's nested storage, without unpacking extraction
+trees. Derived plans remain owned. Production `BuildSession` sidecars still use
+CBOR; switching their lifecycle to FlatBuffers is intentionally separate.
+
 The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries

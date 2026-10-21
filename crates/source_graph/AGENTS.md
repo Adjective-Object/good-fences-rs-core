@@ -1,10 +1,12 @@
 # source_graph
 
 Edges point consumer → dependency. Forward/reverse indexes refer to the same
-occurrence collection. Reuse ast_segmenter owned facts; do not reconstruct a
+occurrence collection. Retain ast_segmenter owned-or-wire storage; do not reconstruct a
 second binding IR or put usage tags/effects/runtime scheduling in structure.
 Module nodes preserve empty-file identity; enclosing-function metadata is not
 permission to execute a require eagerly.
+Read `file_facts` Copy views and value iterators; `file_fact_storage` shares the
+owner for Ecco/emission. Building graph ranges is not permission to unpack facts.
 
 Lexical binding is independent of TDZ evaluation. Local references and checked
 export routes demand all declaration segments of one lexical identity, not only

@@ -6,6 +6,8 @@ use std::{fs, path::Path};
 fn calls(source: &str) -> Vec<Invocation> {
     crate::tests::input("file.ts", source)
         .facts
+        .owned()
+        .unwrap()
         .invocations()
         .to_vec()
 }
@@ -94,7 +96,7 @@ fn wildcard_members_match_computed_strings_optional_and_shadowed_receivers_witho
     ] {
         let matches = calls(source)
             .iter()
-            .any(|c| policy.matching_patterns(c).next().is_some());
+            .any(|c| policy.matching_patterns(c.into()).next().is_some());
         assert_eq!(matches, expected, "{source}");
         results.push((source, matches));
     }
@@ -128,7 +130,7 @@ fn exact_global_patterns_exclude_lexical_shadows_and_do_not_follow_aliases() {
         assert_eq!(
             calls(source)
                 .iter()
-                .any(|c| policy.matching_patterns(c).next().is_some()),
+                .any(|c| policy.matching_patterns(c.into()).next().is_some()),
             expected,
             "{source}"
         );
@@ -140,9 +142,9 @@ fn matching_rules_are_add_only_and_override_pure_without_making_deferred_creatio
     let source = "/* @__PURE__ */ node.appendChild(sideEffect(), ...iterable);";
     let parsed = crate::tests::input("entry.ts", source);
     let span = parsed.segments[0].span;
-    let base = effects::summarize(&parsed.facts, span, false);
+    let base = effects::summarize(parsed.facts.view(), span, false);
     let policy = EffectPolicy::parse(["*.appendChild(...)", "node.appendChild(...)"]).unwrap();
-    let known = effects::summarize_with_policy(&parsed.facts, span, false, &policy);
+    let known = effects::summarize_with_policy(parsed.facts.view(), span, false, &policy);
     assert_eq!(base.rewrites.len(), 1);
     assert!(known.rewrites.is_empty());
     assert_eq!(known.known_effects.len(), 2);
@@ -165,13 +167,20 @@ fn matching_rules_are_add_only_and_override_pure_without_making_deferred_creatio
     assert!(plan.effects[0].summary.known_effects.is_empty());
     let plain = calls("unknown();");
     let unknown = crate::tests::input("unknown.ts", "unknown();");
-    let result =
-        effects::summarize_with_policy(&unknown.facts, unknown.segments[0].span, false, &policy);
+    let result = effects::summarize_with_policy(
+        unknown.facts.view(),
+        unknown.segments[0].span,
+        false,
+        &policy,
+    );
     assert!(result
         .sites
         .iter()
         .any(|s| s.reason() == EffectReason::Invocation));
-    assert!(policy.matching_patterns(&plain[0]).next().is_none());
+    assert!(policy
+        .matching_patterns((&plain[0]).into())
+        .next()
+        .is_none());
 }
 
 #[test]
@@ -196,7 +205,7 @@ fn source_value_context_preserves_concise_arrow_returns_and_binding_roots_reach_
         "entry.ts",
         "export const arrow = () => /*@__PURE__*/ node.appendChild(child); effect();",
     )]);
-    let call = &graph.file_facts(0).unwrap().invocations()[0];
+    let call = graph.file_facts(0).unwrap().invocations().get(0).unwrap();
     assert_eq!(
         call.value_use(),
         ast_segmenter::invocation::ValueUse::Required

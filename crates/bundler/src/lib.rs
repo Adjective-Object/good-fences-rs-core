@@ -26,7 +26,7 @@ mod symbols;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
-use ast_segmenter::owned::ModuleFacts;
+use ast_segmenter::views::ModuleFacts;
 use eyre::{ensure, OptionExt};
 use source_graph::{
     Activation, DependencyTarget, EdgeKind, EdgePurpose, GraphNode, GraphRevision, SegmentKey,
@@ -260,7 +260,7 @@ struct Retention<'g, 'p> {
 }
 
 impl Retention<'_, '_> {
-    fn facts(&self, file: u32) -> eyre::Result<&ModuleFacts> {
+    fn facts(&self, file: u32) -> eyre::Result<ModuleFacts<'_>> {
         self.graph
             .file_facts(file)
             .ok_or_eyre("bundler requires live modules with owned source facts")

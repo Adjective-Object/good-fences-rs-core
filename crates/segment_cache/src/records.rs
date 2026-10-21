@@ -19,8 +19,8 @@ impl CachedModule {
         &self.segments
     }
 
-    pub fn facts(&self) -> &ModuleFacts {
-        &self.facts
+    pub fn facts(&self) -> ast_segmenter::views::ModuleFacts<'_> {
+        (&self.facts).into()
     }
 }
 
@@ -100,7 +100,7 @@ impl CacheRecord {
             module: CachedModule {
                 body: parsed.body(),
                 segments: parsed.segments().iter().map(|s| s.span).collect(),
-                facts: parsed.facts().clone(),
+                facts: parsed.owned_facts()?.clone(),
             },
             provenance: parsed.provenance().clone(),
         };
@@ -125,7 +125,7 @@ impl CacheRecord {
                     variables: Default::default(),
                 })
                 .collect(),
-            self.module().facts().clone(),
+            self.module.facts.clone(),
         )
     }
 

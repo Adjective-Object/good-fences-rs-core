@@ -355,7 +355,7 @@ fn compatible(
     values: &Values<'_>,
     live: &BTreeSet<SegmentKey>,
 ) -> eyre::Result<bool> {
-    use ast_segmenter::emission::NamespaceAccess;
+    use ast_segmenter::views::NamespaceAccess;
     let facts = &module.parsed.facts();
     let retained: Vec<_> = facts
         .emission()
@@ -394,19 +394,26 @@ fn compatible(
             .placement()
             .declarations()
             .iter()
-            .any(|id| changed.contains(id))
-            || recipe.placement().writes().iter().any(|&index| {
-                facts.references()[index as usize]
+            .any(|id| changed.contains(&id))
+            || recipe.placement().writes().iter().any(|index| {
+                facts
+                    .references()
+                    .get(index as usize)
+                    .unwrap()
                     .binding()
                     .is_some_and(|id| changed.contains(&id))
             });
-        if recipe.names().named().iter().any(|id| changed.contains(id))
+        if recipe
+            .names()
+            .named()
+            .iter()
+            .any(|id| changed.contains(&id))
             || (inference_changes && recipe.names().inference_sensitive())
         {
             return Ok(false);
         }
         for usage in recipe.namespaces() {
-            let reference = &facts.references()[usage.reference() as usize];
+            let reference = facts.references().get(usage.reference() as usize).unwrap();
             let Some(target) = reference.binding().and_then(|id| namespaces.get(&id)) else {
                 continue;
             };
@@ -433,12 +440,12 @@ fn body(
     values: &Values<'_>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
 ) -> eyre::Result<Option<(Code, Code)>> {
-    use ast_segmenter::emission::{ExportForm, NamespaceAccess, OperationKind};
+    use ast_segmenter::views::{ExportForm, NamespaceAccess, OperationKind};
     let file = key.file_id;
     if !compatible(graph, file, module, values, &BTreeSet::from([key]))? {
         return Ok(None);
     }
-    let facts = &module.parsed.facts();
+    let facts = module.parsed.facts();
     let mut targets = HashMap::new();
     let mut namespaces = HashMap::new();
     for binding in facts
@@ -466,7 +473,7 @@ fn body(
     let mut hoisted = Code::default();
     let mut output = Code::default();
     let index = key.segment_idx as usize;
-    let recipe = &facts.emission().segments()[index];
+    let recipe = facts.emission().segments().get(index).unwrap();
     let mut renderer = crate::emit::CachedRenderer::new(
         module.source,
         facts,
@@ -487,15 +494,21 @@ fn body(
             OperationKind::Reference {
                 reference,
                 shorthand,
-            } => facts.references()[*reference as usize]
+            } => facts
+                .references()
+                .get(*reference as usize)
+                .unwrap()
                 .binding()
                 .and_then(|id| targets.get(&id))
                 .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
                 .transpose()?
                 .map(Code::from),
             OperationKind::Namespace { usage } => {
-                let usage = &recipe.namespaces()[*usage as usize];
-                if let Some(target) = facts.references()[usage.reference() as usize]
+                let usage = recipe.namespaces().get(*usage as usize).unwrap();
+                if let Some(target) = facts
+                    .references()
+                    .get(usage.reference() as usize)
+                    .unwrap()
                     .binding()
                     .and_then(|id| namespaces.get(&id))
                 {
@@ -579,7 +592,7 @@ fn body(
                     .defaults
                     .get(&key)
                     .ok_or_eyre("missing native default binding")?;
-                let value = renderer.slot(&value)?;
+                let value = renderer.slot(*value)?;
                 if *is_hoisted {
                     hoisted.push(
                         value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),

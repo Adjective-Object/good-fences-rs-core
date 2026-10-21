@@ -63,7 +63,7 @@ fn cold_warm_and_disabled_match_every_owned_fact_and_segment() {
         assert_eq!(cold.write, CacheWrite::Stored);
         assert_eq!(warm.status, CacheStatus::Hit);
         for record in [&cold.record, &warm.record, &disabled.record] {
-            assert_eq!(record.module().facts(), parsed.facts());
+            assert_eq!(record.to_parsed(source).unwrap().owned_facts().unwrap(), parsed.owned_facts().unwrap());
             assert_eq!(record.module().body(), parsed.body());
             assert_eq!(record.module().segments(), parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>());
         }
@@ -201,7 +201,14 @@ fn relocation_reuses_bytes_but_resolves_dependencies_under_new_root() {
     let warm = load(&relocated, ModuleFormat::Esm);
     assert_eq!(warm.status, CacheStatus::Hit);
     assert_eq!(cold.record, warm.record);
-    let specifier = warm.record.module().facts().dependencies()[0].specifier();
+    let specifier = warm
+        .record
+        .module()
+        .facts()
+        .dependencies()
+        .get(0)
+        .unwrap()
+        .specifier();
     assert_eq!(specifier, "./dep");
     let old_target = resolver(&a, &["js"])
         .resolve(&original, specifier)
@@ -244,7 +251,7 @@ fn resolver_and_effect_configuration_changes_leave_parse_cache_unchanged() {
         .unwrap()
         .modified()
         .unwrap();
-    let dep = &cold.record.module().facts().dependencies()[0];
+    let dep = cold.record.module().facts().dependencies().get(0).unwrap();
     assert_eq!(dep.kind(), DependencyKind::Import);
     let js = resolver(dir.root(), &["jsx"])
         .resolve(&path, &dep.specifier())

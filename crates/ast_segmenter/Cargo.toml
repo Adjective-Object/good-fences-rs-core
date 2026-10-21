@@ -12,6 +12,8 @@ edition = "2018"
 crate-type = ["lib"]
 
 [dependencies]
+cache_flatbuffers = { path = "../cache_flatbuffers" }
+flatbuffers = "=25.2.10"
 ecco = { path = "../ecco" }
 eyre.workspace = true
 serde.workspace = true

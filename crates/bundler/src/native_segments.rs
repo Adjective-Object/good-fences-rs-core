@@ -183,9 +183,13 @@ impl Placement {
                                             let index = module.parsed.segments().partition_point(
                                                 |segment| segment.span.end <= span.start,
                                             );
-                                            module.parsed.segments()[index].span.end
+                                            module.parsed.segments().get(index).unwrap().span.end
                                                 <= reference.span().start
-                                                || facts.emission().segments()[index]
+                                                || facts
+                                                    .emission()
+                                                    .segments()
+                                                    .get(index)
+                                                    .unwrap()
                                                     .placement()
                                                     .hoisted()
                                                     .contains(&binding.id())
@@ -215,8 +219,13 @@ impl Placement {
             .iter()
             .copied()
             .filter(|key| {
-                let placement = &modules[&key.file_id].parsed.facts().emission().segments()
-                    [key.segment_idx as usize]
+                let placement = modules[&key.file_id]
+                    .parsed
+                    .facts()
+                    .emission()
+                    .segments()
+                    .get(key.segment_idx as usize)
+                    .unwrap()
                     .placement();
                 fenced.contains(&key.file_id)
                     && !phase_bound.contains(&key.file_id)
@@ -253,7 +262,12 @@ impl Placement {
         for &key in &live {
             let module = &modules[&key.file_id];
             let facts = &module.parsed.facts();
-            let placement = &facts.emission().segments()[key.segment_idx as usize].placement();
+            let placement = facts
+                .emission()
+                .segments()
+                .get(key.segment_idx as usize)
+                .unwrap()
+                .placement();
             let definitions = placement
                 .declarations()
                 .iter()
@@ -261,7 +275,7 @@ impl Placement {
                     facts
                         .bindings()
                         .iter()
-                        .find(|b| b.id() == *id)
+                        .find(|b| b.id() == id)
                         .ok_or_eyre("missing placement binding")
                 })
                 .collect::<eyre::Result<Vec<_>>>()?;
@@ -280,7 +294,7 @@ impl Placement {
                 pinned.insert(key);
             }
             for binding in &definitions {
-                for &declaration in binding.declarations() {
+                for declaration in binding.declarations() {
                     let index = module
                         .parsed
                         .segments()
@@ -292,8 +306,8 @@ impl Placement {
                     }
                 }
             }
-            for &index in placement.writes() {
-                let reference = &facts.references()[index as usize];
+            for index in placement.writes() {
+                let reference = facts.references().get(index as usize).unwrap();
                 let Some(binding) = reference.binding().and_then(|id| {
                     facts
                         .bindings()
@@ -313,11 +327,22 @@ impl Placement {
         // chunks as live imports. This also keeps snapshots ahead of later writes.
         for &key in &live {
             let module = &modules[&key.file_id];
-            for &index in module.parsed.facts().emission().segments()[key.segment_idx as usize]
+            for index in module
+                .parsed
+                .facts()
+                .emission()
+                .segments()
+                .get(key.segment_idx as usize)
+                .unwrap()
                 .placement()
                 .eager_reads()
             {
-                let reference = &module.parsed.facts().references()[index as usize];
+                let reference = module
+                    .parsed
+                    .facts()
+                    .references()
+                    .get(index as usize)
+                    .unwrap();
                 let Some(binding) = reference.binding().and_then(|id| {
                     module
                         .parsed
@@ -377,7 +402,12 @@ impl Placement {
             let Some(exports) = boundary_exports.get(&seams[&file]) else {
                 continue;
             };
-            let reference = &modules[&file].parsed.facts().references()[access.reference as usize];
+            let reference = modules[&file]
+                .parsed
+                .facts()
+                .references()
+                .get(access.reference as usize)
+                .unwrap();
             let Some(binding) = reference.binding() else {
                 continue;
             };
@@ -607,8 +637,12 @@ impl Placement {
                             || (initializers.is_empty()
                                 && component.iter().any(|key| {
                                     let module = &modules[&key.file_id];
-                                    let span =
-                                        module.parsed.segments()[key.segment_idx as usize].span;
+                                    let span = module
+                                        .parsed
+                                        .segments()
+                                        .get(key.segment_idx as usize)
+                                        .unwrap()
+                                        .span;
                                     module.parsed.facts().references().iter().any(|reference| {
                                         contains(span, reference.span())
                                             && reference.binding().is_some()
@@ -694,7 +728,12 @@ impl Placement {
             {
                 let facts = &modules[&access.segment.file_id].parsed.facts();
                 if facts.emission().execution().is_module_evaluation(
-                    facts.emission().execution().references()[access.reference as usize],
+                    facts
+                        .emission()
+                        .execution()
+                        .references()
+                        .get(access.reference as usize)
+                        .unwrap(),
                 ) {
                     dependencies
                         .get_mut(&access.segment)
@@ -1103,8 +1142,13 @@ fn activation_safe(
     let mut events = BTreeSet::new();
     let mut native_events: BTreeMap<_, Vec<_>> = BTreeMap::new();
     for &key in owners.keys() {
-        let recipe =
-            &modules[&key.file_id].parsed.facts().emission().segments()[key.segment_idx as usize];
+        let recipe = modules[&key.file_id]
+            .parsed
+            .facts()
+            .emission()
+            .segments()
+            .get(key.segment_idx as usize)
+            .unwrap();
         if recipe.connector_only() || recipe.placement().instantiable() {
             continue;
         }
@@ -1195,7 +1239,7 @@ fn declaration(graph: &SourceGraph, identity: &ExportIdentity) -> eyre::Result<O
                 .iter()
                 .find(|b| b.id() == *binding)
                 .ok_or_eyre("missing symbol binding")?;
-            let span = *binding
+            let span = binding
                 .declarations()
                 .first()
                 .ok_or_eyre("missing symbol declaration")?;
@@ -1232,8 +1276,13 @@ fn local_names(
                 .emission()
                 .free_references()
                 .iter()
-                .map(|&index| {
-                    modules[file].parsed.facts().references()[index as usize]
+                .map(|index| {
+                    modules[file]
+                        .parsed
+                        .facts()
+                        .references()
+                        .get(index as usize)
+                        .unwrap()
                         .name()
                         .to_owned()
                 })
@@ -1289,7 +1338,7 @@ fn local_names(
                                 .facts()
                                 .bindings()
                                 .iter()
-                                .any(|b| b.id() == *id && b.name() == original.name())
+                                .any(|b| b.id() == id && b.name() == original.name())
                         })
             });
         let name = if !captured && occupied.insert(original.name().to_owned()) {
@@ -1343,7 +1392,12 @@ pub(super) fn emit(
                 && live.iter().any(|key| {
                     key.file_id == file
                         && contains(
-                            module.parsed.segments()[key.segment_idx as usize].span,
+                            module
+                                .parsed
+                                .segments()
+                                .get(key.segment_idx as usize)
+                                .unwrap()
+                                .span,
                             d.span(),
                         )
                 })
@@ -1425,7 +1479,12 @@ pub(super) fn emit(
                 r.binding() == Some(binding.id())
                     && live.iter().filter(|k| k.file_id == file).any(|k| {
                         contains(
-                            modules[&file].parsed.segments()[k.segment_idx as usize].span,
+                            modules[&file]
+                                .parsed
+                                .segments()
+                                .get(k.segment_idx as usize)
+                                .unwrap()
+                                .span,
                             r.span(),
                         )
                     })

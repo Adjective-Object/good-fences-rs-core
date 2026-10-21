@@ -21,6 +21,7 @@ use eyre::ensure;
 use oxc_span::Span;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub use validate::validate_parsed;
 
 pub const SCHEMA_VERSION: u32 = 12;
 pub const EXTRACTOR_VERSION: u32 = 14;

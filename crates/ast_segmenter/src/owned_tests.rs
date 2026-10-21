@@ -11,7 +11,9 @@ fn parse(source: &str) -> ModuleFacts {
         ModuleFormat::Esm,
     )
     .unwrap()
-    .into_facts();
+    .into_facts()
+    .into_owned()
+    .unwrap();
     *facts.ecco_mut() = None;
     *facts.ecco_declarations_hash_mut() = Default::default();
     facts

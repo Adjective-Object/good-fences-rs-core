@@ -16,3 +16,6 @@
 - Wire/source integrity is not semantic validity. Production integration must
   retain source-local span/link/ordering/recipe checks and private extraction seals.
   Do not manufacture seals around arbitrary source/facts or deserialize for checking.
+- AST construction/views live in `ast_segmenter`; `segment_cache::validate_parsed`
+  is the shared owned/wire semantic gate. Graph/Ecco/emission retain byte owners;
+  production CBOR loading/publication is still awaiting the separate final hookup.

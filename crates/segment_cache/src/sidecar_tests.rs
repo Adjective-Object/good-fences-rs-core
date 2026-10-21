@@ -228,9 +228,17 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
         .declarations()
         .definitions()
         .iter()
-        .find(|definition| *definition.binding() == ecco::Binding::Local("forward".into()))
+        .find(|definition| {
+            matches!(
+                definition.binding(),
+                ecco::views::BindingView::Local("forward")
+            )
+        })
         .unwrap();
-    assert_eq!(contract.returns(), &ecco::Returns::Argument("value".into()));
+    assert!(matches!(
+        contract.returns(),
+        ecco::views::ReturnsView::Argument("value")
+    ));
     let forward = library
         .symbols()
         .iter()
@@ -247,8 +255,13 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
     );
     for _ in 0..2 {
         let mut analysis = ecco::Analysis::new();
+        let storage = warm
+            .record
+            .to_parsed(&fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .into_facts();
         analysis
-            .add_file("library", std::sync::Arc::new(library.clone()))
+            .add_file("library", storage.ecco_source().unwrap().unwrap())
             .unwrap();
         analysis.add_file("entry", entry.clone()).unwrap();
         let result = analysis
@@ -417,7 +430,14 @@ fn replacement_failure_is_nonfatal_and_does_not_remove_destination() {
         b"do not remove"
     );
     assert_eq!(
-        outcome.record.module().facts().dependencies()[0].specifier(),
+        outcome
+            .record
+            .module()
+            .facts()
+            .dependencies()
+            .get(0)
+            .unwrap()
+            .specifier(),
         "./dep"
     );
     no_staging(&dir);
