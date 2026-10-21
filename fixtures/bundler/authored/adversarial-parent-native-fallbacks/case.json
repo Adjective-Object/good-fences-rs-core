@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-native-fallbacks",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs", "public.mjs"],
+  "expectations": {
+    "stdout": ["eager shared", "parents true true true shared,a,b", "namespace true true true count,object true", "live 1 1 1", "public true 42", "then 8 8 shared,a,b,then-init,then-call,then-call"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored explicit native-fallback coverage; no upstream source copied and no parent-hoisting claim.",
+    "Static-eager and multi-parent dynamic demand preserve shared state and object identity.",
+    "Public target boundaries, reflective module namespaces and callable exported then retain native namespace/assimilation behavior."
+  ]
+}

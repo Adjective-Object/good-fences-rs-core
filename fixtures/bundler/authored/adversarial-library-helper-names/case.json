@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-library-helper-names",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"min_chunk_bytes": 65536}},
+  "expectations": {"backend": "native", "stdout": [
+    "cold 0", "a x 3 proto-x init-x", "b x,y true 5 proto-y init-y", "c x,y true"
+  ]},
+  "goals": [
+    "Locally authored exact differential requiring native output and a 65536-byte small-island threshold.",
+    "Static property root observations target guarded extraction of x={a,b} and y={b,c}; no namespace reflection or exported callable then is required.",
+    "A private then local, exported through the readThen alias, and callable __proto__/init export names preserve values and object identity without colliding with private availability helpers; the separate barrels case covers the conservative exported-then fallback."
+  ]
+}

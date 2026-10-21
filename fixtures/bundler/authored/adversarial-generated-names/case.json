@@ -1,0 +1,12 @@
+{
+  "id": "authored/adversarial-generated-names",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"synthesize_async_boundaries": true, "min_chunk_bytes": 0}},
+  "outputObservation": "observe.mjs",
+  "expectations": {"stdout": ["names: Promise shadow, then export, argument effects"], "backend": "native"},
+  "goals": [
+    "Keep generated helper operations independent of private functions named Promise and then.",
+    "Loading a binding named then must not invoke it as namespace promise assimilation."
+  ]
+}

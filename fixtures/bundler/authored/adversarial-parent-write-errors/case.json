@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-write-errors",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["cold 0", "const TypeError 2 const-init,const-before", "import TypeError 3 dependency,import-init,import-before", "repeat TypeError 2 const-before"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored write-restriction contract; no upstream source copied.",
+    "Deferred const and imported bindings remain read-only after relocation, preserving effects before TypeError and original values.",
+    "Explicit native-fallback coverage: these are ordinary write errors, not waived TDZ errors; unsupported binding shapes must retain read-only semantics."
+  ]
+}

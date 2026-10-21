@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-declarations",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["cold entry", "empty entry", "plain plain true", "functions left right left right true true", "vars 7 7 true true entry,vars"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored explicit native-fallback declaration-only and name-collision contract; no upstream source copied and no hoisting claim.",
+    "Empty/declaration-only targets preserve calls and identity; named-collision shapes are explicit native-fallback coverage.",
+    "Repeated module var declarations and legal nested var/function redeclarations preserve initialization order and captures."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "authored/adversarial-library-barrels",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"min_chunk_bytes": 65536}},
+  "expectations": {"backend": "native", "stdout": [
+    "cold 0", "a x x:then proto-x init-x default-x", "b x,y true y:then proto-y init-y", "c x,y true"
+  ]},
+  "goals": [
+    "Locally authored native exact differential with a 65536-byte clustering threshold.",
+    "Pure equal-map redirect barrels preserve default and named canonical identities across x={a,b} and y={b,c} overlapping masks; callable then and destructured root aliases deliberately cover the conservative native fallback, not guarded extraction.",
+    "Static imports of callable then, __proto__, and init exports must not collide with private activation helpers or leak then onto root namespaces.",
+    "Static destructuring avoids reflection, but typed segment membership is unchanged with clustering disabled; do not count this case as clustering-transform coverage."
+  ]
+}
