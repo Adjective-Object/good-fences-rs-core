@@ -4,6 +4,8 @@ mod structure;
 pub use structure::*;
 mod linker;
 pub use linker::*;
+mod dynamic_imports;
+pub use dynamic_imports::*;
 mod revision;
 pub use revision::*;
 mod legacy;

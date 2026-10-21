@@ -688,6 +688,303 @@ pub(crate) mod tests {
         }
     }
 
+    fn dynamic_demands(graph: &SourceGraph) -> Vec<crate::DynamicImportDemand> {
+        (0..graph.edges().len())
+            .filter_map(|index| graph.dynamic_import_demand(index))
+            .collect()
+    }
+
+    #[test]
+    fn dynamic_selected_routes_preserve_aliases_barrels_and_original_evaluation() {
+        let graph = SourceGraph::from_owned([
+            input(
+                "entry.mjs",
+                "const {chosen, other, absent} = await import('barrel.mjs'); const value = (await import('barrel.mjs')).chosen;",
+            ),
+            input(
+                "barrel.mjs",
+                "console.log('barrel'); export {alias as chosen, alias as other} from 'middle.mjs';",
+            ),
+            input("middle.mjs", "export {value as alias} from 'leaf.mjs';"),
+            input("leaf.mjs", "export const value = 1; export const unused = 2;"),
+        ]);
+        graph.validate_links().unwrap();
+        let demands = dynamic_demands(&graph);
+        assert_eq!(demands.len(), 2);
+        assert_ne!(
+            demands[0].evaluation.dependency,
+            demands[1].evaluation.dependency
+        );
+        assert_ne!(demands[0].source_edge, demands[1].source_edge);
+        for demand in &demands {
+            let original = &graph.edges()[demand.source_edge];
+            assert_eq!(original.purpose, EdgePurpose::Execution);
+            assert_eq!(original.to, GraphNode::Module(1));
+            assert_eq!(demand.evaluation.to, GraphNode::Module(1));
+            assert_eq!(demand.evaluation.purpose, EdgePurpose::Evaluation);
+            let bindings = demand.bindings.as_ref().unwrap();
+            let names = if demand.source_edge == demands[0].source_edge {
+                vec!["chosen", "other"]
+            } else {
+                vec!["chosen"]
+            };
+            for name in names {
+                let route: Vec<_> = bindings
+                    .iter()
+                    .filter(|edge| edge.imported == Some(ImportedName::Name(name.into())))
+                    .map(|edge| edge.to)
+                    .collect();
+                assert_eq!(
+                    route,
+                    graph
+                        .resolve_export(1, name, crate::Namespace::Value)
+                        .unwrap()
+                        .route
+                );
+                assert!(route.contains(&GraphNode::Segment(SegmentKey::new(1, 1))));
+                assert!(route.contains(&GraphNode::Segment(SegmentKey::new(2, 0))));
+                assert!(route.contains(&GraphNode::Segment(SegmentKey::new(3, 0))));
+                assert!(!route.contains(&GraphNode::Segment(SegmentKey::new(3, 1))));
+            }
+            assert_eq!(
+                bindings.len(),
+                if demand.source_edge == demands[0].source_edge {
+                    6
+                } else {
+                    3
+                }
+            );
+            for edge in bindings {
+                assert_eq!(edge.from, original.from);
+                assert_eq!(edge.site, original.site);
+                assert_eq!(edge.dependency, original.dependency);
+                assert_eq!(edge.enclosing_function, original.enclosing_function);
+                assert_eq!(edge.activation, Activation::Asynchronous);
+                assert_eq!(edge.kind, EdgeKind::DynamicImport);
+                assert_eq!(edge.purpose, EdgePurpose::Binding);
+            }
+        }
+        // Demand derivation must not expose extra async edges to today's planner.
+        assert_eq!(
+            graph
+                .edges()
+                .iter()
+                .filter(|e| e.kind == EdgeKind::DynamicImport)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn dynamic_missing_or_unused_properties_need_only_original_evaluation() {
+        for source in [
+            "const {absent} = await import('leaf.mjs');",
+            "await import('leaf.mjs');",
+            "import('leaf.mjs');",
+            "const unused = await import('leaf.mjs');",
+            "import('leaf.mjs').then(ns => ns.absent);",
+        ] {
+            let graph = SourceGraph::from_owned([
+                input("entry.mjs", source),
+                input("leaf.mjs", "export const value = 1;"),
+            ]);
+            graph.validate_links().unwrap();
+            let demands = dynamic_demands(&graph);
+            assert_eq!(demands.len(), 1, "{source}");
+            assert_eq!(demands[0].bindings, Some(Vec::new()), "{source}");
+            assert_eq!(demands[0].evaluation.to, GraphNode::Module(1));
+        }
+        let graph = SourceGraph::from_owned([
+            input("entry.mjs", "import {absent} from 'leaf.mjs';"),
+            input("leaf.mjs", "export const value = 1;"),
+        ]);
+        assert!(graph.validate_links().is_err());
+        assert!(dynamic_demands(&graph).is_empty());
+    }
+
+    #[test]
+    fn dynamic_unknown_reflected_escaping_and_receiver_namespaces_stay_full() {
+        for source in [
+            "const ns = await import('leaf.mjs'); consume(ns);",
+            "const ns = await import('leaf.mjs'); Object.keys(ns);",
+            "const ns = await import('leaf.mjs'); ns[key];",
+            "export const ns = await import('leaf.mjs');",
+            "const ns = await import('leaf.mjs'); ns.fn();",
+            "(await import('leaf.mjs')).fn();",
+            "import('leaf.mjs').then(ns => ns.fn());",
+        ] {
+            let graph = SourceGraph::from_owned([
+                input("entry.mjs", source),
+                input("leaf.mjs", "export function fn() { return this; }"),
+            ]);
+            graph.validate_links().unwrap();
+            assert_eq!(dynamic_demands(&graph)[0].bindings, None, "{source}");
+        }
+    }
+
+    #[test]
+    fn dynamic_possible_then_assimilation_stays_full_even_without_property_reads() {
+        for exports in [
+            "export function then(resolve) { resolve(1); } export const value = 1;",
+            "export {handler as then} from 'handler.mjs'; export const value = 1;",
+            "export * from 'handler.mjs';",
+            // Non-callability is intentionally not inferred in structural linking.
+            "export const then = 1; export const value = 1;",
+        ] {
+            for source in [
+                "const {value} = await import('leaf.mjs');",
+                "import('leaf.mjs');",
+            ] {
+                let graph = SourceGraph::from_owned([
+                    input("entry.mjs", source),
+                    input("leaf.mjs", exports),
+                    input(
+                        "handler.mjs",
+                        "export function handler() {} export {handler as then};",
+                    ),
+                ]);
+                graph.validate_links().unwrap();
+                assert_eq!(dynamic_demands(&graph)[0].bindings, None, "{exports}");
+            }
+        }
+    }
+
+    #[test]
+    fn dynamic_opaque_external_and_context_routes_stay_full() {
+        let parsed = parse_module(
+            &logger::StdioLogger::new(),
+            "exports.value = 1;",
+            Path::new("opaque.cjs"),
+            ModuleFormat::CommonJs,
+        )
+        .unwrap();
+        let cjs =
+            OwnedSourceFileInput::from_parsed("opaque.cjs".into(), parsed, Default::default());
+        let graph = SourceGraph::from_owned([
+            input("entry.mjs", "const {value} = await import('opaque.cjs');"),
+            cjs,
+        ]);
+        graph.validate_links().unwrap();
+        assert_eq!(dynamic_demands(&graph)[0].bindings, None);
+
+        for barrel in [
+            "export {value} from 'external';",
+            "export * from 'external';",
+        ] {
+            let mut target = input("barrel.mjs", barrel);
+            let dependency = target.facts.dependencies().get(0).unwrap().id();
+            target
+                .resolutions
+                .insert(dependency, DependencyTarget::External("external".into()));
+            let graph = SourceGraph::from_owned([
+                input("entry.mjs", "const {value} = await import('barrel.mjs');"),
+                target,
+            ]);
+            graph.validate_links().unwrap();
+            assert_eq!(dynamic_demands(&graph)[0].bindings, None);
+        }
+
+        let mut entry = input("entry.mjs", "const {value} = await import('external');");
+        let dependency = entry.facts.dependencies().get(0).unwrap().id();
+        entry
+            .resolutions
+            .insert(dependency, DependencyTarget::External("external".into()));
+        let graph = SourceGraph::from_owned([entry]);
+        graph.validate_links().unwrap();
+        assert_eq!(dynamic_demands(&graph)[0].bindings, None);
+        assert!(matches!(
+            dynamic_demands(&graph)[0].evaluation.to,
+            GraphNode::Unlinked { .. }
+        ));
+
+        let mut entry = input(
+            "entry.mjs",
+            "const {value} = await import(`./${name}.mjs`);",
+        );
+        let dependency = entry.facts.dependencies().get(0).unwrap().id();
+        entry.resolutions.insert(
+            dependency,
+            DependencyTarget::Context(BTreeMap::from([("./leaf.mjs".into(), "leaf.mjs".into())])),
+        );
+        let graph = SourceGraph::from_owned([entry, input("leaf.mjs", "export const value = 1;")]);
+        graph.validate_links().unwrap();
+        assert_eq!(dynamic_demands(&graph)[0].bindings, None);
+    }
+
+    #[test]
+    fn dynamic_routes_use_borrowed_cache_observations_and_current_resolution() {
+        use segment_cache::{CacheRecord, ParserConfig};
+
+        let sources = [
+            ("entry.mjs", "async function load() { const {chosen} = await import('barrel.mjs'); return chosen; }"),
+            ("barrel.mjs", "import {value as local} from 'leaf.mjs'; export {local as chosen};"),
+            ("leaf.mjs", "export const value = 1;"),
+        ];
+        let cold = SourceGraph::from_owned(sources.map(|(path, source)| input(path, source)));
+        let mut warm = SourceGraph::from_owned(sources.map(|(path, source)| {
+            let mut input = input(path, source);
+            let parsed = parse_module(
+                &logger::StdioLogger::new(),
+                source,
+                Path::new(path),
+                ModuleFormat::Esm,
+            )
+            .unwrap();
+            let bytes = CacheRecord::from_parsed(source, &parsed)
+                .unwrap()
+                .encode(source)
+                .unwrap();
+            drop(parsed);
+            let record = CacheRecord::decode(
+                &bytes,
+                source,
+                ParserConfig::for_path(Path::new(path), ModuleFormat::Esm).unwrap(),
+            )
+            .unwrap();
+            input = OwnedSourceFileInput::from_parsed(
+                path.into(),
+                record.to_parsed(source).unwrap(),
+                input.resolutions,
+            );
+            input
+        }));
+        cold.validate_links().unwrap();
+        warm.validate_links().unwrap();
+        assert_eq!(dynamic_demands(&cold), dynamic_demands(&warm));
+        let demands = dynamic_demands(&warm);
+        assert!(demands[0].evaluation.enclosing_function.is_some());
+        let route: Vec<_> = demands[0]
+            .bindings
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|e| e.to)
+            .collect();
+        assert!(route.contains(&GraphNode::Segment(SegmentKey::new(1, 1))));
+        assert!(route.contains(&GraphNode::Segment(SegmentKey::new(2, 0))));
+
+        warm.patch_owned(
+            Path::new("leaf.mjs"),
+            input(
+                "leaf.mjs",
+                "export const value = 1; export function then() {}",
+            ),
+        )
+        .unwrap();
+        // An unrelated leaf `then` is not exported by the original barrel.
+        assert!(dynamic_demands(&warm)[0].bindings.is_some());
+        warm.patch_owned(
+            Path::new("barrel.mjs"),
+            input(
+                "barrel.mjs",
+                "export * from 'leaf.mjs'; export {value as chosen} from 'leaf.mjs';",
+            ),
+        )
+        .unwrap();
+        warm.validate_links().unwrap();
+        assert_eq!(dynamic_demands(&warm)[0].bindings, None);
+    }
+
     #[test]
     fn contexts_expand_real_occurrences_and_reject_mismatched_resolutions() {
         let mut main = input(

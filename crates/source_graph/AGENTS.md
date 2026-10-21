@@ -36,3 +36,10 @@ never infer generated parser modes from original resource suffixes.
 Effective CJS facts resolve arbitrary value requests to CommonJs(file,name),
 not guessed exports. Binding edges preserve requested names and opaque module
 demand; runtime snapshot/default policy belongs to bundler proxies.
+
+`dynamic_import_demand` is opt-in derived occurrence metadata, not extra indexed
+edges or permission to narrow today's retention. Selected `OccurrenceEdge`
+binding routes always accompany the original module's async evaluation, never
+leaf evaluation alone. Keep requested names separate for per-export roots and
+dependency/site identity for activation. Missing properties have no binding;
+unknown surfaces, receiver calls and possible exported `then` stay full.

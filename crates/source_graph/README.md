@@ -72,6 +72,23 @@ time. Distinct candidate identities involving externals resolve to an explicit
 native loader validates that binding. Fully known internal ambiguities still
 fail. `has_external_star_exports` identifies transitive open namespace surfaces.
 
+`dynamic_import_demand(source_edge)` derives opt-in `DynamicImportDemand` metadata
+for a runtime dynamic-import edge at the current revision. `evaluation` is an
+asynchronous evaluation edge to the **original** module (including barrels);
+every selected export requires that same occurrence's evaluation obligation.
+`bindings: Some(routes)` uses ordinary `OccurrenceEdge` binding routes with the
+requested `ImportedName::Name`, original dependency ID, site and containment.
+Group these by requested name for future per-export roots, never canonical leaf
+identity; keep activation keyed by the original occurrence. Missing properties
+have no binding route or static diagnostic, and `Some([])` is evaluation-only.
+`bindings: None` requires the original full namespace: unknown/escaping/reflected
+observations, receiver calls, possible exported `then` (promise assimilation),
+CommonJS, external/native/namespace-valued routes and contexts are conservative.
+No callability or receiver-safety proof is inferred. Observations remain borrowed
+owned-or-wire views, not symbol aggregation. These demands do not enter the edge
+indexes or change today's retention/chunk planner; consumers must explicitly
+support separate binding roots and original-module evaluation before using them.
+
 `refresh_resolution` invokes the explicit occurrence resolver for every site,
 including prior failures, and returns errors after replacing stale results with
 current source-site diagnostics. External/missing sites retain `Unlinked` nodes;
