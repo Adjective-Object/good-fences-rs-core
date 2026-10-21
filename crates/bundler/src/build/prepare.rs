@@ -53,6 +53,7 @@ pub(super) fn read(
     declarations: &PreparedDeclarations,
     base: &crate::output_url::PublicBase,
 ) -> eyre::Result<Prepared> {
+    let _span = tracing::info_span!("prepare.read").entered();
     ensure!(
         path.starts_with(root),
         "resolved source outside build root: {}",
@@ -64,7 +65,9 @@ pub(super) fn read(
         path.display()
     );
     let format = package_format(root, path)?;
-    let input = fs::read(path).wrap_err_with(|| format!("source {}", path.display()))?;
+    let input = tracing::info_span!("prepare.read_bytes")
+        .in_scope(|| fs::read(path))
+        .wrap_err_with(|| format!("source {}", path.display()))?;
     if crate::resource::kind(path, &options.css.css_modules)
         != crate::resource::ResourceKind::Script
     {
@@ -93,13 +96,17 @@ pub(super) fn load(
     cache: CacheMode,
     declarations: &PreparedDeclarations,
 ) -> eyre::Result<Loaded> {
+    let _span = tracing::info_span!("prepare.load", bytes = input.len()).entered();
     let config = ParserConfig::for_path(parser_path, package)?;
-    if let Some(source) = previous.filter(|s| {
-        s.input == input
-            && s.text == text
-            && s.record.config == config
-            && s.record.matches_prepared_declarations(declarations)
-    }) {
+    let previous = tracing::info_span!("prepare.memory_check").in_scope(|| {
+        previous.filter(|s| {
+            s.input == input
+                && s.text == text
+                && s.record.config == config
+                && s.record.matches_prepared_declarations(declarations)
+        })
+    });
+    if let Some(source) = previous {
         return Ok(Loaded {
             source: None,
             parsed: source.record.to_parsed(&source.text)?,

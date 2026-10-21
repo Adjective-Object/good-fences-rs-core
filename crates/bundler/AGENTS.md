@@ -266,6 +266,11 @@ Workers return typed requests, never publish/prune/render; finalization stays
 serial. Aggregate real worker source/rewrite/validation/declaration-hash counters.
 Execution counts do not invalidate output. Preserve final source/inventory checks
 and last-successful product identity on failure.
+Tracing stays subscriber-free in libraries. Propagate caller Dispatch and parent
+Span into both scoped worker stages; enter job spans only after dequeue, never
+across queue waits. Record numeric IDs/counts, not paths, source/options or payloads.
+The example's opt-in local trace must flush on returned errors without changing
+stdout JSON; create new files outside inventory/output, never overwrite inputs.
 Keep pending invalidations across failed attempts until the next successful
 product/no-op, even when successfully prepared source facts were cached meanwhile.
 Retain effects through shared module-evaluation hubs, not per-segment closures;

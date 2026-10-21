@@ -85,6 +85,7 @@ impl BuildSession {
         output: &Path,
         cancel: &Cancellation,
     ) -> eyre::Result<(BuildResult, Published)> {
+        let _span = tracing::info_span!("build_and_publish").entered();
         cancel.check()?;
         ensure!(
             !output
@@ -279,6 +280,7 @@ fn publish_locked(
     cancel: &Cancellation,
     mut hook: impl FnMut(Phase) -> eyre::Result<()>,
 ) -> eyre::Result<Published> {
+    let _span = tracing::info_span!("build.publish", artifacts = artifacts.files.len()).entered();
     cancel.check()?;
     validate_artifacts(artifacts)?;
     let previous = read_state(output)?;

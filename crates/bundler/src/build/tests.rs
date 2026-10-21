@@ -21,6 +21,42 @@ fn options() -> BuildOptions {
     }
 }
 
+#[test]
+fn tracing_preserves_noop_product_and_counters() {
+    use tracing_subscriber::prelude::*;
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export const value = 'PRIVATE_SOURCE';",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let initial = session.build(&options()).unwrap();
+    let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+        .writer(std::io::sink())
+        .build();
+    let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(layer));
+    let trace_path = dir.root().join(".bundler-trace-active.json");
+    fs::write(&trace_path, "[").unwrap();
+    let _observer = observe_preparation(move |_| {
+        fs::write(&trace_path, r#"[{"ph":"B"}]"#).unwrap();
+    });
+    let traced =
+        tracing::dispatcher::with_default(&dispatch, || session.build(&options())).unwrap();
+    drop(dispatch);
+    drop(guard);
+    assert!(Rc::ptr_eq(&initial.product, &traced.product));
+    assert_eq!(traced.counters.memory_hits, 1);
+    assert_eq!(traced.counters.source_parses, 0);
+    assert_eq!(traced.counters.declaration_fingerprints, 0);
+    assert_eq!(traced.counters.resolutions, 0);
+    assert_eq!(traced.counters.emissions, 0);
+    assert_eq!(traced.counters.output_parses, 0);
+    assert_eq!(traced.counters.source_reparses, 0);
+    assert_eq!(traced.counters.fragment_reparses, 0);
+    assert_eq!(traced.counters.final_validations, 0);
+}
+
 struct PreparationObserver;
 
 impl Drop for PreparationObserver {

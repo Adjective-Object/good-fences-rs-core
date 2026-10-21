@@ -7,6 +7,7 @@ resolver = "2"
 [workspace.dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 eyre = "0.6"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 jwalk = "0.5"
 napi = { version = "2.16.6", default-features = false, features = [
     "compat-mode",

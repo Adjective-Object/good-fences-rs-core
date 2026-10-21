@@ -4,6 +4,14 @@ Per-file Ecco precursors include owned user-function contracts inferred during
 shared-AST extraction. Warm sidecar loads reuse those contracts; linked symbol
 resolution and fixed-point effect solving remain build-local.
 
+Standard `tracing` spans cover sidecar reads, decode/encode, validation, owned
+fact extraction, adapters, source rechecks and publication. They inherit the
+caller's subscriber and parent, including bundler preparation workers; this
+library installs no subscriber. Only byte counts are recorded, never source
+text/paths, declarations or serialized payloads. Recording is opt-in and does
+not change cache contents or validity checks. See the bundler README for the
+local Chrome/Perfetto trace driver.
+
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.

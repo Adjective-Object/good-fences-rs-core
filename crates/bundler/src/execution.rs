@@ -44,7 +44,9 @@ impl ExecutionOptions {
         let mut pending: std::collections::VecDeque<_> = jobs.into_iter().collect();
         if self.workers.get() == 1 {
             while let Some(job) = pending.pop_front() {
-                pending.extend(integrate(work(job)));
+                let result =
+                    tracing::info_span!("prepare.job", worker_id = 0).in_scope(|| work(job));
+                pending.extend(integrate(result));
             }
             return Ok(());
         }
@@ -66,6 +68,8 @@ impl ExecutionOptions {
         let workers = self.workers.get();
         let (jobs_tx, jobs_rx) = mpsc::sync_channel(workers);
         let jobs_rx = Mutex::new(jobs_rx);
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let parent = tracing::Span::current();
         std::thread::scope(|scope| {
             let jobs_tx = jobs_tx;
             // Drop this receiver before joining on every path, so even exit
@@ -73,16 +77,20 @@ impl ExecutionOptions {
             let (results_tx, results_rx) = mpsc::sync_channel(workers);
             let mut handles = Vec::new();
             let mut error = None;
-            for _ in 0..workers {
+            for worker_id in 0..workers {
                 let (jobs_rx, work) = (&jobs_rx, &work);
                 let results_tx = results_tx.clone();
+                let (dispatch, parent) = (dispatch.clone(), parent.clone());
                 match std::thread::Builder::new().spawn_scoped(scope, move || {
+                    let _dispatch = tracing::dispatcher::set_default(&dispatch);
                     let _exit = Exit(results_tx.clone());
                     let before = crate::rewrite::parse_counts();
                     loop {
                         let job = jobs_rx.lock().expect("job queue poisoned").recv();
                         let Ok(job) = job else { break };
-                        if results_tx.send(Event::Completed(work(job))).is_err() {
+                        let result = tracing::info_span!(parent: &parent, "prepare.job", worker_id)
+                            .in_scope(|| work(job));
+                        if results_tx.send(Event::Completed(result)).is_err() {
                             break;
                         }
                     }
@@ -147,19 +155,30 @@ impl ExecutionOptions {
     ) -> eyre::Result<Vec<R>> {
         let workers = self.workers.get().min(jobs.len());
         if workers <= 1 {
-            return Ok(jobs.iter().map(emit).collect());
+            return Ok(jobs
+                .iter()
+                .enumerate()
+                .map(|(owner_id, job)| {
+                    tracing::info_span!("emit.owner", worker_id = 0, owner_id)
+                        .in_scope(|| emit(job))
+                })
+                .collect());
         }
         let next = AtomicUsize::new(0);
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let parent = tracing::Span::current();
         #[cfg(test)]
         let observer = JOB_OBSERVER.with(|observer| observer.borrow().clone());
         let mut results = std::thread::scope(|scope| {
             let mut handles = Vec::new();
             let mut error = None;
-            for _ in 0..workers {
+            for worker_id in 0..workers {
                 let (next, emit) = (&next, &emit);
+                let (dispatch, parent) = (dispatch.clone(), parent.clone());
                 #[cfg(test)]
                 let observer = &observer;
                 let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
+                    let _dispatch = tracing::dispatcher::set_default(&dispatch);
                     let before = crate::rewrite::parse_counts();
                     let mut results = Vec::new();
                     loop {
@@ -169,7 +188,11 @@ impl ExecutionOptions {
                         if let Some(observer) = observer {
                             observer(jobs.len(), index);
                         }
-                        results.push((index, emit(job)));
+                        let result = tracing::info_span!(
+                            parent: &parent, "emit.owner", worker_id, owner_id = index
+                        )
+                        .in_scope(|| emit(job));
+                        results.push((index, result));
                     }
                     (results, crate::rewrite::parse_counts().difference(before))
                 });
@@ -207,6 +230,83 @@ impl ExecutionOptions {
 mod tests {
     use super::*;
     use std::sync::Barrier;
+
+    #[test]
+    fn tracing_propagates_local_dispatch_and_parent_to_both_worker_stages() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
+
+        #[derive(Clone, Default)]
+        struct Observe(Arc<Mutex<Vec<(&'static str, Vec<&'static str>, std::thread::ThreadId)>>>);
+        impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Observe {
+            fn on_enter(&self, id: &tracing::span::Id, context: Context<'_, S>) {
+                let span = context.span(id).unwrap();
+                self.0.lock().unwrap().push((
+                    span.name(),
+                    span.scope().from_root().map(|span| span.name()).collect(),
+                    std::thread::current().id(),
+                ));
+            }
+        }
+        let observed = Observe::default();
+        let dispatch =
+            tracing::Dispatch::new(tracing_subscriber::registry().with(observed.clone()));
+        let other = Observe::default();
+        let other_dispatch =
+            tracing::Dispatch::new(tracing_subscriber::registry().with(other.clone()));
+        let exercise = |observed: &Observe, dispatch: &tracing::Dispatch| {
+            for workers in [1, 2, 4] {
+                observed.0.lock().unwrap().clear();
+                let barrier = Barrier::new(workers);
+                tracing::dispatcher::with_default(dispatch, || {
+                    let _caller = tracing::info_span!("caller").entered();
+                    let execution = ExecutionOptions::new(NonZeroUsize::new(workers).unwrap());
+                    let work = || {
+                        let _span = tracing::info_span!("work").entered();
+                        barrier.wait();
+                    };
+                    execution
+                        .replenish(0..workers, |_| work(), |_| vec![])
+                        .unwrap();
+                    execution
+                        .map(&(0..workers).collect::<Vec<_>>(), |_| work())
+                        .unwrap();
+                });
+                let records = observed.0.lock().unwrap();
+                for stage in ["prepare.job", "emit.owner"] {
+                    let jobs: Vec<_> = records
+                        .iter()
+                        .filter(|(name, _, _)| *name == stage)
+                        .collect();
+                    assert_eq!(jobs.len(), workers, "{stage}: {records:?}");
+                    assert!(jobs
+                        .iter()
+                        .all(|(_, parents, _)| parents == &["caller", stage]));
+                    let threads: std::collections::HashSet<_> =
+                        jobs.iter().map(|(_, _, thread)| *thread).collect();
+                    assert_eq!(threads.len(), workers);
+                    if workers > 1 {
+                        assert!(!threads.contains(&std::thread::current().id()));
+                    }
+                    assert_eq!(
+                        records
+                            .iter()
+                            .filter(|(name, parents, _)| {
+                                *name == "work" && parents == &["caller", stage, "work"]
+                            })
+                            .count(),
+                        workers,
+                        "{stage}: {records:?}"
+                    );
+                }
+            }
+        };
+        std::thread::scope(|scope| {
+            let sibling = scope.spawn(|| exercise(&other, &other_dispatch));
+            exercise(&observed, &dispatch);
+            sibling.join().unwrap();
+        });
+    }
 
     #[test]
     fn frontier_replenishes_before_a_slow_sibling_finishes() {
