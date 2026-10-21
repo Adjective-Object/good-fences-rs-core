@@ -38,7 +38,7 @@ not guessed exports. Binding edges preserve requested names and opaque module
 demand; runtime snapshot/default policy belongs to bundler proxies.
 
 `dynamic_import_demand` is opt-in derived occurrence metadata, not extra indexed
-edges or permission to narrow today's retention. Selected `OccurrenceEdge`
+edges or permission to narrow retention without separate demand roots. Selected `OccurrenceEdge`
 binding routes always accompany the original module's async evaluation, never
 leaf evaluation alone. Keep requested names separate for per-export roots and
 dependency/site identity for activation. Missing properties have no binding;

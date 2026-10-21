@@ -78,7 +78,7 @@ asynchronous evaluation edge to the **original** module (including barrels);
 every selected export requires that same occurrence's evaluation obligation.
 `bindings: Some(routes)` uses ordinary `OccurrenceEdge` binding routes with the
 requested `ImportedName::Name`, original dependency ID, site and containment.
-Group these by requested name for future per-export roots, never canonical leaf
+Group these by requested name for per-export roots, never canonical leaf
 identity; keep activation keyed by the original occurrence. Missing properties
 have no binding route or static diagnostic, and `Some([])` is evaluation-only.
 `bindings: None` requires the original full namespace: unknown/escaping/reflected
@@ -86,8 +86,9 @@ observations, receiver calls, possible exported `then` (promise assimilation),
 CommonJS, external/native/namespace-valued routes and contexts are conservative.
 No callability or receiver-safety proof is inferred. Observations remain borrowed
 owned-or-wire views, not symbol aggregation. These demands do not enter the edge
-indexes or change today's retention/chunk planner; consumers must explicitly
-support separate binding roots and original-module evaluation before using them.
+indexes. The bundler consumes them through separate binding roots with
+original-module evaluation; other consumers must preserve the same obligations
+before narrowing namespace demand.
 
 `refresh_resolution` invokes the explicit occurrence resolver for every site,
 including prior failures, and returns errors after replacing stale results with

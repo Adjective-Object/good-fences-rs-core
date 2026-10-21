@@ -7,8 +7,8 @@ use crate::{
 
 /// Opt-in structural demands for one original import occurrence.
 ///
-/// These are not additional graph edges: existing consumers retain their
-/// conservative namespace demand until they can model separate export roots.
+/// These are not additional graph edges. Consumers must model separate export
+/// roots and original-module evaluation before narrowing namespace demand.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicImportDemand {
     /// Index in `SourceGraph::edges`, valid only at the current graph revision.

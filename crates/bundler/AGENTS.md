@@ -289,8 +289,9 @@ and checks its explicit source-ordered segment schedule against mandatory edges.
 Keep initialization/await phases and observable namespace/name/read-only
 boundaries native, not cells. Logical artifact projections
 may overlap or contain several body owners; root sets do not prescribe files.
-Native dynamic imports rewrite only literal specifiers to canonical namespace routes;
-protect complete target namespaces. Keep statically async source modules as
+Native dynamic imports rewrite only literal specifiers to checked occurrence routes.
+Protect complete namespaces for full observations; selected projections retain
+independent export roots and original-target evaluation. Keep statically async source modules as
 native jobs, preserving original await/for-await and sibling interleaving.
 Redirect pure barrels only for equal export-name/canonical-identity maps,
 including default; subset matches can widen downstream star exports.
