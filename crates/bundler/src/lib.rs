@@ -16,6 +16,7 @@ pub mod effects;
 pub mod emit;
 pub mod execution;
 pub mod execution_dependencies;
+pub mod lazy_modules;
 pub mod link;
 pub mod manifest;
 mod output_url;

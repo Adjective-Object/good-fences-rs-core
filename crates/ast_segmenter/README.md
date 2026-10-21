@@ -141,6 +141,11 @@ declaration and reference ranges, import aliases, export mappings, directives,
 hashbang and individual static/dynamic/require dependencies. Binding and
 dependency IDs are source byte offsets (first declaration and dependency site,
 respectively), meaningful only within the exact source and parse policy.
+Lazy module candidates optionally carry complete plain-options key/value spans
+(`LazyOptionProperty`), read identically through borrowed owned/wire views.
+This structural evidence excludes initializer/prototype keys and unsupported
+property forms, never proves values pure or constructors trusted. Options remain
+one original composed slot; effects/captures must not be duplicated by consumers.
 Semantic resolution links forward references and nested/shadowed bindings;
 unresolved globals have no binding ID. Repeated specifiers are not coalesced.
 Reference read/write and type-only flags, ambient declarations and merged

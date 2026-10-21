@@ -31,6 +31,28 @@ pub struct LazyModuleCandidate {
     #[serde(with = "crate::owned::span_serde")]
     construction: Span,
     arguments: Vec<SourceSlot>,
+    options_properties: Option<Vec<LazyOptionProperty>>,
+}
+
+/// Complete plain-own-property object shape, not an effects or runtime proof.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LazyOptionProperty {
+    #[serde(with = "crate::owned::span_serde")]
+    key: Span,
+    #[serde(with = "crate::owned::span_serde")]
+    value: Span,
+}
+
+impl LazyOptionProperty {
+    pub(super) fn new(key: Span, value: Span) -> Self {
+        Self { key, value }
+    }
+    pub fn key(&self) -> Span {
+        self.key
+    }
+    pub fn value(&self) -> Span {
+        self.value
+    }
 }
 
 impl LazyModuleCandidate {
@@ -41,7 +63,7 @@ impl LazyModuleCandidate {
         callback: (DependencyId, Span),
         declaration: Span,
         construction: Span,
-        arguments: Vec<SourceSlot>,
+        arguments: (Vec<SourceSlot>, Option<Vec<LazyOptionProperty>>),
     ) -> Self {
         let (dependency, import_span) = callback;
         Self {
@@ -52,7 +74,8 @@ impl LazyModuleCandidate {
             import_span,
             declaration,
             construction,
-            arguments,
+            arguments: arguments.0,
+            options_properties: arguments.1,
         }
     }
     pub fn segment(&self) -> u32 {
@@ -84,6 +107,9 @@ impl LazyModuleCandidate {
     }
     pub fn options(&self) -> Option<&SourceSlot> {
         self.arguments.get(1)
+    }
+    pub fn options_properties(&self) -> Option<&[LazyOptionProperty]> {
+        self.options_properties.as_deref()
     }
 }
 

@@ -22912,6 +22912,165 @@ impl DynamicNamespaceT {
     })
   }
 }
+pub enum LazyOptionPropertyOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct LazyOptionProperty<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for LazyOptionProperty<'a> {
+  type Inner = LazyOptionProperty<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> LazyOptionProperty<'a> {
+  pub const VT_KEY: flatbuffers::VOffsetT = 4;
+  pub const VT_VALUE: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    LazyOptionProperty { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args LazyOptionPropertyArgs<'args>
+  ) -> flatbuffers::WIPOffset<LazyOptionProperty<'bldr>> {
+    let mut builder = LazyOptionPropertyBuilder::new(_fbb);
+    if let Some(x) = args.value { builder.add_value(x); }
+    if let Some(x) = args.key { builder.add_key(x); }
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> LazyOptionPropertyT {
+    let key = {
+      let x = self.key();
+      x.unpack()
+    };
+    let value = {
+      let x = self.value();
+      x.unpack()
+    };
+    LazyOptionPropertyT {
+      key,
+      value,
+    }
+  }
+
+  #[inline]
+  pub fn key(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazyOptionProperty::VT_KEY, None).unwrap()}
+  }
+  #[inline]
+  pub fn value(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazyOptionProperty::VT_VALUE, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for LazyOptionProperty<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<Span>("key", Self::VT_KEY, true)?
+     .visit_field::<Span>("value", Self::VT_VALUE, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct LazyOptionPropertyArgs<'a> {
+    pub key: Option<&'a Span>,
+    pub value: Option<&'a Span>,
+}
+impl<'a> Default for LazyOptionPropertyArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    LazyOptionPropertyArgs {
+      key: None, // required field
+      value: None, // required field
+    }
+  }
+}
+
+pub struct LazyOptionPropertyBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> LazyOptionPropertyBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_key(&mut self, key: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazyOptionProperty::VT_KEY, key);
+  }
+  #[inline]
+  pub fn add_value(&mut self, value: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazyOptionProperty::VT_VALUE, value);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> LazyOptionPropertyBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    LazyOptionPropertyBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<LazyOptionProperty<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, LazyOptionProperty::VT_KEY,"key");
+    self.fbb_.required(o, LazyOptionProperty::VT_VALUE,"value");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for LazyOptionProperty<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("LazyOptionProperty");
+      ds.field("key", &self.key());
+      ds.field("value", &self.value());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct LazyOptionPropertyT {
+  pub key: SpanT,
+  pub value: SpanT,
+}
+impl Default for LazyOptionPropertyT {
+  fn default() -> Self {
+    Self {
+      key: Default::default(),
+      value: Default::default(),
+    }
+  }
+}
+impl LazyOptionPropertyT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<LazyOptionProperty<'b>> {
+    let key_tmp = Some(self.key.pack());
+    let key = key_tmp.as_ref();
+    let value_tmp = Some(self.value.pack());
+    let value = value_tmp.as_ref();
+    LazyOptionProperty::create(_fbb, &LazyOptionPropertyArgs{
+      key,
+      value,
+    })
+  }
+}
 pub enum LazyModuleCandidateOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -22936,6 +23095,7 @@ impl<'a> LazyModuleCandidate<'a> {
   pub const VT_DECLARATION: flatbuffers::VOffsetT = 14;
   pub const VT_CONSTRUCTION: flatbuffers::VOffsetT = 16;
   pub const VT_ARGUMENTS: flatbuffers::VOffsetT = 18;
+  pub const VT_OPTIONS_PROPERTIES: flatbuffers::VOffsetT = 20;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -22947,6 +23107,7 @@ impl<'a> LazyModuleCandidate<'a> {
     args: &'args LazyModuleCandidateArgs<'args>
   ) -> flatbuffers::WIPOffset<LazyModuleCandidate<'bldr>> {
     let mut builder = LazyModuleCandidateBuilder::new(_fbb);
+    if let Some(x) = args.options_properties { builder.add_options_properties(x); }
     if let Some(x) = args.arguments { builder.add_arguments(x); }
     if let Some(x) = args.construction { builder.add_construction(x); }
     if let Some(x) = args.declaration { builder.add_declaration(x); }
@@ -22979,6 +23140,9 @@ impl<'a> LazyModuleCandidate<'a> {
       let x = self.arguments();
       x.iter().map(|t| t.unpack()).collect()
     };
+    let options_properties = self.options_properties().map(|x| {
+      x.iter().map(|t| t.unpack()).collect()
+    });
     LazyModuleCandidateT {
       segment,
       binding,
@@ -22988,6 +23152,7 @@ impl<'a> LazyModuleCandidate<'a> {
       declaration,
       construction,
       arguments,
+      options_properties,
     }
   }
 
@@ -23047,6 +23212,13 @@ impl<'a> LazyModuleCandidate<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot>>>>(LazyModuleCandidate::VT_ARGUMENTS, None).unwrap()}
   }
+  #[inline]
+  pub fn options_properties(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazyOptionProperty<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazyOptionProperty>>>>(LazyModuleCandidate::VT_OPTIONS_PROPERTIES, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for LazyModuleCandidate<'_> {
@@ -23064,6 +23236,7 @@ impl flatbuffers::Verifiable for LazyModuleCandidate<'_> {
      .visit_field::<Span>("declaration", Self::VT_DECLARATION, true)?
      .visit_field::<Span>("construction", Self::VT_CONSTRUCTION, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SourceSlot>>>>("arguments", Self::VT_ARGUMENTS, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<LazyOptionProperty>>>>("options_properties", Self::VT_OPTIONS_PROPERTIES, false)?
      .finish();
     Ok(())
   }
@@ -23077,6 +23250,7 @@ pub struct LazyModuleCandidateArgs<'a> {
     pub declaration: Option<&'a Span>,
     pub construction: Option<&'a Span>,
     pub arguments: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot<'a>>>>>,
+    pub options_properties: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazyOptionProperty<'a>>>>>,
 }
 impl<'a> Default for LazyModuleCandidateArgs<'a> {
   #[inline]
@@ -23090,6 +23264,7 @@ impl<'a> Default for LazyModuleCandidateArgs<'a> {
       declaration: None, // required field
       construction: None, // required field
       arguments: None, // required field
+      options_properties: None,
     }
   }
 }
@@ -23132,6 +23307,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> LazyModuleCandidateBuilder<'a, 
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LazyModuleCandidate::VT_ARGUMENTS, arguments);
   }
   #[inline]
+  pub fn add_options_properties(&mut self, options_properties: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<LazyOptionProperty<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LazyModuleCandidate::VT_OPTIONS_PROPERTIES, options_properties);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> LazyModuleCandidateBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     LazyModuleCandidateBuilder {
@@ -23161,6 +23340,7 @@ impl core::fmt::Debug for LazyModuleCandidate<'_> {
       ds.field("declaration", &self.declaration());
       ds.field("construction", &self.construction());
       ds.field("arguments", &self.arguments());
+      ds.field("options_properties", &self.options_properties());
       ds.finish()
   }
 }
@@ -23175,6 +23355,7 @@ pub struct LazyModuleCandidateT {
   pub declaration: SpanT,
   pub construction: SpanT,
   pub arguments: Vec<SourceSlotT>,
+  pub options_properties: Option<Vec<LazyOptionPropertyT>>,
 }
 impl Default for LazyModuleCandidateT {
   fn default() -> Self {
@@ -23187,6 +23368,7 @@ impl Default for LazyModuleCandidateT {
       declaration: Default::default(),
       construction: Default::default(),
       arguments: Default::default(),
+      options_properties: None,
     }
   }
 }
@@ -23209,6 +23391,9 @@ impl LazyModuleCandidateT {
       let x = &self.arguments;
       let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
     });
+    let options_properties = self.options_properties.as_ref().map(|x|{
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
     LazyModuleCandidate::create(_fbb, &LazyModuleCandidateArgs{
       segment,
       binding,
@@ -23218,6 +23403,7 @@ impl LazyModuleCandidateT {
       declaration,
       construction,
       arguments,
+      options_properties,
     })
   }
 }

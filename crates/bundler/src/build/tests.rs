@@ -28,6 +28,75 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn lazy_certification_configuration_invalidates_output_not_source_facts() {
+    use crate::lazy_modules::{ConstructorExport, LazyRuntime};
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {Module,Read} from './runtime.mjs';
+        const mod = new Module(() => import('./target.mjs'), {name: 'test'});
+        export const value = new Read(mod, ns => ns.first);",
+    );
+    write(dir.root(), "runtime.mjs", "export class Module { constructor(load, options) { this.load = load; this.options = options; } }
+        export class Read { constructor(module, get) { this.module = module; this.get = get; } }
+        export class Action {}");
+    write(
+        dir.root(),
+        "target.mjs",
+        "export const first = 1; export const second = 2;",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut options = options();
+    let disabled = session.build(&options).unwrap();
+    assert!(disabled.product.plan.lazy_modules.modules().is_empty());
+    let export = |name: &str| ConstructorExport {
+        module: dir.root().join("runtime.mjs").canonicalize().unwrap(),
+        export: name.into(),
+    };
+    let runtime = LazyRuntime {
+        module: export("Module"),
+        import: export("Read"),
+        action: export("Action"),
+    };
+    options.output.lazy_runtimes.push(runtime.clone());
+    let enabled = session.build(&options).unwrap();
+    assert_eq!(enabled.counters.source_parses, 0);
+    assert_eq!(enabled.counters.source_reparses, 0);
+    assert_eq!(enabled.counters.fragment_reparses, 0);
+    assert_eq!(enabled.product.plan.lazy_modules.modules().len(), 1);
+    assert_ne!(enabled.product.generation, disabled.product.generation);
+    assert_eq!(
+        enabled.product.fingerprints.parse,
+        disabled.product.fingerprints.parse
+    );
+    assert_ne!(
+        enabled.product.fingerprints.output,
+        disabled.product.fingerprints.output
+    );
+    assert_eq!(
+        enabled.product.artifacts.files,
+        disabled.product.artifacts.files
+    );
+    options.output.lazy_runtimes.push(runtime);
+    let noop = session.build(&options).unwrap();
+    assert!(Rc::ptr_eq(&enabled.product, &noop.product));
+    options.output.lazy_runtimes.clear();
+    let disabled_again = session.build(&options).unwrap();
+    assert!(disabled_again
+        .product
+        .plan
+        .lazy_modules
+        .modules()
+        .is_empty());
+    assert_eq!(disabled_again.counters.source_parses, 0);
+    assert_ne!(
+        disabled_again.product.generation,
+        enabled.product.generation
+    );
+}
+
+#[test]
 fn precise_native_dynamic_imports_inside_commonjs_use_occurrence_projections() {
     let dir = TmpDir::new();
     write(

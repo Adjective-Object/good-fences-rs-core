@@ -90,6 +90,8 @@ pub struct OutputOptions {
     pub min_chunk_bytes: usize,
     /// Introduce suspension/load failures at supported private async-body references.
     pub synthesize_async_boundaries: bool,
+    /// Exact runtime identities authorizing certification only; empty disables it.
+    pub lazy_runtimes: Vec<crate::lazy_modules::LazyRuntime>,
 }
 
 impl Default for OutputOptions {
@@ -98,6 +100,7 @@ impl Default for OutputOptions {
             base_url: "./".into(),
             min_chunk_bytes: 0,
             synthesize_async_boundaries: false,
+            lazy_runtimes: Vec::new(),
         }
     }
 }
@@ -663,6 +666,7 @@ impl BuildSession {
                 include_str!("lib.rs"),
                 include_str!("chunks.rs"),
                 include_str!("async_boundaries.rs"),
+                include_str!("lazy_modules.rs"),
                 include_str!("manifest.rs"),
                 include_str!("effects.rs"),
                 include_str!("effect_analysis.rs"),
@@ -672,7 +676,7 @@ impl BuildSession {
         );
         fingerprints.output = Fingerprint::of(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
@@ -680,6 +684,7 @@ impl BuildSession {
                 styles.identities(),
                 options.output.min_chunk_bytes,
                 options.output.synthesize_async_boundaries,
+                crate::lazy_modules::configuration_fingerprint(&options.output.lazy_runtimes),
             )
             .as_bytes(),
         );

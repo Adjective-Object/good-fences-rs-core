@@ -426,6 +426,8 @@ pub struct ChunkPlan {
     pub precise_dynamic_imports: bool,
     /// One original import activation projects onto several independent roots.
     pub async_activations: BTreeMap<AsyncSiteId, AsyncActivation>,
+    /// Checked descriptions only. No lazy graph or emission rewrite is enabled.
+    pub lazy_modules: crate::lazy_modules::Certification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,6 +449,19 @@ impl ChunkPlan {
         self.revision == graph.revision()
             && self.policy_fingerprint == policy.fingerprint()
             && self.retention.is_current(graph, policy)
+            && self.lazy_modules.has_provenance(graph, policy)
+    }
+
+    pub fn is_current_with_options(
+        &self,
+        graph: &SourceGraph,
+        policy: &EffectPolicy,
+        options: &crate::build::OutputOptions,
+    ) -> bool {
+        self.is_current(graph, policy)
+            && self
+                .lazy_modules
+                .is_current(graph, policy, &options.lazy_runtimes)
     }
 
     pub fn chunk_for(&self, node: &NodeId) -> Option<ChunkId> {
@@ -474,7 +489,7 @@ pub fn partition_conservative(
     entries: &[RootSeed],
     policy: &EffectPolicy,
 ) -> eyre::Result<ChunkPlan> {
-    partition_impl(graph, entries, policy, false)
+    partition_impl(graph, entries, policy, false, &[])
 }
 
 /// Plan independent requested-export roots with shared occurrence activation.
@@ -483,7 +498,7 @@ pub fn partition_precise(
     entries: &[RootSeed],
     policy: &EffectPolicy,
 ) -> eyre::Result<ChunkPlan> {
-    partition_impl(graph, entries, policy, true)
+    partition_impl(graph, entries, policy, true, &[])
 }
 
 fn partition_impl(
@@ -491,8 +506,10 @@ fn partition_impl(
     entries: &[RootSeed],
     policy: &EffectPolicy,
     precise_dynamic_imports: bool,
+    lazy_runtimes: &[crate::lazy_modules::LazyRuntime],
 ) -> eyre::Result<ChunkPlan> {
     graph.validate_links()?;
+    let lazy_modules = crate::lazy_modules::certify(graph, policy, lazy_runtimes)?;
     let ecco_effects = crate::effect_analysis::analyze(graph, policy)?;
     let mut roots = BTreeMap::new();
     let mut async_activations = BTreeMap::<AsyncSiteId, AsyncActivation>::new();
@@ -618,10 +635,11 @@ fn partition_impl(
         generated_boundaries: BTreeMap::new(),
         precise_dynamic_imports,
         async_activations,
+        lazy_modules,
     })
 }
 
-/// Partition with opt-in suspension at eligible private function references.
+/// Partition with explicit lazy certification and opt-in private-function suspension.
 /// Source facts and the ordinary partition remain independent of this policy.
 pub fn partition_with_options(
     graph: &SourceGraph,
@@ -629,7 +647,7 @@ pub fn partition_with_options(
     policy: &EffectPolicy,
     options: &crate::build::OutputOptions,
 ) -> eyre::Result<ChunkPlan> {
-    let plan = partition(graph, entries, policy)?;
+    let plan = partition_impl(graph, entries, policy, true, &options.lazy_runtimes)?;
     if options.synthesize_async_boundaries {
         crate::async_boundaries::extract(graph, &plan, policy)
     } else {

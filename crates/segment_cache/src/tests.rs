@@ -18,6 +18,87 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn lazy_options_structural_evidence_roundtrips_and_rejects_incomplete_proofs() {
+    let source = "const captured = 1; const mod = new LM(() => import('./child.mjs'),
+        {name: effect(captured), captured, 'other': () => captured,});";
+    let original = record(source, "lazy.mjs", ModuleFormat::Esm);
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    let parsed = cached.to_parsed(source).unwrap();
+    assert_eq!(
+        parsed.facts().emission(),
+        original.module().facts().emission()
+    );
+    assert_eq!(
+        parsed
+            .facts()
+            .emission()
+            .lazy_modules()
+            .get(0)
+            .unwrap()
+            .options_properties()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    for edit in [
+        |v: &mut serde_json::Value| {
+            v.clear("module.facts.emission.lazy_modules.0.options_properties")
+        },
+        |v: &mut serde_json::Value| {
+            v.add(
+                "module.facts.emission.lazy_modules.0.options_properties.0.key.start",
+                1,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.add(
+                "module.facts.emission.lazy_modules.0.options_properties.0.value.end",
+                1,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.copy(
+                "module.facts.emission.lazy_modules.0.options_properties.0.key",
+                "module.facts.emission.lazy_modules.0.options_properties.1.key",
+            )
+        },
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
+fn lazy_options_cannot_forge_a_value_across_initializer_properties_with_regexp_delimiters() {
+    let source =
+        r"const mod = new LM(() => import('./child.mjs'), {a: /\(/, initializer: init, b: /\)/});";
+    let original = record(source, "lazy.mjs", ModuleFormat::Esm);
+    assert!(original
+        .module()
+        .facts()
+        .emission()
+        .lazy_modules()
+        .get(0)
+        .unwrap()
+        .options_properties()
+        .is_none());
+    let damaged = corrupt(&original, |v| {
+        let key = source.find("a:").unwrap() as u32;
+        let value = source.find(r"/\(/").unwrap() as u32;
+        let end = source.find(r"/\)/").unwrap() as u32 + 4;
+        v["module"]["facts"]["emission"]["lazy_modules"][0]["options_properties"] =
+            serde_json::json!([{"key": [key, key + 1], "value": [value, end]}]);
+    });
+    assert!(damaged.encode(source).is_err());
+    assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+}
+
+#[test]
 fn lazy_candidates_default_parameters_fall_back_on_fresh_and_cached_paths() {
     for getter in ["(ns = ns) => ns.first", "(ns = fallback) => ns.first"] {
         let source = format!(

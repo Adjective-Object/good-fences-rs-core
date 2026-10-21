@@ -215,6 +215,87 @@ fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
             !call.arguments().get(0).unwrap().spread(),
             "spread lazy callback"
         );
+        if let Some(properties) = candidate.options_properties() {
+            let options = candidate
+                .options()
+                .ok_or_eyre("missing literal lazy options")?;
+            let mut previous = options.span().start;
+            for (index, property) in properties.iter().enumerate() {
+                within(source, options.span(), property.key())?;
+                within(source, options.span(), property.value())?;
+                ensure!(
+                    previous <= property.key().start
+                        && property.key().start < property.key().end
+                        && property.value().start < property.value().end
+                        && (property.key() == property.value()
+                            || property.key().end <= property.value().start),
+                    "invalid lazy options property spans"
+                );
+                let key = &source[property.key().start as usize..property.key().end as usize];
+                let name = if key.starts_with(['\'', '"']) {
+                    ensure!(
+                        key.len() >= 2
+                            && key.as_bytes().first() == key.as_bytes().last()
+                            && !key.contains('\\'),
+                        "unsupported lazy options key"
+                    );
+                    &key[1..key.len() - 1]
+                } else {
+                    key
+                };
+                ensure!(
+                    syntax_tokens(key).is_some_and(|t| t == [key])
+                        && !identifier_matches(name, "initializer")
+                        && !identifier_matches(name, "__proto__"),
+                    "unsafe lazy options key"
+                );
+                ensure!(
+                    syntax_tokens(&source[previous as usize..property.key().start as usize])
+                        .is_some_and(|t| t == [if index == 0 { "{" } else { "," }]),
+                    "incomplete lazy options properties"
+                );
+                if property.key() != property.value() {
+                    ensure!(
+                        syntax_tokens(
+                            &source[property.key().end as usize..property.value().start as usize]
+                        )
+                        .is_some_and(|t| t == [":"]),
+                        "nonplain lazy options property"
+                    );
+                }
+                let tokens = syntax_tokens(
+                    &source[property.value().start as usize..property.value().end as usize],
+                )
+                .ok_or_eyre("invalid lazy options value")?;
+                let mut delimiters = Vec::new();
+                for token in tokens {
+                    match token {
+                        "(" => delimiters.push(")"),
+                        "[" => delimiters.push("]"),
+                        "{" => delimiters.push("}"),
+                        ")" | "]" | "}" => ensure!(
+                            delimiters.pop() == Some(token),
+                            "unbalanced lazy options value"
+                        ),
+                        "," => ensure!(!delimiters.is_empty(), "incomplete lazy options value"),
+                        "/" => eyre::bail!("unsupported lazy options slash token"),
+                        _ => {}
+                    }
+                }
+                ensure!(delimiters.is_empty(), "unbalanced lazy options value");
+                previous = property.value().end;
+            }
+            ensure!(
+                syntax_tokens(&source[previous as usize..options.span().end as usize]).is_some_and(
+                    |t| if properties.is_empty() {
+                        t == ["{", "}"]
+                    } else {
+                        t == ["}"] || t == [",", "}"]
+                    }
+                ),
+                "incomplete lazy options object"
+            );
+        }
     }
     for candidate in emission.lazy_selectors() {
         let call = lazy_construction(

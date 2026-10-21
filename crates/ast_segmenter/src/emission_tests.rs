@@ -14,6 +14,46 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn lazy_options_record_complete_plain_property_shapes_not_effect_assumptions() {
+    for (options, properties) in [
+        ("{}", Some(0)),
+        (
+            "{name: effect(capture), capture, 'other': () => capture,}",
+            Some(3),
+        ),
+        ("{initializer: undefined}", None),
+        ("{...capture}", None),
+        ("{[key]: capture}", None),
+        ("{get name() { return capture; }}", None),
+        ("{__proto__: capture}", None),
+        ("unknown", None),
+        ("effect()", None),
+        ("{name: /[)]/}", None),
+        ("{name: capture / 2}", None),
+        ("{name: capture /= 2}", None),
+        ("{name: 'path/to/bundle'}", Some(1)),
+    ] {
+        let source = format!("const mod = new M(() => import('./target'), {options});");
+        let facts = parse(&source);
+        let candidate = &facts.emission().lazy_modules()[0];
+        assert_eq!(
+            candidate.options_properties().map(<[_]>::len),
+            properties,
+            "{options}"
+        );
+        if let Some(properties) = candidate.options_properties() {
+            assert!(properties.iter().all(|p| contains(
+                candidate.options().unwrap().span(),
+                p.key()
+            ) && contains(
+                candidate.options().unwrap().span(),
+                p.value()
+            )));
+        }
+    }
+}
+
+#[test]
 fn lazy_candidates_preserve_aliases_binding_identity_and_original_slots() {
     let source =
         "import { LazyModule as LM, LazyImport as LI, LazyAction as LA } from './runtime.mjs';

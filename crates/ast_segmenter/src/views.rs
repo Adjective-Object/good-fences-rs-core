@@ -469,6 +469,7 @@ view!(SegmentRecipe, em::SegmentRecipe);
 view!(EmissionFacts, em::EmissionFacts);
 view!(DynamicNamespace, em::DynamicNamespace);
 view!(LazyModuleCandidate, em::LazyModuleCandidate);
+view!(LazyOptionProperty, em::LazyOptionProperty);
 view!(LazySelectorCandidate, em::LazySelectorCandidate);
 
 impl<'a> ModuleFacts<'a> {
@@ -1243,12 +1244,23 @@ impl<'a> LazyModuleCandidate<'a> {
     scalar!(declaration, Span, span);
     scalar!(construction, Span, span);
     sequence!(arguments, SourceSlot<'a>);
+    pub fn options_properties(self) -> Option<Sequence<'a, LazyOptionProperty<'a>>> {
+        match self {
+            Self::Owned(v) => v.options_properties().map(Sequence::Owned),
+            Self::Wire(v) => v.options_properties().map(Sequence::Wire),
+        }
+    }
     pub fn callback(self) -> SourceSlot<'a> {
         self.arguments().get(0).expect("validated lazy callback")
     }
     pub fn options(self) -> Option<SourceSlot<'a>> {
         self.arguments().get(1)
     }
+}
+
+impl LazyOptionProperty<'_> {
+    scalar!(key, Span, span);
+    scalar!(value, Span, span);
 }
 
 impl<'a> LazySelectorCandidate<'a> {
@@ -1398,8 +1410,10 @@ equal_view!(
     import_span,
     declaration,
     construction,
-    arguments
+    arguments,
+    options_properties
 );
+equal_view!(LazyOptionProperty, key, value);
 equal_view!(
     LazySelectorCandidate,
     segment,

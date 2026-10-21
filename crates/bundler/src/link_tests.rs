@@ -12,6 +12,9 @@ mod parallel;
 #[path = "precise_dynamic_tests.rs"]
 mod precise_dynamic;
 
+#[path = "lazy_module_tests.rs"]
+mod lazy_modules;
+
 fn normalize(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
     for component in path.components() {

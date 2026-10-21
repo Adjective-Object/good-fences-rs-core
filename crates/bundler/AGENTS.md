@@ -432,6 +432,17 @@ exclude lexical shadows; wildcard receivers include them; never infer aliases.
 Fingerprints include canonical patterns and annotation policy, not source-cache
 identity. Check both graph revision and policy before reusing derived plans.
 
+Lazy certification is disabled unless OutputOptions.lazy_runtimes explicitly
+registers exact module/export constructor identities and authorizes split-specific
+warming plus removable/synthesizable module allocation. Resolve immutable aliases
+and reexports, never wrapper spelling hints. Certify every module-binding reference
+before retention; any escape/unknown wrapper/direct operation rejects the instance.
+Initializer-free literal options require checked cached structural evidence.
+Certification preserves original slots/effect/capture provenance, library wrappers,
+governance/selection caches and action arguments. It does not rewrite graph demands,
+retention or emitted code yet. Stamp graph revision, effect policy and canonical
+runtime configuration; configuration-only edits reuse source extraction.
+
 `partition` and public builds use precise planning; `partition_conservative`
 is the explicit namespace reference. Per-requested-name `AsyncExport` roots
 share an `AsyncSiteId` activation, never union symbols into an occurrence root.

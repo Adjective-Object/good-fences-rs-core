@@ -156,6 +156,7 @@ union DeferredForm { UnsupportedDeferred, FunctionDeferred, EffectDeferred, Vari
 table NamespaceProperty { name:string (required); receiver:bool; }
 table DynamicNamespace { dependency:uint; properties:[NamespaceProperty]; }
 enum LazyWrapperKind:ubyte { Unknown, LazyImport, LazyAction }
+table LazyOptionProperty { key:Span (required); value:Span (required); }
 table LazyModuleCandidate {
   segment:uint;
   binding:uint;
@@ -165,6 +166,7 @@ table LazyModuleCandidate {
   declaration:Span (required);
   construction:Span (required);
   arguments:[SourceSlot] (required);
+  options_properties:[LazyOptionProperty];
 }
 table LazySelectorCandidate {
   segment:uint;

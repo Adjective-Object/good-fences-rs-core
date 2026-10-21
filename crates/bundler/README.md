@@ -11,7 +11,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 13/extractor 17); parse fingerprints include both active
+`.seg.fb` records (schema 15/extractor 20); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -81,6 +81,55 @@ runtime or mutable namespace cells are introduced.
 CommonJS snapshot recovery follows planned facade demands rather than retained
 multi-export statements; native external seams prune direct and local export
 clauses to the same retained surface.
+
+### Lazy-module certification (description only)
+
+Disabled by default. `OutputOptions::lazy_runtimes: Vec<lazy_modules::LazyRuntime>`
+registers three exact `ConstructorExport { module, export }` identities for the
+module, import wrapper and action wrapper. Module paths must be graph identities:
+canonical absolute source paths in `BuildSession`, or the exact paths supplied
+to a low-level graph. There are no builtin package/path or identifier-name rules.
+Import aliases, reexports and simple immutable const aliases resolve to canonical
+linked bindings or immutable default-value expressions. Homonyms, shadows,
+mutable/reassigned constructor variables and registrations assigning conflicting
+roles to one canonical constructor are not authorization.
+
+Registration explicitly trusts the library contract for
+`LazyModule(callback, options)` and `LazyImport`/`LazyAction(module, getter, ...args)`:
+module allocation may be eliminated/synthesized and warming/loaded state may
+become split-specific. Absent options must mean no initializer. Plain own
+option properties without an initializer must not acquire one implicitly.
+Any possible initializer rejects the instance, because it runs once after load
+in the original library. The actual wrapper constructors, methods, optional
+governance, cached selection, module loaded-state reads, action bundle-time
+options and action-call arguments must remain library behavior, not promise
+substitutes.
+
+`lazy_modules::certify` runs before retention in `partition_with_options` and
+public builds. It returns `ChunkPlan::lazy_modules`, a revision/policy/configuration
+stamped `Certification`, with borrowed read access through `modules()`.
+`is_current_with_options` also checks runtime configuration. Certification
+requires a literal local ESM callback, a simple dotted selector, checked export
+routes and no namespace/unknown/CommonJS surface or possible namespace `then`.
+Every runtime reference to a module binding must be a recognized wrapper's module
+argument. An exported module, escape, direct operation, unsupported selector or
+unknown wrapper rejects that entire instance, not only the offending use.
+
+Options must be absent or have checked source-local plain literal-property
+evidence. Initializer/prototype keys, computed/spread/accessor/method properties
+and arbitrary expressions fall back. The initial evidence subset also excludes
+parenthesized option objects, escaped keys and regexp/division-bearing values.
+Effectful values and captures are **not** assumed pure: original option and
+wrapper-argument slots retain operation roots, reference/effect/invocation indices
+and dependency identities. They must be evaluated once at their original site,
+not duplicated across synthesized instances.
+
+Descriptions include original declaration/selector identities, canonical
+constructors, the real dynamic occurrence, original-target evaluation and each
+selected canonical export/route. No source cache mutation, demand replacement,
+retention change, selector relocation or output rewriting is enabled yet.
+Configuration-only changes invalidate derived output, reuse source facts and
+participate in no-op detection; registration ordering/duplicates are immaterial.
 
 ### Native connections
 

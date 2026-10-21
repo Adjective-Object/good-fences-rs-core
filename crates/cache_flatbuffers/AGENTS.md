@@ -1,6 +1,6 @@
 # cache_flatbuffers
 
-- This is the production `.seg.fb` backend (schema 14/extractor 19).
+- This is the production `.seg.fb` backend (schema 15/extractor 20).
   `segment_cache` adds source-local semantic validation before exposing records.
 - `flatbuffers/*.fbs` is authoritative. Keep `cache_generated.rs` byte-for-byte
   compiler output; regenerate using pinned flatc 25.2.10, matching the runtime.
@@ -20,3 +20,5 @@
   are the owned/wire semantic gate. Graph/Ecco/emission retain byte owners.
 - Lazy candidates are typed source-local tables with original composed slots;
   wrapper-kind hints require discriminant validation and prove no runtime identity.
+- Optional lazy-options property tables describe complete plain-own-property
+  literal shape only; values retain their original evaluation and captures.

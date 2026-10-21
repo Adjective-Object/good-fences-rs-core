@@ -18,7 +18,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 14/extractor 19.
+Production loading/publication uses typed FlatBuffers, schema 15/extractor 20.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.
 `validate_parsed(source, parsed)` shares the source-local semantic checks with
 the production codec and accepts `ParsedModule::from_wire` without decoding a fact
@@ -86,7 +86,7 @@ Deferred alternatives validate declaration binding links and complete initialize
 source-slot roots; CommonJS cannot carry these ESM reconstruction alternatives.
 Dynamic namespace observations cover exactly the dynamic dependency occurrences,
 with sorted unique property/receiver pairs; placement and target eligibility are
-never cached. Schema 14 adds typed lazy construction candidates; extractor 19
+never cached. Schema 14 added typed lazy construction candidates; extractor 19
 excludes defaulted getters and validates complete synchronous arrow/return token
 boundaries against canonical invocation, operation and execution spans, without
 parsing or unpacking on hits.
@@ -98,6 +98,12 @@ and complete property-token spans anchor dependency selection and Unicode-decode
 property names to the original source without reparsing; receiver/dot trivia and
 token boundaries reject substring or comment-token substitutions. Unsupported
 getters retain ordinary references; options remain one original source slot.
+Schema 15/extractor 20 adds optional complete plain-options property evidence.
+Borrowed key/value and punctuation checks exclude initializer/prototype keys,
+computed/spread/accessor/method forms and incomplete property lists without
+AST parsing. Unknown options, escaped keys, parenthesized objects and regexp/division
+values conservatively lack evidence. Effectful values and captures are preserved,
+not declared pure; registered runtime identity remains a build-local decision.
 Fresh and wire facts agree without parsing or unpacking on hits. Lazy runtime
 recognition, all-reference certification, graph transformations and emission plans
 are deliberately absent.

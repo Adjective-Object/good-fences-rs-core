@@ -457,7 +457,14 @@ fn emission(v: &em::EmissionFacts) -> w::EmissionFactsT {
                 import_span: span(v.import_span()),
                 declaration: span(v.declaration()),
                 construction: span(v.construction()),
-                arguments: v.arguments().iter().map(slot).collect()
+                arguments: v.arguments().iter().map(slot).collect(),
+                options_properties: v.options_properties().map(|properties| properties
+                    .iter()
+                    .map(|p| table!(LazyOptionPropertyT {
+                        key: span(p.key()),
+                        value: span(p.value())
+                    }))
+                    .collect())
             }))
             .collect(),
         lazy_selectors: v

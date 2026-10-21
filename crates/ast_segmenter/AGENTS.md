@@ -136,4 +136,7 @@ binding/reference identities and composed original argument slots. Wrapper kinds
 are spelling hints only; aliases and lexical shadows are not runtime certification.
 Keep options in one original slot and leave unsupported getter references intact.
 Defaulted getter parameters are unsupported, including self-referencing defaults.
+Optional lazy-options property evidence records complete plain object key/value
+spans, never purity. Unknown options, initializer/prototype keys, computed/spread/
+accessor/method properties, escaped keys and regexp/division-bearing values lack proof.
 No lazy recognition, transformed obligations or reconstruction plans enter caches.

@@ -43,6 +43,63 @@ fn concise<'b, 'a>(arrow: &'b ArrowFunctionExpression<'a>) -> Option<&'b Express
     }
 }
 
+fn options_properties(new: &NewExpression<'_>) -> Option<Vec<LazyOptionProperty>> {
+    let Expression::ObjectExpression(object) = new.arguments.get(1)?.as_expression()? else {
+        return None;
+    };
+    // The borrowed boundary proof does not lex regexps or division tokens.
+    struct UnsupportedValue(bool);
+    impl<'a> Visit<'a> for UnsupportedValue {
+        fn visit_expression(&mut self, expression: &Expression<'a>) {
+            if matches!(expression, Expression::RegExpLiteral(_))
+                || matches!(expression, Expression::BinaryExpression(binary) if binary.operator.as_str() == "/")
+                || matches!(expression, Expression::AssignmentExpression(assignment) if assignment.operator.as_str() == "/=")
+            {
+                self.0 = true;
+            }
+            walk::walk_expression(self, expression);
+        }
+    }
+    let mut unsupported = UnsupportedValue(false);
+    unsupported.visit_object_expression(object);
+    if unsupported.0 {
+        return None;
+    }
+    object
+        .properties
+        .iter()
+        .map(|property| {
+            let ObjectPropertyKind::ObjectProperty(property) = property else {
+                return None;
+            };
+            if property.computed || property.method || property.kind != PropertyKind::Init {
+                return None;
+            }
+            // Escaped string keys stay unsupported; identifiers retain their decoded name.
+            if let PropertyKey::StringLiteral(key) = &property.key {
+                if key.raw.as_ref().is_none_or(|raw| raw.contains('\\')) {
+                    return None;
+                }
+            } else if !matches!(property.key, PropertyKey::StaticIdentifier(_)) {
+                return None;
+            }
+            let name = property.key.static_name()?;
+            if matches!(property.key, PropertyKey::StaticIdentifier(_))
+                && property.key.span().size() as usize != name.len()
+            {
+                return None;
+            }
+            if matches!(name.as_ref(), "initializer" | "__proto__") {
+                return None;
+            }
+            Some(LazyOptionProperty::new(
+                property.key.span(),
+                property.value.span(),
+            ))
+        })
+        .collect()
+}
+
 impl Candidates<'_> {
     fn reference(&self, expression: &Expression<'_>) -> Option<u32> {
         let Expression::Identifier(id) = unparenthesized(expression) else {
@@ -142,7 +199,9 @@ impl<'a> Visit<'a> for Candidates<'_> {
                     if !matches!(
                         unparenthesized(&import.source),
                         Expression::StringLiteral(_)
-                    ) {
+                    ) || import.options.is_some()
+                        || import.phase.is_some()
+                    {
                         return None;
                     }
                     let dependency = self.facts.dependencies().iter().find(|d| {
@@ -157,7 +216,7 @@ impl<'a> Visit<'a> for Candidates<'_> {
                         (dependency.id(), import.span),
                         declaration.span,
                         new.span,
-                        self.arguments(new, segment),
+                        (self.arguments(new, segment), options_properties(new)),
                     ))
                 };
                 if let Some(candidate) = shape() {

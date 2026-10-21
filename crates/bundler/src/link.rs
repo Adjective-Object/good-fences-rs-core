@@ -161,6 +161,10 @@ pub fn esm_with_options(
     options: &crate::build::OutputOptions,
 ) -> eyre::Result<Artifacts> {
     ensure!(
+        plan.is_current_with_options(graph, policy, options),
+        "stale lazy certification configuration; repartition with current options"
+    );
+    ensure!(
         options.synthesize_async_boundaries || plan.generated_boundaries.is_empty(),
         "generated plan requires synthesize_async_boundaries; repartition to disable"
     );
