@@ -132,7 +132,10 @@ and each selector's reference to the removed module binding. No cached facts are
 mutated. Trusted wrapper constructions are removable only when their values are
 unused; residual argument effects and all genuine constructor/getter/additional
 argument dependencies remain. Invocation summaries do not make enclosing
-statements pure. Symbol definitions and execution accesses exclude the removed
+statements pure. Nested local initializer results with reads outside their
+construction are conservatively live even without a segment value demand;
+getter-parameter reads alone never make a discarded selector live.
+Symbol definitions and execution accesses exclude the removed
 module binding; scheduling consumes only the proven invocation contributions.
 Original options are retained once through a `PreservedSlot`
 obligation, including closure captures; they are never copied into selectors.

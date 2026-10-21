@@ -64,6 +64,9 @@ pub struct CertifiedSelector {
     /// Determined from canonical identities, never the cached spelling hint.
     pub kind: LazyWrapperKind,
     pub value_use: ast_segmenter::invocation::ValueUse,
+    /// Nested locals have no separate segment value demand. A read outside the
+    /// construction conservatively protects their initializer's result.
+    pub nested_result_read: bool,
     pub module_reference: u32,
     pub property: String,
     pub selected: LinkedExport,
@@ -75,7 +78,9 @@ impl CertifiedSelector {
     pub(crate) fn value_demanded(&self, statement_value: bool) -> bool {
         match self.value_use {
             ast_segmenter::invocation::ValueUse::Required => true,
-            ast_segmenter::invocation::ValueUse::StatementValue => statement_value,
+            ast_segmenter::invocation::ValueUse::StatementValue => {
+                statement_value || self.nested_result_read
+            }
             ast_segmenter::invocation::ValueUse::Discarded => false,
         }
     }
@@ -440,6 +445,26 @@ fn eligible(
             constructor: identity,
             kind,
             value_use: call.value_use(),
+            nested_result_read: facts.bindings().iter().any(|binding| {
+                !binding.top_level()
+                    && binding.declarations().iter().any(|declaration| {
+                        contains(
+                            graph.file_segments(file).unwrap()[candidate.segment() as usize].span,
+                            declaration,
+                        ) && declaration.end <= candidate.construction().start
+                    })
+                    && facts.references().iter().any(|reference| {
+                        !reference.type_only()
+                            && reference.read()
+                            && reference.binding() == Some(binding.id())
+                            && reference.span().start >= candidate.construction().end
+                            && contains(
+                                graph.file_segments(file).unwrap()[candidate.segment() as usize]
+                                    .span,
+                                reference.span(),
+                            )
+                    })
+            }),
             module_reference: reference as u32,
             property: candidate.property().to_owned(),
             selected,

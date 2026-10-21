@@ -420,6 +420,54 @@ fn lazy_selected_demands_discover_nested_instances_but_not_dead_ones() {
 }
 
 #[test]
+fn lazy_nested_escaping_result_is_not_confused_with_getter_local_reads() {
+    let input = input(
+        "const mod = new M(() => import('./target.mjs'));
+        (() => { const selected = new R(mod, ns => ns.first); globalThis.selected = selected; })();
+        (() => { const dead = new R(mod, ns => ns.second); globalThis.ran = true; })();",
+    );
+    for wire in [false, true] {
+        let (graph, plan) = planned(&input, wire);
+        let module = &plan.lazy_modules.modules()[0];
+        assert_eq!(module.selectors.len(), 2);
+        assert!(module.selectors[0].nested_result_read);
+        assert!(!module.selectors[1].nested_result_read);
+        assert_eq!(plan.async_activations.len(), 1);
+        let first = mask(
+            &graph,
+            &plan,
+            segment(&graph, &input, "leaf.mjs", "function first"),
+        );
+        assert_eq!(first.len(), 1);
+        assert!(first
+            .iter()
+            .all(|root| matches!(root, RootId::AsyncExport { name, .. } if name == "first")));
+        assert!(mask(
+            &graph,
+            &plan,
+            segment(&graph, &input, "leaf.mjs", "function second")
+        )
+        .is_empty());
+        for selector in &module.selectors {
+            let summary = &plan
+                .retention
+                .effects
+                .iter()
+                .find(|effect| effect.key == selector.owner)
+                .unwrap()
+                .summary;
+            assert_eq!(
+                summary
+                    .rewrites
+                    .iter()
+                    .any(|rewrite| rewrite.invocation == selector.construction),
+                !selector.nested_result_read,
+            );
+        }
+    }
+}
+
+#[test]
 fn lazy_required_wrapper_values_activate_without_statement_binding_demand() {
     let input = input(
         "const mod = new M(() => import('./target.mjs'));
