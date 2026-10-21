@@ -1,0 +1,14 @@
+{
+  "id": "authored/precise-dynamic-fallback",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["before 0", "namespace other,receiver,spare 42 99 fallback", "receiver 42 true", "missing true true fallback,missing"],
+    "backend": "native"
+  },
+  "goals": [
+    "An opaque promise callback keeps a complete native namespace, including an otherwise unused pure export.",
+    "Promise callback method invocation preserves its namespace receiver and repeated-import identity.",
+    "Missing awaited and then-selected properties still activate original evaluation exactly once without inventing exports or retaining pure spare declarations."
+  ]
+}

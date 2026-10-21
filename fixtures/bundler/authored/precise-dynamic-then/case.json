@@ -1,0 +1,15 @@
+{
+  "id": "authored/precise-dynamic-then",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["before 0", "pending 0", "selected 11 12 barrel:13", "again true true barrel:13"],
+    "backend": "native"
+  },
+  "goals": [
+    "One promise-then occurrence selecting two aliased exports creates independent implementation owners, not an aggregated occurrence root.",
+    "Shared implementation and original barrel initialization cover the union of selected demands; exclusive helpers stay with their implementation.",
+    "Nested star barrels do not retain an unused pure sibling or its deferred import.",
+    "Activation stays lazy, once-only and identity preserving across repeated calls."
+  ]
+}

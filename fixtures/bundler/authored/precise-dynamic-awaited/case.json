@@ -1,0 +1,14 @@
+{
+  "id": "authored/precise-dynamic-awaited",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["before 0", "pending 0", "selected 11 barrel:13", "again true barrel:13"],
+    "backend": "native"
+  },
+  "goals": [
+    "An awaited property selects one export through nested star and aliased barrels without retaining its pure sibling or that sibling's deferred import.",
+    "Original barrel initialization remains lazy and runs once; its helper closure is retained independently of unrelated exports.",
+    "Repeated demands preserve function identity."
+  ]
+}

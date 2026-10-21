@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -54,11 +54,135 @@ test('real public pipeline executes emitted output without modifying original fi
   });
 });
 
+function withAuthoredBuild(name, min_chunk_bytes, callback) {
+  const fixture = path.join(project, 'fixtures/bundler/authored', name);
+  const manifest = JSON.parse(readFileSync(path.join(fixture, 'case.json'), 'utf8'));
+  managed(managedRoot, directory => {
+    const root = path.join(directory, 'source');
+    cpSync(path.join(fixture, 'files'), root, { recursive: true });
+    const sourceEntries = Object.fromEntries(manifest.entryPoints.map(entry => [entry, path.join(root, entry)]));
+    const baseline = observeEntries(manifest, sourceEntries, root);
+    const build = buildProject(driver, root, manifest.entryPoints, 30000, { output: { min_chunk_bytes } });
+    assert.equal(build.backend, 'native');
+    assert.deepEqual(observeEntries(manifest, build.entries, build.directory), baseline);
+    const artifacts = new Map(readdirSync(build.directory, { recursive: true })
+      .filter(file => /\.(?:mjs|cjs|js)$/u.test(file))
+      .map(file => [file.split(path.sep).join('/'), readFileSync(path.join(build.directory, file), 'utf8')]));
+    const members = source => build.segmentMembers.filter(member => path.basename(member.source) === source);
+    const owner = (symbol, segment, source = 'leaf.mjs') => {
+      const declarations = [...artifacts].filter(([, text]) =>
+        new RegExp(`\\bfunction\\s+${symbol}\\s*\\(`, 'u').test(text));
+      assert.equal(declarations.length, 1, `${symbol} must have exactly one physical declaration`);
+      const artifact = declarations[0][0];
+      assert.equal(members(source).find(member => member.segment === segment)?.artifact, artifact,
+        `${symbol}'s declaration must agree with its exact public segment owner`);
+      return artifact;
+    };
+    callback({ build, artifacts, members, owner });
+  });
+}
+
+// Follow native edges, not hashes, chunk counts or generated filename families.
+function nativeClosure(artifacts, starts) {
+  const reached = new Set();
+  const pending = [...starts];
+  while (pending.length) {
+    const artifact = pending.pop();
+    if (reached.has(artifact)) continue;
+    reached.add(artifact);
+    assert(artifacts.has(artifact), `missing native dependency ${artifact}`);
+    for (const [, request] of artifacts.get(artifact).matchAll(
+      /^(?:import|export)\s+(?:[^;\n]*?\s+from\s+)?["']([^"']+)["'];/gmu)) {
+      if (request.startsWith('.')) pending.push(path.posix.join(path.posix.dirname(artifact), request));
+    }
+  }
+  return reached;
+}
+
+for (const kind of ['awaited', 'then']) {
+  for (const min_chunk_bytes of [0, 10000]) {
+    test(`precise dynamic ${kind} preserves physical demand masks with byte target ${min_chunk_bytes}`, () => {
+      withAuthoredBuild(`precise-dynamic-${kind}`, min_chunk_bytes, ({ build, artifacts, members, owner }) => {
+        const selected = kind === 'then' ? ['selectedA', 'selectedB'] : ['selectedA'];
+        const alpha = owner('alpha', 3), shared = owner('sharedHelper', 0), init = owner('initHelper', 5);
+        const onlyA = owner('onlyA', 1);
+        assert.equal(alpha, onlyA, 'exclusive helper must stay with its implementation');
+        assert.deepEqual(members('leaf.mjs').map(member => member.segment),
+          kind === 'then' ? [0, 1, 2, 3, 4, 5] : [0, 1, 3, 5],
+          'retain exactly the selected implementations and original evaluation helper closure');
+        assert.equal(members('dead.mjs').length, 0, 'unused deferred import must not enter the output graph');
+        for (const text of artifacts.values()) {
+          assert.doesNotMatch(text, /\bunusedSibling\b|unused sibling must not be activated/u);
+          if (kind === 'awaited') assert.doesNotMatch(text, /\b(?:beta|onlyB)\b/u);
+        }
+
+        const entry = path.relative(build.directory, build.entries['entry.mjs']).split(path.sep).join('/');
+        const eager = nativeClosure(artifacts, [entry]);
+        const loads = [...artifacts.get(entry).matchAll(/\bimport\(["']([^"']+)["']\)/gu)];
+        assert.equal(loads.length, 1, 'both selected exports must come from the SAME import occurrence');
+        const activation = path.posix.join(path.posix.dirname(entry), loads[0][1]);
+        const text = artifacts.get(activation);
+        assert.equal(typeof text, 'string', 'the actual import must reach an emitted native activation');
+        const evaluation = [...text.matchAll(/^import\s+["']([^"']+)["'];/gmu)]
+          .map(([, request]) => path.posix.join(path.posix.dirname(activation), request));
+        assert(evaluation.length > 0, 'selected activation must retain original-target evaluation');
+        const routes = new Map([...text.matchAll(
+          /^export\s+\{[^;\n]*\bas\s+["']?(selectedA|selectedB)["']?\s*\}\s+from\s+["']([^"']+)["'];/gmu)]
+          .map(([, name, request]) => [name, path.posix.join(path.posix.dirname(activation), request)]));
+        assert.deepEqual([...routes.keys()].sort(), selected, 'activation must expose exactly the selected bindings');
+        assert.equal(routes.get('selectedA'), alpha, 'selected alias must route to the actual implementation owner');
+        const demands = new Map([...routes].map(([name, artifact]) =>
+          [name, nativeClosure(artifacts, [...evaluation, artifact])]));
+        const mask = artifact => [...demands].filter(([, files]) => files.has(artifact)).map(([name]) => name);
+        assert.deepEqual(mask(alpha), ['selectedA']);
+        assert.deepEqual(mask(shared), selected, 'one shared helper owner must cover the union of selected demands');
+        assert.deepEqual(mask(init), selected, 'original evaluation must pull its helper closure for every demand');
+        const effects = [...artifacts].filter(([, source]) => source.includes("trace.push('barrel:'"));
+        assert.equal(effects.length, 1, 'original barrel initialization must have one physical owner');
+        const effect = effects[0][0];
+        assert.equal(members('barrel.mjs').find(member => member.segment === 2)?.artifact, effect);
+        assert.deepEqual(mask(effect), selected, 'every selected demand must preserve ORIGINAL barrel evaluation');
+        for (const artifact of [alpha, shared, init, effect]) {
+          assert(!eager.has(artifact), 'entry static closure must not eagerly load selected initialization/implementation');
+        }
+        if (kind === 'then') {
+          const beta = owner('beta', 4), onlyB = owner('onlyB', 2);
+          assert.equal(beta, onlyB);
+          assert.equal(routes.get('selectedB'), beta);
+          assert.notEqual(alpha, beta, 'two exports from one occurrence must have distinct physical implementation owners');
+          assert.notEqual(shared, alpha);
+          assert.notEqual(shared, beta);
+          assert.deepEqual(mask(beta), ['selectedB'], 'the sibling implementation must not leak into the other demand');
+          assert(!eager.has(beta));
+        }
+      });
+    });
+  }
+}
+
+test('precise and full dynamic/public consumers retain the complete live namespace', () => {
+  withAuthoredBuild('precise-dynamic-mixed', 0, ({ build, owner, members }) => {
+    owner('change', 1);
+    owner('other', 2);
+    assert.deepEqual(members('leaf.mjs').map(member => member.segment), [0, 1, 2]);
+    assert(build.entries['barrel.mjs'], 'full public barrel must remain a real published entry');
+  });
+});
+
+test('opaque then callbacks preserve full native namespaces while missing selections retain only evaluation', () => {
+  withAuthoredBuild('precise-dynamic-fallback', 0, ({ artifacts, members, owner }) => {
+    ['receiver', 'other', 'spare'].forEach((symbol, segment) => owner(symbol, segment));
+    assert.deepEqual(members('leaf.mjs').map(member => member.segment), [0, 1, 2]);
+    assert.deepEqual(members('missing.mjs').map(member => member.segment), [0]);
+    for (const text of artifacts.values()) assert.doesNotMatch(text, /\bmissingSpare\b/u);
+  });
+});
+
 for (const [name, relocated] of [
   ['barrels', []],
   ['bridge', ['x.mjs', 'y.mjs', 'z.mjs']],
   ['diamond', ['hub.mjs', 'left.mjs', 'right.mjs']],
-  ['failure-cache', ['x.mjs', 'y.mjs']],
+  ['failure-cache', []],
   ['helper-names', ['x.mjs', 'y.mjs']],
   ['native-fallback', []],
   ['write-restrictions', []],
@@ -69,6 +193,7 @@ for (const [name, relocated] of [
     managed(managedRoot, directory => {
       const root = path.join(directory, 'source');
       cpSync(path.join(fixture, 'files'), root, {recursive: true});
+      const canonicalRoot = path.toNamespacedPath(realpathSync(root));
       const members = [0, manifest.fixtureConfig.output.min_chunk_bytes].map(min_chunk_bytes => {
         const build = buildProject(driver,
           root, manifest.entryPoints, 30000, {
@@ -77,7 +202,7 @@ for (const [name, relocated] of [
           });
         assert.equal(build.backend, 'native');
         return new Map(build.segmentMembers.map(member =>
-          [`${path.relative(path.toNamespacedPath(root), path.toNamespacedPath(member.source))}:${member.segment}`, member.artifact]));
+          [`${path.relative(canonicalRoot, path.toNamespacedPath(member.source))}:${member.segment}`, member.artifact]));
       });
       assert.deepEqual([...members[0].keys()], [...members[1].keys()], 'placement must preserve retained segments');
       if (relocated.length === 0) {

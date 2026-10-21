@@ -1,0 +1,14 @@
+{
+  "id": "authored/precise-dynamic-mixed",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs", "barrel.mjs", "observe.mjs"],
+  "expectations": {
+    "stdout": ["selected 1 change,other,value", "live 2 42", "public change,other,value 1", "public live 2 42"],
+    "backend": "native"
+  },
+  "goals": [
+    "A precise property consumer coexists with an escaping full dynamic namespace and a public barrel entry.",
+    "Full consumers retain unselected exports, exact namespace keys and live bindings.",
+    "An independent static observer validates the actual public barrel surface in a fresh runtime."
+  ]
+}

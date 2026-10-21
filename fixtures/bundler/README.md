@@ -73,10 +73,10 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **65 cases / 83 entry executions**: six esbuild cases,
-six rspack cases and fifty-three authored cases. Four authored CSS cases and
-seven generated-async cases use output observations; the 54 ordinary JS cases /
-72 executions remain differential.
+The corpus contains **69 cases / 89 entry executions**: six esbuild cases,
+six rspack cases and fifty-seven authored cases. Four authored CSS cases and
+seven generated-async cases use output observations; the 58 ordinary JS cases /
+78 executions remain differential.
 The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
@@ -103,9 +103,11 @@ different overlapping async masks, no co-activation, shared identity/live state
 and cached undefined failures; Rust ownership tests verify actual merging.
 Twenty adversarial cases extend parent-hoisting, library-clustering and
 generated-boundary coverage. Public-driver tests assert actual segment-owner
-changes for the five transforming library cases and unchanged native placement
-for their two explicit fallback cases. Identity checks require real objects or
-functions, not merely equality between potentially missing values.
+changes for the four transforming library cases and unchanged native placement
+for their three explicit fallback cases. The failure-cache case's evaluation-only
+selected imports now require unchanged ownership: library clustering cannot
+absorb a selected target's complete initializer closure. Identity checks require
+real objects or functions, not merely equality between potentially missing values.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -204,7 +206,7 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All sixty-five current cases require native. Legacy reporting and
+back to legacy. All sixty-nine current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 
@@ -237,6 +239,40 @@ The example driver exposes `generatedBoundaries` plus `moduleMembers` and
 `segmentMembers` containing source identities and final artifact paths. Use these
 to verify extraction/co-location, not generated filename patterns. These fields
 are build diagnostics; they are absent from the source observation.
+
+### Precise deferred import contracts
+
+These four locally authored cases use ordinary source/output differentials, not
+generated-boundary observations. All require native emission. Their `case.json`
+files are the corpus metadata registry; no upstream provenance or license is
+invented, and existing upstream notices and pinned adaptations are unchanged.
+
+| Case (`authored/`) | Runtime contract |
+| --- | --- |
+| `precise-dynamic-awaited` | Awaited property through nested star/aliased barrels; cold startup, lazy original-barrel effect plus helper closure, repeated function identity |
+| `precise-dynamic-then` | Two selected exports from **one** `.then` import occurrence; shared helper, distinct exclusive helpers, once-only lazy original-barrel initialization and stable identities |
+| `precise-dynamic-mixed` | Precise property plus full dynamic namespace, public barrel and static observer entries; complete export keys and live mutation in independent runtimes |
+| `precise-dynamic-fallback` | Opaque callback namespace escape and method receiver preservation; missing awaited/then properties activate evaluation without retaining spare exports |
+
+`scripts/bundler-fixtures-build.test.mjs` additionally builds both selected-only
+cases with byte targets 0 and 10000. It checks actual declaration bodies against
+public `segmentMembers`, including exact retained leaf segment indices. The
+unused pure sibling, its private helper (when unselected), and its deferred
+target must be absent. The two exports selected by one occurrence must occupy
+distinct physical implementation files; each exclusive helper stays with its
+implementation, and the shared helper has one separate owner.
+
+The tests follow the actual emitted native import/reexport edges, starting from
+each selected alias route plus the activation's original-target evaluation
+imports. These **physical demand masks** must be exclusive for each implementation
+and equal the union of selected demands for the shared helper, effect helper and
+original barrel initialization. None may enter the entry's eager static closure.
+This checks physical placement and native dependency membership, not internal
+plan root serialization, hash/filename snapshots, runtime-only values or a
+universal chunk count. Mixed/full consumers separately retain every source
+declaration; missing-property demands retain only their evaluation segment.
+The existing native then-assimilation, TLA and cached-failure corpus contracts
+remain in force; these four cases do not replace them.
 
 ### CSS output contracts and explicit options
 
