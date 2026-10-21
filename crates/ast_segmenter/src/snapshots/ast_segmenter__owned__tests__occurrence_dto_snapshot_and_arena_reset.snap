@@ -1010,6 +1010,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -1026,6 +1027,7 @@ ModuleFacts {
             read: false,
             write: false,
             type_only: true,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -1042,6 +1044,7 @@ ModuleFacts {
             read: false,
             write: false,
             type_only: true,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -1058,6 +1061,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -1074,6 +1078,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -1090,6 +1095,7 @@ ModuleFacts {
             read: false,
             write: false,
             type_only: true,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -1106,6 +1112,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
     ],

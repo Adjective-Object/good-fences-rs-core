@@ -61,6 +61,10 @@ infer package format from extension, wrapper references or export syntax.
 Extraction provenance binds source bytes, effective parser config and owned
 body/ranges/facts. Preserve it through cache/graph adapters; hashes detect
 accidental re-pairing, not publisher forgery.
+Reference `async_deferred` follows the nearest executing function body, not async
+ancestry. Parameters/class initializers reset it; nested bodies reestablish it,
+while computed keys keep their enclosing context. It permits new suspension,
+never claims an existing await has executed.
 
 `ModuleBody::CommonJs` always has one opaque executable segment excluding
 hashbang, never independently tree-shakable internal statements. Classify

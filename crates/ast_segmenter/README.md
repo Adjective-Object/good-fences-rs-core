@@ -72,6 +72,13 @@ pieces separated by runtime gaps; unconstrained nonliteral dependencies fail.
 `function_scoped` includes both `var` and parameters, as in OXC's binding flags;
 the occurrence IR does not infer evaluation timing or TDZ safety.
 
+Each reference's `async_deferred` flag permits introducing suspension in its
+nearest executing async function/arrow/method body; it does not mean an await
+has already executed. Nested synchronous bodies reset it. Parameters and class
+field/static initialization are false, but nested async bodies establish their
+own context. Computed keys retain the surrounding evaluation context. This is
+cached syntax evidence only; extraction and ordinary emission add no awaits.
+
 `ParsedModule::body` distinguishes ESM from CommonJS. CommonJS has exactly one
 opaque `Segment`, including directives, comments and whitespace, excluding the
 hashbang. Its internals must not be independently retained or tree-shaken.

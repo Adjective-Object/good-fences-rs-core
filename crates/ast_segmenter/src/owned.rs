@@ -49,6 +49,9 @@ pub struct Reference {
     pub read: bool,
     pub write: bool,
     pub type_only: bool,
+    /// The nearest executing function body is async, so suspension may be inserted.
+    /// Not a claim that this reference executes after an existing await.
+    pub async_deferred: bool,
     /// Wrapper parameter in CommonJS; never set for a lexical shadow.
     pub commonjs: Option<CommonJsGlobal>,
 }
@@ -286,6 +289,8 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         exported_declaration: None,
         commonjs: program.source_type.is_commonjs(),
         enclosing_function: None,
+        async_deferred: false,
+        function_body_async: false,
     };
     visitor.visit_program(program);
     eyre::ensure!(visitor.errors.is_empty(), "{}", visitor.errors.join("; "));
@@ -344,6 +349,8 @@ struct Extractor<'s, 'a> {
     exported_declaration: Option<(Span, bool)>,
     commonjs: bool,
     enclosing_function: Option<Span>,
+    async_deferred: bool,
+    function_body_async: bool,
 }
 
 impl Extractor<'_, '_> {
@@ -491,6 +498,7 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             read: reference.is_read(),
             write: reference.is_write(),
             type_only,
+            async_deferred: self.async_deferred,
             commonjs,
         });
     }
@@ -685,13 +693,59 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
 
     fn visit_function(&mut self, function: &Function<'a>, flags: ScopeFlags) {
         let previous = self.enclosing_function.replace(function.span);
+        let deferred = std::mem::replace(&mut self.async_deferred, false);
+        let body_async = std::mem::replace(&mut self.function_body_async, function.r#async);
         walk::walk_function(self, function, flags);
+        self.function_body_async = body_async;
+        self.async_deferred = deferred;
         self.enclosing_function = previous;
     }
 
     fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
         let previous = self.enclosing_function.replace(function.span);
+        let deferred = std::mem::replace(&mut self.async_deferred, false);
+        let body_async = std::mem::replace(&mut self.function_body_async, function.r#async);
         walk::walk_arrow_function_expression(self, function);
+        self.function_body_async = body_async;
+        self.async_deferred = deferred;
         self.enclosing_function = previous;
+    }
+
+    fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        let previous = std::mem::replace(&mut self.async_deferred, self.function_body_async);
+        walk::walk_function_body(self, body);
+        self.async_deferred = previous;
+    }
+
+    fn visit_property_definition(&mut self, property: &PropertyDefinition<'a>) {
+        self.visit_decorators(&property.decorators);
+        self.visit_property_key(&property.key);
+        let previous = std::mem::replace(&mut self.async_deferred, false);
+        if let Some(annotation) = &property.type_annotation {
+            self.visit_ts_type_annotation(annotation);
+        }
+        if let Some(value) = &property.value {
+            self.visit_expression(value);
+        }
+        self.async_deferred = previous;
+    }
+
+    fn visit_accessor_property(&mut self, property: &AccessorProperty<'a>) {
+        self.visit_decorators(&property.decorators);
+        self.visit_property_key(&property.key);
+        let previous = std::mem::replace(&mut self.async_deferred, false);
+        if let Some(annotation) = &property.type_annotation {
+            self.visit_ts_type_annotation(annotation);
+        }
+        if let Some(value) = &property.value {
+            self.visit_expression(value);
+        }
+        self.async_deferred = previous;
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        let previous = std::mem::replace(&mut self.async_deferred, false);
+        walk::walk_static_block(self, block);
+        self.async_deferred = previous;
     }
 }

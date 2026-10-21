@@ -27,6 +27,11 @@ Dependency sites retain source spans, binding requests, type namespace and
 sync/async/function-containment metadata.
 Containment does not authorize eager execution. Evaluation and binding demand
 are distinct; this crate does not implement effects or runtime scheduling.
+Local-reference occurrences copy `async_deferred` from owned syntax facts,
+including existing same-segment edges. Mixed async/sync references to one target
+stay separate in both indexes and retain their original sites; the flag neither
+adds dependencies nor changes activation. Dependency and legacy edges remain
+false. Derived consumers use `source_edge` occurrence indices, not pairwise ORs.
 
 `DependencyTarget::Context` maps captured relative request spellings to source
 paths. It expands one real dynamic-import/require occurrence into candidate

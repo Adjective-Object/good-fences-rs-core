@@ -18,6 +18,78 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn async_deferred_tracks_the_executing_body_not_async_ancestry() {
+    let facts = parse(
+        r#"
+module_sync;
+function ordinary() {
+    function_sync;
+    async function nested() { nested_async; }
+    restored_sync;
+}
+const arrow = async () => concise_async;
+const syncArrow = () => concise_sync;
+async function outer(
+    value = parameter_sync,
+    callback = async () => parameter_arrow_async,
+    { [parameter_key_sync]: item = destructured_parameter_sync } = {}
+) {
+    before_async;
+    (() => {
+        callback_sync;
+        (async () => callback_nested_async)();
+        callback_restored_sync;
+    })();
+    after_callback_async;
+    function inner(value = nested_parameter_sync) {
+        inner_sync;
+        async function again() { again_async; }
+        inner_restored_sync;
+    }
+    const object = {
+        [object_key_async]() { object_method_sync; },
+        async [object_async_key_async](value = object_parameter_sync) { object_method_async; },
+        get [getter_key_async]() { getter_sync; },
+    };
+    class C extends heritage_async {
+        [field_key_async] = field_sync;
+        static [static_field_key_async] = static_field_sync;
+        callback = async () => field_arrow_async;
+        static callback = async () => static_field_arrow_async;
+        static {
+            static_block_sync;
+            (async () => static_block_arrow_async)();
+            static_block_restored_sync;
+        }
+        [method_key_async](value = method_parameter_sync) { method_sync; }
+        async [async_method_key_async](value = async_method_parameter_sync) { method_async; }
+        async *generator() { generator_async; }
+    }
+    after_class_async;
+}
+class Outside {
+    async [module_method_key_sync]() { module_method_async; }
+}
+after_module_sync;
+"#,
+    );
+    let contexts: Vec<_> = facts
+        .references
+        .iter()
+        .map(|reference| {
+            assert_eq!(
+                reference.async_deferred,
+                reference.name.ends_with("_async"),
+                "{}",
+                reference.name
+            );
+            (reference.name.as_str(), reference.async_deferred)
+        })
+        .collect();
+    insta::assert_debug_snapshot!(contexts);
+}
+
+#[test]
 fn lexical_identity_survives_forward_uses_shadowing_and_redeclarations() {
     let source = "later; hoisted; let later = 1; var hoisted; var hoisted;\n\
         function outer({value: later = hoisted}, ...rest) {\n\

@@ -617,7 +617,7 @@ fn namespace_demand_retains_exports_not_private_declarations_and_plans_expire_on
 #[test]
 fn cache_ranges_and_facts_produce_the_same_plan_without_tracker_maps() {
     let sources = [
-        ("entry.ts", "import {value} from 'lib.ts'; consume(value);"),
+        ("entry.ts", "import {value} from 'lib.ts'; export async function run() { consume(value); (() => consume(value))(); } run();"),
         ("lib.ts", "export const value = 1; initialize();"),
     ];
     let cold = SourceGraph::from_owned(sources.iter().map(|(p, s)| input(p, s)));
@@ -646,10 +646,21 @@ fn cache_ranges_and_facts_produce_the_same_plan_without_tracker_maps() {
             resolutions,
         )
     }));
-    assert_eq!(
-        retain(&cold, &[0], &[]).unwrap(),
-        retain(&cached, &[0], &[]).unwrap()
-    );
+    assert_eq!(cold.edges(), cached.edges());
+    let plan = retain(&cached, &[0], &[]).unwrap();
+    let contexts: Vec<_> = plan
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.from == GraphNode::Segment(SegmentKey::new(0, 1))
+                && edge.to == GraphNode::Segment(SegmentKey::new(0, 0))
+                && edge.kind == RetentionEdgeKind::Binding
+        })
+        .map(|edge| cached.edges()[edge.source_edge.unwrap()].async_deferred)
+        .collect();
+    assert_eq!(contexts, [true, false]);
+    assert!(plan.async_boundaries.is_empty());
+    assert_eq!(retain(&cold, &[0], &[]).unwrap(), plan);
 }
 
 #[test]

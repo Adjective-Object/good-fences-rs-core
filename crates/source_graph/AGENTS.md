@@ -3,6 +3,8 @@
 Edges point consumer → dependency. Forward/reverse indexes refer to the same
 occurrence collection. Reuse ast_segmenter owned facts; do not reconstruct a
 second binding IR or put usage tags/effects/runtime scheduling in structure.
+Copy reference `async_deferred` per occurrence, never OR consumer/target pairs
+or introduce dependencies from the tag. Same-segment reference edges stay intact.
 Module nodes preserve empty-file identity; enclosing-function metadata is not
 permission to execute a require eagerly.
 

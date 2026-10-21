@@ -7,8 +7,9 @@ resolution and fixed-point effect solving remain build-local.
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 12 /
-extractor 15, including dynamic namespace observation shapes/receiver/`this`
+Syntax-local effect reasons/timing are persisted and range-checked (schema 13 /
+extractor 16, including per-reference `async_deferred` syntax context,
+dynamic namespace observation shapes/receiver/`this`
 facts, deferred declaration/source-slot alternatives,
 relative dependency patterns, owned lazy Ecco precursors,
 inferred user-function contracts and declaration identity,
@@ -41,6 +42,9 @@ hashes; passing an unrelated parse alongside plausible-length text is an error.
 `to_parsed(source)` returns provenance-bearing owned records for graph inputs,
 without parsing or reconstructing legacy tracker maps. Serialized provenance
 detects accidental re-pairing or mutation, not a malicious cache publisher.
+Async-body flags are required on every serialized reference and covered by the
+same sealed records hash; missing flags, changed context facts and previous
+schema/extractor identities are rejected without reparsing.
 
 Recipe validation covers exact segment/capture/occurrence coverage, declaration,
 forward-use and write links, eager-read ranges, hoisted availability consistency,
