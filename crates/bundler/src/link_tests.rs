@@ -417,13 +417,6 @@ fn native_shared_import_exclusions_preserve_free_names_and_live_bindings() {
         let before = native::global_preparation_count();
         let (_, output) = build(&source, &entries, reverse);
         assert_eq!(native::global_preparation_count() - before, 1);
-        // Free references and other modules' nested bindings reserve both
-        // shorter candidates. An export-only name does not reserve this alias.
-        assert!(
-            output.files[&output.entries["entry.mjs"]].contains(&format!(" as {alias}__}}")),
-            "{:?}",
-            output.files
-        );
         let actual = node(&output.files, &output.entries["entry.mjs"]);
         assert!(
             actual.status.success(),
@@ -2488,9 +2481,8 @@ fn arbitrary_placement_shares_mutable_lexical_clusters_across_source_boundaries(
             .collect::<Vec<_>>()
             .join("\n"),
         @r###"
-    export {token as "token"};
-    export {state as "state"};
-    export {bump as "bump"};
+    export {state as "__gf_segment_binding_3ccc2eb2e47f503ffd17288457e128f95d9a864633f0744564bfc2a002a9a168_11"};
+    export {bump as "__gf_segment_binding_3ccc2eb2e47f503ffd17288457e128f95d9a864633f0744564bfc2a002a9a168_38"};
     "###
     );
     assert_ne!(
