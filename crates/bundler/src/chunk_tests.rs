@@ -224,6 +224,462 @@ fn random(state: &mut u64) -> usize {
     *state as usize
 }
 
+fn selected_root(graph: &SourceGraph, consumer: &str, name: &str) -> RootId {
+    let file = graph.file_id(std::path::Path::new(consumer)).unwrap();
+    let dependency = graph
+        .file_facts(file)
+        .unwrap()
+        .dependencies()
+        .iter()
+        .find(|d| d.kind() == ast_segmenter::owned::DependencyKind::DynamicImport)
+        .unwrap()
+        .id();
+    RootId::AsyncExport {
+        site: AsyncSiteId {
+            module: consumer.into(),
+            offset: dependency.0,
+            candidate: None,
+        },
+        name: name.into(),
+    }
+}
+
+fn segment(path: &str, index: u32) -> NodeId {
+    NodeId::Segment {
+        module: path.into(),
+        index,
+    }
+}
+
+#[test]
+fn precise_same_occurrence_has_independent_export_masks_and_shared_original_effects() {
+    let sources = [
+                        ("entry.ts", "const {a, b} = await import('barrel.ts'); use(a, b);"),
+                        ("barrel.ts", "import 'effects.ts'; markBarrel(); export {a, b, unused} from 'leaf.ts';"),
+                        ("effects.ts", "function effectHelper() { markEffect(); } effectHelper();"),
+                        ("leaf.ts", "function shared() { return 1; } function onlyA() { return 2; } function onlyB() { return 3; } export function a() { return shared() + onlyA(); } export function b() { return shared() + onlyB(); } export function unused() { return 4; }"),
+                    ];
+    let graph = SourceGraph::from_owned(sources.iter().map(|(p, s)| input(p, s)));
+    let policy = EffectPolicy::default();
+    let plan = partition_precise(&graph, &[entry(0)], &policy).unwrap();
+    let a = selected_root(&graph, "entry.ts", "a");
+    let b = selected_root(&graph, "entry.ts", "b");
+    let both = BTreeSet::from([a.clone(), b.clone()]);
+    assert_eq!(plan.roots.len(), 3);
+    assert_eq!(a.async_site(), b.async_site());
+    assert_eq!(plan.async_activations.len(), 1);
+    assert_eq!(plan.async_activations[a.async_site().unwrap()].roots, both);
+    for root in [&a, &b] {
+        assert_eq!(plan.roots[root].evaluation_roots, [1]);
+        assert!(!plan.roots[root]
+            .binding_roots
+            .contains(&GraphNode::Module(1)));
+        assert!(plan.reachability[root].contains(&module("barrel.ts")));
+        assert!(!plan.reachability[root].contains(&module("entry.ts")));
+    }
+    for node in [segment("leaf.ts", 1), segment("leaf.ts", 3)] {
+        assert_eq!(plan.node_roots[&node], BTreeSet::from([a.clone()]));
+    }
+    for node in [segment("leaf.ts", 2), segment("leaf.ts", 4)] {
+        assert_eq!(plan.node_roots[&node], BTreeSet::from([b.clone()]));
+    }
+    for node in [
+        segment("leaf.ts", 0),
+        segment("barrel.ts", 1),
+        segment("barrel.ts", 2),
+        segment("effects.ts", 0),
+        segment("effects.ts", 1),
+        module("barrel.ts"),
+        module("effects.ts"),
+    ] {
+        assert_eq!(plan.node_roots[&node], both, "{node:?}");
+    }
+    assert!(plan.node_roots[&segment("leaf.ts", 5)].is_empty());
+    assert_exact_partition(&plan);
+    let error = crate::link::esm_with_options(
+        &graph,
+        &plan,
+        &policy,
+        &BTreeMap::new(),
+        &crate::build::OutputOptions {
+            synthesize_async_boundaries: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("analysis-only"));
+
+    let reordered = SourceGraph::from_owned(sources.iter().rev().map(|(p, s)| input(p, s)));
+    let other = partition_precise(
+        &reordered,
+        &[entry(
+            reordered.file_id(std::path::Path::new("entry.ts")).unwrap(),
+        )],
+        &policy,
+    )
+    .unwrap();
+    assert_eq!(plan.node_roots, other.node_roots);
+    assert_eq!(plan.chunks, other.chunks);
+}
+
+#[test]
+fn precise_requested_aliases_are_distinct_roots_even_for_the_same_canonical_binding() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "const {chosen, other} = await import('barrel.ts'); use(chosen, other);",
+        ),
+        input(
+            "barrel.ts",
+            "export {value as chosen, value as other} from 'leaf.ts';",
+        ),
+        input("leaf.ts", "export const value = 1; export const spare = 2;"),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    let chosen = selected_root(&graph, "entry.ts", "chosen");
+    let other = selected_root(&graph, "entry.ts", "other");
+    assert_eq!(plan.roots.len(), 3);
+    assert_eq!(
+        plan.roots[&chosen].binding_roots,
+        plan.roots[&other].binding_roots
+    );
+    assert_eq!(
+        plan.node_roots[&segment("leaf.ts", 0)],
+        BTreeSet::from([chosen, other])
+    );
+    assert!(plan.node_roots[&segment("leaf.ts", 1)].is_empty());
+}
+
+#[test]
+fn precise_public_and_namespace_roots_still_preserve_the_complete_surface() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "const a = (await import('barrel.ts')).a; use(a);",
+        ),
+        input("barrel.ts", "export {a, b} from 'leaf.ts';"),
+        input("leaf.ts", "export const a = 1; export const b = 2;"),
+        input("full.ts", "import('barrel.ts').then(consume);"),
+        input("static.ts", "import {a} from 'barrel.ts'; use(a);"),
+    ]);
+    let public = RootSeed {
+        id: RootId::Entry("public".into()),
+        evaluation_roots: vec![],
+        binding_roots: vec![GraphNode::Module(1)],
+    };
+    let full = RootSeed {
+        id: RootId::Entry("full".into()),
+        ..entry(3)
+    };
+    let static_root = RootSeed {
+        id: RootId::Entry("static".into()),
+        ..entry(4)
+    };
+    let plan = partition_precise(
+        &graph,
+        &[entry(0), public.clone(), full, static_root.clone()],
+        &EffectPolicy::default(),
+    )
+    .unwrap();
+    let full_root = plan
+        .roots
+        .keys()
+        .find(
+            |r| matches!(r, RootId::Async(site) if site.module == std::path::Path::new("full.ts")),
+        )
+        .unwrap()
+        .clone();
+    assert_eq!(
+        plan.node_roots[&segment("leaf.ts", 0)],
+        BTreeSet::from([
+            public.id.clone(),
+            full_root.clone(),
+            static_root.id,
+            selected_root(&graph, "entry.ts", "a")
+        ])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("leaf.ts", 1)],
+        BTreeSet::from([public.id, full_root])
+    );
+}
+
+#[test]
+fn precise_nested_discovery_does_not_activate_dead_exports_or_cross_async_edges() {
+    let graph = SourceGraph::from_owned([
+                        input("entry.ts", "const go = (await import('barrel.ts')).go; use(go);"),
+                        input("barrel.ts", "export {go, dead} from 'outer.ts';"),
+                        input("outer.ts", "export function go() { return import('nested.ts').then(ns => ns.chosen); } export function dead() { return import('dead.ts'); }"),
+                        input("nested.ts", "export const chosen = 1; export const spare = 2;"),
+                        input("dead.ts", "deadEffect();"),
+                    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    let go = selected_root(&graph, "entry.ts", "go");
+    let nested = selected_root(&graph, "outer.ts", "chosen");
+    assert_eq!(
+        plan.roots.keys().cloned().collect::<BTreeSet<_>>(),
+        BTreeSet::from([entry(0).id, go.clone(), nested.clone()])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("outer.ts", 0)],
+        BTreeSet::from([go])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("nested.ts", 0)],
+        BTreeSet::from([nested])
+    );
+    for node in [
+        segment("outer.ts", 1),
+        segment("nested.ts", 1),
+        module("dead.ts"),
+        segment("dead.ts", 0),
+    ] {
+        assert!(plan.node_roots[&node].is_empty(), "{node:?}");
+    }
+    assert_exact_partition(&plan);
+}
+
+#[test]
+fn precise_missing_properties_and_unused_results_are_evaluation_only() {
+    for source in [
+        "const absent = (await import('target.ts')).absent; use(absent);",
+        "import('target.ts').then(ns => ns.absent);",
+        "import('target.ts');",
+    ] {
+        let graph = SourceGraph::from_owned([
+            input("entry.ts", source),
+            input("target.ts", "effect(); export const spare = 1;"),
+        ]);
+        let policy = EffectPolicy::default();
+        let plan = partition_precise(&graph, &[entry(0)], &policy).unwrap();
+        let (root, seed) = plan
+            .roots
+            .iter()
+            .find(|(r, _)| matches!(r, RootId::Async(_)))
+            .unwrap();
+        assert_eq!(seed.evaluation_roots, [1]);
+        assert!(seed.binding_roots.is_empty());
+        assert_eq!(
+            plan.node_roots[&segment("target.ts", 0)],
+            BTreeSet::from([root.clone()])
+        );
+        assert!(plan.node_roots[&segment("target.ts", 1)].is_empty());
+        let compatible = partition(&graph, &[entry(0)], &policy).unwrap();
+        assert!(!compatible.node_roots[&segment("target.ts", 1)].is_empty());
+        let error = crate::link::esm(&graph, &plan, &policy, &BTreeMap::new()).unwrap_err();
+        assert!(error.to_string().contains("analysis-only"));
+        assert!(
+            crate::link::deferred_esm(&graph, &plan, &policy, &BTreeMap::new())
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("analysis-only")
+        );
+    }
+}
+
+#[test]
+fn precise_unsafe_observations_and_then_exports_keep_full_namespace_masks() {
+    for (source, target) in [
+                        ("import('target.ts').then(consume);", "export const a = 1; export const spare = 2;"),
+                        ("const ns = await import('target.ts'); use(ns[key]);", "export const a = 1; export const spare = 2;"),
+                        ("(await import('target.ts')).a();", "export function a() { return this; } export const spare = 2;"),
+                        ("const a = (await import('target.ts')).a; use(a);", "export const a = 1; export const spare = 2; export function then(resolve) { resolve(1); }"),
+                    ] {
+                        let graph = SourceGraph::from_owned([input("entry.ts", source), input("target.ts", target)]);
+                        let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+                        let (root, seed) = plan.roots.iter().find(|(r, _)| matches!(r, RootId::Async(_))).unwrap();
+                        assert_eq!(plan.roots.len(), 2, "{source}");
+                        assert_eq!(seed.binding_roots, [GraphNode::Module(1)]);
+                        for index in 0..graph.file_segments(1).unwrap().len() {
+                            assert_eq!(plan.node_roots[&segment("target.ts", index as u32)], BTreeSet::from([root.clone()]), "{source}");
+                        }
+                    }
+}
+
+#[test]
+fn precise_routes_through_star_and_local_export_connectors_do_not_widen_bindings() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "const {a, b} = await import('star.ts'); use(a, b);",
+        ),
+        input("star.ts", "export * from 'local.ts';"),
+        input(
+            "local.ts",
+            "import {a, b, unused} from 'leaf.ts'; export {a, b, unused};",
+        ),
+        input(
+            "leaf.ts",
+            "export const a = 1; export const b = 2; export const unused = 3;",
+        ),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    let a = selected_root(&graph, "entry.ts", "a");
+    let b = selected_root(&graph, "entry.ts", "b");
+    assert_eq!(
+        plan.node_roots[&segment("leaf.ts", 0)],
+        BTreeSet::from([a.clone()])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("leaf.ts", 1)],
+        BTreeSet::from([b.clone()])
+    );
+    assert!(plan.node_roots[&segment("leaf.ts", 2)].is_empty());
+    assert_eq!(
+        plan.node_roots[&segment("star.ts", 0)],
+        BTreeSet::from([a.clone(), b.clone()])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("local.ts", 1)],
+        BTreeSet::from([a, b])
+    );
+}
+
+#[test]
+fn precise_distinct_occurrences_of_the_same_export_keep_distinct_identities() {
+    let graph = SourceGraph::from_owned([
+        input("entry.ts", "const a = (await import('target.ts')).value; const b = (await import('target.ts')).value; use(a, b);"),
+        input("target.ts", "export const value = 1; export const spare = 2;"),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    assert_eq!(plan.async_activations.len(), 2);
+    let roots: BTreeSet<_> = plan
+        .roots
+        .keys()
+        .filter(|root| matches!(root, RootId::AsyncExport {name, ..} if name == "value"))
+        .cloned()
+        .collect();
+    assert_eq!(roots.len(), 2);
+    assert_eq!(plan.node_roots[&segment("target.ts", 0)], roots);
+    assert!(plan.node_roots[&segment("target.ts", 1)].is_empty());
+}
+
+#[test]
+fn precise_imported_helpers_follow_each_use_not_all_specifiers_in_the_declaration() {
+    let graph = SourceGraph::from_owned([
+        input("entry.ts", "const {a, b} = await import('target.ts'); use(a, b);"),
+        input("target.ts", "import {shared, onlyA, onlyB, unused} from 'helpers.ts'; export function a() { return shared() + onlyA(); } export function b() { return shared() + onlyB(); }"),
+        input("helpers.ts", "export function shared() { return 1; } export function onlyA() { return 2; } export function onlyB() { return 3; } export function unused() { return 4; }"),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    let a = selected_root(&graph, "entry.ts", "a");
+    let b = selected_root(&graph, "entry.ts", "b");
+    assert_eq!(
+        plan.node_roots[&segment("helpers.ts", 0)],
+        BTreeSet::from([a.clone(), b.clone()])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("helpers.ts", 1)],
+        BTreeSet::from([a])
+    );
+    assert_eq!(
+        plan.node_roots[&segment("helpers.ts", 2)],
+        BTreeSet::from([b])
+    );
+    assert!(plan.node_roots[&segment("helpers.ts", 3)].is_empty());
+}
+
+#[test]
+fn precise_context_commonjs_and_external_targets_keep_conservative_roots() {
+    let mut source = input(
+        "entry.ts",
+        "const a = (await import(`./${name}.ts`)).a; use(a);",
+    );
+    let dependency = source.facts.dependencies().get(0).unwrap().id();
+    source.resolutions.insert(
+        dependency,
+        source_graph::DependencyTarget::Context(BTreeMap::from([
+            ("./one.ts".into(), PathBuf::from("one.ts")),
+            ("./two.ts".into(), PathBuf::from("two.ts")),
+        ])),
+    );
+    let graph = SourceGraph::from_owned([
+        source,
+        input("one.ts", "export const a = 1; export const spare = 2;"),
+        input("two.ts", "export const a = 3; export const spare = 4;"),
+    ]);
+    let policy = EffectPolicy::default();
+    let plan = partition_precise(&graph, &[entry(0)], &policy).unwrap();
+    assert_eq!(plan.async_activations.len(), 2);
+    for target in ["one.ts", "two.ts"] {
+        let root = RootId::Async(AsyncSiteId {
+            module: "entry.ts".into(),
+            offset: dependency.0,
+            candidate: Some(target.into()),
+        });
+        assert!(plan.roots.contains_key(&root));
+        for index in 0..2 {
+            assert_eq!(
+                plan.node_roots[&segment(target, index)],
+                BTreeSet::from([root.clone()])
+            );
+        }
+    }
+    let manifest = crate::manifest::diagnostic_manifest(&graph, &plan, &policy).unwrap();
+    assert_eq!(manifest.async_facades.len(), 2);
+    for (site, activation) in &manifest.async_facades {
+        assert_eq!(
+            activation.target,
+            NodeId::Module(site.candidate.clone().unwrap())
+        );
+        assert_eq!(activation.demand_roots.len(), 1);
+    }
+
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "const a = (await import('opaque.cjs')).a; use(a);",
+        ),
+        input("opaque.cjs", "exports.a = 1; exports.spare = 2;"),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &policy).unwrap();
+    let root = plan
+        .roots
+        .keys()
+        .find(|r| matches!(r, RootId::Async(_)))
+        .unwrap();
+    assert_eq!(plan.roots[root].binding_roots, [GraphNode::Module(1)]);
+    for index in 0..graph.file_segments(1).unwrap().len() {
+        assert_eq!(
+            plan.node_roots[&segment("opaque.cjs", index as u32)],
+            BTreeSet::from([root.clone()])
+        );
+    }
+    assert_eq!(
+        plan.node_roots[&NodeId::CommonJsNamespace("opaque.cjs".into())],
+        BTreeSet::from([root.clone()])
+    );
+
+    let mut source = input(
+        "entry.ts",
+        "const a = (await import('external')).a; use(a);",
+    );
+    let dependency = source.facts.dependencies().get(0).unwrap().id();
+    source.resolutions.insert(
+        dependency,
+        source_graph::DependencyTarget::External("external".into()),
+    );
+    let graph = SourceGraph::from_owned([source]);
+    let plan = partition_precise(&graph, &[entry(0)], &policy).unwrap();
+    let root = plan
+        .roots
+        .keys()
+        .find(|r| matches!(r, RootId::Async(_)))
+        .unwrap();
+    assert_eq!(
+        plan.node_roots[&NodeId::External {
+            module: "entry.ts".into(),
+            offset: dependency.0
+        }],
+        BTreeSet::from([root.clone()])
+    );
+    let manifest = crate::manifest::diagnostic_manifest(&graph, &plan, &policy).unwrap();
+    let activation = manifest.async_facades.values().next().unwrap();
+    assert!(matches!(activation.target, NodeId::External { .. }));
+    assert!(activation.facade.demand.evaluation_modules.is_empty());
+}
+
 #[test]
 fn randomized_small_graphs_match_module_oracle_and_insertion_order() {
     use ast_segmenter::owned::DependencyKind;

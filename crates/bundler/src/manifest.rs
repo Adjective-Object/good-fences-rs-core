@@ -49,7 +49,11 @@ pub struct Facade {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsyncFacade {
     pub consumer: NodeId,
+    /// Original import target, never a selected export's routed leaf.
     pub target: NodeId,
+    /// Independent availability demands activated by this one occurrence.
+    pub demand_roots: BTreeMap<RootId, Facade>,
+    /// Activation projection: union of demand roots, not a new aggregated root.
     pub facade: Facade,
 }
 
@@ -100,7 +104,9 @@ pub fn diagnostic_manifest(
     for (root, seed) in &plan.roots {
         let synthetic = match root {
             RootId::Entry(id) => SyntheticNode::EntryFacade(id.clone()),
-            RootId::Async(site) => SyntheticNode::AsyncFacade(site.clone()),
+            RootId::Async(site) | RootId::AsyncExport { site, .. } => {
+                SyntheticNode::AsyncFacade(site.clone())
+            }
         };
         let facade = Facade {
             synthetic: synthetic.clone(),
@@ -115,8 +121,15 @@ pub fn diagnostic_manifest(
             RootId::Entry(id) => {
                 manifest.entries.insert(id.clone(), facade);
             }
-            RootId::Async(site) => {
+            RootId::Async(site) | RootId::AsyncExport { site, .. } => {
                 if let Some(boundary) = plan.generated_boundaries.get(site) {
+                    let facade = Facade {
+                        demand: FacadeDemand {
+                            evaluation_modules: BTreeSet::new(),
+                            ..facade.demand
+                        },
+                        ..facade
+                    };
                     manifest.async_facades.insert(
                         site.clone(),
                         AsyncFacade {
@@ -125,35 +138,64 @@ pub fn diagnostic_manifest(
                                 graph,
                                 source_graph::GraphNode::Segment(boundary.target),
                             )?,
-                            facade: Facade {
-                                demand: FacadeDemand {
-                                    evaluation_modules: BTreeSet::new(),
-                                    ..facade.demand
-                                },
-                                ..facade
-                            },
+                            demand_roots: BTreeMap::from([(root.clone(), facade.clone())]),
+                            facade,
                         },
                     );
                     continue;
                 }
-                let mut occurrence = None;
-                for &index in &plan.retention.async_boundaries {
-                    if async_seed(graph, index)?.id == *root {
-                        occurrence = Some(&graph.edges()[index]);
-                        break;
-                    }
-                }
-                let edge = occurrence.ok_or_eyre("active async root has no retained occurrence")?;
-                manifest.async_facades.insert(
-                    site.clone(),
-                    AsyncFacade {
-                        consumer: node_id(graph, edge.from)?,
-                        target: node_id(graph, edge.to)?,
-                        facade,
-                    },
+                let activation = plan
+                    .async_activations
+                    .get(site)
+                    .ok_or_eyre("active async root has no activation")?;
+                ensure!(
+                    activation.roots.contains(root)
+                        && plan
+                            .retention
+                            .async_boundaries
+                            .contains(&activation.source_edge)
+                        && async_seed(graph, activation.source_edge)?.id.async_site() == Some(site),
+                    "async root is absent from its retained occurrence"
                 );
+                let edge = graph
+                    .edges()
+                    .get(activation.source_edge)
+                    .ok_or_eyre("missing async occurrence")?;
+                let consumer = node_id(graph, edge.from)?;
+                let target = node_id(graph, edge.to)?;
+                let projection = manifest
+                    .async_facades
+                    .entry(site.clone())
+                    .or_insert_with(|| AsyncFacade {
+                        consumer,
+                        target,
+                        demand_roots: BTreeMap::new(),
+                        facade: facade.clone(),
+                    });
+                projection.demand_roots.insert(root.clone(), facade.clone());
+                projection.facade.load_chunks.extend(facade.load_chunks);
+                projection
+                    .facade
+                    .demand
+                    .evaluation_modules
+                    .extend(facade.demand.evaluation_modules);
+                projection
+                    .facade
+                    .demand
+                    .binding_nodes
+                    .extend(facade.demand.binding_nodes);
             }
         }
+    }
+    for (site, activation) in &plan.async_activations {
+        let projection = manifest
+            .async_facades
+            .get(site)
+            .ok_or_eyre("async activation has no projection")?;
+        ensure!(
+            projection.demand_roots.keys().eq(activation.roots.iter()),
+            "async activation projection has incomplete demand roots"
+        );
     }
     for (node, roots) in &plan.node_roots {
         if let NodeId::CommonJsNamespace(module) = node {

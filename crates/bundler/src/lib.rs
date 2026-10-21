@@ -143,6 +143,7 @@ pub fn retain_with_policy(
         binding_roots,
         policy,
         &ecco_effects,
+        false,
     )
 }
 
@@ -152,6 +153,7 @@ fn retain_with_effects(
     binding_roots: &[GraphNode],
     policy: &policy::EffectPolicy,
     ecco_effects: &BTreeMap<SegmentKey, bool>,
+    precise_dynamic_imports: bool,
 ) -> eyre::Result<RetentionPlan> {
     let mut analysis = Retention {
         graph,
@@ -169,6 +171,7 @@ fn retain_with_effects(
         native_externals: graph
             .module_ids()
             .any(|file| link::has_externals(graph, file)),
+        precise_dynamic_imports,
     };
     for &file in evaluation_roots {
         analysis.queue.push_back(Demand::Evaluation(file));
@@ -258,6 +261,7 @@ struct Retention<'g, 'p> {
     export_names: BTreeMap<u32, BTreeSet<String>>,
     ecco_effects: &'g BTreeMap<SegmentKey, bool>,
     native_externals: bool,
+    precise_dynamic_imports: bool,
 }
 
 impl Retention<'_, '_> {
@@ -467,12 +471,24 @@ impl Retention<'_, '_> {
         });
         self.queue.push_back(Demand::Evaluation(key.file_id));
         let graph = self.graph;
+        // Checked export/reference routes already supply selected bindings.
+        // A shared import/export connector is not demand for its other specifiers.
+        let route_connector = self.precise_dynamic_imports
+            && self
+                .facts(key.file_id)?
+                .emission()
+                .segments()
+                .get(key.segment_idx as usize)
+                .is_some_and(|recipe| recipe.connector_only());
         for (index, edge) in graph.outgoing_indexed(node).filter(|(_, e)| !e.type_only) {
             if edge.activation == Activation::Asynchronous {
                 self.async_boundaries.insert(index);
                 continue;
             }
             if edge.purpose == EdgePurpose::Binding || edge.kind == EdgeKind::LocalReference {
+                if route_connector && !matches!(edge.to, GraphNode::Unlinked { .. }) {
+                    continue;
+                }
                 self.edges.insert(RetentionEdge {
                     from: node,
                     to: edge.to,
@@ -480,6 +496,25 @@ impl Retention<'_, '_> {
                     source_edge: Some(index),
                 });
                 self.target(edge.to, true)?;
+                if self.precise_dynamic_imports && edge.kind == EdgeKind::LocalReference {
+                    // Local references name an import declaration segment. Project
+                    // only that local binding's checked routes onto the real use,
+                    // not every specifier sharing the declaration.
+                    for (_, imported) in graph.outgoing_indexed(edge.to).filter(|(_, imported)| {
+                        imported.kind == EdgeKind::Import
+                            && imported.purpose == EdgePurpose::Binding
+                            && !imported.type_only
+                            && imported.binding == edge.binding
+                    }) {
+                        self.edges.insert(RetentionEdge {
+                            from: node,
+                            to: imported.to,
+                            kind: RetentionEdgeKind::Binding,
+                            source_edge: Some(index),
+                        });
+                        self.target(imported.to, true)?;
+                    }
+                }
             } else if edge.kind == EdgeKind::Require {
                 self.edges.insert(RetentionEdge {
                     from: node,

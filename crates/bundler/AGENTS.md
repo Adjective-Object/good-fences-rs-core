@@ -431,7 +431,14 @@ exclude lexical shadows; wildcard receivers include them; never infer aliases.
 Fingerprints include canonical patterns and annotation policy, not source-cache
 identity. Check both graph revision and policy before reusing derived plans.
 
-Root identities use entry IDs or async source occurrences; context candidates
+`partition_precise` is analysis-only: per-requested-name `AsyncExport` roots
+share an `AsyncSiteId` activation, never union symbols into an occurrence root.
+Each seeds original-target evaluation plus its checked route; pure connectors
+must not pull sibling specifiers. `async_activations` and manifest `demand_roots`
+project one occurrence onto independent masks while retaining the original target.
+Default planning remains namespace-conservative; emission rejects precise plans
+until typed post-placement Connections support selected namespace projections.
+Root identities use entry IDs or async source occurrences/demands; context candidates
 extend that occurrence identity with their target, never replace the source site.
 Capture relative patterns against the bounded inventory and invalidate on
 candidate additions/removals. Expand checked edges without inventing source IDs.

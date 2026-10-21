@@ -141,6 +141,9 @@ fn emit_inner(
                 };
                 async_targets.insert(site.clone(), graph.file_id(target).unwrap());
             }
+            RootId::AsyncExport { .. } => {
+                eyre::bail!("selected async demand roots require native projection support")
+            }
         }
     }
     let native_seams = modules.keys().any(|&file| has_externals(graph, file));

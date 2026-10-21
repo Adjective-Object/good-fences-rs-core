@@ -21,6 +21,20 @@ pub struct AsyncSiteId {
 pub enum RootId {
     Entry(String),
     Async(AsyncSiteId),
+    /// One requested export, not the union of an occurrence's selected names.
+    AsyncExport {
+        site: AsyncSiteId,
+        name: String,
+    },
+}
+
+impl RootId {
+    pub fn async_site(&self) -> Option<&AsyncSiteId> {
+        match self {
+            Self::Entry(_) => None,
+            Self::Async(site) | Self::AsyncExport { site, .. } => Some(site),
+        }
+    }
 }
 
 /// Canonical diagnostic identity; graph-local numeric IDs never name chunks.
@@ -132,6 +146,53 @@ pub fn async_seed(graph: &SourceGraph, edge_index: usize) -> eyre::Result<RootSe
         evaluation_roots: vec![],
         binding_roots: vec![edge.to],
     })
+}
+
+/// Independent export roots sharing one activation occurrence. Every selected
+/// route carries the original import target's evaluation, including sibling effects.
+/// Unsafe/unknown namespace observations keep the conservative namespace root.
+pub fn async_demand_seeds(graph: &SourceGraph, edge_index: usize) -> eyre::Result<Vec<RootSeed>> {
+    let original = async_seed(graph, edge_index)?;
+    let Some(demand) = graph.dynamic_import_demand(edge_index) else {
+        return Ok(vec![original]);
+    };
+    let Some(bindings) = demand.bindings else {
+        return Ok(vec![original]);
+    };
+    let GraphNode::Module(target) = demand.evaluation.to else {
+        eyre::bail!("precise dynamic evaluation must target a local module");
+    };
+    let mut routes = BTreeMap::<String, Vec<GraphNode>>::new();
+    for binding in bindings {
+        let Some(ast_segmenter::owned::ImportedName::Name(name)) = binding.imported else {
+            eyre::bail!("precise dynamic route requires a requested export name");
+        };
+        let route = routes.entry(name).or_default();
+        if !route.contains(&binding.to) {
+            route.push(binding.to);
+        }
+    }
+    if routes.is_empty() {
+        return Ok(vec![RootSeed {
+            evaluation_roots: vec![target],
+            binding_roots: vec![],
+            ..original
+        }]);
+    }
+    let RootId::Async(site) = original.id else {
+        unreachable!("async_seed always supplies an occurrence identity")
+    };
+    Ok(routes
+        .into_iter()
+        .map(|(name, binding_roots)| RootSeed {
+            id: RootId::AsyncExport {
+                site: site.clone(),
+                name,
+            },
+            evaluation_roots: vec![target],
+            binding_roots,
+        })
+        .collect())
 }
 
 /// Deliberately simple reference oracle: one independent flood fill per root.
@@ -298,6 +359,16 @@ pub struct ChunkPlan {
     pub chunks: BTreeMap<ChunkId, Vec<NodeId>>,
     /// Derived reference occurrences, never source dependency IDs or cached facts.
     pub generated_boundaries: BTreeMap<AsyncSiteId, GeneratedBoundary>,
+    /// Opt-in analysis only until native connections support selected projections.
+    pub precise_dynamic_imports: bool,
+    /// One original import activation projects onto several independent roots.
+    pub async_activations: BTreeMap<AsyncSiteId, AsyncActivation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncActivation {
+    pub source_edge: usize,
+    pub roots: BTreeSet<RootId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,9 +402,29 @@ pub fn partition(
     entries: &[RootSeed],
     policy: &EffectPolicy,
 ) -> eyre::Result<ChunkPlan> {
+    partition_impl(graph, entries, policy, false)
+}
+
+/// Precise planning/diagnostics only. Native emission still requires `partition`:
+/// it currently rewrites import specifiers to complete namespace surfaces.
+pub fn partition_precise(
+    graph: &SourceGraph,
+    entries: &[RootSeed],
+    policy: &EffectPolicy,
+) -> eyre::Result<ChunkPlan> {
+    partition_impl(graph, entries, policy, true)
+}
+
+fn partition_impl(
+    graph: &SourceGraph,
+    entries: &[RootSeed],
+    policy: &EffectPolicy,
+    precise_dynamic_imports: bool,
+) -> eyre::Result<ChunkPlan> {
     graph.validate_links()?;
     let ecco_effects = crate::effect_analysis::analyze(graph, policy)?;
     let mut roots = BTreeMap::new();
+    let mut async_activations = BTreeMap::<AsyncSiteId, AsyncActivation>::new();
     for entry in entries {
         ensure!(
             matches!(entry.id, RootId::Entry(_)),
@@ -365,8 +456,14 @@ pub fn partition(
             .flat_map(|r| r.binding_roots.iter().copied())
             .filter(|n| !matches!(n, GraphNode::Unlinked { .. }))
             .collect();
-        let retention =
-            crate::retain_with_effects(graph, &evaluation, &bindings, policy, &ecco_effects)?;
+        let retention = crate::retain_with_effects(
+            graph,
+            &evaluation,
+            &bindings,
+            policy,
+            &ecco_effects,
+            precise_dynamic_imports,
+        )?;
         let seeds: Vec<_> = roots.values().cloned().collect();
         let reached = reference_reachability(graph, &retention, policy, &seeds)?;
         let mut added = false;
@@ -375,12 +472,31 @@ pub fn partition(
             if !reached.values().any(|nodes| nodes.contains(&consumer)) {
                 continue;
             }
-            let seed = async_seed(graph, index)?;
-            if let Some(existing) = roots.get(&seed.id) {
-                ensure!(*existing == seed, "conflicting async site identity");
+            let original = async_seed(graph, index)?;
+            let RootId::Async(site) = original.id.clone() else {
+                unreachable!()
+            };
+            let seeds = if precise_dynamic_imports {
+                async_demand_seeds(graph, index)?
             } else {
-                roots.insert(seed.id.clone(), seed);
-                added = true;
+                vec![original]
+            };
+            let activation = AsyncActivation {
+                source_edge: index,
+                roots: seeds.iter().map(|seed| seed.id.clone()).collect(),
+            };
+            if let Some(existing) = async_activations.get(&site) {
+                ensure!(*existing == activation, "conflicting async activation");
+            } else {
+                async_activations.insert(site, activation);
+            }
+            for seed in seeds {
+                if let Some(existing) = roots.get(&seed.id) {
+                    ensure!(*existing == seed, "conflicting async site identity");
+                } else {
+                    roots.insert(seed.id.clone(), seed);
+                    added = true;
+                }
             }
         }
         if !added {
@@ -429,6 +545,8 @@ pub fn partition(
         node_roots,
         chunks,
         generated_boundaries: BTreeMap::new(),
+        precise_dynamic_imports,
+        async_activations,
     })
 }
 

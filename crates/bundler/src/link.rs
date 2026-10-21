@@ -160,6 +160,7 @@ pub fn esm_with_options(
     sources: &BTreeMap<PathBuf, String>,
     options: &crate::build::OutputOptions,
 ) -> eyre::Result<Artifacts> {
+    ensure_emission_compatible(plan)?;
     ensure!(
         options.synthesize_async_boundaries || plan.generated_boundaries.is_empty(),
         "generated plan requires synthesize_async_boundaries; repartition to disable"
@@ -194,6 +195,7 @@ pub fn deferred_esm(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Option<DeferredEsm>> {
+    ensure_emission_compatible(plan)?;
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let relocations = BTreeMap::new();
@@ -316,6 +318,7 @@ pub(crate) fn esm_plan_configured(
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
+    ensure_emission_compatible(plan)?;
     let _span = tracing::info_span!("build.link").entered();
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
@@ -336,6 +339,14 @@ pub(crate) fn esm_plan_configured(
         min_chunk_bytes,
         execution,
     )
+}
+
+fn ensure_emission_compatible(plan: &ChunkPlan) -> eyre::Result<()> {
+    ensure!(
+        !plan.precise_dynamic_imports,
+        "precise dynamic import plans are analysis-only until native Connections support selected namespace projections; use chunks::partition for emission"
+    );
+    Ok(())
 }
 
 fn load_modules<'a>(

@@ -130,6 +130,45 @@ DiagnosticManifest {
                 module: "entry.ts",
                 offset: 0,
             },
+            demand_roots: {
+                Async(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 0,
+                        candidate: None,
+                    },
+                ): Facade {
+                    synthetic: AsyncFacade(
+                        AsyncSiteId {
+                            module: "entry.ts",
+                            offset: 0,
+                            candidate: None,
+                        },
+                    ),
+                    demand: FacadeDemand {
+                        evaluation_modules: {},
+                        binding_nodes: {
+                            External {
+                                module: "entry.ts",
+                                offset: 0,
+                            },
+                        },
+                    },
+                    load_chunks: {
+                        ChunkId(
+                            {
+                                Async(
+                                    AsyncSiteId {
+                                        module: "entry.ts",
+                                        offset: 0,
+                                        candidate: None,
+                                    },
+                                ),
+                            },
+                        ),
+                    },
+                },
+            },
             facade: Facade {
                 synthetic: AsyncFacade(
                     AsyncSiteId {
@@ -174,6 +213,45 @@ DiagnosticManifest {
             target: External {
                 module: "entry.ts",
                 offset: 20,
+            },
+            demand_roots: {
+                Async(
+                    AsyncSiteId {
+                        module: "entry.ts",
+                        offset: 20,
+                        candidate: None,
+                    },
+                ): Facade {
+                    synthetic: AsyncFacade(
+                        AsyncSiteId {
+                            module: "entry.ts",
+                            offset: 20,
+                            candidate: None,
+                        },
+                    ),
+                    demand: FacadeDemand {
+                        evaluation_modules: {},
+                        binding_nodes: {
+                            External {
+                                module: "entry.ts",
+                                offset: 20,
+                            },
+                        },
+                    },
+                    load_chunks: {
+                        ChunkId(
+                            {
+                                Async(
+                                    AsyncSiteId {
+                                        module: "entry.ts",
+                                        offset: 20,
+                                        candidate: None,
+                                    },
+                                ),
+                            },
+                        ),
+                    },
+                },
             },
             facade: Facade {
                 synthetic: AsyncFacade(

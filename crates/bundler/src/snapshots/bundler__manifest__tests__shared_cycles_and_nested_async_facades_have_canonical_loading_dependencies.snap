@@ -224,6 +224,63 @@ DiagnosticManifest {
             target: Module(
                 "nested.ts",
             ),
+            demand_roots: {
+                Async(
+                    AsyncSiteId {
+                        module: "a.ts",
+                        offset: 20,
+                        candidate: None,
+                    },
+                ): Facade {
+                    synthetic: AsyncFacade(
+                        AsyncSiteId {
+                            module: "a.ts",
+                            offset: 20,
+                            candidate: None,
+                        },
+                    ),
+                    demand: FacadeDemand {
+                        evaluation_modules: {
+                            "nested.ts",
+                        },
+                        binding_nodes: {
+                            Module(
+                                "nested.ts",
+                            ),
+                        },
+                    },
+                    load_chunks: {
+                        ChunkId(
+                            {
+                                Entry(
+                                    "a",
+                                ),
+                                Entry(
+                                    "b",
+                                ),
+                                Async(
+                                    AsyncSiteId {
+                                        module: "a.ts",
+                                        offset: 20,
+                                        candidate: None,
+                                    },
+                                ),
+                            },
+                        ),
+                        ChunkId(
+                            {
+                                Async(
+                                    AsyncSiteId {
+                                        module: "a.ts",
+                                        offset: 20,
+                                        candidate: None,
+                                    },
+                                ),
+                            },
+                        ),
+                    },
+                },
+            },
             facade: Facade {
                 synthetic: AsyncFacade(
                     AsyncSiteId {
@@ -286,6 +343,46 @@ DiagnosticManifest {
             target: Module(
                 "empty.ts",
             ),
+            demand_roots: {
+                Async(
+                    AsyncSiteId {
+                        module: "nested.ts",
+                        offset: 20,
+                        candidate: None,
+                    },
+                ): Facade {
+                    synthetic: AsyncFacade(
+                        AsyncSiteId {
+                            module: "nested.ts",
+                            offset: 20,
+                            candidate: None,
+                        },
+                    ),
+                    demand: FacadeDemand {
+                        evaluation_modules: {
+                            "empty.ts",
+                        },
+                        binding_nodes: {
+                            Module(
+                                "empty.ts",
+                            ),
+                        },
+                    },
+                    load_chunks: {
+                        ChunkId(
+                            {
+                                Async(
+                                    AsyncSiteId {
+                                        module: "nested.ts",
+                                        offset: 20,
+                                        candidate: None,
+                                    },
+                                ),
+                            },
+                        ),
+                    },
+                },
+            },
             facade: Facade {
                 synthetic: AsyncFacade(
                     AsyncSiteId {

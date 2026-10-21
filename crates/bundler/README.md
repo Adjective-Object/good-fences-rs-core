@@ -11,7 +11,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 13/extractor 16); parse fingerprints include both active
+`.seg.fb` records (schema 13/extractor 17); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -40,6 +40,37 @@ Source imports and references carry binding-availability, execution/activation,
 native-external-validation and exact-public-surface obligations; they do not
 prescribe physical module seams. `RetentionPlan` and canonical symbols feed the
 segment owner solver. Source privacy never adds a placement constraint.
+
+### Precise dynamic-import planning (analysis-only)
+
+`chunks::partition_precise` consumes checked `SourceGraph::dynamic_import_demand`
+routes. `RootId::AsyncExport { site, name }` identifies each requested export
+independently, even when two names share a canonical binding. `AsyncSiteId` still
+identifies activation, not a union of selected bindings. Every export root seeds
+the **original import module's evaluation** plus its checked binding route;
+barrel/sibling effects therefore belong to every selected root. Pure route
+connectors do not demand their other import/export specifiers. Full namespaces
+and public roots still retain their entire surface. Missing properties need
+evaluation only; unsafe observations, possible `then` exports, receiver calls,
+contexts, CommonJS and external surfaces retain the graph's conservative demand.
+
+`ChunkPlan::async_activations` maps each original occurrence to its independent
+roots. `DiagnosticManifest::async_facades` keeps one activation projection:
+`target` is the original import target, `demand_roots` preserves each root's
+demand/load set, and `facade` is their availability union, not another root.
+Nested occurrences are discovered only from reached consumers to a fixed point.
+Generated private-function boundaries retain their existing separate contract.
+
+**Compatibility gate:** `partition`/`partition_with_options` and `BuildSession`
+still plan complete import namespaces. Linked emission explicitly rejects precise
+plans, including evaluation-only plans: today's specifier-only rewrite assumes
+complete surfaces. The next emission phase must carry activation projections
+through physical placement into typed post-placement `Connections`, route each
+occurrence to its selected public namespace without exposing internal transport
+names, and preserve original-target evaluation/rejection/activation timing.
+Only then may the default planner switch; logical roots need not become files.
+
+### Native connections
 
 After placement, internal `native_connections::Connections` fixes owner-local
 names, demanded cross-owner binding addresses, typed native requests and public
