@@ -171,6 +171,7 @@ impl Connections {
         placement: &Placement,
         surfaces: &BTreeSet<u32>,
         cjs: &commonjs::CommonJs,
+        activations: Option<&Activations>,
     ) -> eyre::Result<Self> {
         let mut result = Self {
             names: placement
@@ -195,11 +196,26 @@ impl Connections {
             addresses: HashMap::new(),
             demanded: BTreeMap::new(),
         };
+        if let Some(activations) = activations {
+            for (&owner, bindings) in &mut result.bindings {
+                for binding in bindings {
+                    if let ExportIdentity::Namespace(target) = binding.identity {
+                        if let Some(initialization) = activations.initializers.get(&target) {
+                            if owner == Owner::Evaluation(activations.owners[&target]) {
+                                binding.alias = initialization.namespace.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // Ordered evaluation skeleton: after actual binding/phase/namespace links
         // are assembled, transparent private connectors are reduced over that
         // typed graph; final activation validation checks the reduced output.
         for file in seams.values().copied().collect::<BTreeSet<_>>() {
-            if cjs.contains(file) {
+            if cjs.contains(file)
+                || activations.is_some_and(|a| a.initializers.contains_key(&file))
+            {
                 continue;
             }
             let requests = result
@@ -274,6 +290,18 @@ impl Connections {
             if cjs.contains(file) {
                 continue;
             }
+            if let Some(activations) = activations {
+                for &file in activations.initializers.keys() {
+                    for linked in symbols.exports[&file].values() {
+                        if let Some(key) = segments::declaration(graph, &linked.identity)? {
+                            let owner = placement.owners[&key];
+                            if owner != Owner::Evaluation(activations.owners[&file]) {
+                                result.demand(graph, symbols, &defaults, owner, &linked.identity)?;
+                            }
+                        }
+                    }
+                }
+            }
             for linked in symbols.exports[&file].values() {
                 if let Some(key) = segments::declaration(graph, &linked.identity)? {
                     let owner = placement.owners[&key];
@@ -326,6 +354,21 @@ impl Connections {
                 output.push(match &binding.identity {
                     ExportIdentity::Namespace(file) if cjs.contains(*file) => {
                         cjs.import(graph, *file, &ImportedName::Namespace, alias)?
+                    }
+                    ExportIdentity::Namespace(file)
+                        if activations.is_some_and(|a| a.initializers.contains_key(file)) =>
+                    {
+                        let activations = activations.unwrap();
+                        if owner == Owner::Evaluation(activations.owners[file]) {
+                            Code::default()
+                        } else {
+                            let namespace = &activations.initializers[file].namespace;
+                            Code::request(
+                                path(graph, activations.owners[file]),
+                                RequestKind::Import,
+                            )
+                            .surrounded(format!("import {{{namespace} as {alias}}} from "), ";\n")
+                        }
                     }
                     ExportIdentity::Namespace(file) => {
                         Code::request(result.namespaces[file].clone(), RequestKind::Import)
@@ -568,7 +611,7 @@ impl Connections {
         Ok(())
     }
 
-    fn address(&self, identity: &ExportIdentity) -> eyre::Result<&str> {
+    pub(super) fn address(&self, identity: &ExportIdentity) -> eyre::Result<&str> {
         self.addresses
             .get(identity)
             .map(String::as_str)

@@ -19,6 +19,31 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Artifacts<Code>> {
+    emit_inner(graph, plan, modules, manifest, symbols, None)
+}
+
+pub(super) fn emit_activated(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    symbols: &Symbols,
+    placements: &BTreeMap<u32, u32>,
+) -> eyre::Result<Artifacts<Code>> {
+    let Some(activations) = Activations::checked(graph, plan, modules, symbols, placements)? else {
+        return super::emit(graph, plan, modules, manifest, symbols, &BTreeMap::new());
+    };
+    emit_inner(graph, plan, modules, manifest, symbols, Some(&activations))
+}
+
+fn emit_inner(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    symbols: &Symbols,
+    activations: Option<&Activations>,
+) -> eyre::Result<Artifacts<Code>> {
     let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
     for (root, seed) in &plan.roots {
@@ -103,6 +128,10 @@ pub(super) fn emit(
     }
     let mut boundaries: BTreeSet<_> = entry_owners.values().flatten().copied().collect();
     boundaries.extend(async_targets.values().copied());
+    if let Some(activations) = activations {
+        boundaries.extend(activations.owners.keys().copied());
+        boundaries.extend(activations.owners.values().copied());
+    }
     // Keep source wait bounds and sibling interleaving in native module jobs.
     boundaries.extend(&asynchronous);
     boundaries.extend(modules.keys().filter(|&&f| cjs.contains(f)).copied());
@@ -182,8 +211,8 @@ pub(super) fn emit(
         .filter(|e| !e.summary.rewrites.is_empty())
         .map(|e| (e.key, e.summary.rewrites.as_slice()))
         .collect();
-    let owners = redirects.clone();
-    let jobs: BTreeSet<_> = modules
+    let mut owners = redirects.clone();
+    let mut jobs: BTreeSet<_> = modules
         .keys()
         .filter(|&&f| redirects[&f] == f)
         .copied()
@@ -198,18 +227,118 @@ pub(super) fn emit(
             pending.extend(edges[&file].iter().copied());
         }
     }
-    let placement = segments::Placement::new(
+    if let Some(activations) = activations {
+        for (&file, &owner) in &activations.owners {
+            if file == owner {
+                continue;
+            }
+            if cjs.contains(owner)
+                || asynchronous.contains(&owner)
+                || cycles.contains(&owner)
+            {
+                return super::emit(graph, plan, modules, manifest, symbols, &BTreeMap::new());
+            }
+            jobs.remove(&file);
+            for assigned in owners.values_mut() {
+                if *assigned == file {
+                    *assigned = owner;
+                }
+            }
+        }
+    }
+    let mut placement = segments::Placement::new(
         graph,
         plan,
         modules,
         symbols,
-        &owners,
+        &redirects,
         &phase_bound,
         &wait_bound,
         &boundaries,
         &cjs,
     )?;
+    if let Some(activations) = activations {
+        for (&key, owner) in &mut placement.owners {
+            if activations.initializers.contains_key(&key.file_id) {
+                *owner = segments::Owner::Evaluation(owners[&key.file_id]);
+            } else if let segments::Owner::Evaluation(file) = owner {
+                *file = owners[file];
+            }
+        }
+        placement.reschedule(graph, plan, modules, symbols, &owners)?;
+        for (&owner, names) in &placement.names {
+            let mut values = Values::new(graph, modules, symbols);
+            values.names = names.locals.clone();
+            for binding in &names.bindings {
+                values.imports.insert(binding.symbol, binding.alias.clone());
+            }
+            let retained = placement.schedule(owner).iter().copied().collect();
+            for file in placement.schedule(owner).iter().map(|key| key.file_id).collect::<BTreeSet<_>>() {
+                if !compatible(graph, file, &modules[&file], &values, &retained)? {
+                    return super::emit(graph, plan, modules, manifest, symbols, &BTreeMap::new());
+                }
+            }
+        }
+    }
+    let resolved_activations = activations
+        .map(|activations| {
+            let mut resolved = activations.clone();
+            resolved.exports.clear();
+            for (&file, owner) in &mut resolved.owners {
+                *owner = owners[&file];
+            }
+            for (&file, module) in modules {
+                for dependency in module
+                    .parsed
+                    .facts
+                    .dependencies
+                    .iter()
+                    .filter(|d| !d.type_only)
+                {
+                    let consumer = if dependency.kind == DependencyKind::DynamicImport {
+                        let index = module
+                            .parsed
+                            .segments
+                            .partition_point(|s| s.span.end <= dependency.span.start);
+                        let Some(owner) =
+                            placement.owners.get(&SegmentKey::new(file, index as u32))
+                        else {
+                            continue;
+                        };
+                        *owner
+                    } else if resolved.initializers.contains_key(&file) {
+                        segments::Owner::Evaluation(owners[&file])
+                    } else {
+                        continue;
+                    };
+                    for target in target_files(graph, file, dependency)? {
+                        if resolved.initializers.contains_key(&target)
+                            && consumer != segments::Owner::Evaluation(owners[&target])
+                        {
+                            resolved.exports.insert(target);
+                        }
+                    }
+                }
+            }
+            Ok::<_, eyre::Report>(resolved)
+        })
+        .transpose()?;
+    let activations = resolved_activations.as_ref();
+    if let Some(activations) = activations {
+        if activations.exports.iter().any(|file| {
+            owners[file] != *file
+                && entry_owners
+                    .values()
+                    .flatten()
+                    .any(|owner| *owner == owners[file])
+        }) {
+            return super::emit(graph, plan, modules, manifest, symbols, &BTreeMap::new());
+        }
+    }
     let mut changed = BTreeSet::new();
+    if activations.is_some() {
+        changed.extend(jobs.iter().copied());
+    }
     changed.extend(
         jobs.iter()
             .filter(|file| connectors.contains(file) && !boundaries.contains(file))
@@ -253,11 +382,18 @@ pub(super) fn emit(
     }
     let mut surfaces = boundaries.clone();
     surfaces.extend(jobs.iter().filter(|f| !changed.contains(f)).copied());
+    if let Some(activations) = activations {
+        for (&file, &owner) in &activations.owners {
+            if file != owner && activations.exports.contains(&file) {
+                surfaces.remove(&owner);
+            }
+        }
+    }
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
     let connections = connections::Connections::new(
-        graph, modules, symbols, &owners, &placement, &surfaces, &cjs,
+        graph, modules, symbols, &owners, &placement, &surfaces, &cjs, activations,
     )?;
     cjs.emit(graph, modules, &connections.namespaces, &entry_files)?;
     for &root in &jobs {
@@ -275,6 +411,7 @@ pub(super) fn emit(
                 &connections,
                 &recipes,
                 &cjs,
+                activations,
             )?
         } else {
             let module = &modules[&root];
@@ -348,7 +485,9 @@ pub(super) fn emit(
             });
             imports
         };
-        if surfaces.contains(&root) {
+        if surfaces.contains(&root)
+            && !activations.is_some_and(|a| a.initializers.contains_key(&root))
+        {
             namespaces.insert(
                 graph.file_path(root).unwrap().to_owned(),
                 connections.namespaces[&root].clone(),
@@ -367,6 +506,7 @@ pub(super) fn emit(
                 &connections,
                 &recipes,
                 &cjs,
+                activations,
             )?;
             let path = owner.path(graph);
             files.insert(path, output);
@@ -503,6 +643,7 @@ pub(super) fn emit(
         &placement,
         &files,
         &root_routes,
+        activations,
     )?;
     Ok(Artifacts {
         resources: BTreeMap::new(),
@@ -532,7 +673,7 @@ pub(super) fn emit(
     })
 }
 
-fn path(graph: &SourceGraph, file: u32) -> PathBuf {
+pub(super) fn path(graph: &SourceGraph, file: u32) -> PathBuf {
     PathBuf::from(format!(
         "native/{}.mjs",
         digest(graph.file_path(file).unwrap().to_str().unwrap())

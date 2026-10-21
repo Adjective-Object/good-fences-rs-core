@@ -16,22 +16,32 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
+    placements: &BTreeMap<u32, u32>,
 ) -> eyre::Result<Artifacts<Code>> {
+    if !placements.is_empty() {
+        return chunks::emit_activated(graph, plan, modules, manifest, symbols, placements);
+    }
     if let Some(output) = single(graph, plan, modules, manifest, symbols, None)? {
         return Ok(output);
     }
     chunks::emit(graph, plan, modules, manifest, symbols)
 }
 
+#[derive(Clone)]
 struct Initialization {
     init: String,
     state: String,
     failure: String,
     caught: String,
+    namespace: String,
 }
 
 impl Initialization {
     fn new(modules: &BTreeMap<u32, Module<'_>>, symbols: &Symbols) -> Self {
+        Self::named(modules, symbols, "")
+    }
+
+    fn named(modules: &BTreeMap<u32, Module<'_>>, symbols: &Symbols, suffix: &str) -> Self {
         let mut occupied: BTreeSet<_> = modules
             .values()
             .flat_map(|m| {
@@ -46,7 +56,7 @@ impl Initialization {
             .chain(symbols.exports.values().flat_map(|e| e.keys().cloned()))
             .collect();
         let mut fresh = |base: &str| {
-            let mut name = base.to_owned();
+            let mut name = format!("{base}{suffix}");
             while !occupied.insert(name.clone()) {
                 name.push('$');
             }
@@ -57,6 +67,7 @@ impl Initialization {
             state: fresh("__gf_init_state"),
             failure: fresh("__gf_init_failure"),
             caught: fresh("__gf_init_caught"),
+            namespace: fresh("__gf_namespace"),
         }
     }
 
@@ -66,6 +77,7 @@ impl Initialization {
             state,
             failure,
             caught,
+            ..
         } = self;
         body.surrounded(
             format!(
@@ -80,6 +92,199 @@ impl Initialization {
                  {failure} = {caught}; {state} = 3; throw {caught};\n}}\n}};\n"
             ),
         )
+    }
+}
+
+/// Only explicitly selected, synchronous islands enter this reconstruction mode.
+#[derive(Clone)]
+struct Activations {
+    initializers: BTreeMap<u32, Initialization>,
+    owners: BTreeMap<u32, u32>,
+    exports: BTreeSet<u32>,
+}
+
+impl Activations {
+    fn checked(
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+        modules: &BTreeMap<u32, Module<'_>>,
+        symbols: &Symbols,
+        placements: &BTreeMap<u32, u32>,
+    ) -> eyre::Result<Option<Self>> {
+        use ast_segmenter::emission::DeferredForm;
+        if modules.keys().any(|&file| has_externals(graph, file)) {
+            return Ok(None);
+        }
+        let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
+        let mut owners = placements.clone();
+        let mut pending: Vec<_> = placements.keys().copied().collect();
+        let mut seen = BTreeSet::new();
+        while let Some(file) = pending.pop() {
+            if !seen.insert(file) {
+                continue;
+            }
+            let Some(module) = modules.get(&file) else {
+                return Ok(None);
+            };
+            let facts = &module.parsed.facts;
+            if !modules.contains_key(&owners[&file])
+                || facts.commonjs
+                || !facts.top_level_await.is_empty()
+                || !module.relocations.is_empty()
+                || symbols.exports[&file].contains_key("then")
+                || symbols.exports[&file]
+                    .values()
+                    .any(|e| matches!(e.identity, ExportIdentity::Namespace(_)))
+                || facts.references.iter().any(|r| {
+                    r.write
+                        && r.binding.is_some_and(|id| {
+                            facts
+                                .bindings
+                                .iter()
+                                .any(|b| b.id == id && (b.constant || b.import))
+                        })
+                })
+                || facts
+                    .emission
+                    .segments
+                    .iter()
+                    .enumerate()
+                    .any(|(index, recipe)| {
+                        live.contains(&SegmentKey::new(file, index as u32))
+                            && matches!(recipe.deferred, DeferredForm::Unsupported)
+                    })
+            {
+                return Ok(None);
+            }
+            for recipe in &facts.emission.segments {
+                for usage in &recipe.namespaces {
+                    let binding = facts.references[usage.reference as usize].binding;
+                    if binding
+                        .and_then(|b| symbols.imports.get(&(file, b)))
+                        .is_some_and(|linked| {
+                            matches!(linked.identity, ExportIdentity::Namespace(_))
+                        })
+                        && !matches!(
+                            usage.access,
+                            ast_segmenter::emission::NamespaceAccess::DirectRead { .. }
+                        )
+                    {
+                        return Ok(None);
+                    }
+                }
+            }
+            for dependency in facts.dependencies.iter().filter(|d| !d.type_only) {
+                if !matches!(
+                    dependency.kind,
+                    DependencyKind::Import | DependencyKind::ReExport
+                ) {
+                    return Ok(None);
+                }
+                let target = target_file(graph, file, dependency)?;
+                owners.entry(target).or_insert(target);
+                pending.push(target);
+            }
+        }
+        // A public/eager consumer cannot share this deferred evaluation contract.
+        for (root, seed) in &plan.roots {
+            if matches!(root, RootId::Entry(_))
+                && (seed.evaluation_roots.iter().any(|f| seen.contains(f))
+                    || seed.binding_roots.iter().any(|n| match n {
+                        GraphNode::Module(f) => seen.contains(f),
+                        GraphNode::Segment(k) => seen.contains(&k.file_id),
+                        _ => false,
+                    }))
+            {
+                return Ok(None);
+            }
+        }
+        let mut edges = BTreeMap::new();
+        for (&file, module) in modules {
+            let mut targets = Vec::new();
+            for dependency in module
+                .parsed
+                .facts
+                .dependencies
+                .iter()
+                .filter(|d| !d.type_only)
+            {
+                let dependency_targets = target_files(graph, file, dependency)?;
+                let activates = dependency_targets.iter().any(|f| seen.contains(f));
+                let synchronous = matches!(
+                    dependency.kind,
+                    DependencyKind::Import | DependencyKind::ReExport
+                );
+                if activates
+                    && (module.parsed.facts.commonjs
+                        || dependency.pattern.is_some()
+                        || (synchronous && !seen.contains(&file))
+                        || (!synchronous && dependency.kind != DependencyKind::DynamicImport))
+                {
+                    return Ok(None);
+                }
+                if synchronous && seen.contains(&file) {
+                    targets.extend(dependency_targets);
+                }
+            }
+            if seen.contains(&file) {
+                edges.insert(file, targets);
+            }
+        }
+        let files: Vec<_> = seen.iter().copied().collect();
+        let indices: BTreeMap<_, _> = files.iter().enumerate().map(|(i, &f)| (f, i)).collect();
+        let edges: Vec<_> = files
+            .iter()
+            .map(|f| edges[f].iter().map(|t| indices[t]).collect())
+            .collect();
+        if crate::effect_dependencies::components(&edges)
+            .iter()
+            .any(|c| c.len() > 1 || edges[c[0]].contains(&c[0]))
+        {
+            return Ok(None);
+        }
+        // Owners must be final physical files, not chains of requested moves.
+        if owners
+            .values()
+            .any(|owner| owners.get(owner).is_some_and(|next| next != owner))
+        {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            initializers: files
+                .into_iter()
+                .map(|file| {
+                    let suffix = format!(
+                        "_{}",
+                        digest(graph.file_path(file).unwrap().to_str().unwrap())
+                    );
+                    (file, Initialization::named(modules, symbols, &suffix))
+                })
+                .collect(),
+            owners,
+            exports: BTreeSet::new(),
+        }))
+    }
+
+    fn dynamic(&self, graph: &SourceGraph, file: u32, owner: &std::path::Path) -> Code {
+        use crate::assembly::RequestKind;
+        let init = &self.initializers[&file];
+        let target = self.owners[&file];
+        if chunks::path(graph, target) == owner {
+            format!(
+                "(async () => {{ await 0; {}(); return {}; }})()",
+                init.init, init.namespace
+            )
+            .into()
+        } else {
+            Code::request(chunks::path(graph, target), RequestKind::DynamicImport).surrounded(
+                "import(",
+                format!(
+                    ").then(m => (m[{}](), m[{}]))",
+                    quote(&init.init),
+                    quote(&init.namespace)
+                ),
+            )
+        }
     }
 }
 
