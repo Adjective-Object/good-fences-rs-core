@@ -79,6 +79,8 @@ fn emit_inner(
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
+    let _span = tracing::info_span!("emit.chunks").entered();
+    let planning_span = tracing::info_span!("emit.planning").entered();
     let symbols = prepared.symbols;
     let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
@@ -304,7 +306,7 @@ fn emit_inner(
             }
         }
     }
-    let mut placement = segments::Placement::new(
+    let mut placement = tracing::info_span!("emit.placement").in_scope(|| segments::Placement::new(
         graph,
         plan,
         modules,
@@ -314,7 +316,7 @@ fn emit_inner(
         &wait_bound,
         &boundaries,
         &cjs,
-    )?;
+    ))?;
     placement.extract_generated(graph, plan)?;
     if let Some(activations) = activations {
         for (&key, owner) in &mut placement.owners {
@@ -465,9 +467,10 @@ fn emit_inner(
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
-    let connections = connections::Connections::new(
+    let connections = tracing::info_span!("emit.routing").in_scope(|| connections::Connections::new(
         graph, modules, prepared, &owners, &placement, &surfaces, &cjs, activations, plan,
-    )?;
+    ))?;
+    drop(planning_span);
     cjs.emit(graph, modules, &connections.namespaces, &entry_files, execution, plan, prepared)?;
     let mut emission_jobs: Vec<_> = jobs
         .iter()
@@ -488,6 +491,11 @@ fn emit_inner(
         segments::Owner::Bindings(key) => (graph.file_path(key.file_id), 1, key.segment_idx),
     });
     let outputs = execution.map(&emission_jobs, |&owner| -> eyre::Result<_> {
+        let (file_id, segment_id) = match owner {
+            segments::Owner::Evaluation(file) => (file, None),
+            segments::Owner::Bindings(key) => (key.file_id, Some(key.segment_idx)),
+        };
+        let _span = tracing::info_span!("emit.esm", file_id, segment_id).entered();
         let segments::Owner::Evaluation(root) = owner else {
             let output = segments::emit(
                 graph,
@@ -596,6 +604,7 @@ fn emit_inner(
             .map(|root| graph.file_path(root).unwrap().to_owned());
         Ok((artifact_path, output, namespace))
     })?;
+    let _finalize = tracing::info_span!("emit.finalize").entered();
     for output in outputs {
         let (artifact_path, output, namespace) = output?;
         if let Some(namespace) = namespace {

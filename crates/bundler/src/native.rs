@@ -32,7 +32,8 @@ pub(super) fn emit(
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
-    let prepared = PreparedValues::new(graph, modules, symbols);
+    let prepared = tracing::info_span!("emit.global_names")
+        .in_scope(|| PreparedValues::new(graph, modules, symbols));
     if !placements.is_empty() {
         return chunks::emit_activated(
             graph,
@@ -83,7 +84,8 @@ fn ordinary(
     require_defaults: &BTreeSet<PathBuf>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
-    if let Some(output) = single(graph, plan, modules, manifest, prepared, None)? {
+    if let Some(output) = tracing::info_span!("emit.single")
+        .in_scope(|| single(graph, plan, modules, manifest, prepared, None))? {
         return Ok(output);
     }
     chunks::emit(

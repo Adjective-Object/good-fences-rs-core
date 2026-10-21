@@ -83,6 +83,7 @@ impl Artifacts<crate::assembly::Code> {
         self,
         destinations: &BTreeMap<PathBuf, PathBuf>,
     ) -> eyre::Result<Artifacts> {
+        let _span = tracing::info_span!("build.render", artifacts = self.files.len()).entered();
         let files = self
             .files
             .iter()
@@ -274,6 +275,7 @@ pub(crate) fn esm_plan_configured(
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
+    let _span = tracing::info_span!("build.link").entered();
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = load_modules(graph, plan, sources, relocations)?;

@@ -781,6 +781,7 @@ impl CommonJs {
         plan: &ChunkPlan,
         prepared: &PreparedValues<'_>,
     ) -> eyre::Result<()> {
+        let _span = tracing::info_span!("emit.cjs").entered();
         let runtime = &self.runtime;
         let mut factories: Vec<_> = self.factories.iter().collect();
         factories.sort_by_key(|(_, value)| &value.name);
@@ -793,6 +794,8 @@ impl CommonJs {
         }
         let jobs: Vec<_> = factory_owners.into_iter().collect();
         let outputs = execution.map(&jobs, |(artifact_path, factories)| -> eyre::Result<_> {
+            let _span =
+                tracing::info_span!("emit.cjs_availability", factories = factories.len()).entered();
             Ok((
                 artifact_path.clone(),
                 self.emit_factories(graph, modules, namespaces, factories)?,
@@ -818,6 +821,7 @@ impl CommonJs {
         }
         let jobs: Vec<_> = facade_owners.into_iter().collect();
         let outputs = execution.map(&jobs, |(path, ordered)| -> eyre::Result<_> {
+            let _span = tracing::info_span!("emit.cjs_facade", parts = ordered.len()).entered();
             let mut output = Code::default();
             let mut imported = BTreeSet::new();
             for &(node, value) in ordered {

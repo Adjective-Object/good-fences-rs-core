@@ -121,6 +121,7 @@ impl CacheRecord {
 
     /// Checked cache adapter shared by graph construction and emission.
     pub fn to_parsed(&self, source: &str) -> eyre::Result<ParsedModule> {
+        let _span = tracing::info_span!("cache.to_parsed").entered();
         self.validate(source, self.config)?;
         ParsedModule::from_provenance(
             source,
@@ -140,6 +141,7 @@ impl CacheRecord {
     }
 
     pub fn encode(&self, source: &str) -> eyre::Result<Vec<u8>> {
+        let _span = tracing::info_span!("cache.encode").entered();
         self.validate(source, self.config)?;
         let payload = serde_cbor::to_vec(self)?;
         bounded::check(&payload)?;
@@ -153,6 +155,7 @@ impl CacheRecord {
 
     /// Invalid/stale records are errors here; filesystem callers treat them as misses.
     pub fn decode(bytes: &[u8], source: &str, config: ParserConfig) -> eyre::Result<Self> {
+        let _span = tracing::info_span!("cache.decode", bytes = bytes.len()).entered();
         bounded::check(bytes)?;
         let envelope: Envelope = serde_cbor::from_slice(bytes)?;
         ensure!(
