@@ -297,6 +297,16 @@ pub struct ChunkPlan {
     pub node_roots: BTreeMap<NodeId, BTreeSet<RootId>>,
     /// Exactly one chunk per nonempty set, without merging or hoisting.
     pub chunks: BTreeMap<ChunkId, Vec<NodeId>>,
+    /// Derived reference occurrences, never source dependency IDs or cached facts.
+    pub generated_boundaries: BTreeMap<AsyncSiteId, GeneratedBoundary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedBoundary {
+    pub source_edge: usize,
+    /// Index into the consumer module's checked reference occurrences.
+    pub reference: u32,
+    pub target: source_graph::SegmentKey,
 }
 
 impl ChunkPlan {
@@ -419,7 +429,24 @@ pub fn partition(
         reachability,
         node_roots,
         chunks,
+        generated_boundaries: BTreeMap::new(),
     })
+}
+
+/// Partition with opt-in suspension at eligible private function references.
+/// Source facts and the ordinary partition remain independent of this policy.
+pub fn partition_with_options(
+    graph: &SourceGraph,
+    entries: &[RootSeed],
+    policy: &EffectPolicy,
+    options: &crate::build::OutputOptions,
+) -> eyre::Result<ChunkPlan> {
+    let plan = partition(graph, entries, policy)?;
+    if options.synthesize_async_boundaries {
+        crate::async_boundaries::extract(graph, &plan, policy)
+    } else {
+        Ok(plan)
+    }
 }
 
 #[cfg(test)]

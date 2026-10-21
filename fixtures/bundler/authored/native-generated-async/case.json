@@ -1,0 +1,13 @@
+{
+  "id": "authored/native-generated-async",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": { "output": { "synthesize_async_boundaries": true } },
+  "outputObservation": "observe.mjs",
+  "expectations": { "stdout": ["generated async: eager, guarded, suspended, stable"], "backend": "native" },
+  "goals": [
+    "Extract a same-source private function behind a real native segment load.",
+    "Keep unrelated effects eager, guards cold, function bodies lazy and identities stable.",
+    "Observe deliberate introduced suspension without comparing source scheduling."
+  ]
+}

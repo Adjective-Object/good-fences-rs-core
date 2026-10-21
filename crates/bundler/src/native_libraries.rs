@@ -15,6 +15,7 @@ struct Island {
 #[expect(clippy::too_many_arguments)]
 fn compatible_group(
     graph: &SourceGraph,
+    plan: &ChunkPlan,
     group: &BTreeSet<u32>,
     redirects: &BTreeMap<u32, u32>,
     modules: &BTreeMap<u32, Module<'_>>,
@@ -26,10 +27,17 @@ fn compatible_group(
     let owners = live
         .iter()
         .map(|&key| {
-            (key, if group.contains(&key.file_id) { owner } else { segments::Owner::Evaluation(redirects[&key.file_id]) })
+            (
+                key,
+                if group.contains(&key.file_id) {
+                    owner
+                } else {
+                    segments::Owner::Evaluation(redirects[&key.file_id])
+                },
+            )
         })
         .collect();
-    let names = connections::name_plan(graph, modules, symbols, &owners, redirects)?;
+    let names = connections::name_plan(graph, plan, modules, symbols, &owners, redirects)?;
     let mut values = Values::new(graph, modules, symbols);
     values.names = names[&owner].locals.clone();
     for binding in &names[&owner].bindings {
@@ -141,7 +149,7 @@ pub(super) fn cluster(
                 .chain([candidate])
                 .flat_map(|i| islands[i].files.iter().copied())
                 .collect();
-            if !compatible_group(graph, &files, redirects, modules, symbols, live, cjs)? {
+            if !compatible_group(graph, plan, &files, redirects, modules, symbols, live, cjs)? {
                 return Ok(None);
             }
             let moves = files.iter().map(|&f| (f, islands[seed].owner)).collect();

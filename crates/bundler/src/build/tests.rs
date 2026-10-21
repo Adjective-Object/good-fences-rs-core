@@ -23,6 +23,72 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn generated_async_boundary_configuration_reuses_facts_invalidates_output_and_noops() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs",
+        "globalThis.trace.push('eager'); function helper() { globalThis.trace.push('body'); return helper; } \
+         export async function read() { return helper(); }");
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/start.js".into());
+    config.entries.insert(
+        "alias".into(),
+        Entry {
+            path: "main.mjs".into(),
+            output_name: Some("aliases/start.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let disabled = session.build(&config).unwrap();
+    assert!(disabled.product.plan.generated_boundaries.is_empty());
+    config.output.synthesize_async_boundaries = true;
+    let enabled = session.build(&config).unwrap();
+    assert_eq!(enabled.product.plan.generated_boundaries.len(), 1);
+    assert_eq!(enabled.counters.source_parses, 0);
+    assert_eq!(enabled.counters.resolutions, 0);
+    assert_eq!(enabled.counters.source_reparses, 0);
+    assert_eq!(enabled.counters.fragment_reparses, 0);
+    assert_eq!(enabled.counters.emissions, 1);
+    assert_eq!(
+        enabled.product.fingerprints.parse,
+        disabled.product.fingerprints.parse
+    );
+    assert_eq!(
+        enabled.product.fingerprints.resolution,
+        disabled.product.fingerprints.resolution
+    );
+    assert_ne!(
+        enabled.product.fingerprints.output,
+        disabled.product.fingerprints.output
+    );
+    observe_named(
+        &enabled.product.artifacts,
+        "import assert from 'node:assert/strict'; globalThis.trace=[]; \
+         const entry = await import('./deep/start.js'); \
+         const alias = await import('./aliases/start.mjs'); \
+         assert.deepEqual(trace,['eager']); \
+         const pending = entry.read(); assert.deepEqual(trace,['eager']); \
+         const helper = await pending; assert.equal(await alias.read(),helper); \
+         assert.deepEqual(trace,['eager','body','body']);",
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&noop.product, &enabled.product));
+    assert_eq!(noop.counters.emissions, 0);
+    assert_eq!(noop.counters.final_validations, 0);
+    let fresh = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(fresh.counters.source_parses, 0);
+    assert_eq!(fresh.counters.disk_hits, 1);
+    assert_eq!(fresh.product.artifacts, enabled.product.artifacts);
+    config.output.synthesize_async_boundaries = false;
+    let restored = session.build(&config).unwrap();
+    assert_eq!(restored.counters.source_parses, 0);
+    assert_eq!(restored.product.artifacts, disabled.product.artifacts);
+}
+
+#[test]
 fn libraries_build_configuration_invalidation_noop_cache_and_final_typed_requests() {
     let dir = TmpDir::new();
     write(

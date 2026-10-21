@@ -383,6 +383,329 @@ fn observe_activated(mut output: Artifacts, observer: &str) {
     );
 }
 
+fn generated_boundaries(
+    input: &BTreeMap<PathBuf, String>,
+    target: usize,
+) -> (ChunkPlan, Artifacts) {
+    let graph = graph(input, false);
+    let file = graph.file_id(Path::new("entry.mjs")).unwrap();
+    let options = crate::build::OutputOptions {
+        synthesize_async_boundaries: true,
+        min_chunk_bytes: target,
+        ..Default::default()
+    };
+    let policy = EffectPolicy::default();
+    let plan = crate::chunks::partition_with_options(
+        &graph,
+        &[RootSeed {
+            id: RootId::Entry("entry".into()),
+            evaluation_roots: vec![file],
+            binding_roots: vec![GraphNode::Module(file)],
+        }],
+        &policy,
+        &options,
+    )
+    .unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let output = esm_with_options(&graph, &plan, &policy, input, &options).unwrap();
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    (plan, output)
+}
+
+#[test]
+fn generated_async_boundaries_extract_same_source_and_preserve_expression_semantics() {
+    let input = sources(&[(
+        "entry.mjs",
+        r"
+        trace.push('eager');
+        function helper(value) {
+            trace.push('body');
+            if (value < 0) return helper(0);
+            return [value, this === undefined, helper];
+        }
+        function __proto__() { return 9; }
+        function then() { return 11; }
+        export async function run(enabled) {
+            return enabled && sink(first(), helper(await second()), ...third());
+        }
+        export async function identity() { return {helper, __proto__, thenFn: then}; }
+    ",
+    )]);
+    let (unoptimized, _) = generated_boundaries(&input, 0);
+    assert_eq!(unoptimized.generated_boundaries.len(), 4);
+    let eager = &unoptimized.reachability[&RootId::Entry("entry".into())];
+    for boundary in unoptimized.generated_boundaries.values() {
+        let target = NodeId::Segment {
+            module: "entry.mjs".into(),
+            index: boundary.target.segment_idx,
+        };
+        assert!(
+            !eager.contains(&target),
+            "{target:?} still eagerly reachable"
+        );
+        let root = unoptimized
+            .roots
+            .iter()
+            .find(|(_, seed)| seed.binding_roots == vec![GraphNode::Segment(boundary.target)])
+            .unwrap()
+            .0;
+        assert!(unoptimized.reachability[root].contains(&target));
+        assert!(!unoptimized.reachability[root].contains(&NodeId::Module("entry.mjs".into())));
+    }
+    for target in [0, 4096] {
+        let (plan, output) = generated_boundaries(&input, target);
+        assert_eq!(plan.node_roots, unoptimized.node_roots);
+        let owner = &output.async_facades.values().next().unwrap();
+        if target == 0 {
+            assert_ne!(owner, &&output.entries["entry"]);
+        } else {
+            assert_eq!(owner, &&output.entries["entry"]);
+        }
+        observe_activated(
+            output,
+            r"
+            assert.deepEqual(trace, ['eager']);
+            globalThis.first = () => { trace.push('first'); return 1; };
+            globalThis.second = async () => { trace.push('second'); return -1; };
+            globalThis.third = () => ({ *[Symbol.iterator]() { trace.push('spread'); yield 3; } });
+            globalThis.sink = (...values) => { trace.push('sink'); return values; };
+            assert.equal(await entry.run(false), false);
+            assert.deepEqual(trace, ['eager']);
+            const pending = entry.run(true);
+            assert.deepEqual(trace, ['eager', 'first']);
+            const result = await pending;
+            assert.equal(result[0], 1);
+            assert.deepEqual(result[1].slice(0,2), [0,true]);
+            assert.equal(result[2], 3);
+            assert.deepEqual(trace, ['eager','first','second','body','body','spread','sink']);
+            const pair = await Promise.all([entry.identity(), entry.identity()]);
+            assert.equal(pair[0].helper, result[1][2]);
+            assert.equal(pair[0].helper, pair[1].helper);
+            assert.deepEqual(Object.keys(pair[0]), ['helper','__proto__','thenFn']);
+            assert.equal(pair[0].__proto__(), 9);
+            assert.equal(pair[0].thenFn(), 11);
+            assert.equal(pair[0].helper.name, 'helper');
+        ",
+        );
+    }
+}
+
+#[test]
+fn generated_async_boundaries_decline_sync_public_captured_and_optional_uses() {
+    for code in [
+        "function helper() { trace.push('body'); } export async function use() { helper(); } helper();",
+        "export function helper() { trace.push('body'); } export async function use() { helper(); }",
+        "function helper() { trace.push('body'); } export async function use() { return [1].map(() => helper()); }",
+        "const capture = {}; function helper() { return capture; } export async function use() { return helper(); }",
+        "function helper() {} export async function use() { return helper?.(); }",
+        "function helper() {} export async function use() { helper = () => 1; return helper(); }",
+        "function helper() { trace.push('body'); } function caller() { return helper(); } export async function use() { return caller(); } caller();",
+        "function helper() {} export async function use(value = helper()) { return value; }",
+        "function helper() {} globalThis.saved = helper; export async function use() { return helper; }",
+        "await 0; function helper() {} export async function use() { return helper; }",
+    ] {
+        let input = sources(&[("entry.mjs", code)]);
+        let (plan, _) = generated_boundaries(&input, 0);
+        assert!(plan.generated_boundaries.is_empty(), "{code}");
+    }
+}
+
+#[test]
+fn generated_async_boundaries_low_level_option_and_checked_occurrences() {
+    let input = sources(&[(
+        "entry.mjs",
+        "function helper() { return 7; } export async function run() { return helper(); }",
+    )]);
+    let (graph, ordinary, _) = canonical(&input, false);
+    let options = crate::build::OutputOptions {
+        synthesize_async_boundaries: true,
+        ..Default::default()
+    };
+    let (mut generated, expected) = generated_boundaries(&input, 0);
+    assert_eq!(
+        esm_with_options(
+            &graph,
+            &ordinary,
+            &EffectPolicy::default(),
+            &input,
+            &options
+        )
+        .unwrap(),
+        expected
+    );
+    assert!(esm_with_options(
+        &graph,
+        &generated,
+        &EffectPolicy::default(),
+        &input,
+        &Default::default()
+    )
+    .is_err());
+    generated
+        .generated_boundaries
+        .values_mut()
+        .next()
+        .unwrap()
+        .reference = u32::MAX;
+    assert!(esm_with_options(
+        &graph,
+        &generated,
+        &EffectPolicy::default(),
+        &input,
+        &options
+    )
+    .is_err());
+}
+
+#[test]
+fn generated_async_boundaries_keep_mutually_recursive_declarations_in_one_island() {
+    let input = sources(&[(
+        "entry.mjs",
+        r"
+        function even(n) { return n === 0 || odd(n - 1); }
+        function odd(n) { return n !== 0 && even(n - 1); }
+        export async function run(n) { return even(n); }
+    ",
+    )]);
+    let (plan, output) = generated_boundaries(&input, 0);
+    assert_eq!(plan.generated_boundaries.len(), 1);
+    let reached = &plan.reachability[&RootId::Entry("entry".into())];
+    for index in [0, 1] {
+        assert!(!reached.contains(&NodeId::Segment {
+            module: "entry.mjs".into(),
+            index
+        }));
+    }
+    observe_activated(
+        output,
+        r"
+        assert.equal(await entry.run(20), true);
+        assert.equal(await entry.run(21), false);
+    ",
+    );
+}
+
+#[test]
+fn generated_async_boundaries_missing_chunk_rejects_at_guarded_use_inside_try() {
+    let input = sources(&[(
+        "entry.mjs",
+        r"
+        trace.push('eager');
+        function helper() { trace.push('body'); return 1; }
+        export async function run(enabled) {
+            try { return enabled ? helper() : 'cold'; }
+            catch (error) { return error.code; }
+        }
+    ",
+    )]);
+    let (_, mut output) = generated_boundaries(&input, 0);
+    let target = output.async_facades.values().next().unwrap().clone();
+    assert!(output.files.remove(&target).is_some());
+    observe_activated(
+        output,
+        r"
+        assert.equal(await entry.run(false), 'cold');
+        assert.deepEqual(trace, ['eager']);
+        assert.deepEqual(await Promise.all([entry.run(true), entry.run(true)]),
+            ['ERR_MODULE_NOT_FOUND','ERR_MODULE_NOT_FOUND']);
+        assert.equal(await entry.run(true), 'ERR_MODULE_NOT_FOUND');
+        assert.deepEqual(trace, ['eager']);
+    ",
+    );
+}
+
+#[test]
+fn generated_async_boundaries_keep_function_body_throws_at_the_call() {
+    let input = sources(&[(
+        "entry.mjs",
+        r"
+        function helper() { trace.push('body'); throw undefined; }
+        export async function run() {
+            try { helper(); } catch (error) { return error === undefined; }
+        }
+    ",
+    )]);
+    for target in [0, 4096] {
+        let (_, output) = generated_boundaries(&input, target);
+        observe_activated(
+            output,
+            r"
+            assert.deepEqual(trace, []);
+            const pending = entry.run();
+            assert.deepEqual(trace, []);
+            assert.equal(await pending, true);
+            assert.deepEqual(await Promise.all([entry.run(), entry.run()]), [true,true]);
+            assert.deepEqual(trace, ['body','body','body']);
+        ",
+        );
+    }
+}
+
+#[test]
+fn generated_async_boundaries_preserve_member_receivers_and_guarded_argument_order() {
+    let input = sources(&[(
+        "entry.mjs",
+        r"
+        function service() {
+            service.method = function(value) { trace.push('method'); return [value, this === service]; };
+        }
+        export async function prepare() { service(); }
+        export async function run(enabled) {
+            return enabled && sink(first(), service.method(second()));
+        }
+    ",
+    )]);
+    for target in [0, 4096] {
+        let (_, output) = generated_boundaries(&input, target);
+        observe_activated(
+            output,
+            r"
+            globalThis.first = () => { trace.push('first'); return 1; };
+            globalThis.second = () => { trace.push('second'); return 2; };
+            globalThis.sink = (...values) => { trace.push('sink'); return values; };
+            assert.equal(await entry.run(false), false);
+            assert.deepEqual(trace, []);
+            await entry.prepare();
+            assert.deepEqual(trace, []);
+            const pending = entry.run(true);
+            assert.deepEqual(trace, ['first']);
+            assert.deepEqual(await pending, [1, [2,true]]);
+            assert.deepEqual(trace, ['first','second','method','sink']);
+        ",
+        );
+    }
+}
+
+#[test]
+fn generated_async_boundaries_compose_with_original_parent_hoisting() {
+    let input = sources(&[
+        ("entry.mjs", "export async function load(enabled) { return enabled ? (await import('./child.mjs')).read() : false; }"),
+        ("child.mjs", "trace.push('child'); function helper() { trace.push('body'); return helper; } export async function read() { return helper(); }"),
+    ]);
+    for target in [0, 4096] {
+        let (plan, output) = generated_boundaries(&input, target);
+        assert_eq!(plan.generated_boundaries.len(), 1);
+        assert_eq!(output.async_facades.len(), 2);
+        for owner in output.async_facades.values() {
+            assert_eq!(owner, &output.entries["entry"]);
+        }
+        observe_activated(
+            output,
+            r"
+            assert.deepEqual(trace, []);
+            assert.equal(await entry.load(false), false);
+            assert.deepEqual(trace, []);
+            const pending = entry.load(true);
+            assert.deepEqual(trace, []);
+            const helper = await pending;
+            assert.deepEqual(trace, ['child','body']);
+            assert.equal(await entry.load(true), helper);
+            assert.deepEqual(trace, ['child','body','body']);
+        ",
+        );
+    }
+}
+
 fn automatically_hoisted(input: &BTreeMap<PathBuf, String>) -> Artifacts {
     let (graph, plan, _) = canonical(input, false);
     let parses = ast_segmenter::module_parse_count();
