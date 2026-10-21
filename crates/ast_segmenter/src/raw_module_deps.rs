@@ -1,11 +1,11 @@
 use std::convert::TryInto;
 
 use ahashmap::{AHashMap, AHashSet};
-use std::fmt::Debug;
 use oxc_ast::ast::ModuleExportName;
 use oxc_ast::{Comment, CommentKind};
 use oxc_span::Span;
 use oxc_utils_parse::leading_comments_at;
+use std::fmt::Debug;
 
 use crate::{ExportedSymbol, ImportTarget, ReExportedSymbol};
 
@@ -20,7 +20,12 @@ pub struct SymbolTags {
 impl SymbolTags {
     const IGNORE_UNUSED_PREFIX: &str = "@ALLOW-UNUSED-EXPORT";
 
-    pub fn from_comments_parent(parent: Self, comments: &[Comment], source: &str, lo: u32) -> SymbolTags {
+    pub fn from_comments_parent(
+        parent: Self,
+        comments: &[Comment],
+        source: &str,
+        lo: u32,
+    ) -> SymbolTags {
         let mut tags = parent;
         let line_comments = leading_comments_at(comments, source, lo);
         if line_comments.is_empty() {
@@ -35,11 +40,10 @@ impl SymbolTags {
                 }
                 _ => continue,
             };
-            if line.len() < Self::IGNORE_UNUSED_PREFIX.len() {
-                continue;
-            }
-            let prefix = &line[..Self::IGNORE_UNUSED_PREFIX.len()];
-            if prefix.eq_ignore_ascii_case(Self::IGNORE_UNUSED_PREFIX) {
+            if line
+                .get(..Self::IGNORE_UNUSED_PREFIX.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(Self::IGNORE_UNUSED_PREFIX))
+            {
                 tags.allow_unused_comment = true;
             }
         }
@@ -49,7 +53,6 @@ impl SymbolTags {
     pub fn from_comments(comments: &[Comment], source: &str, lo: u32) -> SymbolTags {
         SymbolTags::from_comments_parent(SymbolTags::default(), comments, source, lo)
     }
-
 }
 
 /// The interior representation of the name of a symbol.
@@ -237,4 +240,35 @@ pub struct RawModuleDeps {
     pub exports_locals: AHashMap<ExportedLocal, TaggedSymbol>,
     // `import './foo'`
     pub executed_paths: AHashSet<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbol_tags_match_ascii_prefixes_without_slicing_unicode_comments() {
+        for (comment, expected) in [
+            (format!("{}\u{2019}ordinary comment", "x".repeat(19)), false),
+            (format!("{}\u{e9}ordinary comment", "x".repeat(19)), false),
+            ("short".to_owned(), false),
+            ("@ALLOW-UNUSED-EXPORT explanation".to_owned(), true),
+            ("@allow-unused-export \u{2019}".to_owned(), true),
+        ] {
+            let source = format!("// {comment}\nexport const value = 1;");
+            let allocator = oxc_allocator::Allocator::default();
+            let parsed = oxc_utils_parse::parse_file(
+                &allocator,
+                &source,
+                std::path::Path::new("comment.mjs"),
+            );
+            assert!(parsed.errors.is_empty());
+            let tags = SymbolTags::from_comments(
+                &parsed.program.comments,
+                &source,
+                source.rfind("export const").unwrap() as u32,
+            );
+            assert_eq!(tags.allow_unused_comment, expected, "{comment}");
+        }
+    }
 }

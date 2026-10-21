@@ -4,6 +4,8 @@ Extracts owned top-level statement segments from OXC-parsed JavaScript and
 TypeScript. Each segment contains module imports/exports, variable declarations
 and references, and its ownership span; the parser arena can then be reset.
 Spans are zero-based UTF-8 byte ranges with an exclusive end.
+Line-comment annotation matching is ASCII-case-insensitive and tolerates
+arbitrary Unicode comment text without slicing across UTF-8 boundaries.
 Top-level multi-declarator `const`/`let`/`var` declarations, including named
 exports, have one segment per declarator. Destructuring stays indivisible;
 nested declarations and opaque CommonJS bodies are not split. Segment ownership

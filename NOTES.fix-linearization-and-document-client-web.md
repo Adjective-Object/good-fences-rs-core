@@ -130,9 +130,75 @@ design needs separate work rather than skipping them.
 
 ### Full application preparation
 
-Preparing the complete dependency closure in a separate session-local root,
+Prepared the complete dependency closure in a separate session-local root,
 using the actual `OWA Mail` workflow: mail bootstrap, data worker, analytics
 worker, and the vendor editor index-readjuster worker. Unlike the earlier
 45-package probe corpus, dependencies of application roots are included.
 Preparation reports missing packages, version collisions, transpilation and
-Sass failures separately. Full-app output/runtime coverage is not yet established.
+Sass failures separately.
+
+- Enumerated 4,710 package names and 70,135 TypeScript inputs. Installed
+  TypeScript correctly classifies 4,973 arbitrary-extension files such as
+  `*.d.json.ts` and `*.d.scss.ts` as declaration-only: no JavaScript emission is
+  expected. There are 65,162 executable TS inputs. All 71 native compiler
+  batches exited successfully; this still is not typechecking.
+- A monolithic native TypeScript emit consumed roughly 13-15 GiB resident
+  memory, leaving 1.6 GiB free on the 31.7 GiB host. Stopped only that source
+  preparation process, not Cargo. Retried with at most 1,000 files per process,
+  `GOMAXPROCS=2` and `GOMEMLIMIT=2GiB`; batched compiler time was 629.6 s.
+  Initial copying alone took 993.5 s. These are preparation costs, not bundler
+  timings or cache-hit costs.
+- The initial flat staging reported 613 nested-version conflicts. Reconstructed
+  installed vendor topology, visiting 2,568 installed vendor locations and
+  copying 862 missing/corrected locations. Audited all 2,568 manifests against
+  the installed originals; there are no semantic/version mismatches, and
+  restored exact original manifest bytes where initial formatting differed.
+  Repair took 403.4 s and overlapped other preparation.
+- Compiled all 2,474 Sass inputs. The first pass took 252.1 s and left 38 importer
+  errors. Retried only those failures after correcting the local importer's
+  `src/` versus `lib/` mapping and retaining vendor `style`/Sass export handling;
+  all now compile. These were preparation bugs, not 38 client/bundler bugs.
+- Preparation finishes with zero reported input/transpilation/Sass errors.
+  Original client-web files and its two pre-existing dirty paths remain untouched.
+
+Attempting the editor worker, analytics worker, data worker, mail, then the
+combined four-entry workload using the release driver, native CSS auto-mount,
+four preparation workers and local stage traces. Each invocation has a ten-minute
+bound. Build and output syntax success would not establish full application
+runtime correctness: workflow-specific defines, host globals, localization,
+browser/worker execution and integration with the production loader still need
+their own observations. Full-app output/runtime coverage is not yet established.
+
+### First complete-input attempts
+
+All five invocations reached build diagnostics; none published a complete app.
+Times include traversing the complete staged input tree, even for a small entry.
+
+| Entry | Elapsed | First observed failure |
+| --- | ---: | --- |
+| editor worker | 247.0 s | Vendor ESM `.js` distribution lacks module package mode |
+| analytics worker | 223.5 s | Same format issue in a telemetry ESM distribution |
+| data worker | 276.4 s | Same format issue in a utility ESM distribution |
+| mail | 274.2 s | Annotation reader panics on a Unicode comment |
+| all four entries | 277.3 s | Same Unicode comment panic |
+
+The Unicode failure is a real extractor bug, not client/environment noise:
+`SymbolTags::from_comments_parent` sliced a comment at byte 20 without checking
+that it was a UTF-8 character boundary. Added a non-proprietary regression with
+two-/three-byte characters crossing that boundary, ordinary short comments and
+valid mixed-case annotations. It reproduces the exact panic before the fix.
+Use checked prefix access, preserving existing ASCII case-insensitive matching.
+The required spot-check passes after the fix, including all 76 AST tests and the
+workspace check; rebuilt the release driver through `mbx`.
+
+For the vendor format issue, preserve root package manifests and CJS
+distributions. Audit distribution directories syntactically, and add local
+nested `type: module` scopes only when every `.js` script in that scope is ESM.
+Skip mixed/script directories and packages with private import maps rather than
+blindly changing an entire dual-format package to ESM. This is an explicit local
+corpus adaptation, not a claim that the original packages run unchanged.
+
+The editor trace spent 246.5 s in the build but only 27.5 ms preparing its two
+script jobs. Full-tree setup/inventory dominates this early failure. Analytics
+had 405 preparation jobs and data worker 5,390; their traces are retained locally.
+Large-root setup is already a bottleneck before testing linker scaling.
