@@ -426,14 +426,27 @@ pub struct ChunkPlan {
     pub precise_dynamic_imports: bool,
     /// One original import activation projects onto several independent roots.
     pub async_activations: BTreeMap<AsyncSiteId, AsyncActivation>,
-    /// Checked descriptions only. No lazy graph or emission rewrite is enabled.
+    /// Checked pre-retention obligation overlays; native reconstruction is gated.
     pub lazy_modules: crate::lazy_modules::Certification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsyncActivation {
+    /// Original source import for diagnostics, not necessarily a retained edge.
     pub source_edge: usize,
+    pub origin: AsyncOrigin,
     pub roots: BTreeSet<RootId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AsyncOrigin {
+    Import,
+    /// Real extraction identities, never manufactured DependencyIds.
+    Lazy {
+        declaration: source_graph::SegmentKey,
+        module_candidate: u32,
+        selector: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -551,6 +564,7 @@ fn partition_impl(
             policy,
             &ecco_effects,
             precise_dynamic_imports,
+            Some(&lazy_modules),
         )?;
         let seeds: Vec<_> = roots.values().cloned().collect();
         let reached = reference_reachability(graph, &retention, policy, &seeds)?;
@@ -571,6 +585,7 @@ fn partition_impl(
             };
             let activation = AsyncActivation {
                 source_edge: index,
+                origin: AsyncOrigin::Import,
                 roots: seeds.iter().map(|seed| seed.id.clone()).collect(),
             };
             if let Some(existing) = async_activations.get(&site) {
@@ -581,6 +596,60 @@ fn partition_impl(
             for seed in seeds {
                 if let Some(existing) = roots.get(&seed.id) {
                     ensure!(*existing == seed, "conflicting async site identity");
+                } else {
+                    roots.insert(seed.id.clone(), seed);
+                    added = true;
+                }
+            }
+        }
+        for module in lazy_modules.modules() {
+            for selector in &module.selectors {
+                let consumer = node_id(graph, GraphNode::Segment(selector.owner))?;
+                // Residual argument effects do not demand the wrapper's value.
+                let value = retention
+                    .segments
+                    .iter()
+                    .find(|segment| segment.key == selector.owner)
+                    .is_some_and(|segment| {
+                        selector.value_demanded(
+                            segment.reasons.iter().any(|reason| reason.demands_value()),
+                        )
+                    });
+                if !value || !reached.values().any(|nodes| nodes.contains(&consumer)) {
+                    continue;
+                }
+                let site = AsyncSiteId {
+                    module: graph
+                        .file_path(selector.owner.file_id)
+                        .ok_or_eyre("missing lazy selector module")?
+                        .to_owned(),
+                    offset: selector.construction.start,
+                    candidate: None,
+                };
+                let seed = RootSeed {
+                    id: RootId::AsyncExport {
+                        site: site.clone(),
+                        name: selector.property.clone(),
+                    },
+                    evaluation_roots: vec![module.target],
+                    binding_roots: selector.selected.route.clone(),
+                };
+                let activation = AsyncActivation {
+                    source_edge: module.source_edge,
+                    origin: AsyncOrigin::Lazy {
+                        declaration: module.owner,
+                        module_candidate: module.candidate,
+                        selector: selector.candidate,
+                    },
+                    roots: BTreeSet::from([seed.id.clone()]),
+                };
+                if let Some(existing) = async_activations.get(&site) {
+                    ensure!(*existing == activation, "conflicting lazy activation");
+                } else {
+                    async_activations.insert(site, activation);
+                }
+                if let Some(existing) = roots.get(&seed.id) {
+                    ensure!(*existing == seed, "conflicting lazy demand");
                 } else {
                     roots.insert(seed.id.clone(), seed);
                     added = true;

@@ -90,7 +90,8 @@ pub struct OutputOptions {
     pub min_chunk_bytes: usize,
     /// Introduce suspension/load failures at supported private async-body references.
     pub synthesize_async_boundaries: bool,
-    /// Exact runtime identities authorizing certification only; empty disables it.
+    /// Exact runtime identities authorizing lazy graph overlays; empty disables them.
+    /// Certified native emission is gated until post-placement wiring is available.
     pub lazy_runtimes: Vec<crate::lazy_modules::LazyRuntime>,
 }
 

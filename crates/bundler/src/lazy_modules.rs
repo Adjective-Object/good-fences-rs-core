@@ -1,5 +1,5 @@
 //! Explicit runtime authorization and build-local, all-reference certification.
-//! This phase describes obligations only; retention and emission remain unchanged.
+//! Certified overlays replace graph obligations without changing cached facts.
 use std::{collections::HashSet, path::PathBuf};
 
 use ast_segmenter::{
@@ -63,11 +63,22 @@ pub struct CertifiedSelector {
     pub constructor: ExportIdentity,
     /// Determined from canonical identities, never the cached spelling hint.
     pub kind: LazyWrapperKind,
+    pub value_use: ast_segmenter::invocation::ValueUse,
     pub module_reference: u32,
     pub property: String,
     pub selected: LinkedExport,
     /// Includes module/getter and every wrapper-specific argument, unchanged.
     pub arguments: Vec<PreservedSlot>,
+}
+
+impl CertifiedSelector {
+    pub(crate) fn value_demanded(&self, statement_value: bool) -> bool {
+        match self.value_use {
+            ast_segmenter::invocation::ValueUse::Required => true,
+            ast_segmenter::invocation::ValueUse::StatementValue => statement_value,
+            ast_segmenter::invocation::ValueUse::Discarded => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +111,74 @@ pub struct Certification {
 impl Certification {
     pub fn modules(&self) -> &[CertifiedModule] {
         &self.modules
+    }
+
+    pub(crate) fn consumes_binding(&self, file: u32, binding: BindingId) -> bool {
+        self.modules
+            .iter()
+            .any(|module| module.owner.file_id == file && module.binding == binding)
+    }
+
+    pub(crate) fn consumes_edge(&self, graph: &SourceGraph, index: usize) -> bool {
+        let edge = &graph.edges()[index];
+        self.modules.iter().any(|module| {
+            edge.from == GraphNode::Segment(module.owner)
+                && edge.kind == EdgeKind::DynamicImport
+                && edge.dependency == Some(module.dependency)
+                || module.selectors.iter().any(|selector| {
+                    edge.from == GraphNode::Segment(selector.owner)
+                        && edge.binding == Some(module.binding)
+                        && graph
+                            .file_facts(selector.owner.file_id)
+                            .is_some_and(|facts| {
+                                facts
+                                    .references()
+                                    .get(selector.module_reference as usize)
+                                    .is_some_and(|reference| reference.span() == edge.site)
+                            })
+                })
+        })
+    }
+
+    pub(crate) fn affects(&self, key: SegmentKey) -> bool {
+        self.modules.iter().any(|module| {
+            module.owner == key
+                || module
+                    .selectors
+                    .iter()
+                    .any(|selector| selector.owner == key)
+        })
+    }
+
+    pub(crate) fn invocation_removable(&self, key: SegmentKey, span: Span, demanded: bool) -> bool {
+        self.modules.iter().any(|module| {
+            module.owner == key && module.construction == span
+                || module.selectors.iter().any(|selector| {
+                    selector.owner == key
+                        && selector.construction == span
+                        && !selector.value_demanded(demanded)
+                })
+        })
+    }
+
+    pub(crate) fn consumed_read(&self, graph: &SourceGraph, key: SegmentKey, span: Span) -> bool {
+        let Some(facts) = graph.file_facts(key.file_id) else {
+            return false;
+        };
+        self.modules.iter().any(|module| {
+            let matches = |reference| {
+                facts
+                    .references()
+                    .get(reference as usize)
+                    .is_some_and(|reference| reference.span() == span)
+            };
+            module.owner == key && matches(module.constructor_reference)
+                || module.selectors.iter().any(|selector| {
+                    selector.owner == key
+                        && (matches(selector.module_reference)
+                            || matches(selector.constructor_reference))
+                })
+        })
     }
 
     pub fn is_current(
@@ -360,6 +439,7 @@ fn eligible(
             constructor_reference: candidate.constructor(),
             constructor: identity,
             kind,
+            value_use: call.value_use(),
             module_reference: reference as u32,
             property: candidate.property().to_owned(),
             selected,
@@ -392,7 +472,7 @@ fn eligible(
 }
 
 /// Certify before retention. Unsupported or mixed-use instances are absent in
-/// their entirety; source-local cache facts and graph obligations are untouched.
+/// their entirety; source-local cache facts remain untouched.
 pub fn certify(
     graph: &SourceGraph,
     policy: &EffectPolicy,

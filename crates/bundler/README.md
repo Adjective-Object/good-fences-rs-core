@@ -82,7 +82,7 @@ CommonJS snapshot recovery follows planned facade demands rather than retained
 multi-export statements; native external seams prune direct and local export
 clauses to the same retained surface.
 
-### Lazy-module certification (description only)
+### Lazy-module certification and graph overlays
 
 Disabled by default. `OutputOptions::lazy_runtimes: Vec<lazy_modules::LazyRuntime>`
 registers three exact `ConstructorExport { module, export }` identities for the
@@ -124,10 +124,37 @@ wrapper-argument slots retain operation roots, reference/effect/invocation indic
 and dependency identities. They must be evaluated once at their original site,
 not duplicated across synthesized instances.
 
-Descriptions include original declaration/selector identities, canonical
+Certificates include original declaration/selector identities, canonical
 constructors, the real dynamic occurrence, original-target evaluation and each
-selected canonical export/route. No source cache mutation, demand replacement,
-retention change, selector relocation or output rewriting is enabled yet.
+selected canonical export/route. Before retention, a build-local overlay consumes
+the module construction's invocation contribution, its broad callback import,
+and each selector's reference to the removed module binding. No cached facts are
+mutated. Trusted wrapper constructions are removable only when their values are
+unused; residual argument effects and all genuine constructor/getter/additional
+argument dependencies remain. Invocation summaries do not make enclosing
+statements pure. Symbol definitions and execution accesses exclude the removed
+module binding; scheduling consumes only the proven invocation contributions.
+Original options are retained once through a `PreservedSlot`
+obligation, including closure captures; they are never copied into selectors.
+
+Every retained selector independently activates an `AsyncExport` root with its
+checked selected binding route and **original barrel evaluation**. Discovery
+iterates to a fixed point, including nested instances but excluding dead
+selectors. Shared effects/helpers retain ordinary union masks, not an aggregated
+symbol root. `AsyncActivation::origin` distinguishes source imports from
+`AsyncOrigin::Lazy { declaration, module_candidate, selector }`; lazy offsets
+identify selector constructions, never invented source dependency IDs.
+Diagnostic async facades report the selector consumer and original import target.
+
+**Native emission of a certified transformation currently returns an explicit
+error** requiring phases 5/6. It does not silently emit the original broad demand
+or an incomplete replacement. Remaining work is final selector/implementation
+placement and typed post-placement `Connections` reconstruction: synthesized
+module instances keyed by source chunkgroup × original module identity ×
+destination projection, callbacks against selected projections, and selector
+module-argument rewrites. The original options slot must supply one preserved
+value, not duplicated expressions. Unconfigured and unsupported-instance builds
+retain their existing native emission behavior.
 Configuration-only changes invalidate derived output, reuse source facts and
 participate in no-op detection; registration ordering/duplicates are immaterial.
 

@@ -36,6 +36,7 @@ fn lazy_certification_configuration_invalidates_output_not_source_facts() {
         "main.mjs",
         "import {Module,Read} from './runtime.mjs';
         const mod = new Module(() => import('./target.mjs'), {name: 'test'});
+        globalThis.escape = mod;
         export const value = new Read(mod, ns => ns.first);",
     );
     write(dir.root(), "runtime.mjs", "export class Module { constructor(load, options) { this.load = load; this.options = options; } }
@@ -64,7 +65,7 @@ fn lazy_certification_configuration_invalidates_output_not_source_facts() {
     assert_eq!(enabled.counters.source_parses, 0);
     assert_eq!(enabled.counters.source_reparses, 0);
     assert_eq!(enabled.counters.fragment_reparses, 0);
-    assert_eq!(enabled.product.plan.lazy_modules.modules().len(), 1);
+    assert!(enabled.product.plan.lazy_modules.modules().is_empty());
     assert_ne!(enabled.product.generation, disabled.product.generation);
     assert_eq!(
         enabled.product.fingerprints.parse,
@@ -93,6 +94,53 @@ fn lazy_certification_configuration_invalidates_output_not_source_facts() {
     assert_ne!(
         disabled_again.product.generation,
         enabled.product.generation
+    );
+}
+
+#[test]
+fn lazy_certified_public_build_fails_explicitly_until_native_wiring_exists() {
+    use crate::lazy_modules::{ConstructorExport, LazyRuntime};
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {Module,Read} from './runtime.mjs';
+        const mod = new Module(() => import('./target.mjs'));
+        export const value = new Read(mod, ns => ns.first);",
+    );
+    write(
+        dir.root(),
+        "runtime.mjs",
+        "export class Module {}
+        export class Read {} export class Action {}",
+    );
+    write(
+        dir.root(),
+        "target.mjs",
+        "export const first = 1; export const second = 2;",
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let mut options = options();
+    let disabled = session.build(&options).unwrap();
+    let export = |name: &str| ConstructorExport {
+        module: dir.root().join("runtime.mjs").canonicalize().unwrap(),
+        export: name.into(),
+    };
+    options.output.lazy_runtimes.push(LazyRuntime {
+        module: export("Module"),
+        import: export("Read"),
+        action: export("Action"),
+    });
+    let error = session
+        .build(&options)
+        .err()
+        .expect("no fake transformed output");
+    assert!(format!("{error:#}").contains("post-placement lazy wiring"));
+    options.output.lazy_runtimes.clear();
+    let restored = session.build(&options).unwrap();
+    assert_eq!(
+        disabled.product.artifacts.files,
+        restored.product.artifacts.files
     );
 }
 

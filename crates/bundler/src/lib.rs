@@ -48,6 +48,14 @@ pub enum RetentionReason {
     TopLevelEffect,
     Dependency,
     NamespaceConservative,
+    /// Evaluate/capture an original source slot, never request its old binding.
+    PreservedSlot,
+}
+
+impl RetentionReason {
+    pub(crate) fn demands_value(self) -> bool {
+        !matches!(self, Self::TopLevelEffect | Self::PreservedSlot)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +83,8 @@ pub enum RetentionEdgeKind {
     /// Export routes traversed only by namespace binding demand, not evaluation.
     Namespace,
     Require,
+    /// An original residual slot, not the consumed LazyModule binding.
+    PreservedSlot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -145,6 +155,7 @@ pub fn retain_with_policy(
         policy,
         &ecco_effects,
         false,
+        None,
     )
 }
 
@@ -155,6 +166,7 @@ fn retain_with_effects(
     policy: &policy::EffectPolicy,
     ecco_effects: &BTreeMap<SegmentKey, bool>,
     precise_dynamic_imports: bool,
+    lazy_modules: Option<&lazy_modules::Certification>,
 ) -> eyre::Result<RetentionPlan> {
     let mut analysis = Retention {
         graph,
@@ -173,6 +185,7 @@ fn retain_with_effects(
             .module_ids()
             .any(|file| link::has_externals(graph, file)),
         precise_dynamic_imports,
+        lazy_modules,
     };
     for &file in evaluation_roots {
         analysis.queue.push_back(Demand::Evaluation(file));
@@ -205,8 +218,13 @@ fn retain_with_effects(
     );
     let mut edges: Vec<_> = analysis.edges.into_iter().collect();
     edges.sort_by_key(|e| (node_key(e.from), node_key(e.to), e.kind, e.source_edge));
-    let execution =
-        execution_dependencies::plan(graph, &analysis.segments.keys().copied().collect(), &edges)?;
+    let execution = execution_dependencies::plan(
+        graph,
+        &analysis.segments.keys().copied().collect(),
+        &edges,
+        lazy_modules,
+        &analysis.values,
+    )?;
     Ok(RetentionPlan {
         revision: graph.revision(),
         policy_fingerprint: policy.fingerprint(),
@@ -263,9 +281,42 @@ struct Retention<'g, 'p> {
     ecco_effects: &'g BTreeMap<SegmentKey, bool>,
     native_externals: bool,
     precise_dynamic_imports: bool,
+    lazy_modules: Option<&'g lazy_modules::Certification>,
 }
 
 impl Retention<'_, '_> {
+    fn summarize(
+        &self,
+        key: SegmentKey,
+        span: oxc_span::Span,
+        demanded: bool,
+    ) -> eyre::Result<effects::StatementEffects> {
+        let facts = self.facts(key.file_id)?;
+        if let Some(lazy) = self.lazy_modules.filter(|lazy| lazy.affects(key)) {
+            let mut summary = effects::summarize_with_invocations(
+                facts,
+                span,
+                demanded,
+                self.policy,
+                |invocation| lazy.invocation_removable(key, invocation, demanded),
+            );
+            summary.sites.retain(|site| {
+                site.reason() != ast_segmenter::effects::EffectReason::BindingRead
+                    || !lazy.consumed_read(self.graph, key, site.span())
+            });
+            return Ok(summary);
+        }
+        Ok(effect_analysis::summarize(
+            self.graph,
+            key.file_id,
+            facts,
+            span,
+            demanded,
+            self.policy,
+            self.ecco_effects.get(&key).copied(),
+        ))
+    }
+
     fn facts(&self, file: u32) -> eyre::Result<ModuleFacts<'_>> {
         self.graph
             .file_facts(file)
@@ -305,15 +356,7 @@ impl Retention<'_, '_> {
                     source_edge: None,
                 });
             }
-            let summary = effect_analysis::summarize(
-                graph,
-                file,
-                self.facts(file)?,
-                statement.span,
-                self.values.contains(&key),
-                self.policy,
-                self.ecco_effects.get(&key).copied(),
-            );
+            let summary = self.summarize(key, statement.span, self.values.contains(&key))?;
             if summary.is_effectful() {
                 let node = GraphNode::Segment(key);
                 self.queue
@@ -444,22 +487,18 @@ impl Retention<'_, '_> {
         let reasons = self.segments.entry(key).or_default();
         let first = reasons.is_empty();
         reasons.insert(reason);
-        if reason != RetentionReason::TopLevelEffect && self.values.insert(key) {
+        let new_value = reason.demands_value() && self.values.insert(key);
+        if new_value {
             let span = self
                 .graph
                 .file_segments(key.file_id)
                 .ok_or_eyre("missing binding statements")?[key.segment_idx as usize]
                 .span;
-            let summary = effect_analysis::summarize(
-                self.graph,
-                key.file_id,
-                self.facts(key.file_id)?,
-                span,
-                true,
-                self.policy,
-                self.ecco_effects.get(&key).copied(),
-            );
+            let summary = self.summarize(key, span, true)?;
             self.effects.insert(key, summary);
+        }
+        if first || new_value {
+            self.lazy_dependencies(key)?;
         }
         if !first {
             return Ok(());
@@ -482,6 +521,12 @@ impl Retention<'_, '_> {
                 .get(key.segment_idx as usize)
                 .is_some_and(|recipe| recipe.connector_only());
         for (index, edge) in graph.outgoing_indexed(node).filter(|(_, e)| !e.type_only) {
+            if self
+                .lazy_modules
+                .is_some_and(|lazy| lazy.consumes_edge(graph, index))
+            {
+                continue;
+            }
             if edge.activation == Activation::Asynchronous {
                 self.async_boundaries.insert(index);
                 continue;
@@ -496,7 +541,11 @@ impl Retention<'_, '_> {
                     kind: RetentionEdgeKind::Binding,
                     source_edge: Some(index),
                 });
-                self.target(edge.to, true)?;
+                // Parameters/captures owned by this statement do not demand an
+                // otherwise unused certified wrapper's result.
+                if edge.to != node || !self.lazy_modules.is_some_and(|lazy| lazy.affects(key)) {
+                    self.target(edge.to, true)?;
+                }
                 if self.precise_dynamic_imports && edge.kind == EdgeKind::LocalReference {
                     // Local references name an import declaration segment. Project
                     // only that local binding's checked routes onto the real use,
@@ -525,6 +574,67 @@ impl Retention<'_, '_> {
                 });
                 // Opaque require consumers can inspect any namespace property.
                 self.target(edge.to, true)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn lazy_dependencies(&mut self, key: SegmentKey) -> eyre::Result<()> {
+        let graph = self.graph;
+        let node = GraphNode::Segment(key);
+        if let Some(lazy) = self.lazy_modules {
+            for module in lazy.modules() {
+                if !module.selectors.iter().any(|selector| {
+                    selector.owner == key && selector.value_demanded(self.values.contains(&key))
+                }) {
+                    continue;
+                }
+                // The synthesized constructor remains a genuine binding demand,
+                // but never through the removed module variable.
+                let reference = self
+                    .facts(module.owner.file_id)?
+                    .references()
+                    .get(module.constructor_reference as usize)
+                    .ok_or_eyre("missing lazy constructor")?;
+                let targets: Vec<_> = graph
+                    .outgoing_indexed(GraphNode::Segment(module.owner))
+                    .filter(|(_, edge)| {
+                        edge.site == reference.span() && edge.binding == reference.binding()
+                    })
+                    .flat_map(|(_, edge)| {
+                        std::iter::once(edge.to).chain(
+                            graph
+                                .outgoing_indexed(edge.to)
+                                .filter(|(_, imported)| {
+                                    imported.kind == EdgeKind::Import
+                                        && imported.purpose == EdgePurpose::Binding
+                                        && !imported.type_only
+                                        && imported.binding == edge.binding
+                                })
+                                .map(|(_, imported)| imported.to),
+                        )
+                    })
+                    .collect();
+                for target in targets {
+                    self.edges.insert(RetentionEdge {
+                        from: node,
+                        to: target,
+                        kind: RetentionEdgeKind::Binding,
+                        source_edge: None,
+                    });
+                    self.target(target, true)?;
+                }
+                if module.options.is_some() {
+                    let target = GraphNode::Segment(module.owner);
+                    self.edges.insert(RetentionEdge {
+                        from: node,
+                        to: target,
+                        kind: RetentionEdgeKind::PreservedSlot,
+                        source_edge: None,
+                    });
+                    self.queue
+                        .push_back(Demand::Binding(target, RetentionReason::PreservedSlot));
+                }
             }
         }
         Ok(())

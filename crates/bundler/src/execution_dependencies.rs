@@ -81,6 +81,8 @@ pub(crate) fn plan(
     graph: &SourceGraph,
     retained: &BTreeSet<SegmentKey>,
     edges: &[RetentionEdge],
+    lazy: Option<&crate::lazy_modules::Certification>,
+    values: &std::collections::HashSet<SegmentKey>,
 ) -> eyre::Result<ExecutionPlan> {
     let mut constraints = BTreeSet::new();
     let mut accesses = BTreeSet::new();
@@ -113,6 +115,9 @@ pub(crate) fn plan(
                 .push(segment);
         }
         for binding in recipe.placement().declarations() {
+            if lazy.is_some_and(|lazy| lazy.consumes_binding(segment.file_id, binding)) {
+                continue;
+            }
             declarations
                 .entry((segment.file_id, binding))
                 .or_insert(segment);
@@ -163,6 +168,16 @@ pub(crate) fn plan(
             .take_while(|e| e.span().start < range.end)
             .filter(|e| crate::effects::contains(range, e.span()))
         {
+            if lazy.is_some_and(|lazy| {
+                matches!(
+                    site.reason(),
+                    EffectReason::Invocation | EffectReason::Construction
+                ) && lazy.invocation_removable(segment, site.span(), values.contains(&segment))
+                    || site.reason() == EffectReason::BindingRead
+                        && lazy.consumed_read(graph, segment, site.span())
+            }) {
+                continue;
+            }
             if !timing.effect_is_module_evaluation(site)? {
                 continue;
             }
@@ -178,7 +193,7 @@ pub(crate) fn plan(
         let call_start = facts
             .invocations()
             .partition_point(|c| c.span().start < range.start);
-        for (relative, _) in facts
+        for (relative, call) in facts
             .invocations()
             .slice(call_start..)
             .iter()
@@ -186,6 +201,11 @@ pub(crate) fn plan(
             .take_while(|(_, c)| c.span().start < range.end)
             .filter(|(_, c)| crate::effects::contains(range, c.span()))
         {
+            if lazy.is_some_and(|lazy| {
+                lazy.invocation_removable(segment, call.span(), values.contains(&segment))
+            }) {
+                continue;
+            }
             let index = call_start + relative;
             if !timing
                 .contexts()
@@ -212,6 +232,11 @@ pub(crate) fn plan(
             .filter(|(_, r)| !r.type_only() && crate::effects::contains(range, r.span()))
         {
             let index = reference_start + relative;
+            if reference.binding().is_some_and(|binding| {
+                lazy.is_some_and(|lazy| lazy.consumes_binding(file, binding))
+            }) {
+                continue;
+            }
             let Some(binding) = reference.binding().and_then(|id| {
                 facts
                     .bindings()

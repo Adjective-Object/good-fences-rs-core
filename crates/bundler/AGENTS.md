@@ -439,9 +439,20 @@ and reexports, never wrapper spelling hints. Certify every module-binding refere
 before retention; any escape/unknown wrapper/direct operation rejects the instance.
 Initializer-free literal options require checked cached structural evidence.
 Certification preserves original slots/effect/capture provenance, library wrappers,
-governance/selection caches and action arguments. It does not rewrite graph demands,
-retention or emitted code yet. Stamp graph revision, effect policy and canonical
-runtime configuration; configuration-only edits reuse source extraction.
+governance/selection caches and action arguments. Apply checked overlays before
+retention: consume module allocations/broad imports and selector module references,
+never mutate cached facts. Invocation-only removal preserves residual argument
+effects; PreservedSlot edges evaluate/capture options at the original site without
+demanding the removed module binding. Symbol definitions and execution accesses
+also exclude that binding; only proven invocation barriers are consumed.
+Keep constructor/wrapper/getter dependencies.
+Only live selector values activate independent selected-export roots, carrying
+original-barrel evaluation, to a nested/dead fixed point. Lazy activation origins
+identify declaration/candidate/selector; their source_edge is original-import
+provenance, not a fabricated or retained dependency. Configured certified emission
+errors until selector placement and post-placement wiring exist; never emit broad
+or hollow replacements. Stamp graph revision, effect policy and canonical runtime
+configuration; configuration-only edits reuse source extraction.
 
 `partition` and public builds use precise planning; `partition_conservative`
 is the explicit namespace reference. Per-requested-name `AsyncExport` roots

@@ -149,19 +149,59 @@ pub fn diagnostic_manifest(
                     .get(site)
                     .ok_or_eyre("active async root has no activation")?;
                 ensure!(
-                    activation.roots.contains(root)
-                        && plan
-                            .retention
-                            .async_boundaries
-                            .contains(&activation.source_edge)
-                        && async_seed(graph, activation.source_edge)?.id.async_site() == Some(site),
-                    "async root is absent from its retained occurrence"
+                    activation.roots.contains(root),
+                    "async root missing from activation"
                 );
+                let consumer = match activation.origin {
+                    crate::chunks::AsyncOrigin::Import => {
+                        ensure!(
+                            plan.retention
+                                .async_boundaries
+                                .contains(&activation.source_edge)
+                                && async_seed(graph, activation.source_edge)?.id.async_site()
+                                    == Some(site),
+                            "async root is absent from its retained occurrence"
+                        );
+                        graph.edges()[activation.source_edge].from
+                    }
+                    crate::chunks::AsyncOrigin::Lazy {
+                        declaration,
+                        module_candidate,
+                        selector,
+                    } => {
+                        let module = plan
+                            .lazy_modules
+                            .modules()
+                            .iter()
+                            .find(|module| {
+                                module.owner == declaration && module.candidate == module_candidate
+                            })
+                            .ok_or_eyre("missing lazy declaration certificate")?;
+                        let selected = module
+                            .selectors
+                            .iter()
+                            .find(|s| s.candidate == selector)
+                            .ok_or_eyre("missing lazy selector certificate")?;
+                        ensure!(
+                            activation.source_edge == module.source_edge
+                                && site.offset == selected.construction.start
+                                && graph.file_path(selected.owner.file_id)
+                                    == Some(site.module.as_path())
+                                && plan
+                                    .retention
+                                    .segments
+                                    .iter()
+                                    .any(|s| s.key == selected.owner),
+                            "invalid lazy activation"
+                        );
+                        source_graph::GraphNode::Segment(selected.owner)
+                    }
+                };
                 let edge = graph
                     .edges()
                     .get(activation.source_edge)
                     .ok_or_eyre("missing async occurrence")?;
-                let consumer = node_id(graph, edge.from)?;
+                let consumer = node_id(graph, consumer)?;
                 let target = node_id(graph, edge.to)?;
                 let projection = manifest
                     .async_facades

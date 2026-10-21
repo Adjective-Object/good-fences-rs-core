@@ -119,7 +119,13 @@ impl Symbols {
             let mut bindings: Vec<_> = facts
                 .bindings()
                 .iter()
-                .filter(|b| b.top_level() && !b.type_only() && !b.ambient() && !facts.commonjs())
+                .filter(|b| {
+                    b.top_level()
+                        && !b.type_only()
+                        && !b.ambient()
+                        && !facts.commonjs()
+                        && !plan.lazy_modules.consumes_binding(file, b.id())
+                })
                 .collect();
             bindings.sort_by_key(|b| b.id().0);
             for binding in bindings {

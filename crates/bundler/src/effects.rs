@@ -84,6 +84,18 @@ pub fn summarize_with_policy(
     value_demanded: bool,
     policy: &EffectPolicy,
 ) -> StatementEffects {
+    summarize_with_invocations(facts, statement, value_demanded, policy, |_| false)
+}
+
+/// Additional removals are invocation-scoped checked build obligations, not
+/// annotations on the enclosing statement. Argument and capture sites survive.
+pub(crate) fn summarize_with_invocations(
+    facts: ModuleFacts<'_>,
+    statement: Span,
+    value_demanded: bool,
+    policy: &EffectPolicy,
+    trusted: impl Fn(Span) -> bool,
+) -> StatementEffects {
     let first = facts
         .invocations()
         .partition_point(|c| c.span().start < statement.start);
@@ -92,7 +104,10 @@ pub fn summarize_with_policy(
         .slice(first..)
         .iter()
         .take_while(|c| c.span().start <= statement.end)
-        .filter(|c| contains(statement, c.span()) && removable(*c, value_demanded, policy))
+        .filter(|c| {
+            contains(statement, c.span())
+                && (removable(*c, value_demanded, policy) || trusted(c.span()))
+        })
         .collect();
     let start = facts
         .effects()

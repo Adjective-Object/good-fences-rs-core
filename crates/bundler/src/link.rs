@@ -198,6 +198,10 @@ pub fn deferred_esm(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Option<DeferredEsm>> {
+    ensure!(
+        plan.lazy_modules.modules().is_empty(),
+        "certified lazy-module emission requires selector placement and post-placement lazy wiring (phases 5/6)"
+    );
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let relocations = BTreeMap::new();
@@ -321,6 +325,10 @@ pub(crate) fn esm_plan_configured(
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let _span = tracing::info_span!("build.link").entered();
+    ensure!(
+        plan.lazy_modules.modules().is_empty(),
+        "certified lazy-module emission requires selector placement and post-placement lazy wiring (phases 5/6)"
+    );
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = load_modules(graph, plan, sources, relocations)?;
