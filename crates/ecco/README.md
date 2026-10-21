@@ -13,6 +13,9 @@ existing checked OXC program and semantic model without retaining arena data;
 `parse_source` is its parsing convenience entrypoint. Both return a serializable
 `ParsedFile` containing lazy owned function definitions and module roots, not
 evaluated hazards or specialized calls.
+Persisted records expose borrowed accessors, including declaration collections
+and nested templates; construct declarations with their `new` methods or the
+declaration parser. Interpreter state remains separate and mutable.
 
 `parse_from_ast_with_segments(program, semantic, facts, segments)` reuses that
 same checked AST and validates unique root ownership in the caller's actual
@@ -73,7 +76,7 @@ let library = Arc::new(parse_source(
     "export function read(value) { return value.key; }",
     Path::new("library.js"), LocalFacts::default(),
 )?);
-let read = library.symbols().iter().find(|symbol| symbol.name == "read").unwrap().id;
+let read = library.symbols().iter().find(|symbol| symbol.name() == "read").unwrap().id();
 let entry = Arc::new(parse_source(
     "import { read } from 'library'; read({});",
     Path::new("entry.js"), LocalFacts::default(),
@@ -82,7 +85,7 @@ let mut analysis = Analysis::new();
 analysis.add_file("entry", entry)?;
 analysis.add_file("library", library)?;
 let result = analysis.solve(&|_: &&str, reference: &ExternalReference| {
-    match &reference.binding {
+    match reference.binding() {
         ecco::Binding::Module { module, path } if module == "library" && path == &["read"] => {
             Ok(Resolution::Symbol(Symbol { file: "library", local: read }))
         }

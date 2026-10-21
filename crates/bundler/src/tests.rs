@@ -4,6 +4,15 @@ use source_graph::OwnedSourceFileInput;
 use std::collections::HashMap;
 use std::path::Path;
 
+pub(crate) fn corrupt<T: serde::Serialize + serde::de::DeserializeOwned>(
+    original: &T,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> T {
+    let mut value = serde_json::to_value(original).unwrap();
+    edit(&mut value);
+    serde_json::from_value(value).unwrap()
+}
+
 pub(crate) fn input(path: &str, source: &str) -> OwnedSourceFileInput {
     let parsed = parse_module(
         &logger::StdioLogger::new(),
@@ -13,10 +22,15 @@ pub(crate) fn input(path: &str, source: &str) -> OwnedSourceFileInput {
     )
     .unwrap();
     let resolutions = parsed
-        .facts
-        .dependencies
+        .facts()
+        .dependencies()
         .iter()
-        .map(|d| (d.id, DependencyTarget::File(d.specifier.clone().into())))
+        .map(|d| {
+            (
+                d.id(),
+                DependencyTarget::File(d.specifier().to_owned().into()),
+            )
+        })
         .collect();
     OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
 }
@@ -978,13 +992,18 @@ fn cache_ranges_and_facts_produce_the_same_plan_without_tracker_maps() {
         let record = segment_cache::CacheRecord::from_parsed(source, &parsed).unwrap();
         let bytes = record.encode(source).unwrap();
         drop(parsed);
-        let record = segment_cache::CacheRecord::decode(&bytes, source, record.config).unwrap();
+        let record = segment_cache::CacheRecord::decode(&bytes, source, record.config()).unwrap();
         let resolutions = record
-            .module
-            .facts
-            .dependencies
+            .module()
+            .facts()
+            .dependencies()
             .iter()
-            .map(|d| (d.id, DependencyTarget::File(d.specifier.clone().into())))
+            .map(|d| {
+                (
+                    d.id(),
+                    DependencyTarget::File(d.specifier().to_owned().into()),
+                )
+            })
             .collect();
         OwnedSourceFileInput::from_parsed(
             (*path).into(),
@@ -1015,7 +1034,7 @@ fn external_evaluation_is_explicit_and_type_reexports_do_not_evaluate() {
         "entry.ts",
         "import 'external'; export type {T} from 'types.ts';",
     );
-    let dependency = entry.facts.dependencies[0].id;
+    let dependency = entry.facts.dependencies()[0].id();
     entry
         .resolutions
         .insert(dependency, DependencyTarget::External("external".into()));

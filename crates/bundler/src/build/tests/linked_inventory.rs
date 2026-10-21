@@ -437,7 +437,9 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     let cycled = inventory::inventory(root).unwrap();
     assert_ne!(inventory, cycled);
     assert_eq!(cycled.directory_reads(), 21);
-    dependency.pattern = Some(vec!["./cycle/".into(), ".mjs".into()]);
+    let mut value = serde_json::to_value(&dependency).unwrap();
+    value["pattern"] = serde_json::json!(["./cycle/", ".mjs"]);
+    dependency = serde_json::from_value(value).unwrap();
     let external_importer = directories[20].join("one.mjs");
     let resolved = crate::context::resolve(
         root,
@@ -640,7 +642,7 @@ fn external_package_type_changes_reparse_unchanged_javascript() {
     let config = linked_options();
     let mut session = BuildSession::new(&root).unwrap();
     fresh_parity(&mut session, &config);
-    let esm = session.sources[&package.join("value.js")].record.config;
+    let esm = session.sources[&package.join("value.js")].record.config();
     write(
         dir.root(),
         "workspace/package.json",
@@ -649,7 +651,7 @@ fn external_package_type_changes_reparse_unchanged_javascript() {
     let cjs = fresh_parity(&mut session, &config);
     assert_ne!(
         esm,
-        session.sources[&package.join("value.js")].record.config
+        session.sources[&package.join("value.js")].record.config()
     );
     assert_eq!(cjs.counters.source_parses, 1);
     assert_eq!(observe(&cjs.product.artifacts), b"value\n");

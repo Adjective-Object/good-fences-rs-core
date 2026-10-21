@@ -5,10 +5,10 @@ use ast_segmenter::ExportedSymbol;
 #[test]
 fn unknown_external_star_collisions_keep_native_boundaries_and_all_routes() {
     let mut barrel = input("barrel.mjs", "export * from 'one'; export * from 'two';");
-    for dependency in &barrel.facts.dependencies {
+    for dependency in barrel.facts.dependencies() {
         barrel.resolutions.insert(
-            dependency.id,
-            DependencyTarget::External(dependency.specifier.clone()),
+            dependency.id(),
+            DependencyTarget::External(dependency.specifier().to_owned()),
         );
     }
     let graph = SourceGraph::from_owned([

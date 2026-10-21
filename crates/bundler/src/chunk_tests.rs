@@ -269,15 +269,15 @@ fn randomized_small_graphs_match_module_oracle_and_insertion_order() {
                     }
                 }
                 for &file in &files {
-                    for d in &graph.file_facts(file as u32).unwrap().dependencies {
-                        if d.kind == DependencyKind::DynamicImport {
+                    for d in graph.file_facts(file as u32).unwrap().dependencies() {
+                        if d.kind() == DependencyKind::DynamicImport {
                             expected.insert(
                                 RootId::Async(AsyncSiteId {
                                     module: format!("{file}.ts").into(),
-                                    offset: d.id.0,
+                                    offset: d.id().0,
                                     candidate: None,
                                 }),
-                                d.specifier.trim_end_matches(".ts").parse().unwrap(),
+                                d.specifier().trim_end_matches(".ts").parse().unwrap(),
                             );
                         }
                     }

@@ -191,15 +191,18 @@ fn prepared_css_parser_modes_key_disk_reuse_even_when_generated_text_is_unchange
         let before = ast_segmenter::module_parse_count();
         let cold = load(CacheMode::ReadWrite);
         assert!(matches!(cold.status, CacheStatus::Miss(_)));
-        assert_eq!(cold.record.config.commonjs, extension == "css.cjs");
+        assert_eq!(cold.record.config().commonjs(), extension == "css.cjs");
         let warm = load(CacheMode::ReadOnly);
         assert_eq!(warm.status, CacheStatus::Hit);
         assert_eq!(warm.record, cold.record);
         assert_eq!(ast_segmenter::module_parse_count(), before + 1);
         let parsed = warm.record.to_parsed(source).unwrap();
-        assert_eq!(parsed.provenance().config(), warm.record.config);
+        assert_eq!(parsed.provenance().config(), warm.record.config());
         let mut forged = warm.record;
-        forged.config.commonjs = !forged.config.commonjs;
+        forged = crate::test_builder::corrupt(&forged, |r| {
+            use crate::test_builder::RecordBuilder;
+            r.set("config.commonjs", !forged.config().commonjs());
+        });
         assert!(forged.to_parsed(source).is_err());
     }
 }
@@ -220,20 +223,20 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
     assert_eq!(warm.status, CacheStatus::Hit);
     assert_eq!(ast_segmenter::module_parse_count(), parses);
     assert_eq!(cold.record, warm.record);
-    let library = warm.record.module.facts.ecco.as_ref().unwrap();
+    let library = warm.record.module().facts().ecco().unwrap();
     let contract = library
         .declarations()
-        .definitions
+        .definitions()
         .iter()
-        .find(|definition| definition.binding == ecco::Binding::Local("forward".into()))
+        .find(|definition| *definition.binding() == ecco::Binding::Local("forward".into()))
         .unwrap();
-    assert_eq!(contract.returns, ecco::Returns::Argument("value".into()));
+    assert_eq!(contract.returns(), &ecco::Returns::Argument("value".into()));
     let forward = library
         .symbols()
         .iter()
-        .find(|symbol| symbol.name == "forward")
+        .find(|symbol| symbol.name() == "forward")
         .unwrap()
-        .id;
+        .id();
     let entry = std::sync::Arc::new(
         ecco::parse_source(
             "import {forward} from './library.mjs'; forward({});",
@@ -250,7 +253,7 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
         analysis.add_file("entry", entry.clone()).unwrap();
         let result = analysis
             .solve(&|_: &&str, reference: &ecco::ExternalReference| {
-                Ok(match &reference.binding {
+                Ok(match &reference.binding() {
                     ecco::Binding::Module { module, .. } if module == "./library.mjs" => {
                         ecco::Resolution::Symbol(ecco::Symbol {
                             file: "library",
@@ -346,8 +349,10 @@ fn interrupted_publication_preserves_valid_destination_and_cleans_staging() {
     .is_err());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
-    let mut invalid = cold.record;
-    invalid.source_len += 1;
+    let invalid = crate::test_builder::corrupt(&cold.record, |r| {
+        use crate::test_builder::RecordBuilder;
+        r.add("source_len", 1);
+    });
     assert!(publish(&path, SOURCE, SOURCE.as_bytes(), &invalid, || Ok(())).is_err());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
@@ -408,7 +413,7 @@ fn replacement_failure_is_nonfatal_and_does_not_remove_destination() {
         b"do not remove"
     );
     assert_eq!(
-        outcome.record.module.facts.dependencies[0].specifier,
+        outcome.record.module().facts().dependencies()[0].specifier(),
         "./dep"
     );
     no_staging(&dir);

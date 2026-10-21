@@ -25,6 +25,14 @@ Target export surfaces, retention and placement remain linker decisions.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
 
+Read persisted records through borrowed accessors, for example
+`parsed.facts().emission().segments()[i].source()`. Strings and collections
+borrow their storage; optional records return `Option<&T>`. Construction and
+finalization stay inside extraction, before provenance is sealed. `into_parts`
+and `into_facts` transfer ownership only at owned-adapter boundaries.
+This API encapsulation does not change Serde/CBOR layout or introduce a
+byte-backed representation.
+
 `facts.emission.execution` owns preorder callable/instance-initializer contexts,
 their parent links and reference/invocation context indices. Callable spans include
 parameter defaults; computed keys and static class initialization inherit their

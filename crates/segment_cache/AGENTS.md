@@ -1,5 +1,9 @@
 # segment_cache
 
+- `records` owns private cache storage; validation/sidecar consumers use accessors.
+  Corruption tests edit a serialized test-only projection, never add production
+  setters or mutable views of sealed facts.
+
 - Persist `ast_segmenter::owned::ModuleFacts`, body and ordered statement ranges;
   never legacy tracker tags, resolved paths, arena IDs or derived graph/effects.
 - Keep split-declarator ownership ranges disjoint; persist and validate shared

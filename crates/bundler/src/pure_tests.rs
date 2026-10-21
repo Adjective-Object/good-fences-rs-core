@@ -28,7 +28,11 @@ fn precise_block_comment_attachment_not_substrings_or_declaration_comments() {
     ] {
         let parsed = crate::tests::input("file.ts", source);
         assert_eq!(
-            parsed.facts.invocations.iter().any(|c| c.pure.is_some()),
+            parsed
+                .facts
+                .invocations()
+                .iter()
+                .any(|c| c.pure().is_some()),
             expected,
             "{source}"
         );
@@ -43,16 +47,16 @@ fn recipes_preserve_callee_receiver_arguments_and_spread_iteration() {
     assert!(result
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::PropertyRead));
+        .any(|s| s.reason() == EffectReason::PropertyRead));
     assert!(result
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::SpreadOrIteration));
+        .any(|s| s.reason() == EffectReason::SpreadOrIteration));
     let calls: Vec<_> = result
         .sites
         .iter()
-        .filter(|s| s.reason == EffectReason::Invocation)
-        .map(|s| &source[s.span.start as usize..s.span.end as usize])
+        .filter(|s| s.reason() == EffectReason::Invocation)
+        .map(|s| &source[s.span().start as usize..s.span().end as usize])
         .collect();
     assert_eq!(calls, ["sideEffect()"]);
     let rewrite = &result.rewrites[0];
@@ -61,7 +65,7 @@ fn recipes_preserve_callee_receiver_arguments_and_spread_iteration() {
         "object.method"
     );
     assert_eq!(rewrite.arguments.len(), 2);
-    assert!(rewrite.arguments[1].spread);
+    assert!(rewrite.arguments[1].spread());
     insta::assert_debug_snapshot!(result);
 }
 
@@ -78,7 +82,7 @@ fn pure_invocation_is_not_whole_statement_purity() {
     assert!(result
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::Invocation));
+        .any(|s| s.reason() == EffectReason::Invocation));
     let pure = SourceGraph::from_owned([crate::tests::input(
         "file.ts",
         "function f() {} /* @__PURE__ */ f();",
@@ -106,7 +110,7 @@ fn used_initializer_export_and_argument_results_keep_invocation() {
         .summary
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::Invocation));
+        .any(|s| s.reason() == EffectReason::Invocation));
     assert!(summary("consume(/* @__PURE__ */ f());", false)
         .rewrites
         .is_empty());
@@ -163,7 +167,7 @@ fn computed_receivers_and_construction_keep_all_input_evaluation() {
         result
             .sites
             .iter()
-            .filter(|s| s.reason == EffectReason::Invocation)
+            .filter(|s| s.reason() == EffectReason::Invocation)
             .count(),
         3
     );
@@ -173,22 +177,22 @@ fn computed_receivers_and_construction_keep_all_input_evaluation() {
     assert!(!new
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::Construction));
+        .any(|s| s.reason() == EffectReason::Construction));
     assert!(new
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::SpreadOrIteration));
+        .any(|s| s.reason() == EffectReason::SpreadOrIteration));
 }
 
 #[test]
 fn value_contexts_are_source_facts_not_policy_and_deferred_bodies_stay_intact() {
     let parsed = crate::tests::input("file.ts",
         "function f(x = /*PURE?*/ defaults()) { return /*@__PURE__*/ g(); } const v = (/*@__PURE__*/ a(), /*@__PURE__*/ b());");
-    let calls = &parsed.facts.invocations;
-    assert_eq!(calls[1].value_use, ValueUse::Required);
-    assert!(calls[1].deferred.is_some());
-    assert_eq!(calls[2].value_use, ValueUse::Discarded);
-    assert_eq!(calls[3].value_use, ValueUse::StatementValue);
+    let calls = &parsed.facts.invocations();
+    assert_eq!(calls[1].value_use(), ValueUse::Required);
+    assert!(calls[1].deferred().is_some());
+    assert_eq!(calls[2].value_use(), ValueUse::Discarded);
+    assert_eq!(calls[3].value_use(), ValueUse::StatementValue);
     let graph = SourceGraph::from_owned([parsed]);
     let plan = retain(&graph, &[], &[GraphNode::Segment(SegmentKey::new(0, 0))]).unwrap();
     assert!(plan.effects[0].summary.rewrites.is_empty());
@@ -212,7 +216,7 @@ fn late_binding_demand_restores_effect_order_and_opaque_cjs_ignores_hints() {
     assert_eq!(plan.segments.len(), 1);
     assert!(plan.effects[0].summary.rewrites.is_empty());
     assert_eq!(
-        plan.effects[0].summary.sites[0].reason,
+        plan.effects[0].summary.sites[0].reason(),
         EffectReason::OpaqueCommonJs
     );
 }
@@ -224,7 +228,10 @@ fn nested_recipes_compose_inside_the_original_optional_argument_guard() {
     assert_eq!(result.rewrites.len(), 2);
     let outer = &result.rewrites[0];
     let inner = &result.rewrites[1];
-    assert!(effects::contains(outer.arguments[0].span, inner.invocation));
+    assert!(effects::contains(
+        outer.arguments[0].span(),
+        inner.invocation
+    ));
     assert_eq!(
         outer.guard,
         ArgumentGuard::OriginalChain {
@@ -235,8 +242,8 @@ fn nested_recipes_compose_inside_the_original_optional_argument_guard() {
     let invocations: Vec<_> = result
         .sites
         .iter()
-        .filter(|s| s.reason == EffectReason::Invocation)
-        .map(|s| &source[s.span.start as usize..s.span.end as usize])
+        .filter(|s| s.reason() == EffectReason::Invocation)
+        .map(|s| &source[s.span().start as usize..s.span().end as usize])
         .collect();
     assert_eq!(invocations, ["sideEffect()"]);
     insta::assert_debug_snapshot!(result.rewrites);

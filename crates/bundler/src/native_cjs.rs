@@ -38,11 +38,11 @@ impl CommonJs {
             .values()
             .flat_map(|m| {
                 m.parsed
-                    .facts
-                    .bindings
+                    .facts()
+                    .bindings()
                     .iter()
-                    .map(|b| b.name.as_str())
-                    .chain(m.parsed.facts.references.iter().map(|r| r.name.as_str()))
+                    .map(|b| b.name())
+                    .chain(m.parsed.facts().references().iter().map(|r| r.name()))
             })
             .collect();
         let prefix = (0..)
@@ -53,18 +53,24 @@ impl CommonJs {
             browser,
             runtime: format!("{prefix}runtime"),
             runtime_required: modules.iter().any(|(&file, module)| {
-                module.parsed.facts.commonjs
-                    || module.parsed.facts.dependencies.iter().any(|dependency| {
-                        dependency.pattern.is_some()
-                            && plan.retention.segments.iter().any(|segment| {
-                                segment.key.file_id == file
-                                    && contains(
-                                        module.parsed.segments[segment.key.segment_idx as usize]
-                                            .span,
-                                        dependency.span,
-                                    )
-                            })
-                    })
+                module.parsed.facts().commonjs()
+                    || module
+                        .parsed
+                        .facts()
+                        .dependencies()
+                        .iter()
+                        .any(|dependency| {
+                            dependency.pattern().is_some()
+                                && plan.retention.segments.iter().any(|segment| {
+                                    segment.key.file_id == file
+                                        && contains(
+                                            module.parsed.segments()
+                                                [segment.key.segment_idx as usize]
+                                                .span,
+                                            dependency.span(),
+                                        )
+                                })
+                        })
             }),
             values: BTreeMap::new(),
             factories: BTreeMap::new(),
@@ -78,7 +84,7 @@ impl CommonJs {
             namespaces: BTreeMap::new(),
             entries: BTreeMap::new(),
         };
-        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
+        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts().commonjs()) {
             let original = graph.file_path(file).unwrap().to_owned();
             let body = NodeId::Segment {
                 module: original.clone(),
@@ -196,7 +202,7 @@ impl CommonJs {
                 );
             }
         }
-        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
+        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts().commonjs()) {
             let original = graph.file_path(file).unwrap().to_owned();
             if let Ok(default) = result.value(graph, file, &ImportedName::Name("default".into())) {
                 let mut path = default.path.clone();
@@ -221,25 +227,25 @@ impl CommonJs {
             for (&file, module) in modules {
                 for dependency in module
                     .parsed
-                    .facts
-                    .dependencies
+                    .facts()
+                    .dependencies()
                     .iter()
-                    .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+                    .filter(|d| !d.type_only() && d.kind() == DependencyKind::Require)
                 {
                     for target in target_files(graph, file, dependency)? {
-                        if modules[&target].parsed.facts.commonjs {
+                        if modules[&target].parsed.facts().commonjs() {
                             continue;
                         }
                         let original = graph.file_path(target).unwrap();
                         let name = format!("{prefix}esm_{}", digest(original.to_str().unwrap()));
-                        let facts = &modules[&target].parsed.facts;
+                        let facts = &modules[&target].parsed.facts();
                         let default_resource = require_defaults.contains(original);
                         if default_resource {
                             result.require_defaults.insert(target);
                         }
-                        if facts.dependencies.iter().all(|d| d.type_only)
+                        if facts.dependencies().iter().all(|d| d.type_only())
                             && (default_resource
-                                || facts.effects.iter().all(|effect| effect.deferred.is_some()))
+                                || facts.effects().iter().all(|effect| effect.deferred().is_some()))
                         {
                             // Instantiating a dependency-free, effect-free leaf
                             // cannot activate application code. Keep its native
@@ -262,7 +268,7 @@ impl CommonJs {
                         result
                             .members
                             .insert(NodeId::Module(original.to_owned()), path.clone());
-                        for (index, _) in modules[&target].parsed.segments.iter().enumerate() {
+                        for (index, _) in modules[&target].parsed.segments().iter().enumerate() {
                             result.members.insert(
                                 NodeId::Segment {
                                     module: original.to_owned(),
@@ -279,7 +285,7 @@ impl CommonJs {
             for &target in result.require_esm.keys() {
                 let original = graph.file_path(target).unwrap();
                 ensure!(
-                    modules[&target].parsed.facts.dependencies.iter().all(|d| d.type_only),
+                    modules[&target].parsed.facts().dependencies().iter().all(|d| d.type_only()),
                     "{}: browser synchronous require of ESM currently needs a dependency-free leaf; use import() for this evaluation boundary",
                     original.display()
                 );
@@ -294,17 +300,17 @@ impl CommonJs {
             for (&file, module) in modules {
                 for dependency in module
                     .parsed
-                    .facts
-                    .dependencies
+                    .facts()
+                    .dependencies()
                     .iter()
-                    .filter(|d| !d.type_only)
+                    .filter(|d| !d.type_only())
                 {
                     for target in target_files(graph, file, dependency)? {
                         if result.require_esm.contains_key(&target) {
                             ensure!(
-                                module.parsed.facts.commonjs && dependency.kind == DependencyKind::Require,
+                                module.parsed.facts().commonjs() && dependency.kind() == DependencyKind::Require,
                                 "{}:{}..{}: browser synchronous require of {} cannot share a native static/dynamic ESM job",
-                                graph.file_path(file).unwrap().display(), dependency.span.start, dependency.span.end,
+                                graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end,
                                 graph.file_path(target).unwrap().display()
                             );
                         }
@@ -417,7 +423,7 @@ impl CommonJs {
         namespaces: &BTreeMap<u32, PathBuf>,
     ) -> eyre::Result<Option<crate::context::Dispatch>> {
         let Some(DependencyTarget::Context(candidates)) =
-            graph.dependency_target(file, dependency.id)
+            graph.dependency_target(file, dependency.id())
         else {
             return Ok(None);
         };
@@ -506,42 +512,47 @@ impl CommonJs {
     ) -> eyre::Result<Code> {
         let mut requested = BTreeMap::new();
         let mut declarations = Code::default();
-        if dependency.kind == DependencyKind::Import {
+        if dependency.kind() == DependencyKind::Import {
             for import in facts
-                .imports
+                .imports()
                 .iter()
-                .filter(|i| i.dependency == dependency.id)
+                .filter(|i| i.dependency() == dependency.id())
             {
                 let binding = facts
-                    .bindings
+                    .bindings()
                     .iter()
-                    .find(|b| b.id == import.binding)
+                    .find(|b| b.id() == import.binding())
                     .unwrap();
-                if !symbols.imports.contains_key(&(file, binding.id))
+                if !symbols.imports.contains_key(&(file, binding.id()))
                     || !self.demands.get(&(file, target)).is_some_and(|nodes| {
-                        nodes.contains(&Self::node(graph, target, &import.imported))
+                        nodes.contains(&Self::node(graph, target, &import.imported()))
                     })
                 {
                     continue;
                 }
-                let value = self.value(graph, target, &import.imported)?;
-                declarations.push(self.import(graph, target, &import.imported, &binding.name)?);
-                requested.insert(import_key(&import.imported), &value.path);
+                let value = self.value(graph, target, &import.imported())?;
+                declarations.push(self.import(
+                    graph,
+                    target,
+                    &import.imported(),
+                    &binding.name(),
+                )?);
+                requested.insert(import_key(&import.imported()), &value.path);
             }
         } else {
-            for export in facts.exports.iter().filter(|e| {
-                matches!(e.value, ExportValue::ReExport { dependency: d, .. } if d == dependency.id)
+            for export in facts.exports().iter().filter(|e| {
+                matches!(e.value(), ExportValue::ReExport { dependency: d, .. } if *d == dependency.id())
             }) {
-                if export.name.is_none() && graph.has_external_star_exports(file) {
+                if export.name().is_none() && graph.has_external_star_exports(file) {
                     let proxy = &self.proxies[graph.file_path(target).unwrap()].0;
                     declarations.push(Code::request(proxy.clone(), RequestKind::ReExport).surrounded("export * from ", ";\n"));
                     continue;
                 }
-                let ExportValue::ReExport { imported, .. } = &export.value else {
+                let ExportValue::ReExport { imported, .. } = &export.value() else {
                     unreachable!()
                 };
-                let names = match &export.name {
-                    Some(name) => vec![(name.clone(), imported.clone())],
+                let names = match export.name() {
+                    Some(name) => vec![(name.to_owned(), imported.clone())],
                     None => symbols.exports[&file]
                         .iter()
                         .filter_map(|(public, linked)| match &linked.identity {
@@ -601,27 +612,27 @@ impl CommonJs {
             let module = &modules[&file];
             let mut renderer = crate::emit::CachedRenderer::new(
                 module.source,
-                &module.parsed.facts,
-                &module.parsed.facts.emission.segments[0],
+                &module.parsed.facts(),
+                &module.parsed.facts().emission().segments()[0],
                 &[],
             );
             let mut imports = BTreeMap::new();
             for dependency in module
                 .parsed
-                .facts
-                .dependencies
+                .facts()
+                .dependencies()
                 .iter()
-                .filter(|d| !d.type_only)
+                .filter(|d| !d.type_only())
             {
                 if let Some(DependencyTarget::External(specifier)) =
-                    graph.dependency_target(file, dependency.id)
+                    graph.dependency_target(file, dependency.id())
                 {
                     ensure!(
-                        !self.browser || dependency.kind != DependencyKind::Require,
+                        !self.browser || dependency.kind() != DependencyKind::Require,
                         "{}:{}..{}: browser target cannot require external {specifier:?}; use an ESM import or bundle the dependency",
-                        graph.file_path(file).unwrap().display(), dependency.span.start, dependency.span.end
+                        graph.file_path(file).unwrap().display(), dependency.span().start, dependency.span().end
                     );
-                    let (kind, prefix) = match dependency.kind {
+                    let (kind, prefix) = match dependency.kind() {
                         DependencyKind::Require => (RequestKind::Require, "require("),
                         DependencyKind::DynamicImport => (RequestKind::DynamicImport, "import("),
                         _ => eyre::bail!("static ESM external in opaque CommonJS body"),
@@ -633,7 +644,8 @@ impl CommonJs {
                     );
                     continue;
                 }
-                if dependency.pattern.is_some() && dependency.kind == DependencyKind::DynamicImport
+                if dependency.pattern().is_some()
+                    && dependency.kind() == DependencyKind::DynamicImport
                 {
                     renderer.context(
                         dependency,
@@ -642,7 +654,7 @@ impl CommonJs {
                     );
                     continue;
                 }
-                let targets = match graph.dependency_target(file, dependency.id) {
+                let targets = match graph.dependency_target(file, dependency.id()) {
                     Some(DependencyTarget::Context(candidates)) => candidates
                         .iter()
                         .map(|(request, path)| {
@@ -655,13 +667,13 @@ impl CommonJs {
                         })
                         .collect::<eyre::Result<BTreeMap<_, _>>>()?,
                     _ => BTreeMap::from([(
-                        dependency.specifier.clone(),
+                        dependency.specifier().to_owned(),
                         target_file(graph, file, dependency)?,
                     )]),
                 };
                 let mut requests = BTreeMap::new();
                 for (request, target) in targets {
-                    let replacement = match dependency.kind {
+                    let replacement = match dependency.kind() {
                         DependencyKind::Require => {
                             if let Some(other) = self.factories.get(&target) {
                                 if other.path != value.path
@@ -743,7 +755,7 @@ impl CommonJs {
                     };
                     requests.insert(request, replacement);
                 }
-                if dependency.pattern.is_some() {
+                if dependency.pattern().is_some() {
                     renderer.context(
                         dependency,
                         crate::context::Dispatch {
@@ -899,7 +911,7 @@ impl CommonJs {
             let (path, output) = output?;
             self.files.entry(path).or_default().push(output);
         }
-        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
+        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts().commonjs()) {
             let original = graph.file_path(file).unwrap().to_owned();
             if let Ok(default) = self.value(graph, file, &ImportedName::Name("default".into())) {
                 let path = &self.proxies[&original].0;
@@ -970,7 +982,7 @@ impl CommonJs {
             let name = &value.name;
             let mut hoisted = Code::default();
             let mut bodies = Code::default();
-            for index in 0..modules[&file].parsed.segments.len() {
+            for index in 0..modules[&file].parsed.segments().len() {
                 let key = SegmentKey::new(file, index as u32);
                 if live.contains(&key) {
                     let (declarations, body) = reconstruct(graph, key, &modules[&file], &values, &recipes, false)?
@@ -1038,12 +1050,12 @@ fn direct_request(graph: &SourceGraph, from: GraphNode, target: u32) -> bool {
     graph
         .file_facts(file)
         .unwrap()
-        .dependencies
+        .dependencies()
         .iter()
         .any(|d| {
-            !d.type_only
-                && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
-                && span.is_none_or(|span| contains(span, d.span))
+            !d.type_only()
+                && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                && span.is_none_or(|span| contains(span, d.span()))
                 && target_file(graph, file, d).is_ok_and(|f| f == target)
         })
 }

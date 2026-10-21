@@ -279,14 +279,14 @@ impl Retention<'_, '_> {
         for (index, statement) in statements.iter().enumerate() {
             let key = SegmentKey::new(file, index as u32);
             if self.native_externals
-                && self.facts(file)?.dependencies.iter().any(|dependency| {
-                    !dependency.type_only
+                && self.facts(file)?.dependencies().iter().any(|dependency| {
+                    !dependency.type_only()
                         && matches!(
-                            dependency.kind,
+                            dependency.kind(),
                             ast_segmenter::owned::DependencyKind::Import
                                 | ast_segmenter::owned::DependencyKind::ReExport
                         )
-                        && link::contains(statement.span, dependency.span)
+                        && link::contains(statement.span, dependency.span())
                 })
             {
                 self.queue.push_back(Demand::Binding(
@@ -363,7 +363,7 @@ impl Retention<'_, '_> {
                 self.queue.push_back(Demand::Evaluation(file));
                 if self.namespaces.insert(file) {
                     let mut routes = Vec::new();
-                    if self.facts(file)?.commonjs {
+                    if self.facts(file)?.commonjs() {
                         for index in 0..self.graph.file_segments(file).unwrap().len() {
                             routes.push(GraphNode::Segment(SegmentKey::new(file, index as u32)));
                         }
@@ -371,13 +371,13 @@ impl Retention<'_, '_> {
                         if self.graph.has_external_star_exports(file) {
                             for export in self
                                 .facts(file)?
-                                .exports
+                                .exports()
                                 .iter()
-                                .filter(|export| !export.type_only && export.name.is_none())
+                                .filter(|export| !export.type_only() && export.name().is_none())
                             {
                                 let index =
                                     self.graph.file_segments(file).unwrap().partition_point(
-                                        |segment| segment.span.end <= export.span.start,
+                                        |segment| segment.span.end <= export.span().start,
                                     );
                                 routes
                                     .push(GraphNode::Segment(SegmentKey::new(file, index as u32)));
@@ -393,9 +393,9 @@ impl Retention<'_, '_> {
                                 Err(error)
                                     if !self
                                         .facts(file)?
-                                        .exports
+                                        .exports()
                                         .iter()
-                                        .any(|e| e.name.as_ref() == Some(name)) =>
+                                        .any(|e| e.name() == Some(name.as_str())) =>
                                 {
                                     ensure!(
                                         error.to_string().starts_with("ambiguous ")

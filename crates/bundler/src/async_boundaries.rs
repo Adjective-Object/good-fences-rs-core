@@ -24,24 +24,24 @@ pub(crate) fn validate(graph: &SourceGraph, plan: &ChunkPlan) -> eyre::Result<()
             .file_facts(from.file_id)
             .ok_or_eyre("missing generated consumer facts")?;
         let reference = facts
-            .references
+            .references()
             .get(boundary.reference as usize)
             .ok_or_eyre("missing generated reference")?;
         eyre::ensure!(
             edge.kind == EdgeKind::LocalReference
                 && edge.to == GraphNode::Segment(boundary.target)
                 && edge.async_deferred
-                && reference.async_deferred
+                && reference.async_deferred()
                 && edge.read
                 && !edge.write
                 && !edge.type_only
-                && reference.read
-                && !reference.write
-                && !reference.type_only
-                && reference.span == edge.site
-                && reference.binding == edge.binding
+                && reference.read()
+                && !reference.write()
+                && !reference.type_only()
+                && reference.span() == edge.site
+                && reference.binding() == edge.binding
                 && graph.file_path(from.file_id) == Some(site.module.as_path())
-                && site.offset == reference.span.start
+                && site.offset == reference.span().start
                 && site.candidate.is_none(),
             "invalid generated reference occurrence"
         );
@@ -91,22 +91,22 @@ pub(crate) fn extract(
         let facts = graph
             .file_facts(key.file_id)
             .ok_or_eyre("missing extraction facts")?;
-        let recipe = &facts.emission.segments[key.segment_idx as usize];
-        if facts.commonjs
-            || !facts.top_level_await.is_empty()
-            || facts.dependencies.iter().any(|d| !d.type_only)
-            || !matches!(recipe.deferred, DeferredForm::Function)
-            || recipe.placement.declarations.len() != 1
-            || !recipe.placement.instantiable
+        let recipe = &facts.emission().segments()[key.segment_idx as usize];
+        if facts.commonjs()
+            || !facts.top_level_await().is_empty()
+            || facts.dependencies().iter().any(|d| !d.type_only())
+            || !matches!(recipe.deferred(), DeferredForm::Function)
+            || recipe.placement().declarations().len() != 1
+            || !recipe.placement().instantiable()
         {
             continue;
         }
-        let binding = recipe.placement.declarations[0];
+        let binding = recipe.placement().declarations()[0];
         let identity = ExportIdentity::Binding(key.file_id, binding);
         if facts
-            .bindings
+            .bindings()
             .iter()
-            .any(|b| b.id == binding && b.declarations.len() != 1)
+            .any(|b| b.id() == binding && b.declarations().len() != 1)
             || symbols
                 .exports
                 .values()
@@ -123,12 +123,12 @@ pub(crate) fn extract(
     let declaration = |file, binding| {
         let facts = graph.file_facts(file)?;
         let b = facts
-            .bindings
+            .bindings()
             .iter()
-            .find(|b| b.id == binding && b.top_level)?;
+            .find(|b| b.id() == binding && b.top_level())?;
         let index = graph
             .file_segments(file)?
-            .partition_point(|s| s.span.end <= b.declarations[0].start);
+            .partition_point(|s| s.span.end <= b.declarations()[0].start);
         Some(SegmentKey::new(file, index as u32))
     };
     // Removing an unsupported member may make a former internal reference an
@@ -139,12 +139,12 @@ pub(crate) fn extract(
             let facts = graph.file_facts(key.file_id).unwrap();
             let span = graph.file_segments(key.file_id).unwrap()[key.segment_idx as usize].span;
             for reference in facts
-                .references
+                .references()
                 .iter()
-                .filter(|r| !r.type_only && crate::link::contains(span, r.span))
+                .filter(|r| !r.type_only() && crate::link::contains(span, r.span()))
             {
-                if let Some(target) = reference.binding.and_then(|b| declaration(key.file_id, b)) {
-                    if !candidates.contains(&target) || reference.write {
+                if let Some(target) = reference.binding().and_then(|b| declaration(key.file_id, b)) {
+                    if !candidates.contains(&target) || reference.write() {
                         rejected.insert(key);
                     }
                 }
@@ -167,20 +167,20 @@ pub(crate) fn extract(
                 let source = &graph.edges()[index];
                 let consumer = graph.file_facts(from.file_id).unwrap();
                 let reference = consumer
-                    .references
+                    .references()
                     .iter()
-                    .position(|r| r.span == source.site);
+                    .position(|r| r.span() == source.site);
                 if edge.kind != RetentionEdgeKind::Binding
                     || source.kind != EdgeKind::LocalReference
                     || from.file_id != key.file_id
                     || !source.async_deferred || !source.read || source.write
                     || reference.is_none_or(|reference| {
-                        !consumer.emission.segments[from.segment_idx as usize].operations.iter().any(|op|
-                            matches!(op.kind, OperationKind::Reference { reference: r, .. } if r as usize == reference))
+                        !consumer.emission().segments()[from.segment_idx as usize].operations().iter().any(|op|
+                            matches!(op.kind(), OperationKind::Reference { reference: r, .. } if *r as usize == reference))
                     })
-                    || consumer.invocations.iter().any(|invocation|
-                        (invocation.optional_call || invocation.optional_chain)
-                        && crate::link::contains(invocation.span, source.site))
+                    || consumer.invocations().iter().any(|invocation|
+                        (invocation.optional_call() || invocation.optional_chain())
+                        && crate::link::contains(invocation.span(), source.site))
                     || original.retention.effects.iter().any(|effects| effects.key == from
                         && effects.summary.rewrites.iter().any(|rewrite|
                             crate::link::contains(rewrite.invocation, source.site)))
@@ -209,9 +209,9 @@ pub(crate) fn extract(
         let reference = graph
             .file_facts(from.file_id)
             .unwrap()
-            .references
+            .references()
             .iter()
-            .position(|r| r.span == source.site)
+            .position(|r| r.span() == source.site)
             .ok_or_eyre("missing boundary reference")? as u32;
         let site = AsyncSiteId {
             module: graph.file_path(from.file_id).unwrap().to_owned(),

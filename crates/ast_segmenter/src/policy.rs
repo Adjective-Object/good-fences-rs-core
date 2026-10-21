@@ -22,54 +22,55 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
     };
     policy.visit_program(program);
     let requires: Vec<_> = facts
-        .dependencies
+        .dependencies()
         .iter()
-        .filter(|d| d.kind == DependencyKind::Require)
+        .filter(|d| d.kind() == DependencyKind::Require)
         .collect();
-    for reference in &facts.references {
-        if reference.binding.is_some() || reference.type_only {
+    for reference in facts.references() {
+        if reference.binding().is_some() || reference.type_only() {
             continue;
         }
-        match reference.name.as_str() {
+        match reference.name() {
             "require" | "module" | "exports"
                 if !policy.commonjs
-                    && (reference.write
-                        || policy.wrapper_operations.contains(&reference.span.start)
-                        || (reference.name == "require"
-                            && !policy.typeof_names.contains(&reference.span.start))) =>
+                    && (reference.write()
+                        || policy.wrapper_operations.contains(&reference.span().start)
+                        || (reference.name() == "require"
+                            && !policy.typeof_names.contains(&reference.span().start))) =>
             {
-                policy.reject(reference.span, "mixed ESM/CommonJS wrapper reference");
+                policy.reject(reference.span(), "mixed ESM/CommonJS wrapper reference");
             }
             "require" if policy.commonjs => {
-                let i = requires.partition_point(|d| d.span.start <= reference.span.start);
+                let i = requires.partition_point(|d| d.span().start <= reference.span().start);
                 let direct_call = i.checked_sub(1).is_some_and(|i| {
                     let d = requires[i];
-                    reference.span.end <= d.specifier_span.start
-                        && reference.span.start >= d.span.start
+                    reference.span().end <= d.specifier_span().start
+                        && reference.span().start >= d.span().start
                 });
-                if reference.write || !direct_call {
+                if reference.write() || !direct_call {
                     policy.reject(
-                        reference.span,
+                        reference.span(),
                         "unsupported require reassignment, alias or indirect use",
                     );
                 }
             }
             "module"
                 if policy.commonjs
-                    && !reference.write
-                    && !policy.module_receivers.contains(&reference.span.start) =>
+                    && !reference.write()
+                    && !policy.module_receivers.contains(&reference.span().start) =>
             {
                 policy.reject(
-                    reference.span,
+                    reference.span(),
                     "unsupported module access (only module.exports is supported)",
                 );
             }
-            "eval" => policy.reject(reference.span, "unsupported unshadowed eval"),
+            "eval" => policy.reject(reference.span(), "unsupported unshadowed eval"),
             "arguments"
-                if policy.commonjs && policy.wrapper_arguments.contains(&reference.span.start) =>
+                if policy.commonjs
+                    && policy.wrapper_arguments.contains(&reference.span().start) =>
             {
                 policy.reject(
-                    reference.span,
+                    reference.span(),
                     "unsupported CommonJS wrapper arguments access",
                 );
             }
@@ -77,16 +78,16 @@ pub(crate) fn check(program: &Program<'_>, facts: &ModuleFacts) -> eyre::Result<
         }
     }
     if policy.commonjs {
-        for binding in &facts.bindings {
-            if binding.top_level
-                && !binding.type_only
-                && (matches!(binding.name.as_str(), "require" | "module" | "exports")
-                    || (matches!(binding.name.as_str(), "__filename" | "__dirname")
-                        && !binding.function_scoped
-                        && !binding.function))
+        for binding in facts.bindings() {
+            if binding.top_level()
+                && !binding.type_only()
+                && (matches!(binding.name(), "require" | "module" | "exports")
+                    || (matches!(binding.name(), "__filename" | "__dirname")
+                        && !binding.function_scoped()
+                        && !binding.function()))
             {
                 policy.reject(
-                    binding.declarations[0],
+                    binding.declarations()[0],
                     "unsupported CommonJS wrapper redeclaration",
                 );
             }

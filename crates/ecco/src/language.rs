@@ -89,8 +89,32 @@ pub enum CallArgument {
 /// Explicit fields override the wildcard default, independent of source order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HazardFields {
-    pub default: Option<HazardExpr>,
-    pub fields: Vec<(Hazard, HazardExpr)>,
+    default: Option<HazardExpr>,
+    fields: Vec<(Hazard, HazardExpr)>,
+}
+
+impl HazardFields {
+    pub fn new(default: Option<HazardExpr>, fields: Vec<(Hazard, HazardExpr)>) -> Self {
+        Self { default, fields }
+    }
+
+    pub(crate) fn default_mut(&mut self) -> &mut Option<HazardExpr> {
+        &mut self.default
+    }
+
+    pub(crate) fn fields_mut(&mut self) -> &mut Vec<(Hazard, HazardExpr)> {
+        &mut self.fields
+    }
+}
+
+impl HazardFields {
+    pub fn default_expression(&self) -> Option<&HazardExpr> {
+        self.default.as_ref()
+    }
+
+    pub fn fields(&self) -> &[(Hazard, HazardExpr)] {
+        &self.fields
+    }
 }
 
 impl HazardFields {
@@ -116,32 +140,193 @@ pub enum Returns {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Update {
-    pub target: String,
+    target: String,
     /// None means all hazard slots.
-    pub slot: Option<Hazard>,
-    pub expression: HazardExpr,
+    slot: Option<Hazard>,
+    expression: HazardExpr,
+}
+
+impl Update {
+    pub fn new(target: String, slot: Option<Hazard>, expression: HazardExpr) -> Self {
+        Self {
+            target,
+            slot,
+            expression,
+        }
+    }
+}
+
+impl Update {
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub fn slot(&self) -> Option<Hazard> {
+        self.slot
+    }
+
+    pub fn expression(&self) -> &HazardExpr {
+        &self.expression
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Definition {
-    pub binding: Binding,
-    pub parameters: Vec<String>,
-    pub rest: Option<String>,
-    pub variadic: bool,
-    pub hazards: HazardFields,
-    pub returns: Returns,
-    pub return_hazards: HazardFields,
-    pub updates: Vec<Update>,
+    binding: Binding,
+    parameters: Vec<String>,
+    rest: Option<String>,
+    variadic: bool,
+    hazards: HazardFields,
+    returns: Returns,
+    return_hazards: HazardFields,
+    updates: Vec<Update>,
+}
+
+impl Definition {
+    pub fn new(
+        binding: Binding,
+        parameters: Vec<String>,
+        rest: Option<String>,
+        variadic: bool,
+        hazards: HazardFields,
+        returns: Returns,
+        return_hazards: HazardFields,
+        updates: Vec<Update>,
+    ) -> Self {
+        Self {
+            binding,
+            parameters,
+            rest,
+            variadic,
+            hazards,
+            returns,
+            return_hazards,
+            updates,
+        }
+    }
+
+    pub(crate) fn binding_mut(&mut self) -> &mut Binding {
+        &mut self.binding
+    }
+
+    pub(crate) fn parameters_mut(&mut self) -> &mut Vec<String> {
+        &mut self.parameters
+    }
+
+    pub(crate) fn rest_mut(&mut self) -> &mut Option<String> {
+        &mut self.rest
+    }
+
+    pub(crate) fn variadic_mut(&mut self) -> &mut bool {
+        &mut self.variadic
+    }
+
+    pub(crate) fn hazards_mut(&mut self) -> &mut HazardFields {
+        &mut self.hazards
+    }
+
+    pub(crate) fn returns_mut(&mut self) -> &mut Returns {
+        &mut self.returns
+    }
+
+    pub(crate) fn return_hazards_mut(&mut self) -> &mut HazardFields {
+        &mut self.return_hazards
+    }
+
+    pub(crate) fn updates_mut(&mut self) -> &mut Vec<Update> {
+        &mut self.updates
+    }
+}
+
+impl Definition {
+    pub fn binding(&self) -> &Binding {
+        &self.binding
+    }
+
+    pub fn parameters(&self) -> &[String] {
+        &self.parameters
+    }
+
+    pub fn rest(&self) -> Option<&str> {
+        self.rest.as_deref()
+    }
+
+    pub fn variadic(&self) -> bool {
+        self.variadic
+    }
+
+    pub fn hazards(&self) -> &HazardFields {
+        &self.hazards
+    }
+
+    pub fn returns(&self) -> &Returns {
+        &self.returns
+    }
+
+    pub fn return_hazards(&self) -> &HazardFields {
+        &self.return_hazards
+    }
+
+    pub fn updates(&self) -> &[Update] {
+        &self.updates
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalFacts {
-    pub definitions: Vec<Definition>,
-    pub global_symbols: Vec<GlobalSymbol>,
+    definitions: Vec<Definition>,
+    global_symbols: Vec<GlobalSymbol>,
+}
+
+impl LocalFacts {
+    pub fn new(definitions: Vec<Definition>, global_symbols: Vec<GlobalSymbol>) -> Self {
+        Self {
+            definitions,
+            global_symbols,
+        }
+    }
+
+    pub(crate) fn definitions_mut(&mut self) -> &mut Vec<Definition> {
+        &mut self.definitions
+    }
+
+    pub(crate) fn global_symbols_mut(&mut self) -> &mut Vec<GlobalSymbol> {
+        &mut self.global_symbols
+    }
+
+    pub fn into_parts(self) -> (Vec<Definition>, Vec<GlobalSymbol>) {
+        (self.definitions, self.global_symbols)
+    }
+}
+
+impl LocalFacts {
+    pub fn definitions(&self) -> &[Definition] {
+        &self.definitions
+    }
+
+    pub fn global_symbols(&self) -> &[GlobalSymbol] {
+        &self.global_symbols
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalSymbol {
-    pub name: String,
-    pub read_effects: bool,
+    name: String,
+    read_effects: bool,
+}
+
+impl GlobalSymbol {
+    pub fn new(name: String, read_effects: bool) -> Self {
+        Self { name, read_effects }
+    }
+}
+
+impl GlobalSymbol {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn read_effects(&self) -> bool {
+        self.read_effects
+    }
 }

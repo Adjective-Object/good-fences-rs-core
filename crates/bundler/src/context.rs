@@ -27,7 +27,7 @@ pub(crate) fn resolve(
         let Some(request) = assembly::relative_request(importer, &target, false) else {
             continue;
         };
-        if dependency.kind == DependencyKind::DynamicImport {
+        if dependency.kind() == DependencyKind::DynamicImport {
             let encoded = assembly::relative_request(importer, &target, true)
                 .expect("the unencoded relative request exists");
             if dependency.matches_specifier(&encoded) {
@@ -40,7 +40,7 @@ pub(crate) fn resolve(
         if dependency.matches_specifier(&request) {
             requests.insert(request.clone(), request.clone());
         }
-        if dependency.kind == DependencyKind::Require {
+        if dependency.kind() == DependencyKind::Require {
             for extension in extensions {
                 if let Some(stem) =
                     request.strip_suffix(&format!(".{}", extension.trim_start_matches('.')))
@@ -62,7 +62,7 @@ pub(crate) fn resolve(
     requests
         .into_iter()
         .map(|(key, request)| {
-            let mode = if dependency.kind == DependencyKind::Require {
+            let mode = if dependency.kind() == DependencyKind::Require {
                 ResolutionMode::Require
             } else {
                 ResolutionMode::Import
@@ -85,18 +85,19 @@ pub(crate) fn may_match_directory(
         return true;
     }
     let prefix = dependency
-        .pattern
+        .pattern()
         .as_ref()
         .and_then(|parts| parts.first())
-        .unwrap_or(&dependency.specifier);
-    [false, dependency.kind == DependencyKind::DynamicImport]
+        .map(String::as_str)
+        .unwrap_or(dependency.specifier());
+    [false, dependency.kind() == DependencyKind::DynamicImport]
         .into_iter()
         .any(|url| {
             assembly::relative_request(importer, directory, url).is_some_and(|mut request| {
                 request.push('/');
                 request.starts_with(prefix) || prefix.starts_with(&request)
                     // Require also exposes a directory's index under its name.
-                    || (dependency.kind == DependencyKind::Require
+                    || (dependency.kind() == DependencyKind::Require
                         && dependency.matches_specifier(request.trim_end_matches('/')))
             })
         })

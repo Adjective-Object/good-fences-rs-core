@@ -9,6 +9,7 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{ScopeFlags, Semantic, SymbolFlags, SymbolId};
 use oxc_span::{GetSpan, Span};
+use records::Directive;
 use serde::{Deserialize, Serialize};
 
 /// Canonical parsed contract identity; never hashes raw declaration text.
@@ -18,178 +19,8 @@ pub fn declarations_hash(
     crate::fingerprint::declarations_hash(declarations)
 }
 
-/// The byte offset of a binding's first declaration, not an OXC symbol ID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BindingId(pub u32);
-
-/// The byte offset of a dependency expression/declaration. Repeated paths stay distinct.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct DependencyId(pub u32);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Binding {
-    pub id: BindingId,
-    pub name: String,
-    #[serde(with = "span_serde::list")]
-    pub declarations: Vec<Span>,
-    pub top_level: bool,
-    pub function_scoped: bool,
-    pub function: bool,
-    pub import: bool,
-    pub constant: bool,
-    pub type_only: bool,
-    pub ambient: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Reference {
-    pub name: String,
-    #[serde(with = "span_serde")]
-    pub span: Span,
-    pub binding: Option<BindingId>,
-    pub read: bool,
-    pub write: bool,
-    pub type_only: bool,
-    /// The nearest executing function body is async, so suspension may be inserted.
-    /// Not a claim that this reference executes after an existing await.
-    pub async_deferred: bool,
-    /// Wrapper parameter in CommonJS; never set for a lexical shadow.
-    pub commonjs: Option<CommonJsGlobal>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CommonJsGlobal {
-    Require,
-    Module,
-    Exports,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DependencyKind {
-    Import,
-    ReExport,
-    DynamicImport,
-    Require,
-    ImportType,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Dependency {
-    pub id: DependencyId,
-    pub kind: DependencyKind,
-    #[serde(with = "span_serde")]
-    pub span: Span,
-    pub specifier: String,
-    /// Literal pieces separated by runtime gaps, never resolved paths.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pattern: Option<Vec<String>>,
-    #[serde(with = "span_serde")]
-    pub specifier_span: Span,
-    pub type_only: bool,
-    /// Lexical containment only, not a claim that a module-level site runs eagerly.
-    #[serde(with = "span_serde::optional")]
-    pub enclosing_function: Option<Span>,
-}
-
-impl Dependency {
-    pub fn matches_specifier(&self, request: &str) -> bool {
-        let Some(parts) = &self.pattern else {
-            return request == self.specifier;
-        };
-        let Some(first) = parts.first() else {
-            return false;
-        };
-        let Some(mut rest) = request.strip_prefix(first) else {
-            return false;
-        };
-        if parts.len() == 1 {
-            return rest.is_empty();
-        }
-        let Some(middle) = rest.strip_suffix(parts.last().unwrap()) else {
-            return false;
-        };
-        rest = middle;
-        for part in &parts[1..parts.len() - 1] {
-            let Some(index) = rest.find(part) else {
-                return false;
-            };
-            rest = &rest[index + part.len()..];
-        }
-        true
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ImportedName {
-    Name(String),
-    Namespace,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportBinding {
-    pub dependency: DependencyId,
-    pub binding: BindingId,
-    pub imported: ImportedName,
-    #[serde(with = "span_serde")]
-    pub span: Span,
-    #[serde(with = "span_serde")]
-    pub imported_span: Span,
-    pub type_only: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExportValue {
-    Binding(BindingId),
-    ReExport {
-        dependency: DependencyId,
-        imported: ImportedName,
-    },
-    /// Includes anonymous default functions/classes and default expressions.
-    Expression(#[serde(with = "span_serde")] Span),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Export {
-    /// `None` means export-star, not a default export.
-    pub name: Option<String>,
-    pub value: ExportValue,
-    #[serde(with = "span_serde")]
-    pub span: Span,
-    /// Absent for the implicit `default` name and export-star.
-    #[serde(with = "span_serde::optional")]
-    pub name_span: Option<Span>,
-    pub type_only: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Directive {
-    pub value: String,
-    #[serde(with = "span_serde")]
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleFacts {
-    /// Owned lazy ESM operations, never solved effects. CJS stays opaque.
-    pub ecco: Option<ecco::ParsedFile>,
-    /// Effective contracts are identity inputs even for opaque CommonJS.
-    pub ecco_declarations_hash: crate::DeclarationFingerprint,
-    /// Effective parser format, including package policy for extensionless/.js input.
-    pub commonjs: bool,
-    /// Syntax-local await/for-await sites outside functions, not a schedule.
-    #[serde(with = "span_serde::list")]
-    pub top_level_await: Vec<Span>,
-    pub effects: Vec<crate::effects::EffectSite>,
-    pub invocations: Vec<crate::invocation::Invocation>,
-    pub emission: crate::emission::EmissionFacts,
-    pub bindings: Vec<Binding>,
-    pub references: Vec<Reference>,
-    pub dependencies: Vec<Dependency>,
-    pub imports: Vec<ImportBinding>,
-    pub exports: Vec<Export>,
-    pub directives: Vec<Directive>,
-    pub hashbang: Option<Directive>,
-}
+mod records;
+pub use records::*;
 
 /// Stable byte-pair representation, independent of OXC's serde features.
 pub mod span_serde {
@@ -247,18 +78,18 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         .symbol_ids()
         .map(|symbol| {
             let flags = scoping.symbol_flags(symbol);
-            Binding {
-                id: ids[&symbol],
-                name: scoping.symbol_name(symbol).to_owned(),
-                declarations: Vec::new(),
-                top_level: scoping.symbol_scope_id(symbol) == scoping.root_scope_id(),
-                function_scoped: flags.contains(SymbolFlags::FunctionScopedVariable),
-                function: flags.contains(SymbolFlags::Function),
-                import: flags.intersects(SymbolFlags::Import | SymbolFlags::TypeImport),
-                constant: flags.contains(SymbolFlags::ConstVariable),
-                type_only: flags.is_type() && !flags.is_value(),
-                ambient: flags.contains(SymbolFlags::Ambient),
-            }
+            Binding::new(
+                ids[&symbol],
+                scoping.symbol_name(symbol).to_owned(),
+                Vec::new(),
+                scoping.symbol_scope_id(symbol) == scoping.root_scope_id(),
+                flags.contains(SymbolFlags::FunctionScopedVariable),
+                flags.contains(SymbolFlags::Function),
+                flags.intersects(SymbolFlags::Import | SymbolFlags::TypeImport),
+                flags.contains(SymbolFlags::ConstVariable),
+                flags.is_type() && !flags.is_value(),
+                flags.contains(SymbolFlags::Ambient),
+            )
         })
         .collect();
     let mut visitor = Extractor {
@@ -267,25 +98,31 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
         binding_indices: bindings
             .iter()
             .enumerate()
-            .map(|(i, b): (_, &Binding)| (b.id, i))
+            .map(|(i, b): (_, &Binding)| (b.id(), i))
             .collect(),
-        facts: ModuleFacts {
-            commonjs: program.source_type.is_commonjs(),
+        facts: ModuleFacts::new(
+            Default::default(),
+            Default::default(),
+            program.source_type.is_commonjs(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
             bindings,
-            directives: program
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            program
                 .directives
                 .iter()
-                .map(|d| Directive {
-                    value: d.expression.value.to_string(),
-                    span: d.span,
-                })
+                .map(|d| Directive::new(d.expression.value.to_string(), d.span))
                 .collect(),
-            hashbang: program.hashbang.as_ref().map(|h| Directive {
-                value: h.value.to_string(),
-                span: h.span,
-            }),
-            ..ModuleFacts::default()
-        },
+            program
+                .hashbang
+                .as_ref()
+                .map(|h| Directive::new(h.value.to_string(), h.span)),
+        ),
         errors: Vec::new(),
         exported_declaration: None,
         commonjs: program.source_type.is_commonjs(),
@@ -296,20 +133,26 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
     visitor.visit_program(program);
     eyre::ensure!(visitor.errors.is_empty(), "{}", visitor.errors.join("; "));
     let mut facts = visitor.facts;
-    facts.bindings.sort_by_key(|b| b.id.0);
-    for binding in &mut facts.bindings {
-        binding.declarations.sort_by_key(|s| (s.start, s.end));
-        binding.declarations.dedup();
+    facts.bindings_mut().sort_by_key(|b| b.id().0);
+    for binding in facts.bindings_mut() {
+        binding.declarations_mut().sort_by_key(|s| (s.start, s.end));
+        binding.declarations_mut().dedup();
     }
-    facts.references.sort_by_key(|r| (r.span.start, r.span.end));
-    facts.dependencies.sort_by_key(|d| d.id.0);
-    facts.top_level_await.sort_by_key(|s| (s.start, s.end));
-    facts.imports.sort_by_key(|i| i.span.start);
     facts
-        .exports
-        .sort_by_key(|e| (e.span.start, e.name_span.map(|s| s.start)));
-    (facts.effects, facts.invocations) = crate::effects::extract(program, &facts);
-    let segments = if facts.commonjs {
+        .references_mut()
+        .sort_by_key(|r| (r.span().start, r.span().end));
+    facts.dependencies_mut().sort_by_key(|d| d.id().0);
+    facts
+        .top_level_await_mut()
+        .sort_by_key(|s| (s.start, s.end));
+    facts.imports_mut().sort_by_key(|i| i.span().start);
+    facts
+        .exports_mut()
+        .sort_by_key(|e| (e.span().start, e.name_span().map(|s| s.start)));
+    let (effects, invocations) = crate::effects::extract(program, &facts);
+    *facts.effects_mut() = effects;
+    *facts.invocations_mut() = invocations;
+    let segments = if facts.commonjs() {
         let span = Span::new(
             program.hashbang.as_ref().map_or(0, |h| h.span.end),
             program.source_text.len() as u32,
@@ -322,22 +165,22 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
             .flat_map(crate::multi_span::statement_sources)
             .collect()
     };
-    if !facts.commonjs {
-        for export in &mut facts.exports {
-            if let Some(name) = export.name_span {
+    if !facts.commonjs() {
+        for export in facts.exports_mut() {
+            if let Some(name) = export.name_span() {
                 let index = segments.partition_point(|(span, _)| span.end <= name.start);
                 if let Some((span, source)) = segments.get(index) {
                     if source.as_slice().len() > 1
                         && span.start <= name.start
                         && name.end <= span.end
                     {
-                        export.span = *span;
+                        *export.span_mut() = *span;
                     }
                 }
             }
         }
     }
-    facts.emission = crate::emission::extract(program, &facts, &segments);
+    *facts.emission_mut() = crate::emission::extract(program, &facts, &segments);
     Ok(facts)
 }
 
@@ -389,16 +232,16 @@ impl Extractor<'_, '_> {
             );
             return;
         }
-        self.facts.dependencies.push(Dependency {
-            id: DependencyId(span.start),
+        self.facts.dependencies_mut().push(Dependency::new(
+            DependencyId(span.start),
             kind,
             span,
-            specifier: pattern.join("*"),
-            pattern: Some(pattern),
-            specifier_span: source.span(),
-            type_only: false,
-            enclosing_function: self.enclosing_function,
-        });
+            pattern.join("*"),
+            Some(pattern),
+            source.span(),
+            false,
+            self.enclosing_function,
+        ));
     }
 
     fn binding(&self, id: &BindingIdentifier<'_>) -> BindingId {
@@ -407,10 +250,10 @@ impl Extractor<'_, '_> {
 
     fn root_binding(&self, name: &str) -> Option<BindingId> {
         self.facts
-            .bindings
+            .bindings()
             .iter()
-            .find(|b| b.top_level && b.name == name)
-            .map(|b| b.id)
+            .find(|b| b.top_level() && b.name() == name)
+            .map(|b| b.id())
     }
 
     fn dependency(
@@ -421,16 +264,16 @@ impl Extractor<'_, '_> {
         type_only: bool,
     ) -> DependencyId {
         let id = DependencyId(span.start);
-        self.facts.dependencies.push(Dependency {
+        self.facts.dependencies_mut().push(Dependency::new(
             id,
             kind,
             span,
-            specifier: source.value.to_string(),
-            pattern: None,
-            specifier_span: source.span,
+            source.value.to_string(),
+            None,
+            source.span,
             type_only,
-            enclosing_function: self.enclosing_function,
-        });
+            self.enclosing_function,
+        ));
         id
     }
 
@@ -443,14 +286,14 @@ impl Extractor<'_, '_> {
 impl<'a> Visit<'a> for Extractor<'_, 'a> {
     fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {
         if self.enclosing_function.is_none() {
-            self.facts.top_level_await.push(expression.span);
+            self.facts.top_level_await_mut().push(expression.span);
         }
         walk::walk_await_expression(self, expression);
     }
 
     fn visit_for_of_statement(&mut self, statement: &ForOfStatement<'a>) {
         if statement.r#await && self.enclosing_function.is_none() {
-            self.facts.top_level_await.push(statement.span);
+            self.facts.top_level_await_mut().push(statement.span);
         }
         walk::walk_for_of_statement(self, statement);
     }
@@ -458,19 +301,20 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     fn visit_binding_identifier(&mut self, id: &BindingIdentifier<'a>) {
         if let Some(symbol) = id.symbol_id.get() {
             let binding = self.ids[&symbol];
-            self.facts.bindings[self.binding_indices[&binding]]
-                .declarations
+            self.facts.bindings_mut()[self.binding_indices[&binding]]
+                .declarations_mut()
                 .push(id.span);
             if let Some((span, type_only)) = self.exported_declaration {
-                let info = &self.facts.bindings[self.binding_indices[&binding]];
-                if info.top_level {
-                    self.facts.exports.push(Export {
-                        name: Some(id.name.to_string()),
-                        value: ExportValue::Binding(binding),
+                let info = &self.facts.bindings()[self.binding_indices[&binding]];
+                if info.top_level() {
+                    let type_only = type_only || info.type_only();
+                    self.facts.exports_mut().push(Export::new(
+                        Some(id.name.to_string()),
+                        ExportValue::Binding(binding),
                         span,
-                        name_span: Some(id.span),
-                        type_only: type_only || info.type_only,
-                    });
+                        Some(id.span),
+                        type_only,
+                    ));
                 }
             }
         }
@@ -492,16 +336,17 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
         } else {
             None
         };
-        self.facts.references.push(Reference {
-            name: id.name.to_string(),
-            span: id.span,
-            binding: reference.symbol_id().map(|s| self.ids[&s]),
-            read: reference.is_read(),
-            write: reference.is_write(),
+        let reference = Reference::new(
+            id.name.to_string(),
+            id.span,
+            reference.symbol_id().map(|s| self.ids[&s]),
+            reference.is_read(),
+            reference.is_write(),
             type_only,
-            async_deferred: self.async_deferred,
+            self.async_deferred,
             commonjs,
-        });
+        );
+        self.facts.references_mut().push(reference);
     }
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -526,14 +371,15 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                         (ImportedName::Namespace, s.span, false)
                     }
                 };
-                self.facts.imports.push(ImportBinding {
+                let binding = self.binding(specifier.local());
+                self.facts.imports_mut().push(ImportBinding::new(
                     dependency,
-                    binding: self.binding(specifier.local()),
+                    binding,
                     imported,
-                    span: specifier.span(),
+                    specifier.span(),
                     imported_span,
-                    type_only: decl.import_kind.is_type() || type_only,
-                });
+                    decl.import_kind.is_type() || type_only,
+                ));
             }
         }
         walk::walk_import_declaration(self, decl);
@@ -562,19 +408,17 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             };
             let local_type_only = match &value {
                 ExportValue::Binding(binding) => {
-                    self.facts.bindings[self.binding_indices[binding]].type_only
+                    self.facts.bindings()[self.binding_indices[binding]].type_only()
                 }
                 _ => false,
             };
-            self.facts.exports.push(Export {
-                name: Some(specifier.exported.name().to_string()),
+            self.facts.exports_mut().push(Export::new(
+                Some(specifier.exported.name().to_string()),
                 value,
-                span: specifier.span,
-                name_span: Some(specifier.exported.span()),
-                type_only: decl.export_kind.is_type()
-                    || specifier.export_kind.is_type()
-                    || local_type_only,
-            });
+                specifier.span,
+                Some(specifier.exported.span()),
+                decl.export_kind.is_type() || specifier.export_kind.is_type() || local_type_only,
+            ));
         }
         let previous = self.exported_declaration;
         self.exported_declaration = decl.declaration.as_ref().map(|d| {
@@ -614,16 +458,16 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             }
             _ => false,
         };
-        self.facts.exports.push(Export {
-            name: Some("default".into()),
-            value: binding.map_or(
+        self.facts.exports_mut().push(Export::new(
+            Some("default".into()),
+            binding.map_or(
                 ExportValue::Expression(decl.declaration.span()),
                 ExportValue::Binding,
             ),
-            span: decl.span,
-            name_span: None,
+            decl.span,
+            None,
             type_only,
-        });
+        ));
         walk::walk_export_default_declaration(self, decl);
     }
 
@@ -634,16 +478,16 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
             &decl.source,
             decl.export_kind.is_type(),
         );
-        self.facts.exports.push(Export {
-            name: decl.exported.as_ref().map(|n| n.name().to_string()),
-            value: ExportValue::ReExport {
+        self.facts.exports_mut().push(Export::new(
+            decl.exported.as_ref().map(|n| n.name().to_string()),
+            ExportValue::ReExport {
                 dependency,
                 imported: ImportedName::Namespace,
             },
-            span: decl.span,
-            name_span: decl.exported.as_ref().map(GetSpan::span),
-            type_only: decl.export_kind.is_type(),
-        });
+            decl.span,
+            decl.exported.as_ref().map(GetSpan::span),
+            decl.export_kind.is_type(),
+        ));
         walk::walk_export_all_declaration(self, decl);
     }
 

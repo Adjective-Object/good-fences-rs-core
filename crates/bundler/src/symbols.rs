@@ -86,20 +86,20 @@ impl Symbols {
             let facts = graph
                 .file_facts(file)
                 .ok_or_eyre("missing owned link facts")?;
-            for binding in &facts.bindings {
-                originals.insert(binding.name.clone());
+            for binding in facts.bindings() {
+                originals.insert(binding.name().to_owned());
                 // Top-level imports disappear after checked read substitution;
                 // reserving their aliases needlessly renames observable functions.
-                if !binding.top_level || facts.commonjs {
-                    reserved.insert(binding.name.clone());
+                if !binding.top_level() || facts.commonjs() {
+                    reserved.insert(binding.name().to_owned());
                 }
             }
             reserved.extend(
                 facts
-                    .references
+                    .references()
                     .iter()
-                    .filter(|r| r.binding.is_none())
-                    .map(|r| r.name.clone()),
+                    .filter(|r| r.binding().is_none())
+                    .map(|r| r.name().to_owned()),
             );
         }
         let mut result = Self {
@@ -116,14 +116,14 @@ impl Symbols {
                 .file_segments(file)
                 .ok_or_eyre("missing source segments")?;
             let mut bindings: Vec<_> = facts
-                .bindings
+                .bindings()
                 .iter()
-                .filter(|b| b.top_level && !b.type_only && !b.ambient && !facts.commonjs)
+                .filter(|b| b.top_level() && !b.type_only() && !b.ambient() && !facts.commonjs())
                 .collect();
-            bindings.sort_by_key(|b| b.id.0);
+            bindings.sort_by_key(|b| b.id().0);
             for binding in bindings {
                 let mut declarations = BTreeSet::new();
-                for &span in &binding.declarations {
+                for &span in binding.declarations() {
                     let index = segments.partition_point(|s| s.span.end <= span.start);
                     ensure!(
                         segments
@@ -139,29 +139,29 @@ impl Symbols {
                 if declarations.is_empty() {
                     continue;
                 }
-                if binding.import {
+                if binding.import() {
                     let import = facts
-                        .imports
+                        .imports()
                         .iter()
-                        .find(|i| i.binding == binding.id)
+                        .find(|i| i.binding() == binding.id())
                         .ok_or_eyre("missing owned import")?;
                     let dependency = facts
-                        .dependencies
+                        .dependencies()
                         .iter()
-                        .find(|d| d.id == import.dependency)
+                        .find(|d| d.id() == import.dependency())
                         .ok_or_eyre("missing import dependency")?;
                     let mut linked =
                         if let Some(source_graph::DependencyTarget::External(specifier)) =
-                            graph.dependency_target(file, dependency.id)
+                            graph.dependency_target(file, dependency.id())
                         {
                             let node = GraphNode::Unlinked {
                                 file_id: file,
-                                dependency: dependency.id,
+                                dependency: dependency.id(),
                             };
                             LinkedExport {
                                 identity: ExportIdentity::External(
                                     specifier.clone(),
-                                    match &import.imported {
+                                    match &import.imported() {
                                         ImportedName::Name(name) => Some(name.clone()),
                                         ImportedName::Namespace => None,
                                     },
@@ -171,9 +171,9 @@ impl Symbols {
                             }
                         } else {
                             let target = super::link::target_file(graph, file, dependency)?;
-                            match &import.imported {
+                            match &import.imported() {
                                 ImportedName::Name(name) => {
-                                    graph.resolve_export(target, name, Namespace::Value)?
+                                    graph.resolve_export(target, &name, Namespace::Value)?
                                 }
                                 ImportedName::Namespace => LinkedExport {
                                     identity: ExportIdentity::Namespace(target),
@@ -189,13 +189,13 @@ impl Symbols {
                         route_retained(&linked),
                         "canonical import route is not retained"
                     );
-                    result.imports.insert((file, binding.id), linked);
+                    result.imports.insert((file, binding.id()), linked);
                     continue;
                 }
-                let name = allocate_name(&binding.name, &mut reserved, &originals, &mut fresh);
+                let name = allocate_name(&binding.name(), &mut reserved, &originals, &mut fresh);
                 result
                     .definitions
-                    .insert((file, binding.id), Definition { name });
+                    .insert((file, binding.id()), Definition { name });
             }
         }
         let files: BTreeSet<_> = files.into_iter().collect();
@@ -208,7 +208,12 @@ impl Symbols {
             for name in names {
                 let linked = match graph.resolve_export(file, &name, Namespace::Value) {
                     Ok(linked) => linked,
-                    Err(error) if !facts.exports.iter().any(|e| e.name.as_ref() == Some(&name)) => {
+                    Err(error)
+                        if !facts
+                            .exports()
+                            .iter()
+                            .any(|e| e.name() == Some(name.as_str())) =>
+                    {
                         // ResolveExport omits ambiguous/cycle-only star names.
                         ensure!(
                             error.to_string().starts_with("ambiguous ")

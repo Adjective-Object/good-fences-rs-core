@@ -65,13 +65,13 @@ impl OwnedSourceFileInput {
         parsed: ast_segmenter::ParsedModule,
         resolutions: AHashMap<DependencyId, DependencyTarget>,
     ) -> Self {
-        let provenance = Some(parsed.provenance().clone());
+        let (_, _, segments, facts, provenance) = parsed.into_parts();
         Self {
             path,
-            segments: parsed.segments,
-            facts: parsed.facts,
+            segments,
+            facts,
             resolutions,
-            provenance,
+            provenance: Some(provenance),
             prepared_resource: None,
         }
     }
@@ -168,10 +168,12 @@ impl SourceGraph {
                 segments: input.segments.clone(),
                 resolved_reexport_paths: input
                     .facts
-                    .dependencies
+                    .dependencies()
                     .iter()
-                    .filter_map(|d| match input.resolutions.get(&d.id) {
-                        Some(DependencyTarget::File(p)) => Some((d.specifier.clone(), p.clone())),
+                    .filter_map(|d| match input.resolutions.get(&d.id()) {
+                        Some(DependencyTarget::File(p)) => {
+                            Some((d.specifier().to_owned(), p.clone()))
+                        }
                         _ => None,
                     })
                     .collect(),
@@ -180,15 +182,13 @@ impl SourceGraph {
         }));
         for (file, input) in graph.files.iter_mut().zip(inputs) {
             file.symbol_to_segment.clear();
-            for export in &input.facts.exports {
-                if let Some(name) = &export.name {
+            for export in input.facts.exports() {
+                if let Some(name) = export.name() {
                     if let Some(index) = file.segments.iter().position(|s| {
-                        s.span.start <= export.span.start && export.span.end <= s.span.end
+                        s.span.start <= export.span().start && export.span().end <= s.span.end
                     }) {
-                        file.symbol_to_segment.insert(
-                            ast_segmenter::ExportedSymbol::from(name.as_str()),
-                            index as u32,
-                        );
+                        file.symbol_to_segment
+                            .insert(ast_segmenter::ExportedSymbol::from(name), index as u32);
                     }
                 }
             }
@@ -269,17 +269,17 @@ impl SourceGraph {
                 edges.extend(self.legacy_edges(file_id));
                 continue;
             };
-            for reference in &input.facts.references {
-                let Some(binding) = reference.binding else {
+            for reference in input.facts.references() {
+                let Some(binding) = reference.binding() else {
                     continue;
                 };
-                let Some(declaration) = input.facts.bindings.iter().find(|b| b.id == binding)
+                let Some(declaration) = input.facts.bindings().iter().find(|b| b.id() == binding)
                 else {
                     continue;
                 };
-                let from = self.segment_at(file_id, reference.span);
+                let from = self.segment_at(file_id, reference.span());
                 let mut targets = AHashSet::default();
-                for &span in &declaration.declarations {
+                for &span in declaration.declarations() {
                     let to = self.segment_at(file_id, span);
                     if targets.insert(to) {
                         edges.push(OccurrenceEdge {
@@ -288,28 +288,28 @@ impl SourceGraph {
                             kind: EdgeKind::LocalReference,
                             purpose: EdgePurpose::Binding,
                             activation: Activation::Synchronous,
-                            type_only: reference.type_only,
-                            site: reference.span,
+                            type_only: reference.type_only(),
+                            site: reference.span(),
                             dependency: None,
                             enclosing_function: None,
                             imported: None,
                             binding: Some(binding),
-                            read: reference.read,
-                            write: reference.write,
-                            async_deferred: reference.async_deferred,
+                            read: reference.read(),
+                            write: reference.write(),
+                            async_deferred: reference.async_deferred(),
                         });
                     }
                 }
             }
-            for dependency in &input.facts.dependencies {
-                let context = match input.resolutions.get(&dependency.id) {
+            for dependency in input.facts.dependencies() {
+                let context = match input.resolutions.get(&dependency.id()) {
                     Some(DependencyTarget::Context(candidates)) => Some(candidates),
                     _ => None,
                 };
-                if dependency.pattern.is_some() != context.is_some()
+                if dependency.pattern().is_some() != context.is_some()
                     || context.is_some_and(|candidates| {
                         !matches!(
-                            dependency.kind,
+                            dependency.kind(),
                             DependencyKind::DynamicImport | DependencyKind::Require
                         ) || candidates
                             .keys()
@@ -318,23 +318,23 @@ impl SourceGraph {
                 {
                     self.diagnostics.push(crate::LinkDiagnostic {
                         file_id,
-                        site: dependency.span,
+                        site: dependency.span(),
                         message: "dependency context does not match its source pattern".into(),
                     });
                     continue;
                 }
                 let unresolved = GraphNode::Unlinked {
                     file_id,
-                    dependency: dependency.id,
+                    dependency: dependency.id(),
                 };
-                let target = match input.resolutions.get(&dependency.id) {
+                let target = match input.resolutions.get(&dependency.id()) {
                     Some(DependencyTarget::File(path)) => self
                         .file_id(path)
                         .map(GraphNode::Module)
                         .unwrap_or(unresolved),
                     _ => unresolved,
                 };
-                let failure = match input.resolutions.get(&dependency.id) {
+                let failure = match input.resolutions.get(&dependency.id()) {
                     Some(DependencyTarget::External(_)) => None,
                     Some(DependencyTarget::Missing(message)) => Some(message.clone()),
                     Some(DependencyTarget::File(path)) if self.file_id(path).is_none() => {
@@ -344,17 +344,20 @@ impl SourceGraph {
                         .values()
                         .find(|path| self.file_id(path).is_none())
                         .map(|path| format!("context target not in graph: {}", path.display())),
-                    None => Some(format!("unresolved dependency {:?}", dependency.specifier)),
+                    None => Some(format!(
+                        "unresolved dependency {:?}",
+                        dependency.specifier()
+                    )),
                     _ => None,
                 };
                 if let Some(message) = failure {
                     self.diagnostics.push(crate::LinkDiagnostic {
                         file_id,
-                        site: dependency.span,
+                        site: dependency.span(),
                         message,
                     });
                 }
-                let kind = match dependency.kind {
+                let kind = match dependency.kind() {
                     DependencyKind::Import => EdgeKind::Import,
                     DependencyKind::ReExport => EdgeKind::ReExport,
                     DependencyKind::DynamicImport => EdgeKind::DynamicImport,
@@ -363,12 +366,12 @@ impl SourceGraph {
                 };
                 let bindings: Vec<_> = input
                     .facts
-                    .imports
+                    .imports()
                     .iter()
-                    .filter(|i| i.dependency == dependency.id)
+                    .filter(|i| i.dependency() == dependency.id())
                     .collect();
                 let base = OccurrenceEdge {
-                    from: self.segment_at(file_id, dependency.span),
+                    from: self.segment_at(file_id, dependency.span()),
                     to: target,
                     kind,
                     purpose: if kind == EdgeKind::ReExport {
@@ -383,10 +386,10 @@ impl SourceGraph {
                     } else {
                         Activation::Synchronous
                     },
-                    type_only: dependency.type_only,
-                    site: dependency.span,
-                    dependency: Some(dependency.id),
-                    enclosing_function: dependency.enclosing_function,
+                    type_only: dependency.type_only(),
+                    site: dependency.span(),
+                    dependency: Some(dependency.id()),
+                    enclosing_function: dependency.enclosing_function(),
                     imported: None,
                     binding: None,
                     read: false,
@@ -394,7 +397,7 @@ impl SourceGraph {
                     async_deferred: false,
                 };
                 if let Some(DependencyTarget::Context(candidates)) =
-                    input.resolutions.get(&dependency.id)
+                    input.resolutions.get(&dependency.id())
                 {
                     let mut seen = AHashSet::default();
                     for path in candidates.values() {
@@ -414,25 +417,25 @@ impl SourceGraph {
                 for binding in bindings {
                     edges.push(OccurrenceEdge {
                         purpose: EdgePurpose::Binding,
-                        imported: Some(binding.imported.clone()),
-                        binding: Some(binding.binding),
-                        type_only: binding.type_only,
-                        site: binding.span,
+                        imported: Some(binding.imported().clone()),
+                        binding: Some(binding.binding()),
+                        type_only: binding.type_only(),
+                        site: binding.span(),
                         ..base.clone()
                     });
                 }
-                for export in &input.facts.exports {
+                for export in input.facts.exports() {
                     if let ExportValue::ReExport {
                         dependency: id,
                         imported,
-                    } = &export.value
+                    } = &export.value()
                     {
-                        if *id == dependency.id {
+                        if *id == dependency.id() {
                             edges.push(OccurrenceEdge {
                                 purpose: EdgePurpose::Binding,
                                 imported: Some(imported.clone()),
-                                type_only: export.type_only,
-                                site: export.span,
+                                type_only: export.type_only(),
+                                site: export.span(),
                                 ..base.clone()
                             });
                         }
@@ -511,13 +514,13 @@ pub(crate) mod tests {
         )
         .unwrap();
         let resolutions = parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
             .map(|d| {
                 (
-                    d.id,
-                    DependencyTarget::File(PathBuf::from(d.specifier.clone())),
+                    d.id(),
+                    DependencyTarget::File(PathBuf::from(d.specifier().to_owned())),
                 )
             })
             .collect();
@@ -626,10 +629,11 @@ pub(crate) mod tests {
                 format,
             )
             .unwrap();
+            let (_, _, segments, facts, _) = parsed.into_parts();
             let graph = SourceGraph::from_owned([OwnedSourceFileInput::from_ranges(
                 "input.js".into(),
-                parsed.segments.iter().map(|s| s.span),
-                parsed.facts,
+                segments.iter().map(|s| s.span),
+                facts,
                 Default::default(),
             )]);
             let edges: Vec<_> = graph
@@ -684,7 +688,7 @@ pub(crate) mod tests {
             "main.mjs",
             "export const load = name => import(`./parts/${name}.mjs`);",
         );
-        let dependency = main.facts.dependencies[0].id;
+        let dependency = main.facts.dependencies()[0].id();
         let candidates = BTreeMap::from([
             ("./parts/a.mjs".into(), "a.mjs".into()),
             ("./parts/b.mjs".into(), "b.mjs".into()),
@@ -717,7 +721,7 @@ pub(crate) mod tests {
         assert!(SourceGraph::from_owned([main]).validate_links().is_err());
         let mut main = input("main.mjs", "import './a.mjs';");
         main.resolutions.insert(
-            main.facts.dependencies[0].id,
+            main.facts.dependencies()[0].id(),
             DependencyTarget::Context(BTreeMap::new()),
         );
         assert!(SourceGraph::from_owned([main]).validate_links().is_err());
@@ -733,10 +737,10 @@ pub(crate) mod tests {
         )
         .unwrap();
         let resolutions = parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
-            .map(|d| (d.id, DependencyTarget::File("empty.ts".into())))
+            .map(|d| (d.id(), DependencyTarget::File("empty.ts".into())))
             .collect();
         let graph = SourceGraph::from_owned([
             OwnedSourceFileInput::from_parsed("entry.cjs".into(), parsed, resolutions),

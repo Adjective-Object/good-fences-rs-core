@@ -6,109 +6,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::*;
 
-/// Source-local declaration start, independent of OXC's arena and symbol IDs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SymbolId(pub u32);
-
-/// Index into a parsed file's roots.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RootId(pub usize);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParsedSymbol {
-    pub id: SymbolId,
-    pub name: String,
-    #[serde(with = "span")]
-    pub span: Span,
-    pub(crate) value: ValueId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExternalReference {
-    pub binding: Binding,
-    #[serde(with = "span")]
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParsedRoot {
-    #[serde(with = "span")]
-    pub span: Span,
-    pub function: OwnedFunction,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ParsedValue {
-    pub hazards: Hazards,
-    pub definition: Option<usize>,
-    pub alias: Option<ValueId>,
-}
-
-/// Cacheable extraction only: no evaluated hazards, specialized calls, resolved
-/// cross-file links, or interpreter state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParsedFile {
-    pub(crate) version: u32,
-    pub(crate) facts: LocalFacts,
-    pub(crate) values: Vec<ParsedValue>,
-    pub(crate) functions: Vec<OwnedFunction>,
-    pub(crate) setup: OwnedFunction,
-    pub(crate) symbols: Vec<ParsedSymbol>,
-    pub(crate) roots: Vec<ParsedRoot>,
-    pub(crate) externals: Vec<ExternalReference>,
-    pub(crate) matches: Vec<DefinitionMatch>,
-}
+mod records;
+pub use records::*;
 
 impl ParsedFile {
-    /// Top-level definitions, addressed by declaration spans. Imports are
-    /// external references; the caller resolves through reexports to definitions.
-    pub fn symbols(&self) -> &[ParsedSymbol] {
-        &self.symbols
-    }
-
-    pub fn roots(&self) -> &[ParsedRoot] {
-        &self.roots
-    }
-
-    pub fn functions(&self) -> &[OwnedFunction] {
-        &self.functions
-    }
-
-    pub fn external_references(&self) -> &[ExternalReference] {
-        &self.externals
-    }
-
-    pub fn declarations(&self) -> &LocalFacts {
-        &self.facts
-    }
-
-    pub fn definition_matches(&self) -> &[DefinitionMatch] {
-        &self.matches
-    }
-
     /// Check deserialized IDs and references before they enter an interpreter.
     pub fn validate(&self) -> Result<()> {
-        crate::parser::validate_facts(&self.facts)?;
-        ensure!(self.version == 1, "unsupported Ecco parsed-file version");
-        ensure!(self.values.len() >= 2, "missing Ecco constant values");
+        crate::parser::validate_facts(&self.declarations())?;
+        ensure!(self.version() == 1, "unsupported Ecco parsed-file version");
+        ensure!(self.values().len() >= 2, "missing Ecco constant values");
         ensure!(
-            self.values[0].hazards == Hazards::NONE
-                && self.values[1].hazards == Hazards::UNKNOWN
-                && self.values[..2]
+            self.values()[0].hazards() == Hazards::NONE
+                && self.values()[1].hazards() == Hazards::UNKNOWN
+                && self.values()[..2]
                     .iter()
-                    .all(|v| v.alias.is_none() && v.definition.is_none()),
+                    .all(|v| v.alias().is_none() && v.definition().is_none()),
             "invalid Ecco constant values"
         );
-        let mut definitions = vec![false; self.facts.definitions.len()];
-        for value in &self.values {
-            if let Some(index) = value.definition {
+        let mut definitions = vec![false; self.declarations().definitions().len()];
+        for value in self.values() {
+            if let Some(index) = value.definition() {
                 let slot = definitions
                     .get_mut(index)
                     .ok_or_else(|| eyre!("invalid Ecco declaration index"))?;
                 ensure!(!*slot, "duplicate Ecco declaration slot");
                 *slot = true;
             }
-            if let Some(alias) = value.alias {
+            if let Some(alias) = value.alias() {
                 ensure!(self.valid_value(alias), "invalid Ecco initial alias");
             }
         }
@@ -117,36 +41,46 @@ impl ParsedFile {
             "missing Ecco declaration slot"
         );
         ensure!(
-            self.facts.definitions.iter().enumerate().all(|(index, _)| {
-                self.values
-                    .get(index + 2)
-                    .is_some_and(|v| v.definition == Some(index))
-            }),
+            self.declarations()
+                .definitions()
+                .iter()
+                .enumerate()
+                .all(|(index, _)| {
+                    self.values()
+                        .get(index + 2)
+                        .is_some_and(|v| v.definition() == Some(index))
+                }),
             "invalid Ecco declaration slot order"
         );
         let mut symbols = std::collections::HashSet::new();
-        for symbol in &self.symbols {
+        for symbol in self.symbols() {
             ensure!(
-                symbol.id.0 == symbol.span.start
-                    && symbol.span.start <= symbol.span.end
-                    && symbols.insert(symbol.id)
-                    && self.valid_value(symbol.value),
+                symbol.id().0 == symbol.span().start
+                    && symbol.span().start <= symbol.span().end
+                    && symbols.insert(symbol.id())
+                    && self.valid_value(symbol.value()),
                 "invalid or duplicate Ecco source symbol"
             );
         }
-        for reference in &self.externals {
+        for reference in self.external_references() {
             ensure!(
-                reference.span.start <= reference.span.end,
+                reference.span().start <= reference.span().end,
                 "invalid Ecco reference span"
             );
         }
-        for root in &self.roots {
-            ensure!(root.span.start <= root.span.end, "invalid Ecco root span");
-            ensure!(root.function.returns.len() == 1, "invalid Ecco root result");
-            self.validate_function(&root.function)?;
+        for root in self.roots() {
+            ensure!(
+                root.span().start <= root.span().end,
+                "invalid Ecco root span"
+            );
+            ensure!(
+                root.function().returns().len() == 1,
+                "invalid Ecco root result"
+            );
+            self.validate_function(&root.function())?;
         }
-        self.validate_function(&self.setup)?;
-        for function in &self.functions {
+        self.validate_function(&self.setup())?;
+        for function in self.functions() {
             self.validate_function(function)?;
         }
         Ok(())
@@ -241,16 +175,16 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
         let mut declaration_namespaces = HashMap::new();
         for (key, parsed) in &self.files {
             let environment = context.install_values(parsed);
-            for symbol in &parsed.symbols {
+            for symbol in parsed.symbols() {
                 symbols.insert(
                     Symbol {
                         file: key.clone(),
-                        local: symbol.id,
+                        local: symbol.id(),
                     },
-                    environment[&symbol.value],
+                    environment[&symbol.value()],
                 );
             }
-            for index in 0..parsed.roots.len() {
+            for index in 0..parsed.roots().len() {
                 root_values.insert((key.clone(), RootId(index)), context.value(Hazards::NONE));
             }
             namespaces.insert(key.clone(), namespace(&mut context));
@@ -261,7 +195,7 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
         for (key, parsed) in &self.files {
             let environment = &values[key];
             let mut externals = Vec::new();
-            for reference in &parsed.externals {
+            for reference in parsed.external_references() {
                 let value = match resolver.resolve(key, reference)? {
                     Resolution::Symbol(symbol) => *symbols
                         .get(&symbol)
@@ -274,10 +208,10 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
                         .ok_or_else(|| eyre!("resolver returned an unregistered Ecco namespace"))?,
                     Resolution::Declaration(binding) => {
                         if let Some(index) = parsed
-                            .facts
-                            .definitions
+                            .declarations()
+                            .definitions()
                             .iter()
-                            .position(|definition| definition.binding == binding)
+                            .position(|definition| definition.binding() == &binding)
                         {
                             context.declaration_value(parsed, environment, index)
                         } else {
@@ -308,13 +242,13 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
         for (key, parsed, _, roots) in installed {
             let roots = roots
                 .into_iter()
-                .zip(&parsed.roots)
+                .zip(parsed.roots())
                 .map(|(root, parsed)| {
                     let result = context.run_root(root);
                     SourceRoot {
-                        span: parsed.span,
-                        value: result.value,
-                        effects: result.effects,
+                        span: parsed.span(),
+                        value: result.value(),
+                        effects: result.effects(),
                     }
                 })
                 .collect();
@@ -322,11 +256,11 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
                 key.clone(),
                 FileAnalysis {
                     roots,
-                    matches: parsed.matches.clone(),
+                    matches: parsed.definition_matches().to_vec(),
                     symbols: parsed
-                        .symbols
+                        .symbols()
                         .iter()
-                        .map(|symbol| (symbol.id, values[key][&symbol.value]))
+                        .map(|symbol| (symbol.id(), values[key][&symbol.value()]))
                         .collect(),
                 },
             );
@@ -357,13 +291,13 @@ pub(crate) fn analyze_parsed(parsed: ParsedFile) -> Result<SourceAnalysis> {
     analysis.add_file((), parsed.clone())?;
     let result = analysis.solve(&|_: &(), reference: &ExternalReference| {
         if parsed
-            .facts
-            .definitions
+            .declarations()
+            .definitions()
             .iter()
-            .any(|d| d.binding == reference.binding)
-            || parsed.is_declared_namespace(&reference.binding)
+            .any(|d| d.binding() == reference.binding())
+            || parsed.is_declared_namespace(reference.binding())
         {
-            Ok(Resolution::Declaration(reference.binding.clone()))
+            Ok(Resolution::Declaration(reference.binding().clone()))
         } else {
             Ok(Resolution::Unknown)
         }
@@ -378,10 +312,8 @@ pub(crate) fn analyze_parsed(parsed: ParsedFile) -> Result<SourceAnalysis> {
 
 impl ParsedFile {
     fn is_declared_namespace(&self, binding: &Binding) -> bool {
-        self.facts
-            .definitions
-            .iter()
-            .any(|definition| match (binding, &definition.binding) {
+        self.declarations().definitions().iter().any(|definition| {
+            match (binding, definition.binding()) {
                 (Binding::Global(prefix), Binding::Global(path)) => {
                     prefix.len() < path.len() && path.starts_with(prefix)
                 }
@@ -394,9 +326,10 @@ impl ParsedFile {
                         module: other,
                         path,
                     },
-                ) => module == other && prefix.len() < path.len() && path.starts_with(prefix),
+                ) => *module == *other && prefix.len() < path.len() && path.starts_with(prefix),
                 _ => false,
-            })
+            }
+        })
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_builder::{corrupt, RecordBuilder};
 
 fn record(source: &str, path: &str, format: ModuleFormat) -> CacheRecord {
     let parsed = ast_segmenter::parse_module_with_declarations(
@@ -123,22 +124,30 @@ fn provenance_rejects_repaired_source_config_and_fact_pairings() {
     assert!(CacheRecord::from_parsed(changed, &parsed).is_err());
     let original = CacheRecord::from_parsed(source, &parsed).unwrap();
 
-    let mut replaced = original.clone();
-    replaced.source_hash = digest(changed.as_bytes());
+    let replaced = corrupt(&original, |r| {
+        r.set("source_hash", digest(changed.as_bytes()))
+    });
     assert!(replaced.to_parsed(changed).is_err());
-    assert!(CacheRecord::decode(&envelope(&replaced), changed, replaced.config).is_err());
+    assert!(CacheRecord::decode(&envelope(&replaced), changed, replaced.config()).is_err());
 
-    let mut replaced = original.clone();
-    replaced.config.commonjs = true;
+    let replaced = corrupt(&original, |r| r.set("config.commonjs", true));
     assert!(replaced.to_parsed(source).is_err());
 
-    let mut replaced = original;
-    replaced.module.facts.emission.segments[0].connector_only = true;
+    let replaced = corrupt(&original, |r| {
+        r.set("module.facts.emission.segments.0.connector_only", true)
+    });
     assert!(replaced.to_parsed(source).is_err());
 
-    let mut wrong_config = parsed;
-    wrong_config.source_type = oxc_span::SourceType::ts();
-    assert!(CacheRecord::from_parsed(source, &wrong_config).is_err());
+    let (_, body, segments, facts, provenance) = parsed.into_parts();
+    assert!(provenance
+        .verify(
+            source,
+            ParserConfig::from_source_type(oxc_span::SourceType::ts()),
+            body,
+            &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+            &facts
+        )
+        .is_err());
 }
 
 #[test]
@@ -170,13 +179,13 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         let first = record(source, path, format);
         let bytes = first.encode(source).unwrap();
         assert_eq!(bytes, record(source, path, format).encode(source).unwrap());
-        let decoded = CacheRecord::decode(&bytes, source, first.config).unwrap();
+        let decoded = CacheRecord::decode(&bytes, source, first.config()).unwrap();
         assert_eq!(first, decoded);
         assert_eq!(bytes, decoded.encode(source).unwrap());
         let parsed = decoded.to_parsed(source).unwrap();
         assert_eq!(
-            ParserConfig::from_source_type(parsed.source_type),
-            decoded.config
+            ParserConfig::from_source_type(parsed.source_type()),
+            decoded.config()
         );
     }
 }
@@ -185,28 +194,28 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
 fn rejects_corrupt_execution_contexts_and_access_timing() {
     let source =
         "let x; const stored = (p = x++) => () => x; (() => x++)(); class C { field = x++; }";
-    let mutations: &[fn(&mut ast_segmenter::emission::EmissionFacts)] = &[
+    let mutations: &[fn(&mut serde_json::Value)] = &[
         |e| {
-            e.execution.references.pop();
+            e.pop("execution.references");
         },
         |e| {
-            e.execution.invocations.clear();
+            e.clear("execution.invocations");
         },
-        |e| e.execution.contexts[0].parent = Some(0),
-        |e| e.execution.contexts[1].parent = None,
-        |e| e.execution.contexts[0].span.end = u32::MAX,
-        |e| e.execution.contexts[0].immediate = Some(u32::MAX),
-        |e| e.execution.contexts[3].immediate = Some(0),
-        |e| e.segments[1].placement.eager_writes.push(0),
-        |e| e.segments[2].placement.eager_reads.clear(),
+        |e| e.set("execution.contexts.0.parent", Some(0)),
+        |e| e.set("execution.contexts.1.parent", serde_json::Value::Null),
+        |e| e.set("execution.contexts.0.span.end", u32::MAX),
+        |e| e.set("execution.contexts.0.immediate", Some(u32::MAX)),
+        |e| e.set("execution.contexts.3.immediate", Some(0)),
+        |e| e.push("segments.1.placement.eager_writes", 0),
+        |e| e.clear("segments.2.placement.eager_reads"),
     ];
     let original = record(source, "emission.mjs", ModuleFormat::Esm);
-    crate::validate_emission::validate(&original.module, source).unwrap();
+    crate::validate_emission::validate(&original.module(), source).unwrap();
     for (index, mutate) in mutations.iter().enumerate() {
         let mut modified = original.clone();
-        mutate(&mut modified.module.facts.emission);
+        modified = corrupt(&modified, |value| mutate(value.at("module.facts.emission")));
         assert!(
-            crate::validate_emission::validate(&modified.module, source).is_err(),
+            crate::validate_emission::validate(&modified.module(), source).is_err(),
             "structural execution validation accepted mutation {index}"
         );
     }
@@ -222,20 +231,24 @@ fn rejects_invalid_or_repaired_multispan_sources() {
     assert!(serde_cbor::from_slice::<MultiSpan>(&encoded).is_err());
     let source = "export const a = 1, b = a;";
     let original = record(source, "file.mjs", ModuleFormat::Esm);
-    let mut changed = original.clone();
-    changed.module.facts.emission.segments[1].source = MultiSpan::from(changed.module.segments[1]);
+    let changed = corrupt(&original, |r| {
+        r.set(
+            "module.facts.emission.segments.1.source",
+            MultiSpan::from(original.module().segments()[1]),
+        )
+    });
     assert!(changed.to_parsed(source).is_err());
-    assert!(CacheRecord::decode(&envelope(&changed), source, original.config).is_err());
+    assert!(CacheRecord::decode(&envelope(&changed), source, original.config()).is_err());
 }
 
-fn reject_emission(source: &str, mutations: &[fn(&mut ast_segmenter::emission::EmissionFacts)]) {
+fn reject_emission(source: &str, mutations: &[fn(&mut serde_json::Value)]) {
     let original = record(source, "emission.mjs", ModuleFormat::Esm);
     for (i, mutate) in mutations.iter().enumerate() {
         let mut modified = original.clone();
-        mutate(&mut modified.module.facts.emission);
+        modified = corrupt(&modified, |value| mutate(value.at("module.facts.emission")));
         assert!(modified.encode(source).is_err(), "encode mutation {}", i);
         assert!(
-            CacheRecord::decode(&envelope(&modified), source, original.config).is_err(),
+            CacheRecord::decode(&envelope(&modified), source, original.config()).is_err(),
             "decode mutation {}",
             i
         );
@@ -297,36 +310,42 @@ fn rejects_malformed_emission_placement_names_and_namespace_links() {
         source,
         &[
             |e| {
-                e.segments.pop();
+                e.pop("segments");
             },
-            |e| e.nested_bindings.push(BindingId(999)),
-            |e| e.free_references.push(999),
-            |e| e.segments[0].connector_only = false,
-            |e| e.segments[2].placement.declarations.clear(),
-            |e| e.segments[2].placement.forward_references.clear(),
-            |e| e.segments[2].placement.hoisted = e.segments[2].placement.declarations.clone(),
-            |e| e.segments[3].placement.instantiable = false,
-            |e| e.segments[2].placement.eager_reads.push(999),
-            |e| e.segments[4].placement.writes.clear(),
-            |e| e.segments[6].placement.default_expression = false,
-            |e| e.segments[3].names.named.push(BindingId(999)),
-            |e| e.segments[2].namespaces[0].reference = 999,
+            |e| e.push("nested_bindings", BindingId(999)),
+            |e| e.push("free_references", 999),
+            |e| e.set("segments.0.connector_only", false),
+            |e| e.clear("segments.2.placement.declarations"),
+            |e| e.clear("segments.2.placement.forward_references"),
             |e| {
-                e.segments[2].namespaces[0].access = NamespaceAccess::DirectRead {
-                    member: Span::new(0, u32::MAX),
-                    property: "value".into(),
-                }
+                e.copy(
+                    "segments.2.placement.hoisted",
+                    "segments.2.placement.declarations",
+                )
+            },
+            |e| e.set("segments.3.placement.instantiable", false),
+            |e| e.push("segments.2.placement.eager_reads", 999),
+            |e| e.clear("segments.4.placement.writes"),
+            |e| e.set("segments.6.placement.default_expression", false),
+            |e| e.push("segments.3.names.named", BindingId(999)),
+            |e| e.set("segments.2.namespaces.0.reference", 999),
+            |e| {
+                e.set(
+                    "segments.2.namespaces.0.access",
+                    NamespaceAccess::DirectRead {
+                        member: Span::new(0, u32::MAX),
+                        property: "value".into(),
+                    },
+                )
             },
             |e| {
-                if let NamespaceAccess::DirectRead { property, .. } =
-                    &mut e.segments[2].namespaces[0].access
-                {
-                    property.clear();
-                }
+                e.clear("segments.2.namespaces.0.access.DirectRead.property");
             },
             |e| {
-                e.segments[2].namespaces[0].access =
-                    NamespaceAccess::Native(NamespaceReason::Receiver)
+                e.set(
+                    "segments.2.namespaces.0.access",
+                    NamespaceAccess::Native(NamespaceReason::Receiver),
+                )
             },
         ],
     );
@@ -344,9 +363,9 @@ fn rejects_missing_named_import_namespace_candidates() {
                 declaration
             ),
             &[
-                |e| e.segments[1].namespaces.clear(),
-                |e| e.segments[2].namespaces.clear(),
-                |e| e.segments[3].namespaces.clear(),
+                |e| e.clear("segments.1.namespaces"),
+                |e| e.clear("segments.2.namespaces"),
+                |e| e.clear("segments.3.namespaces"),
             ],
         );
     }
@@ -363,137 +382,133 @@ fn rejects_malformed_emission_operations_and_composition() {
         source,
         &[
             |e| {
-                e.segments[0].operations.remove(0);
+                e.at("segments.0.operations")
+                    .as_array_mut()
+                    .unwrap()
+                    .remove(0);
             },
             |e| {
-                let operation = e.segments[1].operations[0].clone();
-                e.segments[1].operations.push(operation);
+                let operation = e.at("segments.1.operations.0").clone();
+                e.push("segments.1.operations", operation);
             },
-            |e| e.segments[1].operations[0].parent = Some(0),
-            |e| e.segments[1].operations[1].parent = Some(u32::MAX),
-            |e| e.segments[1].operations.swap(0, 1),
-            |e| e.segments[2].operations.clear(),
+            |e| e.set("segments.1.operations.0.parent", Some(0)),
+            |e| e.set("segments.1.operations.1.parent", Some(u32::MAX)),
             |e| {
-                e.segments[0].operations[0].kind = OperationKind::Dependency {
-                    dependency: DependencyId(999),
-                }
+                e.at("segments.1.operations")
+                    .as_array_mut()
+                    .unwrap()
+                    .swap(0, 1)
             },
+            |e| e.clear("segments.2.operations"),
             |e| {
-                e.segments[1].operations[1].kind = OperationKind::Binding {
-                    binding: BindingId(999),
-                    declaration: 0,
-                    shorthand: Shorthand::None,
-                }
-            },
-            |e| {
-                if let OperationKind::Binding { declaration, .. } =
-                    &mut e.segments[1].operations[1].kind
-                {
-                    *declaration = 999;
-                }
+                e.set(
+                    "segments.0.operations.0.kind",
+                    OperationKind::Dependency {
+                        dependency: DependencyId(999),
+                    },
+                )
             },
             |e| {
-                e.segments[2].operations[0].kind = OperationKind::Reference {
-                    reference: 999,
-                    shorthand: Shorthand::None,
-                }
+                e.set(
+                    "segments.1.operations.1.kind",
+                    OperationKind::Binding {
+                        binding: BindingId(999),
+                        declaration: 0,
+                        shorthand: Shorthand::None,
+                    },
+                )
             },
             |e| {
-                e.segments[2].operations[0].kind = OperationKind::Reference {
-                    reference: 2,
-                    shorthand: Shorthand::Proto,
-                }
-            },
-            |e| e.segments[1].operations[2].kind = OperationKind::Namespace { usage: 999 },
-            |e| e.segments[3].operations.clear(),
-            |e| {
-                e.segments[2].operations[0].kind = OperationKind::SourceHint {
-                    span: Span::new(0, 6),
-                }
+                e.set("segments.1.operations.1.kind.Binding.declaration", 999);
             },
             |e| {
-                if let OperationKind::Export { form, .. } = &mut e.segments[1].operations[0].kind {
-                    *form = ExportForm::Default {
-                        value: SourceSlot {
-                            span: Span::new(0, 1),
-                            operations: vec![],
-                        },
-                        hoisted: true,
-                    };
-                }
+                e.set(
+                    "segments.2.operations.0.kind",
+                    OperationKind::Reference {
+                        reference: 999,
+                        shorthand: Shorthand::None,
+                    },
+                )
+            },
+            |e| {
+                e.set(
+                    "segments.2.operations.0.kind",
+                    OperationKind::Reference {
+                        reference: 2,
+                        shorthand: Shorthand::Proto,
+                    },
+                )
+            },
+            |e| {
+                e.set(
+                    "segments.1.operations.2.kind",
+                    OperationKind::Namespace { usage: 999 },
+                )
+            },
+            |e| e.clear("segments.3.operations"),
+            |e| {
+                e.set(
+                    "segments.2.operations.0.kind",
+                    OperationKind::SourceHint {
+                        span: Span::new(0, 6),
+                    },
+                )
+            },
+            |e| {
+                e.set(
+                    "segments.1.operations.0.kind.Export.form",
+                    serde_json::json!({
+                        "Default": {"value": {"span": [0, 1], "operations": []}, "hoisted": true}
+                    }),
+                );
             },
         ],
     );
 }
 
-fn outer_lowering(
-    emission: &mut ast_segmenter::emission::EmissionFacts,
-) -> &mut ast_segmenter::emission::PureLowering {
-    emission.segments[0]
-        .operations
-        .iter_mut()
-        .find_map(|operation| {
-            if let ast_segmenter::emission::OperationKind::Invocation { lowering, .. } =
-                &mut operation.kind
-            {
-                Some(lowering)
-            } else {
-                None
-            }
-        })
+fn outer_lowering(emission: &mut serde_json::Value) -> &mut serde_json::Value {
+    emission
+        .at("segments.0.operations")
+        .as_array_mut()
         .unwrap()
+        .iter_mut()
+        .find_map(|operation| operation["kind"].get_mut("Invocation"))
+        .unwrap()
+        .at("lowering")
 }
 
 #[test]
 fn rejects_malformed_pure_inputs_guards_and_source_slots() {
-    use ast_segmenter::emission::*;
     let source = "/*#__PURE__*/ obj?.[key()](/*#__PURE__*/ inner(arg), ...iterable, await later);";
     reject_emission(
         source,
         &[
-            |e| outer_lowering(e).callee.span.end = u32::MAX,
+            |e| outer_lowering(e).set("callee.span.end", u32::MAX),
             |e| {
-                outer_lowering(e).arguments.pop();
+                outer_lowering(e).pop("arguments");
             },
-            |e| outer_lowering(e).arguments[0].span.start += 1,
-            |e| outer_lowering(e).arguments[0].operations.clear(),
-            |e| outer_lowering(e).callee.operations.clear(),
-            |e| outer_lowering(e).chain.as_mut().unwrap().base.span.start += 1,
+            |e| outer_lowering(e).add("arguments.0.span.start", 1),
+            |e| outer_lowering(e).clear("arguments.0.operations"),
+            |e| outer_lowering(e).clear("callee.operations"),
+            |e| outer_lowering(e).add("chain.base.span.start", 1),
+            |e| outer_lowering(e).clear("chain.base.operations"),
+            |e| outer_lowering(e).set("guard_start", Some(0)),
+            |e| outer_lowering(e).set("guard_start", Some(u32::MAX)),
+            |e| outer_lowering(e).set("guard_start", serde_json::Value::Null),
+            |e| outer_lowering(e).set("crosses_await_guard", false),
+            |e| outer_lowering(e).clear("chain.steps"),
             |e| {
-                outer_lowering(e)
-                    .chain
-                    .as_mut()
-                    .unwrap()
-                    .base
-                    .operations
-                    .clear()
-            },
-            |e| outer_lowering(e).guard_start = Some(0),
-            |e| outer_lowering(e).guard_start = Some(u32::MAX),
-            |e| outer_lowering(e).guard_start = None,
-            |e| outer_lowering(e).crosses_await_guard = false,
-            |e| outer_lowering(e).chain.as_mut().unwrap().steps.clear(),
-            |e| {
-                if let ChainStep::Computed { property, .. } =
-                    &mut outer_lowering(e).chain.as_mut().unwrap().steps[0]
-                {
-                    property.span.end = u32::MAX;
-                }
+                outer_lowering(e).set("chain.steps.0.Computed.property.span.end", u32::MAX);
             },
             |e| {
-                if let ChainStep::Computed { property, .. } =
-                    &mut outer_lowering(e).chain.as_mut().unwrap().steps[0]
-                {
-                    property.operations.clear();
-                }
+                outer_lowering(e).clear("chain.steps.0.Computed.property.operations");
             },
-            |e| outer_lowering(e).callee.operations.push(u32::MAX),
+            |e| outer_lowering(e).push("callee.operations", u32::MAX),
             |e| {
-                if let OperationKind::Invocation { invocation, .. } =
-                    &mut e.segments[0].operations[0].kind
-                {
-                    *invocation = u32::MAX;
-                }
+                e.set(
+                    "segments.0.operations.0.kind.Invocation.invocation",
+                    u32::MAX,
+                );
             },
         ],
     );
@@ -505,70 +520,67 @@ fn rejects_nonopaque_cjs_emission_and_stale_recipe_versions() {
     let source = "module.exports = require('./x');";
     let original = record(source, "input.cjs", ModuleFormat::CommonJs);
     for mutate in [
-        |r: &mut CacheRecord| r.module.facts.emission.segments[0].connector_only = true,
-        |r: &mut CacheRecord| {
-            r.module.facts.emission.segments[0]
-                .names
-                .inference_sensitive = true
+        |r: &mut serde_json::Value| r.set("module.facts.emission.segments.0.connector_only", true),
+        |r: &mut serde_json::Value| {
+            r.set(
+                "module.facts.emission.segments.0.names.inference_sensitive",
+                true,
+            )
         },
-        |r: &mut CacheRecord| {
-            r.module.facts.emission.segments[0]
-                .placement
-                .eager_reads
-                .push(0)
+        |r: &mut serde_json::Value| {
+            r.push("module.facts.emission.segments.0.placement.eager_reads", 0)
         },
-        |r: &mut CacheRecord| {
-            r.module.facts.emission.segments[0].operations[0].kind = OperationKind::Reference {
-                reference: 0,
-                shorthand: Shorthand::None,
-            }
+        |r: &mut serde_json::Value| {
+            r.set(
+                "module.facts.emission.segments.0.operations.0.kind",
+                OperationKind::Reference {
+                    reference: 0,
+                    shorthand: Shorthand::None,
+                },
+            )
         },
-        |r: &mut CacheRecord| r.schema = 5,
-        |r: &mut CacheRecord| r.extractor = 8,
+        |r: &mut serde_json::Value| r.set("schema", 5),
+        |r: &mut serde_json::Value| r.set("extractor", 8),
     ] {
         let mut modified = original.clone();
-        mutate(&mut modified);
+        modified = corrupt(&modified, mutate);
         assert!(modified.encode(source).is_err());
-        assert!(CacheRecord::decode(&envelope(&modified), source, original.config).is_err());
+        assert!(CacheRecord::decode(&envelope(&modified), source, original.config()).is_err());
     }
 }
 #[test]
 fn rejects_recursive_slots_and_default_child_omission() {
-    use ast_segmenter::emission::*;
     let source = "/*#__PURE__*/ f();";
-    let mut modified = record(source, "input.mjs", ModuleFormat::Esm);
-    let call = &mut modified.module.facts.invocations[0];
-    call.callee = call.span;
-    let whole = call.span;
-    let plan = outer_lowering(&mut modified.module.facts.emission);
-    plan.callee = SourceSlot {
-        span: whole,
-        operations: vec![0],
-    };
-    plan.chain.as_mut().unwrap().base = plan.callee.clone();
+    let modified = corrupt(&record(source, "input.mjs", ModuleFormat::Esm), |r| {
+        r.copy(
+            "module.facts.invocations.0.callee",
+            "module.facts.invocations.0.span",
+        );
+        let whole = r.at("module.facts.invocations.0.span").clone();
+        let plan = outer_lowering(r.at("module.facts.emission"));
+        plan.set(
+            "callee",
+            serde_json::json!({"span": whole, "operations": [0]}),
+        );
+        plan.copy("chain.base", "callee");
+    });
     assert!(modified.encode(source).is_err());
-    assert!(CacheRecord::decode(&envelope(&modified), source, modified.config).is_err());
+    assert!(CacheRecord::decode(&envelope(&modified), source, modified.config()).is_err());
 
     reject_emission(
         "export default function(){ return value; }",
         &[|e| {
-            if let OperationKind::Export {
-                form: ExportForm::Default { value, .. },
-                ..
-            } = &mut e.segments[0].operations[0].kind
-            {
-                value.operations.clear();
-            }
+            e.clear("segments.0.operations.0.kind.Export.form.Default.value.operations");
         }],
     );
     reject_emission(
         "/*#__PURE__*/ object.method(arg()).next?.(...iterable);",
         &[|e| {
-            let chain = outer_lowering(e).chain.as_mut().unwrap();
-            let base = chain.base.clone();
-            for step in &mut chain.steps {
-                if let ChainStep::Call { suffix } = step {
-                    *suffix = base.clone();
+            let chain = outer_lowering(e).at("chain");
+            let base = chain.at("base").clone();
+            for step in chain.at("steps").as_array_mut().unwrap() {
+                if let Some(call) = step.get_mut("Call") {
+                    call.set("suffix", base.clone());
                 }
             }
         }],
@@ -580,32 +592,38 @@ fn rejects_versions_config_source_and_corruption() {
     let source = "export const café = 1;";
     let original = record(source, "file.js", ModuleFormat::Esm);
     for mutate in [
-        |r: &mut CacheRecord| r.schema += 1,
-        |r: &mut CacheRecord| r.extractor += 1,
-        |r: &mut CacheRecord| r.oxc.push('x'),
-        |r: &mut CacheRecord| r.magic.clear(),
-        |r: &mut CacheRecord| r.source_len += 1,
-        |r: &mut CacheRecord| r.source_hash[0] ^= 1,
-        |r: &mut CacheRecord| r.config.jsx = true,
+        |r: &mut serde_json::Value| r.add("schema", 1),
+        |r: &mut serde_json::Value| r.add("extractor", 1),
+        |r: &mut serde_json::Value| {
+            let value = format!("{}x", r.at("oxc").as_str().unwrap());
+            r.set("oxc", value);
+        },
+        |r: &mut serde_json::Value| r.clear("magic"),
+        |r: &mut serde_json::Value| r.add("source_len", 1),
+        |r: &mut serde_json::Value| {
+            let value = r.at("source_hash.0").as_u64().unwrap() ^ 1;
+            r.set("source_hash.0", value);
+        },
+        |r: &mut serde_json::Value| r.set("config.jsx", true),
     ] {
         let mut modified = original.clone();
-        mutate(&mut modified);
-        assert!(CacheRecord::decode(&envelope(&modified), source, original.config).is_err());
+        modified = corrupt(&modified, mutate);
+        assert!(CacheRecord::decode(&envelope(&modified), source, original.config()).is_err());
     }
     let bytes = original.encode(source).unwrap();
-    assert!(CacheRecord::decode(&bytes, "export const café = 2;", original.config).is_err());
+    assert!(CacheRecord::decode(&bytes, "export const café = 2;", original.config()).is_err());
     for i in 0..bytes.len() {
-        assert!(CacheRecord::decode(&bytes[..i], source, original.config).is_err());
+        assert!(CacheRecord::decode(&bytes[..i], source, original.config()).is_err());
         let mut corrupt = bytes.clone();
         corrupt[i] ^= 1;
         assert!(
-            CacheRecord::decode(&corrupt, source, original.config).is_err(),
+            CacheRecord::decode(&corrupt, source, original.config()).is_err(),
             "byte {i}"
         );
     }
     let mut trailing = bytes.clone();
     trailing.push(0);
-    assert!(CacheRecord::decode(&trailing, source, original.config).is_err());
+    assert!(CacheRecord::decode(&trailing, source, original.config()).is_err());
 }
 
 #[test]
@@ -613,26 +631,31 @@ fn rejects_impossible_spans_ids_and_order() {
     let source = "export const café = 1; console.log(café);";
     let original = record(source, "file.js", ModuleFormat::Esm);
     for mutate in [
-        |r: &mut CacheRecord| r.module.segments[0] = Span::new(2, 1),
-        |r: &mut CacheRecord| r.module.segments[0].end = u32::MAX,
-        |r: &mut CacheRecord| r.module.facts.bindings[0].declarations[0].end = 17,
-        |r: &mut CacheRecord| r.module.facts.bindings[0].id.0 += 1,
-        |r: &mut CacheRecord| {
-            r.module.facts.references[0].binding = Some(ast_segmenter::owned::BindingId(999))
+        |r: &mut serde_json::Value| r.set("module.segments.0", [2, 1]),
+        |r: &mut serde_json::Value| r.set("module.segments.0.end", u32::MAX),
+        |r: &mut serde_json::Value| r.set("module.facts.bindings.0.declarations.0.end", 17),
+        |r: &mut serde_json::Value| r.add("module.facts.bindings.0.id", 1),
+        |r: &mut serde_json::Value| {
+            r.set(
+                "module.facts.references.0.binding",
+                Some(ast_segmenter::owned::BindingId(999)),
+            )
         },
-        |r: &mut CacheRecord| r.module.segments.reverse(),
-        |r: &mut CacheRecord| r.module.facts.commonjs = true,
-        |r: &mut CacheRecord| r.module.facts.effects[0].span.end = u32::MAX,
-        |r: &mut CacheRecord| r.module.facts.effects.reverse(),
-        |r: &mut CacheRecord| r.module.facts.effects[0].deferred = Some(Span::new(0, 1)),
-        |r: &mut CacheRecord| r.module.facts.invocations[0].callee = Span::new(0, 1),
-        |r: &mut CacheRecord| r.module.facts.invocations[0].arguments[0].span.end = u32::MAX,
-        |r: &mut CacheRecord| r.module.facts.invocations[0].pure = Some(Span::new(0, 6)),
-        |r: &mut CacheRecord| r.module.facts.invocations[0].deferred = Some(Span::new(0, 1)),
+        |r: &mut serde_json::Value| r.reverse("module.segments"),
+        |r: &mut serde_json::Value| r.set("module.facts.commonjs", true),
+        |r: &mut serde_json::Value| r.set("module.facts.effects.0.span.end", u32::MAX),
+        |r: &mut serde_json::Value| r.reverse("module.facts.effects"),
+        |r: &mut serde_json::Value| r.set("module.facts.effects.0.deferred", [0, 1]),
+        |r: &mut serde_json::Value| r.set("module.facts.invocations.0.callee", [0, 1]),
+        |r: &mut serde_json::Value| {
+            r.set("module.facts.invocations.0.arguments.0.span.end", u32::MAX)
+        },
+        |r: &mut serde_json::Value| r.set("module.facts.invocations.0.pure", [0, 6]),
+        |r: &mut serde_json::Value| r.set("module.facts.invocations.0.deferred", [0, 1]),
     ] {
         let mut modified = original.clone();
-        mutate(&mut modified);
-        assert!(CacheRecord::decode(&envelope(&modified), source, original.config).is_err());
+        modified = corrupt(&modified, mutate);
+        assert!(CacheRecord::decode(&envelope(&modified), source, original.config()).is_err());
     }
 }
 
@@ -654,16 +677,16 @@ fn bounded_decoder_rejects_allocation_and_depth_bombs() {
 fn rejects_invalid_async_syntax_sites() {
     let source = "await 1; await 2;";
     let original = record(source, "async.mjs", ModuleFormat::Esm);
-    assert_eq!(original.module.facts.top_level_await.len(), 2);
+    assert_eq!(original.module().facts().top_level_await().len(), 2);
     for mutate in [
-        |r: &mut CacheRecord| r.module.facts.top_level_await.reverse(),
-        |r: &mut CacheRecord| r.module.facts.top_level_await[0].end = u32::MAX,
-        |r: &mut CacheRecord| r.module.facts.top_level_await[0] = Span::new(8, 8),
-        |r: &mut CacheRecord| r.schema = 4,
-        |r: &mut CacheRecord| r.extractor = 5,
+        |r: &mut serde_json::Value| r.reverse("module.facts.top_level_await"),
+        |r: &mut serde_json::Value| r.set("module.facts.top_level_await.0.end", u32::MAX),
+        |r: &mut serde_json::Value| r.set("module.facts.top_level_await.0", [8, 8]),
+        |r: &mut serde_json::Value| r.set("schema", 4),
+        |r: &mut serde_json::Value| r.set("extractor", 5),
     ] {
         let mut modified = original.clone();
-        mutate(&mut modified);
-        assert!(CacheRecord::decode(&envelope(&modified), source, original.config).is_err());
+        modified = corrupt(&modified, mutate);
+        assert!(CacheRecord::decode(&envelope(&modified), source, original.config()).is_err());
     }
 }

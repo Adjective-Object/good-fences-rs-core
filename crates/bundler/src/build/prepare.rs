@@ -101,7 +101,7 @@ pub(super) fn load(
         previous.filter(|s| {
             s.input == input
                 && s.text == text
-                && s.record.config == config
+                && s.record.config() == config
                 && s.record.matches_prepared_declarations(declarations)
         })
     });

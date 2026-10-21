@@ -12,35 +12,8 @@ use serde::{Deserialize, Serialize};
 use crate::invocation::{self, Invocation, ValueUse};
 use crate::owned::ModuleFacts;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum EffectReason {
-    UnknownExpression,
-    UnknownControl,
-    Invocation,
-    Construction,
-    PropertyRead,
-    Coercion,
-    Mutation,
-    SpreadOrIteration,
-    Destructuring,
-    ClassHeritage,
-    ComputedKey,
-    StaticBlock,
-    UnresolvedRead,
-    BindingRead,
-    OpaqueCommonJs,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectSite {
-    #[serde(with = "crate::owned::span_serde")]
-    pub span: Span,
-    pub reason: EffectReason,
-    /// None means module evaluation; otherwise execution waits for this function
-    /// or instance field initializer. Lexical containment is not a call graph.
-    #[serde(with = "crate::owned::span_serde::optional")]
-    pub deferred: Option<Span>,
-}
+mod records;
+pub use records::*;
 
 pub(crate) fn extract(
     program: &Program<'_>,
@@ -69,11 +42,11 @@ pub(crate) fn extract(
     }
     visitor
         .sites
-        .sort_by_key(|s| (s.span.start, s.span.end, s.reason));
+        .sort_by_key(|s| (s.span().start, s.span().end, s.reason()));
     visitor.sites.dedup();
     visitor
         .invocations
-        .sort_by_key(|c| (c.span.start, c.span.end));
+        .sort_by_key(|c| (c.span().start, c.span().end));
     (visitor.sites, visitor.invocations)
 }
 
@@ -90,11 +63,8 @@ struct Effects<'f> {
 
 impl Effects<'_> {
     fn add(&mut self, span: Span, reason: EffectReason) {
-        self.sites.push(EffectSite {
-            span,
-            reason,
-            deferred: self.deferred,
-        });
+        self.sites
+            .push(EffectSite::new(span, reason, self.deferred));
     }
 }
 
@@ -162,24 +132,24 @@ impl<'a> Visit<'a> for Effects<'_> {
     fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
         let Ok(index) = self
             .facts
-            .references
+            .references()
             .binary_search_by_key(&(identifier.span.start, identifier.span.end), |r| {
-                (r.span.start, r.span.end)
+                (r.span().start, r.span().end)
             })
         else {
             return;
         };
-        let reference = &self.facts.references[index];
-        if reference.type_only || !reference.read {
+        let reference = &self.facts.references()[index];
+        if reference.type_only() || !reference.read() {
             return;
         }
-        if let Some(binding) = reference.binding {
+        if let Some(binding) = reference.binding() {
             // Even a lexical local can throw in its TDZ. Hoisted function reads cannot.
             if !self
                 .facts
-                .bindings
-                .binary_search_by_key(&binding.0, |b| b.id.0)
-                .is_ok_and(|i| self.facts.bindings[i].function)
+                .bindings()
+                .binary_search_by_key(&binding.0, |b| b.id().0)
+                .is_ok_and(|i| self.facts.bindings()[i].function())
             {
                 self.add(identifier.span, EffectReason::BindingRead);
             }
@@ -190,18 +160,18 @@ impl<'a> Visit<'a> for Effects<'_> {
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         self.add(call.span, EffectReason::Invocation);
-        self.invocations.push(Invocation {
-            span: call.span,
-            callee: call.callee.span(),
-            shape: invocation::shape(&call.callee, self.facts),
-            arguments: invocation::arguments(&call.arguments),
-            construct: false,
-            optional_call: call.optional,
-            optional_chain: invocation::optional_chain(&call.callee),
-            pure: invocation::pure_comment(self.comments, self.source, call.span.start, call.pure),
-            deferred: self.deferred,
-            value_use: self.value_use,
-        });
+        self.invocations.push(Invocation::new(
+            call.span,
+            call.callee.span(),
+            invocation::shape(&call.callee, self.facts),
+            invocation::arguments(&call.arguments),
+            false,
+            call.optional,
+            invocation::optional_chain(&call.callee),
+            invocation::pure_comment(self.comments, self.source, call.span.start, call.pure),
+            self.deferred,
+            self.value_use,
+        ));
         let previous = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_call_expression(self, call);
         self.value_use = previous;
@@ -209,18 +179,18 @@ impl<'a> Visit<'a> for Effects<'_> {
 
     fn visit_new_expression(&mut self, call: &NewExpression<'a>) {
         self.add(call.span, EffectReason::Construction);
-        self.invocations.push(Invocation {
-            span: call.span,
-            callee: call.callee.span(),
-            shape: invocation::shape(&call.callee, self.facts),
-            arguments: invocation::arguments(&call.arguments),
-            construct: true,
-            optional_call: false,
-            optional_chain: false,
-            pure: invocation::pure_comment(self.comments, self.source, call.span.start, call.pure),
-            deferred: self.deferred,
-            value_use: self.value_use,
-        });
+        self.invocations.push(Invocation::new(
+            call.span,
+            call.callee.span(),
+            invocation::shape(&call.callee, self.facts),
+            invocation::arguments(&call.arguments),
+            true,
+            false,
+            false,
+            invocation::pure_comment(self.comments, self.source, call.span.start, call.pure),
+            self.deferred,
+            self.value_use,
+        ));
         let previous = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_new_expression(self, call);
         self.value_use = previous;

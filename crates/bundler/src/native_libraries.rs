@@ -100,8 +100,8 @@ pub(super) fn cluster(
         let bytes = keys
             .iter()
             .map(|key| {
-                modules[&key.file_id].parsed.facts.emission.segments[key.segment_idx as usize]
-                    .source
+                modules[&key.file_id].parsed.facts().emission().segments()[key.segment_idx as usize]
+                    .source()
                     .as_slice()
                     .iter()
                     .map(|span| (span.end - span.start) as usize)
@@ -227,8 +227,8 @@ fn certify(
     let mut selected: BTreeSet<_> = moves.keys().copied().collect();
     let mut edges = Vec::new();
     for (&file, module) in modules {
-        for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
-            !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+        for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
+            !d.type_only() && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
         }) {
             for target in target_files(graph, file, dependency)? {
                 edges.push((file, target));
@@ -249,7 +249,7 @@ fn certify(
     }
     let mut placements = existing.clone();
     for &file in &selected {
-        if modules[&file].parsed.facts.emission.uses_this {
+        if modules[&file].parsed.facts().emission().uses_this() {
             return Ok(None);
         }
         placements.entry(file).or_insert(seams[&file]);
@@ -267,12 +267,12 @@ fn certify(
         return Ok(None);
     };
     for (&file, module) in modules {
-        for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
-            !d.type_only
-                && d.kind == DependencyKind::DynamicImport
+        for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
+            !d.type_only()
+                && d.kind() == DependencyKind::DynamicImport
                 && plan.roots.contains_key(&RootId::Async(AsyncSiteId {
                     module: graph.file_path(file).unwrap().to_owned(),
-                    offset: d.id.0,
+                    offset: d.id().0,
                     candidate: None,
                 }))
         }) {

@@ -60,31 +60,32 @@ impl DeclarationConfig {
             .map_err(|error| eyre!("{error}"))?;
         let mut user = LocalFacts::default();
         for facts in &self.user {
-            user.definitions.extend(facts.definitions.iter().cloned());
-            user.global_symbols
-                .extend(facts.global_symbols.iter().cloned());
+            user.definitions_mut()
+                .extend(facts.definitions().iter().cloned());
+            user.global_symbols_mut()
+                .extend(facts.global_symbols().iter().cloned());
         }
         ensure!(
-            user.definitions
+            user.definitions()
                 .iter()
-                .all(|definition| !matches!(definition.binding, Binding::Local(_))),
+                .all(|definition| !matches!(definition.binding(), Binding::Local(_))),
             "build-wide declarations cannot contain local contracts"
         );
         crate::parser::validate_facts(&user)?;
         let mut definitions = BTreeMap::new();
         let mut symbols = BTreeMap::new();
         for facts in [presets, &user] {
-            for definition in &facts.definitions {
+            for definition in facts.definitions() {
                 definitions.insert(binding_key(definition), definition.clone());
             }
-            for symbol in &facts.global_symbols {
-                symbols.insert(symbol.name.clone(), symbol.clone());
+            for symbol in facts.global_symbols() {
+                symbols.insert(symbol.name().to_owned(), symbol.clone());
             }
         }
-        Ok(LocalFacts {
-            definitions: definitions.into_values().collect(),
-            global_symbols: symbols.into_values().collect(),
-        })
+        Ok(LocalFacts::new(
+            definitions.into_values().collect(),
+            symbols.into_values().collect(),
+        ))
     }
 
     fn preset_facts(&self, environment: Environment) -> Result<LocalFacts> {
@@ -92,8 +93,8 @@ impl DeclarationConfig {
         if self.javascript {
             let mut facts = parse_declarations(include_str!("../presets/ecmascript2025.ecco"))?;
             let mut expanded = Vec::new();
-            for definition in facts.definitions {
-                let Binding::Global(path) = &definition.binding else {
+            for definition in std::mem::take(facts.definitions_mut()) {
+                let Binding::Global(path) = definition.binding() else {
                     unreachable!("JavaScript preset contains only globals")
                 };
                 if path[0] == "TypedArray" {
@@ -114,33 +115,35 @@ impl DeclarationConfig {
                         let mut alias = definition.clone();
                         let mut path = path.clone();
                         path[0] = name.to_owned();
-                        alias.binding = Binding::Global(path);
+                        *alias.binding_mut() = Binding::Global(path);
                         expanded.push(alias);
                     }
                 } else {
                     expanded.push(definition);
                 }
             }
-            facts.definitions = expanded;
-            for definition in &facts.definitions {
-                let Binding::Global(path) = &definition.binding else {
+            *facts.definitions_mut() = expanded;
+            for definition in facts.definitions() {
+                let Binding::Global(path) = definition.binding() else {
                     unreachable!("JavaScript preset contains only globals")
                 };
                 let mut alias = definition.clone();
-                alias.binding = Binding::Global(
+                *alias.binding_mut() = Binding::Global(
                     std::iter::once("globalThis".to_owned())
                         .chain(path.iter().cloned())
                         .collect(),
                 );
-                presets.definitions.push(alias);
+                presets.definitions_mut().push(alias);
             }
-            presets.definitions.extend(facts.definitions);
-            presets.global_symbols.extend(facts.global_symbols);
+            let (definitions, symbols) = facts.into_parts();
+            presets.definitions_mut().extend(definitions);
+            presets.global_symbols_mut().extend(symbols);
         }
         if environment == Environment::Node && self.node {
             let facts = parse_declarations(include_str!("../presets/node24.ecco"))?;
-            for definition in facts.definitions {
-                if let Binding::Module { module, path } = &definition.binding {
+            let (definitions, symbols) = facts.into_parts();
+            for definition in definitions {
+                if let Binding::Module { module, path } = definition.binding() {
                     let mut modules = vec![module.clone()];
                     if !matches!(
                         module.as_str(),
@@ -150,42 +153,43 @@ impl DeclarationConfig {
                     }
                     for module in modules {
                         let mut alias = definition.clone();
-                        alias.binding = Binding::Module {
+                        *alias.binding_mut() = Binding::Module {
                             module: module.clone(),
                             path: path.clone(),
                         };
-                        presets.definitions.push(alias);
+                        presets.definitions_mut().push(alias);
                         if path.first().is_some_and(|name| name != "default") {
                             let mut alias = definition.clone();
-                            alias.binding = Binding::Module {
+                            *alias.binding_mut() = Binding::Module {
                                 module,
                                 path: std::iter::once("default".to_owned())
                                     .chain(path.iter().cloned())
                                     .collect(),
                             };
-                            presets.definitions.push(alias);
+                            presets.definitions_mut().push(alias);
                         }
                     }
                 } else {
                     let mut alias = definition.clone();
-                    let Binding::Global(path) = &definition.binding else {
+                    let Binding::Global(path) = definition.binding() else {
                         unreachable!("Node preset contains no locals")
                     };
-                    alias.binding = Binding::Global(
+                    *alias.binding_mut() = Binding::Global(
                         std::iter::once("globalThis".to_owned())
                             .chain(path.iter().cloned())
                             .collect(),
                     );
-                    presets.definitions.push(alias);
-                    presets.definitions.push(definition);
+                    presets.definitions_mut().push(alias);
+                    presets.definitions_mut().push(definition);
                 }
             }
-            presets.global_symbols.extend(facts.global_symbols);
+            presets.global_symbols_mut().extend(symbols);
         }
         if environment == Environment::Browser && self.browser {
             let facts = parse_declarations(include_str!("../presets/browser.ecco"))?;
-            presets.definitions.extend(facts.definitions);
-            presets.global_symbols.extend(facts.global_symbols);
+            let (definitions, symbols) = facts.into_parts();
+            presets.definitions_mut().extend(definitions);
+            presets.global_symbols_mut().extend(symbols);
         }
         crate::parser::validate_facts(&presets)?;
         Ok(presets)
@@ -193,7 +197,7 @@ impl DeclarationConfig {
 }
 
 fn binding_key(definition: &Definition) -> (u8, String, Vec<String>) {
-    match &definition.binding {
+    match definition.binding() {
         Binding::Global(path) => (0, String::new(), path.clone()),
         Binding::Module { module, path } => (1, module.clone(), path.clone()),
         Binding::Local(name) => (2, name.clone(), Vec::new()),
@@ -204,9 +208,9 @@ fn binding_key(definition: &Definition) -> (u8, String, Vec<String>) {
 ///
 /// This does not match arbitrary children of a declared namespace.
 pub fn declaration_matches(facts: &LocalFacts, binding: &Binding) -> bool {
-    facts.definitions.iter().any(|definition| {
-        definition.binding == *binding
-            || match (binding, &definition.binding) {
+    facts.definitions().iter().any(|definition| {
+        *definition.binding() == *binding
+            || match (binding, definition.binding()) {
                 (Binding::Global(prefix), Binding::Global(path)) => {
                     prefix.len() < path.len() && path.starts_with(prefix)
                 }
@@ -219,7 +223,7 @@ pub fn declaration_matches(facts: &LocalFacts, binding: &Binding) -> bool {
                         module: other,
                         path,
                     },
-                ) => module == other && prefix.len() < path.len() && path.starts_with(prefix),
+                ) => *module == *other && prefix.len() < path.len() && path.starts_with(prefix),
                 _ => false,
             }
     })

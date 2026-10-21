@@ -11,10 +11,15 @@ fn input_with_format(path: &str, source: &str, format: ModuleFormat) -> OwnedSou
     let parsed =
         parse_module(&logger::StdioLogger::new(), source, Path::new(path), format).unwrap();
     let resolutions = parsed
-        .facts
-        .dependencies
+        .facts()
+        .dependencies()
         .iter()
-        .map(|d| (d.id, DependencyTarget::File(d.specifier.clone().into())))
+        .map(|d| {
+            (
+                d.id(),
+                DependencyTarget::File(d.specifier().to_owned().into()),
+            )
+        })
         .collect();
     OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
 }
@@ -35,15 +40,15 @@ fn graph_pair(inputs: Vec<OwnedSourceFileInput>) -> (SourceGraph, SourceGraph) {
             segments: i.segments.clone(),
             resolved_import_paths: i
                 .facts
-                .dependencies
+                .dependencies()
                 .iter()
-                .map(|d| (d.specifier.clone(), d.specifier.clone().into()))
+                .map(|d| (d.specifier().to_owned(), d.specifier().to_owned().into()))
                 .collect(),
             resolved_reexport_paths: i
                 .facts
-                .dependencies
+                .dependencies()
                 .iter()
-                .map(|d| (d.specifier.clone(), d.specifier.clone().into()))
+                .map(|d| (d.specifier().to_owned(), d.specifier().to_owned().into()))
                 .collect(),
         }
     }));

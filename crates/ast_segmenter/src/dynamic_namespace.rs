@@ -19,32 +19,32 @@ pub(super) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> (Vec<Dynami
     };
     visitor.visit_program(program);
     let observations = facts
-        .dependencies
+        .dependencies()
         .iter()
-        .filter(|d| d.kind == DependencyKind::DynamicImport)
+        .filter(|d| d.kind() == DependencyKind::DynamicImport)
         .map(|d| DynamicNamespace {
-            dependency: d.id,
+            dependency: d.id(),
             properties: visitor
                 .imports
-                .remove(&d.id.0)
+                .remove(&d.id().0)
                 .and_then(|(mut properties, binding)| {
                     if let Some(binding) = binding {
                         if facts
-                            .exports
+                            .exports()
                             .iter()
-                            .any(|e| e.value == ExportValue::Binding(binding))
+                            .any(|e| *e.value() == ExportValue::Binding(binding))
                         {
                             return None;
                         }
                         for reference in facts
-                            .references
+                            .references()
                             .iter()
-                            .filter(|r| !r.type_only && r.binding == Some(binding))
+                            .filter(|r| !r.type_only() && r.binding() == Some(binding))
                         {
-                            if reference.write {
+                            if reference.write() {
                                 return None;
                             }
-                            properties.push(visitor.reads.get(&reference.span.start)?.clone());
+                            properties.push(visitor.reads.get(&reference.span().start)?.clone());
                         }
                     }
                     properties.sort();
@@ -84,13 +84,13 @@ impl Observations<'_> {
             BindingPattern::BindingIdentifier(id) => {
                 let Some(binding) = self
                     .facts
-                    .bindings
+                    .bindings()
                     .iter()
-                    .find(|b| b.declarations.contains(&id.span))
+                    .find(|b| b.declarations().contains(&id.span))
                 else {
                     return;
                 };
-                (Vec::new(), Some(binding.id))
+                (Vec::new(), Some(binding.id()))
             }
             BindingPattern::ObjectPattern(object) if object.rest.is_none() => {
                 let mut properties = Vec::new();

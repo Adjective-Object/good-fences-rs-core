@@ -103,18 +103,18 @@ fn single_parent(
     for (&file, module) in modules {
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
-            .filter(|d| !d.type_only)
+            .filter(|d| !d.type_only())
         {
-            if dependency.kind == DependencyKind::DynamicImport
+            if dependency.kind() == DependencyKind::DynamicImport
                 && !plan.roots.contains_key(&RootId::Async(AsyncSiteId {
                     module: graph.file_path(file).unwrap().to_owned(),
-                    offset: dependency.id.0,
+                    offset: dependency.id().0,
                     candidate: None,
                 }))
-                && dependency.pattern.is_none()
+                && dependency.pattern().is_none()
             {
                 continue;
             }
@@ -132,8 +132,8 @@ fn single_parent(
         if target == parent
             || uses.iter().any(|(file, dependency)| {
                 *file != parent
-                    || dependency.kind != DependencyKind::DynamicImport
-                    || dependency.pattern.is_some()
+                    || dependency.kind() != DependencyKind::DynamicImport
+                    || dependency.pattern().is_some()
             })
         {
             continue;
@@ -148,8 +148,8 @@ fn single_parent(
             let Some(module) = modules.get(&file) else {
                 continue;
             };
-            for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
-                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
+                !d.type_only() && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             }) {
                 pending.extend(target_files(graph, file, dependency)?);
             }
@@ -157,13 +157,13 @@ fn single_parent(
         if island.contains(&parent)
             || island.iter().any(|file| {
                 !modules.contains_key(file)
-                    || modules[file].parsed.facts.emission.uses_this
+                    || modules[file].parsed.facts().emission().uses_this()
                     || incoming.get(file).is_some_and(|uses| {
                         uses.iter().any(|(consumer, dependency)| {
                             !island.contains(consumer)
                                 && (*file != target
                                     || *consumer != parent
-                                    || dependency.kind != DependencyKind::DynamicImport)
+                                    || dependency.kind() != DependencyKind::DynamicImport)
                         })
                     })
             })
@@ -196,12 +196,12 @@ fn dynamic_namespace_safe(
 ) -> bool {
     let Some(properties) = modules[&file]
         .parsed
-        .facts
-        .emission
-        .dynamic_namespaces
+        .facts()
+        .emission()
+        .dynamic_namespaces()
         .iter()
-        .find(|n| n.dependency == dependency.id)
-        .and_then(|n| n.properties.as_ref())
+        .find(|n| n.dependency() == dependency.id())
+        .and_then(|n| n.properties())
     else {
         return false;
     };
@@ -212,12 +212,12 @@ fn dynamic_namespace_safe(
         !receiver
             || match export.identity {
                 ExportIdentity::Binding(file, id) => {
-                    let facts = &modules[&file].parsed.facts;
-                    facts.bindings.iter().any(|b| b.id == id && b.function)
+                    let facts = &modules[&file].parsed.facts();
+                    facts.bindings().iter().any(|b| b.id() == id && b.function())
                         && !facts
-                            .references
+                            .references()
                             .iter()
-                            .any(|r| r.binding == Some(id) && r.write && !r.type_only)
+                            .any(|r| r.binding() == Some(id) && r.write() && !r.type_only())
                 }
                 _ => false,
             }
@@ -243,11 +243,11 @@ impl Initialization {
             .values()
             .flat_map(|m| {
                 m.parsed
-                    .facts
-                    .bindings
+                    .facts()
+                    .bindings()
                     .iter()
-                    .map(|b| b.name.clone())
-                    .chain(m.parsed.facts.references.iter().map(|r| r.name.clone()))
+                    .map(|b| b.name().to_owned())
+                    .chain(m.parsed.facts().references().iter().map(|r| r.name().to_owned()))
             })
             .chain(symbols.definitions.values().map(|d| d.name.clone()))
             .chain(symbols.exports.values().flat_map(|e| e.keys().cloned()))
@@ -323,39 +323,39 @@ impl Activations {
             let Some(module) = modules.get(&file) else {
                 return Ok(None);
             };
-            let facts = &module.parsed.facts;
+            let facts = &module.parsed.facts();
             if !modules.contains_key(&owners[&file])
-                || facts.commonjs
-                || !facts.top_level_await.is_empty()
+                || facts.commonjs()
+                || !facts.top_level_await().is_empty()
                 || !module.relocations.is_empty()
                 || symbols.exports[&file].contains_key("then")
                 || symbols.exports[&file]
                     .values()
                     .any(|e| matches!(e.identity, ExportIdentity::Namespace(_)))
-                || facts.references.iter().any(|r| {
-                    r.write
-                        && r.binding.is_some_and(|id| {
+                || facts.references().iter().any(|r| {
+                    r.write()
+                        && r.binding().is_some_and(|id| {
                             facts
-                                .bindings
+                                .bindings()
                                 .iter()
-                                .any(|b| b.id == id && (b.constant || b.import))
+                                .any(|b| b.id() == id && (b.constant() || b.import()))
                         })
                 })
                 || facts
-                    .emission
-                    .segments
+                    .emission()
+                    .segments()
                     .iter()
                     .enumerate()
                     .any(|(index, recipe)| {
                         live.contains(&SegmentKey::new(file, index as u32))
-                            && matches!(recipe.deferred, DeferredForm::Unsupported)
+                            && matches!(recipe.deferred(), DeferredForm::Unsupported)
                     })
             {
                 return Ok(None);
             }
-            for recipe in &facts.emission.segments {
-                for usage in &recipe.namespaces {
-                    let binding = facts.references[usage.reference as usize].binding;
+            for recipe in facts.emission().segments() {
+                for usage in recipe.namespaces() {
+                    let binding = facts.references()[usage.reference as usize].binding;
                     if binding
                         .and_then(|b| symbols.imports.get(&(file, b)))
                         .is_some_and(|linked| {
@@ -370,9 +370,9 @@ impl Activations {
                     }
                 }
             }
-            for dependency in facts.dependencies.iter().filter(|d| !d.type_only) {
+            for dependency in facts.dependencies().iter().filter(|d| !d.type_only()) {
                 if !matches!(
-                    dependency.kind,
+                    dependency.kind(),
                     DependencyKind::Import | DependencyKind::ReExport
                 ) {
                     return Ok(None);
@@ -400,22 +400,22 @@ impl Activations {
             let mut targets = Vec::new();
             for dependency in module
                 .parsed
-                .facts
-                .dependencies
+                .facts()
+                .dependencies()
                 .iter()
-                .filter(|d| !d.type_only)
+                .filter(|d| !d.type_only())
             {
                 let dependency_targets = target_files(graph, file, dependency)?;
                 let activates = dependency_targets.iter().any(|f| seen.contains(f));
                 let synchronous = matches!(
-                    dependency.kind,
+                    dependency.kind(),
                     DependencyKind::Import | DependencyKind::ReExport
                 );
                 if activates
-                    && (module.parsed.facts.commonjs
-                        || dependency.pattern.is_some()
+                    && (module.parsed.facts().commonjs()
+                        || dependency.pattern().is_some()
                         || (synchronous && !seen.contains(&file))
-                        || (!synchronous && dependency.kind != DependencyKind::DynamicImport))
+                        || (!synchronous && dependency.kind() != DependencyKind::DynamicImport))
                 {
                     return Ok(None);
                 }
@@ -533,17 +533,18 @@ fn single(
         return Ok(None);
     }
     for module in modules.values() {
-        let facts = &module.parsed.facts;
-        let imports: HashSet<_> = facts.imports.iter().map(|i| i.binding).collect();
-        if facts.commonjs
-            || !facts.top_level_await.is_empty()
-            || facts.dependencies.iter().any(|d| {
-                !d.type_only && !matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+        let facts = &module.parsed.facts();
+        let imports: HashSet<_> = facts.imports().iter().map(|i| i.binding()).collect();
+        if facts.commonjs()
+            || !facts.top_level_await().is_empty()
+            || facts.dependencies().iter().any(|d| {
+                !d.type_only()
+                    && !matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             })
             || facts
-                .references
+                .references()
                 .iter()
-                .any(|r| r.write && r.binding.is_some_and(|b| imports.contains(&b)))
+                .any(|r| r.write() && r.binding().is_some_and(|b| imports.contains(&b)))
         {
             return Ok(None);
         }
@@ -556,11 +557,11 @@ fn single(
     }
     if initialization.is_some()
         && modules.values().any(|module| {
-            let facts = &module.parsed.facts;
-            facts.references.iter().any(|r| {
-                r.write
-                    && r.binding
-                        .is_some_and(|id| facts.bindings.iter().any(|b| b.id == id && b.constant))
+            let facts = &module.parsed.facts();
+            facts.references().iter().any(|r| {
+                r.write()
+                    && r.binding()
+                        .is_some_and(|id| facts.bindings().iter().any(|b| b.id() == id && b.constant()))
             })
         })
     {
@@ -589,11 +590,11 @@ fn single(
         let module = modules.get(&file).ok_or_eyre("missing native dependency")?;
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
             .rev()
-            .filter(|d| !d.type_only)
+            .filter(|d| !d.type_only())
         {
             stack.push((target_file(graph, file, dependency)?, false));
         }
@@ -608,7 +609,7 @@ fn single(
     let schedule: Vec<_> = order
         .iter()
         .flat_map(|&file| {
-            (0..modules[&file].parsed.segments.len())
+            (0..modules[&file].parsed.segments().len())
                 .map(move |index| SegmentKey::new(file, index as u32))
                 .filter(|key| live.contains(key))
         })
@@ -637,9 +638,9 @@ fn single(
         .filter(|e| !e.summary.rewrites.is_empty())
         .map(|e| (e.key, e.summary.rewrites.as_slice()))
         .collect();
-    if let Some(hashbang) = &modules[file].parsed.facts.hashbang {
+    if let Some(hashbang) = &modules[file].parsed.facts().hashbang() {
         output.push_str(
-            &modules[file].source[hashbang.span.start as usize..hashbang.span.end as usize],
+            &modules[file].source[hashbang.span().start as usize..hashbang.span().end as usize],
         );
         output.push_str("\n");
     }
@@ -730,14 +731,21 @@ impl<'s> PreparedValues<'s> {
             .flat_map(|exports| exports.keys().map(String::as_str))
             .collect();
         for module in modules.values() {
-            occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
             occupied.extend(
                 module
                     .parsed
-                    .facts
-                    .references
+                    .facts()
+                    .bindings()
                     .iter()
-                    .map(|r| r.name.clone()),
+                    .map(|b| b.name().to_owned()),
+            );
+            occupied.extend(
+                module
+                    .parsed
+                    .facts()
+                    .references()
+                    .iter()
+                    .map(|r| r.name().to_owned()),
             );
         }
         let mut files: Vec<_> = modules.keys().copied().collect();
@@ -746,11 +754,11 @@ impl<'s> PreparedValues<'s> {
         let mut fresh = 0;
         for &file in &files {
             let module = &modules[&file];
-            for export in &module.parsed.facts.exports {
-                if let ExportValue::Expression(span) = export.value {
+            for export in module.parsed.facts().exports() {
+                if let ExportValue::Expression(span) = export.value() {
                     let index = module
                         .parsed
-                        .segments
+                        .segments()
                         .partition_point(|s| s.span.end <= span.start);
                     let name = loop {
                         let name = format!("__gf_default_{fresh}");
@@ -845,10 +853,10 @@ fn compatible(
     live: &BTreeSet<SegmentKey>,
 ) -> eyre::Result<bool> {
     use ast_segmenter::emission::NamespaceAccess;
-    let facts = &module.parsed.facts;
+    let facts = &module.parsed.facts();
     let retained: Vec<_> = facts
-        .emission
-        .segments
+        .emission()
+        .segments()
         .iter()
         .enumerate()
         .filter(|(index, _)| live.contains(&SegmentKey::new(file, *index as u32)))
@@ -856,50 +864,54 @@ fn compatible(
         .collect();
     let mut changed = HashSet::new();
     let mut namespaces = HashMap::new();
-    for binding in facts.bindings.iter().filter(|binding| binding.top_level) {
-        let symbol = (file, binding.id);
+    for binding in facts
+        .bindings()
+        .iter()
+        .filter(|binding| binding.top_level())
+    {
+        let symbol = (file, binding.id());
         let target = if let Some(name) = values.imports.get(&symbol) {
             Some(name.as_str())
         } else if values.symbols.definitions.contains_key(&symbol) {
-            values.name(&ExportIdentity::Binding(file, binding.id))
+            values.name(&ExportIdentity::Binding(file, binding.id()))
         } else if let Some(import) = values.symbols.imports.get(&symbol) {
             if let ExportIdentity::Namespace(target) = import.identity {
-                namespaces.insert(binding.id, target);
+                namespaces.insert(binding.id(), target);
             }
             values.name(&import.identity)
         } else {
             None
         };
-        if target.is_some_and(|name| name != binding.name) {
-            changed.insert(binding.id);
+        if target.is_some_and(|name| name != binding.name()) {
+            changed.insert(binding.id());
         }
     }
     for recipe in retained {
         let inference_changes = recipe
-            .placement
-            .declarations
+            .placement()
+            .declarations()
             .iter()
             .any(|id| changed.contains(id))
-            || recipe.placement.writes.iter().any(|&index| {
-                facts.references[index as usize]
-                    .binding
+            || recipe.placement().writes().iter().any(|&index| {
+                facts.references()[index as usize]
+                    .binding()
                     .is_some_and(|id| changed.contains(&id))
             });
-        if recipe.names.named.iter().any(|id| changed.contains(id))
-            || (inference_changes && recipe.names.inference_sensitive)
+        if recipe.names().named().iter().any(|id| changed.contains(id))
+            || (inference_changes && recipe.names().inference_sensitive())
         {
             return Ok(false);
         }
-        for usage in &recipe.namespaces {
-            let reference = &facts.references[usage.reference as usize];
-            let Some(target) = reference.binding.and_then(|id| namespaces.get(&id)) else {
+        for usage in recipe.namespaces() {
+            let reference = &facts.references()[usage.reference() as usize];
+            let Some(target) = reference.binding().and_then(|id| namespaces.get(&id)) else {
                 continue;
             };
-            let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
+            let NamespaceAccess::DirectRead { property, .. } = &usage.access() else {
                 return Ok(false);
             };
             let Ok(linked) =
-                graph.resolve_export(*target, property, source_graph::Namespace::Value)
+                graph.resolve_export(*target, &property, source_graph::Namespace::Value)
             else {
                 return Ok(false);
             };
@@ -924,31 +936,35 @@ fn reconstruct(
     if !compatible(graph, file, module, values, &BTreeSet::from([key]))? {
         return Ok(None);
     }
-    let facts = &module.parsed.facts;
+    let facts = &module.parsed.facts();
     let mut targets = HashMap::new();
     let mut namespaces = HashMap::new();
-    for binding in facts.bindings.iter().filter(|binding| binding.top_level) {
-        let symbol = (file, binding.id);
+    for binding in facts
+        .bindings()
+        .iter()
+        .filter(|binding| binding.top_level())
+    {
+        let symbol = (file, binding.id());
         let target = if let Some(name) = values.imports.get(&symbol) {
             Some(name.as_str())
         } else if values.symbols.definitions.contains_key(&symbol) {
-            values.name(&ExportIdentity::Binding(file, binding.id))
+            values.name(&ExportIdentity::Binding(file, binding.id()))
         } else if let Some(import) = values.symbols.imports.get(&symbol) {
             if let ExportIdentity::Namespace(target) = import.identity {
-                namespaces.insert(binding.id, target);
+                namespaces.insert(binding.id(), target);
             }
             values.name(&import.identity)
         } else {
             None
         };
-        if let Some(name) = target.filter(|name| *name != binding.name) {
-            targets.insert(binding.id, name);
+        if let Some(name) = target.filter(|name| *name != binding.name()) {
+            targets.insert(binding.id(), name);
         }
     }
     let mut hoisted = Code::default();
     let mut output = Code::default();
     let index = key.segment_idx as usize;
-    let recipe = &facts.emission.segments[index];
+    let recipe = &facts.emission().segments()[index];
     let mut renderer = crate::emit::CachedRenderer::new(
         module.source,
         facts,
@@ -956,13 +972,13 @@ fn reconstruct(
         recipes.get(&key).copied().unwrap_or_default(),
     );
     renderer.relocate_urls(module.relocations)?;
-    for (operation_index, operation) in recipe.operations.iter().enumerate() {
-        let span = operation.kind.span(facts, recipe);
-        let replacement = match &operation.kind {
+    for (operation_index, operation) in recipe.operations().iter().enumerate() {
+        let span = operation.kind().span(facts, recipe);
+        let replacement = match &operation.kind() {
             OperationKind::Binding {
                 binding, shorthand, ..
             } => targets
-                .get(binding)
+                .get(&binding)
                 .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
                 .transpose()?
                 .map(Code::from),
@@ -975,8 +991,8 @@ fn reconstruct(
                         rewrite::shorthand_replacement(module.source, span, "", *shorthand)?;
                     Some(expression.clone().surrounded(prefix, ""))
                 } else {
-                    facts.references[*reference as usize]
-                        .binding
+                    facts.references()[*reference as usize]
+                        .binding()
                         .and_then(|id| targets.get(&id))
                         .map(|name| {
                             rewrite::shorthand_replacement(module.source, span, name, *shorthand)
@@ -986,16 +1002,16 @@ fn reconstruct(
                 }
             }
             OperationKind::Namespace { usage } => {
-                let usage = &recipe.namespaces[*usage as usize];
-                if let Some(target) = facts.references[usage.reference as usize]
-                    .binding
+                let usage = &recipe.namespaces()[*usage as usize];
+                if let Some(target) = facts.references()[usage.reference() as usize]
+                    .binding()
                     .and_then(|id| namespaces.get(&id))
                 {
-                    let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
+                    let NamespaceAccess::DirectRead { property, .. } = &usage.access() else {
                         unreachable!()
                     };
                     let linked =
-                        graph.resolve_export(*target, property, source_graph::Namespace::Value)?;
+                        graph.resolve_export(*target, &property, source_graph::Namespace::Value)?;
                     Some(Code::from(
                         values
                             .name(&linked.identity)
@@ -1008,19 +1024,21 @@ fn reconstruct(
             }
             OperationKind::Dependency { dependency } => {
                 let dependency = facts
-                    .dependencies
+                    .dependencies()
                     .iter()
-                    .find(|d| d.id == *dependency)
+                    .find(|d| d.id() == *dependency)
                     .ok_or_eyre("missing original dependency")?;
                 if matches!(
-                    dependency.kind,
+                    dependency.kind(),
                     DependencyKind::Import | DependencyKind::ReExport
                 ) {
                     Some(";".into())
-                } else if dependency.type_only || dependency.kind != DependencyKind::DynamicImport {
+                } else if dependency.type_only()
+                    || dependency.kind() != DependencyKind::DynamicImport
+                {
                     None
                 } else {
-                    if let Some(dispatch) = values.contexts.get(&(file, dependency.id)) {
+                    if let Some(dispatch) = values.contexts.get(&(file, dependency.id())) {
                         renderer.context(dependency, dispatch.clone());
                         continue;
                     }
@@ -1031,7 +1049,7 @@ fn reconstruct(
                         renderer.edit(
                             operation_index as u32,
                             Edit {
-                                span: dependency.specifier_span,
+                                span: dependency.specifier_span(),
                                 replacement: values
                                     .requests
                                     .get(&target)
@@ -1049,8 +1067,8 @@ fn reconstruct(
             renderer.replace(operation_index as u32, replacement);
         }
     }
-    for (operation_index, operation) in recipe.operations.iter().enumerate().rev() {
-        let OperationKind::Export { form, .. } = &operation.kind else {
+    for (operation_index, operation) in recipe.operations().iter().enumerate().rev() {
+        let OperationKind::Export { form, .. } = &operation.kind() else {
             continue;
         };
         let replacement = match form {
@@ -1069,7 +1087,7 @@ fn reconstruct(
                     .defaults
                     .get(&key)
                     .ok_or_eyre("missing native default binding")?;
-                let value = renderer.slot(value)?;
+                let value = renderer.slot(&value)?;
                 if *is_hoisted {
                     hoisted.push(
                         value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),
@@ -1084,7 +1102,7 @@ fn reconstruct(
     }
     if deferred {
         use ast_segmenter::emission::DeferredForm;
-        match &recipe.deferred {
+        match &recipe.deferred() {
             DeferredForm::Unsupported => return Ok(None),
             DeferredForm::Function => {
                 hoisted.push(renderer.materialize()?);
@@ -1095,9 +1113,9 @@ fn reconstruct(
                 initializer,
             } => {
                 let definition = facts
-                    .bindings
+                    .bindings()
                     .iter()
-                    .find(|b| b.id == *binding)
+                    .find(|b| b.id() == *binding)
                     .ok_or_eyre("missing deferred variable")?;
                 let name = values
                     .name(&ExportIdentity::Binding(file, *binding))
@@ -1109,7 +1127,7 @@ fn reconstruct(
                             .slot(initializer)?
                             .surrounded(format!("{name} = ("), ");\n"),
                     );
-                } else if !definition.function_scoped {
+                } else if !definition.function_scoped() {
                     output.push_str(&format!("{name} = void 0;\n"));
                 }
             }

@@ -12,21 +12,17 @@ pub(crate) fn prepare_declarations(
     config: &ecco::DeclarationConfig,
     environment: ecco::Environment,
 ) -> eyre::Result<ast_segmenter::PreparedDeclarations> {
-    let mut facts = config.effective_for_environment(environment)?;
+    let (definitions, mut symbols) = config.effective_for_environment(environment)?.into_parts();
     for name in ENVIRONMENT_PROBES {
-        if !facts
-            .global_symbols
+        if !symbols
             .iter()
-            .any(|symbol| symbol.name == name)
+            .any(|symbol| symbol.name() == name)
         {
-            facts.global_symbols.push(ecco::GlobalSymbol {
-                name: name.to_owned(),
-                read_effects: true,
-            });
+            symbols.push(ecco::GlobalSymbol::new(name.to_owned(), true));
         }
     }
-    facts.global_symbols.sort_by(|a, b| a.name.cmp(&b.name));
-    ast_segmenter::PreparedDeclarations::new(facts)
+    symbols.sort_by(|a, b| a.name().cmp(b.name()));
+    ast_segmenter::PreparedDeclarations::new(ecco::LocalFacts::new(definitions, symbols))
 }
 
 pub(crate) fn analyze(
@@ -38,7 +34,7 @@ pub(crate) fn analyze(
         let facts = graph
             .file_facts(file)
             .ok_or_eyre("missing Ecco module facts")?;
-        let Some(parsed) = &facts.ecco else {
+        let Some(parsed) = facts.ecco() else {
             continue;
         };
         analysis.add_file(file, Arc::new(parsed.clone()))?;
@@ -48,8 +44,8 @@ pub(crate) fn analyze(
             format!(
                 "{}: effect reference at bytes {}..{}",
                 graph.file_path(*file).unwrap().display(),
-                reference.span.start,
-                reference.span.end
+                reference.span().start,
+                reference.span().end
             )
         })
     })?;
@@ -61,48 +57,48 @@ pub(crate) fn analyze(
     let structural_override = !policy.honors_pure_annotations()
         || graph.module_ids().any(|file| {
             graph.file_facts(file).is_some_and(|facts| {
-                facts.commonjs
+                facts.commonjs()
                     || crate::link::has_externals(graph, file)
-                    || facts.effects.iter().any(|site| {
-                        site.deferred.is_some()
-                            && site.reason == ast_segmenter::effects::EffectReason::UnresolvedRead
-                            && facts.references.iter().any(|reference| {
-                                reference.span == site.span
-                                    && ENVIRONMENT_PROBES.contains(&reference.name.as_str())
-                                    && !facts.ecco.as_ref().is_some_and(|parsed| {
+                    || facts.effects().iter().any(|site| {
+                        site.deferred().is_some()
+                            && site.reason() == ast_segmenter::effects::EffectReason::UnresolvedRead
+                            && facts.references().iter().any(|reference| {
+                                reference.span() == site.span()
+                                    && ENVIRONMENT_PROBES.contains(&reference.name())
+                                    && !facts.ecco().as_ref().is_some_and(|parsed| {
                                         parsed
                                             .declarations()
-                                            .global_symbols
+                                            .global_symbols()
                                             .iter()
-                                            .any(|symbol| symbol.name == reference.name)
+                                            .any(|symbol| symbol.name() == reference.name())
                                     })
                             })
                     })
-                    || facts.invocations.iter().any(|call| {
-                        call.deferred.is_some() && policy.matching_patterns(call).next().is_some()
+                    || facts.invocations().iter().any(|call| {
+                        call.deferred().is_some() && policy.matching_patterns(call).next().is_some()
                     })
-                    || facts.effects.iter().any(|site| {
-                        let Some(deferred) = site.deferred else {
+                    || facts.effects().iter().any(|site| {
+                        let Some(deferred) = site.deferred() else {
                             return false;
                         };
-                        if site.reason != ast_segmenter::effects::EffectReason::BindingRead {
+                        if site.reason() != ast_segmenter::effects::EffectReason::BindingRead {
                             return false;
                         }
                         facts
-                            .references
+                            .references()
                             .iter()
-                            .find(|r| r.span == site.span)
-                            .and_then(|r| r.binding)
-                            .and_then(|id| facts.bindings.iter().find(|b| b.id == id))
+                            .find(|r| r.span() == site.span())
+                            .and_then(|r| r.binding())
+                            .and_then(|id| facts.bindings().iter().find(|b| b.id() == id))
                             .is_some_and(|binding| {
-                                if binding.import {
-                                    return binding_may_throw(graph, file, facts, site.span);
+                                if binding.import() {
+                                    return binding_may_throw(graph, file, facts, site.span());
                                 }
-                                !binding.function
-                                    && !binding.function_scoped
-                                    && binding.declarations.iter().any(|declaration| {
+                                !binding.function()
+                                    && !binding.function_scoped()
+                                    && binding.declarations().iter().any(|declaration| {
                                         !effects::contains(deferred, *declaration)
-                                            || declaration.start >= site.span.start
+                                            || declaration.start >= site.span().start
                                     })
                             })
                     })
@@ -113,7 +109,7 @@ pub(crate) fn analyze(
         let segments = graph.file_segments(file).unwrap();
         // Prepared CSS ESM stubs perform DOM writes and throw without a document.
         // Caller DOM declarations must never infer those operations away.
-        if structural_override || facts.commonjs || graph.file_prepared_resource(file).is_some() {
+        if structural_override || facts.commonjs() || graph.file_prepared_resource(file).is_some() {
             continue;
         }
         for root in analyzed.roots {
@@ -148,15 +144,15 @@ pub(crate) fn summarize(
             let index = segments.partition_point(|segment| segment.span.start < span.start);
             segments
                 .get(index)
-                .zip(facts.emission.segments.get(index))
-                .is_some_and(|(segment, recipe)| segment.span == span && recipe.connector_only)
+                .zip(facts.emission().segments().get(index))
+                .is_some_and(|(segment, recipe)| segment.span == span && recipe.connector_only())
         })
     {
         // Generated mapping aliases are export addresses, not executable reads.
         // Keep DOM operations conservative without retaining every alias's value.
         summary
             .sites
-            .retain(|site| site.reason != ast_segmenter::effects::EffectReason::BindingRead);
+            .retain(|site| site.reason() != ast_segmenter::effects::EffectReason::BindingRead);
     }
     if let Some(false) = effectful {
         // Binding reads remain native TDZ/error barriers. Environment probes
@@ -164,19 +160,19 @@ pub(crate) fn summarize(
         // Ecco's default purity for undeclared globals does not prove otherwise.
         summary.sites.retain(|site| {
             (matches!(
-                site.reason,
+                site.reason(),
                 ast_segmenter::effects::EffectReason::Invocation
                     | ast_segmenter::effects::EffectReason::Construction
             ) && facts
-                .invocations
+                .invocations()
                 .iter()
-                .any(|call| call.span == site.span && call.pure.is_some()))
-                || site.reason == ast_segmenter::effects::EffectReason::BindingRead
-                    && binding_may_throw(graph, file, facts, site.span)
-                || site.reason == ast_segmenter::effects::EffectReason::UnresolvedRead
-                    && facts.references.iter().any(|reference| {
-                        reference.span == site.span
-                            && ENVIRONMENT_PROBES.contains(&reference.name.as_str())
+                .any(|call| call.span() == site.span() && call.pure().is_some()))
+                || site.reason() == ast_segmenter::effects::EffectReason::BindingRead
+                    && binding_may_throw(graph, file, facts, site.span())
+                || site.reason() == ast_segmenter::effects::EffectReason::UnresolvedRead
+                    && facts.references().iter().any(|reference| {
+                        reference.span() == site.span()
+                            && ENVIRONMENT_PROBES.contains(&reference.name())
                     })
         });
     }
@@ -190,49 +186,50 @@ fn binding_may_throw(
     span: oxc_span::Span,
 ) -> bool {
     let Some(binding) = facts
-        .references
+        .references()
         .iter()
-        .find(|reference| reference.span == span)
-        .and_then(|reference| reference.binding)
-        .and_then(|id| facts.bindings.iter().find(|binding| binding.id == id))
+        .find(|reference| reference.span() == span)
+        .and_then(|reference| reference.binding())
+        .and_then(|id| facts.bindings().iter().find(|binding| binding.id() == id))
     else {
         return true;
     };
-    if binding.import {
+    if binding.import() {
         let Some(import) = facts
-            .imports
+            .imports()
             .iter()
-            .find(|import| import.binding == binding.id)
+            .find(|import| import.binding() == binding.id())
         else {
             return true;
         };
-        let Some(DependencyTarget::File(target)) = graph.dependency_target(file, import.dependency)
+        let Some(DependencyTarget::File(target)) =
+            graph.dependency_target(file, import.dependency())
         else {
             return true;
         };
         let Some(target) = graph.file_id(target) else {
             return true;
         };
-        let ast_segmenter::owned::ImportedName::Name(name) = &import.imported else {
+        let ast_segmenter::owned::ImportedName::Name(name) = &import.imported() else {
             return false;
         };
         return !graph
-            .resolve_export(target, name, Namespace::Value)
+            .resolve_export(target, &name, Namespace::Value)
             .is_ok_and(|linked| match linked.identity {
                 ExportIdentity::Binding(file, id) => graph.file_facts(file).is_some_and(|facts| {
                     facts
-                        .bindings
+                        .bindings()
                         .iter()
-                        .any(|binding| binding.id == id && binding.function)
+                        .any(|binding| binding.id() == id && binding.function())
                 }),
                 ExportIdentity::Namespace(_) => true,
                 _ => false,
             });
     }
-    if binding.function_scoped || binding.function {
+    if binding.function_scoped() || binding.function() {
         return false;
     }
-    let Some(declaration) = binding.declarations.first() else {
+    let Some(declaration) = binding.declarations().first() else {
         return true;
     };
     declaration.start >= span.start
@@ -250,32 +247,32 @@ fn resolve(
     reference: &ecco::ExternalReference,
 ) -> eyre::Result<ecco::Resolution<u32>> {
     let facts = graph.file_facts(file).ok_or_eyre("missing effect source")?;
-    let parsed = facts.ecco.as_ref().ok_or_eyre("missing Ecco precursors")?;
-    if ecco::declaration_matches(parsed.declarations(), &reference.binding) {
-        return Ok(ecco::Resolution::Declaration(reference.binding.clone()));
+    let parsed = facts.ecco().ok_or_eyre("missing Ecco precursors")?;
+    if ecco::declaration_matches(parsed.declarations(), &reference.binding()) {
+        return Ok(ecco::Resolution::Declaration(reference.binding().clone()));
     }
-    let ecco::Binding::Module { module, path } = &reference.binding else {
+    let ecco::Binding::Module { module, path } = &reference.binding() else {
         return Ok(ecco::Resolution::Unknown);
     };
     let dependency = facts
-        .dependencies
+        .dependencies()
         .iter()
         .find(|dependency| {
-            dependency.specifier == *module
-                && !dependency.type_only
+            dependency.specifier() == *module
+                && !dependency.type_only()
                 && matches!(
-                    dependency.kind,
+                    dependency.kind(),
                     DependencyKind::Import | DependencyKind::ReExport
                 )
         })
         .ok_or_eyre("effect import has no structural dependency")?;
-    match graph.dependency_target(file, dependency.id) {
+    match graph.dependency_target(file, dependency.id()) {
         Some(DependencyTarget::External(_)) => Ok(ecco::Resolution::Unknown),
         Some(DependencyTarget::File(target)) => {
             let file = graph
                 .file_id(target)
                 .ok_or_eyre("missing effect import target")?;
-            exported(graph, file, path)
+            exported(graph, file, &path)
         }
         _ => eyre::bail!("unresolved effect import {module:?}"),
     }
@@ -287,7 +284,7 @@ fn exported(
     path: &[String],
 ) -> eyre::Result<ecco::Resolution<u32>> {
     let Some((name, rest)) = path.split_first() else {
-        if graph.file_facts(file).is_some_and(|facts| facts.commonjs) {
+        if graph.file_facts(file).is_some_and(|facts| facts.commonjs()) {
             return Ok(ecco::Resolution::Unknown);
         }
         return Ok(ecco::Resolution::Namespace(file));
@@ -304,16 +301,13 @@ fn exported(
         })),
         ExportIdentity::Expression(segment) => {
             let facts = graph.file_facts(segment.file_id).unwrap();
-            let parsed = facts
-                .ecco
-                .as_ref()
-                .ok_or_eyre("missing default precursors")?;
+            let parsed = facts.ecco().ok_or_eyre("missing default precursors")?;
             let span =
                 graph.file_segments(segment.file_id).unwrap()[segment.segment_idx as usize].span;
             let root = parsed
                 .roots()
                 .iter()
-                .position(|root| effects::contains(span, root.span))
+                .position(|root| effects::contains(span, root.span()))
                 .ok_or_eyre("default export has no Ecco root")?;
             Ok(ecco::Resolution::Root {
                 file: segment.file_id,

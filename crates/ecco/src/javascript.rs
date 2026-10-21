@@ -23,8 +23,24 @@ pub struct SourceRoot {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DefinitionMatch {
     #[serde(with = "crate::analysis::span")]
-    pub span: Span,
-    pub binding: Binding,
+    span: Span,
+    binding: Binding,
+}
+
+impl DefinitionMatch {
+    pub(crate) fn new(span: Span, binding: Binding) -> Self {
+        Self { span, binding }
+    }
+}
+
+impl DefinitionMatch {
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn binding(&self) -> &Binding {
+        &self.binding
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -78,13 +94,13 @@ pub fn parse_from_ast<'a>(
     mut facts: LocalFacts,
 ) -> Result<ParsedFile> {
     let mut contracts: HashSet<_> = facts
-        .definitions
+        .definitions()
         .iter()
-        .map(|definition| definition.binding.clone())
+        .map(|definition| definition.binding().clone())
         .collect();
     let (inferred, usable) = crate::inference::infer_contracts(program, semantic, &facts)?;
     contracts.extend(usable);
-    facts.definitions.extend(inferred.definitions);
+    facts.definitions_mut().extend(inferred.into_parts().0);
     let mut context = Context::recording_context(facts)?;
     let values = semantic
         .scoping()
@@ -149,15 +165,15 @@ pub fn parse_from_ast<'a>(
         })
         .map(|symbol| {
             let span = semantic.scoping().symbol_span(symbol);
-            ParsedSymbol {
-                id: SymbolId(span.start),
-                name: semantic.scoping().symbol_name(symbol).to_owned(),
+            ParsedSymbol::new(
+                SymbolId(span.start),
+                semantic.scoping().symbol_name(symbol).to_owned(),
                 span,
-                value: extractor.slots[&symbol],
-            }
+                extractor.slots[&symbol],
+            )
         })
         .collect();
-    symbols.sort_by_key(|symbol| symbol.id.0);
+    symbols.sort_by_key(|symbol| symbol.id().0);
     let values = extractor.context.parsed_values();
     Compiler {
         extractor: &mut extractor,
@@ -191,17 +207,17 @@ pub fn parse_from_ast<'a>(
         Vec::new(),
         extractor.context.pure(),
     );
-    Ok(ParsedFile {
-        version: 1,
-        facts: extractor.context.facts().clone(),
+    Ok(ParsedFile::new(
+        1,
+        extractor.context.facts().clone(),
         values,
-        functions: extractor.context.owned_functions(),
+        extractor.context.owned_functions(),
         setup,
         symbols,
-        roots: extractor.parsed_roots,
-        externals: extractor.externals,
-        matches: extractor.matches,
-    })
+        extractor.parsed_roots,
+        extractor.externals,
+        extractor.matches,
+    ))
 }
 
 /// Extract from the same checked AST as a segmenter, preserving declarator
@@ -217,7 +233,7 @@ pub fn parse_from_ast_with_segments<'a>(
     for root in parsed.roots() {
         let segment = segments
             .iter()
-            .position(|span| span.start <= root.span.start && root.span.end <= span.end)
+            .position(|span| span.start <= root.span().start && root.span().end <= span.end)
             .ok_or_else(|| eyre::eyre!("Ecco root outside segment ownership"))?;
         ensure!(
             occupied.insert(segment),
@@ -442,10 +458,7 @@ impl<'a> Extractor<'_, 'a> {
                 vec![root.value],
                 root.effects,
             );
-            self.parsed_roots.push(ParsedRoot {
-                span: root.span,
-                function,
-            });
+            self.parsed_roots.push(ParsedRoot::new(root.span, function));
             self.context.start_function();
         }
     }
@@ -614,17 +627,17 @@ impl<'a> Extractor<'_, 'a> {
         let Some(symbol) = self
             .context
             .facts()
-            .global_symbols
+            .global_symbols()
             .iter()
-            .find(|symbol| symbol.name == name)
+            .find(|symbol| symbol.name() == name)
         else {
             return self.context.pure();
         };
-        let read_effects = symbol.read_effects;
-        self.matches.push(DefinitionMatch {
+        let read_effects = symbol.read_effects();
+        self.matches.push(DefinitionMatch::new(
             span,
-            binding: Binding::Global(vec![name.to_owned()]),
-        });
+            Binding::Global(vec![name.to_owned()]),
+        ));
         if read_effects {
             self.context.opaque_effects()
         } else {
@@ -634,19 +647,15 @@ impl<'a> Extractor<'_, 'a> {
 
     fn resolve(&mut self, binding: &Binding, span: Span) -> ValueId {
         if let Some(value) = self.context.definition(binding) {
-            self.matches.push(DefinitionMatch {
-                span,
-                binding: binding.clone(),
-            });
+            self.matches
+                .push(DefinitionMatch::new(span, binding.clone()));
             if matches!(binding, Binding::Local(_)) {
                 return value;
             }
         }
         let reference = self.externals.len();
-        self.externals.push(ExternalReference {
-            binding: binding.clone(),
-            span,
-        });
+        self.externals
+            .push(ExternalReference::new(binding.clone(), span));
         self.context.external_value(reference)
     }
 
@@ -757,21 +766,21 @@ impl<'a> Extractor<'_, 'a> {
         let (arguments, argument_effects, spread) = self.invocation_arguments(&call.arguments);
         effects.extend(argument_effects);
         let result = if spread {
-            CallResult {
-                value: self.context.unknown(),
-                effects: if call.pure {
+            CallResult::new(
+                self.context.unknown(),
+                if call.pure {
                     self.context.pure()
                 } else {
                     self.context.opaque_effects()
                 },
-            }
+            )
         } else {
             self.context
                 .call_with_annotation(callee.named.value, &arguments, receiver, call.pure)
         };
-        effects.push(result.effects);
+        effects.push(result.effects());
         let effects = self.context.any(effects);
-        self.computed(result.value, effects)
+        self.computed(result.value(), effects)
     }
 
     fn expression(&mut self, expression: &Expression<'_>) -> Computed {
@@ -1268,14 +1277,14 @@ impl<'a> Compiler<'_, '_, 'a> {
         captures.dedup();
         extractor.context.finish_function(
             info.index,
-            FunctionSignature {
-                parameters: arguments,
-                receiver: (!info.arrow).then_some(info.receiver),
-                self_binding: info.self_binding,
+            FunctionSignature::new(
                 captures,
-                constructible: !info.arrow,
-                arguments: if info.arrow { None } else { info.arguments },
-            },
+                arguments,
+                (!info.arrow).then_some(info.receiver),
+                info.self_binding,
+                !info.arrow,
+                if info.arrow { None } else { info.arguments },
+            ),
             returns,
             effects,
         );

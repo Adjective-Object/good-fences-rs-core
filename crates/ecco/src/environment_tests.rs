@@ -16,9 +16,9 @@ fn module(name: &str, path: &[&str]) -> Binding {
 
 fn definition<'a>(facts: &'a LocalFacts, binding: &Binding) -> &'a Definition {
     facts
-        .definitions
+        .definitions()
         .iter()
-        .find(|definition| &definition.binding == binding)
+        .find(|definition| definition.binding() == binding)
         .unwrap_or_else(|| panic!("missing {binding:?}"))
 }
 
@@ -114,36 +114,34 @@ fn environment_user_overrides_are_exact_and_order_is_canonical() {
     );
     assert_eq!(
         definition(&facts, &global(&["Math", "abs"]))
-            .hazards
+            .hazards()
             .get(Hazard::Call),
         HazardExpr::Bool(true)
     );
     assert_ne!(
         definition(&facts, &global(&["globalThis", "Math", "abs"]))
-            .hazards
+            .hazards()
             .get(Hazard::Call),
         HazardExpr::Bool(true)
     );
     assert_eq!(
         definition(&facts, &module("node:fs", &["readFile"]))
-            .hazards
+            .hazards()
             .get(Hazard::Call),
         HazardExpr::Bool(false)
     );
     assert_eq!(
         definition(&facts, &module("fs", &["readFile"]))
-            .hazards
+            .hazards()
             .get(Hazard::Call),
         HazardExpr::Bool(true)
     );
-    assert!(
-        !facts
-            .global_symbols
-            .iter()
-            .find(|symbol| symbol.name == "navigator")
-            .unwrap()
-            .read_effects
-    );
+    assert!(!facts
+        .global_symbols()
+        .iter()
+        .find(|symbol| symbol.name() == "navigator")
+        .unwrap()
+        .read_effects());
 }
 
 #[test]
@@ -175,7 +173,7 @@ fn environment_rejects_duplicates_invalid_facts_and_build_wide_locals() {
     .contains("local"));
     assert!(crate::Context::from_local_facts(local).is_ok());
     let mut invalid = parse_declarations("global fn invalid(value) { returns = value }").unwrap();
-    invalid.definitions[0].parameters.clear();
+    invalid.definitions_mut()[0].parameters_mut().clear();
     assert!(DeclarationConfig {
         user: vec![invalid],
         ..Default::default()

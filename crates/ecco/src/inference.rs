@@ -97,12 +97,12 @@ pub(crate) fn infer_contracts<'a>(
     for function in &mut functions {
         function.unsupported |= redeclared.contains(&function.symbol);
     }
-    let supplied = facts.definitions.len();
-    let mut contracts = facts.definitions.clone();
+    let supplied = facts.definitions().len();
+    let mut contracts = facts.definitions().to_vec();
     let mut bindings: HashMap<_, _> = contracts
         .iter()
         .enumerate()
-        .map(|(index, definition)| (definition.binding.clone(), index))
+        .map(|(index, definition)| (definition.binding().clone(), index))
         .collect();
     let mut symbols = HashMap::new();
     functions.retain(|function| {
@@ -175,7 +175,7 @@ pub(crate) fn infer_contracts<'a>(
             bindings: &bindings,
             imports: &imports,
             prefixes: &prefixes,
-            global_symbols: &facts.global_symbols,
+            global_symbols: &facts.global_symbols(),
             locals: HashMap::new(),
             effects: Vec::new(),
             returns: Vec::new(),
@@ -227,14 +227,14 @@ pub(crate) fn infer_contracts<'a>(
             }
         }
     }
-    let inferred = LocalFacts {
-        definitions: contracts.into_iter().skip(supplied).collect(),
-        ..LocalFacts::default()
-    };
+    let inferred = LocalFacts::new(
+        contracts.into_iter().skip(supplied).collect(),
+        Default::default(),
+    );
     crate::parser::validate_facts(&inferred)?;
     // Linked captures and alias joins need the richer owned operation summaries.
     let usable = inferred
-        .definitions
+        .definitions()
         .iter()
         .zip(closed)
         .filter_map(|(definition, closed)| {
@@ -246,21 +246,21 @@ pub(crate) fn infer_contracts<'a>(
                 }
             }
             (closed
-                && !matches!(definition.returns, Returns::Unknown)
-                && [&definition.hazards, &definition.return_hazards]
+                && !matches!(definition.returns(), Returns::Unknown)
+                && [definition.hazards(), definition.return_hazards()]
                     .into_iter()
                     .all(|fields| {
                         fields
-                            .default
-                            .iter()
-                            .chain(fields.fields.iter().map(|(_, value)| value))
+                            .default_expression()
+                            .into_iter()
+                            .chain(fields.fields().iter().map(|(_, value)| value))
                             .all(known)
                     })
                 && definition
-                    .updates
+                    .updates()
                     .iter()
-                    .all(|update| known(&update.expression)))
-            .then(|| definition.binding.clone())
+                    .all(|update| known(update.expression())))
+            .then(|| definition.binding().clone())
         })
         .collect();
     Ok((inferred, usable))
@@ -471,19 +471,16 @@ fn union(expressions: impl IntoIterator<Item = HazardExpr>) -> HazardExpr {
 }
 
 fn unknown_contract(binding: Binding, parameters: Vec<String>) -> Definition {
-    Definition {
+    Definition::new(
         binding,
         parameters,
-        rest: None,
-        variadic: true,
-        hazards: HazardFields {
-            default: None,
-            fields: vec![(Hazard::Call, HazardExpr::Unknown)],
-        },
-        returns: Returns::Unknown,
-        return_hazards: HazardFields::default(),
-        updates: Vec::new(),
-    }
+        None,
+        true,
+        HazardFields::new(None, vec![(Hazard::Call, HazardExpr::Unknown)]),
+        Returns::Unknown,
+        HazardFields::default(),
+        Vec::new(),
+    )
 }
 
 struct Analyzer<'s, 'a> {
@@ -534,7 +531,7 @@ impl<'a> Analyzer<'_, 'a> {
             value.callable = Some(*index);
             let definition = &self.contracts[*index];
             value.hazards =
-                std::array::from_fn(|index| match definition.hazards.get(Hazard::ALL[index]) {
+                std::array::from_fn(|index| match definition.hazards().get(Hazard::ALL[index]) {
                     HazardExpr::Bool(false) => HazardExpr::Bool(false),
                     _ => HazardExpr::Unknown,
                 });
@@ -572,7 +569,7 @@ impl<'a> Analyzer<'_, 'a> {
                         }
                         self.locals[&symbol].clone()
                     } else if let Some(index) = self.symbols.get(&symbol) {
-                        self.bound(self.contracts[*index].binding.clone())
+                        self.bound(self.contracts[*index].binding().clone())
                     } else if let Some(binding) = self.imports.get(&symbol) {
                         self.bound(binding.clone())
                     } else {
@@ -587,7 +584,7 @@ impl<'a> Analyzer<'_, 'a> {
                     value,
                     effects: if reference.symbol_id().is_none()
                         && self.global_symbols.iter().any(|symbol| {
-                            symbol.name == identifier.name.as_str() && symbol.read_effects
+                            symbol.name() == identifier.name.as_str() && symbol.read_effects()
                         }) {
                         HazardExpr::Unknown
                     } else {
@@ -914,12 +911,12 @@ impl<'a> Analyzer<'_, 'a> {
                 return self.unknown();
             }
             let definition = self.contracts[index].clone();
-            if !definition.variadic && arguments.len() > definition.parameters.len() {
+            if !definition.variadic() && arguments.len() > definition.parameters().len() {
                 self.expanding.remove(&index);
                 return self.unknown();
             }
             let mut frame: HashMap<_, _> = definition
-                .parameters
+                .parameters()
                 .iter()
                 .enumerate()
                 .map(|(index, name)| {
@@ -930,11 +927,11 @@ impl<'a> Analyzer<'_, 'a> {
                 })
                 .collect();
             frame.insert("this".into(), receiver);
-            let effects = if !execute && !definition.updates.is_empty() {
+            let effects = if !execute && !definition.updates().is_empty() {
                 HazardExpr::Bool(true)
             } else {
                 self.substitute(
-                    &definition.hazards.get(Hazard::Call),
+                    &definition.hazards().get(Hazard::Call),
                     &frame,
                     &arguments,
                     &definition,
@@ -942,24 +939,20 @@ impl<'a> Analyzer<'_, 'a> {
             };
             if execute {
                 self.execute_calls(
-                    &definition.hazards.get(Hazard::Call),
+                    &definition.hazards().get(Hazard::Call),
                     &frame,
                     &arguments,
                     &definition,
                 );
-                for update in &definition.updates {
+                for update in definition.updates() {
                     let expression =
-                        self.substitute(&update.expression, &frame, &arguments, &definition);
+                        self.substitute(update.expression(), &frame, &arguments, &definition);
                     if let Some(Value {
                         origin: Origin::Input(target),
                         ..
-                    }) = frame.get(&update.target)
+                    }) = frame.get(update.target())
                     {
-                        let update = Update {
-                            target: target.clone(),
-                            slot: update.slot,
-                            expression,
-                        };
+                        let update = Update::new(target.clone(), update.slot(), expression);
                         if !self.updates.contains(&update) {
                             self.updates.push(update);
                         }
@@ -968,7 +961,7 @@ impl<'a> Analyzer<'_, 'a> {
                     }
                 }
             }
-            let value = match &definition.returns {
+            let value = match definition.returns() {
                 Returns::Argument(name) => frame.get(name).cloned().unwrap_or_else(Value::unknown),
                 Returns::Void => Value::void(),
                 Returns::Unknown => Value::unknown(),
@@ -976,7 +969,7 @@ impl<'a> Analyzer<'_, 'a> {
                     origin: Origin::Fresh,
                     hazards: std::array::from_fn(|index| {
                         self.substitute(
-                            &definition.return_hazards.get(Hazard::ALL[index]),
+                            &definition.return_hazards().get(Hazard::ALL[index]),
                             &frame,
                             &arguments,
                             &definition,
@@ -1036,7 +1029,7 @@ impl<'a> Analyzer<'_, 'a> {
                 }
                 CallArgument::Forward => values.extend_from_slice(arguments),
                 CallArgument::Spread(_) => values.extend_from_slice(
-                    &arguments[definition.parameters.len().min(arguments.len())..],
+                    &arguments[definition.parameters().len().min(arguments.len())..],
                 ),
             }
         }
@@ -1130,22 +1123,19 @@ impl<'a> Analyzer<'_, 'a> {
             Origin::Unknown => Returns::Unknown,
         };
         let return_hazards = if matches!(returns, Returns::Fresh) {
-            HazardFields {
-                default: None,
-                fields: Hazard::ALL.into_iter().zip(value.hazards).collect(),
-            }
+            HazardFields::new(None, Hazard::ALL.into_iter().zip(value.hazards).collect())
         } else {
             HazardFields::default()
         };
         let effects = union(self.effects);
-        Definition {
+        Definition::new(
             binding,
             parameters,
-            rest: None,
-            variadic: true,
-            hazards: HazardFields {
-                default: Some(HazardExpr::Bool(false)),
-                fields: vec![
+            None,
+            true,
+            HazardFields::new(
+                Some(HazardExpr::Bool(false)),
+                vec![
                     (Hazard::Call, effects.clone()),
                     (
                         Hazard::Construct,
@@ -1156,10 +1146,10 @@ impl<'a> Analyzer<'_, 'a> {
                         },
                     ),
                 ],
-            },
+            ),
             returns,
             return_hazards,
-            updates: self.updates,
-        }
+            self.updates,
+        )
     }
 }

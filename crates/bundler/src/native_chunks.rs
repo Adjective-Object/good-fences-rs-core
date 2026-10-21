@@ -136,13 +136,13 @@ fn emit_inner(
         }
         if module
             .parsed
-            .facts
-            .emission
-            .segments
+            .facts()
+            .emission()
+            .segments()
             .iter()
             .enumerate()
             .filter(|(index, _)| live.contains(&SegmentKey::new(file, *index as u32)))
-            .all(|(_, recipe)| recipe.connector_only)
+            .all(|(_, recipe)| recipe.connector_only())
         {
             connectors.insert(file);
         }
@@ -150,16 +150,16 @@ fn emit_inner(
             file,
             module
                 .parsed
-                .facts
-                .dependencies
+                .facts()
+                .dependencies()
                 .iter()
                 .filter(|d| {
-                    !d.type_only
-                        && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+                    !d.type_only()
+                        && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
                 })
                 .filter(|d| {
                     !matches!(
-                        graph.dependency_target(file, d.id),
+                        graph.dependency_target(file, d.id()),
                         Some(DependencyTarget::External(_))
                     )
                 })
@@ -182,10 +182,10 @@ fn emit_inner(
     for (&file, module) in modules {
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
-            .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+            .filter(|d| !d.type_only() && d.kind() == DependencyKind::Require)
         {
             boundaries.extend(target_files(graph, file, dependency)?);
         }
@@ -359,16 +359,16 @@ fn emit_inner(
             for (&file, module) in modules {
                 for dependency in module
                     .parsed
-                    .facts
-                    .dependencies
+                    .facts()
+                    .dependencies()
                     .iter()
-                    .filter(|d| !d.type_only)
+                    .filter(|d| !d.type_only())
                 {
-                    let consumer = if dependency.kind == DependencyKind::DynamicImport {
+                    let consumer = if dependency.kind() == DependencyKind::DynamicImport {
                         let index = module
                             .parsed
-                            .segments
-                            .partition_point(|s| s.span.end <= dependency.span.start);
+                            .segments()
+                            .partition_point(|s| s.span.end <= dependency.span().start);
                         let Some(owner) =
                             placement.owners.get(&SegmentKey::new(file, index as u32))
                         else {
@@ -527,23 +527,23 @@ fn emit_inner(
             )?
         } else {
             let module = &modules[&root];
-            let facts = &module.parsed.facts;
+            let facts = &module.parsed.facts();
             let edits = facts
-                .dependencies
+                .dependencies()
                 .iter()
-                .filter(|d| !d.type_only)
+                .filter(|d| !d.type_only())
                 .filter(|dependency| {
                     let index = module
                         .parsed
-                        .segments
-                        .partition_point(|segment| segment.span.end <= dependency.span.start);
+                        .segments()
+                        .partition_point(|segment| segment.span.end <= dependency.span().start);
                     live.contains(&SegmentKey::new(root, index as u32))
                 })
-                .filter(|d| d.pattern.is_none())
+                .filter(|d| d.pattern().is_none())
                 .map(|dependency| {
                     let request = connections
                         .native_requests
-                        .get(&(root, dependency.id))
+                        .get(&(root, dependency.id()))
                         .ok_or_eyre("missing planned native request")?;
                     Ok((dependency, request))
                 })
@@ -559,7 +559,7 @@ fn emit_inner(
                     "relocated segment in unchanged native job"
                 );
                 let index = key.segment_idx as usize;
-                let recipe = &facts.emission.segments[index];
+                let recipe = &facts.emission().segments()[index];
                 let mut renderer = crate::emit::CachedRenderer::new(
                     module.source,
                     facts,
@@ -570,8 +570,9 @@ fn emit_inner(
                 for (dependency, request) in &edits {
                     renderer.dependency(dependency, request.code.clone(), request.whole);
                 }
-                for dependency in facts.dependencies.iter().filter(|d| {
-                    d.pattern.is_some() && contains(module.parsed.segments[index].span, d.span)
+                for dependency in facts.dependencies().iter().filter(|d| {
+                    d.pattern().is_some()
+                        && contains(module.parsed.segments()[index].span, d.span())
                 }) {
                     if let Some(dispatch) =
                         cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
@@ -582,17 +583,17 @@ fn emit_inner(
                 imports.push(renderer.materialize()?);
                 imports.push_str("\n;\n");
             }
-            imports.default_export |= facts.exports.iter().any(|export| {
-                !export.type_only
-                    && export.name.as_deref() == Some("default")
+            imports.default_export |= facts.exports().iter().any(|export| {
+                !export.type_only()
+                    && export.name().as_deref() == Some("default")
                     && module
                         .parsed
-                        .segments
+                        .segments()
                         .iter()
                         .enumerate()
                         .any(|(index, segment)| {
                             live.contains(&SegmentKey::new(root, index as u32))
-                                && contains(segment.span, export.span)
+                                && contains(segment.span, export.span())
                         })
             });
             imports
@@ -708,9 +709,9 @@ fn emit_inner(
                     .iter()
                     .filter(|(_, owner)| **owner == segments::Owner::Evaluation(**file))
                     .all(|(key, _)| {
-                        modules[&key.file_id].parsed.facts.emission.segments
+                        modules[&key.file_id].parsed.facts().emission().segments()
                             [key.segment_idx as usize]
-                            .connector_only
+                            .connector_only()
                     })
         })
         .map(|&file| path(graph, file))

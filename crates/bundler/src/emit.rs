@@ -31,16 +31,21 @@ pub fn single_module(
     );
     let parsed = checked_source(graph, file, source)?;
     ensure!(
-        parsed.body == ModuleBody::Esm,
+        parsed.body() == ModuleBody::Esm,
         "single-module emission requires ESM; use link::esm for CJS"
     );
-    if let Some(dependency) = parsed.facts.dependencies.iter().find(|d| !d.type_only) {
+    if let Some(dependency) = parsed
+        .facts()
+        .dependencies()
+        .iter()
+        .find(|d| !d.type_only())
+    {
         eyre::bail!(
             "{}: dependency needs linked emission at bytes {}..{} ({:?})",
             graph.file_path(file).unwrap().display(),
-            dependency.span.start,
-            dependency.span.end,
-            dependency.kind
+            dependency.span().start,
+            dependency.span().end,
+            dependency.kind()
         );
     }
     ensure!(
@@ -65,7 +70,7 @@ pub(crate) fn checked_source(
     let path = graph
         .file_path(file)
         .ok_or_eyre("missing emission module")?;
-    let format = if graph.file_facts(file).is_some_and(|f| f.commonjs) {
+    let format = if graph.file_facts(file).is_some_and(|f| f.commonjs()) {
         ModuleFormat::CommonJs
     } else {
         ModuleFormat::Esm
@@ -87,12 +92,12 @@ pub(crate) fn checked_source(
         path.display()
     );
     ensure!(
-        config.commonjs == (format == ModuleFormat::CommonJs),
+        config.commonjs() == (format == ModuleFormat::CommonJs),
         "{}: source parser configuration mismatch with module facts",
         path.display()
     );
     ensure!(
-        !config.typescript && !config.jsx,
+        !config.typescript() && !config.jsx(),
         "{}: emission supports JavaScript only at bytes 0..{}; TS/JSX need later backends",
         path.display(),
         source.len()
@@ -103,7 +108,7 @@ pub(crate) fn checked_source(
     let segments = graph
         .file_segments(file)
         .ok_or_eyre("missing emission ranges")?;
-    let body = if config.commonjs {
+    let body = if config.commonjs() {
         ModuleBody::CommonJs {
             span: segments.first().ok_or_eyre("missing opaque CJS body")?.span,
         }
@@ -151,19 +156,19 @@ fn projection_edits(
         .map(|s| s.key.segment_idx)
         .collect();
     let mut edits = Vec::new();
-    for (index, segment) in parsed.segments.iter().enumerate() {
+    for (index, segment) in parsed.segments().iter().enumerate() {
         let key = SegmentKey::new(file, index as u32);
-        let recipe = &parsed.facts.emission.segments[index];
-        let edit_span = if recipe.source.as_slice().len() > 1 {
-            let prefix = recipe.source.as_slice()[0];
+        let recipe = &parsed.facts().emission().segments()[index];
+        let edit_span = if recipe.source().as_slice().len() > 1 {
+            let prefix = recipe.source().as_slice()[0];
             let start = if index > 0
-                && parsed.facts.emission.segments[index - 1]
-                    .source
+                && parsed.facts().emission().segments()[index - 1]
+                    .source()
                     .as_slice()
                     .first()
                     == Some(&prefix)
             {
-                parsed.segments[index - 1].span.end
+                parsed.segments()[index - 1].span.end
             } else {
                 prefix.start
             };
@@ -184,7 +189,7 @@ fn projection_edits(
             .find(|e| e.key == key)
             .map(|e| e.summary.rewrites.as_slice())
             .unwrap_or_default();
-        let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, rewrites);
+        let mut renderer = CachedRenderer::new(source, &parsed.facts(), recipe, rewrites);
         let replacement = renderer.materialize().wrap_err_with(|| {
             format!(
                 "{}: PURE rewrite at bytes {}..{}",
@@ -210,10 +215,10 @@ impl Fresh {
     fn new(facts: &ast_segmenter::owned::ModuleFacts) -> Self {
         Self {
             names: facts
-                .bindings
+                .bindings()
                 .iter()
-                .map(|b| b.name.clone())
-                .chain(facts.references.iter().map(|r| r.name.clone()))
+                .map(|b| b.name().to_owned())
+                .chain(facts.references().iter().map(|r| r.name().to_owned()))
                 .collect(),
             next: 0,
         }
@@ -273,7 +278,7 @@ impl<'a> CachedRenderer<'a> {
         for relocation in relocations {
             if !self
                 .recipe
-                .source
+                .source()
                 .as_slice()
                 .iter()
                 .any(|span| crate::effects::contains(*span, relocation.operation))
@@ -282,13 +287,13 @@ impl<'a> CachedRenderer<'a> {
             }
             let index = self
                 .recipe
-                .operations
+                .operations()
                 .iter()
                 .position(|operation| {
-                    matches!(operation.kind,
+                    matches!(operation.kind(),
                         ast_segmenter::emission::OperationKind::Invocation { invocation, .. }
-                        if self.facts.invocations[invocation as usize].span == relocation.operation
-                            && self.facts.invocations[invocation as usize].construct
+                        if self.facts.invocations()[*invocation as usize].span() == relocation.operation
+                            && self.facts.invocations()[*invocation as usize].construct()
                     )
                 })
                 .ok_or_eyre(
@@ -311,10 +316,10 @@ impl<'a> CachedRenderer<'a> {
         dependency: &ast_segmenter::owned::Dependency,
         dispatch: crate::context::Dispatch,
     ) {
-        if let Some(index) = self.recipe.operations.iter().position(|operation| matches!(
-            operation.kind, ast_segmenter::emission::OperationKind::Dependency { dependency: id } if id == dependency.id
+        if let Some(index) = self.recipe.operations().iter().position(|operation| matches!(
+            operation.kind(), ast_segmenter::emission::OperationKind::Dependency { dependency: id } if *id == dependency.id()
         )) {
-            self.contexts.insert(index as u32, (dependency.specifier_span, dispatch));
+            self.contexts.insert(index as u32, (dependency.specifier_span(), dispatch));
         }
     }
 
@@ -325,19 +330,21 @@ impl<'a> CachedRenderer<'a> {
         whole: bool,
     ) {
         use ast_segmenter::emission::{ExportForm, OperationKind};
-        let operation = self
-            .recipe
-            .operations
-            .iter()
-            .position(|operation| match operation.kind {
-                OperationKind::Dependency { dependency: id } => id == dependency.id,
-                // Reexports cache their removable wrapper, which is the request occurrence.
-                OperationKind::Export {
-                    span,
-                    form: ExportForm::Remove,
-                } => dependency.kind == DependencyKind::ReExport && span == dependency.span,
-                _ => false,
-            });
+        let operation =
+            self.recipe
+                .operations()
+                .iter()
+                .position(|operation| match operation.kind() {
+                    OperationKind::Dependency { dependency: id } => *id == dependency.id(),
+                    // Reexports cache their removable wrapper, which is the request occurrence.
+                    OperationKind::Export {
+                        span,
+                        form: ExportForm::Remove,
+                    } => {
+                        dependency.kind() == DependencyKind::ReExport && *span == dependency.span()
+                    }
+                    _ => false,
+                });
         if let Some(index) = operation {
             if whole {
                 self.replace(index as u32, replacement);
@@ -345,7 +352,7 @@ impl<'a> CachedRenderer<'a> {
                 self.edit(
                     index as u32,
                     Edit {
-                        span: dependency.specifier_span,
+                        span: dependency.specifier_span(),
                         replacement,
                     },
                 );
@@ -359,10 +366,10 @@ impl<'a> CachedRenderer<'a> {
 
     pub(crate) fn materialize(&mut self) -> eyre::Result<Code> {
         let mut output = Code::default();
-        for &piece in self.recipe.source.as_slice() {
+        for &piece in self.recipe.source().as_slice() {
             output.push(self.render(piece)?);
         }
-        if self.recipe.source.as_slice().len() > 1 {
+        if self.recipe.source().as_slice().len() > 1 {
             output.push_str(";\n");
         }
         Ok(output)
@@ -372,18 +379,18 @@ impl<'a> CachedRenderer<'a> {
         &mut self,
         slot: &ast_segmenter::emission::SourceSlot,
     ) -> eyre::Result<Code> {
-        self.roots(slot.span, &slot.operations, Vec::new())
+        self.roots(slot.span(), &slot.operations(), Vec::new())
     }
 
     pub(crate) fn children(&mut self, range: Span, parent: Option<u32>) -> eyre::Result<Code> {
         let roots: Vec<_> = self
             .recipe
-            .operations
+            .operations()
             .iter()
             .enumerate()
             .filter(|(_, operation)| {
-                operation.parent == parent
-                    && crate::link::contains(range, operation.kind.span(self.facts, self.recipe))
+                operation.parent() == parent
+                    && crate::link::contains(range, operation.kind().span(self.facts, self.recipe))
             })
             .map(|(index, _)| index as u32)
             .collect();
@@ -396,8 +403,8 @@ impl<'a> CachedRenderer<'a> {
 
     fn roots(&mut self, range: Span, roots: &[u32], mut edits: Vec<Edit>) -> eyre::Result<Code> {
         for &index in roots {
-            let operation = &self.recipe.operations[index as usize];
-            let span = operation.kind.span(self.facts, self.recipe);
+            let operation = &self.recipe.operations()[index as usize];
+            let span = operation.kind().span(self.facts, self.recipe);
             edits.push(Edit {
                 span,
                 replacement: self.operation(index)?,
@@ -415,28 +422,28 @@ impl<'a> CachedRenderer<'a> {
             let argument = self.children(span, Some(index))?;
             return Ok(dispatch.emit(argument));
         }
-        let operation = &self.recipe.operations[index as usize];
-        let span = operation.kind.span(self.facts, self.recipe);
-        if let OperationKind::SourceHint { .. } = operation.kind {
+        let operation = &self.recipe.operations()[index as usize];
+        let span = operation.kind().span(self.facts, self.recipe);
+        if let OperationKind::SourceHint { .. } = operation.kind() {
             return Ok(Code::default());
         }
         if let OperationKind::Invocation {
             invocation,
             ref lowering,
-        } = operation.kind
+        } = operation.kind()
         {
             if let Some(recipe) = self.rewrites.iter().find(|rewrite| {
-                rewrite.invocation == self.facts.invocations[invocation as usize].span
+                rewrite.invocation == self.facts.invocations()[*invocation as usize].span()
             }) {
                 if !matches!(
                     recipe.guard,
                     crate::effects::ArgumentGuard::OriginalChain { .. }
-                ) || !lowering.crosses_await_guard
+                ) || !lowering.crosses_await_guard()
                 {
                     let mut tail = Code::default();
-                    for (slot, argument) in lowering.arguments.iter().zip(&recipe.arguments) {
+                    for (slot, argument) in lowering.arguments().iter().zip(&recipe.arguments) {
                         let value = self.slot(slot)?;
-                        tail.push(if argument.spread {
+                        tail.push(if argument.spread() {
                             value.surrounded("[...(", ")],")
                         } else {
                             value.surrounded("(", "),")
@@ -445,18 +452,18 @@ impl<'a> CachedRenderer<'a> {
                     tail.push_str("void 0");
                     return match recipe.guard {
                         crate::effects::ArgumentGuard::Always => {
-                            let callee = self.slot(&lowering.callee)?;
+                            let callee = self.slot(&lowering.callee())?;
                             let mut output = callee.surrounded("((", "),");
                             output.push(tail);
                             output.push_str(")");
                             Ok(output)
                         }
                         crate::effects::ArgumentGuard::OriginalChain { optional_call } => {
-                            let chain = lowering.chain.as_ref().ok_or_eyre(
+                            let chain = lowering.chain().ok_or_eyre(
                                 "unsupported nested optional call/private PURE callee",
                             )?;
-                            let base = self.slot(&chain.base)?;
-                            self.chain(&chain.steps, base, optional_call, &tail)
+                            let base = self.slot(&chain.base())?;
+                            self.chain(&chain.steps(), base, optional_call, &tail)
                         }
                     };
                 }
