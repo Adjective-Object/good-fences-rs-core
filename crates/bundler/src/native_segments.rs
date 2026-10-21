@@ -31,6 +31,31 @@ impl Owner {
 }
 
 impl Placement {
+    pub(super) fn reschedule(
+        &mut self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+        modules: &BTreeMap<u32, Module<'_>>,
+        prepared: &PreparedValues<'_>,
+        seams: &BTreeMap<u32, u32>,
+    ) -> eyre::Result<()> {
+        let prefixes = self
+            .phase_dependencies
+            .values()
+            .flatten()
+            .filter_map(|owner| match owner {
+                Owner::Bindings(key) => Some(*key),
+                Owner::Evaluation(_) => None,
+            })
+            .collect();
+        let mut scheduled =
+            Self::scheduled(graph, plan, modules, self.owners.clone(), &prefixes)?;
+        let definitions = partition_definitions(graph, prepared, &scheduled.owners)?;
+        scheduled.names = connections::name_plan(graph, modules, prepared, &scheduled.owners, seams, &definitions)?;
+        *self = scheduled;
+        Ok(())
+    }
+
     pub fn schedule(&self, owner: Owner) -> &[SegmentKey] {
         self.schedules
             .get(&owner)
@@ -481,7 +506,7 @@ impl Placement {
                     Self::scheduled(graph, plan, modules, owners.clone(), &prefixes)?;
                 placement.names = names;
                 let (safe, initializers) = activation_safe(
-                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes, None, None,
+                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes, None, None, None,
                 )?;
                 if !safe {
                     // Reject contraction, not native cycles. Prefer retaining
@@ -853,6 +878,7 @@ fn activation_safe(
     prefixes: &BTreeSet<SegmentKey>,
     connections: Option<(&BTreeMap<PathBuf, Code>, &BTreeMap<RootId, PathBuf>)>,
     cjs: Option<&commonjs::CommonJs>,
+    activations: Option<&Activations>,
 ) -> eyre::Result<(bool, BTreeSet<SegmentKey>)> {
     let owners = &placement.owners;
     let mut native = BTreeMap::new();
@@ -992,9 +1018,10 @@ fn activation_safe(
     for &key in owners.keys() {
         // Opaque factories/facade jobs have their own activation contract.
         // This final check projects the reconstructed native ESM body events.
-        if connections.is_some()
+        if (connections.is_some()
             && (modules[&key.file_id].parsed.facts.commonjs
-                || cjs.is_some_and(|cjs| cjs.owns_activation(key.file_id)))
+                || cjs.is_some_and(|cjs| cjs.owns_activation(key.file_id))))
+            || activations.is_some_and(|a| a.initializers.contains_key(&key.file_id))
         {
             continue;
         }
@@ -1042,6 +1069,9 @@ fn activation_safe(
             GraphNode::Segment(key) => Some(key.file_id),
             GraphNode::Unlinked { .. } => None,
         }));
+        if activations.is_some_and(|a| entrances.iter().all(|file| a.initializers.contains_key(file))) {
+            continue;
+        }
         let groups = if connections.is_some() {
             vec![entrances]
         } else {
@@ -1114,6 +1144,7 @@ pub(super) fn validate_connections(
     files: &BTreeMap<PathBuf, Code>,
     routes: &BTreeMap<RootId, PathBuf>,
     cjs: &commonjs::CommonJs,
+    activations: Option<&Activations>,
 ) -> eyre::Result<()> {
     for (path, code) in files {
         for (target, _) in code.static_dependencies() {
@@ -1146,6 +1177,7 @@ pub(super) fn validate_connections(
         &BTreeSet::new(),
         Some((files, routes)),
         Some(cjs),
+        activations,
     )?;
     eyre::ensure!(
         safe,
@@ -1299,6 +1331,7 @@ pub(super) fn emit(
     connections: &connections::Connections,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
+    activations: Option<&Activations>,
 ) -> eyre::Result<Code> {
     let live: BTreeSet<_> = placement
         .owners
@@ -1317,6 +1350,14 @@ pub(super) fn emit(
         .iter()
         .map(|(&f, route)| (f, Code::request(route.clone(), RequestKind::DynamicImport)))
         .collect();
+    if let Some(activations) = activations {
+        for &target in activations.initializers.keys() {
+            values.dynamic.insert(
+                target,
+                activations.dynamic(graph, target, &root.path(graph)),
+            );
+        }
+    }
     for (&file, module) in modules {
         for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
             !d.type_only
@@ -1363,14 +1404,110 @@ pub(super) fn emit(
     for binding in connections.bindings.get(&root).into_iter().flatten() {
         values.imports.insert(binding.symbol, binding.alias.clone());
     }
+    let mut imported = BTreeSet::new();
+    let mut occupied: BTreeSet<_> = values
+        .names
+        .values()
+        .chain(values.defaults.values())
+        .cloned()
+        .collect();
+    for module in modules.values() {
+        occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
+        occupied.extend(
+            module
+                .parsed
+                .facts
+                .references
+                .iter()
+                .map(|r| r.name.clone()),
+        );
+    }
+    occupied.extend(prepared.symbols.definitions.values().map(|d| d.name.clone()));
     let mut bodies = Code::default();
+    let mut deferred_bodies: BTreeMap<u32, Code> = BTreeMap::new();
     for &key in schedule {
         let file = key.file_id;
-        let (hoisted, body) = body(graph, key, &modules[&file], &values, recipes)?
-            .ok_or_eyre("relocated lexical group changed compatibility")?;
+        let initialization = activations.and_then(|a| a.initializers.get(&file));
+        let (hoisted, body) = reconstruct(
+            graph,
+            key,
+            &modules[&file],
+            &values,
+            recipes,
+            initialization.is_some(),
+        )?
+        .ok_or_else(|| eyre::eyre!("relocated lexical group changed compatibility: {:?}, segment {}", graph.file_path(file), key.segment_idx))?;
         output.push(hoisted);
-        bodies.push(body);
-        bodies.push_str("\n;\n");
+        if initialization.is_some() {
+            deferred_bodies.entry(file).or_default().push(body);
+        } else {
+            bodies.push(body);
+            bodies.push_str("\n;\n");
+        }
+    }
+    if let Some(activations) = activations {
+        for (&file, initialization) in &activations.initializers {
+            if Owner::Evaluation(activations.owners[&file]) != root {
+                continue;
+            }
+            let mut dependencies = Code::default();
+            for dependency in modules[&file].parsed.facts.dependencies.iter().filter(|d| {
+                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            }) {
+                let target = target_file(graph, file, dependency)?;
+                let target_init = &activations.initializers[&target].init;
+                if Owner::Evaluation(activations.owners[&target]) != root && imported.insert(target_init.clone())
+                {
+                    output.push(
+                        Code::request(path(graph, activations.owners[&target]), RequestKind::Import)
+                            .surrounded(format!("import {{{target_init}}} from "), ";\n"),
+                    );
+                }
+                dependencies.push_str(&format!("{target_init}();\n"));
+            }
+            if let Some(body) = deferred_bodies.remove(&file) {
+                dependencies.push(body);
+            }
+            output.push(initialization.guard(dependencies));
+            let mut getters = String::new();
+            for (index, (name, linked)) in prepared.symbols.exports[&file].iter().enumerate() {
+                let key = declaration(graph, &linked.identity)?
+                    .ok_or_eyre("nonlexical deferred namespace export")?;
+                let owner = placement.owners[&key];
+                let value = if owner == root {
+                    values
+                        .name(&linked.identity)
+                        .ok_or_eyre("missing deferred namespace binding")?
+                        .to_owned()
+                } else {
+                    let mut alias = format!("{}_{}", initialization.namespace, index);
+                    while !occupied.insert(alias.clone()) {
+                        alias.push('$');
+                    }
+                    output.push(
+                        Code::request(owner.path(graph), RequestKind::Import).surrounded(
+                            format!(
+                                "import {{{} as {alias}}} from ",
+                                quote(connections.address(&linked.identity)?)
+                            ),
+                            ";\n",
+                        ),
+                    );
+                    alias
+                };
+                getters.push_str(&format!("get {}() {{ return {value}; }},\n", quote(name)));
+            }
+            output.push_str(&format!(
+                "var {} = {{__proto__: null,\n{getters}}};\n",
+                initialization.namespace
+            ));
+            if activations.exports.contains(&file) {
+                output.push_str(&format!(
+                    "export {{{}, {}}};\n",
+                    initialization.init, initialization.namespace
+                ));
+            }
+        }
     }
     output.push(bodies);
     if let Some(exports) = connections.exports.get(&root) {

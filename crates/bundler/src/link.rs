@@ -199,6 +199,33 @@ pub(crate) fn esm_plan_prepared(
     browser: bool,
     require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
+    esm_plan_activated_prepared(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new())
+}
+
+/// Explicit internal placement, before automatic selection. Callers must exclude
+/// escaped/reflective namespace observations; namespaces here support live reads
+/// and identity only. Unsupported reconstruction returns native output.
+pub(crate) fn esm_plan_activated(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+    relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
+    placements: &BTreeMap<u32, u32>,
+) -> eyre::Result<Artifacts<crate::assembly::Code>> {
+    esm_plan_activated_prepared(graph, plan, policy, sources, relocations, false, &BTreeSet::new(), placements)
+}
+
+fn esm_plan_activated_prepared(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+    relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
+    browser: bool,
+    require_defaults: &BTreeSet<PathBuf>,
+    placements: &BTreeMap<u32, u32>,
+) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = load_modules(graph, plan, sources, relocations)?;
@@ -206,7 +233,7 @@ pub(crate) fn esm_plan_prepared(
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    native::emit(graph, plan, &modules, &manifest, &symbols, browser, require_defaults)
+    native::emit(graph, plan, &modules, &manifest, &symbols, browser, require_defaults, placements)
 }
 
 fn load_modules<'a>(

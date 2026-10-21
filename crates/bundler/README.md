@@ -90,7 +90,7 @@ Windows separators introduced by native path joins.
 single-root/single-chunk ESM island. It returns `Some(DeferredEsm)` with ordinary
 native artifacts and the generated initializer export name, or `None` when the
 island needs native evaluation. Ordinary `link::esm` and `BuildSession` output
-are unchanged: no automatic activation rewrites or parent-hoisting yet.
+are unchanged: no automatic deferred-target selection or parent-hoisting yet.
 
 Supported retained declarations are named root functions and simple identifier
 `var`/`let`/`const` declarations (including split declarators and named exports).
@@ -109,6 +109,34 @@ Imported writes and writes to const bindings also prevent reconstruction.
 Cached source-local declaration alternatives and original-coordinate initializer
 slots use the same checked operation renderer as ordinary native emission;
 no emitted-source parsing or runtime source loading is involved.
+
+The internal `link::esm_plan_activated` reconstruction seam takes explicit
+source-file → physical evaluation-owner selections; it is also the ordinary
+prepared-emission path with an empty selection. Selection is not a build option
+or an automatic single-parent policy. Its caller must certify that dynamic
+namespace results are used only for live reads, call receivers and identity,
+not reflection, mutation, escaping to unknown consumers or namespace reexports.
+Those unsupported observations must retain their native boundary. Eligible
+results use one per-island null-prototype getter literal over root bindings,
+not export snapshots or a namespace runtime.
+
+Selected static dependency closures receive separate cached guards. Synchronous
+activation calls run inside each dependent guard in source occurrence order;
+loading availability files alone does not activate them. Cached dependency
+operations replace only the original dynamic-import expression. Local imports
+yield before calling the local guard; cross-owner imports load the native
+availability chunk and invoke its exported guard before yielding the same live
+namespace view. Guards and views are exported only when another owner needs
+them. Typed `Code` requests use final physical owners and survive empty-file
+pruning and destination renaming. Deferred availability files have artifact
+members and async routes, not independently executable source namespace routes.
+
+The seam rejects unsupported declaration/namespace forms, `then` export
+surfaces, source TLA/static cycles, require/context/CJS activation, eager/public
+demands on deferred sources and incompatible co-location. It falls back to
+ordinary native emission rather than changing their evaluation. Deferred sources
+with their own dynamic imports currently stay native. Selection and placement
+heuristics, clustering and synthesized async boundaries remain unimplemented.
 
 ## JSON modules
 
