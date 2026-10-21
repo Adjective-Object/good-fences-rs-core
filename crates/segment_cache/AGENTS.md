@@ -35,6 +35,6 @@
 - Validate parented execution contexts, immediate call links and exact occurrence/
   eager-access coverage; never persist linked scheduling constraints.
 - Sidecars use requested lexical source paths; unique sibling staging plus
-  tempfile atomic replacement, never unlink-before-rename. Last publisher wins;
+  closed tempfile paths and std atomic rename, never unlink-before-rename. Last publisher wins;
   recheck source before publish/return. Cache failures are reported nonfatally,
   source/parse failures are fatal. Never clean another writer's staging files.

@@ -427,11 +427,16 @@ fn replacement_failure_is_nonfatal_and_does_not_remove_destination() {
 fn concurrent_publishers_always_leave_one_complete_record() {
     let (dir, path) = setup();
     let cold = run(&path).unwrap();
+    let mut previous = File::open(sidecar_path(&path)).unwrap();
+    let previous_bytes = fs::read(sidecar_path(&path)).unwrap();
+    let start = std::sync::Barrier::new(8);
     std::thread::scope(|scope| {
         for _ in 0..8 {
             let path = &path;
             let record = &cold.record;
+            let start = &start;
             scope.spawn(move || {
+                start.wait();
                 for _ in 0..8 {
                     publish(path, SOURCE, SOURCE.as_bytes(), record, || Ok(())).unwrap();
                     assert_eq!(run(path).unwrap().record, *record);
@@ -439,6 +444,10 @@ fn concurrent_publishers_always_leave_one_complete_record() {
             });
         }
     });
+    let mut retained = Vec::new();
+    previous.read_to_end(&mut retained).unwrap();
+    assert_eq!(retained, previous_bytes);
+    drop(previous);
     assert_eq!(run(&path).unwrap().status, CacheStatus::Hit);
     no_staging(&dir);
 }

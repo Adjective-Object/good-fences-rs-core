@@ -259,9 +259,9 @@ fn publish(
     staging.as_file().sync_all()?;
     before_publish()?;
     unchanged(path, original)?;
-    staging
-        .persist(&destination)
-        .map_err(|e| eyre::eyre!("cache replacement failed: {e}"))?;
+    let staging = staging.into_temp_path();
+    // std also handles replacement of open destinations on Windows.
+    fs::rename(&staging, &destination).wrap_err("cache replacement failed")?;
     Ok(())
 }
 

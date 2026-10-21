@@ -127,8 +127,9 @@ payload checksum and sealed extraction integrity remain SHA-256.
 
 Writes use uniquely named sibling `.seg.cbor.stage-*` files, flush/sync before
 atomic replacement, and clean up staging files on errors/normal cancellation.
-The pinned tempfile implementation atomically overwrites on Unix and Windows;
-it never removes the old destination first. Unsupported-filesystem replacement
+Staging handles close before `std::fs::rename` atomically overwrites the
+destination, including Windows replacement with open readers. It never removes
+the old destination first. Unsupported-filesystem replacement
 errors preserve the previous cache and return an uncached parse. A crash may
 leave a staging orphan: readers ignore it, and no writer deletes another
 writer's staging file. This promises atomic visibility, not directory-fsync

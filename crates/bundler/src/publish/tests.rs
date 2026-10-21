@@ -59,6 +59,9 @@ fn snapshot(directory: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTi
     ) {
         for entry in fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
+            if path == root.join(LOCK) {
+                continue;
+            }
             if path.is_dir() {
                 visit(root, &path, result);
             } else {
