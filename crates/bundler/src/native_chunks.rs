@@ -99,6 +99,9 @@ fn emit_inner(
                 entry_owners.insert(entry.clone(), owners);
             }
             RootId::Async(site) => {
+                if plan.generated_boundaries.contains_key(site) {
+                    continue;
+                }
                 if matches!(manifest.async_facades[site].target, NodeId::External { .. }) {
                     continue;
                 }
@@ -258,7 +261,10 @@ fn emit_inner(
             pending.extend(edges[&file].iter().copied());
         }
     }
-    let groups = jobs.iter().map(|&file| (file, BTreeSet::from([file]))).collect();
+    let groups = jobs
+        .iter()
+        .map(|&file| (file, BTreeSet::from([file])))
+        .collect();
     let clustered = libraries::cluster(
         graph,
         plan,
@@ -304,6 +310,7 @@ fn emit_inner(
         &boundaries,
         &cjs,
     )?;
+    placement.extract_generated(graph, plan)?;
     if let Some(activations) = activations {
         for (&key, owner) in &mut placement.owners {
             if activations.initializers.contains_key(&key.file_id) {
@@ -320,7 +327,12 @@ fn emit_inner(
                 values.imports.insert(binding.symbol, binding.alias.clone());
             }
             let retained = placement.schedule(owner).iter().copied().collect();
-            for file in placement.schedule(owner).iter().map(|key| key.file_id).collect::<BTreeSet<_>>() {
+            for file in placement
+                .schedule(owner)
+                .iter()
+                .map(|key| key.file_id)
+                .collect::<BTreeSet<_>>()
+            {
                 if !compatible(graph, file, &modules[&file], &values, &retained)? {
                     return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults);
                 }
@@ -328,6 +340,7 @@ fn emit_inner(
         }
     }
     placement.cluster(graph, plan, modules, prepared, &owners, min_chunk_bytes)?;
+    placement.hoist_generated(graph, plan, modules, min_chunk_bytes)?;
     placement.reschedule(graph, plan, modules, prepared, &owners)?;
     let resolved_activations = activations
         .map(|activations| {
@@ -385,6 +398,12 @@ fn emit_inner(
         }
     }
     let mut changed = BTreeSet::new();
+    for boundary in plan.generated_boundaries.values() {
+        let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
+            unreachable!()
+        };
+        changed.insert(owners[&consumer.file_id]);
+    }
     if activations.is_some() {
         changed.extend(jobs.iter().copied());
     }
@@ -442,7 +461,7 @@ fn emit_inner(
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
     let connections = connections::Connections::new(
-        graph, modules, prepared, &owners, &placement, &surfaces, &cjs, activations,
+        graph, modules, prepared, &owners, &placement, &surfaces, &cjs, activations, plan,
     )?;
     cjs.emit(graph, modules, &connections.namespaces, &entry_files, plan, prepared)?;
     for &root in &jobs {
@@ -461,6 +480,7 @@ fn emit_inner(
                 &recipes,
                 &cjs,
                 activations,
+                plan,
             )?
         } else {
             let module = &modules[&root];
@@ -556,6 +576,7 @@ fn emit_inner(
                 &recipes,
                 &cjs,
                 activations,
+                plan,
             )?;
             let path = owner.path(graph);
             files.insert(path, output);
@@ -718,6 +739,9 @@ fn emit_inner(
                         .unwrap_or_else(|| connections.namespaces[&file].clone()),
                 )
             })
+            .chain(plan.generated_boundaries.iter().map(|(site, boundary)| {
+                (site.clone(), placement.owners[&boundary.target].path(graph))
+            }))
             .collect(),
         async_modules,
     })

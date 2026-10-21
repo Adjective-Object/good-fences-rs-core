@@ -922,7 +922,7 @@ impl CommonJs {
             for index in 0..modules[&file].parsed.segments.len() {
                 let key = SegmentKey::new(file, index as u32);
                 if live.contains(&key) {
-                    let (declarations, body) = body(graph, key, &modules[&file], &values, &recipes)?
+                    let (declarations, body) = reconstruct(graph, key, &modules[&file], &values, &recipes, false)?
                         .ok_or_eyre("unsupported browser require-of-ESM lexical placement")?;
                     hoisted.push(declarations);
                     bodies.push(body);

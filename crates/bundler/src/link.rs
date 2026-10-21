@@ -158,6 +158,17 @@ pub fn esm_with_options(
     sources: &BTreeMap<PathBuf, String>,
     options: &crate::build::OutputOptions,
 ) -> eyre::Result<Artifacts> {
+    ensure!(
+        options.synthesize_async_boundaries || plan.generated_boundaries.is_empty(),
+        "generated plan requires synthesize_async_boundaries; repartition to disable"
+    );
+    let generated;
+    let plan = if options.synthesize_async_boundaries {
+        generated = crate::async_boundaries::extract(graph, plan, policy)?;
+        &generated
+    } else {
+        plan
+    };
     esm_plan_configured(
         graph,
         plan,

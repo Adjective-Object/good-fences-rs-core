@@ -280,6 +280,8 @@ for (const [name, mutate, expected] of [
   ['negative chunk size', (m) => { m.fixtureConfig = { output: { min_chunk_bytes: -1 } }; }, /nonnegative safe integer/u],
   ['fractional chunk size', (m) => { m.fixtureConfig = { output: { min_chunk_bytes: 1.5 } }; }, /nonnegative safe integer/u],
   ['unsafe chunk size', (m) => { m.fixtureConfig = { output: { min_chunk_bytes: Number.MAX_SAFE_INTEGER + 1 } }; }, /nonnegative safe integer/u],
+  ['invalid async synthesis option', (m) => { m.fixtureConfig = { output: { synthesize_async_boundaries: 1 } }; }, /must be a boolean/u],
+  ['async synthesis without observer', (m) => { m.fixtureConfig = { output: { synthesize_async_boundaries: true } }; }, /requires an outputObservation/u],
   ['null fixture config', (m) => { m.fixtureConfig = null; }, /must be an object/u],
   ['invalid loader', (m) => { m.fixtureConfig = { css: { load: 'custom' } }; }, /invalid css.load/u],
   ['invalid module suffix', (m) => { m.fixtureConfig = { css: { css_modules: 'ext:../css' } }; }, /invalid css.css_modules/u],
@@ -333,6 +335,43 @@ test('CSS output observations validate syntax without raw CSS imports and keep b
     delete manifest.expectations.backend;
     writeFileSync(manifestFile, JSON.stringify(manifest));
     assert.throws(run, /CSS output observations require native/u);
+  });
+});
+
+test('async synthesis output contracts validate inputs and retain build/backend/output stages', () => {
+  withCorpus(({root, run, driver, builds}) => {
+    const directory = addCase(root, 'async', {
+      fixtureConfig: {output: {synthesize_async_boundaries: true}},
+      outputObservation: 'observe.mjs',
+      expectations: {stdout: ['hello'], backend: 'native'},
+      sources: {'entry.js': "throw Error('source must not execute');"},
+    });
+    const observer = path.join(directory, 'observe.mjs');
+    writeFileSync(observer, "export function observe({entry,entries}) { if (!entries[entry]) throw Error('missing'); console.log('hello'); }");
+    // The synthetic driver need only acknowledge this bounded fixture option.
+    writeFileSync(driver, readFileSync(driver, 'utf8').replace(
+      'const [root, directory, ...names] = process.argv.slice(2);',
+      "const [root, directory, ...args] = process.argv.slice(2); const names = args[0] === '--fixture-config' ? args.slice(2) : args;"));
+    assert.equal(run()[0].status, 'passed');
+    writeFileSync(observer, "export function observe() { console.log('wrong'); }");
+    const output = run()[0];
+    assert.equal(output.stage, 'output');
+    assert.match(output.error.message, /async boundary output stdout mismatch/u);
+    const buildCount = readFileSync(builds, 'utf8');
+    writeFileSync(observer, 'export const = ;');
+    assert.equal(run()[0].stage, 'input');
+    assert.equal(readFileSync(builds, 'utf8'), buildCount);
+    writeFileSync(observer, 'export function observe() {}');
+    writeFileSync(path.join(directory, 'files/entry.js'), 'const = ;');
+    assert.equal(run()[0].stage, 'input');
+    assert.equal(readFileSync(builds, 'utf8'), buildCount);
+    writeFileSync(path.join(directory, 'files/entry.js'), '');
+    writeFileSync(driver, readFileSync(driver, 'utf8')
+      .replace("backend:'native'", "backend:'legacy'")
+      .replace("layout:'native-chunks-v1'", "layout:'exact-root-set-chunks-v1'"));
+    assert.equal(run()[0].stage, 'backend');
+    writeFileSync(driver, '#!/bin/sh\nexit 1\n');
+    assert.equal(run()[0].stage, 'build');
   });
 });
 

@@ -5,6 +5,8 @@ JavaScript runtime semantics and CSS output contracts. One runner validates the
 inputs, builds through the public Rust library/publisher, and compares emitted
 observations. Ordinary JavaScript retains unbundled Node differential checks;
 CSS uses a separate explicit output observer because raw Node cannot import CSS.
+Opt-in generated async boundaries likewise use an explicit output contract,
+because their deliberate extra suspension precludes source scheduling comparison.
 
 From the repository root, with Node.js 22 and the repository Rust toolchain:
 
@@ -42,9 +44,10 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **44 cases / 60 entry executions**: six esbuild cases,
-six rspack cases and thirty-two authored cases. Four authored CSS cases use
-output observations; the 40 JS cases / 56 executions remain differential.
+The corpus contains **45 cases / 61 entry executions**: six esbuild cases,
+six rspack cases and thirty-three authored cases. Four authored CSS cases and
+one generated-async case use output observations; the 40 ordinary JS cases /
+56 executions remain differential.
 The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
@@ -82,7 +85,7 @@ tests.
 ```
 
 Every case has `id`, `moduleType`, `entryPoints`, `expectations` and `goals`.
-`upstream`, `fixtureConfig` and `cssObservation` are optional at the top level;
+`upstream`, `fixtureConfig`, `cssObservation` and `outputObservation` are optional at the top level;
 no unknown fields are accepted.
 An upstream adaptation looks like:
 
@@ -177,6 +180,20 @@ package lifecycle scripts are supported. The runner never installs dependencies
 or invokes scripts; missing runtime dependencies fail execution. Node built-ins
 are available. Only trusted, reviewed fixtures should be run: Node execution is
 **not a sandbox**, and this runner does not enforce a network or filesystem jail.
+
+### Generated async output contracts
+
+The bounded driver accepts
+`"fixtureConfig": {"output": {"synthesize_async_boundaries": true}}`.
+Enabled fixtures must also declare `"outputObservation": "observe.mjs"` and
+require the native backend. This sibling module exports `async function
+observe(build)` with the same build/entry inputs as CSS observers below.
+The harness syntax-checks all source JS and the observer before building, then
+runs the output observer instead of a source/output scheduling differential.
+Metadata/input, build, backend and output validation stages remain separate.
+`authored/native-generated-async` observes eager unrelated effects, a cold guard,
+introduced suspension, receiver semantics and concurrent stable identity.
+Do not use output observers to bypass ordinary JS differential contracts.
 
 ### CSS output contracts and explicit options
 

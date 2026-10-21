@@ -66,7 +66,7 @@ function validateFiles(directory) {
 
 function validateCase(root, directory) {
   const manifest = json(path.join(directory, 'case.json'));
-  object(manifest, requiredFields, 'case.json', ['upstream', 'fixtureConfig', 'cssObservation']);
+  object(manifest, requiredFields, 'case.json', ['upstream', 'fixtureConfig', 'cssObservation', 'outputObservation']);
   if (Object.hasOwn(manifest, 'fixtureConfig')) {
     validateFixtureConfig(manifest.fixtureConfig);
   }
@@ -76,6 +76,19 @@ function validateCase(root, directory) {
       'cssObservation must be a sibling .mjs module');
     regularFile(path.join(directory, manifest.cssObservation));
     check(manifest.expectations?.backend === 'native', 'CSS output observations require native backend');
+  }
+  if (Object.hasOwn(manifest, 'outputObservation')) {
+    relativePath(manifest.outputObservation, 'outputObservation');
+    check(!manifest.outputObservation.includes('/') && manifest.outputObservation.endsWith('.mjs'),
+      'outputObservation must be a sibling .mjs module');
+    regularFile(path.join(directory, manifest.outputObservation));
+    check(manifest.expectations?.backend === 'native', 'Output observations require native backend');
+    check(manifest.fixtureConfig?.output?.synthesize_async_boundaries === true,
+      'outputObservation requires explicit async boundary synthesis');
+    check(!manifest.cssObservation, 'Choose one output observation contract');
+  }
+  if (manifest.fixtureConfig?.output?.synthesize_async_boundaries === true) {
+    check(manifest.outputObservation, 'Async boundary synthesis requires an outputObservation contract');
   }
   relativePath(manifest.id, 'id');
   const relative = path.relative(root, directory).split(path.sep).join('/');
@@ -138,11 +151,15 @@ function validateFixtureConfig(config) {
   object(config, [], 'fixtureConfig', ['output', 'css']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
   if (Object.hasOwn(config, 'output')) {
-    object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes']);
+    object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes', 'synthesize_async_boundaries']);
     if (Object.hasOwn(config.output, 'base_url')) text(config.output.base_url, 'output.base_url');
     if (Object.hasOwn(config.output, 'min_chunk_bytes')) {
       check(Number.isSafeInteger(config.output.min_chunk_bytes) && config.output.min_chunk_bytes >= 0,
         'output.min_chunk_bytes must be a nonnegative safe integer');
+    }
+    if (Object.hasOwn(config.output, 'synthesize_async_boundaries')) {
+      check(typeof config.output.synthesize_async_boundaries === 'boolean',
+        'output.synthesize_async_boundaries must be a boolean');
     }
   }
   if (Object.hasOwn(config, 'css')) {
@@ -230,7 +247,7 @@ export function copyCase(files, directory, manifest) {
   if (!existsSync(path.join(directory, 'package.json'))) {
     writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ type: manifest.moduleType }));
   }
-  if (manifest.expectations.errors || manifest.cssObservation) {
+  if (manifest.expectations.errors || manifest.cssObservation || manifest.outputObservation) {
     const selection = manifest.fixtureConfig?.css?.css_modules;
     const cssSuffix = typeof selection === 'string' && selection.startsWith('ext:')
       ? selection.slice(4) : undefined;
@@ -386,12 +403,14 @@ export function runFixtures(root = defaultRoot, {
         const source = path.join(directory, 'source');
         copyCase(files, native, manifest);
         let baseline;
-        let cssObserver;
-        if (manifest.cssObservation) {
-          cssObserver = path.join(directory, 'observe.mjs');
-          cpSync(path.join(path.dirname(files), manifest.cssObservation), cssObserver);
-          successful(execute(process.execPath, ['--check', cssObserver], directory),
-            `${manifest.id}: CSS observer syntax validation`);
+        let outputObserver;
+        const observation = manifest.cssObservation ?? manifest.outputObservation;
+        const observationLabel = manifest.cssObservation ? 'CSS output' : 'async boundary output';
+        if (observation) {
+          outputObserver = path.join(directory, 'observe.mjs');
+          cpSync(path.join(path.dirname(files), observation), outputObserver);
+          successful(execute(process.execPath, ['--check', outputObserver], directory),
+            `${manifest.id}: ${manifest.cssObservation ? 'CSS' : 'output'} observer syntax validation`);
         } else {
           baseline = observeEntries(manifest,
             Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
@@ -417,9 +436,9 @@ export function runFixtures(root = defaultRoot, {
         }
         stage = 'output';
         const bundled = observeEntries(manifest,
-          cssObserver ? Object.fromEntries(manifest.entryPoints.map(entry => [entry, cssObserver])) : build.entries,
-          source, timeoutMs, cssObserver ? 'CSS output' : 'bundled', cssObserver ? build : undefined);
-        if (!cssObserver) assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
+          outputObserver ? Object.fromEntries(manifest.entryPoints.map(entry => [entry, outputObserver])) : build.entries,
+          source, timeoutMs, outputObserver ? observationLabel : 'bundled', outputObserver ? build : undefined);
+        if (!outputObserver) assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
         return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
           executions: manifest.entryPoints.length, stdout: bundled.stdout, ...retained };
       } catch (error) {

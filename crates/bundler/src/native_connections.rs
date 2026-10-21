@@ -18,6 +18,7 @@ pub(super) struct OwnerNames {
 
 pub(super) fn name_plan(
     graph: &SourceGraph,
+    plan: &ChunkPlan,
     modules: &BTreeMap<u32, Module<'_>>,
     prepared: &PreparedValues<'_>,
     owners: &BTreeMap<SegmentKey, Owner>,
@@ -28,8 +29,21 @@ pub(super) fn name_plan(
     let defaults = Values::new(prepared);
     let mut generated = OccupiedNames::new(prepared);
     let mut references: BTreeMap<Owner, HashMap<crate::symbols::Symbol, bool>> = BTreeMap::new();
+    let generated_references: BTreeSet<_> = plan
+        .generated_boundaries
+        .values()
+        .map(|boundary| {
+            let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
+                unreachable!()
+            };
+            (consumer.file_id, boundary.reference)
+        })
+        .collect();
     for (&file, module) in modules {
-        for reference in &module.parsed.facts.references {
+        for (index, reference) in module.parsed.facts.references.iter().enumerate() {
+            if generated_references.contains(&(file, index as u32)) {
+                continue;
+            }
             let Some(binding) = reference.binding else {
                 continue;
             };
@@ -168,6 +182,7 @@ impl Connections {
         surfaces: &BTreeSet<u32>,
         cjs: &commonjs::CommonJs,
         activations: Option<&Activations>,
+        plan: &ChunkPlan,
     ) -> eyre::Result<Self> {
         let symbols = prepared.symbols;
         let mut result = Self {
@@ -210,8 +225,7 @@ impl Connections {
         // are assembled, transparent private connectors are reduced over that
         // typed graph; final activation validation checks the reduced output.
         for file in seams.values().copied().collect::<BTreeSet<_>>() {
-            if cjs.contains(file)
-                || activations.is_some_and(|a| a.initializers.contains_key(&file))
+            if cjs.contains(file) || activations.is_some_and(|a| a.initializers.contains_key(&file))
             {
                 continue;
             }
@@ -247,6 +261,23 @@ impl Connections {
             return Ok(result);
         }
         let defaults = Values::new(prepared);
+        for boundary in plan.generated_boundaries.values() {
+            let binding = modules[&boundary.target.file_id]
+                .parsed
+                .facts
+                .emission
+                .segments[boundary.target.segment_idx as usize]
+                .placement
+                .declarations[0];
+            let identity = ExportIdentity::Binding(boundary.target.file_id, binding);
+            let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
+                unreachable!()
+            };
+            let owner = placement.owners[&boundary.target];
+            if placement.owners[&consumer] != owner {
+                result.demand(graph, symbols, &defaults, owner, &identity)?;
+            }
+        }
         let owners: BTreeSet<_> = placement
             .owners
             .values()
@@ -293,7 +324,13 @@ impl Connections {
                         if let Some(key) = segments::declaration(graph, &linked.identity)? {
                             let owner = placement.owners[&key];
                             if owner != Owner::Evaluation(activations.owners[&file]) {
-                                result.demand(graph, symbols, &defaults, owner, &linked.identity)?;
+                                result.demand(
+                                    graph,
+                                    symbols,
+                                    &defaults,
+                                    owner,
+                                    &linked.identity,
+                                )?;
                             }
                         }
                     }

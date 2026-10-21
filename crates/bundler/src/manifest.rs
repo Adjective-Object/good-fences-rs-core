@@ -87,6 +87,7 @@ pub fn diagnostic_manifest(
         plan.is_current(graph, policy),
         "stale partition revision or effect policy"
     );
+    crate::async_boundaries::validate(graph, plan)?;
     let mut manifest = DiagnosticManifest {
         revision: plan.revision,
         policy_fingerprint: plan.policy_fingerprint,
@@ -115,6 +116,26 @@ pub fn diagnostic_manifest(
                 manifest.entries.insert(id.clone(), facade);
             }
             RootId::Async(site) => {
+                if let Some(boundary) = plan.generated_boundaries.get(site) {
+                    manifest.async_facades.insert(
+                        site.clone(),
+                        AsyncFacade {
+                            consumer: node_id(graph, graph.edges()[boundary.source_edge].from)?,
+                            target: node_id(
+                                graph,
+                                source_graph::GraphNode::Segment(boundary.target),
+                            )?,
+                            facade: Facade {
+                                demand: FacadeDemand {
+                                    evaluation_modules: BTreeSet::new(),
+                                    ..facade.demand
+                                },
+                                ..facade
+                            },
+                        },
+                    );
+                    continue;
+                }
                 let mut occurrence = None;
                 for &index in &plan.retention.async_boundaries {
                     if async_seed(graph, index)?.id == *root {
