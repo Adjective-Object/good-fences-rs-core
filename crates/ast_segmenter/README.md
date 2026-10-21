@@ -51,9 +51,10 @@ and unknown names all remain candidates. `LazyWrapperKind` is an imported/local
 spelling hint (`Unknown`, `LazyImport`, `LazyAction`), never runtime proof. Currently
 callbacks are non-async zero-parameter concise arrows returning a literal import;
 getters are non-async one-identifier-parameter concise arrows returning that
-binding's non-optional dotted property. Parentheses and parameter annotations are
-preserved; expression casts/assertions are not supported candidates. Unsupported
-getters are omitted, but all ordinary references remain for later all-reference
+binding's non-optional dotted property, without a parameter default. Parentheses
+and parameter annotations are preserved; expression casts/assertions are not
+supported candidates. Unsupported getters are omitted, but all ordinary
+references remain for later all-reference
 certification. Extra arguments, spreads, options effects and initializer syntax
 are preserved, not evaluated, copied or certified. No promise rewrite, runtime
 recognition, target eligibility, graph obligations or emission plan is extracted.

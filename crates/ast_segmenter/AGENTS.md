@@ -135,4 +135,5 @@ Lazy module/selector candidates record general identifier-constructor shapes,
 binding/reference identities and composed original argument slots. Wrapper kinds
 are spelling hints only; aliases and lexical shadows are not runtime certification.
 Keep options in one original slot and leave unsupported getter references intact.
+Defaulted getter parameters are unsupported, including self-referencing defaults.
 No lazy recognition, transformed obligations or reconstruction plans enter caches.

@@ -18,6 +18,201 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn lazy_candidates_default_parameters_fall_back_on_fresh_and_cached_paths() {
+    for getter in ["(ns = ns) => ns.first", "(ns = fallback) => ns.first"] {
+        let source = format!(
+            "const mod = new LM(() => import('./child.mjs'));
+             const a = new LI(mod, {getter});"
+        );
+        let original = record(&source, "lazy.mjs", ModuleFormat::Esm);
+        assert_eq!(original.module().facts().emission().lazy_modules().len(), 1);
+        assert!(original
+            .module()
+            .facts()
+            .emission()
+            .lazy_selectors()
+            .is_empty());
+        let parses = ast_segmenter::module_parse_count();
+        let cached = CacheRecord::decode(
+            &original.encode(&source).unwrap(),
+            &source,
+            original.config(),
+        )
+        .unwrap();
+        assert_eq!(
+            cached.to_parsed(&source).unwrap().facts().emission(),
+            original.module().facts().emission()
+        );
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+    }
+}
+
+#[test]
+fn lazy_candidates_reject_resealed_unsupported_arrow_shapes() {
+    use ast_segmenter::views::CalleeShape;
+    use serde_json::json;
+
+    for (callback, getter, forge_module) in [
+        (
+            "() => import('./child.mjs').then(replaceNamespace)",
+            "ns => ns.first",
+            true,
+        ),
+        ("async () => import('./child.mjs')", "ns => ns.first", true),
+        (
+            "(unused = fallback) => import('./child.mjs')",
+            "ns => ns.first",
+            true,
+        ),
+        (
+            "() => (sideEffect(), import('./child.mjs'))",
+            "ns => ns.first",
+            true,
+        ),
+        (
+            "() => { return import('./child.mjs'); }",
+            "ns => ns.first",
+            true,
+        ),
+        ("() => import('./child.mjs')", "ns => ns.first()", false),
+        ("() => import('./child.mjs')", "async ns => ns.first", false),
+        (
+            "() => import('./child.mjs')",
+            "(ns = fallback) => ns.first",
+            false,
+        ),
+        (
+            "() => import('./child.mjs')",
+            "(ns = ns) => ns.first",
+            false,
+        ),
+        (
+            "() => import('./child.mjs')",
+            "(ns, unused) => ns.first",
+            false,
+        ),
+        (
+            "() => import('./child.mjs')",
+            "ns => { return ns.first; }",
+            false,
+        ),
+        (
+            "() => import('./child.mjs')",
+            "ns => (sideEffect(), ns.first)",
+            false,
+        ),
+        ("() => import('./child.mjs')", "ns => ns?.first", false),
+    ] {
+        let source = format!("const mod = new LM({callback}); const a = new LI(mod, {getter});");
+        let original = record(&source, "lazy.mjs", ModuleFormat::Esm);
+        let facts = original.module().facts();
+        let emission = facts.emission();
+        assert!(
+            if forge_module {
+                emission.lazy_modules().is_empty()
+            } else {
+                emission.lazy_selectors().is_empty()
+            },
+            "{source}"
+        );
+        let name = if forge_module { "LM" } else { "LI" };
+        let call = facts
+            .invocations()
+            .iter()
+            .find(|call| {
+                call.construct()
+                    && matches!(call.shape(), CalleeShape::Identifier(id) if id.name() == name)
+            })
+            .unwrap();
+        let constructor = facts
+            .references()
+            .iter()
+            .position(|r| r.name() == name && crate::validate::contains(call.callee(), r.span()))
+            .unwrap();
+        let segment = emission
+            .segments()
+            .iter()
+            .position(|r| r.source().contains(call.span()))
+            .unwrap();
+        let recipe = emission.segments().get(segment).unwrap();
+        let ranges: Vec<_> = recipe
+            .operations()
+            .iter()
+            .map(|o| o.kind().span(facts, recipe))
+            .collect();
+        let arguments: Vec<_> = call.arguments().iter().map(|argument| {
+            let operations: Vec<_> = ranges.iter().enumerate().filter(|&(i, &range)| {
+                crate::validate::contains(argument.span(), range)
+                    && !recipe.operations().get(i).unwrap().parent().is_some_and(|p| {
+                        crate::validate::contains(argument.span(), ranges[p as usize])
+                    })
+            }).map(|(i, _)| i as u32).collect();
+            json!({"span": (argument.span().start, argument.span().end), "operations": operations})
+        }).collect();
+        let construction = (call.span().start, call.span().end);
+        let candidate = if forge_module {
+            let binding = facts.bindings().iter().find(|b| b.name() == "mod").unwrap();
+            let dependency = facts
+                .dependencies()
+                .iter()
+                .find(|d| d.kind() == ast_segmenter::owned::DependencyKind::DynamicImport)
+                .unwrap();
+            json!({
+                "segment": segment, "constructor": constructor, "binding": binding.id(),
+                "dependency": dependency.id(),
+                "import_span": (dependency.span().start, dependency.span().end),
+                "declaration": (binding.declarations().get(0).unwrap().start, call.span().end),
+                "construction": construction, "arguments": arguments,
+            })
+        } else {
+            let (module_reference, module) = facts
+                .references()
+                .iter()
+                .enumerate()
+                .find(|(_, r)| r.name() == "mod")
+                .unwrap();
+            let (getter_reference, _) = facts
+                .references()
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.name() == "ns")
+                .last()
+                .unwrap();
+            let property = source.rfind("first").unwrap() as u32;
+            json!({
+                "segment": segment, "constructor": constructor, "kind": "LazyImport",
+                "module_reference": module_reference, "module_binding": module.binding().unwrap(),
+                "getter_reference": getter_reference, "property": "first",
+                "property_span": (property, property + 5),
+                "construction": construction, "arguments": arguments,
+            })
+        };
+        let parses = ast_segmenter::module_parse_count();
+        CacheRecord::decode(
+            &original.encode(&source).unwrap(),
+            &source,
+            original.config(),
+        )
+        .unwrap();
+        let forged = corrupt(&original, |v| {
+            v.set(
+                if forge_module {
+                    "module.facts.emission.lazy_modules"
+                } else {
+                    "module.facts.emission.lazy_selectors"
+                },
+                vec![candidate],
+            );
+        });
+        let error = CacheRecord::decode(&forged.envelope(true), &source, original.config())
+            .err()
+            .expect(&source);
+        assert!(error.to_string().contains("lazy"), "{source}: {error:?}");
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+    }
+}
+
+#[test]
 fn lazy_candidates_roundtrip_borrowed_without_parsing_or_unpacking() {
     let source =
         "import { LazyModule as LM, LazyImport as LI, LazyAction as LA } from './runtime.mjs';
@@ -163,7 +358,7 @@ fn lazy_candidates_reject_corrupt_links_spans_slots_and_kind_hints() {
         assert!(damaged.encode(source).is_err());
         assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
     }
-    for (field, version) in [("schema", 13), ("extractor", 17)] {
+    for (field, version) in [("schema", 13), ("extractor", 18)] {
         let stale = corrupt(&original, |v| v[field] = version.into());
         assert!(CacheRecord::decode(&envelope(&stale), source, original.config()).is_err());
     }
@@ -248,6 +443,33 @@ fn lazy_candidates_validate_returned_import_and_decoded_property_tokens() {
         ModuleFormat::Esm,
     );
     assert_eq!(typed.module().facts().emission().lazy_selectors().len(), 1);
+}
+
+#[test]
+fn lazy_candidates_accept_complete_commented_parenthesized_and_typed_arrows() {
+    for (path, source) in [
+        ("lazy.mjs", "const mod = new (LM)(( /* async decoy */ () /* => */ => ((import('./child.mjs'))) ));
+         const a = new LI(((mod)), (( /* async */ (ns /* = decoy */ ,) /* => */ => (((ns) /* ) */). /* () */ first) )));"),
+        ("lazy.ts", "const mod = new LM(<T extends (value: unknown) => unknown>(): Promise<T> => (import('./child.mjs')));
+         const a = new LI(mod, <T>(ns: { first: T }): T => (ns.first));
+         const b = new LI(mod, (ns: { first: (value: string) => number }) => ns.first);
+         const c = new LI(mod, (ns: { first: '<=>,()' }) => ns.first);
+         const d = new LI(mod, (ns: { first: <T = unknown>(value: T) => T }) => ns.first);
+         const e = new LI(mod, (ns: `${`a=b`}`) => ns.first);"),
+    ] {
+        let original = record(source, path, ModuleFormat::Esm);
+        assert_eq!(original.module().facts().emission().lazy_modules().len(), 1);
+        assert_eq!(
+            original.module().facts().emission().lazy_selectors().len(),
+            if path == "lazy.ts" { 5 } else { 1 }
+        );
+        let parses = ast_segmenter::module_parse_count();
+        let cached = CacheRecord::decode(
+            &original.encode(source).unwrap(), source, original.config(),
+        ).unwrap();
+        assert_eq!(cached.module().facts().emission(), original.module().facts().emission());
+        assert_eq!(ast_segmenter::module_parse_count(), parses);
+    }
 }
 
 #[test]

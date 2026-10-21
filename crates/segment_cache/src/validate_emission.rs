@@ -194,7 +194,7 @@ fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
             .execution()
             .contexts()
             .iter()
-            .find(|c| contains(candidate.callback().span(), c.span()))
+            .find(|c| wrapped(source, candidate.callback().span(), c.span()))
             .ok_or_eyre("missing lazy callback context")?;
         ensure!(
             dependency.kind() == DependencyKind::DynamicImport
@@ -204,6 +204,13 @@ fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
                 && dependency.enclosing_function() == Some(callback_context.span()),
             "invalid lazy callback dependency"
         );
+        direct_arrow(
+            source,
+            callback_context.span(),
+            None,
+            candidate.import_span(),
+            None,
+        )?;
         ensure!(
             !call.arguments().get(0).unwrap().spread(),
             "spread lazy callback"
@@ -272,6 +279,26 @@ fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
                 ),
             "invalid lazy getter link"
         );
+        let getter_context = emission
+            .execution()
+            .contexts()
+            .iter()
+            .find(|c| {
+                c.kind() == ast_segmenter::execution::ContextKind::Callable
+                    && wrapped(source, candidate.getter().span(), c.span())
+            })
+            .ok_or_eyre("missing lazy getter context")?;
+        ensure!(
+            wrapped(source, candidate.module_argument().span(), reference.span()),
+            "invalid lazy module argument expression"
+        );
+        direct_arrow(
+            source,
+            getter_context.span(),
+            parameter.declarations().get(0),
+            getter.span(),
+            Some(candidate.property_span()),
+        )?;
         let constructor = facts
             .references()
             .get(candidate.constructor() as usize)
@@ -291,6 +318,229 @@ fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
         );
     }
     Ok(())
+}
+
+// Only delimiters/trivia may surround an anchored expression. Containment alone
+// would accept a nested import/member inside a call, sequence or async arrow.
+fn wrapped(source: &str, outer: Span, inner: Span) -> bool {
+    if !contains(outer, inner) {
+        return false;
+    }
+    let Some(before) = syntax_tokens(&source[outer.start as usize..inner.start as usize]) else {
+        return false;
+    };
+    let Some(after) = syntax_tokens(&source[inner.end as usize..outer.end as usize]) else {
+        return false;
+    };
+    before.iter().all(|t| *t == "(")
+        && after.len() == before.len()
+        && after.iter().all(|t| *t == ")")
+}
+
+// This is a bounded token-boundary check, not a parser. Anchors come from the
+// canonical invocation/operation and execution records; no AST is built on hits.
+fn direct_arrow(
+    source: &str,
+    arrow: Span,
+    parameter: Option<Span>,
+    returned: Span,
+    property: Option<Span>,
+) -> eyre::Result<()> {
+    within(source, arrow, returned)?;
+    let mut header_start = arrow.start;
+    let parenthesized = if let Some(parameter) = parameter {
+        within(source, arrow, parameter)?;
+        ensure!(
+            parameter.end < returned.start,
+            "invalid lazy parameter order"
+        );
+        let prefix = syntax_tokens(&source[arrow.start as usize..parameter.start as usize])
+            .ok_or_eyre("invalid lazy parameter prefix")?;
+        ensure!(
+            prefix.is_empty()
+                || (prefix.last() == Some(&"(") && type_parameters(&prefix[..prefix.len() - 1])),
+            "non-simple or asynchronous lazy parameter"
+        );
+        header_start = parameter.end;
+        !prefix.is_empty()
+    } else {
+        true
+    };
+    let header = syntax_tokens(&source[header_start as usize..returned.start as usize])
+        .ok_or_eyre("invalid lazy arrow header")?;
+    let arrow_token = header
+        .iter()
+        .rposition(|t| *t == "=>")
+        .ok_or_eyre("missing synchronous lazy arrow")?;
+    let (parameters, body) = header.split_at(arrow_token);
+    ensure!(
+        body[1..].iter().all(|t| *t == "("),
+        "non-direct lazy arrow return"
+    );
+    if parameter.is_none() {
+        let open = parameters
+            .iter()
+            .enumerate()
+            .find(|(i, t)| **t == "(" && type_parameters(&parameters[..*i]))
+            .map(|(i, _)| i)
+            .ok_or_eyre("missing lazy callback parameters")?;
+        ensure!(
+            parameters[open..].starts_with(&["(", ")"])
+                && return_annotation(&parameters[open + 2..]),
+            "nonempty or asynchronous lazy callback parameters"
+        );
+    } else if parenthesized {
+        // Find the parameter-list close without confusing nested type syntax
+        // (including function types) with a default initializer or extra parameter.
+        let close = parameters
+            .iter()
+            .enumerate()
+            .find(|(i, t)| **t == ")" && balanced_type(&parameters[..*i], true))
+            .map(|(i, _)| i)
+            .ok_or_eyre("non-simple lazy getter parameter")?;
+        ensure!(
+            return_annotation(&parameters[close + 1..]),
+            "invalid lazy arrow return annotation"
+        );
+    } else {
+        ensure!(parameters.is_empty(), "non-simple lazy getter parameter");
+    }
+    let mut depth = body.len() - 1;
+    let end = if let Some(property) = property {
+        within(source, arrow, property)?;
+        ensure!(returned.end < property.start, "invalid lazy member order");
+        let member = syntax_tokens(&source[returned.end as usize..property.start as usize])
+            .ok_or_eyre("invalid lazy member tokens")?;
+        ensure!(
+            member.last() == Some(&".")
+                && member[..member.len() - 1].iter().all(|t| *t == ")")
+                && member.len() - 1 <= depth,
+            "non-direct lazy member"
+        );
+        depth -= member.len() - 1;
+        property.end
+    } else {
+        returned.end
+    };
+    let suffix = syntax_tokens(&source[end as usize..arrow.end as usize])
+        .ok_or_eyre("invalid lazy return suffix")?;
+    ensure!(
+        suffix.len() == depth && suffix.iter().all(|t| *t == ")"),
+        "non-direct lazy arrow expression"
+    );
+    Ok(())
+}
+
+fn return_annotation(tokens: &[&str]) -> bool {
+    tokens.is_empty() || (tokens.first() == Some(&":") && balanced_type(&tokens[1..], false))
+}
+
+fn type_parameters(tokens: &[&str]) -> bool {
+    tokens.is_empty()
+        || (tokens.first() == Some(&"<")
+            && tokens.last() == Some(&">")
+            && balanced_type(tokens, false))
+}
+
+fn balanced_type(mut tokens: &[&str], parameter: bool) -> bool {
+    if parameter {
+        if tokens.last() == Some(&",") {
+            tokens = &tokens[..tokens.len() - 1];
+        }
+        if tokens.first() == Some(&"?") {
+            tokens = &tokens[1..];
+        }
+        if tokens.is_empty() {
+            return true;
+        }
+        if tokens.first() != Some(&":") {
+            return false;
+        }
+        tokens = &tokens[1..];
+    }
+    if tokens.is_empty() {
+        return false;
+    }
+    let mut stack = Vec::new();
+    for &token in tokens {
+        match token {
+            "(" => stack.push(")"),
+            "[" => stack.push("]"),
+            "{" => stack.push("}"),
+            "<" => stack.push(">"),
+            ")" | "]" | "}" | ">" if stack.pop() != Some(token) => return false,
+            "=" if stack.is_empty() => return false,
+            "," if stack.is_empty() => return false,
+            _ => {}
+        }
+    }
+    stack.is_empty()
+}
+
+fn syntax_tokens(mut text: &str) -> Option<Vec<&str>> {
+    let mut tokens = Vec::new();
+    loop {
+        text = trivia(text)?;
+        let Some(first) = text.chars().next() else {
+            return Some(tokens);
+        };
+        let end = if matches!(first, '\'' | '"' | '`') {
+            quoted_token_len(text)?
+        } else if text.starts_with("=>") {
+            2
+        } else if first.is_alphanumeric() || matches!(first, '_' | '$' | '\\') || !first.is_ascii()
+        {
+            text.char_indices()
+                .skip(1)
+                .find(|(_, c)| !(c.is_alphanumeric() || matches!(c, '_' | '$' | '\\')))
+                .map_or(text.len(), |(offset, _)| offset)
+        } else {
+            first.len_utf8()
+        };
+        tokens.push(&text[..end]);
+        text = &text[end..];
+    }
+}
+
+fn quoted_token_len(text: &str) -> Option<usize> {
+    // Template-literal types may nest templates in substitutions. Track lexical
+    // modes iteratively so quoted punctuation never becomes header evidence.
+    let quote = text.chars().next()?;
+    let mut modes = vec![(quote, 0usize)];
+    let mut offset = quote.len_utf8();
+    while let Some(&(quote, depth)) = modes.last() {
+        let rest = &text[offset..];
+        let character = rest.chars().next()?;
+        offset += character.len_utf8();
+        if depth != 0 {
+            if matches!(character, '\'' | '"' | '`') {
+                modes.push((character, 0));
+            } else if character == '{' {
+                modes.last_mut()?.1 += 1;
+            } else if character == '}' {
+                modes.last_mut()?.1 -= 1;
+                if modes.last()?.1 == 0 {
+                    modes.pop();
+                }
+            } else if character == '/' {
+                let after = trivia(rest)?;
+                if after.len() < rest.len() {
+                    offset = text.len() - after.len();
+                }
+            }
+        } else if character == '\\' {
+            offset += text[offset..].chars().next()?.len_utf8();
+        } else if character == quote {
+            modes.pop();
+            if modes.is_empty() {
+                return Some(offset);
+            }
+        } else if quote == '`' && character == '$' && text[offset..].starts_with('{') {
+            offset += 1;
+            modes.push(('\0', 1));
+        }
+    }
+    None
 }
 
 fn property_token_matches(source: &str, receiver: Span, property: Span, name: &str) -> bool {
@@ -412,6 +662,7 @@ fn lazy_construction<'a>(
             && !reference.write()
             && !reference.type_only()
             && contains(call.callee(), reference.span())
+            && wrapped(source, call.callee(), reference.span())
             && matches!(call.shape(), CalleeShape::Identifier(id) if id.binding() == reference.binding() && id.name() == reference.name())
             && call.arguments().len() == arguments.len(),
         "invalid lazy constructor link"

@@ -22,7 +22,7 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 14/extractor 18 retains typed nested module buffers and wire seals,
+- Schema 14/extractor 19 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
   Shared `PreparedDeclarations`
@@ -44,6 +44,8 @@
   hints. Runtime identity and all-reference certification remain linker policy.
   Anchor directly returned imports and decoded property tokens to explicit source
   spans; nested option imports must not replace callback dependency identities.
+  Token-boundary checks prove complete synchronous concise-arrow returns and
+  simple nondefaulted parameters; containment alone never certifies lazy syntax.
 - Sidecars use requested lexical source paths; unique sibling staging plus
   closed tempfile paths and std atomic rename, never unlink-before-rename. Last publisher wins;
   recheck source before publish/return. Cache failures are reported nonfatally,

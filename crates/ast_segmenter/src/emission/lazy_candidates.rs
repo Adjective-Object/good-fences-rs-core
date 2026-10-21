@@ -179,7 +179,10 @@ impl<'a> Visit<'a> for Candidates<'_> {
             else {
                 return None;
             };
-            if arrow.params.items.len() != 1 || arrow.params.rest.is_some() {
+            if arrow.params.items.len() != 1
+                || arrow.params.rest.is_some()
+                || arrow.params.items[0].initializer.is_some()
+            {
                 return None;
             }
             let BindingPattern::BindingIdentifier(parameter) = &arrow.params.items[0].pattern

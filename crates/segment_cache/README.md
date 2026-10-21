@@ -18,7 +18,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 14/extractor 18.
+Production loading/publication uses typed FlatBuffers, schema 14/extractor 19.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.
 `validate_parsed(source, parsed)` shares the source-local semantic checks with
 the production codec and accepts `ParsedModule::from_wire` without decoding a fact
@@ -86,7 +86,10 @@ Deferred alternatives validate declaration binding links and complete initialize
 source-slot roots; CommonJS cannot carry these ESM reconstruction alternatives.
 Dynamic namespace observations cover exactly the dynamic dependency occurrences,
 with sorted unique property/receiver pairs; placement and target eligibility are
-never cached. Schema 14/extractor 18 adds typed lazy construction candidates.
+never cached. Schema 14 adds typed lazy construction candidates; extractor 19
+excludes defaulted getters and validates complete synchronous arrow/return token
+boundaries against canonical invocation, operation and execution spans, without
+parsing or unpacking on hits.
 Their borrowed validation checks segment/declaration/constructor/dependency and
 module/getter binding links, exact original argument spans, complete composed
 source-slot roots, ordering and wrapper spelling hints. Aliased or shadowed

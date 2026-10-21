@@ -1,6 +1,6 @@
 # cache_flatbuffers
 
-- This is the production `.seg.fb` backend (schema 14/extractor 18).
+- This is the production `.seg.fb` backend (schema 14/extractor 19).
   `segment_cache` adds source-local semantic validation before exposing records.
 - `flatbuffers/*.fbs` is authoritative. Keep `cache_generated.rs` byte-for-byte
   compiler output; regenerate using pinned flatc 25.2.10, matching the runtime.
