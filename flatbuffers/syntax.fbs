@@ -1,0 +1,179 @@
+include "ecco.fbs";
+namespace source_cache;
+
+enum CommonJsGlobal:ubyte { Require, Module, Exports }
+enum DependencyKind:ubyte { Import, ReExport, DynamicImport, Require, ImportType }
+enum EffectReason:ubyte {
+  UnknownExpression, UnknownControl, Invocation, Construction, PropertyRead,
+  Coercion, Mutation, SpreadOrIteration, Destructuring, ClassHeritage,
+  ComputedKey, StaticBlock, UnresolvedRead, BindingRead, OpaqueCommonJs
+}
+enum ValueUse:ubyte { Discarded, StatementValue, Required }
+enum ContextKind:ubyte { Callable, InstanceInitializer }
+enum Shorthand:ubyte { None, Property, Proto }
+enum NamespaceReason:ubyte { Other, Receiver, Tag, Write, Delete }
+
+table Binding {
+  id:uint;
+  name:string (required);
+  declarations:[Span] (required);
+  top_level:bool;
+  function_scoped:bool;
+  function:bool;
+  import:bool;
+  constant:bool;
+  type_only:bool;
+  ambient:bool;
+}
+table Reference {
+  name:string (required);
+  span:Span (required);
+  binding:uint = null;
+  read:bool;
+  write:bool;
+  type_only:bool;
+  commonjs:CommonJsGlobal = null;
+}
+table Dependency {
+  id:uint;
+  kind:DependencyKind;
+  span:Span (required);
+  specifier:string (required);
+  pattern:[string];
+  specifier_span:Span (required);
+  type_only:bool;
+  enclosing_function:Span;
+}
+table NamedImport { name:string (required); }
+table NamespaceImport {}
+union ImportedNameValue { NamedImport, NamespaceImport }
+table ImportedName { value:ImportedNameValue (required); }
+table ImportBinding {
+  dependency:uint;
+  binding:uint;
+  imported:ImportedName (required);
+  span:Span (required);
+  imported_span:Span (required);
+  type_only:bool;
+}
+table BindingExport { binding:uint; }
+table ReExport { dependency:uint; imported:ImportedName (required); }
+table ExpressionExport { span:Span (required); }
+union ExportValue { BindingExport, ReExport, ExpressionExport }
+table Export {
+  name:string;
+  value:ExportValue (required);
+  span:Span (required);
+  name_span:Span;
+  type_only:bool;
+}
+table Directive { value:string (required); span:Span (required); }
+table EffectSite { span:Span (required); reason:EffectReason; deferred:Span; }
+table IdentifierCallee { name:string (required); binding:uint = null; }
+table MemberCallee {
+  receiver:Span (required);
+  receiver_identifier:IdentifierCallee;
+  property:string;
+  computed:bool;
+}
+table OtherCallee {}
+union CalleeShape { IdentifierCallee, MemberCallee, OtherCallee }
+table InvocationArgument { span:Span (required); spread:bool; }
+table Invocation {
+  span:Span (required);
+  callee:Span (required);
+  shape:CalleeShape (required);
+  arguments:[InvocationArgument] (required);
+  construct:bool;
+  optional_call:bool;
+  optional_chain:bool;
+  pure:Span;
+  deferred:Span;
+  value_use:ValueUse;
+}
+table ExecutionContext {
+  span:Span (required);
+  parent:uint = null;
+  kind:ContextKind;
+  immediate:uint = null;
+}
+table ExecutionFacts {
+  contexts:[ExecutionContext] (required);
+  references:[OptionalIndex] (required);
+  invocations:[OptionalIndex] (required);
+}
+table PlacementFacts {
+  declarations:[uint] (required);
+  hoisted:[uint] (required);
+  instantiable:bool;
+  default_expression:bool;
+  forward_references:[uint] (required);
+  eager_reads:[uint] (required);
+  eager_writes:[uint] (required);
+  writes:[uint] (required);
+}
+table NameRestrictions { named:[uint] (required); inference_sensitive:bool; }
+table DirectNamespaceRead { member:Span (required); property:string (required); }
+table NativeNamespace { reason:NamespaceReason; }
+union NamespaceAccess { DirectNamespaceRead, NativeNamespace }
+table NamespaceUse { reference:uint; access:NamespaceAccess (required); }
+table SourceSlot { span:Span (required); operations:[uint] (required); }
+table StaticChainStep { property:string (required); optional:bool; }
+table ComputedChainStep { property:SourceSlot (required); optional:bool; }
+table CallChainStep { suffix:SourceSlot (required); }
+union ChainStepValue { StaticChainStep, ComputedChainStep, CallChainStep }
+table ChainStep { value:ChainStepValue (required); }
+table CalleePlan { base:SourceSlot (required); steps:[ChainStep] (required); }
+table PureLowering {
+  callee:SourceSlot (required);
+  chain:CalleePlan;
+  arguments:[SourceSlot] (required);
+  guard_start:uint = null;
+  crosses_await_guard:bool;
+}
+table RemoveExport {}
+table DeclarationExport { declaration:Span (required); }
+table DefaultExport { value:SourceSlot (required); hoisted:bool; }
+union ExportForm { RemoveExport, DeclarationExport, DefaultExport }
+table BindingOperation { binding:uint; declaration:uint; shorthand:Shorthand; }
+table ReferenceOperation { reference:uint; shorthand:Shorthand; }
+table NamespaceOperation { usage:uint; }
+table DependencyOperation { dependency:uint; }
+table ExportOperation { span:Span (required); form:ExportForm (required); }
+table SourceHintOperation { span:Span (required); }
+table InvocationOperation { invocation:uint; lowering:PureLowering (required); }
+union OperationKind {
+  BindingOperation, ReferenceOperation, NamespaceOperation, DependencyOperation,
+  ExportOperation, SourceHintOperation, InvocationOperation
+}
+table Operation { parent:uint = null; kind:OperationKind (required); }
+table SegmentRecipe {
+  source:[Span] (required);
+  connector_only:bool;
+  placement:PlacementFacts (required);
+  names:NameRestrictions (required);
+  namespaces:[NamespaceUse] (required);
+  operations:[Operation] (required);
+}
+table EmissionFacts {
+  execution:ExecutionFacts (required);
+  segments:[SegmentRecipe] (required);
+  nested_bindings:[uint] (required);
+  free_references:[uint] (required);
+}
+table ModuleFacts {
+  ecco:ParsedFile;
+  ecco_declarations_hash:Fingerprint (required);
+  commonjs:bool;
+  top_level_await:[Span] (required);
+  effects:[EffectSite] (required);
+  invocations:[Invocation] (required);
+  emission:EmissionFacts (required);
+  bindings:[Binding] (required);
+  references:[Reference] (required);
+  dependencies:[Dependency] (required);
+  imports:[ImportBinding] (required);
+  exports:[Export] (required);
+  directives:[Directive] (required);
+  hashbang:Directive;
+}

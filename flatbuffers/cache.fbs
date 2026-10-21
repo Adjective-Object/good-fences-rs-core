@@ -1,0 +1,23 @@
+include "module.fbs";
+namespace source_cache;
+
+table SourceProvenance {
+  source_hash:Sha256 (required);
+  config:ParserConfig (required);
+  records_hash:Sha256 (required);
+}
+table CacheRecord {
+  schema:uint;
+  extractor:uint;
+  oxc:string (required);
+  source_len:ulong;
+  source_hash:Sha256 (required);
+  config:ParserConfig (required);
+  // A typed nested FlatBuffer, not a serialized DTO or CBOR payload. The exact
+  // immutable module bytes are the extraction seal's SHA-256 input.
+  module:[ubyte] (required, nested_flatbuffer: "CachedModule");
+  provenance:SourceProvenance (required);
+}
+root_type CacheRecord;
+file_identifier "GFSC";
+file_extension "seg.fb";

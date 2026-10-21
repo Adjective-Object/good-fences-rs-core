@@ -1,0 +1,14 @@
+namespace source_cache;
+
+struct Span { start:uint; end:uint; }
+struct Sha256 { bytes:[ubyte:32]; }
+struct Fingerprint { bytes:[ubyte:16]; }
+struct ParserConfig {
+  typescript:bool;
+  jsx:bool;
+  definition:bool;
+  commonjs:bool;
+}
+
+// No sentinel: byte offset/ID zero is a real identity.
+table OptionalIndex { value:uint = null; }
