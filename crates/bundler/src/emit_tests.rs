@@ -323,6 +323,20 @@ fn source_provenance_rejects_changed_bytes_modes_and_unprovenanced_inputs() {
     let mut input = crate::tests::input("input.mjs", source);
     input.facts.emission.segments[0].connector_only = true;
     assert!(check(&SourceGraph::from_owned([input]), source).is_err());
+
+    let source = "export const value = 1; export async function read() { return value; }";
+    let graph = SourceGraph::from_owned([crate::tests::input("input.mjs", source)]);
+    let before = ast_segmenter::module_parse_count();
+    assert_eq!(
+        checked_source(&graph, 0, source).unwrap().facts,
+        *graph.file_facts(0).unwrap()
+    );
+    assert_eq!(ast_segmenter::module_parse_count(), before);
+    assert_eq!(emit(source, true), source);
+    let mut input = crate::tests::input("input.mjs", source);
+    assert!(input.facts.references[0].async_deferred);
+    input.facts.references[0].async_deferred = false;
+    assert!(check(&SourceGraph::from_owned([input]), source).is_err());
 }
 
 #[test]

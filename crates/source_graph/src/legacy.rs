@@ -26,6 +26,7 @@ impl SourceGraph {
                 binding: None,
                 read: true,
                 write: false,
+                async_deferred: false,
             };
             for (name, type_only) in segment.variables.get_escaped_symbols_with_type_only() {
                 if let Some(target) =

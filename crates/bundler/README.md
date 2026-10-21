@@ -130,6 +130,12 @@ ordinary native emission rather than changing their evaluation. Deferred sources
 with their own dynamic imports currently stay native. Synthesized async
 boundaries remain unimplemented.
 
+Owned references and checked source edges now retain per-occurrence
+`async_deferred` syntax tags. Retention preserves their source-edge indices even
+for mixed async/sync uses of one target; checked source provenance covers the
+tags on cold and cached inputs. They do not create async roots, insert awaits or
+change ordinary output. Generated async-load boundaries remain a later step.
+
 ### Automatic single-parent placement
 
 A retained dynamic target with exactly one logical source parent across all its
