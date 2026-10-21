@@ -218,9 +218,20 @@ pub fn reference_reachability(
     }
     let retained_segments: HashSet<_> = retention.segments.iter().map(|s| s.key).collect();
     let retained_modules: HashSet<_> = retention.modules.iter().copied().collect();
+    let export_names =
+        crate::link::namespace_export_names(graph, |_| BTreeSet::from(["default".into()]));
     let mut result = BTreeMap::new();
     for root in roots {
         ensure!(!result.contains_key(&root.id), "duplicate root identity");
+        let mut export_requests = BTreeSet::new();
+        let mut namespace_modules: Vec<_> = root
+            .binding_roots
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::Module(file) => Some(*file),
+                _ => None,
+            })
+            .collect();
         let mut queue: VecDeque<_> = root
             .evaluation_roots
             .iter()
@@ -260,10 +271,36 @@ pub fn reference_reachability(
                     RetentionEdgeKind::Binding | RetentionEdgeKind::Require
                 ) {
                     enqueue_binding(retention, edge.to, &mut queue);
+                    if let GraphNode::Module(file) = edge.to {
+                        namespace_modules.push(file);
+                    }
                 } else {
                     queue.push_back(edge.to);
                 }
             }
+        }
+        // Checked namespace routes can bypass import declarations. Preserve their
+        // named CJS snapshots without traversing a connector's sibling bindings.
+        // Track binding demands, not merely reached module-evaluation nodes.
+        let mut seen_namespaces = HashSet::new();
+        while let Some(file) = namespace_modules.pop() {
+            if !seen_namespaces.insert(file) || graph.file_facts(file).unwrap().commonjs() {
+                continue;
+            }
+            for name in &export_names[&file] {
+                commonjs_export_requests(graph, file, name, &mut export_requests);
+            }
+            namespace_modules.extend(retention.edges.iter().filter_map(|edge| {
+                if edge.from == GraphNode::Module(file) && edge.kind == RetentionEdgeKind::Namespace
+                {
+                    match edge.to {
+                        GraphNode::Module(target) => Some(target),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }));
         }
         for file in retention.modules.iter().copied().filter(|file| {
             graph
@@ -271,14 +308,18 @@ pub fn reference_reachability(
                 .is_some_and(|facts| facts.commonjs())
         }) {
             let module = graph.file_path(file).unwrap().to_owned();
-            let mut demanded = BTreeSet::new();
+            let mut demanded: BTreeSet<_> = export_requests
+                .iter()
+                .filter(|(target, _)| *target == file)
+                .map(|(_, name)| name.clone())
+                .collect();
             let direct_entry = root.evaluation_roots.contains(&file)
                 || root.binding_roots.iter().any(|node| match node {
                     GraphNode::Module(target) => *target == file,
                     GraphNode::Segment(key) => key.file_id == file,
                     GraphNode::Unlinked { .. } => false,
                 });
-            let mut initialize = direct_entry;
+            let mut initialize = direct_entry || !demanded.is_empty();
             let mut namespace = direct_entry;
             for (from, request) in crate::cjs::requests(graph, retention, file) {
                 if !reached.contains(&node_id(graph, from)?) {
@@ -314,6 +355,25 @@ pub fn reference_reachability(
         result.insert(root.id.clone(), reached);
     }
     Ok(result)
+}
+
+fn commonjs_export_requests(
+    graph: &SourceGraph,
+    file: u32,
+    name: &str,
+    requests: &mut BTreeSet<(u32, String)>,
+) {
+    // Missing/ambiguous implicit star exports are excluded from namespace
+    // surfaces by retention too; explicit invalid exports already fail linking.
+    if let Ok(alternatives) =
+        graph.resolve_export_alternatives(file, name, source_graph::Namespace::Value)
+    {
+        for linked in alternatives {
+            if let source_graph::ExportIdentity::CommonJs(target, name) = linked.identity {
+                requests.insert((target, name));
+            }
+        }
+    }
 }
 
 pub(crate) fn enqueue_binding(

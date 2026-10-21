@@ -50,7 +50,10 @@ identifies activation, not a union of selected bindings. Every export root seeds
 the **original import module's evaluation** plus its checked binding route;
 barrel/sibling effects therefore belong to every selected root. Pure route
 connectors do not demand their other import/export specifiers. Full namespaces
-and public roots still retain their entire surface. Missing properties need
+and public roots still retain their entire surface, including named CommonJS
+snapshots resolved through local export connectors whose import declarations
+are pruned. These requests follow each root's namespace-binding provenance,
+not module evaluation alone. Missing properties need
 evaluation only; unsafe observations, possible `then` exports, receiver calls,
 contexts, CommonJS and external surfaces retain the graph's conservative demand.
 

@@ -434,7 +434,10 @@ identity. Check both graph revision and policy before reusing derived plans.
 `partition_precise` is analysis-only: per-requested-name `AsyncExport` roots
 share an `AsyncSiteId` activation, never union symbols into an occurrence root.
 Each seeds original-target evaluation plus its checked route; pure connectors
-must not pull sibling specifiers. `async_activations` and manifest `demand_roots`
+must not pull sibling specifiers. Namespace-binding provenance preserves checked
+named CJS snapshot requests even when local export routes skip import declarations;
+evaluation alone never demands those snapshots.
+`async_activations` and manifest `demand_roots`
 project one occurrence onto independent masks while retaining the original target.
 Default planning remains namespace-conservative; emission rejects precise plans
 until typed post-placement Connections support selected namespace projections.

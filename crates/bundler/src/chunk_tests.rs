@@ -581,6 +581,110 @@ fn precise_imported_helpers_follow_each_use_not_all_specifiers_in_the_declaratio
 }
 
 #[test]
+fn precise_local_commonjs_exports_preserve_full_namespace_and_public_snapshots() {
+    let graph = SourceGraph::from_owned([
+        input("entry.ts", "import('barrel.ts').then(consume);"),
+        input(
+            "barrel.ts",
+            "import {a, b, unused} from 'dep.cjs'; export {a, b};",
+        ),
+        input(
+            "dep.cjs",
+            "exports.a = 1; exports.b = 2; exports.unused = 3;",
+        ),
+    ]);
+    let policy = EffectPolicy::default();
+    let mut public = entry(1);
+    public.binding_roots.push(GraphNode::Module(1));
+    for roots in [vec![entry(0)], vec![public]] {
+        let conservative = partition(&graph, &roots, &policy).unwrap();
+        let precise = partition_precise(&graph, &roots, &policy).unwrap();
+        for name in ["a", "b"] {
+            let snapshot = NodeId::CommonJsProxy {
+                module: "dep.cjs".into(),
+                name: Some(name.into()),
+            };
+            assert!(!conservative.node_roots[&snapshot].is_empty());
+            assert_eq!(
+                precise.node_roots.get(&snapshot),
+                conservative.node_roots.get(&snapshot)
+            );
+        }
+        assert!(!precise.node_roots.contains_key(&NodeId::CommonJsProxy {
+            module: "dep.cjs".into(),
+            name: Some("unused".into()),
+        }));
+        assert_exact_partition(&precise);
+    }
+}
+
+#[test]
+fn precise_selected_local_commonjs_exports_keep_the_conservative_surface() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "const {a, b} = await import('barrel.ts'); use(a, b);",
+        ),
+        input(
+            "barrel.ts",
+            "import {a as first, b as second, unused} from 'dep.cjs'; export {first as a, second as b, unused};",
+        ),
+        input("dep.cjs", "exports.a = 1; exports.b = 2; exports.unused = 3;"),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    let root = plan
+        .roots
+        .keys()
+        .find(|root| matches!(root, RootId::Async(_)))
+        .unwrap();
+    assert!(!plan
+        .roots
+        .keys()
+        .any(|root| matches!(root, RootId::AsyncExport { .. })));
+    for name in ["a", "b", "unused"] {
+        assert_eq!(
+            plan.node_roots.get(&NodeId::CommonJsProxy {
+                module: "dep.cjs".into(),
+                name: Some(name.into()),
+            }),
+            Some(&BTreeSet::from([root.clone()]))
+        );
+    }
+    assert_eq!(
+        plan.node_roots[&module("barrel.ts")],
+        BTreeSet::from([root.clone()])
+    );
+    assert_exact_partition(&plan);
+}
+
+#[test]
+fn precise_selected_esm_export_does_not_demand_a_sibling_commonjs_snapshot() {
+    let graph = SourceGraph::from_owned([
+        input(
+            "entry.ts",
+            "const b = (await import('barrel.ts')).b; use(b);",
+        ),
+        input(
+            "barrel.ts",
+            "import {a} from 'dep.cjs'; const b = 2; export {a, b};",
+        ),
+        input("dep.cjs", "exports.a = 1;"),
+    ]);
+    let plan = partition_precise(&graph, &[entry(0)], &EffectPolicy::default()).unwrap();
+    let b = selected_root(&graph, "entry.ts", "b");
+    assert_eq!(
+        plan.node_roots[&segment("barrel.ts", 1)],
+        BTreeSet::from([b.clone()])
+    );
+    assert_eq!(plan.node_roots[&module("barrel.ts")], BTreeSet::from([b]));
+    assert!(!plan.node_roots.contains_key(&NodeId::CommonJsProxy {
+        module: "dep.cjs".into(),
+        name: Some("a".into()),
+    }));
+    assert_exact_partition(&plan);
+}
+
+#[test]
 fn precise_context_commonjs_and_external_targets_keep_conservative_roots() {
     let mut source = input(
         "entry.ts",
