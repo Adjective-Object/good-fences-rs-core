@@ -9,7 +9,7 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{ScopeFlags, Semantic, SymbolFlags, SymbolId};
 use oxc_span::{GetSpan, Span};
-use records::Directive;
+pub use records::Directive;
 use serde::{Deserialize, Serialize};
 
 /// Canonical parsed contract identity; never hashes raw declaration text.

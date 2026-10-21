@@ -67,16 +67,27 @@ impl ParserConfig {
 
 /// Extraction integrity, not authentication of a cache publisher.
 /// Private fields prevent accidentally pairing arbitrary facts with source text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceProvenance {
     source_hash: [u8; 32],
     config: ParserConfig,
     records_hash: [u8; 32],
+    #[serde(skip)]
+    wire: Option<cache_flatbuffers::WireRecord>,
 }
 
+impl PartialEq for SourceProvenance {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_hash == other.source_hash
+            && self.config == other.config
+            && self.records_hash == other.records_hash
+            && self.wire.is_some() == other.wire.is_some()
+    }
+}
+impl Eq for SourceProvenance {}
+
 fn records_hash(body: ModuleBody, ranges: &[Span], facts: &ModuleFacts) -> eyre::Result<[u8; 32]> {
-    let ranges: Vec<_> = ranges.iter().map(|s| (s.start, s.end)).collect();
-    Ok(Sha256::digest(serde_cbor::to_vec(&(body, ranges, facts))?).into())
+    Ok(Sha256::digest(facts.encode_module(body, ranges)).into())
 }
 
 impl SourceProvenance {
@@ -91,11 +102,16 @@ impl SourceProvenance {
             source_hash: Sha256::digest(source.as_bytes()).into(),
             config,
             records_hash: records_hash(body, ranges, facts)?,
+            wire: None,
         })
     }
 
     pub fn config(&self) -> ParserConfig {
         self.config
+    }
+
+    pub(crate) fn wire_record(&self) -> Option<&cache_flatbuffers::WireRecord> {
+        self.wire.as_ref()
     }
 
     pub fn verify(
@@ -104,7 +120,7 @@ impl SourceProvenance {
         config: ParserConfig,
         body: ModuleBody,
         ranges: &[Span],
-        facts: &ModuleFacts,
+        facts: crate::views::ModuleFacts<'_>,
     ) -> eyre::Result<()> {
         ensure!(
             self.source_hash == <[u8; 32]>::from(Sha256::digest(source.as_bytes())),
@@ -114,10 +130,55 @@ impl SourceProvenance {
             self.config == config,
             "source parser configuration mismatch"
         );
-        ensure!(
-            self.records_hash == records_hash(body, ranges, facts)?,
-            "source facts/ranges do not match extraction provenance"
-        );
+        match facts {
+            crate::views::ModuleFacts::Owned(facts) => ensure!(
+                self.wire.is_none() && self.records_hash == records_hash(body, ranges, facts)?,
+                "source facts/ranges do not match extraction provenance"
+            ),
+            crate::views::ModuleFacts::Wire(facts) => {
+                let wire = self
+                    .wire
+                    .as_ref()
+                    .ok_or_else(|| eyre::eyre!("wire facts require wire extraction provenance"))?;
+                let module = wire.module();
+                ensure!(
+                    std::ptr::eq(module.facts()._tab.buf(), facts._tab.buf())
+                        && module.facts()._tab.loc() == facts._tab.loc()
+                        && crate::views::module_body(module) == body
+                        && module
+                            .segments()
+                            .iter()
+                            .map(crate::views::span)
+                            .eq(ranges.iter().copied()),
+                    "wire module/ranges do not match extraction provenance"
+                );
+            }
+        }
         Ok(())
+    }
+
+    pub(crate) fn from_wire(
+        source: &str,
+        wire: &cache_flatbuffers::WireRecord,
+    ) -> eyre::Result<Self> {
+        let root = wire.root();
+        let p = root.provenance();
+        let c = p.config();
+        let result = Self {
+            source_hash: std::array::from_fn(|i| p.source_hash().bytes().get(i)),
+            config: ParserConfig {
+                typescript: c.typescript(),
+                jsx: c.jsx(),
+                definition: c.definition(),
+                commonjs: c.commonjs(),
+            },
+            records_hash: std::array::from_fn(|i| p.records_hash().bytes().get(i)),
+            wire: Some(wire.clone()),
+        };
+        ensure!(
+            result.source_hash == <[u8; 32]>::from(Sha256::digest(source.as_bytes())),
+            "source provenance content mismatch"
+        );
+        Ok(result)
     }
 }

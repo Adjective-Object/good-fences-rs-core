@@ -3,6 +3,9 @@
 - `records` owns private cache storage; validation/sidecar consumers use accessors.
   Corruption tests edit a serialized test-only projection, never add production
   setters or mutable views of sealed facts.
+- Production `.seg.fb` records retain verified immutable FlatBuffers. Construction
+  runs full borrowed semantic validation once; adapters recheck exact source
+  identity and share owners, never unpack or re-encode for canonical comparison.
 
 - Persist `ast_segmenter::owned::ModuleFacts`, body and ordered statement ranges;
   never legacy tracker tags, resolved paths, arena IDs or derived graph/effects.
@@ -15,11 +18,12 @@
   property/receiver pairs are sorted and unique. Target safety stays derived.
 - Cache ESM top-level suspension spans only; async dependency/SCC state and
   require compatibility belong to the linker/native host, not sidecars.
-- Preflight CBOR byte/item/depth limits before serde; validate source hash,
+- Bound FlatBuffer byte/depth/table/apparent-size verification; validate source hash,
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 12 combines execution contexts with typed XXH3 declaration identity.
+- Schema 13/extractor 16 activates typed nested module buffers and wire seals,
+  including dynamic namespace observations, deferred recipes and async references.
   Shared `PreparedDeclarations`
   avoids per-file serialization; source/checksum/provenance remain SHA-256.
 - Reference `async_deferred` is required syntax evidence covered by provenance,
@@ -38,3 +42,7 @@
   closed tempfile paths and std atomic rename, never unlink-before-rename. Last publisher wins;
   recheck source before publish/return. Cache failures are reported nonfatally,
   source/parse failures are fatal. Never clean another writer's staging files.
+- Valid owned extraction that exceeds wire limits remains an uncached success;
+  never allow untrusted wire input through that cold-only fallback.
+- Exclude both `.seg.fb`/`.seg.cbor` and their staging siblings from inventory;
+  never read legacy formats as valid or delete old user files during migration.

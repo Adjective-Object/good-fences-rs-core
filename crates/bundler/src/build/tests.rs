@@ -63,6 +63,45 @@ fn tracing_preserves_noop_product_and_counters() {
     assert_eq!(traced.counters.final_validations, 0);
 }
 
+#[test]
+fn parallel_cache_artifacts_do_not_invalidate_inventory_or_rewrite_warm_sidecars() {
+    for workers in [1, 4] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", "export const value = 1;");
+        let mut config = options();
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        let sidecar = segment_cache::sidecar_path(&dir.root().join("main.mjs"));
+        let bytes = fs::read(&sidecar).unwrap();
+        let modified = fs::metadata(&sidecar).unwrap().modified().unwrap();
+        for name in [
+            "main.mjs.seg.cbor",
+            "main.mjs.seg.cbor.stage-old",
+            "main.mjs.seg.fb.stage-new",
+        ] {
+            write(dir.root(), name, "not source or a valid current record");
+        }
+        let noop = session.build(&config).unwrap();
+        assert!(Rc::ptr_eq(&cold.product, &noop.product));
+        assert_eq!(noop.counters.source_parses, 0);
+        assert_eq!(noop.counters.emissions, 0);
+        let warm = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(warm.counters.disk_hits, 1);
+        assert_eq!(warm.counters.source_parses, 0);
+        assert_eq!(warm.product.artifacts, cold.product.artifacts);
+        assert_eq!(fs::read(&sidecar).unwrap(), bytes);
+        assert_eq!(
+            fs::metadata(&sidecar).unwrap().modified().unwrap(),
+            modified
+        );
+    }
+}
+
 struct PreparationObserver;
 
 impl Drop for PreparationObserver {
@@ -261,7 +300,7 @@ fn parallel_preparation_corrupt_stale_caches_and_source_errors_are_deterministic
             .unwrap();
         fs::write(
             segment_cache::sidecar_path(&dir.root().join("a.mjs")),
-            b"invalid CBOR",
+            b"invalid FlatBuffer",
         )
         .unwrap();
         fs::copy(
@@ -280,16 +319,15 @@ fn parallel_preparation_corrupt_stale_caches_and_source_errors_are_deterministic
             .unwrap();
         assert_eq!(warm.counters.disk_hits, 3);
 
-        // Even a memory hit must validate sealed source/facts provenance.
+        // Checked records cannot be mutated; re-pairing a genuine record with
+        // another source must still fail on a memory hit.
+        let unrelated = session.sources[&dir.root().join("z.mjs")].record.clone();
         let record = &mut session
             .sources
             .get_mut(&dir.root().join("a.mjs"))
             .unwrap()
             .record;
-        *record = crate::tests::corrupt(record, |v| {
-            let end = v["module"]["segments"][0][1].as_u64().unwrap();
-            v["module"]["segments"][0][1] = (end - 1).into();
-        });
+        *record = unrelated;
         assert!(session.build(&config).is_err());
         assert!(Rc::ptr_eq(
             session.last.as_ref().unwrap(),
@@ -2357,8 +2395,16 @@ fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
     assert!(Rc::ptr_eq(&memory.product, &cold.product));
     assert_eq!(memory.counters.memory_hits, 2);
     assert_eq!(memory.counters.output_parses, 0);
-    let record = &mut session.sources.get_mut(&path).unwrap().record;
-    *record = crate::tests::corrupt(record, |v| v["config"]["commonjs"] = false.into());
+    let wrong_source = "const placeholder = 1;";
+    let wrong_mode = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        wrong_source,
+        Path::new("wrong-mode.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    session.sources.get_mut(&path).unwrap().record =
+        CacheRecord::from_parsed(wrong_source, &wrong_mode).unwrap();
     let mismatched_memory = session.build(&config).unwrap();
     assert_eq!(mismatched_memory.counters.memory_hits, 1);
     assert_eq!(mismatched_memory.counters.disk_hits, 1);
@@ -6576,11 +6622,13 @@ fn unused_esm_environment_probes_preserve_effects_with_ecco_refinement() {
                 format!("[\"loaded\",[\"{name}\",\"abs\"]]"),
             ),
         ] {
-            let check = |entry: &str| format!(
-                "const log = []; {host}
+            let check = |entry: &str| {
+                format!(
+                    "const log = []; {host}
                  const result = await import('./{entry}').then(() => 'loaded', error => error.name);
                  console.log(JSON.stringify([result, log]));"
-            );
+                )
+            };
             write(dir.root(), "check.mjs", &check("main.mjs"));
             let original = observe_entry(&dir.root().join("check.mjs"));
             assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
@@ -7062,4 +7110,3 @@ fn parallel_execution_preserves_build_bytes_counters_and_noop_generation() {
         assert_eq!(noop.counters.output_parses, 0);
     }
 }
-

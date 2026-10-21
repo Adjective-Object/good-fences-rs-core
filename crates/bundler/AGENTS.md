@@ -1,6 +1,8 @@
 # bundler
 
-Consume owned syntax facts and checked shared graph edges, never UsedTag.
+Consume owned-or-wire syntax views and checked shared graph edges, never UsedTag.
+Keep immutable AST/Ecco owners alive through graph and worker reads; never
+unpack cached facts for linking, validation, execution constraints or recipes.
 Solve cached Ecco precursors on the complete checked graph, using canonical export
 identities; never cache solved effects. Share a solve across async partition rounds.
 Declaration structs key source metadata, memory reuse and parse fingerprints.

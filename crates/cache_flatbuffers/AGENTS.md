@@ -1,7 +1,7 @@
 # cache_flatbuffers
 
-- The production cache is not integrated yet. Do not describe schema availability
-  or structural verification as completion of the per-file storage migration.
+- This is the production `.seg.fb` backend (schema 13/extractor 16).
+  `segment_cache` adds source-local semantic validation before exposing records.
 - `flatbuffers/*.fbs` is authoritative. Keep `cache_generated.rs` byte-for-byte
   compiler output; regenerate using pinned flatc 25.2.10, matching the runtime.
   Only this generated module has narrowly scoped generated-code lint expectations.
@@ -16,3 +16,5 @@
 - Wire/source integrity is not semantic validity. Production integration must
   retain source-local span/link/ordering/recipe checks and private extraction seals.
   Do not manufacture seals around arbitrary source/facts or deserialize for checking.
+- AST construction/views live in `ast_segmenter`; shared `segment_cache` validators
+  are the owned/wire semantic gate. Graph/Ecco/emission retain byte owners.

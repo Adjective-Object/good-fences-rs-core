@@ -7,6 +7,14 @@ lists permitted execution differences and the observations adversarial tests
 must preserve. TDZ-error preservation is waived; generated suspension and new
 load failures require explicit async-boundary opt-in.
 
+Graph linking, effect policy, Ecco registration, execution constraints and native
+recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
+verified owners, including Ecco's nested storage, without unpacking extraction
+trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
+`.seg.fb` records (schema 13/extractor 16); parse fingerprints include both active
+versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
+but never loaded as current facts or deleted by the migration.
+
 The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries
@@ -445,7 +453,7 @@ All these input bytes are rechecked before accepting a build.
 These resource identities independently invalidate output reuse, including
 CSS-only edits that leave caller-loaded module mappings unchanged.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
-memory/CBOR cache. There is no Sass compilation, CSS concatenation or minification.
+memory/FlatBuffers cache. There is no Sass compilation, CSS concatenation or minification.
 
 `BuildOptions.css.css_modules` (`CssModules`) accepts `false` (default/`Disabled`),
 `true` (`Enabled`, selecting `.module.css`), `"everything"` (`Everything`, all CSS
@@ -582,7 +590,7 @@ Selection changes recheck the complete CSS/composition closure before comparing
 prepared text. Every input compares its newly prepared text, including custom
 stylesheet suffixes deselected back to JavaScript; stale mappings cannot bypass
 source validation. Declaration-only CSS edits can reuse generated mappings from
-CBOR, but never skip original-input checks or stylesheet output invalidation.
+FlatBuffers, but never skip original-input checks or stylesheet output invalidation.
 No cache stores linked graph handles or solved effects; no extractor/schema bump
 is needed for these resource-layer identities.
 
@@ -860,7 +868,7 @@ still asserts one ordinary public `main.mjs`, without runtime/helpers.
 ## Retention
 
 Source extraction records owned Ecco functions and at most one lazy root per
-segment in the metadata CBOR, using the existing AST/semantic parse. After
+segment in the typed metadata FlatBuffer, using the existing AST/semantic parse. After
 registering the complete graph, retention solves those precursors together,
 resolving imports and barrels through the checked `SourceGraph` export identities.
 The same connected effects drive public builds and low-level retention/chunks.

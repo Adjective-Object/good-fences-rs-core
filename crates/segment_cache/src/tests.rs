@@ -1,7 +1,7 @@
 use super::*;
-use crate::test_builder::{corrupt, RecordBuilder};
+use crate::test_builder::{corrupt, FixtureRecord, RecordBuilder};
 
-fn record(source: &str, path: &str, format: ModuleFormat) -> CacheRecord {
+fn record(source: &str, path: &str, format: ModuleFormat) -> FixtureRecord {
     let parsed = ast_segmenter::parse_module_with_declarations(
         &logger::StdioLogger::new(),
         source,
@@ -10,16 +10,11 @@ fn record(source: &str, path: &str, format: ModuleFormat) -> CacheRecord {
         ecco::LocalFacts::default(),
     )
     .unwrap();
-    CacheRecord::from_parsed(source, &parsed).unwrap()
+    FixtureRecord::from_parsed(source, &parsed).unwrap()
 }
 
-fn envelope(record: &CacheRecord) -> Vec<u8> {
-    let payload = serde_cbor::to_vec(record).unwrap();
-    serde_cbor::to_vec(&Envelope {
-        checksum: digest(&payload),
-        payload,
-    })
-    .unwrap()
+fn envelope(record: &FixtureRecord) -> Vec<u8> {
+    record.envelope(false)
 }
 
 #[test]
@@ -29,7 +24,10 @@ fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
     let bytes = original.encode(source).unwrap();
     let decoded = CacheRecord::decode(&bytes, source, original.config()).unwrap();
     let parsed = decoded.to_parsed(source).unwrap();
-    assert_eq!(parsed.facts(), original.module().facts());
+    assert_eq!(
+        parsed.facts().references(),
+        original.module().facts().references()
+    );
     assert_eq!(
         parsed
             .facts()
@@ -53,37 +51,30 @@ fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
         assert!(stale.to_parsed(source).is_err());
         assert!(CacheRecord::decode(&envelope(&stale), source, original.config()).is_err());
     }
-    let mut missing = serde_cbor::value::to_value(&original).unwrap();
-    let serde_cbor::Value::Map(root) = &mut missing else {
-        panic!()
-    };
-    let serde_cbor::Value::Map(module) = root.get_mut(&String::from("module").into()).unwrap()
-    else {
-        panic!()
-    };
-    let serde_cbor::Value::Map(facts) = module.get_mut(&String::from("facts").into()).unwrap()
-    else {
-        panic!()
-    };
-    let serde_cbor::Value::Array(references) =
-        facts.get_mut(&String::from("references").into()).unwrap()
-    else {
-        panic!()
-    };
-    let serde_cbor::Value::Map(reference) = &mut references[0] else {
-        panic!()
-    };
-    reference.remove(&String::from("async_deferred").into());
-    let payload = serde_cbor::to_vec(&missing).unwrap();
-    let bytes = serde_cbor::to_vec(&Envelope {
-        checksum: digest(&payload),
-        payload,
-    })
-    .unwrap();
-    assert!(CacheRecord::decode(&bytes, source, original.config())
-        .unwrap_err()
-        .to_string()
-        .contains("missing field `async_deferred`"));
+    let mut missing = serde_json::to_value(&original).unwrap();
+    missing["module"]["facts"]["references"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("async_deferred");
+    assert!(serde_json::from_value::<FixtureRecord>(missing).is_err());
+}
+
+#[test]
+fn production_uses_typed_flatbuffers_and_rejects_previous_cbor() {
+    // Old CBOR digests identify the intentionally incompatible prior format.
+    for (path, source, format, previous) in [
+        ("entry.mjs", "import * as ns from './dep'; export let x = 1, y = ns.value; export function f(a) { return () => a + x; } x++; /*#__PURE__*/ ns.call?.(f(y), ...items);", ModuleFormat::Esm, "19ca011458a79b6a87eaa06b0c12c16172a525743c79262b9d8826ac56d17c24"),
+        ("async.mjs", "export const x = await load(); (() => { consume(x); })(); class C { [key()] = value(); static x = setup(); }", ModuleFormat::Esm, "53991301778b338305cea4e88ab8ca1a735a18ba0b8bcf9ddb5ebef7f1cba117"),
+        ("entry.cjs", "#!/usr/bin/env node\n'use strict'; module.exports = name => require('./parts/' + name);", ModuleFormat::CommonJs, "76bdfcba1aa442d832757eaa11fda3ea1bdb79f329c6878cb7826f7c267d7d0a"),
+        ("empty.mjs", "", ModuleFormat::Esm, "778555e065c782772c87855dc9af5d32289e1052879ef206230b481f386a146c"),
+    ] {
+        let bytes = record(source, path, format).encode(source).unwrap();
+        assert_eq!(&bytes[8..12], b"GFSC");
+        assert_ne!(format!("{:x}", Sha256::digest(&bytes)), previous, "{path}");
+        let original = record(source, path, format);
+        let legacy = serde_cbor::to_vec(&original).unwrap();
+        assert!(CacheRecord::decode(&legacy, source, original.config()).is_err());
+    }
 }
 
 #[test]
@@ -98,8 +89,18 @@ fn dynamic_namespace_observations_roundtrip_and_reject_dangling_dependencies() {
         record.module().facts().emission()
     );
     assert_eq!(
-        decoded.module().facts().emission().dynamic_namespaces()[0].properties(),
-        Some(vec![("value".into(), false)]).as_deref()
+        decoded
+            .module()
+            .facts()
+            .emission()
+            .dynamic_namespaces()
+            .get(0)
+            .unwrap()
+            .properties()
+            .unwrap()
+            .iter()
+            .collect::<Vec<_>>(),
+        [("value", false)]
     );
     let damaged = corrupt(&record, |v| {
         v.add("module.facts.emission.dynamic_namespaces.0.dependency", 1)
@@ -123,7 +124,7 @@ fn provenance_rejects_repaired_source_config_and_fact_pairings() {
     .unwrap();
     let changed = "export const value = 2;";
     assert!(CacheRecord::from_parsed(changed, &parsed).is_err());
-    let original = CacheRecord::from_parsed(source, &parsed).unwrap();
+    let original = FixtureRecord::from_parsed(source, &parsed).unwrap();
 
     let replaced = corrupt(&original, |r| {
         r.set("source_hash", digest(changed.as_bytes()))
@@ -146,7 +147,7 @@ fn provenance_rejects_repaired_source_config_and_fact_pairings() {
             ParserConfig::from_source_type(oxc_span::SourceType::ts()),
             body,
             &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
-            &facts
+            facts.view()
         )
         .is_err());
 }
@@ -184,6 +185,16 @@ fn deterministic_roundtrip_after_parser_arena_drop() {
         assert_eq!(first, decoded);
         assert_eq!(bytes, decoded.encode(source).unwrap());
         let parsed = decoded.to_parsed(source).unwrap();
+        let wire_bytes = parsed.to_flatbuffer(source, OXC_REVISION).unwrap();
+        assert_eq!(wire_bytes, parsed.to_flatbuffer(source, OXC_REVISION).unwrap());
+        let wire = ast_segmenter::WireRecord::new(wire_bytes.into(), source, decoded.config().wire(), OXC_REVISION).unwrap();
+        let borrowed = ParsedModule::from_wire(source, wire).unwrap();
+        crate::validate_parsed(source, &borrowed).unwrap();
+        assert!(CacheRecord::from_parsed(source, &borrowed).is_ok());
+        assert!(parsed.owned_facts().is_err());
+        assert!(parsed.owned_segments().is_none());
+        assert_eq!(borrowed.body(), parsed.body());
+        assert_eq!(borrowed.facts().bindings().iter().map(|b| (b.id(), b.name())).collect::<Vec<_>>(), parsed.facts().bindings().iter().map(|b| (b.id(), b.name())).collect::<Vec<_>>());
         assert_eq!(
             ParserConfig::from_source_type(parsed.source_type()),
             decoded.config()
@@ -211,16 +222,110 @@ fn rejects_corrupt_execution_contexts_and_access_timing() {
         |e| e.clear("segments.2.placement.eager_reads"),
     ];
     let original = record(source, "emission.mjs", ModuleFormat::Esm);
-    crate::validate_emission::validate(&original.module(), source).unwrap();
+    crate::validate_emission::validate(&original.module().into(), source).unwrap();
     for (index, mutate) in mutations.iter().enumerate() {
         let mut modified = original.clone();
         modified = corrupt(&modified, |value| mutate(value.at("module.facts.emission")));
         assert!(
-            crate::validate_emission::validate(&modified.module(), source).is_err(),
+            crate::validate_emission::validate(&modified.module().into(), source).is_err(),
             "structural execution validation accepted mutation {index}"
         );
     }
     reject_emission(source, mutations);
+}
+
+#[test]
+fn wire_semantics_reject_resealed_execution_self_parent() {
+    let source = "let x; export const stored = () => () => x;";
+    let parsed = record(source, "execution.mjs", ModuleFormat::Esm)
+        .to_parsed(source)
+        .unwrap();
+    let config = parsed.provenance().config().wire();
+    let wire = ast_segmenter::WireRecord::new(
+        parsed.to_flatbuffer(source, OXC_REVISION).unwrap().into(),
+        source,
+        config,
+        OXC_REVISION,
+    )
+    .unwrap();
+    let root = wire.root();
+    let module = root.module().bytes();
+    let module_start = module.as_ptr() as usize - wire.bytes().as_ptr() as usize;
+    let contexts = wire.module().facts().emission().execution().contexts();
+    let (index, context) = contexts
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.parent().is_some())
+        .unwrap();
+    let parent = context
+        ._tab
+        .vtable()
+        .get(cache_flatbuffers::wire::ExecutionContext::VT_PARENT) as usize;
+    assert_ne!(parent, 0);
+    let offset = module_start + context._tab.loc() + parent;
+    let seal =
+        root.provenance().records_hash() as *const _ as usize - wire.bytes().as_ptr() as usize;
+    let mut bytes = wire.bytes().to_vec();
+    bytes[offset..offset + 4].copy_from_slice(&(index as u32).to_le_bytes());
+    let hash = digest(&bytes[module_start..module_start + module.len()]);
+    bytes[seal..seal + 32].copy_from_slice(&hash);
+    let checksum = bytes.len() - 32;
+    let hash = digest(&bytes[..checksum]);
+    bytes[checksum..].copy_from_slice(&hash);
+
+    // Structural checks and both hashes pass; source-local semantics must not.
+    assert!(CacheRecord::decode(&bytes, source, parsed.provenance().config()).is_err());
+    let malformed =
+        ast_segmenter::WireRecord::new(bytes.into(), source, config, OXC_REVISION).unwrap();
+    let borrowed = ParsedModule::from_wire(source, malformed).unwrap();
+    assert!(crate::validate_parsed(source, &borrowed).is_err());
+    assert!(CacheRecord::from_parsed(source, &borrowed).is_err());
+}
+
+#[test]
+fn production_adapters_share_the_verified_allocation_after_record_drop() {
+    let source = "export const value = 1;";
+    let fixture = record(source, "input.mjs", ModuleFormat::Esm);
+    let bytes = fixture.encode(source).unwrap();
+    let decoded = CacheRecord::decode(&bytes, source, fixture.config()).unwrap();
+    let first = decoded.to_parsed(source).unwrap();
+    let second = decoded.to_parsed(source).unwrap();
+    let first_name = first.facts().bindings().get(0).unwrap().name();
+    let second_name = second.facts().bindings().get(0).unwrap().name();
+    assert!(std::ptr::eq(first_name, second_name));
+    drop(bytes);
+    drop(decoded);
+    assert_eq!(first_name, "value");
+    assert_eq!(second_name, "value");
+    assert!(first.owned_facts().is_err());
+    assert!(first.owned_segments().is_none());
+}
+
+#[test]
+fn production_rejects_resealed_unknown_wire_discriminant() {
+    let source = "export const value = 1;";
+    let record = record(source, "input.mjs", ModuleFormat::Esm);
+    let bytes = record.encode(source).unwrap();
+    let wire =
+        ast_segmenter::WireRecord::new(bytes.into(), source, record.config().wire(), OXC_REVISION)
+            .unwrap();
+    let module = wire.root().module().bytes();
+    let module_start = module.as_ptr() as usize - wire.bytes().as_ptr() as usize;
+    let table = wire.module()._tab;
+    let tag = table
+        .vtable()
+        .get(cache_flatbuffers::wire::CachedModule::VT_BODY_TYPE) as usize;
+    assert_ne!(tag, 0);
+    let seal = wire.root().provenance().records_hash() as *const _ as usize
+        - wire.bytes().as_ptr() as usize;
+    let mut bytes = wire.bytes().to_vec();
+    bytes[module_start + table.loc() + tag] = 255;
+    let hash = digest(&bytes[module_start..module_start + module.len()]);
+    bytes[seal..seal + 32].copy_from_slice(&hash);
+    let checksum = bytes.len() - 32;
+    let hash = digest(&bytes[..checksum]);
+    bytes[checksum..].copy_from_slice(&hash);
+    assert!(CacheRecord::decode(&bytes, source, record.config()).is_err());
 }
 
 #[test]
@@ -252,6 +357,10 @@ fn reject_emission(source: &str, mutations: &[fn(&mut serde_json::Value)]) {
             CacheRecord::decode(&envelope(&modified), source, original.config()).is_err(),
             "decode mutation {}",
             i
+        );
+        assert!(
+            CacheRecord::decode(&modified.envelope(true), source, original.config()).is_err(),
+            "resealed wire semantics accepted mutation {i}"
         );
     }
 }
@@ -633,11 +742,12 @@ fn rejects_impossible_spans_ids_and_order() {
         let mut modified = original.clone();
         modified = corrupt(&modified, mutate);
         assert!(CacheRecord::decode(&envelope(&modified), source, original.config()).is_err());
+        assert!(CacheRecord::decode(&modified.envelope(true), source, original.config()).is_err());
     }
 }
 
 #[test]
-fn bounded_decoder_rejects_allocation_and_depth_bombs() {
+fn flatbuffer_decoder_rejects_legacy_allocation_and_depth_bombs() {
     for bytes in [
         vec![0x9b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
         vec![0x5b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
@@ -646,7 +756,8 @@ fn bounded_decoder_rejects_allocation_and_depth_bombs() {
         vec![0; MAX_RECORD_BYTES + 1],
         [vec![0x9a, 0, 32, 0, 0], vec![0; 2_097_152]].concat(),
     ] {
-        assert!(bounded::check(&bytes).is_err());
+        let config = ParserConfig::for_path(Path::new("empty.mjs"), ModuleFormat::Esm).unwrap();
+        assert!(CacheRecord::decode(&bytes, "", config).is_err());
     }
 }
 
@@ -665,5 +776,6 @@ fn rejects_invalid_async_syntax_sites() {
         let mut modified = original.clone();
         modified = corrupt(&modified, mutate);
         assert!(CacheRecord::decode(&envelope(&modified), source, original.config()).is_err());
+        assert!(CacheRecord::decode(&modified.envelope(true), source, original.config()).is_err());
     }
 }

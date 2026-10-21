@@ -31,8 +31,10 @@ syntax/emission/execution records and Ecco precursors. Keep storage fields
 private in record modules; scoped construction APIs are for extraction before
 provenance sealing, not consumer mutation. Owned adapter moves are explicit.
 Scalar IDs/spans and enum discriminants/payload matching remain value APIs.
-Accessor-only changes must preserve Serde field order/attributes and CBOR bytes;
-do not couple consumers to serialization or deserialize a tree just to read it.
+Production source sidecars are typed FlatBuffers, schema 13/extractor 16.
+Keep structural/integrity verification and borrowed semantic validation before
+constructing checked cache records; never deserialize/unpack trees on hits.
+Serde projections remain for declaration fingerprints and debug/test fixtures.
 
 Leave CONCISE notes on persistent design in AGENTS.md files in the roots of the crates, or the repo root for cross-cutting concerns.
 Any temporary notes about mid-refactor or mid-implementation belong in the NOTES file instead.

@@ -125,6 +125,11 @@ fn main() -> eyre::Result<()> {
         let mut session = BuildSession::new(root)?;
         let cold = run(&mut session, &options, &output)?;
         assert_eq!(cold.build.counters.source_parses, MODULES + 2);
+        let cold_artifacts = cold.build.product.artifacts.clone();
+        let sidecar = segment_cache::sidecar_path(&root.join("main.mjs"));
+        let sidecar_bytes = fs::read(&sidecar)?;
+        let sidecar_modified = fs::metadata(&sidecar)?.modified()?;
+        assert_eq!(&sidecar_bytes[8..12], b"GFSC");
         results.entry("cold").or_default().push(cold);
 
         // New process-equivalent session with warm disk facts and existing output.
@@ -132,6 +137,9 @@ fn main() -> eyre::Result<()> {
         let warm = run(&mut session, &options, &output)?;
         assert_eq!(warm.build.counters.source_parses, 0);
         assert_eq!(warm.build.counters.disk_hits, MODULES + 2);
+        assert_eq!(warm.build.product.artifacts, cold_artifacts);
+        assert_eq!(fs::read(&sidecar)?, sidecar_bytes);
+        assert_eq!(fs::metadata(&sidecar)?.modified()?, sidecar_modified);
         results.entry("warm").or_default().push(warm);
 
         let noop = run(&mut session, &options, &output)?;

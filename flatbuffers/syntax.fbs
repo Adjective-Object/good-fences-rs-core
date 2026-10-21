@@ -33,6 +33,7 @@ table Reference {
   write:bool;
   type_only:bool;
   commonjs:CommonJsGlobal = null;
+  async_deferred:bool;
 }
 table Dependency {
   id:uint;
@@ -147,6 +148,13 @@ union OperationKind {
   ExportOperation, SourceHintOperation, InvocationOperation
 }
 table Operation { parent:uint = null; kind:OperationKind (required); }
+table UnsupportedDeferred {}
+table FunctionDeferred {}
+table EffectDeferred {}
+table VariableDeferred { binding:uint; initializer:SourceSlot; }
+union DeferredForm { UnsupportedDeferred, FunctionDeferred, EffectDeferred, VariableDeferred }
+table NamespaceProperty { name:string (required); receiver:bool; }
+table DynamicNamespace { dependency:uint; properties:[NamespaceProperty]; }
 table SegmentRecipe {
   source:[Span] (required);
   connector_only:bool;
@@ -154,12 +162,15 @@ table SegmentRecipe {
   names:NameRestrictions (required);
   namespaces:[NamespaceUse] (required);
   operations:[Operation] (required);
+  deferred:DeferredForm (required);
 }
 table EmissionFacts {
   execution:ExecutionFacts (required);
   segments:[SegmentRecipe] (required);
   nested_bindings:[uint] (required);
   free_references:[uint] (required);
+  dynamic_namespaces:[DynamicNamespace] (required);
+  uses_this:bool;
 }
 table ModuleFacts {
   ecco:ParsedFile;

@@ -122,7 +122,7 @@ fn single_parent(
     modules: &BTreeMap<u32, Module<'_>>,
     symbols: &Symbols,
 ) -> eyre::Result<BTreeMap<u32, u32>> {
-    let mut incoming = BTreeMap::<u32, Vec<(u32, &Dependency)>>::new();
+    let mut incoming = BTreeMap::<u32, Vec<(u32, Dependency<'_>)>>::new();
     for (&file, module) in modules {
         for dependency in module
             .parsed
@@ -192,7 +192,7 @@ fn single_parent(
                     })
             })
             || uses.iter().any(|(file, dependency)| {
-                !dynamic_namespace_safe(modules, symbols, *file, dependency, target)
+                !dynamic_namespace_safe(modules, symbols, *file, *dependency, target)
             })
         {
             continue;
@@ -215,7 +215,7 @@ fn dynamic_namespace_safe(
     modules: &BTreeMap<u32, Module<'_>>,
     symbols: &Symbols,
     file: u32,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
     target: u32,
 ) -> bool {
     let Some(properties) = modules[&file]
@@ -341,7 +341,7 @@ impl Activations {
         symbols: &Symbols,
         placements: &BTreeMap<u32, u32>,
     ) -> eyre::Result<Option<Self>> {
-        use ast_segmenter::emission::DeferredForm;
+        use ast_segmenter::views::DeferredForm;
         if modules.keys().any(|&file| has_externals(graph, file)) {
             return Ok(None);
         }
@@ -388,7 +388,11 @@ impl Activations {
             }
             for recipe in facts.emission().segments() {
                 for usage in recipe.namespaces() {
-                    let binding = facts.references()[usage.reference() as usize].binding();
+                    let binding = facts
+                        .references()
+                        .get(usage.reference() as usize)
+                        .unwrap()
+                        .binding();
                     if binding
                         .and_then(|b| symbols.imports.get(&(file, b)))
                         .is_some_and(|linked| {
@@ -396,7 +400,7 @@ impl Activations {
                         })
                         && !matches!(
                             usage.access(),
-                            ast_segmenter::emission::NamespaceAccess::DirectRead { .. }
+                            ast_segmenter::views::NamespaceAccess::DirectRead { .. }
                         )
                     {
                         return Ok(None);
@@ -889,7 +893,7 @@ fn compatible(
     values: &Values<'_>,
     live: &BTreeSet<SegmentKey>,
 ) -> eyre::Result<bool> {
-    use ast_segmenter::emission::NamespaceAccess;
+    use ast_segmenter::views::NamespaceAccess;
     let facts = &module.parsed.facts();
     let retained: Vec<_> = facts
         .emission()
@@ -928,19 +932,26 @@ fn compatible(
             .placement()
             .declarations()
             .iter()
-            .any(|id| changed.contains(id))
-            || recipe.placement().writes().iter().any(|&index| {
-                facts.references()[index as usize]
+            .any(|id| changed.contains(&id))
+            || recipe.placement().writes().iter().any(|index| {
+                facts
+                    .references()
+                    .get(index as usize)
+                    .unwrap()
                     .binding()
                     .is_some_and(|id| changed.contains(&id))
             });
-        if recipe.names().named().iter().any(|id| changed.contains(id))
+        if recipe
+            .names()
+            .named()
+            .iter()
+            .any(|id| changed.contains(&id))
             || (inference_changes && recipe.names().inference_sensitive())
         {
             return Ok(false);
         }
         for usage in recipe.namespaces() {
-            let reference = &facts.references()[usage.reference() as usize];
+            let reference = facts.references().get(usage.reference() as usize).unwrap();
             let Some(target) = reference.binding().and_then(|id| namespaces.get(&id)) else {
                 continue;
             };
@@ -968,12 +979,12 @@ fn reconstruct(
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     deferred: bool,
 ) -> eyre::Result<Option<(Code, Code)>> {
-    use ast_segmenter::emission::{ExportForm, NamespaceAccess, OperationKind};
+    use ast_segmenter::views::{ExportForm, NamespaceAccess, OperationKind};
     let file = key.file_id;
     if !compatible(graph, file, module, values, &BTreeSet::from([key]))? {
         return Ok(None);
     }
-    let facts = &module.parsed.facts();
+    let facts = module.parsed.facts();
     let mut targets = HashMap::new();
     let mut namespaces = HashMap::new();
     for binding in facts
@@ -1001,7 +1012,7 @@ fn reconstruct(
     let mut hoisted = Code::default();
     let mut output = Code::default();
     let index = key.segment_idx as usize;
-    let recipe = &facts.emission().segments()[index];
+    let recipe = facts.emission().segments().get(index).unwrap();
     let mut renderer = crate::emit::CachedRenderer::new(
         module.source,
         facts,
@@ -1028,7 +1039,10 @@ fn reconstruct(
                         rewrite::shorthand_replacement(module.source, span, "", *shorthand)?;
                     Some(expression.clone().surrounded(prefix, ""))
                 } else {
-                    facts.references()[*reference as usize]
+                    facts
+                        .references()
+                        .get(*reference as usize)
+                        .unwrap()
                         .binding()
                         .and_then(|id| targets.get(&id))
                         .map(|name| {
@@ -1039,8 +1053,11 @@ fn reconstruct(
                 }
             }
             OperationKind::Namespace { usage } => {
-                let usage = &recipe.namespaces()[*usage as usize];
-                if let Some(target) = facts.references()[usage.reference() as usize]
+                let usage = recipe.namespaces().get(*usage as usize).unwrap();
+                if let Some(target) = facts
+                    .references()
+                    .get(usage.reference() as usize)
+                    .unwrap()
                     .binding()
                     .and_then(|id| namespaces.get(&id))
                 {
@@ -1124,7 +1141,7 @@ fn reconstruct(
                     .defaults
                     .get(&key)
                     .ok_or_eyre("missing native default binding")?;
-                let value = renderer.slot(&value)?;
+                let value = renderer.slot(*value)?;
                 if *is_hoisted {
                     hoisted.push(
                         value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),
@@ -1138,7 +1155,7 @@ fn reconstruct(
         renderer.replace(operation_index as u32, replacement);
     }
     if deferred {
-        use ast_segmenter::emission::DeferredForm;
+        use ast_segmenter::views::DeferredForm;
         match &recipe.deferred() {
             DeferredForm::Unsupported => return Ok(None),
             DeferredForm::Function => {
@@ -1161,7 +1178,7 @@ fn reconstruct(
                 if let Some(initializer) = initializer {
                     output.push(
                         renderer
-                            .slot(initializer)?
+                            .slot(*initializer)?
                             .surrounded(format!("{name} = ("), ");\n"),
                     );
                 } else if !definition.function_scoped() {

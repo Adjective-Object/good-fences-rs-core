@@ -24,7 +24,7 @@ impl Inventory {
         &self,
         root: &Path,
         importer: &Path,
-        dependency: &ast_segmenter::owned::Dependency,
+        dependency: ast_segmenter::views::Dependency<'_>,
     ) -> impl Iterator<Item = PathBuf> {
         self.context_candidates(root, importer, dependency)
             .0
@@ -35,13 +35,13 @@ impl Inventory {
         &self,
         root: &Path,
         importer: &Path,
-        dependency: &ast_segmenter::owned::Dependency,
+        dependency: ast_segmenter::views::Dependency<'_>,
     ) -> (BTreeSet<PathBuf>, usize) {
         struct Walk<'a> {
             inventory: &'a Inventory,
             root: &'a Path,
             importer: &'a Path,
-            dependency: &'a ast_segmenter::owned::Dependency,
+            dependency: ast_segmenter::views::Dependency<'a>,
             candidates: BTreeSet<PathBuf>,
             visits: usize,
         }
@@ -251,7 +251,11 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
                 .last()
             {
                 ensure!(
-                    !target.strip_prefix(scope).unwrap().ancestors().any(excluded),
+                    !target
+                        .strip_prefix(scope)
+                        .unwrap()
+                        .ancestors()
+                        .any(excluded),
                     "inventory target is reserved/excluded: {} -> {}",
                     directory.join(name).display(),
                     target.display()

@@ -173,6 +173,7 @@ fn complete_module() -> w::CachedModuleT {
         }),
     );
     facts.emission.segments.push(w::SegmentRecipeT {
+        deferred: w::DeferredFormT::UnsupportedDeferred(Box::default()),
         source: (0..4)
             .map(|start| w::SpanT {
                 start,

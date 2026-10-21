@@ -3511,6 +3511,224 @@ impl OperationKindT {
   }
 }
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MIN_DEFERRED_FORM: u8 = 0;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MAX_DEFERRED_FORM: u8 = 4;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_DEFERRED_FORM: [DeferredForm; 5] = [
+  DeferredForm::NONE,
+  DeferredForm::UnsupportedDeferred,
+  DeferredForm::FunctionDeferred,
+  DeferredForm::EffectDeferred,
+  DeferredForm::VariableDeferred,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct DeferredForm(pub u8);
+#[allow(non_upper_case_globals)]
+impl DeferredForm {
+  pub const NONE: Self = Self(0);
+  pub const UnsupportedDeferred: Self = Self(1);
+  pub const FunctionDeferred: Self = Self(2);
+  pub const EffectDeferred: Self = Self(3);
+  pub const VariableDeferred: Self = Self(4);
+
+  pub const ENUM_MIN: u8 = 0;
+  pub const ENUM_MAX: u8 = 4;
+  pub const ENUM_VALUES: &'static [Self] = &[
+    Self::NONE,
+    Self::UnsupportedDeferred,
+    Self::FunctionDeferred,
+    Self::EffectDeferred,
+    Self::VariableDeferred,
+  ];
+  /// Returns the variant's name or "" if unknown.
+  pub fn variant_name(self) -> Option<&'static str> {
+    match self {
+      Self::NONE => Some("NONE"),
+      Self::UnsupportedDeferred => Some("UnsupportedDeferred"),
+      Self::FunctionDeferred => Some("FunctionDeferred"),
+      Self::EffectDeferred => Some("EffectDeferred"),
+      Self::VariableDeferred => Some("VariableDeferred"),
+      _ => None,
+    }
+  }
+}
+impl core::fmt::Debug for DeferredForm {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    if let Some(name) = self.variant_name() {
+      f.write_str(name)
+    } else {
+      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    }
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for DeferredForm {
+  type Inner = Self;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+    Self(b)
+  }
+}
+
+impl flatbuffers::Push for DeferredForm {
+    type Output = DeferredForm;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for DeferredForm {
+  type Scalar = u8;
+  #[inline]
+  fn to_little_endian(self) -> u8 {
+    self.0.to_le()
+  }
+  #[inline]
+  #[allow(clippy::wrong_self_convention)]
+  fn from_little_endian(v: u8) -> Self {
+    let b = u8::from_le(v);
+    Self(b)
+  }
+}
+
+impl<'a> flatbuffers::Verifiable for DeferredForm {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    u8::run_verifier(v, pos)
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for DeferredForm {}
+pub struct DeferredFormUnionTableOffset {}
+
+#[allow(clippy::upper_case_acronyms)]
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeferredFormT {
+  NONE,
+  UnsupportedDeferred(Box<UnsupportedDeferredT>),
+  FunctionDeferred(Box<FunctionDeferredT>),
+  EffectDeferred(Box<EffectDeferredT>),
+  VariableDeferred(Box<VariableDeferredT>),
+}
+impl Default for DeferredFormT {
+  fn default() -> Self {
+    Self::NONE
+  }
+}
+impl DeferredFormT {
+  pub fn deferred_form_type(&self) -> DeferredForm {
+    match self {
+      Self::NONE => DeferredForm::NONE,
+      Self::UnsupportedDeferred(_) => DeferredForm::UnsupportedDeferred,
+      Self::FunctionDeferred(_) => DeferredForm::FunctionDeferred,
+      Self::EffectDeferred(_) => DeferredForm::EffectDeferred,
+      Self::VariableDeferred(_) => DeferredForm::VariableDeferred,
+    }
+  }
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>) -> Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>> {
+    match self {
+      Self::NONE => None,
+      Self::UnsupportedDeferred(v) => Some(v.pack(fbb).as_union_value()),
+      Self::FunctionDeferred(v) => Some(v.pack(fbb).as_union_value()),
+      Self::EffectDeferred(v) => Some(v.pack(fbb).as_union_value()),
+      Self::VariableDeferred(v) => Some(v.pack(fbb).as_union_value()),
+    }
+  }
+  /// If the union variant matches, return the owned UnsupportedDeferredT, setting the union to NONE.
+  pub fn take_unsupported_deferred(&mut self) -> Option<Box<UnsupportedDeferredT>> {
+    if let Self::UnsupportedDeferred(_) = self {
+      let v = core::mem::replace(self, Self::NONE);
+      if let Self::UnsupportedDeferred(w) = v {
+        Some(w)
+      } else {
+        unreachable!()
+      }
+    } else {
+      None
+    }
+  }
+  /// If the union variant matches, return a reference to the UnsupportedDeferredT.
+  pub fn as_unsupported_deferred(&self) -> Option<&UnsupportedDeferredT> {
+    if let Self::UnsupportedDeferred(v) = self { Some(v.as_ref()) } else { None }
+  }
+  /// If the union variant matches, return a mutable reference to the UnsupportedDeferredT.
+  pub fn as_unsupported_deferred_mut(&mut self) -> Option<&mut UnsupportedDeferredT> {
+    if let Self::UnsupportedDeferred(v) = self { Some(v.as_mut()) } else { None }
+  }
+  /// If the union variant matches, return the owned FunctionDeferredT, setting the union to NONE.
+  pub fn take_function_deferred(&mut self) -> Option<Box<FunctionDeferredT>> {
+    if let Self::FunctionDeferred(_) = self {
+      let v = core::mem::replace(self, Self::NONE);
+      if let Self::FunctionDeferred(w) = v {
+        Some(w)
+      } else {
+        unreachable!()
+      }
+    } else {
+      None
+    }
+  }
+  /// If the union variant matches, return a reference to the FunctionDeferredT.
+  pub fn as_function_deferred(&self) -> Option<&FunctionDeferredT> {
+    if let Self::FunctionDeferred(v) = self { Some(v.as_ref()) } else { None }
+  }
+  /// If the union variant matches, return a mutable reference to the FunctionDeferredT.
+  pub fn as_function_deferred_mut(&mut self) -> Option<&mut FunctionDeferredT> {
+    if let Self::FunctionDeferred(v) = self { Some(v.as_mut()) } else { None }
+  }
+  /// If the union variant matches, return the owned EffectDeferredT, setting the union to NONE.
+  pub fn take_effect_deferred(&mut self) -> Option<Box<EffectDeferredT>> {
+    if let Self::EffectDeferred(_) = self {
+      let v = core::mem::replace(self, Self::NONE);
+      if let Self::EffectDeferred(w) = v {
+        Some(w)
+      } else {
+        unreachable!()
+      }
+    } else {
+      None
+    }
+  }
+  /// If the union variant matches, return a reference to the EffectDeferredT.
+  pub fn as_effect_deferred(&self) -> Option<&EffectDeferredT> {
+    if let Self::EffectDeferred(v) = self { Some(v.as_ref()) } else { None }
+  }
+  /// If the union variant matches, return a mutable reference to the EffectDeferredT.
+  pub fn as_effect_deferred_mut(&mut self) -> Option<&mut EffectDeferredT> {
+    if let Self::EffectDeferred(v) = self { Some(v.as_mut()) } else { None }
+  }
+  /// If the union variant matches, return the owned VariableDeferredT, setting the union to NONE.
+  pub fn take_variable_deferred(&mut self) -> Option<Box<VariableDeferredT>> {
+    if let Self::VariableDeferred(_) = self {
+      let v = core::mem::replace(self, Self::NONE);
+      if let Self::VariableDeferred(w) = v {
+        Some(w)
+      } else {
+        unreachable!()
+      }
+    } else {
+      None
+    }
+  }
+  /// If the union variant matches, return a reference to the VariableDeferredT.
+  pub fn as_variable_deferred(&self) -> Option<&VariableDeferredT> {
+    if let Self::VariableDeferred(v) = self { Some(v.as_ref()) } else { None }
+  }
+  /// If the union variant matches, return a mutable reference to the VariableDeferredT.
+  pub fn as_variable_deferred_mut(&mut self) -> Option<&mut VariableDeferredT> {
+    if let Self::VariableDeferred(v) = self { Some(v.as_mut()) } else { None }
+  }
+}
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_MODULE_BODY: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MAX_MODULE_BODY: u8 = 2;
@@ -13836,6 +14054,7 @@ impl<'a> Reference<'a> {
   pub const VT_WRITE: flatbuffers::VOffsetT = 12;
   pub const VT_TYPE_ONLY: flatbuffers::VOffsetT = 14;
   pub const VT_COMMONJS: flatbuffers::VOffsetT = 16;
+  pub const VT_ASYNC_DEFERRED: flatbuffers::VOffsetT = 18;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -13850,6 +14069,7 @@ impl<'a> Reference<'a> {
     if let Some(x) = args.binding { builder.add_binding(x); }
     if let Some(x) = args.span { builder.add_span(x); }
     if let Some(x) = args.name { builder.add_name(x); }
+    builder.add_async_deferred(args.async_deferred);
     if let Some(x) = args.commonjs { builder.add_commonjs(x); }
     builder.add_type_only(args.type_only);
     builder.add_write(args.write);
@@ -13871,6 +14091,7 @@ impl<'a> Reference<'a> {
     let write = self.write();
     let type_only = self.type_only();
     let commonjs = self.commonjs();
+    let async_deferred = self.async_deferred();
     ReferenceT {
       name,
       span,
@@ -13879,6 +14100,7 @@ impl<'a> Reference<'a> {
       write,
       type_only,
       commonjs,
+      async_deferred,
     }
   }
 
@@ -13931,6 +14153,13 @@ impl<'a> Reference<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<CommonJsGlobal>(Reference::VT_COMMONJS, None)}
   }
+  #[inline]
+  pub fn async_deferred(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(Reference::VT_ASYNC_DEFERRED, Some(false)).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for Reference<'_> {
@@ -13947,6 +14176,7 @@ impl flatbuffers::Verifiable for Reference<'_> {
      .visit_field::<bool>("write", Self::VT_WRITE, false)?
      .visit_field::<bool>("type_only", Self::VT_TYPE_ONLY, false)?
      .visit_field::<CommonJsGlobal>("commonjs", Self::VT_COMMONJS, false)?
+     .visit_field::<bool>("async_deferred", Self::VT_ASYNC_DEFERRED, false)?
      .finish();
     Ok(())
   }
@@ -13959,6 +14189,7 @@ pub struct ReferenceArgs<'a> {
     pub write: bool,
     pub type_only: bool,
     pub commonjs: Option<CommonJsGlobal>,
+    pub async_deferred: bool,
 }
 impl<'a> Default for ReferenceArgs<'a> {
   #[inline]
@@ -13971,6 +14202,7 @@ impl<'a> Default for ReferenceArgs<'a> {
       write: false,
       type_only: false,
       commonjs: None,
+      async_deferred: false,
     }
   }
 }
@@ -14009,6 +14241,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ReferenceBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<CommonJsGlobal>(Reference::VT_COMMONJS, commonjs);
   }
   #[inline]
+  pub fn add_async_deferred(&mut self, async_deferred: bool) {
+    self.fbb_.push_slot::<bool>(Reference::VT_ASYNC_DEFERRED, async_deferred, false);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> ReferenceBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     ReferenceBuilder {
@@ -14035,6 +14271,7 @@ impl core::fmt::Debug for Reference<'_> {
       ds.field("write", &self.write());
       ds.field("type_only", &self.type_only());
       ds.field("commonjs", &self.commonjs());
+      ds.field("async_deferred", &self.async_deferred());
       ds.finish()
   }
 }
@@ -14048,6 +14285,7 @@ pub struct ReferenceT {
   pub write: bool,
   pub type_only: bool,
   pub commonjs: Option<CommonJsGlobal>,
+  pub async_deferred: bool,
 }
 impl Default for ReferenceT {
   fn default() -> Self {
@@ -14059,6 +14297,7 @@ impl Default for ReferenceT {
       write: false,
       type_only: false,
       commonjs: None,
+      async_deferred: false,
     }
   }
 }
@@ -14078,6 +14317,7 @@ impl ReferenceT {
     let write = self.write;
     let type_only = self.type_only;
     let commonjs = self.commonjs;
+    let async_deferred = self.async_deferred;
     Reference::create(_fbb, &ReferenceArgs{
       name,
       span,
@@ -14086,6 +14326,7 @@ impl ReferenceT {
       write,
       type_only,
       commonjs,
+      async_deferred,
     })
   }
 }
@@ -21814,6 +22055,774 @@ impl OperationT {
     })
   }
 }
+pub enum UnsupportedDeferredOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct UnsupportedDeferred<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for UnsupportedDeferred<'a> {
+  type Inner = UnsupportedDeferred<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> UnsupportedDeferred<'a> {
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    UnsupportedDeferred { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    _args: &'args UnsupportedDeferredArgs
+  ) -> flatbuffers::WIPOffset<UnsupportedDeferred<'bldr>> {
+    let mut builder = UnsupportedDeferredBuilder::new(_fbb);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> UnsupportedDeferredT {
+    UnsupportedDeferredT {
+    }
+  }
+}
+
+impl flatbuffers::Verifiable for UnsupportedDeferred<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct UnsupportedDeferredArgs {
+}
+impl<'a> Default for UnsupportedDeferredArgs {
+  #[inline]
+  fn default() -> Self {
+    UnsupportedDeferredArgs {
+    }
+  }
+}
+
+pub struct UnsupportedDeferredBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> UnsupportedDeferredBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> UnsupportedDeferredBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    UnsupportedDeferredBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<UnsupportedDeferred<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for UnsupportedDeferred<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("UnsupportedDeferred");
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnsupportedDeferredT {
+}
+impl Default for UnsupportedDeferredT {
+  fn default() -> Self {
+    Self {
+    }
+  }
+}
+impl UnsupportedDeferredT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<UnsupportedDeferred<'b>> {
+    UnsupportedDeferred::create(_fbb, &UnsupportedDeferredArgs{
+    })
+  }
+}
+pub enum FunctionDeferredOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct FunctionDeferred<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for FunctionDeferred<'a> {
+  type Inner = FunctionDeferred<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> FunctionDeferred<'a> {
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    FunctionDeferred { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    _args: &'args FunctionDeferredArgs
+  ) -> flatbuffers::WIPOffset<FunctionDeferred<'bldr>> {
+    let mut builder = FunctionDeferredBuilder::new(_fbb);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> FunctionDeferredT {
+    FunctionDeferredT {
+    }
+  }
+}
+
+impl flatbuffers::Verifiable for FunctionDeferred<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct FunctionDeferredArgs {
+}
+impl<'a> Default for FunctionDeferredArgs {
+  #[inline]
+  fn default() -> Self {
+    FunctionDeferredArgs {
+    }
+  }
+}
+
+pub struct FunctionDeferredBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> FunctionDeferredBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> FunctionDeferredBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    FunctionDeferredBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<FunctionDeferred<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for FunctionDeferred<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("FunctionDeferred");
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDeferredT {
+}
+impl Default for FunctionDeferredT {
+  fn default() -> Self {
+    Self {
+    }
+  }
+}
+impl FunctionDeferredT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<FunctionDeferred<'b>> {
+    FunctionDeferred::create(_fbb, &FunctionDeferredArgs{
+    })
+  }
+}
+pub enum EffectDeferredOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct EffectDeferred<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for EffectDeferred<'a> {
+  type Inner = EffectDeferred<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> EffectDeferred<'a> {
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    EffectDeferred { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    _args: &'args EffectDeferredArgs
+  ) -> flatbuffers::WIPOffset<EffectDeferred<'bldr>> {
+    let mut builder = EffectDeferredBuilder::new(_fbb);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> EffectDeferredT {
+    EffectDeferredT {
+    }
+  }
+}
+
+impl flatbuffers::Verifiable for EffectDeferred<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct EffectDeferredArgs {
+}
+impl<'a> Default for EffectDeferredArgs {
+  #[inline]
+  fn default() -> Self {
+    EffectDeferredArgs {
+    }
+  }
+}
+
+pub struct EffectDeferredBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EffectDeferredBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> EffectDeferredBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    EffectDeferredBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<EffectDeferred<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for EffectDeferred<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("EffectDeferred");
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectDeferredT {
+}
+impl Default for EffectDeferredT {
+  fn default() -> Self {
+    Self {
+    }
+  }
+}
+impl EffectDeferredT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<EffectDeferred<'b>> {
+    EffectDeferred::create(_fbb, &EffectDeferredArgs{
+    })
+  }
+}
+pub enum VariableDeferredOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct VariableDeferred<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for VariableDeferred<'a> {
+  type Inner = VariableDeferred<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> VariableDeferred<'a> {
+  pub const VT_BINDING: flatbuffers::VOffsetT = 4;
+  pub const VT_INITIALIZER: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    VariableDeferred { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args VariableDeferredArgs<'args>
+  ) -> flatbuffers::WIPOffset<VariableDeferred<'bldr>> {
+    let mut builder = VariableDeferredBuilder::new(_fbb);
+    if let Some(x) = args.initializer { builder.add_initializer(x); }
+    builder.add_binding(args.binding);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> VariableDeferredT {
+    let binding = self.binding();
+    let initializer = self.initializer().map(|x| {
+      Box::new(x.unpack())
+    });
+    VariableDeferredT {
+      binding,
+      initializer,
+    }
+  }
+
+  #[inline]
+  pub fn binding(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(VariableDeferred::VT_BINDING, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn initializer(&self) -> Option<SourceSlot<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<SourceSlot>>(VariableDeferred::VT_INITIALIZER, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for VariableDeferred<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("binding", Self::VT_BINDING, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<SourceSlot>>("initializer", Self::VT_INITIALIZER, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct VariableDeferredArgs<'a> {
+    pub binding: u32,
+    pub initializer: Option<flatbuffers::WIPOffset<SourceSlot<'a>>>,
+}
+impl<'a> Default for VariableDeferredArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    VariableDeferredArgs {
+      binding: 0,
+      initializer: None,
+    }
+  }
+}
+
+pub struct VariableDeferredBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> VariableDeferredBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_binding(&mut self, binding: u32) {
+    self.fbb_.push_slot::<u32>(VariableDeferred::VT_BINDING, binding, 0);
+  }
+  #[inline]
+  pub fn add_initializer(&mut self, initializer: flatbuffers::WIPOffset<SourceSlot<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<SourceSlot>>(VariableDeferred::VT_INITIALIZER, initializer);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> VariableDeferredBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    VariableDeferredBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<VariableDeferred<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for VariableDeferred<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("VariableDeferred");
+      ds.field("binding", &self.binding());
+      ds.field("initializer", &self.initializer());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariableDeferredT {
+  pub binding: u32,
+  pub initializer: Option<Box<SourceSlotT>>,
+}
+impl Default for VariableDeferredT {
+  fn default() -> Self {
+    Self {
+      binding: 0,
+      initializer: None,
+    }
+  }
+}
+impl VariableDeferredT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<VariableDeferred<'b>> {
+    let binding = self.binding;
+    let initializer = self.initializer.as_ref().map(|x|{
+      x.pack(_fbb)
+    });
+    VariableDeferred::create(_fbb, &VariableDeferredArgs{
+      binding,
+      initializer,
+    })
+  }
+}
+pub enum NamespacePropertyOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct NamespaceProperty<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for NamespaceProperty<'a> {
+  type Inner = NamespaceProperty<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> NamespaceProperty<'a> {
+  pub const VT_NAME: flatbuffers::VOffsetT = 4;
+  pub const VT_RECEIVER: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    NamespaceProperty { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args NamespacePropertyArgs<'args>
+  ) -> flatbuffers::WIPOffset<NamespaceProperty<'bldr>> {
+    let mut builder = NamespacePropertyBuilder::new(_fbb);
+    if let Some(x) = args.name { builder.add_name(x); }
+    builder.add_receiver(args.receiver);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> NamespacePropertyT {
+    let name = {
+      let x = self.name();
+      x.to_string()
+    };
+    let receiver = self.receiver();
+    NamespacePropertyT {
+      name,
+      receiver,
+    }
+  }
+
+  #[inline]
+  pub fn name(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(NamespaceProperty::VT_NAME, None).unwrap()}
+  }
+  #[inline]
+  pub fn receiver(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(NamespaceProperty::VT_RECEIVER, Some(false)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for NamespaceProperty<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, true)?
+     .visit_field::<bool>("receiver", Self::VT_RECEIVER, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct NamespacePropertyArgs<'a> {
+    pub name: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub receiver: bool,
+}
+impl<'a> Default for NamespacePropertyArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    NamespacePropertyArgs {
+      name: None, // required field
+      receiver: false,
+    }
+  }
+}
+
+pub struct NamespacePropertyBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NamespacePropertyBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_name(&mut self, name: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(NamespaceProperty::VT_NAME, name);
+  }
+  #[inline]
+  pub fn add_receiver(&mut self, receiver: bool) {
+    self.fbb_.push_slot::<bool>(NamespaceProperty::VT_RECEIVER, receiver, false);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> NamespacePropertyBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    NamespacePropertyBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<NamespaceProperty<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, NamespaceProperty::VT_NAME,"name");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for NamespaceProperty<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("NamespaceProperty");
+      ds.field("name", &self.name());
+      ds.field("receiver", &self.receiver());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamespacePropertyT {
+  pub name: String,
+  pub receiver: bool,
+}
+impl Default for NamespacePropertyT {
+  fn default() -> Self {
+    Self {
+      name: "".to_string(),
+      receiver: false,
+    }
+  }
+}
+impl NamespacePropertyT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<NamespaceProperty<'b>> {
+    let name = Some({
+      let x = &self.name;
+      _fbb.create_string(x)
+    });
+    let receiver = self.receiver;
+    NamespaceProperty::create(_fbb, &NamespacePropertyArgs{
+      name,
+      receiver,
+    })
+  }
+}
+pub enum DynamicNamespaceOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct DynamicNamespace<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for DynamicNamespace<'a> {
+  type Inner = DynamicNamespace<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> DynamicNamespace<'a> {
+  pub const VT_DEPENDENCY: flatbuffers::VOffsetT = 4;
+  pub const VT_PROPERTIES: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    DynamicNamespace { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args DynamicNamespaceArgs<'args>
+  ) -> flatbuffers::WIPOffset<DynamicNamespace<'bldr>> {
+    let mut builder = DynamicNamespaceBuilder::new(_fbb);
+    if let Some(x) = args.properties { builder.add_properties(x); }
+    builder.add_dependency(args.dependency);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> DynamicNamespaceT {
+    let dependency = self.dependency();
+    let properties = self.properties().map(|x| {
+      x.iter().map(|t| t.unpack()).collect()
+    });
+    DynamicNamespaceT {
+      dependency,
+      properties,
+    }
+  }
+
+  #[inline]
+  pub fn dependency(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(DynamicNamespace::VT_DEPENDENCY, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn properties(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NamespaceProperty<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NamespaceProperty>>>>(DynamicNamespace::VT_PROPERTIES, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for DynamicNamespace<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("dependency", Self::VT_DEPENDENCY, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<NamespaceProperty>>>>("properties", Self::VT_PROPERTIES, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct DynamicNamespaceArgs<'a> {
+    pub dependency: u32,
+    pub properties: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NamespaceProperty<'a>>>>>,
+}
+impl<'a> Default for DynamicNamespaceArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    DynamicNamespaceArgs {
+      dependency: 0,
+      properties: None,
+    }
+  }
+}
+
+pub struct DynamicNamespaceBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DynamicNamespaceBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_dependency(&mut self, dependency: u32) {
+    self.fbb_.push_slot::<u32>(DynamicNamespace::VT_DEPENDENCY, dependency, 0);
+  }
+  #[inline]
+  pub fn add_properties(&mut self, properties: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<NamespaceProperty<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DynamicNamespace::VT_PROPERTIES, properties);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DynamicNamespaceBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    DynamicNamespaceBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<DynamicNamespace<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for DynamicNamespace<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("DynamicNamespace");
+      ds.field("dependency", &self.dependency());
+      ds.field("properties", &self.properties());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicNamespaceT {
+  pub dependency: u32,
+  pub properties: Option<Vec<NamespacePropertyT>>,
+}
+impl Default for DynamicNamespaceT {
+  fn default() -> Self {
+    Self {
+      dependency: 0,
+      properties: None,
+    }
+  }
+}
+impl DynamicNamespaceT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<DynamicNamespace<'b>> {
+    let dependency = self.dependency;
+    let properties = self.properties.as_ref().map(|x|{
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    DynamicNamespace::create(_fbb, &DynamicNamespaceArgs{
+      dependency,
+      properties,
+    })
+  }
+}
 pub enum SegmentRecipeOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -21836,6 +22845,8 @@ impl<'a> SegmentRecipe<'a> {
   pub const VT_NAMES: flatbuffers::VOffsetT = 10;
   pub const VT_NAMESPACES: flatbuffers::VOffsetT = 12;
   pub const VT_OPERATIONS: flatbuffers::VOffsetT = 14;
+  pub const VT_DEFERRED_TYPE: flatbuffers::VOffsetT = 16;
+  pub const VT_DEFERRED: flatbuffers::VOffsetT = 18;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -21847,11 +22858,13 @@ impl<'a> SegmentRecipe<'a> {
     args: &'args SegmentRecipeArgs<'args>
   ) -> flatbuffers::WIPOffset<SegmentRecipe<'bldr>> {
     let mut builder = SegmentRecipeBuilder::new(_fbb);
+    if let Some(x) = args.deferred { builder.add_deferred(x); }
     if let Some(x) = args.operations { builder.add_operations(x); }
     if let Some(x) = args.namespaces { builder.add_namespaces(x); }
     if let Some(x) = args.names { builder.add_names(x); }
     if let Some(x) = args.placement { builder.add_placement(x); }
     if let Some(x) = args.source { builder.add_source(x); }
+    builder.add_deferred_type(args.deferred_type);
     builder.add_connector_only(args.connector_only);
     builder.finish()
   }
@@ -21878,6 +22891,30 @@ impl<'a> SegmentRecipe<'a> {
       let x = self.operations();
       x.iter().map(|t| t.unpack()).collect()
     };
+    let deferred = match self.deferred_type() {
+      DeferredForm::NONE => DeferredFormT::NONE,
+      DeferredForm::UnsupportedDeferred => DeferredFormT::UnsupportedDeferred(Box::new(
+        self.deferred_as_unsupported_deferred()
+            .expect("Invalid union table, expected `DeferredForm::UnsupportedDeferred`.")
+            .unpack()
+      )),
+      DeferredForm::FunctionDeferred => DeferredFormT::FunctionDeferred(Box::new(
+        self.deferred_as_function_deferred()
+            .expect("Invalid union table, expected `DeferredForm::FunctionDeferred`.")
+            .unpack()
+      )),
+      DeferredForm::EffectDeferred => DeferredFormT::EffectDeferred(Box::new(
+        self.deferred_as_effect_deferred()
+            .expect("Invalid union table, expected `DeferredForm::EffectDeferred`.")
+            .unpack()
+      )),
+      DeferredForm::VariableDeferred => DeferredFormT::VariableDeferred(Box::new(
+        self.deferred_as_variable_deferred()
+            .expect("Invalid union table, expected `DeferredForm::VariableDeferred`.")
+            .unpack()
+      )),
+      _ => DeferredFormT::NONE,
+    };
     SegmentRecipeT {
       source,
       connector_only,
@@ -21885,6 +22922,7 @@ impl<'a> SegmentRecipe<'a> {
       names,
       namespaces,
       operations,
+      deferred,
     }
   }
 
@@ -21930,6 +22968,76 @@ impl<'a> SegmentRecipe<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Operation>>>>(SegmentRecipe::VT_OPERATIONS, None).unwrap()}
   }
+  #[inline]
+  pub fn deferred_type(&self) -> DeferredForm {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<DeferredForm>(SegmentRecipe::VT_DEFERRED_TYPE, Some(DeferredForm::NONE)).unwrap()}
+  }
+  #[inline]
+  pub fn deferred(&self) -> flatbuffers::Table<'a> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Table<'a>>>(SegmentRecipe::VT_DEFERRED, None).unwrap()}
+  }
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn deferred_as_unsupported_deferred(&self) -> Option<UnsupportedDeferred<'a>> {
+    if self.deferred_type() == DeferredForm::UnsupportedDeferred {
+      let u = self.deferred();
+      // Safety:
+      // Created from a valid Table for this object
+      // Which contains a valid union in this slot
+      Some(unsafe { UnsupportedDeferred::init_from_table(u) })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn deferred_as_function_deferred(&self) -> Option<FunctionDeferred<'a>> {
+    if self.deferred_type() == DeferredForm::FunctionDeferred {
+      let u = self.deferred();
+      // Safety:
+      // Created from a valid Table for this object
+      // Which contains a valid union in this slot
+      Some(unsafe { FunctionDeferred::init_from_table(u) })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn deferred_as_effect_deferred(&self) -> Option<EffectDeferred<'a>> {
+    if self.deferred_type() == DeferredForm::EffectDeferred {
+      let u = self.deferred();
+      // Safety:
+      // Created from a valid Table for this object
+      // Which contains a valid union in this slot
+      Some(unsafe { EffectDeferred::init_from_table(u) })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn deferred_as_variable_deferred(&self) -> Option<VariableDeferred<'a>> {
+    if self.deferred_type() == DeferredForm::VariableDeferred {
+      let u = self.deferred();
+      // Safety:
+      // Created from a valid Table for this object
+      // Which contains a valid union in this slot
+      Some(unsafe { VariableDeferred::init_from_table(u) })
+    } else {
+      None
+    }
+  }
+
 }
 
 impl flatbuffers::Verifiable for SegmentRecipe<'_> {
@@ -21945,6 +23053,15 @@ impl flatbuffers::Verifiable for SegmentRecipe<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<NameRestrictions>>("names", Self::VT_NAMES, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<NamespaceUse>>>>("namespaces", Self::VT_NAMESPACES, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Operation>>>>("operations", Self::VT_OPERATIONS, true)?
+     .visit_union::<DeferredForm, _>("deferred_type", Self::VT_DEFERRED_TYPE, "deferred", Self::VT_DEFERRED, true, |key, v, pos| {
+        match key {
+          DeferredForm::UnsupportedDeferred => v.verify_union_variant::<flatbuffers::ForwardsUOffset<UnsupportedDeferred>>("DeferredForm::UnsupportedDeferred", pos),
+          DeferredForm::FunctionDeferred => v.verify_union_variant::<flatbuffers::ForwardsUOffset<FunctionDeferred>>("DeferredForm::FunctionDeferred", pos),
+          DeferredForm::EffectDeferred => v.verify_union_variant::<flatbuffers::ForwardsUOffset<EffectDeferred>>("DeferredForm::EffectDeferred", pos),
+          DeferredForm::VariableDeferred => v.verify_union_variant::<flatbuffers::ForwardsUOffset<VariableDeferred>>("DeferredForm::VariableDeferred", pos),
+          _ => Ok(()),
+        }
+     })?
      .finish();
     Ok(())
   }
@@ -21956,6 +23073,8 @@ pub struct SegmentRecipeArgs<'a> {
     pub names: Option<flatbuffers::WIPOffset<NameRestrictions<'a>>>,
     pub namespaces: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<NamespaceUse<'a>>>>>,
     pub operations: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Operation<'a>>>>>,
+    pub deferred_type: DeferredForm,
+    pub deferred: Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>,
 }
 impl<'a> Default for SegmentRecipeArgs<'a> {
   #[inline]
@@ -21967,6 +23086,8 @@ impl<'a> Default for SegmentRecipeArgs<'a> {
       names: None, // required field
       namespaces: None, // required field
       operations: None, // required field
+      deferred_type: DeferredForm::NONE,
+      deferred: None, // required field
     }
   }
 }
@@ -22001,6 +23122,14 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SegmentRecipeBuilder<'a, 'b, A>
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SegmentRecipe::VT_OPERATIONS, operations);
   }
   #[inline]
+  pub fn add_deferred_type(&mut self, deferred_type: DeferredForm) {
+    self.fbb_.push_slot::<DeferredForm>(SegmentRecipe::VT_DEFERRED_TYPE, deferred_type, DeferredForm::NONE);
+  }
+  #[inline]
+  pub fn add_deferred(&mut self, deferred: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SegmentRecipe::VT_DEFERRED, deferred);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> SegmentRecipeBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     SegmentRecipeBuilder {
@@ -22016,6 +23145,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SegmentRecipeBuilder<'a, 'b, A>
     self.fbb_.required(o, SegmentRecipe::VT_NAMES,"names");
     self.fbb_.required(o, SegmentRecipe::VT_NAMESPACES,"namespaces");
     self.fbb_.required(o, SegmentRecipe::VT_OPERATIONS,"operations");
+    self.fbb_.required(o, SegmentRecipe::VT_DEFERRED,"deferred");
     flatbuffers::WIPOffset::new(o.value())
   }
 }
@@ -22029,6 +23159,41 @@ impl core::fmt::Debug for SegmentRecipe<'_> {
       ds.field("names", &self.names());
       ds.field("namespaces", &self.namespaces());
       ds.field("operations", &self.operations());
+      ds.field("deferred_type", &self.deferred_type());
+      match self.deferred_type() {
+        DeferredForm::UnsupportedDeferred => {
+          if let Some(x) = self.deferred_as_unsupported_deferred() {
+            ds.field("deferred", &x)
+          } else {
+            ds.field("deferred", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        DeferredForm::FunctionDeferred => {
+          if let Some(x) = self.deferred_as_function_deferred() {
+            ds.field("deferred", &x)
+          } else {
+            ds.field("deferred", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        DeferredForm::EffectDeferred => {
+          if let Some(x) = self.deferred_as_effect_deferred() {
+            ds.field("deferred", &x)
+          } else {
+            ds.field("deferred", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        DeferredForm::VariableDeferred => {
+          if let Some(x) = self.deferred_as_variable_deferred() {
+            ds.field("deferred", &x)
+          } else {
+            ds.field("deferred", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        _ => {
+          let x: Option<()> = None;
+          ds.field("deferred", &x)
+        },
+      };
       ds.finish()
   }
 }
@@ -22041,6 +23206,7 @@ pub struct SegmentRecipeT {
   pub names: Box<NameRestrictionsT>,
   pub namespaces: Vec<NamespaceUseT>,
   pub operations: Vec<OperationT>,
+  pub deferred: DeferredFormT,
 }
 impl Default for SegmentRecipeT {
   fn default() -> Self {
@@ -22051,6 +23217,7 @@ impl Default for SegmentRecipeT {
       names: Default::default(),
       namespaces: Default::default(),
       operations: Default::default(),
+      deferred: DeferredFormT::NONE,
     }
   }
 }
@@ -22080,6 +23247,8 @@ impl SegmentRecipeT {
       let x = &self.operations;
       let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
     });
+    let deferred_type = self.deferred.deferred_form_type();
+    let deferred = self.deferred.pack(_fbb);
     SegmentRecipe::create(_fbb, &SegmentRecipeArgs{
       source,
       connector_only,
@@ -22087,6 +23256,8 @@ impl SegmentRecipeT {
       names,
       namespaces,
       operations,
+      deferred_type,
+      deferred,
     })
   }
 }
@@ -22110,6 +23281,8 @@ impl<'a> EmissionFacts<'a> {
   pub const VT_SEGMENTS: flatbuffers::VOffsetT = 6;
   pub const VT_NESTED_BINDINGS: flatbuffers::VOffsetT = 8;
   pub const VT_FREE_REFERENCES: flatbuffers::VOffsetT = 10;
+  pub const VT_DYNAMIC_NAMESPACES: flatbuffers::VOffsetT = 12;
+  pub const VT_USES_THIS: flatbuffers::VOffsetT = 14;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -22121,10 +23294,12 @@ impl<'a> EmissionFacts<'a> {
     args: &'args EmissionFactsArgs<'args>
   ) -> flatbuffers::WIPOffset<EmissionFacts<'bldr>> {
     let mut builder = EmissionFactsBuilder::new(_fbb);
+    if let Some(x) = args.dynamic_namespaces { builder.add_dynamic_namespaces(x); }
     if let Some(x) = args.free_references { builder.add_free_references(x); }
     if let Some(x) = args.nested_bindings { builder.add_nested_bindings(x); }
     if let Some(x) = args.segments { builder.add_segments(x); }
     if let Some(x) = args.execution { builder.add_execution(x); }
+    builder.add_uses_this(args.uses_this);
     builder.finish()
   }
 
@@ -22145,11 +23320,18 @@ impl<'a> EmissionFacts<'a> {
       let x = self.free_references();
       x.into_iter().collect()
     };
+    let dynamic_namespaces = {
+      let x = self.dynamic_namespaces();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    let uses_this = self.uses_this();
     EmissionFactsT {
       execution,
       segments,
       nested_bindings,
       free_references,
+      dynamic_namespaces,
+      uses_this,
     }
   }
 
@@ -22181,6 +23363,20 @@ impl<'a> EmissionFacts<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(EmissionFacts::VT_FREE_REFERENCES, None).unwrap()}
   }
+  #[inline]
+  pub fn dynamic_namespaces(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DynamicNamespace<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DynamicNamespace>>>>(EmissionFacts::VT_DYNAMIC_NAMESPACES, None).unwrap()}
+  }
+  #[inline]
+  pub fn uses_this(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(EmissionFacts::VT_USES_THIS, Some(false)).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for EmissionFacts<'_> {
@@ -22194,6 +23390,8 @@ impl flatbuffers::Verifiable for EmissionFacts<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SegmentRecipe>>>>("segments", Self::VT_SEGMENTS, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("nested_bindings", Self::VT_NESTED_BINDINGS, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("free_references", Self::VT_FREE_REFERENCES, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<DynamicNamespace>>>>("dynamic_namespaces", Self::VT_DYNAMIC_NAMESPACES, true)?
+     .visit_field::<bool>("uses_this", Self::VT_USES_THIS, false)?
      .finish();
     Ok(())
   }
@@ -22203,6 +23401,8 @@ pub struct EmissionFactsArgs<'a> {
     pub segments: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SegmentRecipe<'a>>>>>,
     pub nested_bindings: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub free_references: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
+    pub dynamic_namespaces: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DynamicNamespace<'a>>>>>,
+    pub uses_this: bool,
 }
 impl<'a> Default for EmissionFactsArgs<'a> {
   #[inline]
@@ -22212,6 +23412,8 @@ impl<'a> Default for EmissionFactsArgs<'a> {
       segments: None, // required field
       nested_bindings: None, // required field
       free_references: None, // required field
+      dynamic_namespaces: None, // required field
+      uses_this: false,
     }
   }
 }
@@ -22238,6 +23440,14 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EmissionFactsBuilder<'a, 'b, A>
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(EmissionFacts::VT_FREE_REFERENCES, free_references);
   }
   #[inline]
+  pub fn add_dynamic_namespaces(&mut self, dynamic_namespaces: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<DynamicNamespace<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(EmissionFacts::VT_DYNAMIC_NAMESPACES, dynamic_namespaces);
+  }
+  #[inline]
+  pub fn add_uses_this(&mut self, uses_this: bool) {
+    self.fbb_.push_slot::<bool>(EmissionFacts::VT_USES_THIS, uses_this, false);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> EmissionFactsBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     EmissionFactsBuilder {
@@ -22252,6 +23462,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EmissionFactsBuilder<'a, 'b, A>
     self.fbb_.required(o, EmissionFacts::VT_SEGMENTS,"segments");
     self.fbb_.required(o, EmissionFacts::VT_NESTED_BINDINGS,"nested_bindings");
     self.fbb_.required(o, EmissionFacts::VT_FREE_REFERENCES,"free_references");
+    self.fbb_.required(o, EmissionFacts::VT_DYNAMIC_NAMESPACES,"dynamic_namespaces");
     flatbuffers::WIPOffset::new(o.value())
   }
 }
@@ -22263,6 +23474,8 @@ impl core::fmt::Debug for EmissionFacts<'_> {
       ds.field("segments", &self.segments());
       ds.field("nested_bindings", &self.nested_bindings());
       ds.field("free_references", &self.free_references());
+      ds.field("dynamic_namespaces", &self.dynamic_namespaces());
+      ds.field("uses_this", &self.uses_this());
       ds.finish()
   }
 }
@@ -22273,6 +23486,8 @@ pub struct EmissionFactsT {
   pub segments: Vec<SegmentRecipeT>,
   pub nested_bindings: Vec<u32>,
   pub free_references: Vec<u32>,
+  pub dynamic_namespaces: Vec<DynamicNamespaceT>,
+  pub uses_this: bool,
 }
 impl Default for EmissionFactsT {
   fn default() -> Self {
@@ -22281,6 +23496,8 @@ impl Default for EmissionFactsT {
       segments: Default::default(),
       nested_bindings: Default::default(),
       free_references: Default::default(),
+      dynamic_namespaces: Default::default(),
+      uses_this: false,
     }
   }
 }
@@ -22305,11 +23522,18 @@ impl EmissionFactsT {
       let x = &self.free_references;
       _fbb.create_vector(x)
     });
+    let dynamic_namespaces = Some({
+      let x = &self.dynamic_namespaces;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    let uses_this = self.uses_this;
     EmissionFacts::create(_fbb, &EmissionFactsArgs{
       execution,
       segments,
       nested_bindings,
       free_references,
+      dynamic_namespaces,
+      uses_this,
     })
   }
 }

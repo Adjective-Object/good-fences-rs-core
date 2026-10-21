@@ -1,10 +1,10 @@
 # Typed source-cache FlatBuffers
 
-**Integration foundation, not the completed production cache migration.**
-`segment_cache` still uses schema 12/extractor 14 and `.seg.cbor`. This crate is
-not yet the storage backend of `segment_cache` or `ast-segmenter`. Ecco now uses
-its tables through borrowed precursor views and a construction-only encoder.
-No existing cache hit is made zero-copy by this addition alone.
+**Production source-cache backend: schema 13/extractor 16, `.seg.fb`.**
+`segment_cache` reads these immutable buffers through AST/Ecco views and runs
+full semantic validation before exposing checked records. Byte-backed parsed
+modules feed graph linking, effect solving and native emission without unpacking
+facts. Encoders and generated object APIs are construction-only.
 
 ## Schema coverage
 
@@ -29,7 +29,7 @@ Declaration fingerprints retain their 16-byte representation, not a new hash.
 
 ## Buffer format and read guarantees
 
-The proposed `.seg.fb` format is a size-prefixed `CacheRecord` FlatBuffer (`GFSC`)
+The `.seg.fb` format is a size-prefixed `CacheRecord` FlatBuffer (`GFSC`)
 followed by a 32-byte SHA-256 of the entire size-prefixed record. Its `module`
 vector contains a **typed `CachedModule` FlatBuffer** (`GFSM`). Nesting enables
 an exact immutable module-byte extraction seal without serializing the facts
@@ -49,23 +49,25 @@ unchecked-root calls reuse the already verified immutable roots. There is no
 lifetime transmute or self-referential storage. Tests prove that nested string
 pointers address this allocation and remain identical across thread-shared clones.
 
-**This is not yet the complete source-local semantic validator.** Span UTF-8
+**`WireRecord` is not the source-local semantic validator.** Span UTF-8
 boundaries, ID/link/occurrence coverage, ordering, operation-parent rules,
-execution contexts, supported recipes and Ecco semantic bounds must be checked
-through byte-backed views before integrating this owner into production.
+execution contexts, supported recipes and Ecco semantic bounds are checked by
+`segment_cache::validate_parsed` through owned-or-wire views. Call that gate after
+`ParsedModule::from_wire`; structural/source verification alone is insufficient.
 
-The reserved wire constants are schema 13/extractor 15; they do not change the
-currently active production identity. The production migration still needs:
+AST's `ParsedModule::to_flatbuffer` verifies owned extraction provenance before
+constructing typed tables, embedding Ecco directly with its existing encoder.
+`FactsStorage` retains the verified owner; strings and nested records borrow it,
+while graph ranges and derived analysis/emission plans are explicitly owned.
+AST and bundler differential tests cover complete record equality, byte borrowing,
+owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-- Owned extraction-to-wire construction and private provenance sealing.
-- Owned/borrowed read facades for AST consumers without recursively cloning
-  or unpacking cache trees in validation, `to_parsed`, graph creation, or emission.
-- Replacement of production CBOR encode/decode and obsolete preflight logic.
-- `.seg.fb` publication and inventory integration, with old `.seg.cbor` misses.
-- Actual-source cold/warm/parallel/incremental differential and performance tests.
-
-Existing Serde and CBOR uses remain untouched because production integration is
-not complete. Serde in this new crate's handwritten wire path is not used.
+Schema 13/extractor 16 are active production identities, included in bundler
+source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
+inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
+Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.
+Owned AST provenance now hashes typed module bytes too; CBOR remains only in the
+independent declaration-configuration fingerprint and debug/test fixtures.
 
 Ecco's precursor substage is usable independently: `WireEcco` bounds and
 structurally verifies a standalone typed `ParsedFile`, then owns its immutable

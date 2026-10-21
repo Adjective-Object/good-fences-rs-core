@@ -260,6 +260,13 @@ fn publication_noop_mtimes_generation_identity_and_bounded_stale_cleanup() {
         Path::new("foo.mjs.seg.cbor.stage-ab"),
         &output
     ));
+    for artifact in [
+        "foo.mjs.seg.cbor",
+        "foo.mjs.seg.fb",
+        "foo.mjs.seg.fb.stage-ab",
+    ] {
+        assert!(is_generated_artifact(Path::new(artifact), &output));
+    }
     assert!(is_generated_artifact(
         Path::new("other/.bundler-stage-1/x"),
         &output

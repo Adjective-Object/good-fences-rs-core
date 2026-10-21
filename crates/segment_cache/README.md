@@ -18,9 +18,15 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-This accessor-only migration retains the existing CBOR bytes and versions.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 12 /
-extractor 14, including parented execution contexts, complete occurrence timing,
+Production loading/publication uses typed FlatBuffers, schema 13/extractor 16.
+Facts expose Copy/value-iterator APIs over immutable verified byte owners.
+`validate_parsed(source, parsed)` shares the source-local semantic checks with
+the production codec and accepts `ParsedModule::from_wire` without decoding a fact
+tree. Raw wire callers must apply this check after structural/source verification;
+`WireRecord` alone does not prove span/link/recipe validity. `CacheRecord` construction
+always runs the same semantic gate before exposing immutable records.
+Syntax-local effect reasons/timing are persisted and range-checked (including
+parented execution contexts, complete occurrence timing,
 eager read/write links, relative dependency patterns, owned lazy Ecco precursors,
 deferred declaration/source-slot alternatives,
 dynamic namespace observation shapes/receiver/`this` facts,
@@ -39,21 +45,26 @@ Support-policy/facts changes invalidate previous sidecars. Transitive
 async status, SCC schedules and require compatibility remain derived linker/host
 policy, never source truth. CJS records cannot carry top-level suspension sites.
 
-P2.1 provides a deterministic versioned CBOR codec. SHA-256 identifies the exact
+The codec stores a size-prefixed `GFSC` root and typed nested `GFSM` module.
+SHA-256 identifies the exact
 source bytes and protects the payload against accidental corruption. Identity
 includes schema/extractor versions, the pinned OXC revision and effective parser
 language/module/definition mode. Current parser defaults are part of the
 extractor version; bump it when defaults or extraction/support policy change.
 
-`CacheRecord::from_parsed`, `encode` and `decode` validate all UTF-8 ranges,
+`CacheRecord::from_parsed` and `decode` validate all UTF-8 ranges,
 source-local IDs, links and ordering. Decode limits input to 16 MiB, 2,097,152
-CBOR items and 32 levels before serde allocates; indefinite lengths and trailing
-data are rejected. This is an untrusted cache, not an authenticated artifact.
-Diagnostics are not persisted. The codec is owned after parser arena drop.
+tables, 64 levels and 64 MiB apparent size before generated access. Both roots
+are structurally verified; unknown discriminants, wrong size prefixes and checksums
+are rejected. No Serde, object `unpack`, owned-tree reconstruction or
+decode/re-encode canonical comparison occurs. This is an untrusted cache, not an
+authenticated artifact. Diagnostics are not persisted.
 `from_parsed` also checks the extraction's sealed source/configuration and record
 hashes; passing an unrelated parse alongside plausible-length text is an error.
-`to_parsed(source)` returns provenance-bearing owned records for graph inputs,
-without parsing or reconstructing legacy tracker maps. Serialized provenance
+`encode(source)` and `to_parsed(source)` check exact source identity then share/copy
+already validated immutable storage, without repeating semantic tree traversal.
+`to_parsed` retains byte-backed AST/Ecco facts and lazy statement ranges for graph
+inputs, without parsing or reconstructing legacy tracker maps. Serialized provenance
 detects accidental re-pairing or mutation, not a malicious cache publisher.
 Async-body flags are required on every serialized reference and covered by the
 same sealed records hash; missing flags, changed context facts and previous
@@ -77,7 +88,7 @@ with sorted unique property/receiver pairs; placement and target eligibility are
 never cached.
 These are structural integrity checks on source-local evidence, not a second
 parser or authentication of a publisher; source/configuration hashes and bounded
-CBOR preflight remain mandatory on both codec boundaries.
+wire verification remain mandatory at the codec boundary.
 Execution contexts validate preorder/nearest parents, original segment containment,
 immediate call links and exact reference/invocation coverage. No derived linked
 execution constraints or relocation decisions are persisted.
@@ -101,13 +112,17 @@ original bytes still fails on that hit. Complete CSS/composition closure checkin
 belongs to the preparing caller, not resolved state persisted in this cache.
 
 `load_or_parse(logger, path, package_format, CacheMode)` always reads the source,
-then checks `<source>.seg.cbor`. It returns the exact source snapshot, record,
+then checks `<source>.seg.fb`. It returns the exact source snapshot, record,
 hit/miss reason and write outcome. Invalid/unreadable caches are misses. Source
 read/parse errors are fatal; old success records are never returned for failures.
 No negative diagnostics are cached: failures are regenerated with the current
 path. Cache read/write errors are nonfatal and explicitly reported in the
 outcome, not logged behind the caller's back. `ReadOnly` suppresses writes;
 `Disabled` suppresses both cache reads and writes.
+If a valid owned extraction exceeds wire byte/depth/table limits, it remains an
+uncached success and publication reports `CacheWrite::Failed`, preserving any old
+sidecar. This exceptional cold record retains checked owned facts; disk hits
+always retain verified wire storage. Untrusted wire input cannot use this fallback.
 
 `load_or_parse_with_declarations(..., &LocalFacts)` includes effective contracts
 in identity for ESM and opaque CJS; `load_or_parse` uses the default JavaScript
@@ -121,11 +136,13 @@ Shared configurations use `ast_segmenter::PreparedDeclarations` with
 `CacheRecord::matches_prepared_declarations` and
 `CacheRecord::decode_with_prepared_declarations`. These paths compare the prepared
 identity without serializing declarations per source or hit. Existing `LocalFacts`
-entrypoints remain compatibility wrappers. Schema 12 invalidates old sidecars
-because declaration identity is now a typed 128-bit XXH3 fingerprint; source,
-payload checksum and sealed extraction integrity remain SHA-256.
+entrypoints remain compatibility wrappers. Declaration identity remains the
+typed 128-bit XXH3 fingerprint; its independent CBOR configuration serialization
+is retained for compatibility, once per prepared configuration, not per-file
+loading. Debug/test Serde projections are not the production codec.
+Source, payload checksum and sealed extraction integrity remain SHA-256.
 
-Writes use uniquely named sibling `.seg.cbor.stage-*` files, flush/sync before
+Writes use uniquely named sibling `.seg.fb.stage-*` files, flush/sync before
 atomic replacement, and clean up staging files on errors/normal cancellation.
 Staging handles close before `std::fs::rename` atomically overwrites the
 destination, including Windows replacement with open readers. It never removes
@@ -147,8 +164,11 @@ Sidecars follow the requested lexical source path (including symlink aliases),
 not a canonicalized target. Caller-supplied effective package policy remains
 authoritative; callers own resolution/symlink/casing policy.
 
-Watchers should exclude `is_cache_artifact(path)` results. Deleted sources never
-load orphan records; the cache does not delete or enumerate orphan sidecars.
+Watchers exclude `is_cache_artifact(path)` results: both `.seg.fb` and legacy
+`.seg.cbor` sidecars and their staging siblings. Legacy sidecars are explicit
+miss/rebuild inputs, never decoded as current records or deleted. Legacy data
+placed at a new suffix is an invalid-record miss. Deleted sources never load
+orphan records; the cache does not delete or enumerate orphan sidecars.
 
 ## Invalidation boundaries
 

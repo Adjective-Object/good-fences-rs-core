@@ -2,7 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use ast_segmenter::owned::{Dependency, DependencyKind, ExportValue};
+use ast_segmenter::owned::DependencyKind;
+use ast_segmenter::views::{Dependency, ExportValue};
 use ast_segmenter::ParsedModule;
 use eyre::{ensure, OptionExt};
 use oxc_span::Span;
@@ -222,7 +223,19 @@ pub fn esm_with_execution(
     sources: &BTreeMap<PathBuf, String>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts> {
-    esm_plan_configured(graph, plan, policy, sources, &BTreeMap::new(), false, &BTreeSet::new(), &BTreeMap::new(), 0, execution)?.render()
+    esm_plan_configured(
+        graph,
+        plan,
+        policy,
+        sources,
+        &BTreeMap::new(),
+        false,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        0,
+        execution,
+    )?
+    .render()
 }
 
 pub(crate) fn esm_plan(
@@ -232,7 +245,13 @@ pub(crate) fn esm_plan(
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     esm_plan_prepared(
-        graph, plan, policy, sources, &BTreeMap::new(), false, &BTreeSet::new(),
+        graph,
+        plan,
+        policy,
+        sources,
+        &BTreeMap::new(),
+        false,
+        &BTreeSet::new(),
     )
 }
 
@@ -245,7 +264,18 @@ pub(crate) fn esm_plan_prepared(
     browser: bool,
     require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_configured(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new(), 0, Default::default())
+    esm_plan_configured(
+        graph,
+        plan,
+        policy,
+        sources,
+        relocations,
+        browser,
+        require_defaults,
+        &BTreeMap::new(),
+        0,
+        Default::default(),
+    )
 }
 
 /// Internal placement; an empty selection derives single-parent placements.
@@ -260,7 +290,18 @@ pub(crate) fn esm_plan_activated(
     relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
     placements: &BTreeMap<u32, u32>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_configured(graph, plan, policy, sources, relocations, false, &BTreeSet::new(), placements, 0, Default::default())
+    esm_plan_configured(
+        graph,
+        plan,
+        policy,
+        sources,
+        relocations,
+        false,
+        &BTreeSet::new(),
+        placements,
+        0,
+        Default::default(),
+    )
 }
 
 pub(crate) fn esm_plan_configured(
@@ -337,7 +378,7 @@ fn async_modules(
                 .facts()
                 .top_level_await()
                 .first()
-                .map(|&span| (file, (file, span)))
+                .map(|span| (file, (file, span)))
         })
         .collect();
     // Static dependency closure also propagates async status around SCCs.
@@ -403,7 +444,7 @@ fn async_modules(
 pub(super) fn target_file(
     graph: &SourceGraph,
     file: u32,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
 ) -> eyre::Result<u32> {
     match graph.dependency_target(file, dependency.id()) {
         Some(DependencyTarget::File(path)) => {
@@ -421,7 +462,7 @@ pub(super) fn target_file(
 pub(super) fn target_files(
     graph: &SourceGraph,
     file: u32,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
 ) -> eyre::Result<Vec<u32>> {
     if matches!(
         graph.dependency_target(file, dependency.id()),
@@ -498,7 +539,7 @@ pub(super) fn namespace_export_names(
             {
                 if let ExportValue::ReExport { dependency, .. } = export.value() {
                     if let Some(DependencyTarget::File(path)) =
-                        graph.dependency_target(file, *dependency)
+                        graph.dependency_target(file, dependency)
                     {
                         if let Some(target) = graph.file_id(path) {
                             names.get_mut(&file).unwrap().extend(

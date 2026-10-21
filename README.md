@@ -165,8 +165,10 @@ records actual timings, counters, public usage and support/interop/platform limi
 This does not change the
 tracker/CLI's Node requirements.
 P1 provides checked owned parse facts; P2 adds the opt-in
-[`segment_cache` library](crates/segment_cache/README.md) with versioned CBOR and
-atomic source-adjacent sidecars. Existing tracker behavior is unchanged.
+[`segment_cache` library](crates/segment_cache/README.md) with typed FlatBuffers
+(schema 13/extractor 16), immutable byte-backed warm facts and atomic `.seg.fb`
+source-adjacent sidecars. Legacy `.seg.cbor` files miss/rebuild without deletion.
+Existing tracker behavior is unchanged.
 
 ## Setting up the Development Environment
 1. Install a container engine:

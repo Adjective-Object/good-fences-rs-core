@@ -32,10 +32,40 @@ fn graph_with_format(
     reverse: bool,
     format: ModuleFormat,
 ) -> SourceGraph {
+    graph_with_storage(sources, reverse, format, false)
+}
+
+fn graph_with_storage(
+    sources: &BTreeMap<PathBuf, String>,
+    reverse: bool,
+    format: ModuleFormat,
+    wire: bool,
+) -> SourceGraph {
     let mut inputs: Vec<_> = sources
         .iter()
         .map(|(path, source)| {
             let parsed = parse_module(&logger::StdioLogger::new(), source, path, format).unwrap();
+            let parsed = if wire {
+                let bytes = parsed
+                    .to_flatbuffer(source, segment_cache::OXC_REVISION)
+                    .unwrap();
+                let record = ast_segmenter::WireRecord::new(
+                    bytes.into(),
+                    source,
+                    parsed.provenance().config().wire(),
+                    segment_cache::OXC_REVISION,
+                )
+                .unwrap();
+                let parsed = ast_segmenter::ParsedModule::from_wire(source, record).unwrap();
+                segment_cache::validate_parsed(source, &parsed).unwrap();
+                assert!(matches!(
+                    parsed.facts(),
+                    ast_segmenter::views::ModuleFacts::Wire(_)
+                ));
+                parsed
+            } else {
+                parsed
+            };
             let resolutions = parsed
                 .facts()
                 .dependencies()
@@ -1712,6 +1742,98 @@ fn activated_esm_unsupported_targets_keep_native_boundaries() {
 }
 
 #[test]
+fn byte_backed_graph_effects_native_outputs_and_parallel_emission_match_owned() {
+    for sources in [
+        sources(&[
+            ("dep.mjs", "export let a = 1, b = a + 1; export function bump(){ a++; b++; }"),
+            ("entry.mjs", "import {a,b,bump} from './dep.mjs'; const values = [], first = values.push(a), second = values.push(b); bump(); /*#__PURE__*/ Math.abs(3); console.log(values.join(','), a, b, first, second); export {a,b};"),
+        ]),
+        sources(&[
+            ("dep.cjs", "let count = 0; exports.next = () => ++count;"),
+            ("entry.mjs", "import dep from './dep.cjs'; export const next = dep.next; console.log(next(), next());"),
+        ]),
+        sources(&[
+            ("lazy.mjs", "export const value = 7;"),
+            ("entry.mjs", "const object = {get method(){ console.log('get'); return undefined; }}; /*#__PURE__*/ object?.method?.(console.log('skipped')); let value = 0; (() => value++)(); export const load = () => import('./lazy.mjs'); console.log(value);"),
+        ]),
+    ] {
+        let mut expected = None;
+        let mut edges = None;
+        for wire in [false, true] {
+            let graph = graph_with_storage(&sources, false, ModuleFormat::Esm, wire);
+            graph.validate_links().unwrap();
+            if let Some(edges) = &edges { assert_eq!(graph.edges(), edges); }
+            else { edges = Some(graph.edges().to_vec()); }
+            let file = graph.file_id(Path::new("entry.mjs")).unwrap();
+            let policy = EffectPolicy::default();
+            let before = crate::rewrite::parse_counts();
+            let plan = partition(&graph, &[RootSeed {
+                id: RootId::Entry("entry.mjs".into()),
+                evaluation_roots: vec![file],
+                binding_roots: vec![GraphNode::Module(file)],
+            }], &policy).unwrap();
+            for workers in [1, 3] {
+                let output = esm_with_execution(&graph, &plan, &policy, &sources,
+                    crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap())).unwrap();
+                assert_eq!(output.backend, Backend::Native);
+                if let Some(expected) = &expected { assert_eq!(&output, expected); }
+                else { expected = Some(output.clone()); }
+                if wire && workers == 3 {
+                    let baseline = node(&sources, Path::new("entry.mjs"));
+                    let actual = node(&output.files, &output.entries["entry.mjs"]);
+                    assert!(baseline.status.success(), "{}", String::from_utf8_lossy(&baseline.stderr));
+                    assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
+                    assert_eq!(baseline.stdout, actual.stdout);
+                }
+            }
+            let after = crate::rewrite::parse_counts().difference(before);
+            assert_eq!(after.source, 0);
+            assert_eq!(after.declarations, 0);
+            assert!(after.output > 0);
+            assert_eq!(after.output, after.validation);
+        }
+    }
+}
+
+#[test]
+fn byte_backed_jsx_still_cannot_enter_native_emission() {
+    let path = Path::new("entry.jsx");
+    let error = parse_module(
+        &logger::StdioLogger::new(),
+        "export const element = <div />;",
+        path,
+        ModuleFormat::Esm,
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("JSX"));
+
+    // JS syntax can be extracted in JSX mode, but that mode must survive caching
+    // and still be rejected by the JavaScript-only native backend.
+    let source = "export const element = 1;";
+    let parsed =
+        parse_module(&logger::StdioLogger::new(), source, path, ModuleFormat::Esm).unwrap();
+    let bytes = parsed
+        .to_flatbuffer(source, segment_cache::OXC_REVISION)
+        .unwrap();
+    let wire = ast_segmenter::WireRecord::new(
+        bytes.into(),
+        source,
+        parsed.provenance().config().wire(),
+        segment_cache::OXC_REVISION,
+    )
+    .unwrap();
+    let parsed = ast_segmenter::ParsedModule::from_wire(source, wire).unwrap();
+    segment_cache::validate_parsed(source, &parsed).unwrap();
+    assert!(parsed.provenance().config().jsx());
+    let graph = SourceGraph::from_owned([OwnedSourceFileInput::from_parsed(
+        path.into(),
+        parsed,
+        Default::default(),
+    )]);
+    assert!(crate::emit::checked_source(&graph, 0, source).is_err());
+}
+
+#[test]
 fn native_concatenation_preserves_late_import_statement_boundaries() {
     assert_native_observation(
         &sources(&[
@@ -2195,7 +2317,7 @@ fn canonical_imports_and_public_aliases_share_definitions_not_names() {
         .iter()
         .find(|b| b.name() == "value")
         .unwrap();
-    let imported = &graph.file_facts(entry).unwrap().imports()[0];
+    let imported = graph.file_facts(entry).unwrap().imports().get(0).unwrap();
     let identity = ExportIdentity::Binding(leaf, binding.id());
     assert_eq!(
         symbols.imports[&(entry, imported.binding())].identity,
@@ -3249,7 +3371,7 @@ fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
                 let access = plan.retention.execution.accesses.iter()
                     .find(|access| access.segment == reader && access.declaration == secret)
                     .unwrap();
-                let placement = &graph.file_facts(file).unwrap().emission().segments()[1].placement();
+                let placement = graph.file_facts(file).unwrap().emission().segments().get(1).unwrap().placement();
                 assert!(placement.instantiable());
                 assert!(!placement.eager_reads().contains(&access.reference));
                 assert!(!plan.retention.execution.constraints.iter().any(|constraint| {

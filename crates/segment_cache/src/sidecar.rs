@@ -77,14 +77,17 @@ pub fn load_prepared_with_declarations(
 
 pub fn sidecar_path(source: &Path) -> PathBuf {
     let mut name = source.as_os_str().to_owned();
-    name.push(".seg.cbor");
+    name.push(".seg.fb");
     PathBuf::from(name)
 }
 
 pub fn is_cache_artifact(path: &Path) -> bool {
     path.file_name().is_some_and(|n| {
         let name = n.to_string_lossy();
-        name.ends_with(".seg.cbor") || name.contains(".seg.cbor.stage-")
+        name.ends_with(".seg.fb")
+            || name.ends_with(".seg.cbor")
+            || name.contains(".seg.fb.stage-")
+            || name.contains(".seg.cbor.stage-")
     })
 }
 
@@ -195,7 +198,11 @@ fn load_prepared_inner(
         Err(MissReason::Disabled)
     } else {
         read_cache(&sidecar_path(path)).and_then(|bytes| {
-            CacheRecord::decode_with_prepared_declarations(&bytes, source, config, declarations)
+            CacheRecord::decode_owned(bytes, source, config)
+                .and_then(|record| {
+                    record.check_declarations(declarations)?;
+                    Ok(record)
+                })
                 .map_err(|e| MissReason::InvalidRecord(format!("{e:#}")))
         })
     };

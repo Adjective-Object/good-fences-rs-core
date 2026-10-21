@@ -39,7 +39,15 @@ fn compatible_group(
         .collect();
     let prepared = PreparedValues::new(graph, modules, symbols);
     let definitions = segments::partition_definitions(graph, &prepared, &owners)?;
-    let names = connections::name_plan(graph, plan, modules, &prepared, &owners, redirects, &definitions)?;
+    let names = connections::name_plan(
+        graph,
+        plan,
+        modules,
+        &prepared,
+        &owners,
+        redirects,
+        &definitions,
+    )?;
     let mut values = Values::new(&prepared);
     values.names = names[&owner].locals.clone();
     for binding in &names[&owner].bindings {
@@ -100,9 +108,15 @@ pub(super) fn cluster(
         let bytes = keys
             .iter()
             .map(|key| {
-                modules[&key.file_id].parsed.facts().emission().segments()[key.segment_idx as usize]
+                modules[&key.file_id]
+                    .parsed
+                    .facts()
+                    .emission()
+                    .segments()
+                    .get(key.segment_idx as usize)
+                    .unwrap()
                     .source()
-                    .as_slice()
+                    .spans()
                     .iter()
                     .map(|span| (span.end - span.start) as usize)
                     .sum::<usize>()

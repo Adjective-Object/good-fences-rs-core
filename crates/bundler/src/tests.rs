@@ -1034,7 +1034,7 @@ fn external_evaluation_is_explicit_and_type_reexports_do_not_evaluate() {
         "entry.ts",
         "import 'external'; export type {T} from 'types.ts';",
     );
-    let dependency = entry.facts.dependencies()[0].id();
+    let dependency = entry.facts.dependencies().get(0).unwrap().id();
     entry
         .resolutions
         .insert(dependency, DependencyTarget::External("external".into()));

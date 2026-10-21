@@ -33,11 +33,33 @@ fn cold_warm_and_cache_modes() {
     let cold = run(&path).unwrap();
     assert_eq!(cold.status, CacheStatus::Miss(MissReason::Missing));
     assert_eq!(cold.write, CacheWrite::Stored);
+    let bytes = fs::read(sidecar_path(&path)).unwrap();
+    let modified = fs::metadata(sidecar_path(&path))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let parses = ast_segmenter::module_parse_count();
     let warm = run(&path).unwrap();
     assert_eq!(warm.status, CacheStatus::Hit);
     assert_eq!(warm.write, CacheWrite::NotRequested);
     assert_eq!(cold.record, warm.record);
     assert_eq!(cold.source, warm.source);
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    assert_eq!(fs::read(sidecar_path(&path)).unwrap(), bytes);
+    assert_eq!(
+        fs::metadata(sidecar_path(&path))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        modified
+    );
+    let parsed = warm.record.to_parsed(SOURCE).unwrap();
+    assert!(parsed.owned_facts().is_err());
+    assert!(parsed.owned_segments().is_none());
+    assert!(matches!(
+        parsed.facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
     let disabled = load_or_parse(
         &logger::StdioLogger::new(),
         &path,
@@ -198,12 +220,12 @@ fn prepared_css_parser_modes_key_disk_reuse_even_when_generated_text_is_unchange
         assert_eq!(ast_segmenter::module_parse_count(), before + 1);
         let parsed = warm.record.to_parsed(source).unwrap();
         assert_eq!(parsed.provenance().config(), warm.record.config());
-        let mut forged = warm.record;
-        forged = crate::test_builder::corrupt(&forged, |r| {
-            use crate::test_builder::RecordBuilder;
-            r.set("config.commonjs", !forged.config().commonjs());
-        });
-        assert!(forged.to_parsed(source).is_err());
+        let other_path = path.with_extension(if extension == "css.cjs" { "mjs" } else { "cjs" });
+        let other_config = ParserConfig::for_path(&other_path, ModuleFormat::Esm).unwrap();
+        assert!(
+            CacheRecord::decode(&warm.record.encode(source).unwrap(), source, other_config)
+                .is_err()
+        );
     }
 }
 #[test]
@@ -228,9 +250,17 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
         .declarations()
         .definitions()
         .iter()
-        .find(|definition| *definition.binding() == ecco::Binding::Local("forward".into()))
+        .find(|definition| {
+            matches!(
+                definition.binding(),
+                ecco::views::BindingView::Local("forward")
+            )
+        })
         .unwrap();
-    assert_eq!(contract.returns(), &ecco::Returns::Argument("value".into()));
+    assert!(matches!(
+        contract.returns(),
+        ecco::views::ReturnsView::Argument("value")
+    ));
     let forward = library
         .symbols()
         .iter()
@@ -247,8 +277,13 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
     );
     for _ in 0..2 {
         let mut analysis = ecco::Analysis::new();
+        let storage = warm
+            .record
+            .to_parsed(&fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .into_facts();
         analysis
-            .add_file("library", std::sync::Arc::new(library.clone()))
+            .add_file("library", storage.ecco_source().unwrap().unwrap())
             .unwrap();
         analysis.add_file("entry", entry.clone()).unwrap();
         let result = analysis
@@ -317,7 +352,7 @@ fn corruption_truncation_and_oversize_are_repaired_misses() {
     let cold = run(&path).unwrap();
     let bytes = fs::read(sidecar_path(&path)).unwrap();
     for broken in [
-        b"not CBOR".to_vec(),
+        b"not a FlatBuffer".to_vec(),
         bytes[..bytes.len() / 2].to_vec(),
         vec![0; MAX_RECORD_BYTES + 1],
     ] {
@@ -353,11 +388,37 @@ fn interrupted_publication_preserves_valid_destination_and_cleans_staging() {
     .is_err());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
-    let invalid = crate::test_builder::corrupt(&cold.record, |r| {
-        use crate::test_builder::RecordBuilder;
-        r.add("source_len", 1);
-    });
-    assert!(publish(&path, SOURCE, SOURCE.as_bytes(), &invalid, || Ok(())).is_err());
+    assert!(publish(
+        &path,
+        "different source",
+        SOURCE.as_bytes(),
+        &cold.record,
+        || Ok(())
+    )
+    .is_err());
+    assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
+    no_staging(&dir);
+}
+
+#[test]
+fn valid_extraction_exceeding_wire_limits_remains_an_uncached_success() {
+    let (dir, path) = setup();
+    run(&path).unwrap();
+    let previous = fs::read(sidecar_path(&path)).unwrap();
+    // The binding and Ecco symbol both persist this name, exceeding the wire
+    // limit without needing a large/deep syntax tree or excessive source size.
+    let source = format!("export const {} = 1;", "x".repeat(MAX_RECORD_BYTES / 2));
+    fs::write(&path, &source).unwrap();
+    let outcome = run(&path).unwrap();
+    assert!(matches!(outcome.status, CacheStatus::Miss(_)));
+    assert!(matches!(outcome.write, CacheWrite::Failed(_)));
+    assert_eq!(outcome.source, source);
+    assert!(outcome
+        .record
+        .to_parsed(&source)
+        .unwrap()
+        .owned_facts()
+        .is_ok());
     assert_eq!(fs::read(sidecar_path(&path)).unwrap(), previous);
     no_staging(&dir);
 }
@@ -417,7 +478,14 @@ fn replacement_failure_is_nonfatal_and_does_not_remove_destination() {
         b"do not remove"
     );
     assert_eq!(
-        outcome.record.module().facts().dependencies()[0].specifier(),
+        outcome
+            .record
+            .module()
+            .facts()
+            .dependencies()
+            .get(0)
+            .unwrap()
+            .specifier(),
         "./dep"
     );
     no_staging(&dir);
@@ -522,11 +590,25 @@ fn unwritable_parent_reports_uncached_success_and_preserves_old_cache() {
 #[test]
 fn watcher_exclusions_and_orphan_staging() {
     let (dir, path) = setup();
-    let stage = dir.root_join("entry.js.seg.cbor.stage-abandoned");
-    fs::write(&stage, b"incomplete").unwrap();
-    assert!(is_cache_artifact(&stage));
+    let legacy = dir.root_join("entry.js.seg.cbor");
+    fs::write(&legacy, b"legacy user file").unwrap();
+    let stages = [
+        dir.root_join("entry.js.seg.cbor.stage-abandoned"),
+        dir.root_join("entry.js.seg.fb.stage-abandoned"),
+    ];
+    for stage in &stages {
+        fs::write(stage, b"incomplete").unwrap();
+        assert!(is_cache_artifact(stage));
+    }
+    assert!(is_cache_artifact(&legacy));
     assert!(is_cache_artifact(&sidecar_path(&path)));
     assert!(!is_cache_artifact(&path));
-    assert_eq!(run(&path).unwrap().write, CacheWrite::Stored);
-    assert_eq!(fs::read(&stage).unwrap(), b"incomplete");
+    let cold = run(&path).unwrap();
+    assert_eq!(cold.status, CacheStatus::Miss(MissReason::Missing));
+    assert_eq!(cold.write, CacheWrite::Stored);
+    assert_eq!(fs::read(&legacy).unwrap(), b"legacy user file");
+    for stage in &stages {
+        assert_eq!(fs::read(stage).unwrap(), b"incomplete");
+    }
+    assert_eq!(run(&path).unwrap().status, CacheStatus::Hit);
 }

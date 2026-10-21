@@ -4,7 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ast_segmenter::owned::{Dependency, DependencyKind};
+use ast_segmenter::owned::DependencyKind;
+use ast_segmenter::views::Dependency;
 use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDependency};
 
 use crate::assembly::{self, Code};
@@ -12,7 +13,7 @@ use crate::assembly::{self, Code};
 pub(crate) fn resolve(
     root: &Path,
     importer: &Path,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
     inventory: impl Iterator<Item = impl AsRef<Path>>,
     extensions: &[String],
     resolver: &impl DependencyResolver,
@@ -79,7 +80,7 @@ pub(crate) fn resolve(
 pub(crate) fn may_match_directory(
     importer: &Path,
     directory: &Path,
-    dependency: &Dependency,
+    dependency: Dependency<'_>,
 ) -> bool {
     if importer.starts_with(directory) || directory.to_str().is_none() {
         return true;
@@ -88,7 +89,6 @@ pub(crate) fn may_match_directory(
         .pattern()
         .as_ref()
         .and_then(|parts| parts.first())
-        .map(String::as_str)
         .unwrap_or(dependency.specifier());
     [false, dependency.kind() == DependencyKind::DynamicImport]
         .into_iter()

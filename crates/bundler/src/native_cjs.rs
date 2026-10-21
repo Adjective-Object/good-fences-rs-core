@@ -1,7 +1,8 @@
 //! Opaque availability is pure; native interop jobs own demanded snapshots.
 use super::*;
 use crate::assembly::{Code, RequestKind};
-use ast_segmenter::owned::{ImportedName, ModuleFacts};
+use ast_segmenter::owned::ImportedName;
+use ast_segmenter::views::ModuleFacts;
 
 struct Value {
     path: PathBuf,
@@ -64,8 +65,11 @@ impl CommonJs {
                                 && plan.retention.segments.iter().any(|segment| {
                                     segment.key.file_id == file
                                         && contains(
-                                            module.parsed.segments()
-                                                [segment.key.segment_idx as usize]
+                                            module
+                                                .parsed
+                                                .segments()
+                                                .get(segment.key.segment_idx as usize)
+                                                .unwrap()
                                                 .span,
                                             dependency.span(),
                                         )
@@ -245,7 +249,10 @@ impl CommonJs {
                         }
                         if facts.dependencies().iter().all(|d| d.type_only())
                             && (default_resource
-                                || facts.effects().iter().all(|effect| effect.deferred().is_some()))
+                                || facts
+                                    .effects()
+                                    .iter()
+                                    .all(|effect| effect.deferred().is_some()))
                         {
                             // Instantiating a dependency-free, effect-free leaf
                             // cannot activate application code. Keep its native
@@ -419,7 +426,7 @@ impl CommonJs {
         &self,
         graph: &SourceGraph,
         file: u32,
-        dependency: &Dependency,
+        dependency: Dependency<'_>,
         namespaces: &BTreeMap<u32, PathBuf>,
     ) -> eyre::Result<Option<crate::context::Dispatch>> {
         let Some(DependencyTarget::Context(candidates)) =
@@ -506,8 +513,8 @@ impl CommonJs {
         graph: &SourceGraph,
         file: u32,
         target: u32,
-        dependency: &Dependency,
-        facts: &ModuleFacts,
+        dependency: Dependency<'_>,
+        facts: ModuleFacts<'_>,
         symbols: &Symbols,
     ) -> eyre::Result<Code> {
         let mut requested = BTreeMap::new();
@@ -525,34 +532,34 @@ impl CommonJs {
                     .unwrap();
                 if !symbols.imports.contains_key(&(file, binding.id()))
                     || !self.demands.get(&(file, target)).is_some_and(|nodes| {
-                        nodes.contains(&Self::node(graph, target, &import.imported()))
+                        nodes.contains(&Self::node(graph, target, &import.imported().to_owned()))
                     })
                 {
                     continue;
                 }
-                let value = self.value(graph, target, &import.imported())?;
+                let value = self.value(graph, target, &import.imported().to_owned())?;
                 declarations.push(self.import(
                     graph,
                     target,
-                    &import.imported(),
+                    &import.imported().to_owned(),
                     &binding.name(),
                 )?);
-                requested.insert(import_key(&import.imported()), &value.path);
+                requested.insert(import_key(&import.imported().to_owned()), &value.path);
             }
         } else {
             for export in facts.exports().iter().filter(|e| {
-                matches!(e.value(), ExportValue::ReExport { dependency: d, .. } if *d == dependency.id())
+                matches!(e.value(), ExportValue::ReExport { dependency: d, .. } if d == dependency.id())
             }) {
                 if export.name().is_none() && graph.has_external_star_exports(file) {
                     let proxy = &self.proxies[graph.file_path(target).unwrap()].0;
                     declarations.push(Code::request(proxy.clone(), RequestKind::ReExport).surrounded("export * from ", ";\n"));
                     continue;
                 }
-                let ExportValue::ReExport { imported, .. } = &export.value() else {
+                let ExportValue::ReExport { imported, .. } = export.value() else {
                     unreachable!()
                 };
                 let names = match export.name() {
-                    Some(name) => vec![(name.to_owned(), imported.clone())],
+                    Some(name) => vec![(name.to_owned(), imported.to_owned())],
                     None => symbols.exports[&file]
                         .iter()
                         .filter_map(|(public, linked)| match &linked.identity {
@@ -612,8 +619,8 @@ impl CommonJs {
             let module = &modules[&file];
             let mut renderer = crate::emit::CachedRenderer::new(
                 module.source,
-                &module.parsed.facts(),
-                &module.parsed.facts().emission().segments()[0],
+                module.parsed.facts(),
+                module.parsed.facts().emission().segments().get(0).unwrap(),
                 &[],
             );
             let mut imports = BTreeMap::new();
@@ -710,7 +717,10 @@ impl CommonJs {
                                                     namespaces[&target].clone(),
                                                     RequestKind::Import,
                                                 )
-                                                .surrounded(format!("import * as {name} from "), ";\n"),
+                                                .surrounded(
+                                                    format!("import * as {name} from "),
+                                                    ";\n",
+                                                ),
                                             );
                                         }
                                         Code::from(if self.require_defaults.contains(&target) {
@@ -725,22 +735,22 @@ impl CommonJs {
                                         {
                                             imports.insert(
                                                 other.name.clone(),
-                                                Code::request(other.path.clone(), RequestKind::Import)
-                                                    .surrounded(
-                                                        format!("import {{{}}} from ", other.name),
-                                                        ";\n",
-                                                    ),
+                                                Code::request(
+                                                    other.path.clone(),
+                                                    RequestKind::Import,
+                                                )
+                                                .surrounded(
+                                                    format!("import {{{}}} from ", other.name),
+                                                    ";\n",
+                                                ),
                                             );
                                         }
                                         Code::from(format!("{}()", other.name))
                                     }
                                 } else {
                                     // Native require is intentionally inside the original call site.
-                                    Code::request(
-                                        namespaces[&target].clone(),
-                                        RequestKind::Require,
-                                    )
-                                    .surrounded("require(", ")")
+                                    Code::request(namespaces[&target].clone(), RequestKind::Require)
+                                        .surrounded("require(", ")")
                                 }
                             }
                         }
@@ -851,15 +861,21 @@ impl CommonJs {
                         if self.browser {
                             imports.push(
                                 Code::request(factory.path.clone(), RequestKind::Import)
-                                    .surrounded(format!("import {{{}}} from ", factory.name), ";\n"),
+                                    .surrounded(
+                                        format!("import {{{}}} from ", factory.name),
+                                        ";\n",
+                                    ),
                             );
                             format!("{}(true)", factory.name)
                         } else {
-                        imports.push(
-                            Code::request(factory.path.clone(), RequestKind::Import)
-                                .surrounded(format!("import {}_factory from ", value.name), ";\n"),
-                        );
-                        format!("{}_factory.{}(true)", value.name, factory.name)
+                            imports.push(
+                                Code::request(factory.path.clone(), RequestKind::Import)
+                                    .surrounded(
+                                        format!("import {}_factory from ", value.name),
+                                        ";\n",
+                                    ),
+                            );
+                            format!("{}_factory.{}(true)", value.name, factory.name)
                         }
                     }
                     _ => {
@@ -985,8 +1001,9 @@ impl CommonJs {
             for index in 0..modules[&file].parsed.segments().len() {
                 let key = SegmentKey::new(file, index as u32);
                 if live.contains(&key) {
-                    let (declarations, body) = reconstruct(graph, key, &modules[&file], &values, &recipes, false)?
-                        .ok_or_eyre("unsupported browser require-of-ESM lexical placement")?;
+                    let (declarations, body) =
+                        reconstruct(graph, key, &modules[&file], &values, &recipes, false)?
+                            .ok_or_eyre("unsupported browser require-of-ESM lexical placement")?;
                     hoisted.push(declarations);
                     bodies.push(body);
                 }

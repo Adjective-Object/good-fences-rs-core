@@ -1,7 +1,7 @@
 //! Build-local extraction of private, capture-free function declaration islands.
 use std::collections::{BTreeMap, BTreeSet};
 
-use ast_segmenter::emission::{DeferredForm, OperationKind};
+use ast_segmenter::views::{DeferredForm, OperationKind};
 use eyre::OptionExt;
 use source_graph::{EdgeKind, ExportIdentity, GraphNode, SegmentKey, SourceGraph};
 
@@ -91,7 +91,11 @@ pub(crate) fn extract(
         let facts = graph
             .file_facts(key.file_id)
             .ok_or_eyre("missing extraction facts")?;
-        let recipe = &facts.emission().segments()[key.segment_idx as usize];
+        let recipe = facts
+            .emission()
+            .segments()
+            .get(key.segment_idx as usize)
+            .unwrap();
         if facts.commonjs()
             || !facts.top_level_await().is_empty()
             || facts.dependencies().iter().any(|d| !d.type_only())
@@ -101,7 +105,7 @@ pub(crate) fn extract(
         {
             continue;
         }
-        let binding = recipe.placement().declarations()[0];
+        let binding = recipe.placement().declarations().get(0).unwrap();
         let identity = ExportIdentity::Binding(key.file_id, binding);
         if facts
             .bindings()
@@ -128,7 +132,7 @@ pub(crate) fn extract(
             .find(|b| b.id() == binding && b.top_level())?;
         let index = graph
             .file_segments(file)?
-            .partition_point(|s| s.span.end <= b.declarations()[0].start);
+            .partition_point(|s| s.span.end <= b.declarations().get(0).unwrap().start);
         Some(SegmentKey::new(file, index as u32))
     };
     // Removing an unsupported member may make a former internal reference an
@@ -143,7 +147,10 @@ pub(crate) fn extract(
                 .iter()
                 .filter(|r| !r.type_only() && crate::link::contains(span, r.span()))
             {
-                if let Some(target) = reference.binding().and_then(|b| declaration(key.file_id, b)) {
+                if let Some(target) = reference
+                    .binding()
+                    .and_then(|b| declaration(key.file_id, b))
+                {
                     if !candidates.contains(&target) || reference.write() {
                         rejected.insert(key);
                     }
@@ -175,8 +182,8 @@ pub(crate) fn extract(
                     || from.file_id != key.file_id
                     || !source.async_deferred || !source.read || source.write
                     || reference.is_none_or(|reference| {
-                        !consumer.emission().segments()[from.segment_idx as usize].operations().iter().any(|op|
-                            matches!(op.kind(), OperationKind::Reference { reference: r, .. } if *r as usize == reference))
+                        !consumer.emission().segments().get(from.segment_idx as usize).unwrap().operations().iter().any(|op|
+                            matches!(op.kind(), OperationKind::Reference { reference: r, .. } if r as usize == reference))
                     })
                     || consumer.invocations().iter().any(|invocation|
                         (invocation.optional_call() || invocation.optional_chain())

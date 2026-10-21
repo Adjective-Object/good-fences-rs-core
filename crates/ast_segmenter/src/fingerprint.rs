@@ -16,6 +16,16 @@ impl Fingerprint {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DeclarationFingerprint(Fingerprint);
 
+impl DeclarationFingerprint {
+    pub(crate) fn bytes(self) -> [u8; 16] {
+        self.0 .0
+    }
+
+    pub(crate) fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(Fingerprint(bytes))
+    }
+}
+
 thread_local! {
     static DECLARATION_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

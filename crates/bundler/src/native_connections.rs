@@ -96,13 +96,14 @@ pub(super) fn name_plan(
             .collect();
         for &file in &files {
             let facts = &modules[&file].parsed.facts();
-            occupied.extend(
+            occupied.extend(facts.emission().free_references().iter().map(|index| {
                 facts
-                    .emission()
-                    .free_references()
-                    .iter()
-                    .map(|&index| facts.references()[index as usize].name().to_owned()),
-            );
+                    .references()
+                    .get(index as usize)
+                    .unwrap()
+                    .name()
+                    .to_owned()
+            }));
         }
         let mut bindings = Vec::new();
         for file in files {
@@ -280,9 +281,13 @@ impl Connections {
                 .parsed
                 .facts()
                 .emission()
-                .segments()[boundary.target.segment_idx as usize]
+                .segments()
+                .get(boundary.target.segment_idx as usize)
+                .unwrap()
                 .placement()
-                .declarations()[0];
+                .declarations()
+                .get(0)
+                .unwrap();
             let identity = ExportIdentity::Binding(boundary.target.file_id, binding);
             let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
                 unreachable!()
@@ -588,7 +593,7 @@ impl Connections {
                                     file,
                                     target,
                                     dependency,
-                                    &module.parsed.facts(),
+                                    module.parsed.facts(),
                                     symbols,
                                 )?
                             },

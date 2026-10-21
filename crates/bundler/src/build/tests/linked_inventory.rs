@@ -420,7 +420,7 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     }))
     .unwrap();
     let importer = root.join("main.mjs");
-    let (candidates, visits) = inventory.context_candidates(root, &importer, &dependency);
+    let (candidates, visits) = inventory.context_candidates(root, &importer, (&dependency).into());
     // Nineteen fixed edges and only the final diamond are expanded.
     assert_eq!(visits, 22);
     let config = linked_options();
@@ -428,7 +428,7 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     let resolved = crate::context::resolve(
         root,
         &importer,
-        &dependency,
+        (&dependency).into(),
         candidates.into_iter(),
         &config.resolver.extensions,
         &resolver,
@@ -458,8 +458,8 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     let resolved = crate::context::resolve(
         root,
         &external_importer,
-        &dependency,
-        cycled.candidates(root, &external_importer, &dependency),
+        (&dependency).into(),
+        cycled.candidates(root, &external_importer, (&dependency).into()),
         &config.resolver.extensions,
         &resolver,
     )
@@ -511,7 +511,7 @@ fn context_cross_volume_candidates_keep_same_volume_lexical_aliases() {
             let resolved = crate::context::resolve(
                 root,
                 &importer,
-                &dependency,
+                (&dependency).into(),
                 [PathBuf::from(other), root.join("linked").join("one.mjs")].into_iter(),
                 &[],
                 &Resolver,

@@ -64,6 +64,7 @@ fn emission(emission: w::EmissionFacts<'_>) -> Result<()> {
         known!(context.kind());
     }
     for segment in emission.segments() {
+        union!(segment.deferred_type());
         ensure!(
             (1..=4).contains(&segment.source().len()),
             "invalid MultiSpan length"

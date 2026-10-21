@@ -133,9 +133,11 @@ name = "ast-segmenter"
 version = "0.2.0-beta.1"
 dependencies = [
  "ahashmap",
+ "cache_flatbuffers",
  "compact_str",
  "ecco",
  "eyre",
+ "flatbuffers",
  "insta",
  "logger",
  "logger_srcfile",
@@ -2322,8 +2324,10 @@ name = "segment_cache"
 version = "0.1.0"
 dependencies = [
  "ast-segmenter",
+ "cache_flatbuffers",
  "ecco",
  "eyre",
+ "flatbuffers",
  "import_resolver",
  "logger",
  "oxc_span",

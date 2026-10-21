@@ -1,6 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
-use ast_segmenter::owned::{DependencyKind, ModuleFacts};
+use ast_segmenter::owned::DependencyKind;
+use ast_segmenter::views::ModuleFacts;
 use eyre::{ensure, OptionExt, WrapErr};
 use source_graph::{DependencyTarget, ExportIdentity, Namespace, SegmentKey, SourceGraph};
 
@@ -14,10 +15,7 @@ pub(crate) fn prepare_declarations(
 ) -> eyre::Result<ast_segmenter::PreparedDeclarations> {
     let (definitions, mut symbols) = config.effective_for_environment(environment)?.into_parts();
     for name in ENVIRONMENT_PROBES {
-        if !symbols
-            .iter()
-            .any(|symbol| symbol.name() == name)
-        {
+        if !symbols.iter().any(|symbol| symbol.name() == name) {
             symbols.push(ecco::GlobalSymbol::new(name.to_owned(), true));
         }
     }
@@ -34,10 +32,18 @@ pub(crate) fn analyze(
         let facts = graph
             .file_facts(file)
             .ok_or_eyre("missing Ecco module facts")?;
-        let Some(parsed) = facts.ecco() else {
+        let Some(_) = facts.ecco() else {
             continue;
         };
-        analysis.add_file(file, Arc::new(parsed.clone()))?;
+        let storage = graph
+            .file_fact_storage(file)
+            .ok_or_eyre("missing Ecco storage")?;
+        analysis.add_file(
+            file,
+            storage
+                .ecco_source()?
+                .ok_or_eyre("missing Ecco precursor")?,
+        )?;
     }
     let result = analysis.solve(
         &|file: &u32, reference: ecco::views::ExternalReferenceView<'_>| {
@@ -99,7 +105,7 @@ pub(crate) fn analyze(
                                 !binding.function()
                                     && !binding.function_scoped()
                                     && binding.declarations().iter().any(|declaration| {
-                                        !effects::contains(deferred, *declaration)
+                                        !effects::contains(deferred, declaration)
                                             || declaration.start >= site.span().start
                                     })
                             })
@@ -134,7 +140,7 @@ pub(crate) fn analyze(
 pub(crate) fn summarize(
     graph: &SourceGraph,
     file: u32,
-    facts: &ModuleFacts,
+    facts: ModuleFacts<'_>,
     span: oxc_span::Span,
     demanded: bool,
     policy: &EffectPolicy,
@@ -184,7 +190,7 @@ pub(crate) fn summarize(
 fn binding_may_throw(
     graph: &SourceGraph,
     file: u32,
-    facts: &ModuleFacts,
+    facts: ModuleFacts<'_>,
     span: oxc_span::Span,
 ) -> bool {
     let Some(binding) = facts
@@ -212,7 +218,7 @@ fn binding_may_throw(
         let Some(target) = graph.file_id(target) else {
             return true;
         };
-        let ast_segmenter::owned::ImportedName::Name(name) = &import.imported() else {
+        let ast_segmenter::views::ImportedName::Name(name) = import.imported() else {
             return false;
         };
         return !graph
@@ -237,7 +243,7 @@ fn binding_may_throw(
     declaration.start >= span.start
         || graph.file_segments(file).is_some_and(|segments| {
             segments.iter().any(|segment| {
-                effects::contains(segment.span, *declaration)
+                effects::contains(segment.span, declaration)
                     && effects::contains(segment.span, span)
             })
         })

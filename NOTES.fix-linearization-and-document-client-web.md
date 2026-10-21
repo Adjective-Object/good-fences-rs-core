@@ -37,13 +37,40 @@ the cache concurrency regression also passes after the change.
 
 ## Per-file FlatBuffers completion
 
-Pending recovery and integration of the skipped dirty `perf-optim` edits.
-The base already contains typed wire tables and borrowed syntax/Ecco adapters,
-but the production sidecar record still uses CBOR.
+Recovered omitted commit `77f924a` (AST borrowed views) and the dirty per-file
+storage patch from `perf-optim`; original worktree remains unchanged.
+Resolved replay conflicts in favor of the integrated connection planner and
+activation ordering, adapting it to value views rather than restoring the old
+planner. The production sidecar path is now `.seg.fb`.
+
+The skipped wire schema lacked integrated dynamic namespace observations,
+`uses_this`, deferred emission alternatives and async-reference evidence.
+Added these to the authoritative schema and regenerated with pinned flatc
+25.2.10. Extractor 16 preserves the integrated parser policy and rejects older
+records. Views retain borrowed strings, tables, optional property vectors and
+initializer slots; no unpack-on-hit bridge.
+
+Windows fixes are checkpointed in `e08d0f2`. FlatBuffers integration passes all
+728 affected library tests: AST 75, Ecco 112, segment cache 46, source graph 38,
+wire schema 11 and bundler 446, with no exclusions. The required
+`scripts/spot-check` also passes, including the full workspace check.
+
+The first run used the machine's Node 22.8 and failed ten runtime tests;
+rerunning the bundler suite with the retained Node 22.14 executable passes all
+446. This includes the TLA rejection-order case, so that discrepancy was not
+reproduced under Node 22.14. The retained Node 24.10 executable instead fails
+256 tests, predominantly with `EISDIR: lstat 'C:'` before executing the scripts.
+Use Node 22.14 for this exercise; do not weaken tests to accommodate either
+runtime's failures. A synthetic wire fixture also needed the newly required
+deferred union; it now supplies the explicit unsupported alternative.
+
+After the requested pause/restart, `cargo` resolves to
+`C:\Users\mahuangh\AppData\Local\mbx\bin\cargo.exe`. Builds use that transparent
+cache wrapper without `CARGO_TARGET_DIR` or `RUSTC_WRAPPER` overrides.
 
 ## Client-web exercise
 
-Pending publication fixes and completed FlatBuffers integration. Start with
+Publication fixes and FlatBuffers integration are complete. Start with
 isolated small packages, increase dependency graph size, then attempt the full
 mail workload with all application and worker entries. Distinguish preparation,
 resolution, build, output and runtime failures; never count a successful

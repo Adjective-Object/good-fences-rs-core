@@ -22,21 +22,40 @@ fn opaque_body_preserves_directives_reassignment_and_nested_sites() {
         module['exports'].load = load;\n\
         if (café) return; require('./after-return');";
     let module = parse(source, "test.cjs").unwrap();
-    let span = module.segments()[0].span;
+    let span = module.segments().get(0).unwrap().span;
     assert_eq!(module.body(), ModuleBody::CommonJs { span });
     assert_eq!(module.segments().len(), 1);
     assert_eq!(
         &source[span.start as usize..span.end as usize],
         &source[source.find('\n').unwrap()..]
     );
-    assert_eq!(module.facts().directives()[0].value(), "use strict");
+    assert_eq!(
+        module.facts().directives().get(0).unwrap().value(),
+        "use strict"
+    );
     assert_eq!(module.facts().dependencies().len(), 4);
-    assert_eq!(module.facts().dependencies()[0].enclosing_function(), None);
-    for dependency in &module.facts().dependencies()[1..3] {
+    assert_eq!(
+        module
+            .facts()
+            .dependencies()
+            .get(0)
+            .unwrap()
+            .enclosing_function(),
+        None
+    );
+    for dependency in module.facts().dependencies().slice(1..3) {
         let function = dependency.enclosing_function().unwrap();
         assert!(function.start <= dependency.span().start && function.end >= dependency.span().end);
     }
-    assert_eq!(module.facts().dependencies()[3].enclosing_function(), None);
+    assert_eq!(
+        module
+            .facts()
+            .dependencies()
+            .get(3)
+            .unwrap()
+            .enclosing_function(),
+        None
+    );
     assert!(module
         .facts()
         .references()
@@ -47,12 +66,27 @@ fn opaque_body_preserves_directives_reassignment_and_nested_sites() {
         .references()
         .iter()
         .any(|r| r.commonjs() == Some(CommonJsGlobal::Exports) && r.write()));
-    assert_eq!(module.segments()[0].module_deps.requires.len(), 2);
-    assert_eq!(module.segments()[0].module_deps.dynamic_imports.len(), 1);
+    assert_eq!(
+        module.owned_segments().unwrap()[0]
+            .module_deps
+            .requires
+            .len(),
+        2
+    );
+    assert_eq!(
+        module.owned_segments().unwrap()[0]
+            .module_deps
+            .dynamic_imports
+            .len(),
+        1
+    );
     assert!(module.facts().exports().is_empty());
-    assert_eq!(module.facts(), parse(source, "test.cjs").unwrap().facts());
+    assert_eq!(
+        module.owned_facts().unwrap(),
+        parse(source, "test.cjs").unwrap().owned_facts().unwrap()
+    );
     assert!(module.facts().ecco().is_none());
-    let mut facts = module.into_facts();
+    let mut facts = module.into_facts().into_owned().unwrap();
     *facts.ecco_declarations_hash_mut() = Default::default();
     insta::assert_debug_snapshot!(facts);
 }
@@ -71,7 +105,10 @@ fn global_wrapper_names_are_distinct_from_lexical_shadows() {
     )
     .unwrap();
     assert_eq!(module.facts().dependencies().len(), 1);
-    assert_eq!(module.facts().dependencies()[0].specifier(), "./real");
+    assert_eq!(
+        module.facts().dependencies().get(0).unwrap().specifier(),
+        "./real"
+    );
     for name in ["require", "module", "exports"] {
         assert!(module
             .facts()
@@ -91,7 +128,10 @@ fn global_wrapper_names_are_distinct_from_lexical_shadows() {
     )
     .unwrap();
     assert_eq!(module.facts().dependencies().len(), 1);
-    assert_eq!(module.facts().dependencies()[0].specifier(), "./runtime");
+    assert_eq!(
+        module.facts().dependencies().get(0).unwrap().specifier(),
+        "./runtime"
+    );
     assert!(module
         .facts()
         .references()
@@ -109,8 +149,11 @@ fn commonjs_empty_bodies_and_top_level_return_are_deliberate() {
     ] {
         let module = parse(source, "test.cjs").unwrap();
         assert_eq!(module.segments().len(), 1);
-        assert_eq!(module.segments()[0].span.start, 0);
-        assert_eq!(module.segments()[0].span.end as usize, source.len());
+        assert_eq!(module.segments().get(0).unwrap().span.start, 0);
+        assert_eq!(
+            module.segments().get(0).unwrap().span.end as usize,
+            source.len()
+        );
     }
     let module = parse(
         "const x: number = 1; module.exports = x; return;",
@@ -180,8 +223,14 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
         "valid.cjs",
     )
     .unwrap();
-    assert_eq!(module.facts().dependencies()[0].specifier(), "./x");
-    assert_eq!(module.facts().dependencies()[1].specifier(), "./y");
+    assert_eq!(
+        module.facts().dependencies().get(0).unwrap().specifier(),
+        "./x"
+    );
+    assert_eq!(
+        module.facts().dependencies().get(1).unwrap().specifier(),
+        "./y"
+    );
     assert!(module
         .facts()
         .references()
@@ -435,9 +484,10 @@ fn unsupported_transforms_and_execution_features_are_diagnostics() {
 fn owned_utf8_spans_cover_declarations_references_and_dependency_sites() {
     let source = "const café = require('./dépendance'); module.exports = café;";
     let module = parse(source, "unicode.cjs").unwrap();
-    let binding = &module.facts().bindings()[0];
+    let binding = module.facts().bindings().get(0).unwrap();
     assert_eq!(
-        &source[binding.declarations()[0].start as usize..binding.declarations()[0].end as usize],
+        &source[binding.declarations().get(0).unwrap().start as usize
+            ..binding.declarations().get(0).unwrap().end as usize],
         "café"
     );
     for reference in module.facts().references() {
@@ -446,7 +496,7 @@ fn owned_utf8_spans_cover_declarations_references_and_dependency_sites() {
             reference.name()
         );
     }
-    let dependency = &module.facts().dependencies()[0];
+    let dependency = module.facts().dependencies().get(0).unwrap();
     assert_eq!(
         &source
             [dependency.specifier_span().start as usize..dependency.specifier_span().end as usize],
@@ -483,10 +533,22 @@ fn parse_only_target_facts_are_not_resolution_or_transformation_claims() {
         ]
     );
     assert_eq!(
-        module.facts().dependencies()[0].kind(),
+        module.facts().dependencies().get(0).unwrap().kind(),
         DependencyKind::ImportType
     );
-    assert!(module.facts().dependencies()[0].type_only());
-    assert_eq!(module.segments()[0].module_deps.requires.len(), 2);
-    assert_eq!(module.segments()[0].module_deps.dynamic_imports.len(), 2);
+    assert!(module.facts().dependencies().get(0).unwrap().type_only());
+    assert_eq!(
+        module.owned_segments().unwrap()[0]
+            .module_deps
+            .requires
+            .len(),
+        2
+    );
+    assert_eq!(
+        module.owned_segments().unwrap()[0]
+            .module_deps
+            .dynamic_imports
+            .len(),
+        2
+    );
 }

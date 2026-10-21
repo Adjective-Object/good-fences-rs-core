@@ -1,5 +1,5 @@
 //! Bounded add-only structural invocation rules; never JavaScript evaluation.
-use ast_segmenter::invocation::{CalleeShape, IdentifierCallee, Invocation};
+use ast_segmenter::views::{CalleeShape, IdentifierCallee, Invocation};
 use eyre::{ensure, WrapErr};
 use sha2::{Digest, Sha256};
 
@@ -67,10 +67,10 @@ impl EffectPolicy {
         self.patterns.iter().map(|p| p.canonical.as_str())
     }
 
-    pub fn matching_patterns<'a>(&'a self, call: &'a Invocation) -> impl Iterator<Item = &'a str> {
+    pub fn matching_patterns<'a>(&'a self, call: Invocation<'a>) -> impl Iterator<Item = &'a str> {
         self.patterns
             .iter()
-            .filter(|p| p.matches(call))
+            .filter(move |p| p.matches(call))
             .map(|p| p.canonical.as_str())
     }
 
@@ -95,7 +95,7 @@ fn identifier(name: &str) -> bool {
         && bytes.all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'$'))
 }
 
-fn global(id: &IdentifierCallee, name: &str) -> bool {
+fn global(id: &IdentifierCallee<'_>, name: &str) -> bool {
     id.binding().is_none() && id.name() == name
 }
 
@@ -137,7 +137,7 @@ impl Pattern {
         Ok(Self { canonical, shape })
     }
 
-    fn matches(&self, call: &Invocation) -> bool {
+    fn matches(&self, call: Invocation<'_>) -> bool {
         match (&self.shape, &call.shape()) {
             (PatternShape::Global(name), CalleeShape::Identifier(id)) => global(&id, name),
             (

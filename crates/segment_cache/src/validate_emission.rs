@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use ast_segmenter::{
-    emission::*,
-    owned::{BindingId, DependencyKind, ExportValue, ModuleFacts},
+    emission::Shorthand,
+    owned::{BindingId, DependencyKind},
+    views::*,
 };
 use eyre::{ensure, OptionExt};
 use oxc_span::Span;
 
+use crate::validate::ModuleView;
 use crate::validate::{contains, span};
-use crate::CachedModule;
 
 fn strict(values: impl IntoIterator<Item = u32>) -> bool {
     let mut previous = None;
@@ -30,7 +31,7 @@ fn within(source: &str, outer: Span, inner: Span) -> eyre::Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> {
+pub(crate) fn validate(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
     let facts = module.facts();
     let emission = &facts.emission();
     execution(module, source)?;
@@ -53,7 +54,10 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
     for observation in emission.dynamic_namespaces() {
         if let Some(properties) = &observation.properties() {
             ensure!(
-                properties.windows(2).all(|w| w[0] < w[1]),
+                properties
+                    .iter()
+                    .zip(properties.iter().skip(1))
+                    .all(|(a, b)| a < b),
                 "invalid dynamic namespace properties"
             );
         }
@@ -77,19 +81,24 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
         "invalid emission capture links"
     );
     for (&range, recipe) in module.segments().iter().zip(emission.segments()) {
-        let pieces = recipe.source().as_slice();
+        let pieces = recipe.source().spans();
         ensure!(
             !pieces.is_empty() && pieces.len() <= 4,
             "invalid source pieces"
         );
-        for &piece in pieces {
+        for piece in pieces {
             span(source, piece)?;
         }
         ensure!(
             recipe.source().contains(range)
-                && pieces.windows(2).all(|w| w[0].end <= w[1].start)
+                && pieces
+                    .iter()
+                    .zip(pieces.iter().skip(1))
+                    .all(|(a, b)| a.end <= b.start)
                 && (pieces == [range]
-                    || (pieces.len() == 2 && pieces[1] == range && pieces[0].end <= range.start)),
+                    || (pieces.len() == 2
+                        && pieces.get(1) == Some(range)
+                        && pieces.get(0).unwrap().end <= range.start)),
             "invalid segment source assembly"
         );
         placement(facts, recipe, range)?;
@@ -98,9 +107,17 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
         if facts.commonjs() {
             ensure!(
                 !recipe.connector_only()
-                    && *recipe.placement() == PlacementFacts::default()
-                    && *recipe.deferred() == DeferredForm::Unsupported
-                    && *recipe.names() == NameRestrictions::default()
+                    && matches!(recipe.deferred(), DeferredForm::Unsupported)
+                    && recipe.placement().declarations().is_empty()
+                    && recipe.placement().hoisted().is_empty()
+                    && !recipe.placement().instantiable()
+                    && !recipe.placement().default_expression()
+                    && recipe.placement().forward_references().is_empty()
+                    && recipe.placement().eager_reads().is_empty()
+                    && recipe.placement().eager_writes().is_empty()
+                    && recipe.placement().writes().is_empty()
+                    && recipe.names().named().is_empty()
+                    && !recipe.names().inference_sensitive()
                     && recipe.namespaces().is_empty()
                     && recipe.operations().iter().all(|o| matches!(
                         o.kind(),
@@ -113,13 +130,15 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
     Ok(())
 }
 
-fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
-    use ast_segmenter::execution::{ContextKind, ExecutionFacts};
+fn execution(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
+    use ast_segmenter::execution::ContextKind;
     let facts = module.facts();
     let execution = &facts.emission().execution();
     if facts.commonjs() {
         ensure!(
-            *execution == &ExecutionFacts::default(),
+            execution.contexts().is_empty()
+                && execution.references().is_empty()
+                && execution.invocations().is_empty(),
             "nonopaque CommonJS execution facts"
         );
         return Ok(());
@@ -134,7 +153,7 @@ fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
                     .any(|&s| contains(s, context.span())),
             "execution context outside segment"
         );
-        let preceding = &execution.contexts()[..index];
+        let preceding = execution.contexts().slice(..index);
         ensure!(
             context.parent()
                 == preceding
@@ -177,7 +196,7 @@ fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
     for context in execution.contexts() {
         if let Some(call) = context.immediate() {
             ensure!(
-                execution.invocations()[call as usize] == context.parent(),
+                execution.invocations().get(call as usize).unwrap() == context.parent(),
                 "immediate execution context escapes caller"
             );
         }
@@ -185,7 +204,7 @@ fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
     Ok(())
 }
 
-fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::Result<()> {
+fn placement(facts: ModuleFacts<'_>, recipe: SegmentRecipe<'_>, range: Span) -> eyre::Result<()> {
     let placement = &recipe.placement();
     if facts.commonjs() {
         return Ok(());
@@ -194,7 +213,7 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
         .bindings()
         .iter()
         .filter(|b| {
-            b.top_level() && !b.import() && b.declarations().iter().any(|&s| contains(range, s))
+            b.top_level() && !b.import() && b.declarations().iter().any(|s| contains(range, s))
         })
         .collect();
     ensure!(
@@ -217,7 +236,7 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
             && placement
                 .hoisted()
                 .iter()
-                .all(|id| definitions.iter().any(|b| b.id() == *id && b.function()))
+                .all(|id| definitions.iter().any(|b| b.id() == id && b.function()))
             && placement.instantiable()
                 == (!definitions.is_empty() && placement.declarations() == placement.hoisted()),
         "invalid hoisted availability"
@@ -227,7 +246,7 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
             == facts
                 .exports()
                 .iter()
-                .any(|e| matches!(e.value(), ExportValue::Expression(s) if contains(range, *s))),
+                .any(|e| matches!(e.value(), ExportValue::Expression(s) if contains(range, s))),
         "invalid default-expression placement"
     );
     ensure!(
@@ -239,10 +258,9 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
                 .filter(|(i, r)| {
                     r.read()
                         && contains(range, r.span())
-                        && facts
-                            .emission()
-                            .execution()
-                            .is_module_evaluation(facts.emission().execution().references()[*i])
+                        && facts.emission().execution().is_module_evaluation(
+                            facts.emission().execution().references().get(*i).unwrap(),
+                        )
                 })
                 .map(|(i, _)| i as u32)
                 .collect::<Vec<_>>()
@@ -254,10 +272,9 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
                     .filter(|(i, r)| {
                         r.write()
                             && contains(range, r.span())
-                            && facts
-                                .emission()
-                                .execution()
-                                .is_module_evaluation(facts.emission().execution().references()[*i])
+                            && facts.emission().execution().is_module_evaluation(
+                                facts.emission().execution().references().get(*i).unwrap(),
+                            )
                     })
                     .map(|(i, _)| i as u32)
                     .collect::<Vec<_>>()
@@ -276,15 +293,15 @@ fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::
             && recipe.names().named().iter().all(|id| facts
                 .bindings()
                 .iter()
-                .any(|b| b.id() == *id && b.declarations().iter().any(|&s| contains(range, s)))),
+                .any(|b| b.id() == id && b.declarations().iter().any(|s| contains(range, s)))),
         "invalid name-sensitive binding links"
     );
     Ok(())
 }
 
 fn namespaces(
-    facts: &ModuleFacts,
-    recipe: &SegmentRecipe,
+    facts: ModuleFacts<'_>,
+    recipe: SegmentRecipe<'_>,
     source: &str,
     range: Span,
 ) -> eyre::Result<()> {
@@ -314,7 +331,7 @@ fn namespaces(
     for usage in recipe.namespaces() {
         if let NamespaceAccess::DirectRead { member, property } = &usage.access() {
             within(source, range, *member)?;
-            let reference = &facts.references()[usage.reference() as usize];
+            let reference = facts.references().get(usage.reference() as usize).unwrap();
             ensure!(
                 member.start == reference.span().start
                     && reference.span().end < member.end
@@ -338,8 +355,8 @@ enum Key {
 }
 
 fn operations(
-    facts: &ModuleFacts,
-    recipe: &SegmentRecipe,
+    facts: ModuleFacts<'_>,
+    recipe: SegmentRecipe<'_>,
     source: &str,
     range: Span,
 ) -> eyre::Result<()> {
@@ -416,8 +433,8 @@ fn operations(
                 ensure!(
                     !facts.commonjs()
                         && (*wrapper == range
-                            || (recipe.source().as_slice().len() > 1
-                                && *wrapper == recipe.source().as_slice()[0]
+                            || (recipe.source().spans().len() > 1
+                                && *wrapper == recipe.source().spans().get(0).unwrap()
                                 && matches!(form, ExportForm::Declaration { .. }))),
                     "invalid export wrapper range"
                 );
@@ -453,7 +470,7 @@ fn operations(
                         ensure!(
                             facts.exports().iter().any(|e| e.span() == *wrapper
                                 && e.name().as_deref() == Some("default")
-                                && *e.value() == ExportValue::Expression(value.span())),
+                                && e.value() == ExportValue::Expression(value.span())),
                             "invalid default value link"
                         );
                     }
@@ -528,14 +545,14 @@ fn operations(
             OperationKind::Export {
                 span: outer,
                 form: ExportForm::Default { value, .. },
-            } => source_slot(source, *outer, &value, owner, &ranges, &recipe.operations())?,
+            } => source_slot(source, *outer, *value, owner, &ranges, recipe.operations())?,
             OperationKind::Invocation {
                 invocation,
                 lowering,
             } => pure(
                 facts,
                 *invocation,
-                &lowering,
+                *lowering,
                 owner,
                 recipe,
                 source,
@@ -551,7 +568,8 @@ fn operations(
             "invalid deferred function"
         ),
         DeferredForm::Effect => ensure!(
-            recipe.placement().declarations().is_empty() && !recipe.placement().default_expression(),
+            recipe.placement().declarations().is_empty()
+                && !recipe.placement().default_expression(),
             "invalid deferred effect"
         ),
         DeferredForm::Variable {
@@ -575,7 +593,7 @@ fn operations(
                     binding
                         .declarations()
                         .iter()
-                        .any(|s| contains(range, *s) && s.end < slot.span().start),
+                        .any(|s| contains(range, s) && s.end < slot.span().start),
                     "invalid deferred initializer range"
                 );
                 let expected: Vec<_> = ranges
@@ -583,7 +601,10 @@ fn operations(
                     .enumerate()
                     .filter(|&(i, &range)| {
                         contains(slot.span(), range)
-                            && !recipe.operations()[i]
+                            && !recipe
+                                .operations()
+                                .get(i)
+                                .unwrap()
                                 .parent()
                                 .is_some_and(|p| contains(slot.span(), ranges[p as usize]))
                     })
@@ -597,7 +618,7 @@ fn operations(
         }
     }
     for (binding, info) in &bindings {
-        for (i, &declaration) in info.declarations().iter().enumerate() {
+        for (i, declaration) in info.declarations().iter().enumerate() {
             if !facts.commonjs() && contains(range, declaration) {
                 ensure!(
                     keys.contains(&Key::Binding(*binding, i as u32)),
@@ -646,7 +667,7 @@ fn operations(
     for export in facts.exports() {
         if contains(range, export.span()) {
             ensure!(
-                keys.contains(&Key::Export(recipe.source().as_slice()[0].start)),
+                keys.contains(&Key::Export(recipe.source().spans().get(0).unwrap().start)),
                 "missing export wrapper"
             );
         }
@@ -671,17 +692,17 @@ fn source_hint(text: &str) -> bool {
         })
 }
 
-fn source_slot(
+fn source_slot<'a>(
     source: &str,
     outer: Span,
-    slot: &SourceSlot,
+    slot: SourceSlot<'_>,
     owner: usize,
     ranges: &[Span],
-    operations: &[Operation],
+    operations: Sequence<'a, Operation<'a>>,
 ) -> eyre::Result<()> {
     within(source, outer, slot.span())?;
     ensure!(
-        slot.span() != ranges[owner] && slot.operations().iter().all(|&i| i as usize > owner),
+        slot.span() != ranges[owner] && slot.operations().iter().all(|i| i as usize > owner),
         "recursive source-slot composition"
     );
     let expected: Vec<_> = ranges
@@ -689,7 +710,9 @@ fn source_slot(
         .enumerate()
         .filter(|&(i, &range)| {
             contains(slot.span(), range)
-                && !operations[i]
+                && !operations
+                    .get(i)
+                    .unwrap()
                     .parent()
                     .is_some_and(|p| contains(slot.span(), ranges[p as usize]))
         })
@@ -703,15 +726,15 @@ fn source_slot(
 }
 
 fn pure(
-    facts: &ModuleFacts,
+    facts: ModuleFacts<'_>,
     invocation: u32,
-    lowering: &PureLowering,
+    lowering: PureLowering<'_>,
     owner: usize,
-    recipe: &SegmentRecipe,
+    recipe: SegmentRecipe<'_>,
     source: &str,
     ranges: &[Span],
 ) -> eyre::Result<()> {
-    let call = &facts.invocations()[invocation as usize];
+    let call = facts.invocations().get(invocation as usize).unwrap();
     ensure!(
         lowering.callee().span() == call.callee()
             && lowering.arguments().len() == call.arguments().len(),
@@ -720,10 +743,10 @@ fn pure(
     source_slot(
         source,
         call.span(),
-        &lowering.callee(),
+        lowering.callee(),
         owner,
         ranges,
-        &recipe.operations(),
+        recipe.operations(),
     )?;
     for (slot, argument) in lowering.arguments().iter().zip(call.arguments()) {
         ensure!(slot.span() == argument.span(), "invalid PURE argument link");
@@ -733,7 +756,7 @@ fn pure(
             slot,
             owner,
             ranges,
-            &recipe.operations(),
+            recipe.operations(),
         )?;
     }
     if let Some(start) = lowering.guard_start() {
@@ -762,16 +785,16 @@ fn pure(
         source_slot(
             source,
             call.callee(),
-            &chain.base(),
+            chain.base(),
             owner,
             ranges,
-            &recipe.operations(),
+            recipe.operations(),
         )?;
         ensure!(
             chain.base().span().start == call.callee().start,
             "invalid PURE chain base"
         );
-        let optional = |step: &ChainStep| {
+        let optional = |step: ChainStep<'_>| {
             matches!(
                 step,
                 ChainStep::Static { optional: true, .. }
@@ -811,10 +834,10 @@ fn pure(
                 source_slot(
                     source,
                     call.callee(),
-                    &slot,
+                    slot,
                     owner,
                     ranges,
-                    &recipe.operations(),
+                    recipe.operations(),
                 )?;
                 ensure!(end <= slot.span().start, "unordered PURE chain slots");
                 end = slot.span().end;

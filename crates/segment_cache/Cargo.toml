@@ -3,7 +3,7 @@ name = "segment_cache"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Versioned source-local segment facts and atomic CBOR sidecars"
+description = "Versioned source-local segment facts and atomic FlatBuffer sidecars"
 
 [dependencies]
 ecco = { path = "../ecco" }
@@ -12,12 +12,14 @@ eyre.workspace = true
 tracing.workspace = true
 logger = { path = "../logger" }
 oxc_span.workspace = true
-serde.workspace = true
-serde_cbor = "0.11.2"
+cache_flatbuffers = { path = "../cache_flatbuffers" }
 sha2 = "0.10.9"
 tempfile = "3.27.0"
 
 [dev-dependencies]
+flatbuffers = "=25.2.10"
+serde.workspace = true
+serde_cbor = "0.11.2"
 import_resolver = { path = "../import_resolver" }
 serde_json.workspace = true
 test_tmpdir = { path = "../test_tmpdir" }

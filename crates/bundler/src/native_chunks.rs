@@ -24,7 +24,18 @@ pub(super) fn emit(
     require_defaults: &BTreeSet<PathBuf>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
-    emit_inner(graph, plan, modules, manifest, prepared, browser, require_defaults, None, 0, execution)
+    emit_inner(
+        graph,
+        plan,
+        modules,
+        manifest,
+        prepared,
+        browser,
+        require_defaults,
+        None,
+        0,
+        execution,
+    )
 }
 
 pub(super) fn emit_activated(
@@ -46,21 +57,34 @@ pub(super) fn emit_activated(
             plan,
             modules,
             manifest,
-            prepared, browser, require_defaults,
+            prepared,
+            browser,
+            require_defaults,
             None,
             min_chunk_bytes,
             execution,
         );
     }
     let Some(activations) = Activations::checked(graph, plan, modules, symbols, placements)? else {
-        return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults, execution);
+        return super::ordinary(
+            graph,
+            plan,
+            modules,
+            manifest,
+            prepared,
+            browser,
+            require_defaults,
+            execution,
+        );
     };
     emit_inner(
         graph,
         plan,
         modules,
         manifest,
-        prepared, browser, require_defaults,
+        prepared,
+        browser,
+        require_defaults,
         Some(&activations),
         min_chunk_bytes,
         execution,
@@ -292,11 +316,17 @@ fn emit_inner(
             if file == owner {
                 continue;
             }
-            if cjs.contains(owner)
-                || asynchronous.contains(&owner)
-                || cycles.contains(&owner)
-            {
-                return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults, execution);
+            if cjs.contains(owner) || asynchronous.contains(&owner) || cycles.contains(&owner) {
+                return super::ordinary(
+                    graph,
+                    plan,
+                    modules,
+                    manifest,
+                    prepared,
+                    browser,
+                    require_defaults,
+                    execution,
+                );
             }
             jobs.remove(&file);
             for assigned in owners.values_mut() {
@@ -306,17 +336,19 @@ fn emit_inner(
             }
         }
     }
-    let mut placement = tracing::info_span!("emit.placement").in_scope(|| segments::Placement::new(
-        graph,
-        plan,
-        modules,
-        prepared,
-        &redirects,
-        &phase_bound,
-        &wait_bound,
-        &boundaries,
-        &cjs,
-    ))?;
+    let mut placement = tracing::info_span!("emit.placement").in_scope(|| {
+        segments::Placement::new(
+            graph,
+            plan,
+            modules,
+            prepared,
+            &redirects,
+            &phase_bound,
+            &wait_bound,
+            &boundaries,
+            &cjs,
+        )
+    })?;
     placement.extract_generated(graph, plan)?;
     if let Some(activations) = activations {
         for (&key, owner) in &mut placement.owners {
@@ -341,7 +373,16 @@ fn emit_inner(
                 .collect::<BTreeSet<_>>()
             {
                 if !compatible(graph, file, &modules[&file], &values, &retained)? {
-                    return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults, execution);
+                    return super::ordinary(
+                        graph,
+                        plan,
+                        modules,
+                        manifest,
+                        prepared,
+                        browser,
+                        require_defaults,
+                        execution,
+                    );
                 }
             }
         }
@@ -401,7 +442,16 @@ fn emit_inner(
                     .flatten()
                     .any(|owner| *owner == owners[file])
         }) {
-            return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults, execution);
+            return super::ordinary(
+                graph,
+                plan,
+                modules,
+                manifest,
+                prepared,
+                browser,
+                require_defaults,
+                execution,
+            );
         }
     }
     let mut changed = BTreeSet::new();
@@ -467,11 +517,29 @@ fn emit_inner(
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
-    let connections = tracing::info_span!("emit.routing").in_scope(|| connections::Connections::new(
-        graph, modules, prepared, &owners, &placement, &surfaces, &cjs, activations, plan,
-    ))?;
+    let connections = tracing::info_span!("emit.routing").in_scope(|| {
+        connections::Connections::new(
+            graph,
+            modules,
+            prepared,
+            &owners,
+            &placement,
+            &surfaces,
+            &cjs,
+            activations,
+            plan,
+        )
+    })?;
     drop(planning_span);
-    cjs.emit(graph, modules, &connections.namespaces, &entry_files, execution, plan, prepared)?;
+    cjs.emit(
+        graph,
+        modules,
+        &connections.namespaces,
+        &entry_files,
+        execution,
+        plan,
+        prepared,
+    )?;
     let mut emission_jobs: Vec<_> = jobs
         .iter()
         .filter(|&&root| !cjs.contains(root))
@@ -512,92 +580,91 @@ fn emit_inner(
             return Ok((owner.path(graph), output, None));
         };
         let artifact_path = path(graph, root);
-        let output = if changed.contains(&root) {
-            segments::emit(
-                graph,
-                segments::Owner::Evaluation(root),
-                modules,
-                prepared,
-                &placement,
-                &connections,
-                &recipes,
-                &cjs,
-                activations,
-                plan,
-            )?
-        } else {
-            let module = &modules[&root];
-            let facts = &module.parsed.facts();
-            let edits = facts
-                .dependencies()
-                .iter()
-                .filter(|d| !d.type_only())
-                .filter(|dependency| {
-                    let index = module
-                        .parsed
-                        .segments()
-                        .partition_point(|segment| segment.span.end <= dependency.span().start);
-                    live.contains(&SegmentKey::new(root, index as u32))
-                })
-                .filter(|d| d.pattern().is_none())
-                .map(|dependency| {
-                    let request = connections
-                        .native_requests
-                        .get(&(root, dependency.id()))
-                        .ok_or_eyre("missing planned native request")?;
-                    Ok((dependency, request))
-                })
-                .collect::<eyre::Result<Vec<_>>>()?;
-            let mut imports = connections
-                .evaluation
-                .get(&segments::Owner::Evaluation(root))
-                .cloned()
-                .unwrap_or_default();
-            for &key in placement.schedule(segments::Owner::Evaluation(root)) {
-                eyre::ensure!(
-                    key.file_id == root,
-                    "relocated segment in unchanged native job"
-                );
-                let index = key.segment_idx as usize;
-                let recipe = &facts.emission().segments()[index];
-                let mut renderer = crate::emit::CachedRenderer::new(
-                    module.source,
-                    facts,
-                    recipe,
-                    recipes.get(&key).copied().unwrap_or_default(),
-                );
-                renderer.relocate_urls(module.relocations)?;
-                for (dependency, request) in &edits {
-                    renderer.dependency(dependency, request.code.clone(), request.whole);
-                }
-                for dependency in facts.dependencies().iter().filter(|d| {
-                    d.pattern().is_some()
-                        && contains(module.parsed.segments()[index].span, d.span())
-                }) {
-                    if let Some(dispatch) =
-                        cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
-                    {
-                        renderer.context(dependency, dispatch);
+        let output =
+            if changed.contains(&root) {
+                segments::emit(
+                    graph,
+                    segments::Owner::Evaluation(root),
+                    modules,
+                    prepared,
+                    &placement,
+                    &connections,
+                    &recipes,
+                    &cjs,
+                    activations,
+                    plan,
+                )?
+            } else {
+                let module = &modules[&root];
+                let facts = &module.parsed.facts();
+                let edits = facts
+                    .dependencies()
+                    .iter()
+                    .filter(|d| !d.type_only())
+                    .filter(|dependency| {
+                        let index = module
+                            .parsed
+                            .segments()
+                            .partition_point(|segment| segment.span.end <= dependency.span().start);
+                        live.contains(&SegmentKey::new(root, index as u32))
+                    })
+                    .filter(|d| d.pattern().is_none())
+                    .map(|dependency| {
+                        let request = connections
+                            .native_requests
+                            .get(&(root, dependency.id()))
+                            .ok_or_eyre("missing planned native request")?;
+                        Ok((dependency, request))
+                    })
+                    .collect::<eyre::Result<Vec<_>>>()?;
+                let mut imports = connections
+                    .evaluation
+                    .get(&segments::Owner::Evaluation(root))
+                    .cloned()
+                    .unwrap_or_default();
+                for &key in placement.schedule(segments::Owner::Evaluation(root)) {
+                    eyre::ensure!(
+                        key.file_id == root,
+                        "relocated segment in unchanged native job"
+                    );
+                    let index = key.segment_idx as usize;
+                    let recipe = facts.emission().segments().get(index).unwrap();
+                    let mut renderer = crate::emit::CachedRenderer::new(
+                        module.source,
+                        *facts,
+                        recipe,
+                        recipes.get(&key).copied().unwrap_or_default(),
+                    );
+                    renderer.relocate_urls(module.relocations)?;
+                    for (dependency, request) in &edits {
+                        renderer.dependency(*dependency, request.code.clone(), request.whole);
                     }
+                    for dependency in facts.dependencies().iter().filter(|d| {
+                        d.pattern().is_some()
+                            && contains(module.parsed.segments().get(index).unwrap().span, d.span())
+                    }) {
+                        if let Some(dispatch) =
+                            cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
+                        {
+                            renderer.context(dependency, dispatch);
+                        }
+                    }
+                    imports.push(renderer.materialize()?);
+                    imports.push_str("\n;\n");
                 }
-                imports.push(renderer.materialize()?);
-                imports.push_str("\n;\n");
-            }
-            imports.default_export |= facts.exports().iter().any(|export| {
-                !export.type_only()
-                    && export.name().as_deref() == Some("default")
-                    && module
-                        .parsed
-                        .segments()
-                        .iter()
-                        .enumerate()
-                        .any(|(index, segment)| {
-                            live.contains(&SegmentKey::new(root, index as u32))
-                                && contains(segment.span, export.span())
-                        })
-            });
-            imports
-        };
+                imports.default_export |=
+                    facts.exports().iter().any(|export| {
+                        !export.type_only()
+                            && export.name().as_deref() == Some("default")
+                            && module.parsed.segments().iter().enumerate().any(
+                                |(index, segment)| {
+                                    live.contains(&SegmentKey::new(root, index as u32))
+                                        && contains(segment.span, export.span())
+                                },
+                            )
+                    });
+                imports
+            };
         let namespace = surfaces
             .contains(&root)
             .then_some(root)
@@ -609,7 +676,9 @@ fn emit_inner(
     for output in outputs {
         let (artifact_path, output, namespace) = output?;
         if let Some(namespace) = namespace {
-            let file = graph.file_id(&namespace).ok_or_eyre("missing native namespace source")?;
+            let file = graph
+                .file_id(&namespace)
+                .ok_or_eyre("missing native namespace source")?;
             namespaces.insert(namespace, connections.namespaces[&file].clone());
         }
         files.insert(artifact_path, output);
@@ -709,8 +778,13 @@ fn emit_inner(
                     .iter()
                     .filter(|(_, owner)| **owner == segments::Owner::Evaluation(**file))
                     .all(|(key, _)| {
-                        modules[&key.file_id].parsed.facts().emission().segments()
-                            [key.segment_idx as usize]
+                        modules[&key.file_id]
+                            .parsed
+                            .facts()
+                            .emission()
+                            .segments()
+                            .get(key.segment_idx as usize)
+                            .unwrap()
                             .connector_only()
                     })
         })

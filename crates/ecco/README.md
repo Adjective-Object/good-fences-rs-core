@@ -69,10 +69,10 @@ Strings borrow their input allocation. IDs, spans, hazards and `CallResult`
 are small scalar values; no reader calls the generated object API's `unpack`.
 
 `ParsedFile::encode_flatbuffer` writes typed Ecco tables into a caller's builder
-for embedding directly in a future AST module. The construction-only encoder
+for embedding directly in an AST module. The construction-only encoder
 uses generated objects; `to_flatbuffer` is a standalone convenience.
 `cache_flatbuffers::WireEcco` structurally verifies and owns standalone bytes.
-`views::ModuleEcco` retains a checked `WireRecord` with nested Ecco, and future
+`views::ModuleEcco` retains a checked `WireRecord` with nested Ecco, and other
 module owners can implement `views::ParsedFileSource`.
 
 `Analysis::add_file` accepts `Arc<dyn ParsedFileSource>` (including existing
@@ -87,9 +87,10 @@ over shared interpreter declarations, without cloning a contract at each call.
 
 Resolvers now receive `ExternalReferenceView` by value and match `BindingView`;
 `declaration_matches` accepts either owned references or borrowed views.
-The existing Serde layout and production `.seg.cbor` format are unchanged.
-AST-module ownership, cache framing/publication and production warm-hit
-integration remain a separate migration stage.
+Production `.seg.fb` sidecars embed these typed precursors in the AST module;
+warm loading and solving retain immutable buffer owners without unpacking.
+Serde remains for debug/test fixtures and the independent declaration-configuration
+fingerprint, not per-file cache encoding or loading.
 
 `ParsedFile` and `OwnedFunction` implement Serde serialization. Save only these
 precursors, never `Context`, `Evaluation`, or `AnalysisResult`. Each solve

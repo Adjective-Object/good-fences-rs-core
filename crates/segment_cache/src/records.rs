@@ -1,57 +1,69 @@
+use std::sync::{Arc, OnceLock};
+
 use super::*;
 
-/// Projection of ParsedModule that preserves executable occurrence facts and
-/// statement ranges without serializing legacy tracker tags or name sets.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Borrowed syntax and lazy scalar ranges backed by a verified immutable buffer.
+#[derive(Debug, Clone)]
 pub struct CachedModule {
-    body: ModuleBody,
-    #[serde(with = "ast_segmenter::owned::span_serde::list")]
-    segments: Vec<Span>,
-    facts: ModuleFacts,
+    parsed: ParsedModule,
+    segments: OnceLock<Vec<Span>>,
 }
 
 impl CachedModule {
     pub fn body(&self) -> ModuleBody {
-        self.body
+        self.parsed.body()
     }
 
     pub fn segments(&self) -> &[Span] {
-        &self.segments
+        self.segments
+            .get_or_init(|| self.parsed.segments().iter().map(|s| s.span).collect())
     }
 
-    pub fn facts(&self) -> &ModuleFacts {
-        &self.facts
+    pub fn facts(&self) -> ast_segmenter::views::ModuleFacts<'_> {
+        self.parsed.facts()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Construction is the semantic validation gate. Clones share the checked
+/// module and wire allocation; no public constructor accepts an unchecked seal.
+#[derive(Debug, Clone)]
 pub struct CacheRecord {
-    magic: String,
-    schema: u32,
-    extractor: u32,
-    oxc: String,
+    wire: Option<cache_flatbuffers::WireRecord>,
+    module: Arc<CachedModule>,
     source_len: u64,
     source_hash: [u8; 32],
-    config: ParserConfig,
-    module: CachedModule,
-    provenance: ast_segmenter::SourceProvenance,
+    write_error: Option<Arc<str>>,
 }
 
+impl PartialEq for CacheRecord {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.wire, &other.wire) {
+            (Some(a), Some(b)) => a.bytes() == b.bytes(),
+            (None, None) => {
+                self.source_len == other.source_len && self.provenance() == other.provenance()
+            }
+            _ => false,
+        }
+    }
+}
+impl Eq for CacheRecord {}
+
 impl CacheRecord {
-    pub fn magic(&self) -> &str {
-        &self.magic
+    #[cfg(test)]
+    pub(crate) fn wire_bytes_for_test(&self) -> &[u8] {
+        self.wire.as_ref().unwrap().bytes()
     }
 
     pub fn schema(&self) -> u32 {
-        self.schema
+        SCHEMA_VERSION
     }
 
     pub fn extractor(&self) -> u32 {
-        self.extractor
+        EXTRACTOR_VERSION
     }
 
     pub fn oxc(&self) -> &str {
-        &self.oxc
+        OXC_REVISION
     }
 
     pub fn source_len(&self) -> u64 {
@@ -63,7 +75,7 @@ impl CacheRecord {
     }
 
     pub fn config(&self) -> ParserConfig {
-        self.config
+        self.provenance().config()
     }
 
     pub fn module(&self) -> &CachedModule {
@@ -71,11 +83,9 @@ impl CacheRecord {
     }
 
     pub fn provenance(&self) -> &ast_segmenter::SourceProvenance {
-        &self.provenance
+        self.module.parsed.provenance()
     }
-}
 
-impl CacheRecord {
     pub fn matches_prepared_declarations(
         &self,
         declarations: &ast_segmenter::PreparedDeclarations,
@@ -89,73 +99,100 @@ impl CacheRecord {
     }
 
     pub fn from_parsed(source: &str, parsed: &ParsedModule) -> eyre::Result<Self> {
-        let record = Self {
-            magic: "good-fences-segments".into(),
-            schema: SCHEMA_VERSION,
-            extractor: EXTRACTOR_VERSION,
-            oxc: OXC_REVISION.into(),
-            source_len: source.len() as u64,
-            source_hash: digest(source.as_bytes()),
-            config: ParserConfig::from_source_type(parsed.source_type()),
-            module: CachedModule {
-                body: parsed.body(),
-                segments: parsed.segments().iter().map(|s| s.span).collect(),
-                facts: parsed.facts().clone(),
-            },
-            provenance: parsed.provenance().clone(),
-        };
-        record.validate(source, record.config())?;
-        Ok(record)
+        ensure!(
+            source.len() <= u32::MAX as usize,
+            "cache source exceeds span limit"
+        );
+        let encoded = {
+            let _span = tracing::info_span!("cache.encode").entered();
+            parsed.to_flatbuffer(source, OXC_REVISION)
+        }
+        .and_then(|bytes| Self::decode_owned(bytes, source, parsed.provenance().config()));
+        match encoded {
+            Ok(record) => Ok(record),
+            Err(error) => {
+                // Wire limits must not turn a valid extraction into a fatal
+                // source error. Only checked owned extraction may stay uncached;
+                // malformed persistent input can never enter this fallback.
+                crate::validate_parsed(source, parsed)?;
+                parsed.owned_facts()?;
+                Ok(Self {
+                    wire: None,
+                    module: Arc::new(CachedModule {
+                        parsed: parsed.clone(),
+                        segments: OnceLock::new(),
+                    }),
+                    source_len: source.len() as u64,
+                    source_hash: digest(source.as_bytes()),
+                    write_error: Some(format!("{error:#}").into()),
+                })
+            }
+        }
     }
 
-    /// Checked cache adapter shared by graph construction and emission.
+    fn check_source(&self, source: &str) -> eyre::Result<()> {
+        ensure!(
+            self.source_len() == source.len() as u64
+                && self.source_hash() == digest(source.as_bytes()),
+            "cache source mismatch"
+        );
+        Ok(())
+    }
+
+    /// Reuse the already semantically checked immutable owner, not an owned tree.
     pub fn to_parsed(&self, source: &str) -> eyre::Result<ParsedModule> {
         let _span = tracing::info_span!("cache.to_parsed").entered();
-        self.validate(source, self.config())?;
-        ParsedModule::from_provenance(
-            source,
-            self.provenance().clone(),
-            self.module().body(),
-            self.module()
-                .segments()
-                .iter()
-                .map(|&span| ast_segmenter::Segment {
-                    span,
-                    module_deps: Default::default(),
-                    variables: Default::default(),
-                })
-                .collect(),
-            self.module().facts().clone(),
-        )
+        self.check_source(source)?;
+        Ok(self.module.parsed.clone())
     }
 
     pub fn encode(&self, source: &str) -> eyre::Result<Vec<u8>> {
         let _span = tracing::info_span!("cache.encode").entered();
-        self.validate(source, self.config())?;
-        let payload = serde_cbor::to_vec(self)?;
-        bounded::check(&payload)?;
-        let bytes = serde_cbor::to_vec(&Envelope {
-            checksum: digest(&payload),
-            payload,
-        })?;
-        bounded::check(&bytes)?;
-        Ok(bytes)
+        self.check_source(source)?;
+        match &self.wire {
+            Some(wire) => Ok(wire.bytes().to_vec()),
+            None => eyre::bail!(
+                "{}",
+                self.write_error.as_deref().unwrap_or("uncacheable record")
+            ),
+        }
     }
 
     /// Invalid/stale records are errors here; filesystem callers treat them as misses.
     pub fn decode(bytes: &[u8], source: &str, config: ParserConfig) -> eyre::Result<Self> {
+        ensure!(bytes.len() <= MAX_RECORD_BYTES, "cache exceeds byte limit");
+        Self::decode_shared(Arc::from(bytes), source, config)
+    }
+
+    pub(crate) fn decode_owned(
+        bytes: Vec<u8>,
+        source: &str,
+        config: ParserConfig,
+    ) -> eyre::Result<Self> {
+        Self::decode_shared(bytes.into(), source, config)
+    }
+
+    fn decode_shared(bytes: Arc<[u8]>, source: &str, config: ParserConfig) -> eyre::Result<Self> {
         let _span = tracing::info_span!("cache.decode", bytes = bytes.len()).entered();
-        bounded::check(bytes)?;
-        let envelope: Envelope = serde_cbor::from_slice(bytes)?;
-        ensure!(
-            digest(&envelope.payload) == envelope.checksum,
-            "cache checksum mismatch"
-        );
-        bounded::check(&envelope.payload)?;
-        let record: Self = serde_cbor::from_slice(&envelope.payload)?;
-        record.validate(source, config)?;
-        ensure!(record.encode(source)? == bytes, "noncanonical cache record");
-        Ok(record)
+        let wire = {
+            let _span = tracing::info_span!("cache.verify_flatbuffer").entered();
+            cache_flatbuffers::WireRecord::new(bytes, source, config.wire(), OXC_REVISION)?
+        };
+        let parsed = ParsedModule::from_wire(source, wire.clone())?;
+        let module = CachedModule {
+            parsed,
+            segments: OnceLock::new(),
+        };
+        // Integrity was checked above. This gate traverses borrowed records once,
+        // before any CacheRecord can escape, including on the cold write path.
+        crate::validate::validate_module(&(&module).into(), source, config)?;
+        Ok(Self {
+            source_len: wire.root().source_len(),
+            source_hash: std::array::from_fn(|i| wire.root().source_hash().bytes().get(i)),
+            wire: Some(wire),
+            module: Arc::new(module),
+            write_error: None,
+        })
     }
 
     pub fn decode_with_declarations(
@@ -175,10 +212,18 @@ impl CacheRecord {
         declarations: &ast_segmenter::PreparedDeclarations,
     ) -> eyre::Result<Self> {
         let record = Self::decode(bytes, source, config)?;
+        record.check_declarations(declarations)?;
+        Ok(record)
+    }
+
+    pub(crate) fn check_declarations(
+        &self,
+        declarations: &ast_segmenter::PreparedDeclarations,
+    ) -> eyre::Result<()> {
         ensure!(
-            record.matches_prepared_declarations(declarations),
+            self.matches_prepared_declarations(declarations),
             "cache Ecco declaration configuration mismatch"
         );
-        Ok(record)
+        Ok(())
     }
 }
