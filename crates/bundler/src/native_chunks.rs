@@ -15,6 +15,8 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
+    browser: bool,
+    require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<Code>> {
     let symbols = prepared.symbols;
     let mut entry_owners = BTreeMap::new();
@@ -51,9 +53,9 @@ pub(super) fn emit(
             }
         }
     }
-    let mut cjs = commonjs::CommonJs::new(graph, plan, modules)?;
     let native_seams = modules.keys().any(|&file| has_externals(graph, file));
     let async_modules = super::super::async_modules(graph, modules)?;
+    let mut cjs = commonjs::CommonJs::new(graph, plan, modules, browser, require_defaults)?;
     let asynchronous: BTreeSet<_> = async_modules
         .iter()
         .map(|p| graph.file_id(p).unwrap())
@@ -62,7 +64,7 @@ pub(super) fn emit(
     let mut connectors = BTreeSet::new();
     let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
     for (&file, module) in modules {
-        if module.parsed.facts.commonjs {
+        if cjs.contains(file) {
             edges.insert(file, Vec::new());
             continue;
         }
@@ -282,7 +284,7 @@ pub(super) fn emit(
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
-    cjs.emit(graph, modules, &owners, &entry_files)?;
+    cjs.emit(graph, modules, &owners, &entry_files, plan, prepared)?;
     for (&root, group) in &groups {
         if cjs.contains(root) {
             continue;

@@ -79,6 +79,46 @@ mod tests {
     use test_tmpdir::test_tmpdir;
 
     #[test]
+    fn explicit_aliases_precede_node_builtins_without_recursive_rewriting() {
+        let dir = test_tmpdir! {
+            "entry.mjs" => "",
+            "stub.cjs" => ""
+        };
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            let caches = CombinedResolverCaches::new();
+            let mut options = NodeModulesResolverOptions::default_for_env(environment);
+            options.alias.insert("fs".into(), "./stub.cjs".into());
+            options.alias.insert("node:fs".into(), "./stub.cjs".into());
+            options
+                .alias
+                .insert("./stub.cjs".into(), "./missing.cjs".into());
+            let resolver = caches.resolver(dir.root(), options);
+            for request in ["fs", "node:fs"] {
+                assert_eq!(
+                    resolver
+                        .resolve(&dir.root_join("entry.mjs"), request)
+                        .unwrap()
+                        .path,
+                    dir.root_join("stub.cjs"),
+                );
+            }
+        }
+        let caches = CombinedResolverCaches::new();
+        let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+        options.alias.insert("native".into(), "fs".into());
+        let resolver = caches.resolver(dir.root(), options);
+        for request in ["native", "fs", "node:fs"] {
+            assert_eq!(
+                resolver
+                    .resolve(&dir.root_join("entry.mjs"), request)
+                    .unwrap()
+                    .path,
+                std::path::PathBuf::from("node:fs"),
+            );
+        }
+    }
+
+    #[test]
     fn custom_conditions_are_scoped_and_cache_keys_include_the_active_set() {
         let dir = test_tmpdir! {
             "entry.mjs" => "",

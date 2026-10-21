@@ -155,7 +155,9 @@ pub(crate) fn esm_plan(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_prepared(graph, plan, policy, sources, &BTreeMap::new())
+    esm_plan_prepared(
+        graph, plan, policy, sources, &BTreeMap::new(), false, &BTreeSet::new(),
+    )
 }
 
 pub(crate) fn esm_plan_prepared(
@@ -164,6 +166,8 @@ pub(crate) fn esm_plan_prepared(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
     relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
+    browser: bool,
+    require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
@@ -190,7 +194,9 @@ pub(crate) fn esm_plan_prepared(
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    native::emit(graph, plan, &modules, &manifest, &symbols)
+    native::emit(
+        graph, plan, &modules, &manifest, &symbols, browser, require_defaults,
+    )
 }
 
 fn async_modules(

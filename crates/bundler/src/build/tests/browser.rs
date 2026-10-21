@@ -309,31 +309,813 @@ fn browser_rejects_node_builtins_even_if_external_and_node_default_still_accepts
 }
 
 #[test]
-fn browser_rejects_node_loader_only_output_instead_of_emitting_broken_chunks() {
-    for (file, source, entry, diagnostic) in [
+fn browser_commonjs_chains_cycles_retry_and_deferred_contexts() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import api from './api.cjs';
+export {api};
+export const dynamic = name => import(`./parts/${name}.cjs`);
+"#,
+    );
+    write(
+        dir.root(),
+        "api.cjs",
+        r#"
+events.push('api');
+exports.load = (name, __gf_cjs_0_runtime) => require(`./parts/${name()}.cjs`);
+exports.retry = () => require('./retry.cjs');
+exports.cycle = () => require('./a.cjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "parts/lazy.cjs",
+        r#"
+events.push('lazy');
+exports.old = true;
+const original = exports;
+module.exports = {value: 7, original, sameThis: this === original};
+exports.detached = true;
+"#,
+    );
+    write(
+        dir.root(),
+        "a.cjs",
+        r#"
+events.push('a'); exports.early = 1;
+exports.b = require('./b.cjs'); exports.done = 2;
+"#,
+    );
+    write(
+        dir.root(),
+        "b.cjs",
+        r#"
+events.push('b'); exports.partial = require('./a.cjs').early;
+exports.incomplete = require('./a.cjs').done === undefined;
+"#,
+    );
+    write(
+        dir.root(),
+        "retry.cjs",
+        r#"
+events.push('retry');
+globalThis.attempts = (globalThis.attempts || 0) + 1;
+if (globalThis.attempts === 1) throw new Error('first');
+module.exports = {ok: true};
+"#,
+    );
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&browser_options())
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+if (typeof require !== 'undefined' || typeof module !== 'undefined') throw new Error('host loader');
+globalThis.events = [];
+const {api, dynamic} = await import('./main.mjs');
+if (events.join() !== 'api') throw new Error('eager factory');
+let calls = 0;
+const value = api.load(() => {calls++; return 'lazy';}, null);
+if (!value.sameThis || !value.original.detached || value.old !== undefined) throw new Error('aliases');
+if (value !== api.load(() => {calls++; return 'lazy';})) throw new Error('cache');
+const ns = await dynamic('lazy');
+if (ns.default !== value || ns.value !== 7) throw new Error('dynamic identity');
+const NativeError = Error;
+globalThis.Error = function () { throw new NativeError('uncaptured Error'); };
+try { api.load(() => {calls++; return 'missing';}); throw new NativeError('missing succeeded'); }
+catch (e) { if (!(e instanceof NativeError) || e.code !== 'MODULE_NOT_FOUND') throw e; }
+globalThis.Error = NativeError;
+if (calls !== 3) throw new Error('argument evaluated more than once');
+const cycle = api.cycle();
+if (cycle.b.partial !== 1 || !cycle.b.incomplete || cycle.done !== 2 || api.cycle() !== cycle) throw new Error('cycle');
+try { api.retry(); throw new Error('retry succeeded'); } catch (e) { if (e.message !== 'first') throw e; }
+if (!api.retry().ok || api.retry() !== api.retry()) throw new Error('retry cache');
+console.log(JSON.stringify(events));
+"#
+        ),
+        b"[\"api\",\"lazy\",\"a\",\"b\",\"retry\",\"retry\"]\n"
+    );
+}
+
+fn assert_browser_transport(artifacts: &Artifacts) {
+    for (path, text) in &artifacts.files {
+        assert_ne!(path.extension().and_then(|ext| ext.to_str()), Some("cjs"));
+        assert!(!text.contains("node:"), "{}: {text}", path.display());
+        assert!(!text.contains("require("), "{}: {text}", path.display());
+    }
+}
+
+#[test]
+fn browser_commonjs_entry_aliases_snapshots_and_target_switches() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "entry.cjs",
+        r#"
+globalThis.count = (globalThis.count || 0) + 1;
+exports.value = 1;
+exports.bump = () => { module.exports.value++; };
+exports.paths = [__filename, __dirname];
+"#,
+    );
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import value, {value as snapshot} from './entry.cjs';
+import * as namespace from './entry.cjs';
+export {value, snapshot, namespace};
+export const load = () => import('./entry.cjs');
+"#,
+    );
+    let mut config = browser_options();
+    config.entries.insert(
+        "cjs".into(),
+        Entry {
+            path: "entry.cjs".into(),
+            output_name: None,
+            namespace: true,
+        },
+    );
+    config.entries.insert(
+        "alias".into(),
+        Entry {
+            path: "entry.cjs".into(),
+            output_name: Some("nested/alias.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let result = session.build(&config).unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        result.product.artifacts.entries["cjs"],
+        PathBuf::from("entry.mjs")
+    );
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+const main = await import('./main.mjs');
+const direct = await import('./entry.mjs');
+const alias = await import('./nested/alias.mjs');
+if (main.value !== direct.default || direct.default !== alias.default || globalThis.count !== 1) throw new Error('entry identity');
+main.value.bump();
+const dynamic = await main.load();
+if (main.snapshot !== 1 || direct.value !== 1 || alias.value !== 1) throw new Error('snapshots');
+if (main.namespace.value !== 2 || dynamic.value !== 2 || dynamic.default !== main.value) throw new Error('namespace');
+if (!main.value.paths[0].endsWith('.mjs') || !main.value.paths[1].endsWith('/native/')) throw new Error('output URLs');
+console.log('entries');
+"#
+        ),
+        b"entries\n"
+    );
+    let fresh = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(fresh.product.artifacts, result.product.artifacts);
+    config.entries.remove("alias");
+    config.resolver.target_env = TargetEnv::Node;
+    assert!(session
+        .build(&config)
+        .unwrap()
+        .product
+        .artifacts
+        .files
+        .keys()
+        .any(|path| path.extension().is_some_and(|ext| ext == "cjs")));
+    config.resolver.target_env = TargetEnv::Browser;
+    assert_browser_transport(&session.build(&config).unwrap().product.artifacts);
+}
+
+#[test]
+fn browser_commonjs_shared_leaf_imports_are_deduplicated_per_availability_chunk() {
+    for (leaf, source, executions) in [
+        ("leaf.mjs", "export const value = 1;", 0),
         (
-            "dep.cjs",
-            "exports.value = 1;",
-            "import './dep.cjs';",
-            "CommonJS",
+            "leaf.mjs",
+            "globalThis.executions++; export const value = 1;",
+            1,
+        ),
+        ("leaf.json", r#"{"value":1}"#, 0),
+    ] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.cjs",
+            &format!("exports.one = require('./{leaf}'); exports.two = require('./child.cjs');"),
+        );
+        write(
+            dir.root(),
+            "child.cjs",
+            &format!("module.exports = require('./{leaf}');"),
+        );
+        write(dir.root(), leaf, source);
+        let mut config = browser_options();
+        config.entries.get_mut("main").unwrap().path = "main.cjs".into();
+        let result = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_browser_transport(&result.product.artifacts);
+        assert_eq!(
+            observe_named(
+                &result.product.artifacts,
+                &format!(
+                    r#"
+globalThis.executions = 0;
+const {{default: api}} = await import('./main.mjs');
+if (api.one !== api.two || api.one.value !== 1) throw Error('shared identity');
+if (executions !== {executions}) throw Error('execution count');
+if ((await import('./main.mjs')).default !== api) throw Error('entry cache');
+console.log('shared leaf');
+"#
+                )
+            ),
+            b"shared leaf\n"
+        );
+    }
+}
+
+#[test]
+fn browser_builtin_aliases_bundle_explicit_stubs_and_track_changes() {
+    for (stub, source) in [
+        ("stub.cjs", "module.exports = require('./value.cjs');"),
+        ("stub.mjs", "export const value = 7;"),
+    ] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", "export {default} from './api.cjs';");
+        write(
+            dir.root(),
+            "api.cjs",
+            "exports.one = require('fs'); exports.two = require('node:fs');",
+        );
+        write(dir.root(), stub, source);
+        write(dir.root(), "value.cjs", "exports.value = 7;");
+        let mut config = browser_options();
+        for request in ["fs", "node:fs"] {
+            config
+                .resolver
+                .alias
+                .insert(request.into(), format!("./{stub}"));
+            // An explicit local replacement wins over an external declaration.
+            config.externals.insert(request.into());
+        }
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        for value in [7, 8] {
+            if value == 8 {
+                if stub == "stub.cjs" {
+                    write(dir.root(), "value.cjs", "exports.value = 8;");
+                } else {
+                    write(dir.root(), stub, "export const value = 8;");
+                }
+            }
+            let result = session.build(&config).unwrap();
+            assert_browser_transport(&result.product.artifacts);
+            assert_eq!(
+                observe_named(
+                    &result.product.artifacts,
+                    &format!(
+                        "const {{default: api}} = await import('./main.mjs'); if (api.one !== api.two || api.one.value !== {value}) throw Error('stub identity/value'); console.log('stub');"
+                    )
+                ),
+                b"stub\n"
+            );
+        }
+    }
+}
+
+#[test]
+fn browser_require_aliases_do_not_hide_invalid_targets() {
+    for (request, replacement, external, diagnostic) in [
+        ("fs", None, false, "Node builtin"),
+        ("node:fs", None, true, "Node builtin"),
+        ("missing", None, false, "missing"),
+        ("missing", Some("./absent.cjs"), false, "absent.cjs"),
+        ("fs", Some("./absent.cjs"), false, "absent.cjs"),
+        ("fs", Some("node:fs"), false, "Node builtin"),
+        ("shim", Some("fs"), false, "Node builtin"),
+        ("fs", Some("./addon.node"), false, "native addon"),
+        (
+            "fs",
+            Some("./.bundler-hidden/stub.cjs"),
+            false,
+            "outside reachable build inventory",
+        ),
+        ("external-pkg", None, true, "cannot require external"),
+    ] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", "export {default} from './api.cjs';");
+        write(
+            dir.root(),
+            "api.cjs",
+            &format!("module.exports = require('{request}');"),
+        );
+        write(dir.root(), "addon.node", "");
+        write(dir.root(), ".bundler-hidden/stub.cjs", "exports.value = 1;");
+        let mut config = browser_options();
+        if let Some(replacement) = replacement {
+            config
+                .resolver
+                .alias
+                .insert(request.into(), replacement.into());
+        }
+        if external {
+            config.externals.insert(request.into());
+        }
+        let error = format!(
+            "{:#}",
+            BuildSession::new(dir.root())
+                .unwrap()
+                .build(&config)
+                .err()
+                .unwrap()
+        );
+        assert!(
+            error.contains("api.cjs") && error.contains(request) && error.contains(diagnostic),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn browser_require_esm_leaf_preserves_timing_live_bindings_and_cached_errors() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "export {default} from './api.cjs';");
+    write(
+        dir.root(),
+        "api.cjs",
+        r#"
+exports.load = () => require('./leaf.mjs');
+exports.fail = () => require('./fail.mjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "leaf.mjs",
+        r#"
+events.push('leaf');
+export let value = 1;
+export const bump = () => value++;
+export {value as alias};
+export default function () { return value; }
+export const topThis = this;
+"#,
+    );
+    write(
+        dir.root(),
+        "fail.mjs",
+        "events.push('fail'); throw new Error('leaf failure');",
+    );
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&browser_options())
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+globalThis.events = [];
+const {default: api} = await import('./main.mjs');
+if (events.length) throw new Error('eager ESM');
+events.push('before');
+const ns = api.load();
+events.push('after');
+ns.bump();
+if (ns.value !== 2 || ns.alias !== 2 || ns.default() !== 2 || ns.default.name !== 'default' || ns.topThis !== undefined || api.load() !== ns) throw new Error('live exports');
+try { ns.value = 42; throw new Error('writable'); } catch (e) { if (!(e instanceof TypeError)) throw e; }
+let first;
+try { api.fail(); } catch(e) { first = e; }
+try { api.fail(); } catch(e) { if (e !== first) throw new Error('ESM error identity'); }
+console.log(JSON.stringify(events));
+"#
+        ),
+        b"[\"before\",\"leaf\",\"after\",\"fail\"]\n"
+    );
+}
+
+#[test]
+fn browser_require_rejects_external_async_and_shared_native_esm_boundaries() {
+    for (entry, source, extra, diagnostic) in [
+        (
+            "export {default} from './api.cjs';",
+            "exports.load = () => require('external-pkg');",
+            "",
+            "cannot require external",
         ),
         (
-            "parts/lazy.cjs",
-            "exports.value = 1;",
-            "export const load = name => import(`./parts/${name}.cjs`);",
-            "CommonJS",
+            "export {default} from './api.cjs';",
+            "exports.load = () => require('./leaf.mjs');",
+            "await 0; export const value = 1;",
+            "async",
+        ),
+        (
+            "import './leaf.mjs'; export {default} from './api.cjs';",
+            "exports.load = () => require('./leaf.mjs');",
+            "console.log('leaf'); export let value = 1;",
+            "native static/dynamic",
+        ),
+        (
+            "export {default} from './api.cjs';",
+            "exports.load = () => require('./leaf.mjs');",
+            "import './other.mjs'; export let value = 1;",
+            "dependency-free leaf",
         ),
     ] {
         let dir = TmpDir::new();
-        write(dir.root(), file, source);
         write(dir.root(), "main.mjs", entry);
+        write(dir.root(), "api.cjs", source);
+        write(dir.root(), "leaf.mjs", extra);
+        write(dir.root(), "other.mjs", "export {};");
+        let mut config = browser_options();
+        config.externals.insert("external-pkg".into());
         let error = BuildSession::new(dir.root())
             .unwrap()
-            .build(&browser_options())
+            .build(&config)
             .err()
-            .unwrap();
+            .expect("unsupported boundary");
         assert!(format!("{error:#}").contains(diagnostic), "{error:#}");
     }
+}
+
+#[test]
+fn browser_require_pure_esm_leaf_shares_native_live_namespace() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import api from './api.cjs';
+import * as ns from './leaf.mjs';
+import json from './data.json';
+import asset from './image.svg';
+import style from './style.css';
+export {api, ns, json, asset, style};
+export const load = () => import('./leaf.mjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "api.cjs",
+        r#"
+exports.load = () => require('./leaf.mjs');
+exports.json = () => require('./data.json');
+exports.asset = () => require('./image.svg');
+exports.style = () => require('./style.css');
+"#,
+    );
+    write(
+        dir.root(),
+        "leaf.mjs",
+        "export let value = 1; export const bump = () => value++;",
+    );
+    write(dir.root(), "data.json", r#"{"nested":{"value":1}}"#);
+    write(dir.root(), "image.svg", "<svg/>");
+    write(dir.root(), "style.css", "body { color: red }");
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&browser_options())
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+const {api, ns, json, asset, style, load} = await import('./main.mjs');
+if (ns !== api.load() || ns !== await load()) throw new Error('native namespace identity');
+ns.bump();
+if (api.load().value !== 2) throw new Error('live binding');
+if (api.json() !== json) throw new Error('JSON identity');
+json.nested.value = 7;
+if (api.json().nested.value !== 7) throw new Error('JSON mutation');
+if (api.asset() !== asset || api.style() !== style) throw new Error('resource defaults');
+console.log('shared');
+"#
+        ),
+        b"shared\n"
+    );
+}
+
+#[test]
+fn browser_commonjs_late_facades_use_captured_intrinsics() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import api from './api.cjs';
+export {api};
+export const load = () => import('./late.cjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "api.cjs",
+        "exports.load = () => require('./late.cjs');",
+    );
+    write(dir.root(), "late.cjs", "exports.value = 7;");
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&browser_options())
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+const entry = await import('./main.mjs');
+const originals = [Object.create, Object.defineProperty, Object.getOwnPropertyNames, Object.freeze, Object.assign, Reflect.apply];
+const fail = () => { throw new Error('uncaptured intrinsic'); };
+Object.create = Object.defineProperty = Object.getOwnPropertyNames = Object.freeze = Object.assign = Reflect.apply = fail;
+const value = entry.api.load();
+const ns = await entry.load();
+[Object.create, Object.defineProperty, Object.getOwnPropertyNames, Object.freeze, Object.assign, Reflect.apply] = originals;
+if (ns.value !== 7 || ns.default !== value) throw new Error('identity');
+console.log('intrinsics');
+"#
+        ),
+        b"intrinsics\n"
+    );
+}
+
+#[test]
+fn browser_commonjs_failed_dynamic_job_stays_failed_while_require_retries() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import api from './api.cjs';
+export {api};
+export const load = () => import('./retry.cjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "api.cjs",
+        "exports.load = () => require('./retry.cjs');",
+    );
+    write(
+        dir.root(),
+        "retry.cjs",
+        r#"
+globalThis.attempts = (globalThis.attempts || 0) + 1;
+if (globalThis.attempts === 1) throw new Error('first');
+exports.value = 7;
+"#,
+    );
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&browser_options())
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+const entry = await import('./main.mjs');
+let first;
+try { await entry.load(); } catch (error) { first = error; }
+if (!first || first.message !== 'first') throw new Error('dynamic failure');
+if (entry.api.load().value !== 7 || globalThis.attempts !== 2) throw new Error('require retry');
+try { await entry.load(); throw new Error('unexpected retry'); }
+catch (error) { if (error !== first) throw error; }
+console.log('cached failure');
+"#
+        ),
+        b"cached failure\n"
+    );
+}
+
+#[test]
+fn browser_require_css_auto_mount_keeps_synchronous_activation_and_url_relocation() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "export {default} from './api.cjs';");
+    write(
+        dir.root(),
+        "api.cjs",
+        "exports.load = () => require('./style.css');",
+    );
+    write(dir.root(), "style.css", "body { color: red }");
+    let mut config = browser_options();
+    config.css.load = CssLoad::AutoMount;
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/main.mjs".into());
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    assert_eq!(
+        observe_named(
+            &result.product.artifacts,
+            r#"
+const events = [];
+globalThis.document = {
+  createElement() { return {}; },
+  head: {appendChild(link) {
+    if (!link.href.startsWith(new URL('./assets/', import.meta.url).href)) throw new Error('URL');
+    events.push(link.href);
+  }}
+};
+const {default: api} = await import('./nested/main.mjs');
+if (events.length) throw new Error('eager CSS');
+const ns = api.load();
+if (events.length !== 1 || ns.default !== events[0] || api.load() !== ns) throw new Error('CSS activation');
+console.log('CSS');
+"#
+        ),
+        b"CSS\n"
+    );
+}
+
+/// Optional real-engine check: no browser download and no Node loader in the page.
+#[test]
+fn browser_commonjs_runs_in_firefox() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let Some(browser) = std::env::var_os("BUNDLER_TEST_FIREFOX") else {
+        eprintln!("BUNDLER_TEST_FIREFOX is unset; real-browser check skipped");
+        return;
+    };
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        r#"
+import api from './api.cjs';
+export {api};
+export const dynamic = () => import('./lazy.cjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "api.cjs",
+        r#"
+exports.load = () => require('./lazy.cjs');
+exports.context = name => require(`./parts/${name()}.cjs`);
+exports.leaf = () => require('./leaf.mjs');
+exports.pure = () => require('./pure.mjs');
+exports.json = () => require('./data.json');
+exports.stub = () => require('fs');
+exports.esmStub = () => require('node:fs');
+exports.child = () => require('./child.cjs');
+exports.cycle = () => require('./a.cjs');
+exports.retry = () => require('./retry.cjs');
+"#,
+    );
+    write(
+        dir.root(),
+        "lazy.cjs",
+        "events.push('lazy'); module.exports = {value: 7};",
+    );
+    write(
+        dir.root(),
+        "parts/a.cjs",
+        "events.push('context'); exports.value = 8;",
+    );
+    write(
+        dir.root(),
+        "a.cjs",
+        "exports.early = 1; exports.b = require('./b.cjs'); exports.done = 2;",
+    );
+    write(dir.root(), "b.cjs", "exports.early = require('./a.cjs').early; exports.partial = require('./a.cjs').done === undefined;");
+    write(
+        dir.root(),
+        "retry.cjs",
+        "if (!globalThis.attempts++) throw new Error('retry'); exports.ok = true;",
+    );
+    write(
+        dir.root(),
+        "leaf.mjs",
+        "events.push('leaf'); export let value = 1; export const bump = () => value++;",
+    );
+    write(dir.root(), "pure.mjs", "export const value = 1;");
+    write(dir.root(), "data.json", r#"{"value":1}"#);
+    write(
+        dir.root(),
+        "stub.cjs",
+        "events.push('stub'); module.exports = require('./stub-value.cjs');",
+    );
+    write(dir.root(), "stub-value.cjs", "exports.value = 9;");
+    write(dir.root(), "stub.mjs", "export const value = 10;");
+    write(
+        dir.root(),
+        "child.cjs",
+        r#"
+exports.leaf = require('./leaf.mjs');
+exports.pure = require('./pure.mjs');
+exports.json = require('./data.json');
+exports.stub = require('fs');
+exports.esmStub = require('node:fs');
+"#,
+    );
+    let mut config = browser_options();
+    config.resolver.alias.insert("fs".into(), "./stub.cjs".into());
+    config
+        .resolver
+        .alias
+        .insert("node:fs".into(), "./stub.mjs".into());
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_browser_transport(&result.product.artifacts);
+    let html = r#"<!doctype html><script type="module">
+try {
+  if (typeof require !== 'undefined' || typeof module !== 'undefined') throw Error('host loader');
+  globalThis.events = []; globalThis.attempts = 0;
+  const entry = await import('/main.mjs');
+  if (events.length) throw Error('eager');
+  const value = entry.api.load();
+  if (value.value !== 7 || (await entry.dynamic()).default !== value) throw Error('identity');
+  let calls = 0;
+  if (entry.api.context(() => { calls++; return 'a'; }).value !== 8 || calls !== 1) throw Error('context');
+  try { entry.api.context(() => 'missing'); throw Error('miss'); }
+  catch (e) { if (e.code !== 'MODULE_NOT_FOUND') throw e; }
+  const cycle = entry.api.cycle();
+  if (cycle.b.early !== 1 || !cycle.b.partial || cycle.done !== 2) throw Error('cycle');
+  try { entry.api.retry(); throw Error('unexpected'); } catch (e) { if (e.message !== 'retry') throw e; }
+  if (!entry.api.retry().ok || attempts !== 2) throw Error('retry cache');
+  const leaf = entry.api.leaf(); leaf.bump();
+  if (leaf.value !== 2 || leaf !== entry.api.leaf()) throw Error('live ESM');
+  const pure = entry.api.pure(), json = entry.api.json(), stub = entry.api.stub(), esmStub = entry.api.esmStub();
+  const child = entry.api.child();
+  if (child.leaf !== leaf || child.leaf.value !== 2 || child.pure !== pure || pure.value !== 1) throw Error('shared ESM');
+  if (child.json !== json || json.value !== 1) throw Error('shared JSON');
+  json.value = 2;
+  if (child.json.value !== 2) throw Error('JSON mutation');
+  if (child.stub !== stub || stub.value !== 9 || child.esmStub !== esmStub || esmStub.value !== 10) throw Error('explicit stubs');
+  if (events.join() !== 'lazy,context,leaf,stub') throw Error('timing/once');
+  await fetch('/result?ok');
+} catch (error) { await fetch('/result?' + encodeURIComponent(error.stack || error)); }
+</script>"#;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let profile = TmpDir::new();
+    let mut child = Command::new(browser)
+        .args(["--headless", "--no-remote", "--profile"])
+        .arg(profile.root())
+        .arg(format!("http://{}/", listener.local_addr().unwrap()))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(45);
+    let mut report = None;
+    while Instant::now() < deadline && child.try_wait().unwrap().is_none() {
+        let Ok((mut stream, _)) = listener.accept() else {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = [0; 8192];
+        let Ok(count) = stream.read(&mut request) else {
+            continue;
+        };
+        let request = String::from_utf8_lossy(&request[..count]);
+        let path = request.split_whitespace().nth(1).unwrap_or("/");
+        let (mime, body) = if path == "/" {
+            ("text/html", html)
+        } else if let Some(message) = path.strip_prefix("/result?") {
+            report = Some(message.to_owned());
+            ("text/plain", "received")
+        } else {
+            (
+                "text/javascript",
+                result
+                    .product
+                    .artifacts
+                    .files
+                    .get(Path::new(path.trim_start_matches('/')))
+                    .map(String::as_str)
+                    .unwrap_or(""),
+            )
+        };
+        let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        if report.is_some() {
+            break;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_eq!(
+        report.as_deref(),
+        Some("ok"),
+        "Firefox did not confirm browser execution: {report:?}"
+    );
 }
 
 fn assert_browser_artifacts(artifacts: &Artifacts) {
