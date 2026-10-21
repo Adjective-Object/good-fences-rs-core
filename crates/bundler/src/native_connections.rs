@@ -72,7 +72,10 @@ pub(super) fn name_plan(
             symbols,
             owners,
             owner,
-            definitions.get(&owner).map(Vec::as_slice).unwrap_or_default(),
+            definitions
+                .get(&owner)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
         )?;
         let mut occupied: BTreeSet<_> = locals.values().cloned().collect();
         occupied.extend(defaults.defaults.values().cloned());
@@ -81,13 +84,16 @@ pub(super) fn name_plan(
                 occupied.insert(definition.name.clone());
             }
         }
-        let mut files: Vec<_> = owners
+        let owner_files: BTreeSet<_> = owners
             .iter()
             .filter_map(|(key, &assigned)| (assigned == owner).then_some(key.file_id))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
             .collect();
-        files.sort_by_key(|&file| graph.file_path(file));
+        let files: Vec<_> = prepared
+            .files
+            .iter()
+            .copied()
+            .filter(|file| owner_files.contains(file))
+            .collect();
         for &file in &files {
             let facts = &modules[&file].parsed.facts();
             occupied.extend(
@@ -125,7 +131,8 @@ pub(super) fn name_plan(
                 if target == Some(owner) && !(binding.import() && written) {
                     continue;
                 }
-                let alias = if let Some(definition) = symbols.definitions.get(&(file, binding.id())) {
+                let alias = if let Some(definition) = symbols.definitions.get(&(file, binding.id()))
+                {
                     definition.name.clone()
                 } else if occupied.insert(binding.name().to_owned()) {
                     binding.name().to_owned()
@@ -233,9 +240,16 @@ impl Connections {
                 .evaluation
                 .entry(Owner::Evaluation(file))
                 .or_default();
-            for dependency in modules[&file].parsed.facts().dependencies().iter().filter(|d| {
-                !d.type_only() && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
-            }) {
+            for dependency in modules[&file]
+                .parsed
+                .facts()
+                .dependencies()
+                .iter()
+                .filter(|d| {
+                    !d.type_only()
+                        && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                })
+            {
                 if let Some(DependencyTarget::External(specifier)) =
                     graph.dependency_target(file, dependency.id())
                 {
@@ -587,7 +601,8 @@ impl Connections {
                         }
                     }
                 };
-                self.native_requests.insert((file, dependency.id()), request);
+                self.native_requests
+                    .insert((file, dependency.id()), request);
             }
         }
         Ok(())
