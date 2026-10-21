@@ -1,0 +1,105 @@
+# Typed source-cache FlatBuffers
+
+**Integration foundation, not the completed production cache migration.**
+`segment_cache` still uses schema 12/extractor 14 and `.seg.cbor`. This crate is
+not currently a dependency of `segment_cache`, `ast-segmenter`, or `ecco`.
+No existing cache hit is made zero-copy by this addition alone.
+
+## Schema coverage
+
+The schemas in the repository's `flatbuffers` directory represent the complete
+persisted record shape, rather than embedding CBOR bytes:
+
+| Schema | Persisted records represented |
+| --- | --- |
+| `common.fbs` | `ParserConfig`; fixed-width spans, SHA-256, declaration fingerprints; optional IDs without sentinel collisions |
+| `ecco.fbs` | `HazardFields`, `Update`, `Definition`, `LocalFacts`, `GlobalSymbol`, `FunctionSignature`, `CallResult`, `OwnedFunction`, `ParsedSymbol`, `ExternalReference`, `ParsedRoot`, `ParsedValue`, `DefinitionMatch`, `ParsedFile` |
+| `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `EmissionFacts`, `ModuleFacts` |
+| `module.fbs` | `CachedModule`, ESM/CommonJS body alternatives, ordered statement spans |
+| `cache.fbs` | `SourceProvenance`, `CacheRecord` |
+
+This covers the 40 persisted record types, plus explicit union alternatives for
+imports, exports, callees, namespace accesses, operations, export forms, chain
+steps, Ecco bindings, recursive hazard expressions, arguments, returns, and all
+13 Ecco instruction variants. `MultiSpan` uses a checked one-to-four span vector.
+Interpreter-local `usize` identities use explicit `ulong` fields; source-local
+byte offsets remain `uint`. Ecco effect sources use strictly increasing keys.
+Declaration fingerprints retain their 16-byte representation, not a new hash.
+
+## Buffer format and read guarantees
+
+The proposed `.seg.fb` format is a size-prefixed `CacheRecord` FlatBuffer (`GFSC`)
+followed by a 32-byte SHA-256 of the entire size-prefixed record. Its `module`
+vector contains a **typed `CachedModule` FlatBuffer** (`GFSM`). Nesting enables
+an exact immutable module-byte extraction seal without serializing the facts
+again during provenance verification. It is not a CBOR envelope.
+
+`WireRecord::new` bounds the complete record to 16 MiB, verifies the checksum,
+size prefix, identifier, schema/extractor/parser identities, source hash/length,
+configuration, and extraction module digest. Both roots independently receive
+FlatBuffers runtime verification with bounded depth, tables, and apparent size.
+A borrowed traversal then rejects unknown enum/union discriminants, absent union
+values, invalid MultiSpan lengths, duplicate hazard fields, and unordered/duplicate
+effect-map keys. No object API `unpack` is called.
+
+The owner retains only an `Arc<[u8]>`, a payload endpoint and the verified module
+range. Views borrow the owner; cloning it only shares bytes. Two small documented
+unchecked-root calls reuse the already verified immutable roots. There is no
+lifetime transmute or self-referential storage. Tests prove that nested string
+pointers address this allocation and remain identical across thread-shared clones.
+
+**This is not yet the complete source-local semantic validator.** Span UTF-8
+boundaries, ID/link/occurrence coverage, ordering, operation-parent rules,
+execution contexts, supported recipes and Ecco semantic bounds must be checked
+through byte-backed views before integrating this owner into production.
+
+The reserved wire constants are schema 13/extractor 15; they do not change the
+currently active production identity. The production migration still needs:
+
+- Owned extraction-to-wire construction and private provenance sealing.
+- Owned/borrowed read facades for AST/Ecco consumers without recursively cloning
+  or unpacking cache trees in validation, `to_parsed`, graph creation, or emission.
+- Replacement of production CBOR encode/decode and obsolete preflight logic.
+- `.seg.fb` publication and inventory integration, with old `.seg.cbor` misses.
+- Actual-source cold/warm/parallel/incremental differential and performance tests.
+
+Existing Serde and CBOR uses remain untouched because production integration is
+not complete. Serde in this new crate's handwritten wire path is not used.
+
+## Regeneration
+
+Compiler **flatc 25.2.10**, runtime **flatbuffers = "=25.2.10"**.
+Generated Rust is checked into `src/cache_generated.rs`; ordinary Cargo builds
+neither invoke flatc nor download it. The optional object API is for construction.
+
+From the repository root, using the official `google/flatbuffers` release
+`v25.2.10` Windows compiler:
+
+```powershell
+$env:FLATC = 'C:\path\to\flatbuffers-tools\flatc.exe'
+.\scripts\generate-cache-flatbuffers.ps1
+```
+
+The script checks the exact compiler version and executes:
+
+```text
+flatc --rust --gen-all --gen-object-api -o crates\cache_flatbuffers\src flatbuffers\cache.fbs
+```
+
+The downloaded official `Windows.flatc.binary.zip` used for this output has SHA-256
+`bd9b3cb6bf5ab8009f1927b6e00207db968c3d5c93e3bc215dae084cc681249a`.
+No compiler installation or global configuration change is required.
+
+Focused validation:
+
+```text
+cargo test -p cache_flatbuffers
+cargo clippy -p cache_flatbuffers --all-targets -- -D warnings
+```
+
+Tests cover borrowed reads, immutable sharing, optional zero IDs, every union
+family, recursive contracts, ESM/CJS separation, stale identities, source/config
+and extraction-seal mismatches, corrupted/truncated roots and vectors, legacy
+non-FlatBuffer data, size/depth limits, unknown discriminants and ordered maps.
+Synthetic wire-shape tests are not a substitute for executable cache integration
+tests.

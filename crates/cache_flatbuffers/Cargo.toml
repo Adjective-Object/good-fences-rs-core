@@ -1,0 +1,10 @@
+[package]
+name = "cache_flatbuffers"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+eyre = { workspace = true }
+flatbuffers = "=25.2.10"
+sha2 = "0.10"
