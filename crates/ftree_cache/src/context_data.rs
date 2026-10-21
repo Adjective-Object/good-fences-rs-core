@@ -105,7 +105,7 @@ where
 }
 
 fn unsafe_map_unwrap_locked_option<T>(
-    readonly_lock: RwLockReadGuard<Option<T>>,
+    readonly_lock: RwLockReadGuard<'_, Option<T>>,
 ) -> MappedRwLockReadGuard<'_, T> {
     RwLockReadGuard::<Option<T>>::map(readonly_lock, |x: &Option<T>| -> &T { x.as_ref().unwrap() })
 }
