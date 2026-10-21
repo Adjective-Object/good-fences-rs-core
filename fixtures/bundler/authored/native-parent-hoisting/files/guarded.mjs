@@ -1,0 +1,1 @@
+trace.push('guarded');

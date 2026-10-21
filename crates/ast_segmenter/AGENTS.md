@@ -102,3 +102,5 @@ belong to the callable, computed/static class work to the surrounding context.
 Eager reads/writes share this classifier; unproven calls never establish purity.
 Resolve effect timing from its recorded deferred context by exact span identity,
 never operand containment; callable heritage/key operands do not defer their owners.
+Dynamic namespace observations inspect alias references by binding identity;
+persist syntax shapes/receiver and `this` facts, never target safety or placement.

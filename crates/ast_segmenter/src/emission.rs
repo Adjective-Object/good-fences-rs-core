@@ -12,6 +12,9 @@ use crate::owned::{BindingId, DependencyId, ExportValue, ModuleFacts};
 #[path = "emission_tests.rs"]
 mod tests;
 
+#[path = "dynamic_namespace.rs"]
+mod dynamic_namespace;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmissionFacts {
     pub execution: crate::execution::ExecutionFacts,
@@ -19,6 +22,17 @@ pub struct EmissionFacts {
     pub segments: Vec<SegmentRecipe>,
     pub nested_bindings: Vec<BindingId>,
     pub free_references: Vec<u32>,
+    pub dynamic_namespaces: Vec<DynamicNamespace>,
+    pub uses_this: bool,
+}
+
+/// Syntax observations only; the linker must still check the target's surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicNamespace {
+    pub dependency: DependencyId,
+    /// None includes escaping promises/namespaces and reflective or writable uses.
+    /// Each property records whether a call uses the namespace as its receiver.
+    pub properties: Option<Vec<(String, bool)>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,8 +368,11 @@ pub(crate) fn extract(
             });
         }
     }
+    let (dynamic_namespaces, uses_this) = dynamic_namespace::extract(program, facts);
     let mut result = EmissionFacts {
         execution: crate::execution::extract(program, facts),
+        dynamic_namespaces,
+        uses_this,
         nested_bindings: facts
             .bindings
             .iter()

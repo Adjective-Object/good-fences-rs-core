@@ -839,6 +839,23 @@ ModuleFacts {
         ],
         nested_bindings: [],
         free_references: [],
+        dynamic_namespaces: [
+            DynamicNamespace {
+                dependency: DependencyId(
+                    384,
+                ),
+                properties: None,
+            },
+            DynamicNamespace {
+                dependency: DependencyId(
+                    404,
+                ),
+                properties: Some(
+                    [],
+                ),
+            },
+        ],
+        uses_this: false,
     },
     bindings: [
         Binding {

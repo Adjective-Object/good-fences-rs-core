@@ -21,10 +21,143 @@ pub(super) fn emit(
     if !placements.is_empty() {
         return chunks::emit_activated(graph, plan, modules, manifest, symbols, placements);
     }
+    let placements = single_parent(graph, plan, modules, symbols)?;
+    if !placements.is_empty() {
+        return chunks::emit_activated(graph, plan, modules, manifest, symbols, &placements);
+    }
+    ordinary(graph, plan, modules, manifest, symbols)
+}
+
+fn ordinary(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    manifest: &DiagnosticManifest,
+    symbols: &Symbols,
+) -> eyre::Result<Artifacts<Code>> {
     if let Some(output) = single(graph, plan, modules, manifest, symbols, None)? {
         return Ok(output);
     }
     chunks::emit(graph, plan, modules, manifest, symbols)
+}
+
+fn single_parent(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    symbols: &Symbols,
+) -> eyre::Result<BTreeMap<u32, u32>> {
+    let mut incoming = BTreeMap::<u32, Vec<(u32, &Dependency)>>::new();
+    for (&file, module) in modules {
+        for dependency in module
+            .parsed
+            .facts
+            .dependencies
+            .iter()
+            .filter(|d| !d.type_only)
+        {
+            if dependency.kind == DependencyKind::DynamicImport
+                && !plan.roots.contains_key(&RootId::Async(AsyncSiteId {
+                    module: graph.file_path(file).unwrap().to_owned(),
+                    offset: dependency.id.0,
+                    candidate: None,
+                }))
+                && dependency.pattern.is_none()
+            {
+                continue;
+            }
+            for target in target_files(graph, file, dependency)? {
+                incoming.entry(target).or_default().push((file, dependency));
+            }
+        }
+    }
+    let mut candidates: Vec<_> = incoming.keys().copied().collect();
+    candidates.sort_by_key(|&file| graph.file_path(file));
+    let mut placements = BTreeMap::new();
+    for target in candidates {
+        let uses = &incoming[&target];
+        let parent = uses[0].0;
+        if target == parent
+            || uses.iter().any(|(file, dependency)| {
+                *file != parent
+                    || dependency.kind != DependencyKind::DynamicImport
+                    || dependency.pattern.is_some()
+            })
+        {
+            continue;
+        }
+        // Include the complete static island, not just the namespace's body.
+        let mut island = BTreeSet::new();
+        let mut pending = vec![target];
+        while let Some(file) = pending.pop() {
+            if !island.insert(file) {
+                continue;
+            }
+            let Some(module) = modules.get(&file) else {
+                continue;
+            };
+            for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
+                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            }) {
+                pending.extend(target_files(graph, file, dependency)?);
+            }
+        }
+        if island.contains(&parent)
+            || island.iter().any(|file| {
+                !modules.contains_key(file)
+                    || modules[file].parsed.facts.emission.uses_this
+                    || incoming.get(file).is_some_and(|uses| {
+                        uses.iter().any(|(consumer, dependency)| {
+                            !island.contains(consumer)
+                                && (*file != target
+                                    || *consumer != parent
+                                    || dependency.kind != DependencyKind::DynamicImport)
+                        })
+                    })
+            })
+            || uses.iter().any(|(file, dependency)| {
+                let facts = &modules[file].parsed.facts;
+                let Some(properties) = facts
+                    .emission
+                    .dynamic_namespaces
+                    .iter()
+                    .find(|n| n.dependency == dependency.id)
+                    .and_then(|n| n.properties.as_ref())
+                else {
+                    return true;
+                };
+                properties.iter().any(|(name, receiver)| {
+                    let Some(export) = symbols.exports[&target].get(name) else {
+                        return true;
+                    };
+                    *receiver
+                        && match export.identity {
+                            ExportIdentity::Binding(file, id) => {
+                                let facts = &modules[&file].parsed.facts;
+                                !facts.bindings.iter().any(|b| b.id == id && b.function)
+                                    || facts
+                                        .references
+                                        .iter()
+                                        .any(|r| r.binding == Some(id) && r.write && !r.type_only)
+                            }
+                            _ => true,
+                        }
+                })
+            })
+        {
+            continue;
+        }
+        let candidate: BTreeMap<_, _> = island.iter().map(|&file| (file, parent)).collect();
+        if Activations::checked(graph, plan, modules, symbols, &candidate)?.is_none() {
+            continue;
+        }
+        let mut combined = placements.clone();
+        combined.extend(candidate);
+        if Activations::checked(graph, plan, modules, symbols, &combined)?.is_some() {
+            placements = combined;
+        }
+    }
+    Ok(placements)
 }
 
 #[derive(Clone)]

@@ -16,6 +16,12 @@ Recipes also retain syntax-only deferred reconstruction alternatives: named root
 functions, simple identifier variables with composed original initializer slots,
 effect statements, or unsupported syntax. Scheduling/eligibility and chosen
 names remain linker decisions, never cached policy.
+`facts.emission.dynamic_namespaces` records conservative AST observations for
+each dynamic import: supported static property reads/call receivers, simple
+destructuring or discarded results, versus escaping/reflective/writable uses.
+Alias references are checked by binding identity, including nested uses.
+`uses_this` records source syntax for conservative receiver eligibility.
+Target export surfaces, retention and placement remain linker decisions.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
 

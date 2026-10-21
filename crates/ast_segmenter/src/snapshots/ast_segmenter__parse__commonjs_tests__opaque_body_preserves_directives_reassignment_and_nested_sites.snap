@@ -129,6 +129,17 @@ ModuleFacts {
             5,
             8,
         ],
+        dynamic_namespaces: [
+            DynamicNamespace {
+                dependency: DependencyId(
+                    187,
+                ),
+                properties: Some(
+                    [],
+                ),
+            },
+        ],
+        uses_this: false,
     },
     bindings: [
         Binding {

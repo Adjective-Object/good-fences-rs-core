@@ -1,0 +1,22 @@
+{
+  "id": "authored/native-parent-hoisting",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": [
+      "before 0",
+      "pending 0",
+      "value 1 2 true true",
+      "empty done",
+      "failure true true true",
+      "trace shared,z,a,child,failure"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored portable contract for automatic single-parent deferred ESM placement; no upstream source is copied.",
+    "Multiple dynamic sites share live state, private captures and stable function identity without eager or guarded activation.",
+    "A static dependency diamond initializes in source order before the child; empty targets and thrown undefined remain once-only.",
+    "Rust public-build ownership assertions separately prove removal of child artifacts and fetches."
+  ]
+}
