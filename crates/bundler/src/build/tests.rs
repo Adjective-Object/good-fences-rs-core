@@ -272,9 +272,10 @@ fn single_parent_build_session_uses_cached_observations_and_final_output_ownersh
     assert_eq!(
         observe_named(
             &external.product.artifacts,
-            "const entry = await import('./nested/start.mjs'); console.log(await entry.load());"
+            "import assert from 'node:assert/strict'; import {sep} from 'node:path'; \
+             const entry = await import('./nested/start.mjs'); assert.equal(await entry.load(), sep);"
         ),
-        b"/\n"
+        b""
     );
 }
 

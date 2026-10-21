@@ -8,6 +8,7 @@ pub(super) struct Placement {
     pub owners: BTreeMap<SegmentKey, Owner>,
     pub names: BTreeMap<Owner, connections::OwnerNames>,
     schedules: BTreeMap<Owner, Vec<SegmentKey>>,
+    prefixes: BTreeSet<SegmentKey>,
     pub(super) phase_dependencies: BTreeMap<Owner, BTreeSet<Owner>>,
 }
 
@@ -100,17 +101,8 @@ impl Placement {
         prepared: &PreparedValues<'_>,
         seams: &BTreeMap<u32, u32>,
     ) -> eyre::Result<()> {
-        let prefixes = self
-            .phase_dependencies
-            .values()
-            .flatten()
-            .filter_map(|owner| match owner {
-                Owner::Bindings(key) => Some(*key),
-                Owner::Evaluation(_) => None,
-            })
-            .collect();
         let mut scheduled =
-            Self::scheduled(graph, plan, modules, self.owners.clone(), &prefixes)?;
+            Self::scheduled(graph, plan, modules, self.owners.clone(), &self.prefixes)?;
         let definitions = partition_definitions(graph, prepared, &scheduled.owners)?;
         scheduled.names = connections::name_plan(graph, plan, modules, prepared, &scheduled.owners, seams, &definitions)?;
         *self = scheduled;
@@ -796,7 +788,12 @@ impl Placement {
                             && matches!(owners[&constraint.before], Owner::Bindings(_))
                             && owners[&constraint.after]
                                 == Owner::Evaluation(constraint.after.file_id),
-                        "mandatory execution component crosses unchecked native owners"
+                        "mandatory execution component crosses unchecked native owners: {:?} ({:?}, prefix={}) -> {:?} ({:?})",
+                        constraint.before,
+                        owners[&constraint.before],
+                        prefixes.contains(&constraint.before),
+                        constraint.after,
+                        owners[&constraint.after],
                     );
                     continue;
                 }
@@ -862,6 +859,7 @@ impl Placement {
             owners,
             names: BTreeMap::new(),
             schedules,
+            prefixes: prefixes.clone(),
             phase_dependencies,
         })
     }
