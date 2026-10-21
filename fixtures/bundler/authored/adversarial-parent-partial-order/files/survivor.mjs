@@ -1,2 +1,3 @@
+import {value as seed} from './seed.mjs';
 trace.push('survivor');
-export const value = 11;
+export const value = seed + 4;

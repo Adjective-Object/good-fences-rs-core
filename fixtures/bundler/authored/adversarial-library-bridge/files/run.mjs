@@ -10,6 +10,7 @@ export async function run(reverse) {
   let first;
   for (let i = 0; i < loaders.length; i++) {
     const result = await loaders[i]();
+    if (result.some(item => item.identity === null || typeof item.identity !== 'object')) throw new Error('identity erased');
     if (i === 0) first = result[0];
     console.log(labels[i], trace.join(','), result.map(item => item.count).join(':'));
   }

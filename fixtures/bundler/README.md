@@ -73,10 +73,10 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **45 cases / 61 entry executions**: six esbuild cases,
-six rspack cases and thirty-three authored cases. Four authored CSS cases and
-one generated-async case use output observations; the 40 ordinary JS cases /
-56 executions remain differential.
+The corpus contains **65 cases / 83 entry executions**: six esbuild cases,
+six rspack cases and fifty-three authored cases. Four authored CSS cases and
+seven generated-async cases use output observations; the 54 ordinary JS cases /
+72 executions remain differential.
 The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
@@ -101,6 +101,11 @@ dependency order, guarded uses, live identity, empty targets and cached failures
 The library-clustering contract explicitly enables a byte target and covers
 different overlapping async masks, no co-activation, shared identity/live state
 and cached undefined failures; Rust ownership tests verify actual merging.
+Twenty adversarial cases extend parent-hoisting, library-clustering and
+generated-boundary coverage. Public-driver tests assert actual segment-owner
+changes for the five transforming library cases and unchanged native placement
+for their two explicit fallback cases. Identity checks require real objects or
+functions, not merely equality between potentially missing values.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -199,7 +204,7 @@ Node syntax checks; build failures are never accepted as runtime failures.
 
 The only accepted `backend` requirement is `"native"`. The runner checks the
 actual production selection and reports a backend failure if such a case falls
-back to legacy. All forty-two current cases require native. Legacy reporting and
+back to legacy. All sixty-five current cases require native. Legacy reporting and
 rejection remain useful when testing older driver binaries; production emission
 has no legacy backend.
 
