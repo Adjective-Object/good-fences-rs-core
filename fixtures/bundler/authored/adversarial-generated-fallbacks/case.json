@@ -1,0 +1,12 @@
+{
+  "id": "authored/adversarial-generated-fallbacks",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"synthesize_async_boundaries": true, "min_chunk_bytes": 100000}},
+  "outputObservation": "observe.mjs",
+  "expectations": {"stdout": ["fallbacks: sync callback, escape, capture, optional, public"], "backend": "native"},
+  "goals": [
+    "Retain synchronous callback consumers, eager function escapes, captures, optional calls and public functions as native fallbacks.",
+    "Retain eager effects beside an independently eligible private declaration."
+  ]
+}

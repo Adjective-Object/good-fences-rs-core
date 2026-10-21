@@ -1,0 +1,10 @@
+globalThis.trace = [];
+console.log('cold', trace.length);
+const {read: a} = await import('./root-a.mjs');
+const first = a();
+console.log('a', trace.join(','), ...first.slice(1));
+const {read: b} = await import('./root-b.mjs');
+const both = b();
+console.log('b', trace.join(','), first[0] === both[0], ...both.slice(2));
+const {read: c} = await import('./root-c.mjs');
+console.log('c', trace.join(','), both[1] === c());

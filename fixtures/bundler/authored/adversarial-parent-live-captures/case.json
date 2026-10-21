@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-live-captures",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["cold 0", "initial 1 1 true true true", "mutated 5 5 5 true true", "repeat 5 5 true true child"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored live-alias and root-function capture contract; no upstream source copied.",
+    "Deferred initialization preserves multiple exported aliases, stable root functions and private object captures.",
+    "Concurrent and later original dynamic imports share mutable state and identity without eager initialization."
+  ]
+}

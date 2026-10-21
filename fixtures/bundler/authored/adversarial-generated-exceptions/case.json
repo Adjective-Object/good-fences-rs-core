@@ -1,0 +1,12 @@
+{
+  "id": "authored/adversarial-generated-exceptions",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"synthesize_async_boundaries": true, "min_chunk_bytes": 0}},
+  "outputObservation": "observe.mjs",
+  "expectations": {"stdout": ["exceptions: undefined, object identity, awaited finally"], "backend": "native"},
+  "goals": [
+    "Preserve thrown undefined and object identity through generated references and original await.",
+    "Execute catch/finally effects once in causal order, including finally replacing a completion."
+  ]
+}

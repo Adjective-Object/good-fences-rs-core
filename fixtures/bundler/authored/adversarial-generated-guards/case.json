@@ -1,0 +1,12 @@
+{
+  "id": "authored/adversarial-generated-guards",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"synthesize_async_boundaries": true, "min_chunk_bytes": 100000}},
+  "outputObservation": "observe.mjs",
+  "expectations": {"stdout": ["guards: cold branches, exact values, shorthand identity"], "backend": "native"},
+  "goals": [
+    "Keep &&, ||, ?? and ternary guards cold and preserve their non-boolean values.",
+    "Retain shorthand property spelling and function identity under generous same-source clustering."
+  ]
+}

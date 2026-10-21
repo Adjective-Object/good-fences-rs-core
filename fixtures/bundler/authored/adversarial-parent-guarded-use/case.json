@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-guarded-use",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["cold false 0", "saved 0", "first 12 enter,child,call:4,finally", "caught TypeError enter,call:0,finally", "again 6 enter,call:2,finally"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored guarded and delayed original-import contract; no upstream source copied.",
+    "Cold short-circuit paths and merely saving an async function must not initialize its deferred target.",
+    "Original argument values, synchronous callee throws and surrounding finally effects survive repeated deferred uses."
+  ]
+}

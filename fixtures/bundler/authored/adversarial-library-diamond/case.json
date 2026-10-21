@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-library-diamond",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"min_chunk_bytes": 65536}},
+  "expectations": {"backend": "native", "stdout": [
+    "cold 0", "left hub,left 1", "right hub,left,right 2", "both hub,left,right 4 true true", "live 4 4 4"
+  ]},
+  "goals": [
+    "Locally authored exact differential requiring the native backend.",
+    "A large explicit threshold clusters undersized left={a,b}, right={b,c}, hub={a,b,c} masks with a static diamond.",
+    "The hub initializes once, branch effects remain lazy, and retained closures and shared object identity observe subsequent live mutations."
+  ]
+}

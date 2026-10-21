@@ -1,0 +1,12 @@
+{
+  "id": "authored/adversarial-generated-sequencing",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"synthesize_async_boundaries": true, "min_chunk_bytes": 0}},
+  "outputObservation": "observe.mjs",
+  "expectations": {"stdout": ["sequencing: receiver, getters, iterator, nested await"], "backend": "native"},
+  "goals": [
+    "Preserve plain-call undefined receivers and argument/getter/spread iteration order across generated loads.",
+    "Keep nested original awaits and unrelated eager effects in their original causal order."
+  ]
+}

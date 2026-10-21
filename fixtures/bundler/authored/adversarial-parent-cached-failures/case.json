@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-cached-failures",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["cold 0", "undefined true true true 1", "null true true true 1", "object true true true 1", "reference true true true 1", "trace undefined,null,object,reference"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored adversarial parent-hoisting contract; no upstream source copied.",
+    "Concurrent and later imports cache all thrown values, including undefined, null, object identity and an ordinary user-thrown ReferenceError.",
+    "Repeated rejected imports must not repeat preceding effects or turn a non-Error failure into success."
+  ]
+}

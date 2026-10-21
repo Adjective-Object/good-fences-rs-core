@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-library-failure-cache",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"min_chunk_bytes": 65536}},
+  "expectations": {"backend": "native", "stdout": [
+    "cold 0", "x ReferenceError authored failure x", "good 17 x,good", "cached true true x,good", "y true true x,good,y", "still-good 17 x,good,y"
+  ]},
+  "goals": [
+    "Locally authored exact differential requiring native output and explicit 65536-byte small-island clustering.",
+    "Failed islands x={a,b}, y={b,c} and successful good={c,d} overlap without granting co-activation.",
+    "User-thrown ReferenceError is not the waived TDZ case; its object and thrown undefined are cached per failed module while unrelated initialization remains usable."
+  ]
+}

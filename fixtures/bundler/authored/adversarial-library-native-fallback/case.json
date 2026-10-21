@@ -1,0 +1,16 @@
+{
+  "id": "authored/adversarial-library-native-fallback",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"min_chunk_bytes": 65536}},
+  "expectations": {"backend": "native", "stdout": [
+    "cold 0", "a cycle-b,cycle-a,tla:start,tla:end,root-a A B 1 true",
+    "b cycle-b,cycle-a,tla:start,tla:end,root-a,root-b true 2",
+    "c cycle-b,cycle-a,tla:start,tla:end,root-a,root-b,root-c true 2"
+  ]},
+  "goals": [
+    "Locally authored native exact differential with an explicit large size threshold, deliberately covering conservative fallback rather than claiming safe extraction.",
+    "TLA static closure, a synchronous cycle and reflected/receiver-observed namespaces must retain ordinary native jobs despite overlapping root masks.",
+    "Awaited checkpoints avoid fetch-race assumptions; receiver identity, namespace identity and live reads remain exact."
+  ]
+}
