@@ -728,6 +728,10 @@ Other TypeScript compiler options are not runtime transforms.
 reserved `.bundler-*` publication directories are excluded. Keep unrelated large
 trees outside the project root; this is measured coarse inventory, not a watcher.
 Source entries/dependencies inside excluded directories are rejected.
+Exclusions are scoped to the input root and each linked external tree, not their
+unrelated absolute ancestors. After discovering all linked trees, canonical
+destinations are checked against every containing tree root, so aliases cannot
+bypass reserved subdirectories even when the containing tree is discovered later.
 
 Source bytes and effective parser config key in-memory and disk parse reuse.
 `Fingerprints` independently identifies parse, resolution, effects, entry roots,
