@@ -140,11 +140,14 @@ fn excluded(path: &Path) -> bool {
 pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
     fn visit(
         root: &Path,
+        scope: &Path,
         dir: &Path,
         canonical: &Path,
+        scopes: &mut BTreeSet<PathBuf>,
         validated_configs: &mut BTreeSet<PathBuf>,
         out: &mut Inventory,
     ) -> eyre::Result<()> {
+        scopes.insert(scope.to_owned());
         if out.directories.contains_key(canonical) {
             return Ok(());
         }
@@ -172,7 +175,8 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
             ensure!(
                 !target
                     .strip_prefix(root)
-                    .unwrap_or(&target)
+                    .or_else(|_| target.strip_prefix(scope))
+                    .unwrap_or_else(|_| Path::new(target.file_name().unwrap_or_default()))
                     .ancestors()
                     .any(excluded),
                 "inventory target is reserved/excluded: {} -> {}",
@@ -186,7 +190,14 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
                 .unwrap()
                 .insert(entry.file_name(), target.clone());
             if metadata.is_dir() {
-                visit(root, &path, &target, validated_configs, out)?;
+                // A newly reached external tree owns its exclusions, not its
+                // unrelated absolute ancestors (which may be named `target`).
+                let scope = if target.starts_with(scope) {
+                    scope
+                } else {
+                    &target
+                };
+                visit(root, scope, &path, &target, scopes, validated_configs, out)?;
             } else if metadata.is_file() {
                 out.aliases.entry(target.clone()).or_insert(path.clone());
                 if path.file_name().is_some_and(|name| name == "tsconfig.json")
@@ -227,14 +238,35 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
     let canonical_root = root
         .canonicalize()
         .wrap_err_with(|| format!("inventory target {}", root.display()))?;
+    let mut scopes = BTreeSet::new();
     let mut validated_configs = BTreeSet::new();
     visit(
         root,
+        &canonical_root,
         root,
         &canonical_root,
+        &mut scopes,
         &mut validated_configs,
         &mut result,
     )?;
+    // A later link can expose the containing tree of an earlier alias. Validate
+    // every edge against the outermost known scope, independent of visit order.
+    for (directory, entries) in &result.directories {
+        for (name, target) in entries {
+            if let Some(scope) = target
+                .ancestors()
+                .filter(|ancestor| scopes.contains(*ancestor))
+                .last()
+            {
+                ensure!(
+                    !target.strip_prefix(scope).unwrap().ancestors().any(excluded),
+                    "inventory target is reserved/excluded: {} -> {}",
+                    directory.join(name).display(),
+                    target.display()
+                );
+            }
+        }
+    }
     let mut ancestors = BTreeSet::new();
     for file in result.files.keys() {
         for directory in file.parent().into_iter().flat_map(Path::ancestors) {

@@ -39,6 +39,9 @@ Input inventory follows reachable symlinks/junctions, including external package
 with canonical source identity. Scan each canonical directory once and retain
 named directory edges, not exponentially many paths through alias diamonds.
 Admit only inventoried sources; never enumerate unrelated ancestor trees.
+Scope reserved-directory exclusions to input/linked tree roots, never unrelated
+absolute ancestors; validate canonical destinations against all discovered roots
+after traversal so cross-tree aliases cannot bypass exclusions in either order.
 Track canonical targets, membership, JSON bytes and existing/missing ancestor
 package/tsconfig probes for invalidation and success rechecks.
 External inventories refresh resolution each build and replay actual requests

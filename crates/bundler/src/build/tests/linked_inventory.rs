@@ -113,6 +113,69 @@ fn aliases_and_directory_cycles_share_one_canonical_module() {
 }
 
 #[test]
+fn linked_packages_ignore_reserved_names_above_inventory_roots() {
+    let dir = TmpDir::new();
+    for name in ["target", ".git", ".bundler-out"] {
+        let root = dir.root().join(name).join("project");
+        let package = dir.root().join(name).join("packages/package");
+        write(&root, "main.mjs", "import {value} from './linked/value.mjs'; console.log(value);");
+        write(&package, "value.mjs", "export const value = 42;");
+        let alias = root.join("linked");
+        directory_link(&package, &alias);
+        let built = fresh_parity(&mut BuildSession::new(&root).unwrap(), &linked_options());
+        assert_eq!(observe(&built.product.artifacts), b"42\n");
+        remove_directory_link(&alias);
+    }
+}
+
+#[test]
+fn linked_aliases_cannot_bypass_reserved_inventory_subdirectories() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("package");
+    write(&root, "main.mjs", "");
+    write(&package, "value.mjs", "");
+    let alias = root.join("linked");
+    directory_link(&package, &alias);
+    for scope in [&root, &package] {
+        for name in ["target", ".git", ".bundler-out"] {
+            let target = scope.join(name).join("nested");
+            fs::create_dir_all(&target).unwrap();
+            let bypass = scope.join("bypass");
+            directory_link(&target, &bypass);
+            let error = format!("{:#}", inventory(&root).err().unwrap());
+            assert!(error.contains("reserved/excluded"), "{error}");
+            remove_directory_link(&bypass);
+        }
+    }
+    remove_directory_link(&alias);
+}
+
+#[test]
+fn cross_tree_aliases_cannot_bypass_reserved_descendants_in_either_order() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("target/packages/package");
+    write(&root, "main.mjs", "");
+    write(&package, "value.mjs", "");
+    let alias = root.join("package");
+    directory_link(&package, &alias);
+    for alias_name in ["a-bypass", "z-bypass"] {
+        for name in ["target", ".git", ".bundler-out"] {
+            let target = package.join(name).join("nested");
+            write(&target, "value.mjs", "");
+            let bypass = root.join(alias_name);
+            directory_link(&target, &bypass);
+            let result = inventory(&root);
+            remove_directory_link(&bypass);
+            let error = format!("{:#}", result.unwrap_err());
+            assert!(error.contains("reserved/excluded"), "{alias_name}: {error}");
+        }
+    }
+    remove_directory_link(&alias);
+}
+
+#[test]
 fn retarget_source_metadata_and_membership_edits_invalidate() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
