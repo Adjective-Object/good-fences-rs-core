@@ -6,20 +6,22 @@ use std::{
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::views::{CallArgumentView, DefinitionView, HazardExprView, ReturnsView, Sequence};
 use crate::*;
 
 mod inference;
 pub(crate) use inference::FunctionSignature;
+pub(crate) use inference::Instruction;
 pub use inference::OwnedFunction;
-use inference::{Closure, Instruction, Recording, Template};
+use inference::{Closure, Recording, Template};
 mod records;
 pub use records::CallResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ValueId(usize);
+pub struct ValueId(pub(crate) usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Effect(usize);
+pub struct Effect(pub(crate) usize);
 
 #[derive(Debug, Clone)]
 enum Expression {
@@ -78,7 +80,7 @@ struct Invocation {
 }
 
 struct Frame<'a> {
-    definition: &'a Definition,
+    definition: DefinitionView<'a>,
     arguments: &'a [ValueId],
     receiver: ValueId,
     undefined: ValueId,
@@ -98,18 +100,18 @@ impl Frame<'_> {
         self.arguments.get(index).copied().unwrap_or(self.undefined)
     }
 
-    fn call_arguments(&self, arguments: &[CallArgument]) -> Vec<ValueId> {
+    fn call_arguments<'a>(&self, arguments: Sequence<'a, CallArgumentView<'a>>) -> Vec<ValueId> {
         let mut values = Vec::new();
         for argument in arguments {
             match argument {
-                CallArgument::Value(name) => values.push(self.value(name)),
-                CallArgument::Spread(_) => values.extend(
+                CallArgumentView::Value(name) => values.push(self.value(name)),
+                CallArgumentView::Spread(_) => values.extend(
                     self.arguments
                         .iter()
                         .skip(self.definition.parameters().len())
                         .copied(),
                 ),
-                CallArgument::Forward => values.extend_from_slice(self.arguments),
+                CallArgumentView::Forward => values.extend_from_slice(self.arguments),
             }
         }
         values
@@ -120,7 +122,7 @@ impl Frame<'_> {
 /// in parallel against immutable snapshots and commits monotone updates.
 #[derive(Debug, Clone)]
 pub struct Context {
-    facts: LocalFacts,
+    facts: Arc<LocalFacts>,
     values: Vec<Value>,
     functions: Vec<ValueId>,
     bindings: HashMap<Binding, usize>,
@@ -155,7 +157,7 @@ impl Context {
     pub(crate) fn recording_context(facts: LocalFacts) -> eyre::Result<Self> {
         crate::parser::validate_facts(&facts)?;
         let mut context = Self {
-            facts,
+            facts: Arc::new(facts),
             values: Vec::new(),
             functions: Vec::new(),
             bindings: HashMap::new(),
@@ -195,16 +197,17 @@ impl Context {
 
     fn instantiate_declarations(&mut self, start: usize) {
         for index in start..self.facts.definitions().len() {
-            let definition = self.facts.definitions()[index].clone();
+            let facts = self.facts.clone();
+            let definition = DefinitionView::from(&facts.definitions()[index]);
             let arguments = vec![self.unknown; definition.parameters().len()];
             let frame = Frame {
-                definition: &definition,
+                definition,
                 arguments: &arguments,
                 receiver: self.unknown,
                 undefined: self.undefined,
             };
             for slot in Hazard::ALL {
-                let expression = self.instantiate(&definition.hazards().get(slot), &frame);
+                let expression = self.instantiate(definition.hazards().get(slot), &frame);
                 let target = self.values[self.functions[index].0].cells[slot as usize];
                 self.equations.push(Equation { target, expression });
             }
@@ -431,13 +434,14 @@ impl Context {
         let Some(index) = self.values[function.0].definition else {
             return CallResult::new(self.unknown, self.opaque_effects());
         };
-        let definition = self.facts.definitions()[index].clone();
+        let facts = self.facts.clone();
+        let definition = DefinitionView::from(&facts.definitions()[index]);
         if !definition.variadic() && arguments.len() > definition.parameters().len() {
             return CallResult::new(self.unknown, self.opaque_effects());
         }
         let effects = self.call_effects(function, arguments, receiver);
         let frame = Frame {
-            definition: &definition,
+            definition,
             arguments,
             receiver,
             undefined: self.undefined,
@@ -451,19 +455,19 @@ impl Context {
             if Self::growing_context(&self.executing, &invocation) {
                 self.opaque_effects();
             } else if self.executing.insert(invocation.clone()) {
-                self.execute_dependencies(&definition.hazards().get(Hazard::Call), &frame);
+                self.execute_dependencies(definition.hazards().get(Hazard::Call), &frame);
                 self.executing.remove(&invocation);
             }
         }
         let value = match definition.returns() {
-            Returns::Argument(name) => frame.value(name),
-            Returns::Void => self.undefined,
-            Returns::Unknown => self.unknown,
-            Returns::Fresh => {
+            ReturnsView::Argument(name) => frame.value(name),
+            ReturnsView::Void => self.undefined,
+            ReturnsView::Unknown => self.unknown,
+            ReturnsView::Fresh => {
                 let value = self.value(Hazards::NONE);
                 for slot in Hazard::ALL {
                     let expression =
-                        self.instantiate(&definition.return_hazards().get(slot), &frame);
+                        self.instantiate(definition.return_hazards().get(slot), &frame);
                     self.equations.push(Equation {
                         target: self.values[value.0].cells[slot as usize],
                         expression,
@@ -476,8 +480,8 @@ impl Context {
             if self.latent {
                 break;
             }
-            let target = frame.value(&update.target());
-            let expression = self.instantiate(&update.expression(), &frame);
+            let target = frame.value(update.target());
+            let expression = self.instantiate(update.expression(), &frame);
             let effects = self.expression(expression);
             for slot in Hazard::ALL {
                 if update.slot().is_none_or(|updated| updated == slot) {
@@ -515,7 +519,8 @@ impl Context {
             }
             return self.hazard(function, Hazard::Call);
         };
-        let definition = self.facts.definitions()[index].clone();
+        let facts = self.facts.clone();
+        let definition = DefinitionView::from(&facts.definitions()[index]);
         // shortcut: hypothetical writes need an isolated heap to specialize.
         if self.latent && !definition.updates().is_empty() {
             return self.effectful;
@@ -543,12 +548,12 @@ impl Context {
         self.initial.push(false);
         self.calls.insert(invocation.clone(), effect);
         let frame = Frame {
-            definition: &definition,
+            definition,
             arguments,
             receiver,
             undefined: self.undefined,
         };
-        let body = self.instantiate(&definition.hazards().get(Hazard::Call), &frame);
+        let body = self.instantiate(definition.hazards().get(Hazard::Call), &frame);
         self.expanding.remove(&invocation);
         self.equations.push(Equation {
             target: effect.0,
@@ -560,20 +565,20 @@ impl Context {
         effect
     }
 
-    fn instantiate(&mut self, expression: &HazardExpr, frame: &Frame<'_>) -> Expression {
+    fn instantiate(&mut self, expression: HazardExprView<'_>, frame: &Frame<'_>) -> Expression {
         match expression {
-            HazardExpr::Bool(value) => Expression::Constant(*value),
-            HazardExpr::Unknown => Expression::Constant(true),
-            HazardExpr::Read { value, slot } => {
-                Expression::Read(self.hazard(frame.value(value), *slot).0)
+            HazardExprView::Bool(value) => Expression::Constant(value),
+            HazardExprView::Unknown => Expression::Constant(true),
+            HazardExprView::Read { value, slot } => {
+                Expression::Read(self.hazard(frame.value(value), slot).0)
             }
-            HazardExpr::Or(expressions) => Expression::Or(
+            HazardExprView::Or(expressions) => Expression::Or(
                 expressions
                     .iter()
                     .map(|e| self.instantiate(e, frame))
                     .collect(),
             ),
-            HazardExpr::Call {
+            HazardExprView::Call {
                 function,
                 arguments,
                 receiver,
@@ -591,21 +596,21 @@ impl Context {
         }
     }
 
-    fn execute_dependencies(&mut self, expression: &HazardExpr, frame: &Frame<'_>) {
+    fn execute_dependencies(&mut self, expression: HazardExprView<'_>, frame: &Frame<'_>) {
         match expression {
-            HazardExpr::Bool(_) => {}
-            HazardExpr::Unknown => {
+            HazardExprView::Bool(_) => {}
+            HazardExprView::Unknown => {
                 self.opaque_effects();
             }
-            HazardExpr::Read { value, slot } => {
-                self.operation(frame.value(value), *slot);
+            HazardExprView::Read { value, slot } => {
+                self.operation(frame.value(value), slot);
             }
-            HazardExpr::Or(expressions) => {
+            HazardExprView::Or(expressions) => {
                 for expression in expressions {
                     self.execute_dependencies(expression, frame);
                 }
             }
-            HazardExpr::Call {
+            HazardExprView::Call {
                 function,
                 arguments,
                 receiver,

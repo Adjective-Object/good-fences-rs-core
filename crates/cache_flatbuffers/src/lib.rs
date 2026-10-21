@@ -26,6 +26,12 @@ pub const EXTRACTOR_VERSION: u32 = 15;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 32;
 
+/// Check Ecco discriminants, canonical maps and host ID widths after generated
+/// structural verification, including when Ecco is embedded in another root.
+pub fn validate_ecco(root: wire::ParsedFile<'_>) -> Result<()> {
+    verify::ecco(root)
+}
+
 fn options() -> flatbuffers::VerifierOptions {
     flatbuffers::VerifierOptions {
         max_depth: 64,
@@ -35,6 +41,34 @@ fn options() -> flatbuffers::VerifierOptions {
     }
 }
 
+/// Independently verified Ecco buffer, useful before a full module is sealed.
+/// Production nested Ecco tables instead borrow their verified module owner.
+#[derive(Clone, Debug)]
+pub struct WireEcco {
+    bytes: Arc<[u8]>,
+}
+
+impl WireEcco {
+    pub fn new(bytes: Arc<[u8]>) -> Result<Self> {
+        ensure!(
+            bytes.len() <= MAX_RECORD_BYTES,
+            "Ecco buffer exceeds byte limit"
+        );
+        let root = flatbuffers::root_with_opts::<wire::ParsedFile<'_>>(&options(), &bytes)?;
+        verify::ecco(root)?;
+        Ok(Self { bytes })
+    }
+
+    pub fn root(&self) -> wire::ParsedFile<'_> {
+        // SAFETY: construction verifies the entire table graph and the bytes
+        // remain immutable, including across clones of this owner.
+        unsafe { flatbuffers::root_unchecked::<wire::ParsedFile<'_>>(&self.bytes) }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
 /// Immutable, structurally verified bytes with source/configuration integrity.
 ///
 /// This is not the source-local semantic validation gate: callers must also

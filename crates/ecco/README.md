@@ -59,6 +59,38 @@ assert!(analysis.roots.iter().all(|root| !evaluation.effect(root.effects)));
 
 ## Owned extraction and graph linking
 
+### Borrowed FlatBuffers precursors
+
+`ParsedFile::view()` and `views::ParsedFileView::from(wire_table)` share
+allocation-free, `Copy` accessors for owned and byte-backed storage. Nested
+records, instructions, binding paths and recursive contracts are returned by
+value; `Sequence` reads either a slice or generated FlatBuffers vector iterator.
+Strings borrow their input allocation. IDs, spans, hazards and `CallResult`
+are small scalar values; no reader calls the generated object API's `unpack`.
+
+`ParsedFile::encode_flatbuffer` writes typed Ecco tables into a caller's builder
+for embedding directly in a future AST module. The construction-only encoder
+uses generated objects; `to_flatbuffer` is a standalone convenience.
+`cache_flatbuffers::WireEcco` structurally verifies and owns standalone bytes.
+`views::ModuleEcco` retains a checked `WireRecord` with nested Ecco, and future
+module owners can implement `views::ParsedFileSource`.
+
+`Analysis::add_file` accepts `Arc<dyn ParsedFileSource>` (including existing
+`Arc<ParsedFile>`), validates contracts/IDs through views, and retains the owner.
+Lazy runtime function templates store owner plus index, not copied instructions;
+validation, resolution and replay never reconstruct a parsed file. Interpreter
+value/effect maps and specialized call arguments still allocate. Declaration
+contracts are explicitly copied into the existing mutable interpreter, and
+definition matches into its owned result. These allocations are solve state,
+not eager cache deserialization. Contract evaluation itself uses borrowed views
+over shared interpreter declarations, without cloning a contract at each call.
+
+Resolvers now receive `ExternalReferenceView` by value and match `BindingView`;
+`declaration_matches` accepts either owned references or borrowed views.
+The existing Serde layout and production `.seg.cbor` format are unchanged.
+AST-module ownership, cache framing/publication and production warm-hit
+integration remain a separate migration stage.
+
 `ParsedFile` and `OwnedFunction` implement Serde serialization. Save only these
 precursors, never `Context`, `Evaluation`, or `AnalysisResult`. Each solve
 creates fresh interpreter identities and specializes calls only after linking.
@@ -70,7 +102,8 @@ indices, spans, and template references before installing them.
 
 ```rust
 use std::{path::Path, sync::Arc};
-use ecco::{Analysis, ExternalReference, LocalFacts, Resolution, Symbol, parse_source};
+use ecco::{Analysis, LocalFacts, Resolution, Symbol, parse_source};
+use ecco::views::{ExternalReferenceView, BindingView};
 
 let library = Arc::new(parse_source(
     "export function read(value) { return value.key; }",
@@ -84,9 +117,9 @@ let entry = Arc::new(parse_source(
 let mut analysis = Analysis::new();
 analysis.add_file("entry", entry)?;
 analysis.add_file("library", library)?;
-let result = analysis.solve(&|_: &&str, reference: &ExternalReference| {
+let result = analysis.solve(&|_: &&str, reference: ExternalReferenceView<'_>| {
     match reference.binding() {
-        ecco::Binding::Module { module, path } if module == "library" && path == &["read"] => {
+        BindingView::Module { module, path } if module == "library" && path.iter().eq(["read"]) => {
             Ok(Resolution::Symbol(Symbol { file: "library", local: read }))
         }
         _ => Ok(Resolution::Unknown),

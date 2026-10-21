@@ -91,7 +91,7 @@ table CallInstruction {
   function:ulong;
   arguments:[ulong] (required);
   receiver:ulong;
-  construct:bool;
+  pure:bool;
 }
 table ClosureInstruction { value:ulong; function:ulong; }
 table ExternalInstruction { value:ulong; reference:ulong; }

@@ -252,17 +252,21 @@ fn inferred_contracts_roundtrip_and_link_without_reparsing() {
             .unwrap();
         analysis.add_file("entry", entry.clone()).unwrap();
         let result = analysis
-            .solve(&|_: &&str, reference: &ecco::ExternalReference| {
-                Ok(match &reference.binding() {
-                    ecco::Binding::Module { module, .. } if module == "./library.mjs" => {
-                        ecco::Resolution::Symbol(ecco::Symbol {
-                            file: "library",
-                            local: forward,
-                        })
-                    }
-                    _ => ecco::Resolution::Unknown,
-                })
-            })
+            .solve(
+                &|_: &&str, reference: ecco::views::ExternalReferenceView<'_>| {
+                    Ok(match reference.binding() {
+                        ecco::views::BindingView::Module { module, .. }
+                            if module == "./library.mjs" =>
+                        {
+                            ecco::Resolution::Symbol(ecco::Symbol {
+                                file: "library",
+                                local: forward,
+                            })
+                        }
+                        _ => ecco::Resolution::Unknown,
+                    })
+                },
+            )
             .unwrap();
         assert!(result.files["entry"]
             .roots

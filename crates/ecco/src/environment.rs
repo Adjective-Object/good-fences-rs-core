@@ -207,23 +207,33 @@ fn binding_key(definition: &Definition) -> (u8, String, Vec<String>) {
 /// Whether a binding has an exact contract or is a trusted namespace prefix.
 ///
 /// This does not match arbitrary children of a declared namespace.
-pub fn declaration_matches(facts: &LocalFacts, binding: &Binding) -> bool {
+pub fn declaration_matches<'a, 'b>(
+    facts: impl Into<crate::views::LocalFactsView<'a>>,
+    binding: impl Into<crate::views::BindingView<'b>>,
+) -> bool {
+    use crate::views::BindingView;
+    let facts = facts.into();
+    let binding = binding.into();
     facts.definitions().iter().any(|definition| {
-        *definition.binding() == *binding
+        definition.binding() == binding
             || match (binding, definition.binding()) {
-                (Binding::Global(prefix), Binding::Global(path)) => {
-                    prefix.len() < path.len() && path.starts_with(prefix)
+                (BindingView::Global(prefix), BindingView::Global(path)) => {
+                    prefix.len() < path.len() && path.iter().take(prefix.len()).eq(prefix)
                 }
                 (
-                    Binding::Module {
+                    BindingView::Module {
                         module,
                         path: prefix,
                     },
-                    Binding::Module {
+                    BindingView::Module {
                         module: other,
                         path,
                     },
-                ) => *module == *other && prefix.len() < path.len() && path.starts_with(prefix),
+                ) => {
+                    module == other
+                        && prefix.len() < path.len()
+                        && path.iter().take(prefix.len()).eq(prefix)
+                }
                 _ => false,
             }
     })

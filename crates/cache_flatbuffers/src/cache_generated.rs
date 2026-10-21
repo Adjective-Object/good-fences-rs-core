@@ -10685,7 +10685,7 @@ impl<'a> CallInstruction<'a> {
   pub const VT_FUNCTION: flatbuffers::VOffsetT = 6;
   pub const VT_ARGUMENTS: flatbuffers::VOffsetT = 8;
   pub const VT_RECEIVER: flatbuffers::VOffsetT = 10;
-  pub const VT_CONSTRUCT: flatbuffers::VOffsetT = 12;
+  pub const VT_PURE_: flatbuffers::VOffsetT = 12;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -10701,7 +10701,7 @@ impl<'a> CallInstruction<'a> {
     builder.add_function(args.function);
     if let Some(x) = args.arguments { builder.add_arguments(x); }
     if let Some(x) = args.result { builder.add_result(x); }
-    builder.add_construct(args.construct);
+    builder.add_pure_(args.pure_);
     builder.finish()
   }
 
@@ -10716,13 +10716,13 @@ impl<'a> CallInstruction<'a> {
       x.into_iter().collect()
     };
     let receiver = self.receiver();
-    let construct = self.construct();
+    let pure_ = self.pure_();
     CallInstructionT {
       result,
       function,
       arguments,
       receiver,
-      construct,
+      pure_,
     }
   }
 
@@ -10755,11 +10755,11 @@ impl<'a> CallInstruction<'a> {
     unsafe { self._tab.get::<u64>(CallInstruction::VT_RECEIVER, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn construct(&self) -> bool {
+  pub fn pure_(&self) -> bool {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(CallInstruction::VT_CONSTRUCT, Some(false)).unwrap()}
+    unsafe { self._tab.get::<bool>(CallInstruction::VT_PURE_, Some(false)).unwrap()}
   }
 }
 
@@ -10774,7 +10774,7 @@ impl flatbuffers::Verifiable for CallInstruction<'_> {
      .visit_field::<u64>("function", Self::VT_FUNCTION, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("arguments", Self::VT_ARGUMENTS, true)?
      .visit_field::<u64>("receiver", Self::VT_RECEIVER, false)?
-     .visit_field::<bool>("construct", Self::VT_CONSTRUCT, false)?
+     .visit_field::<bool>("pure_", Self::VT_PURE_, false)?
      .finish();
     Ok(())
   }
@@ -10784,7 +10784,7 @@ pub struct CallInstructionArgs<'a> {
     pub function: u64,
     pub arguments: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
     pub receiver: u64,
-    pub construct: bool,
+    pub pure_: bool,
 }
 impl<'a> Default for CallInstructionArgs<'a> {
   #[inline]
@@ -10794,7 +10794,7 @@ impl<'a> Default for CallInstructionArgs<'a> {
       function: 0,
       arguments: None, // required field
       receiver: 0,
-      construct: false,
+      pure_: false,
     }
   }
 }
@@ -10821,8 +10821,8 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> CallInstructionBuilder<'a, 'b, 
     self.fbb_.push_slot::<u64>(CallInstruction::VT_RECEIVER, receiver, 0);
   }
   #[inline]
-  pub fn add_construct(&mut self, construct: bool) {
-    self.fbb_.push_slot::<bool>(CallInstruction::VT_CONSTRUCT, construct, false);
+  pub fn add_pure_(&mut self, pure_: bool) {
+    self.fbb_.push_slot::<bool>(CallInstruction::VT_PURE_, pure_, false);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> CallInstructionBuilder<'a, 'b, A> {
@@ -10848,7 +10848,7 @@ impl core::fmt::Debug for CallInstruction<'_> {
       ds.field("function", &self.function());
       ds.field("arguments", &self.arguments());
       ds.field("receiver", &self.receiver());
-      ds.field("construct", &self.construct());
+      ds.field("pure_", &self.pure_());
       ds.finish()
   }
 }
@@ -10859,7 +10859,7 @@ pub struct CallInstructionT {
   pub function: u64,
   pub arguments: Vec<u64>,
   pub receiver: u64,
-  pub construct: bool,
+  pub pure_: bool,
 }
 impl Default for CallInstructionT {
   fn default() -> Self {
@@ -10868,7 +10868,7 @@ impl Default for CallInstructionT {
       function: 0,
       arguments: Default::default(),
       receiver: 0,
-      construct: false,
+      pure_: false,
     }
   }
 }
@@ -10887,13 +10887,13 @@ impl CallInstructionT {
       _fbb.create_vector(x)
     });
     let receiver = self.receiver;
-    let construct = self.construct;
+    let pure_ = self.pure_;
     CallInstruction::create(_fbb, &CallInstructionArgs{
       result,
       function,
       arguments,
       receiver,
-      construct,
+      pure_,
     })
   }
 }

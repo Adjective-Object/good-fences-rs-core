@@ -6,6 +6,8 @@ license = "Apache-2.0"
 description = "Declarative JavaScript effect analysis and parallel hazard propagation"
 
 [dependencies]
+cache_flatbuffers = { path = "../cache_flatbuffers" }
+flatbuffers = "=25.2.10"
 eyre.workspace = true
 rayon.workspace = true
 serde.workspace = true

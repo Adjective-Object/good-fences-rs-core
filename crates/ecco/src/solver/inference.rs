@@ -1,4 +1,8 @@
 use super::*;
+use crate::views::{
+    DefinitionView, FunctionIndex, FunctionSource, FunctionView, GlobalSymbolView, InstructionView,
+    ParsedFileSource, ParsedFileView,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct Closure {
@@ -7,7 +11,7 @@ pub(super) struct Closure {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum Instruction {
+pub enum Instruction {
     Value(ValueId, Hazards),
     Any(Effect, Vec<Effect>),
     Equality(Effect, ValueId, ValueId),
@@ -43,7 +47,7 @@ pub(crate) struct Environment {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct Template {
-    function: Arc<OwnedFunction>,
+    function: FunctionSource,
     environment: Arc<Environment>,
 }
 
@@ -90,7 +94,7 @@ impl Context {
     ) {
         let function = self.finish_recording(signature, returns, effects);
         self.templates[index] = Arc::new(Template {
-            function: Arc::new(function),
+            function: FunctionSource::Owned(Arc::new(function)),
             environment: Arc::default(),
         });
     }
@@ -299,18 +303,23 @@ impl Context {
     ) {
         let captures = self.templates[index]
             .function
+            .view()
             .signature()
             .captures()
             .iter()
-            .map(|capture| (*capture, mapped(environment, *capture)))
+            .map(|capture| (capture, mapped(environment, capture)))
             .collect();
         // A bare call hazard has no arguments to specialize. Keep it separate
         // from replacement hazards consulted by a known, instantiated call.
         self.initial[self.values[value.0].cells[Hazard::Call as usize]] =
-            self.templates[index].function.effects() != Some(self.pure);
-        self.initial[self.values[value.0].cells[Hazard::Construct as usize]] =
-            self.templates[index].function.signature().constructible()
-                && self.templates[index].function.effects() != Some(self.pure);
+            self.templates[index].function.view().effects() != Some(self.pure);
+        self.initial[self.values[value.0].cells[Hazard::Construct as usize]] = self.templates
+            [index]
+            .function
+            .view()
+            .signature()
+            .constructible()
+            && self.templates[index].function.view().effects() != Some(self.pure);
         self.values[value.0].closure = Some(Closure {
             template: index,
             captures,
@@ -351,11 +360,12 @@ impl Context {
         captures.extend(
             template
                 .function
+                .view()
                 .instructions()
                 .iter()
                 .filter_map(|instruction| {
-                    if let Instruction::External(_, reference) = instruction {
-                        Some(template.environment.externals[*reference])
+                    if let InstructionView::External(_, reference) = instruction {
+                        Some(template.environment.externals[reference])
                     } else {
                         None
                     }
@@ -374,6 +384,7 @@ impl Context {
         values.extend(closure.captures);
         for (index, parameter) in template
             .function
+            .view()
             .signature()
             .parameters()
             .iter()
@@ -384,15 +395,15 @@ impl Context {
                 slot,
                 arguments.get(index).copied().unwrap_or(self.undefined),
             );
-            values.insert(*parameter, slot);
+            values.insert(parameter, slot);
         }
-        if let Some(parameter) = template.function.signature().receiver() {
+        if let Some(parameter) = template.function.view().signature().receiver() {
             values.insert(parameter, receiver);
         }
-        if let Some(binding) = template.function.signature().arguments() {
+        if let Some(binding) = template.function.view().signature().arguments() {
             values.insert(binding, self.value(Hazards::UNKNOWN));
         }
-        if let Some(binding) = template.function.signature().self_binding() {
+        if let Some(binding) = template.function.view().signature().self_binding() {
             values.insert(binding, resolved);
         }
         let (value, body, hypothetical_writes) = self.replay(&template, values);
@@ -423,79 +434,78 @@ impl Context {
     ) -> (ValueId, Effect, bool) {
         let mut effects = HashMap::from([(Effect(0), self.pure), (Effect(1), self.effectful)]);
         let mut hypothetical_writes = false;
-        let function = &template.function;
+        let function = template.function.view();
         for instruction in function.instructions() {
             match instruction {
-                Instruction::Value(target, hazards) => {
-                    let value = self.value(*hazards);
-                    values.insert(*target, value);
+                InstructionView::Value(target, hazards) => {
+                    let value = self.value(hazards);
+                    values.insert(target, value);
                 }
-                Instruction::Any(target, inputs) => {
+                InstructionView::Any(target, inputs) => {
                     let inputs: Vec<_> = inputs
                         .iter()
-                        .map(|effect| self.template_effect(*effect, function, &values, &effects))
+                        .map(|effect| self.template_effect(effect, function, &values, &effects))
                         .collect();
-                    effects.insert(*target, self.any(inputs));
+                    effects.insert(target, self.any(inputs));
                 }
-                Instruction::Equality(target, left, right) => {
-                    let effect =
-                        self.loose_equality(mapped(&values, *left), mapped(&values, *right));
-                    effects.insert(*target, effect);
+                InstructionView::Equality(target, left, right) => {
+                    let effect = self.loose_equality(mapped(&values, left), mapped(&values, right));
+                    effects.insert(target, effect);
                 }
-                Instruction::Operation(value, slot) => {
-                    self.operation(mapped(&values, *value), *slot);
+                InstructionView::Operation(value, slot) => {
+                    self.operation(mapped(&values, value), slot);
                 }
-                Instruction::Update(value, slot, effect) => {
+                InstructionView::Update(value, slot, effect) => {
                     if !self.latent {
-                        let effect = self.template_effect(*effect, function, &values, &effects);
-                        self.update(mapped(&values, *value), *slot, effect);
+                        let effect = self.template_effect(effect, function, &values, &effects);
+                        self.update(mapped(&values, value), slot, effect);
                     } else {
                         hypothetical_writes = true;
                     }
                 }
-                Instruction::Bind(target, source) => {
-                    self.set_binding(mapped(&values, *target), mapped(&values, *source));
+                InstructionView::Bind(target, source) => {
+                    self.set_binding(mapped(&values, target), mapped(&values, source));
                 }
-                Instruction::Read(target, source) => {
-                    let value = self.read_binding(mapped(&values, *source));
-                    values.insert(*target, value);
+                InstructionView::Read(target, source) => {
+                    let value = self.read_binding(mapped(&values, source));
+                    values.insert(target, value);
                 }
-                Instruction::Retain(value, locals) => {
+                InstructionView::Retain(value, locals) => {
                     let locals: Vec<_> =
-                        locals.iter().map(|local| mapped(&values, *local)).collect();
-                    self.retain_captures(mapped(&values, *value), &locals);
+                        locals.iter().map(|local| mapped(&values, local)).collect();
+                    self.retain_captures(mapped(&values, value), &locals);
                 }
-                Instruction::Join(target, inputs) => {
+                InstructionView::Join(target, inputs) => {
                     let inputs: Vec<_> =
-                        inputs.iter().map(|value| mapped(&values, *value)).collect();
-                    values.insert(*target, self.join_values(&inputs));
+                        inputs.iter().map(|value| mapped(&values, value)).collect();
+                    values.insert(target, self.join_values(&inputs));
                 }
-                Instruction::Call(target, function, arguments, receiver, pure) => {
+                InstructionView::Call(target, function, arguments, receiver, pure) => {
                     let arguments: Vec<_> = arguments
                         .iter()
-                        .map(|value| mapped(&values, *value))
+                        .map(|value| mapped(&values, value))
                         .collect();
                     let result = self.call_with_annotation(
-                        mapped(&values, *function),
+                        mapped(&values, function),
                         &arguments,
-                        Some(mapped(&values, *receiver)),
-                        *pure,
+                        Some(mapped(&values, receiver)),
+                        pure,
                     );
                     values.insert(target.value(), result.value());
                     effects.insert(target.effects(), result.effects());
                 }
-                Instruction::Closure(target, index) => {
+                InstructionView::Closure(target, index) => {
                     self.install_closure(
-                        mapped(&values, *target),
-                        template.environment.functions + *index,
+                        mapped(&values, target),
+                        template.environment.functions + index,
                         &values,
                     );
                 }
-                Instruction::External(target, reference) => {
-                    let value = self.read_binding(template.environment.externals[*reference]);
-                    values.insert(*target, value);
+                InstructionView::External(target, reference) => {
+                    let value = self.read_binding(template.environment.externals[reference]);
+                    values.insert(target, value);
                 }
-                Instruction::Opaque => {
+                InstructionView::Opaque => {
                     self.opaque_effects();
                 }
             }
@@ -503,7 +513,7 @@ impl Context {
         let returns: Vec<_> = function
             .returns()
             .iter()
-            .map(|value| self.resolve_alias(mapped(&values, *value)))
+            .map(|value| self.resolve_alias(mapped(&values, value)))
             .collect();
         let value = if returns.is_empty() {
             self.undefined
@@ -519,14 +529,17 @@ impl Context {
     fn template_effect(
         &self,
         effect: Effect,
-        template: &OwnedFunction,
+        template: FunctionView<'_>,
         values: &HashMap<ValueId, ValueId>,
         effects: &HashMap<Effect, Effect>,
     ) -> Effect {
         if let Some(effect) = effects.get(&effect) {
             return *effect;
         }
-        let (value, slot) = template.sources()[&effect];
+        let (value, slot) = template
+            .sources()
+            .get(&effect)
+            .expect("validated effect source");
         self.hazard(mapped(values, value), slot)
     }
 
@@ -546,21 +559,29 @@ impl Context {
     pub(crate) fn owned_functions(&self) -> Vec<OwnedFunction> {
         self.templates
             .iter()
-            .map(|t| (*t.function).clone())
+            .map(|t| t.function.extraction_owned())
             .collect()
     }
 
     pub(crate) fn install_values(
         &mut self,
-        parsed: &crate::ParsedFile,
+        parsed: ParsedFileView<'_>,
     ) -> HashMap<ValueId, ValueId> {
         let start = self.facts.definitions().len();
-        self.facts
-            .definitions_mut()
-            .extend_from_slice(parsed.declarations().definitions());
-        self.facts
-            .global_symbols_mut()
-            .extend_from_slice(parsed.declarations().global_symbols());
+        Arc::make_mut(&mut self.facts).definitions_mut().extend(
+            parsed
+                .declarations()
+                .definitions()
+                .iter()
+                .map(DefinitionView::to_owned),
+        );
+        Arc::make_mut(&mut self.facts).global_symbols_mut().extend(
+            parsed
+                .declarations()
+                .global_symbols()
+                .iter()
+                .map(GlobalSymbolView::to_owned),
+        );
         let mut values = HashMap::new();
         for (index, value) in parsed.values().iter().enumerate() {
             let runtime = match index {
@@ -572,9 +593,13 @@ impl Context {
                 self.values[runtime.0].definition = Some(start + definition);
                 self.bindings
                     .entry(
-                        parsed.declarations().definitions()[definition]
+                        parsed
+                            .declarations()
+                            .definitions()
+                            .get(definition)
+                            .expect("validated definition")
                             .binding()
-                            .clone(),
+                            .to_owned(),
                     )
                     .or_insert(start + definition);
                 self.functions.push(runtime);
@@ -592,7 +617,7 @@ impl Context {
 
     pub(crate) fn install_file(
         &mut self,
-        parsed: &crate::ParsedFile,
+        parsed: Arc<dyn ParsedFileSource>,
         values: HashMap<ValueId, ValueId>,
         externals: Vec<ValueId>,
     ) -> (usize, Vec<usize>) {
@@ -601,27 +626,34 @@ impl Context {
             externals,
             functions: self.templates.len(),
         });
-        for function in parsed.functions() {
+        for index in 0..parsed.view().functions().len() {
             self.templates.push(Arc::new(Template {
-                function: Arc::new(function.clone()),
+                function: FunctionSource::Parsed {
+                    file: parsed.clone(),
+                    index: FunctionIndex::Function(index),
+                },
                 environment: environment.clone(),
             }));
         }
         let setup = self.roots.len();
-        for function in
-            std::iter::once(parsed.setup()).chain(parsed.roots().iter().map(|root| root.function()))
+        for selector in std::iter::once(FunctionIndex::Setup)
+            .chain((0..parsed.view().roots().len()).map(FunctionIndex::Root))
         {
+            let function = FunctionSource::Parsed {
+                file: parsed.clone(),
+                index: selector,
+            };
             let index = self.roots.len();
-            for instruction in function.instructions() {
-                if let Instruction::Bind(target, _) = instruction {
-                    if let Some(target) = environment.values.get(target) {
+            for instruction in function.view().instructions() {
+                if let InstructionView::Bind(target, _) = instruction {
+                    if let Some(target) = environment.values.get(&target) {
                         self.producers.entry(*target).or_insert(index);
                     }
                 }
             }
             self.roots.push(LazyRoot {
                 template: Template {
-                    function: Arc::new(function.clone()),
+                    function,
                     environment: environment.clone(),
                 },
                 running: false,
@@ -659,7 +691,7 @@ impl Context {
 
     pub(crate) fn declaration_value(
         &self,
-        parsed: &crate::ParsedFile,
+        parsed: ParsedFileView<'_>,
         values: &HashMap<ValueId, ValueId>,
         definition: usize,
     ) -> ValueId {
@@ -672,12 +704,12 @@ impl Context {
     }
 }
 
-impl crate::ParsedFile {
+impl ParsedFileView<'_> {
     pub(crate) fn valid_value(&self, value: ValueId) -> bool {
         value.0 < self.values().len()
     }
 
-    pub(crate) fn validate_function(&self, function: &OwnedFunction) -> eyre::Result<()> {
+    pub(crate) fn validate_function(&self, function: FunctionView<'_>) -> eyre::Result<()> {
         use eyre::ensure;
 
         let signature = function.signature();
@@ -685,11 +717,11 @@ impl crate::ParsedFile {
             .captures()
             .iter()
             .chain(signature.parameters())
-            .chain(signature.receiver().iter())
-            .chain(signature.self_binding().iter())
-            .chain(signature.arguments().iter())
+            .chain(signature.receiver())
+            .chain(signature.self_binding())
+            .chain(signature.arguments())
         {
-            ensure!(self.valid_value(*value), "invalid Ecco function binding");
+            ensure!(self.valid_value(value), "invalid Ecco function binding");
         }
         let mut values: HashSet<_> = (0..self.values().len()).map(ValueId).collect();
         let mut effects = HashSet::from([Effect(0), Effect(1)]);
@@ -704,51 +736,51 @@ impl crate::ParsedFile {
                         || function
                             .sources()
                             .get(effect)
-                            .is_some_and(|(value, _)| values.contains(value)),
+                            .is_some_and(|(value, _)| values.contains(&value)),
                     "undefined Ecco template effect"
                 );
                 Ok::<_, eyre::Report>(())
             };
         for instruction in function.instructions() {
             match instruction {
-                Instruction::Value(target, _) => {
+                InstructionView::Value(target, _) => {
                     ensure!(target.0 >= 2, "cannot replace Ecco constants");
-                    values.insert(*target);
+                    values.insert(target);
                 }
-                Instruction::Any(target, inputs) => {
+                InstructionView::Any(target, inputs) => {
                     for input in inputs {
                         check_effect(&input, &values, &effects)?;
                     }
-                    effects.insert(*target);
+                    effects.insert(target);
                 }
-                Instruction::Equality(target, left, right) => {
+                InstructionView::Equality(target, left, right) => {
                     check_value(&left, &values)?;
                     check_value(&right, &values)?;
-                    effects.insert(*target);
+                    effects.insert(target);
                 }
-                Instruction::Operation(value, _) => check_value(&value, &values)?,
-                Instruction::Update(value, _, effect) => {
+                InstructionView::Operation(value, _) => check_value(&value, &values)?,
+                InstructionView::Update(value, _, effect) => {
                     check_value(&value, &values)?;
                     check_effect(&effect, &values, &effects)?;
                 }
-                Instruction::Bind(target, source) | Instruction::Read(target, source) => {
+                InstructionView::Bind(target, source) | InstructionView::Read(target, source) => {
                     check_value(&target, &values)?;
                     check_value(&source, &values)?;
                     ensure!(target.0 >= 2, "cannot rebind Ecco constants");
                 }
-                Instruction::Retain(value, locals) => {
+                InstructionView::Retain(value, locals) => {
                     check_value(&value, &values)?;
                     for local in locals {
                         check_value(&local, &values)?;
                     }
                 }
-                Instruction::Join(target, inputs) => {
+                InstructionView::Join(target, inputs) => {
                     check_value(&target, &values)?;
                     for input in inputs {
                         check_value(&input, &values)?;
                     }
                 }
-                Instruction::Call(target, callee, arguments, receiver, _) => {
+                InstructionView::Call(target, callee, arguments, receiver, _) => {
                     check_value(&target.value(), &values)?;
                     check_value(&callee, &values)?;
                     check_value(&receiver, &values)?;
@@ -757,25 +789,25 @@ impl crate::ParsedFile {
                     }
                     effects.insert(target.effects());
                 }
-                Instruction::Closure(target, index) => {
+                InstructionView::Closure(target, index) => {
                     check_value(&target, &values)?;
                     ensure!(
-                        *index < self.functions().len(),
+                        index < self.functions().len(),
                         "invalid Ecco function index"
                     );
                 }
-                Instruction::External(target, index) => {
+                InstructionView::External(target, index) => {
                     check_value(&target, &values)?;
                     ensure!(
-                        *index < self.external_references().len(),
+                        index < self.external_references().len(),
                         "invalid Ecco external reference"
                     );
                 }
-                Instruction::Opaque => {}
+                InstructionView::Opaque => {}
             }
         }
         for value in function.returns() {
-            check_value(value, &values)?;
+            check_value(&value, &values)?;
         }
         let effect = function
             .effects()
