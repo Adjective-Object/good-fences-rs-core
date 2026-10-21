@@ -299,6 +299,7 @@ impl BuildSession {
         let mut inputs = Vec::new();
         let mut sources = BTreeMap::new();
         let mut relocations = BTreeMap::new();
+        let mut require_defaults = BTreeSet::new();
         let mut changed = BTreeSet::new();
         while let Some(path) = queue.pop_front() {
             if sources.contains_key(&path) {
@@ -312,6 +313,15 @@ impl BuildSession {
             let format = package_format(&self.root, &path)?;
             let input = fs::read(&path).wrap_err_with(|| format!("source {}", path.display()))?;
             let kind = crate::resource::kind(&path, &options.css.css_modules);
+            if matches!(
+                kind,
+                crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset
+            )
+                || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
+                    && options.css.load == CssLoad::CallerLoaded)
+            {
+                require_defaults.insert(path.clone());
+            }
             let wrapper_format = match options.resolver.target_env {
                 TargetEnv::Browser => ModuleFormat::Esm,
                 TargetEnv::Node => ModuleFormat::CommonJs,
@@ -398,24 +408,6 @@ impl BuildSession {
                 .expect("loaded source")
                 .css_identity = css_identity;
             let source = &self.sources[&path];
-            if options.resolver.target_env == TargetEnv::Browser {
-                ensure!(
-                    !source.record.module.facts.commonjs,
-                    "{}: browser target does not support CommonJS inputs; the native CommonJS backend requires a Node loader",
-                    path.display()
-                );
-                ensure!(
-                    source
-                        .record
-                        .module
-                        .facts
-                        .dependencies
-                        .iter()
-                        .all(|dependency| dependency.kind != ast_segmenter::owned::DependencyKind::Require),
-                    "{}: browser target does not support require or require contexts; use native imports",
-                    path.display()
-                );
-            }
             let resolved = if let Some(cached) =
                 self.resolutions.get(&path).filter(|_| !external_sources)
             {
@@ -465,7 +457,18 @@ impl BuildSession {
                     resolved.insert(
                         dependency.id,
                         match target {
-                            ResolvedDependency::File(path) => DependencyTarget::File(path),
+                            ResolvedDependency::File(target) => {
+                                ensure!(
+                                    inventory.contains(&target),
+                                    "{}: bytes {}..{} resolving {:?}: source outside reachable build inventory (or reserved/excluded): {}",
+                                    path.display(),
+                                    dependency.span.start,
+                                    dependency.span.end,
+                                    dependency.specifier,
+                                    target.display()
+                                );
+                                DependencyTarget::File(target)
+                            }
                             ResolvedDependency::External(name) => DependencyTarget::External(name),
                         },
                     );
@@ -546,6 +549,7 @@ impl BuildSession {
                     "native-node-cjs-initializers-v1\n",
                     include_str!("native_cjs.rs"),
                     include_str!("runtime.cjs"),
+                    include_str!("browser_intrinsics.mjs"),
                     include_str!("context_intrinsics.mjs"),
                     include_str!("commonjs_namespace.mjs")
                 )
@@ -633,8 +637,15 @@ impl BuildSession {
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
-        let mut artifacts =
-            link::esm_plan_prepared(&graph, &plan, &options.effects, &sources, &relocations)?;
+        let mut artifacts = link::esm_plan_prepared(
+            &graph,
+            &plan,
+            &options.effects,
+            &sources,
+            &relocations,
+            options.resolver.target_env == TargetEnv::Browser,
+            &require_defaults,
+        )?;
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
             let kind = crate::resource::kind(path, &options.css.css_modules);

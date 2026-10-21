@@ -481,7 +481,7 @@ impl Placement {
                     Self::scheduled(graph, plan, modules, owners.clone(), &prefixes)?;
                 placement.names = names;
                 let (safe, initializers) = activation_safe(
-                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes, None,
+                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes, None, None,
                 )?;
                 if !safe {
                     // Reject contraction, not native cycles. Prefer retaining
@@ -852,6 +852,7 @@ fn activation_safe(
     placement: &Placement,
     prefixes: &BTreeSet<SegmentKey>,
     connections: Option<(&BTreeMap<PathBuf, Code>, &BTreeMap<RootId, PathBuf>)>,
+    cjs: Option<&commonjs::CommonJs>,
 ) -> eyre::Result<(bool, BTreeSet<SegmentKey>)> {
     let owners = &placement.owners;
     let mut native = BTreeMap::new();
@@ -991,7 +992,10 @@ fn activation_safe(
     for &key in owners.keys() {
         // Opaque factories/facade jobs have their own activation contract.
         // This final check projects the reconstructed native ESM body events.
-        if connections.is_some() && modules[&key.file_id].parsed.facts.commonjs {
+        if connections.is_some()
+            && (modules[&key.file_id].parsed.facts.commonjs
+                || cjs.is_some_and(|cjs| cjs.owns_activation(key.file_id)))
+        {
             continue;
         }
         let recipe =
@@ -1109,6 +1113,7 @@ pub(super) fn validate_connections(
     placement: &Placement,
     files: &BTreeMap<PathBuf, Code>,
     routes: &BTreeMap<RootId, PathBuf>,
+    cjs: &commonjs::CommonJs,
 ) -> eyre::Result<()> {
     for (path, code) in files {
         for (target, _) in code.static_dependencies() {
@@ -1140,6 +1145,7 @@ pub(super) fn validate_connections(
         placement,
         &BTreeSet::new(),
         Some((files, routes)),
+        Some(cjs),
     )?;
     eyre::ensure!(
         safe,

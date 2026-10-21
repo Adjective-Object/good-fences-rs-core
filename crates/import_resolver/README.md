@@ -14,8 +14,16 @@ validated as local files. Options retain explicit canonical/preserved symlink
 policy. Graph source identities must use the same policy.
 Node defaults activate `node`, `node-addons` and `module-sync` in addition to the
 request mode; browser defaults activate `browser` and omit those Node conditions.
-Structural browser resolution rejects bare/`node:` builtins even when external;
-it never injects polyfills. Package declaration
+Structural resolution applies `NodeModulesResolverOptions::alias` as exact,
+one-step request replacements before builtin/external policy. For caller-provided
+browser stubs, map `fs` and `node:fs` separately to a concrete local CJS/ESM file;
+relative paths are importer-relative, absolute paths are also supported.
+There is no prefix matching or recursive alias expansion (`fs` does not match
+`fs/promises`). Replacements undergo ordinary file resolution, and graph consumers
+still enforce their checked source inventory. Missing replacements fail with the
+original importer/request. Structural browser resolution rejects unreplaced or
+replacement bare/`node:` builtins even when external, and native `.node` addons;
+it never injects polyfills or empty modules. Package declaration
 order, including an early `default`, determines which active condition wins.
 An exports map is authoritative: unmatched subpaths or inactive conditions fail
 resolution, even when a matching physical file exists. Packages without exports

@@ -41,8 +41,12 @@ identity follows explicit options; source paths must follow that same policy.
 Export conditions are active sets, not priority lists; preserve package JSON
 declaration order. Node defaults include node/node-addons/module-sync, not browser
 defaults. Select a subpath before evaluating its conditions.
-Browser defaults activate browser; structural browser requests reject Node
-builtins even with explicit external policy, never inject polyfills.
+Apply exact one-step aliases before builtin/external policy and downstream Node
+builtin resolution. Do not expand prefixes or recurse through aliases. Resolved
+stubs remain real files subject to consumer inventory/graph validation.
+Browser defaults activate browser; structural browser requests reject remaining
+Node builtins even with explicit external policy and native addons, never inject
+polyfills/empty stubs. Preserve original importer/request in errors.
 Apply a dependency's browser object mapping to its selected legacy package entry,
 then retain the importer's request/path mapping policy.
 An existing exports map forbids filesystem fallback for unmatched/private paths.

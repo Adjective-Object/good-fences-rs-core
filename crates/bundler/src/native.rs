@@ -26,12 +26,16 @@ pub(super) fn emit(
     modules: &BTreeMap<u32, Module<'_>>,
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
+    browser: bool,
+    require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<Code>> {
     let prepared = PreparedValues::new(graph, modules, symbols);
     if let Some(output) = single(graph, plan, modules, manifest, &prepared)? {
         return Ok(output);
     }
-    chunks::emit(graph, plan, modules, manifest, &prepared)
+    chunks::emit(
+        graph, plan, modules, manifest, &prepared, browser, require_defaults,
+    )
 }
 
 fn single(

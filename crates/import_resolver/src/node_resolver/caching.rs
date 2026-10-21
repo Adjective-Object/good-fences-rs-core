@@ -558,7 +558,25 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             module_specifier, base, self.target_env
         );
 
-        if !module_specifier.starts_with('.') {
+        // Apply one exact replacement before filesystem and builtin resolution.
+        let target = self
+            .alias
+            .get(module_specifier)
+            .map(String::as_str)
+            .unwrap_or(module_specifier);
+
+        // Handle builtin modules for nodejs, including aliased requests.
+        if let TargetEnv::Node = self.target_env {
+            if target.starts_with("node:") {
+                return Ok(PathBuf::from(target));
+            }
+
+            if is_core_module(target) {
+                return Ok(PathBuf::from(format!("node:{target}")));
+            }
+        }
+
+        if !self.alias.contains_key(module_specifier) && !module_specifier.starts_with('.') {
             // Handle absolute path
 
             let path = Path::new(module_specifier);
@@ -583,25 +601,6 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             base.parent().unwrap_or(cwd)
         } else {
             base
-        };
-
-        // Handle builtin modules for nodejs
-        if let TargetEnv::Node = self.target_env {
-            if module_specifier.starts_with("node:") {
-                return Ok(PathBuf::from(module_specifier));
-            }
-
-            if is_core_module(module_specifier) {
-                return Ok(PathBuf::from(format!("node:{}", module_specifier)));
-            }
-        }
-
-        // Aliases allow browser shims to be renamed so we can
-        // map `stream` to `stream-browserify` for example
-        let target = if let Some(alias) = self.alias.get(module_specifier) {
-            &alias[..]
-        } else {
-            module_specifier
         };
 
         let target_path = Path::new(target);

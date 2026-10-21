@@ -83,18 +83,23 @@ impl DependencyResolver for StructuralResolver {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<ResolvedDependency> {
+        // Check the same one-step exact replacement used by the file resolver.
+        let replacement = self.options.alias.get(specifier);
+        let target = replacement.map(String::as_str).unwrap_or(specifier);
         eyre::ensure!(
             self.options.target_env != TargetEnv::Browser
-                || (!specifier.starts_with("node:") && !NODE_BUILTINS.contains(&specifier)),
-            "Node builtin {specifier:?} is unsupported for the browser target; no polyfills are provided"
+                || (!target.starts_with("node:") && !NODE_BUILTINS.contains(&target)),
+            "{mode:?} resolving {specifier:?} from {}: Node builtin {target:?} is unsupported for the browser target; no polyfills are provided",
+            base.display()
         );
-        if self.externals.contains(specifier) {
+        if replacement.is_none() && self.externals.contains(specifier) {
             return Ok(ResolvedDependency::External(specifier.to_owned()));
         }
 
         eyre::ensure!(
-            !specifier.starts_with("node:") && !NODE_BUILTINS.contains(&specifier),
-            "external {specifier:?} requires explicit external policy"
+            !target.starts_with("node:") && !NODE_BUILTINS.contains(&target),
+            "{mode:?} resolving {specifier:?} from {}: external {target:?} requires explicit external policy",
+            base.display()
         );
         let mut options = self.options.clone();
         options
@@ -125,7 +130,15 @@ impl DependencyResolver for StructuralResolver {
             })?;
         eyre::ensure!(
             result.path.is_file(),
-            "resolved target is not a file: {}",
+            "{mode:?} resolving {specifier:?} from {}: resolved target is not a file: {}",
+            base.display(),
+            result.path.display()
+        );
+        eyre::ensure!(
+            self.options.target_env != TargetEnv::Browser
+                || result.path.extension().is_none_or(|ext| ext != "node"),
+            "{mode:?} resolving {specifier:?} from {}: native addon is unsupported for the browser target: {}",
+            base.display(),
             result.path.display()
         );
         Ok(ResolvedDependency::File(result.path))
@@ -135,6 +148,70 @@ impl DependencyResolver for StructuralResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_builtin_aliases_are_exact_single_step_checked_files() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "stub.cjs" => "exports.value = 1;",
+            "stub.mjs" => "export const value = 1;",
+            "addon.node" => ""
+        };
+        for environment in [TargetEnv::Browser, TargetEnv::Node] {
+            let mut options = NodeModulesResolverOptions::default_for_env(environment);
+            options.alias.insert("fs".into(), "./stub.cjs".into());
+            options.alias.insert(
+                "node:fs".into(),
+                dir.root().join("stub.mjs").to_str().unwrap().into(),
+            );
+            options
+                .alias
+                .insert("./stub.cjs".into(), "./missing.cjs".into());
+            options.alias.insert("missing".into(), "./missing.cjs".into());
+            options.alias.insert("cycle-a".into(), "cycle-b".into());
+            options.alias.insert("cycle-b".into(), "cycle-a".into());
+            options.alias.insert("self".into(), "self".into());
+            options.alias.insert("native".into(), "node:fs".into());
+            options.alias.insert("addon".into(), "./addon.node".into());
+            let resolver = StructuralResolver::new(
+                dir.root().into(),
+                options,
+                BTreeSet::from(["fs".into(), "node:fs".into()]),
+            );
+            for mode in [ResolutionMode::Import, ResolutionMode::Require] {
+                for (request, target) in [("fs", "stub.cjs"), ("node:fs", "stub.mjs")] {
+                    assert_eq!(
+                        resolver
+                            .resolve_dependency(&dir.root().join("entry.mjs"), request, mode)
+                            .unwrap(),
+                        ResolvedDependency::File(dir.root().join(target)),
+                    );
+                }
+                for request in [
+                    "fs/promises",
+                    "node:fs/promises",
+                    "missing",
+                    "cycle-a",
+                    "self",
+                    "native",
+                ]
+                .into_iter()
+                .chain((environment == TargetEnv::Browser).then_some("addon"))
+                {
+                    let error = format!(
+                        "{:#}",
+                        resolver
+                            .resolve_dependency(&dir.root().join("entry.mjs"), request, mode)
+                            .unwrap_err()
+                    );
+                    assert!(
+                        error.contains(request) && error.contains("entry.mjs"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn package_string_roots_and_wildcard_resource_paths_resolve() {
@@ -261,15 +338,19 @@ mod tests {
             (TargetEnv::Browser, "browser.mjs", "local-browser.mjs"),
             (TargetEnv::Node, "server.mjs", "local.mjs"),
         ] {
-            let resolver = StructuralResolver::new(
-                dir.root().into(),
-                NodeModulesResolverOptions::default_for_env(target),
-                BTreeSet::new(),
+            let mut options = NodeModulesResolverOptions::default_for_env(target);
+            options.alias.insert("fs".into(), "./local.mjs".into());
+            options.alias.insert(
+                "node:fs".into(),
+                dir.root().join("local.mjs").to_str().unwrap().into(),
             );
+            let resolver = StructuralResolver::new(dir.root().into(), options, BTreeSet::new());
             for mode in [ResolutionMode::Import, ResolutionMode::Require] {
                 for (request, expected) in [
                     ("dep", dir.root().join("node_modules/dep").join(dependency)),
                     ("./local.mjs", dir.root().join(local)),
+                    ("fs", dir.root().join(local)),
+                    ("node:fs", dir.root().join(local)),
                 ] {
                     assert_eq!(
                         resolver

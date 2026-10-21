@@ -37,8 +37,9 @@ pub(super) fn apply(
             )?,
         };
         if entry.output_name.is_none()
-            && crate::resource::kind(&entry.path, &options.css.css_modules)
+            && (crate::resource::kind(&entry.path, &options.css.css_modules)
                 != crate::resource::ResourceKind::Script
+                || (!commonjs && requested.extension().is_some_and(|ext| ext == "cjs")))
         {
             requested.set_extension(if commonjs { "cjs" } else { "mjs" });
         }
@@ -58,6 +59,7 @@ pub(super) fn apply(
                 .extension()
                 .and_then(|s| s.to_str())
                 .filter(|s| matches!(*s, "mjs" | "cjs" | "js"))
+                .filter(|s| commonjs || *s != "cjs")
                 .unwrap_or(if commonjs { "cjs" } else { "mjs" });
             path.set_extension(extension);
         }

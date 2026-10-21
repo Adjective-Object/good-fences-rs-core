@@ -10,10 +10,23 @@ layer keys use typed XXH3-128 fingerprints; publication/content integrity and
 resource naming retain SHA-256.
 Select Ecco host contracts from resolver target and key preparation by host plus
 declaration config; retain explicit user overrides and wrapper read contracts.
-Browser emits native ESM only, including JSON/asset/global CSS wrappers and
-finite dynamic-import contexts. Reject Node builtins even as externals, actual
-CJS and require contexts. ESM-only context diagnostics capture Error in a native
-intrinsic module before entry effects, never package a Node loader.
+Browser emits native ESM only, including lexical lazy CJS availability,
+JSON/asset/global CSS wrappers and finite require/dynamic-import contexts.
+Availability imports never invoke factories; require sites/facades own activation.
+Resolve explicit one-step exact aliases before rejecting Node builtins even as
+externals; local stubs still require checked inventory/graph loading. Never
+provide automatic polyfills/empty stubs; reject native addons and external require.
+Deduplicate availability imports by output chunk and binding, not factory.
+Capture shim
+intrinsics in native ESM before entry effects, never package a Node loader.
+Browser synchronous ESM require supports dependency-free leaves: effect-free
+leaves retain native shared namespaces; effectful require-only leaves use cached
+lexical initializers/read-only live getters. Reject shared effectful jobs,
+dependent ESM and async boundaries, never eagerly shift their effects.
+JSON/asset/caller-loaded global CSS requires unwrap prepared default values,
+selected by the build's resource policy, never inferred from source extensions.
+Browser CJS entries use ESM
+snapshot facades; wrapper path parameters are availability URLs.
 Default condition lists follow target switches; custom lists stay caller policy.
 Keep native TDZ barriers and add-only forced-effect rules when refining syntax effects.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
@@ -312,8 +325,8 @@ native .cjs-per-input fallback. Preserve early cache allocation, wrapper
 this/exports aliases/current exports and retry after throws.
 Initialize factory-local __filename/__dirname parameters from actual output
 availability paths; retain var/function redeclarations and nested shadows.
-When CJS or a context is retained, add runtime.cjs as the first dependency of every emitted
-job after empty-job pruning. Capture shim intrinsics once before application
+When CJS or a context is retained, add target-appropriate intrinsics as the first
+dependency of every emitted job after empty-job pruning. Capture shim intrinsics once before application
 code; include the support file in chunk projections and use it in CJS aliases.
 Never rewrite application built-in lookups or activate factories from the helper.
 Chunk helper identifiers must avoid all
@@ -329,11 +342,11 @@ Low-level undeclared deferred probes disable refinement, never silently infer pu
 Pure CJS factories group by availability roots, with one lexical cache per
 initializer, never a global ESM table. Facade parts group only at equal consumer
 evaluation seams; adjacent sorted snapshots may share a native job. Namespace
-bridges keep their canonical default-export seam. Public CJS entries alone need
-real CJS wrappers; internal sources have no fake independent module path.
+bridges keep their canonical default-export seam. Public Node CJS entries alone
+need real CJS wrappers; internal sources have no fake independent module path.
 Reverse checked requests supply original names; default is full exports,
 __esModule never unwraps, names snapshot once. Namespace keys snapshot once
-and reads forward to captured exports. Require-of-ESM uses native evaluation
+and reads forward to captured exports. Node require-of-ESM uses native evaluation
 facades and retains native evaluating-cycle errors.
 Physical ownership alone is not fetching correctness. Static execution closure
 differs from deferred require availability; never recreate capture cycles.

@@ -101,7 +101,7 @@ Computed object keys preserve own `__proto__`
 properties, duplicate-key semantics, negative zero, large numbers and escaped
 surrogates without consulting mutable `JSON.parse`. UTF-8 BOMs are accepted.
 Named JSON exports and import attributes remain unsupported; use a default import
-or, on Node, `require`. A JSON entry defaults to `.cjs` on Node and `.mjs` on Browser.
+or `require`. A JSON entry defaults to `.cjs` on Node and `.mjs` on Browser.
 
 Resource preparation separates original input bytes from generated JavaScript.
 Graph identities remain original resource paths, while cached spans and sealed
@@ -806,19 +806,61 @@ nondefault condition sets remain explicit caller policy. Browser defaults activa
 determines exports selection. String `browser` entries and dependency-local
 object mappings of the selected legacy entry are supported alongside importer
 request/path mappings. No polyfills or empty-module substitutions
-are injected. Node builtins (bare and `node:`) fail even if listed as externals.
+are injected. Unreplaced Node builtins (bare and `node:`) fail even if listed as
+externals. Supply a concrete local stub through `options.resolver.alias`, for
+example:
 
-The browser target emits native ESM chunks for ESM inputs, JSON, assets and CSS,
-with conservative Window-host effect analysis. Finite relative dynamic-import
-contexts support compatible ESM/resource candidates; misses asynchronously reject
-using a captured Error intrinsic in a native ESM module. Caller-loaded CSS
-remains application-ordered; auto-mount follows static/dynamic evaluation timing.
-Actual CommonJS inputs and `require` (including contexts) fail explicitly rather
-than emitting unusable `.cjs` chunks. Explicit nonbuiltin externals need a
-host-provided resolution mechanism.
+```rust,ignore
+options.resolver.alias.insert("fs".into(), "./browser-fs.cjs".into());
+options.resolver.alias.insert("node:fs".into(), "./browser-fs.cjs".into());
+```
+
+Aliases are exact, one-step replacements: `fs` does not match `node:fs` or
+`fs/promises`. Relative replacements resolve from the importer; use an absolute
+path to an inventoried file when importers live in different directories.
+Explicit replacements precede builtin/external policy and pass through normal
+file resolution, checked inventory and module graph loading. Missing files,
+native `.node` addons, and replacements still naming builtins fail; no host
+`require` or implicit empty stub is supplied. CJS stubs may have bundled
+dependencies; ESM stubs used by `require` have the leaf restrictions below.
+
+The browser target emits native ESM chunks for ESM and CommonJS inputs, JSON,
+assets and CSS, with conservative Window-host effect analysis. CommonJS
+availability chunks export cached lexical initializers; importing availability
+does **not** execute a factory. Original `require` sites and demanded ESM facades
+activate them. Chains, partial-export cycles, replacement `module.exports`,
+throws/retry, finite relative require contexts and static/dynamic ESM interop
+share the same factory cache. Context arguments evaluate once; require misses
+throw synchronously and dynamic-import misses reject asynchronously, using
+captured intrinsics. Browser CJS entries expose native default/named snapshot
+exports and default to `.mjs` for `.cjs` inputs; `.js` entries get ESM metadata.
+No emitted transport depends on `require`, `module`, `.cjs`, or a Node loader.
+
+Synchronous require of ESM supports dependency-free leaves. Effect-free leaves
+(including prepared JSON/asset/caller-loaded global CSS values) keep their native
+namespace and may be shared with static/dynamic imports. Effectful leaves must be require-only:
+their original body executes at the first require, with cached failures and
+read-only getters over live lexical exports. This bridge is not a native
+namespace exotic object (its property descriptors are getters). Native shared
+jobs for effectful targets, ESM targets with dependencies, and async/TLA targets
+are explicitly rejected rather than eagerly executing effects or converting
+require to a Promise. JSON/asset/caller-loaded global CSS requires return the
+default value; ESM script and other CSS wrapper requires return their namespace.
+Browser factories run under native ESM strict mode: use strict-mode-compatible CommonJS, not sloppy-mode
+global writes/implicit global `this`. `__filename`/`__dirname` are emitted
+availability URLs, not filesystem paths.
+
+Caller-loaded CSS remains application-ordered; auto-mount follows activation
+timing. External require, unreplaced Node builtins, native addons, unbounded require and loader APIs
+(`require.resolve`, `require.cache`, `module.require`) remain unsupported.
+Explicit nonbuiltin import externals need a host-provided resolution mechanism.
 No worker subtargets, DOM typings, rendering/readiness guarantees, or single-file
 runtime are provided. Controlled host-global execution tests cover getter reads,
-DOM mutations, scheduling and lazy native imports, not real browser rendering.
+DOM mutations, scheduling and lazy native imports. Set `BUNDLER_TEST_FIREFOX` to
+an installed Firefox executable when running `cargo test -p bundler --lib browser_`
+to additionally execute the emitted graph over local HTTP in a real headless
+browser, without downloading a browser or using host CommonJS globals. This
+checks execution, not rendering/readiness.
 
 ## Public build session
 
@@ -1094,12 +1136,14 @@ The diagnostic includes the input path and declaration span; no format override
 is applied.
 
 Linked opaque JavaScript CJS bodies appear once as real function syntax in pure
-availability `.cjs` chunks. These chunks group factories by existing root sets;
+availability chunks (`.cjs` on Node, native `.mjs` on Browser).
+These chunks group factories by existing root sets;
 they are not copies of input modules that Node executes/caches as source.
 Each exported initializer owns one lexical record, allocated before invoking its
 factory. Source requires call checked initializer bindings directly, including
-across availability chunks. Requires of synchronous ESM remain lazy native
-requires of the actual ESM chunk path, not eager ESM imports.
+across availability chunks. On Node, requires of synchronous ESM remain lazy native
+requires of the actual ESM chunk path. Browser's bounded synchronous ESM support
+is described above.
 The initializer binds wrapper `this` to the
 initial exports object and returns the current `module.exports`. Recursive
 requires see partial exports; deferred sites execute only when called. Failed
@@ -1107,14 +1151,15 @@ factories are removed from the require cache and retry on the next require.
 Successful modules execute once. Native ESM proxies carry static named/default
 requests; CJS namespace requests/entries use a canonical runtime-key bridge.
 `__filename` and `__dirname` are factory-local wrapper parameters initialized
-from the actual output availability chunk's native path bindings (the CJS
+from the actual output availability chunk's native path bindings on Node (the CJS
 counterpart of `import.meta.filename`/`import.meta.dirname`). They describe emitted
 files, not original source locations. `var` redeclarations retain those values;
 writes stay local to one factory, and nested lexical shadows remain ordinary JS.
 Top-level lexical redeclarations conflict with wrapper parameters and are rejected
 with source diagnostics, as in Node.
 
-When CJS is retained, `native/runtime.cjs` captures generated-shim intrinsics
+When CJS is retained, `native/runtime.cjs` (Node) or
+`native/browser-intrinsics.mjs` (Browser) captures generated-shim intrinsics
 before application evaluation. Every emitted job loads it first, including
 otherwise unrelated entries, so late namespace jobs and public CJS aliases reuse
 the same captures. Namespace construction, factory invocation and cycle errors
@@ -1304,8 +1349,8 @@ same directory/native jobs, never an in-place repair of failed jobs.
 Externals, TS/JSX and other source-policy unsupported forms still fail with
 diagnostics. Logical root-set equality remains exact; native physical grouping
 does not change that analytical partition.
-Public browser builds support the native ESM subset described above; this is not
-a standalone-file target, and Node-loader-dependent CJS/context output is rejected.
+Public browser builds support native ESM transport and lexical CommonJS
+initializers as described above; this is not a standalone-file target.
 
 ### Async evaluation and support
 

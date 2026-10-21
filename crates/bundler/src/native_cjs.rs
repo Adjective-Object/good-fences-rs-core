@@ -10,10 +10,14 @@ struct Value {
 }
 
 pub(super) struct CommonJs {
+    browser: bool,
     runtime: String,
     runtime_required: bool,
     values: BTreeMap<NodeId, Value>,
     factories: BTreeMap<u32, Value>,
+    require_esm: BTreeMap<u32, Value>,
+    eager_esm: BTreeMap<u32, String>,
+    require_defaults: BTreeSet<u32>,
     demands: BTreeMap<(u32, u32), BTreeSet<NodeId>>,
     pub members: BTreeMap<NodeId, PathBuf>,
     pub files: BTreeMap<PathBuf, Code>,
@@ -27,6 +31,8 @@ impl CommonJs {
         graph: &SourceGraph,
         plan: &ChunkPlan,
         modules: &BTreeMap<u32, Module<'_>>,
+        browser: bool,
+        require_defaults: &BTreeSet<PathBuf>,
     ) -> eyre::Result<Self> {
         let occupied: BTreeSet<_> = modules
             .values()
@@ -44,6 +50,7 @@ impl CommonJs {
             .find(|p| occupied.iter().all(|name| !name.starts_with(p)))
             .unwrap();
         let mut result = Self {
+            browser,
             runtime: format!("{prefix}runtime"),
             runtime_required: modules.iter().any(|(&file, module)| {
                 module.parsed.facts.commonjs
@@ -61,6 +68,9 @@ impl CommonJs {
             }),
             values: BTreeMap::new(),
             factories: BTreeMap::new(),
+            require_esm: BTreeMap::new(),
+            eager_esm: BTreeMap::new(),
+            require_defaults: BTreeSet::new(),
             demands: BTreeMap::new(),
             members: BTreeMap::new(),
             files: BTreeMap::new(),
@@ -75,7 +85,11 @@ impl CommonJs {
                 index: 0,
             };
             let chunk = plan.chunk_for(&body).ok_or_eyre("missing opaque owner")?;
-            let path = PathBuf::from(format!("native/cjs-{}.cjs", digest(&format!("{chunk:?}"))));
+            let extension = if browser { "mjs" } else { "cjs" };
+            let path = PathBuf::from(format!(
+                "native/cjs-{}.{extension}",
+                digest(&format!("{chunk:?}"))
+            ));
             result.factories.insert(
                 file,
                 Value {
@@ -203,11 +217,110 @@ impl CommonJs {
                 result.namespaces.insert(original, value.path.clone());
             }
         }
+        if browser {
+            for (&file, module) in modules {
+                for dependency in module
+                    .parsed
+                    .facts
+                    .dependencies
+                    .iter()
+                    .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+                {
+                    for target in target_files(graph, file, dependency)? {
+                        if modules[&target].parsed.facts.commonjs {
+                            continue;
+                        }
+                        let original = graph.file_path(target).unwrap();
+                        let name = format!("{prefix}esm_{}", digest(original.to_str().unwrap()));
+                        let facts = &modules[&target].parsed.facts;
+                        let default_resource = require_defaults.contains(original);
+                        if default_resource {
+                            result.require_defaults.insert(target);
+                        }
+                        if facts.dependencies.iter().all(|d| d.type_only)
+                            && (default_resource
+                                || facts.effects.iter().all(|effect| effect.deferred.is_some()))
+                        {
+                            // Instantiating a dependency-free, effect-free leaf
+                            // cannot activate application code. Keep its native
+                            // namespace, including shared static/dynamic users.
+                            result.eager_esm.insert(target, name);
+                            continue;
+                        }
+                        let path = PathBuf::from(format!(
+                            "native/require-esm-{}.mjs",
+                            digest(original.to_str().unwrap())
+                        ));
+                        result.require_esm.insert(
+                            target,
+                            Value {
+                                path: path.clone(),
+                                name: name.clone(),
+                                exported: name,
+                            },
+                        );
+                        result
+                            .members
+                            .insert(NodeId::Module(original.to_owned()), path.clone());
+                        for (index, _) in modules[&target].parsed.segments.iter().enumerate() {
+                            result.members.insert(
+                                NodeId::Segment {
+                                    module: original.to_owned(),
+                                    index: index as u32,
+                                },
+                                path.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+            // Only require-owned synchronous leaves can move into a lexical
+            // initializer without changing native static/dynamic namespace jobs.
+            for &target in result.require_esm.keys() {
+                let original = graph.file_path(target).unwrap();
+                ensure!(
+                    modules[&target].parsed.facts.dependencies.iter().all(|d| d.type_only),
+                    "{}: browser synchronous require of ESM currently needs a dependency-free leaf; use import() for this evaluation boundary",
+                    original.display()
+                );
+                ensure!(
+                    !plan.roots.values().any(|seed| seed.evaluation_roots.contains(&target)
+                        || seed.binding_roots.iter().any(|node| matches!(node,
+                            GraphNode::Module(file) if *file == target))),
+                    "{}: browser synchronous require cannot also expose the ESM target as a native entry or dynamic-import job",
+                    original.display()
+                );
+            }
+            for (&file, module) in modules {
+                for dependency in module
+                    .parsed
+                    .facts
+                    .dependencies
+                    .iter()
+                    .filter(|d| !d.type_only)
+                {
+                    for target in target_files(graph, file, dependency)? {
+                        if result.require_esm.contains_key(&target) {
+                            ensure!(
+                                module.parsed.facts.commonjs && dependency.kind == DependencyKind::Require,
+                                "{}:{}..{}: browser synchronous require of {} cannot share a native static/dynamic ESM job",
+                                graph.file_path(file).unwrap().display(), dependency.span.start, dependency.span.end,
+                                graph.file_path(target).unwrap().display()
+                            );
+                        }
+                    }
+                }
+            }
+        }
         Ok(result)
     }
 
     pub fn contains(&self, file: u32) -> bool {
-        self.factories.contains_key(&file)
+        self.factories.contains_key(&file) || self.require_esm.contains_key(&file)
+    }
+
+    pub fn owns_activation(&self, file: u32) -> bool {
+        self.contains(file) || self.eager_esm.contains_key(&file)
     }
 
     pub fn add_runtime(
@@ -221,6 +334,8 @@ impl CommonJs {
         let esm_only = self.factories.is_empty();
         let path = PathBuf::from(if esm_only {
             "native/context-intrinsics.mjs"
+        } else if self.browser {
+            "native/browser-intrinsics.mjs"
         } else {
             RUNTIME_PATH
         });
@@ -237,6 +352,8 @@ impl CommonJs {
         }
         let source = Code::from(if esm_only {
             include_str!("context_intrinsics.mjs")
+        } else if self.browser {
+            include_str!("browser_intrinsics.mjs")
         } else {
             include_str!("runtime.cjs")
         });
@@ -457,6 +574,8 @@ impl CommonJs {
         modules: &BTreeMap<u32, Module<'_>>,
         namespaces: &BTreeMap<u32, PathBuf>,
         entries: &BTreeSet<u32>,
+        plan: &ChunkPlan,
+        prepared: &PreparedValues<'_>,
     ) -> eyre::Result<()> {
         // Export initializers before pure cyclic availability imports. Only CJS
         // requires, not ESM interop seams, may observe a still-running factory.
@@ -464,8 +583,19 @@ impl CommonJs {
         factories.sort_by_key(|(_, value)| &value.name);
         let runtime = &self.runtime;
         for (_, value) in &factories {
+            let declaration = if self.browser { "var" } else { "let" };
+            let export = if self.browser {
+                format!("export {{{}}};", value.name)
+            } else {
+                format!("exports.{0} = {0};", value.name)
+            };
+            let paths = if self.browser {
+                format!("import.meta.url, {runtime}.apply({runtime}.slice, import.meta.url, [0, {runtime}.apply({runtime}.lastIndexOf, import.meta.url, ['/']) + 1])")
+            } else {
+                "__filename, __dirname".into()
+            };
             self.files.entry(value.path.clone()).or_default().push_str(&format!(
-                "let {0}_record;\nexports.{0} = {0};\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw {runtime}.assign(new {runtime}.Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {runtime}.apply({0}_factory, module.exports, [module.exports, module, __filename, __dirname]); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
+                "{declaration} {0}_record;\n{export}\nfunction {0}(interop = false) {{\nif ({0}_record) {{\nif (interop && !{0}_record.loaded) throw {runtime}.assign(new {runtime}.Error('Cannot import CommonJS module in a cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\nreturn {0}_record.exports;\n}}\nconst module = {0}_record = {{exports: {{}}, loaded: false}};\ntry {{ {runtime}.apply({0}_factory, module.exports, [module.exports, module, {paths}]); module.loaded = true; return module.exports; }} catch (error) {{ {0}_record = undefined; throw error; }}\n}}\n",
                 value.name
             ));
         }
@@ -489,6 +619,11 @@ impl CommonJs {
                 if let Some(DependencyTarget::External(specifier)) =
                     graph.dependency_target(file, dependency.id)
                 {
+                    ensure!(
+                        !self.browser || dependency.kind != DependencyKind::Require,
+                        "{}:{}..{}: browser target cannot require external {specifier:?}; use an ESM import or bundle the dependency",
+                        graph.file_path(file).unwrap().display(), dependency.span.start, dependency.span.end
+                    );
                     let (kind, prefix) = match dependency.kind {
                         DependencyKind::Require => (RequestKind::Require, "require("),
                         DependencyKind::DynamicImport => (RequestKind::DynamicImport, "import("),
@@ -538,18 +673,66 @@ impl CommonJs {
                                 {
                                     imports.insert(
                                         other.name.clone(),
-                                        Code::request(other.path.clone(), RequestKind::Require)
-                                            .surrounded(
-                                                format!("const {{{}}} = require(", other.name),
-                                                ");\n",
-                                            ),
+                                        if self.browser {
+                                            Code::request(other.path.clone(), RequestKind::Import)
+                                                .surrounded(
+                                                    format!("import {{{}}} from ", other.name),
+                                                    ";\n",
+                                                )
+                                        } else {
+                                            Code::request(other.path.clone(), RequestKind::Require)
+                                                .surrounded(
+                                                    format!("const {{{}}} = require(", other.name),
+                                                    ");\n",
+                                                )
+                                        },
                                     );
                                 }
                                 Code::from(format!("{}()", other.name))
                             } else {
-                                // Native require is intentionally inside the original call site.
-                                Code::request(namespaces[&target].clone(), RequestKind::Require)
+                                if self.browser {
+                                    if let Some(name) = self.eager_esm.get(&target) {
+                                        if availability_imports
+                                            .insert((value.path.clone(), name.clone()))
+                                        {
+                                            imports.insert(
+                                                name.clone(),
+                                                Code::request(
+                                                    namespaces[&target].clone(),
+                                                    RequestKind::Import,
+                                                )
+                                                .surrounded(format!("import * as {name} from "), ";\n"),
+                                            );
+                                        }
+                                        Code::from(if self.require_defaults.contains(&target) {
+                                            format!("{name}.default")
+                                        } else {
+                                            name.clone()
+                                        })
+                                    } else {
+                                        let other = &self.require_esm[&target];
+                                        if availability_imports
+                                            .insert((value.path.clone(), other.name.clone()))
+                                        {
+                                            imports.insert(
+                                                other.name.clone(),
+                                                Code::request(other.path.clone(), RequestKind::Import)
+                                                    .surrounded(
+                                                        format!("import {{{}}} from ", other.name),
+                                                        ";\n",
+                                                    ),
+                                            );
+                                        }
+                                        Code::from(format!("{}()", other.name))
+                                    }
+                                } else {
+                                    // Native require is intentionally inside the original call site.
+                                    Code::request(
+                                        namespaces[&target].clone(),
+                                        RequestKind::Require,
+                                    )
                                     .surrounded("require(", ")")
+                                }
                             }
                         }
                         DependencyKind::DynamicImport if self.contains(target) => {
@@ -607,11 +790,19 @@ impl CommonJs {
             let expression = match node {
                 NodeId::CommonJsProxy { name: None, .. } => {
                     let factory = &self.factories[&file];
-                    imports.push(
-                        Code::request(factory.path.clone(), RequestKind::Import)
-                            .surrounded(format!("import {}_factory from ", value.name), ";\n"),
-                    );
-                    format!("{}_factory.{}(true)", value.name, factory.name)
+                    if self.browser {
+                        imports.push(
+                            Code::request(factory.path.clone(), RequestKind::Import)
+                                .surrounded(format!("import {{{}}} from ", factory.name), ";\n"),
+                        );
+                        format!("{}(true)", factory.name)
+                    } else {
+                        imports.push(
+                            Code::request(factory.path.clone(), RequestKind::Import)
+                                .surrounded(format!("import {}_factory from ", value.name), ";\n"),
+                        );
+                        format!("{}_factory.{}(true)", value.name, factory.name)
+                    }
                 }
                 _ => {
                     let default = self.value(graph, file, &ImportedName::Name("default".into()))?;
@@ -679,6 +870,14 @@ impl CommonJs {
                 }
             }
             if entries.contains(&file) {
+                if self.browser {
+                    let (path, _) = self
+                        .proxies
+                        .get(&original)
+                        .ok_or_eyre("missing browser CommonJS entry facade")?;
+                    self.entries.insert(file, path.clone());
+                    continue;
+                }
                 let factory = &self.factories[&file];
                 let path = PathBuf::from(format!(
                     "native/entry-{}.cjs",
@@ -692,6 +891,71 @@ impl CommonJs {
                 );
                 self.entries.insert(file, path);
             }
+        }
+        self.emit_require_esm(graph, modules, plan, prepared)?;
+        Ok(())
+    }
+
+    fn emit_require_esm(
+        &mut self,
+        graph: &SourceGraph,
+        modules: &BTreeMap<u32, Module<'_>>,
+        plan: &ChunkPlan,
+        prepared: &PreparedValues<'_>,
+    ) -> eyre::Result<()> {
+        if self.require_esm.is_empty() {
+            return Ok(());
+        }
+        let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
+        let recipes = plan
+            .retention
+            .effects
+            .iter()
+            .map(|effect| (effect.key, effect.summary.rewrites.as_slice()))
+            .collect();
+        let values = Values::new(prepared);
+        let runtime = &self.runtime;
+        for (&file, value) in &self.require_esm {
+            let name = &value.name;
+            let mut hoisted = Code::default();
+            let mut bodies = Code::default();
+            for index in 0..modules[&file].parsed.segments.len() {
+                let key = SegmentKey::new(file, index as u32);
+                if live.contains(&key) {
+                    let (declarations, body) = body(graph, key, &modules[&file], &values, &recipes)?
+                        .ok_or_eyre("unsupported browser require-of-ESM lexical placement")?;
+                    hoisted.push(declarations);
+                    bodies.push(body);
+                }
+            }
+            let mut output = Code::from(format!(
+                "var {name}_state, {name}_value, {name}_error;\nexport function {name}() {{\n\
+                 if ({name}_state === 2) return {name}_value;\n\
+                 if ({name}_state === 3) throw {name}_error;\n\
+                 if ({name}_state === 1) throw {runtime}.assign(new {runtime}.Error('Cannot require ESM in an evaluating cycle'), {{code: 'ERR_REQUIRE_CYCLE_MODULE'}});\n\
+                 {name}_state = 1;\ntry {{ {name}_value = {name}_body(); {name}_state = 2; return {name}_value; }}\n\
+                 catch (error) {{ {name}_state = 3; {name}_error = error; throw error; }}\n}}\n\
+                 const {name}_body = () => {{\n"
+            ));
+            output.push(hoisted);
+            output.push(bodies);
+            output.push_str(&format!(
+                "const {name}_namespace = {runtime}.create(null);\n"
+            ));
+            for (public, linked) in &prepared.symbols.exports[&file] {
+                let binding = values
+                    .name(&linked.identity)
+                    .ok_or_eyre("unsupported browser require-of-ESM export")?;
+                output.push_str(&format!(
+                    "{runtime}.defineProperty({name}_namespace, {}, {{enumerable: true, get: () => {binding}}});\n",
+                    quote(public)
+                ));
+            }
+            output.push_str(&format!(
+                "{runtime}.defineProperty({name}_namespace, {runtime}.toStringTag, {{value: 'Module'}});\n\
+                 return {runtime}.freeze({name}_namespace);\n}};\n"
+            ));
+            self.files.insert(value.path.clone(), output);
         }
         Ok(())
     }
