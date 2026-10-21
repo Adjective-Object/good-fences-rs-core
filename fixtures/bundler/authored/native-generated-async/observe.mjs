@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 
-export async function observe({entries, entry}) {
+export async function observe({entries, entry, mode}) {
   globalThis.events = [];
   const ns = await import(pathToFileURL(entries[entry]).href);
   assert.deepEqual(events, ['eager']);
   assert.equal(await ns.run(false), false);
   assert.deepEqual(events, ['eager']);
   const pending = ns.run(true);
-  assert.deepEqual(events, ['eager']);
+  assert.deepEqual(events, mode === 'source' ? ['eager', 'body'] : ['eager']);
   const [value, receiver, helper] = await pending;
   assert.equal(value, 7);
   assert.equal(receiver, true);
