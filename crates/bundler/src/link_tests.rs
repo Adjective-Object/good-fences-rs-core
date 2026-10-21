@@ -2434,8 +2434,8 @@ fn arbitrary_placement_shares_mutable_lexical_clusters_across_source_boundaries(
             .collect::<Vec<_>>()
             .join("\n"),
         @r###"
-    export {state as "state"};
-    export {bump as "bump"};
+    export {state as "__gf_segment_binding_3ccc2eb2e47f503ffd17288457e128f95d9a864633f0744564bfc2a002a9a168_11"};
+    export {bump as "__gf_segment_binding_3ccc2eb2e47f503ffd17288457e128f95d9a864633f0744564bfc2a002a9a168_38"};
     "###
     );
     assert_ne!(
