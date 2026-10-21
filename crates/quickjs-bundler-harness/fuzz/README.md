@@ -32,11 +32,22 @@ cargo +nightly-2026-05-01 fuzz tmin bundle_effects fuzz/artifacts/bundle_effects
 
 Cargo-fuzz finds the nested `fuzz/` package from the harness directory. Its own
 workspace and lockfile keep fuzz-only dependencies out of ordinary builds.
-The default cargo-fuzz address sanitizer instruments Rust dependencies. Do not
-assume QuickJS's C sources have sanitizer or coverage instrumentation merely
-because Rust does; native instrumentation requires a compatible C compiler and
-explicit C build flags. Run workers as isolated processes: QuickJS limits are
-not an OS security sandbox.
+The default cargo-fuzz address sanitizer instruments Rust dependencies, and
+`rquickjs-sys` also forwards the address-sanitizer setting to QuickJS's C build.
+Interpreter coverage feedback is separate and requires Clang coverage flags:
+
+```sh
+CC=clang \
+CFLAGS="-fsanitize=address -fsanitize-coverage=inline-8bit-counters,pc-table,trace-cmp -fno-omit-frame-pointer" \
+cargo +nightly-2026-05-01 fuzz run bundle_effects \
+  --target-dir fuzz/target/quickjs-coverage \
+  -- -max_len=28 -max_total_time=3600
+```
+
+Use a compatible installed Clang (or its absolute path) for `CC`. This adds
+interpreter C-edge feedback, not per-JavaScript-source branch counters. The
+separate target directory keeps this optional build apart from the default.
+Run workers as isolated processes: QuickJS limits are not an OS security sandbox.
 
 ## Input grammar and oracle
 
