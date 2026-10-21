@@ -169,6 +169,41 @@ fn dynamic_namespace_observations_check_every_alias_reference_and_receiver() {
             Some(vec![("value".into(), false)]),
         ),
         (
+            "return ((import('./x'))).then(((ns) => (ns).value));",
+            Some(vec![("value".into(), false)]),
+        ),
+        (
+            "return import('./x').then(ns => { function other(ns) { return ns.shadow; } return ns.value; });",
+            Some(vec![("value".into(), false)]),
+        ),
+        (
+            "return import('./x').then(ns => { ns.method(); return ns.method; });",
+            Some(vec![("method".into(), false), ("method".into(), true)]),
+        ),
+        (
+            "return import('./x').then(ns => () => ns.value);",
+            Some(vec![("value".into(), false)]),
+        ),
+        (
+            "return ((await (import('./x')))).method();",
+            Some(vec![("method".into(), true)]),
+        ),
+        ("return await import('./x').value;", None),
+        ("return import('./x').then(ns => ns);", None),
+        ("return import('./x').then(ns => Object.keys(ns));", None),
+        ("return import('./x').then(ns => ns[key]);", None),
+        ("return import('./x').then(ns => { ns = other; return ns.value; });", None),
+        ("return import('./x').then(ns => { var ns = other; return ns.value; });", None),
+        ("return import('./x').then(ns => { function ns() {} return ns.value; });", None),
+        ("return import('./x').then(ns => ns.value = 1);", None),
+        ("return import('./x').then(ns => ns.value++);", None),
+        ("return import('./x').then(ns => delete ns.value);", None),
+        ("return import('./x').then(ns => ns`tag`);", None),
+        ("return import('./x').then(ns => ({...ns}));", None),
+        ("return import('./x').then(ns => 'value' in ns);", None),
+        ("return () => import('./x');", None),
+        ("return async () => await import('./x');", None),
+        (
             "const {value} = await import('./x'); return value;",
             Some(vec![("value".into(), false)]),
         ),
@@ -204,6 +239,44 @@ fn dynamic_namespace_observations_check_every_alias_reference_and_receiver() {
     assert!(parse("export function receiver() { return this; }")
         .emission()
         .uses_this());
+}
+
+#[test]
+fn dynamic_namespace_observations_preserve_occurrences_and_property_pairs() {
+    let source = "export async function load() {
+        (await import('./x')).first;
+        return import('./x').then(ns => { ns.second; ns.first; ns.second; ns.second(); });
+    }";
+    let facts = parse(source);
+    let observations = facts.emission().dynamic_namespaces();
+    assert_eq!(observations.len(), 2);
+    assert_ne!(observations[0].dependency(), observations[1].dependency());
+    assert_eq!(
+        observations
+            .iter()
+            .map(|o| o.dependency())
+            .collect::<Vec<_>>(),
+        facts
+            .dependencies()
+            .iter()
+            .map(|d| d.id())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        observations[0].properties(),
+        Some([("first".into(), false)].as_slice())
+    );
+    assert_eq!(
+        observations[1].properties(),
+        Some(
+            [
+                ("first".into(), false),
+                ("second".into(), false),
+                ("second".into(), true)
+            ]
+            .as_slice()
+        )
+    );
 }
 
 #[test]

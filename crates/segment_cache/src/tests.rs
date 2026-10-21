@@ -78,38 +78,110 @@ fn production_uses_typed_flatbuffers_and_rejects_previous_cbor() {
 }
 
 #[test]
-fn dynamic_namespace_observations_roundtrip_and_reject_dangling_dependencies() {
-    let source =
-        "export async function load() { const ns = await import('./child.mjs'); return ns.value; }";
-    let record = record(source, "entry.mjs", ModuleFormat::Esm);
+fn dynamic_namespace_observations_roundtrip_without_reparsing_or_unpacking() {
+    let source = "import './eager.mjs'; export async function load() {
+        (await import('./child.mjs')).first;
+        import('./child.mjs').then(((ns) => { ns.second; ns.first; ns.second(); }));
+        import('./child.mjs').then(ns => { function shadow(ns) { return ns.other; } return ns.third; });
+        import('./child.mjs').then(ns => { ns = other; return ns.value; });
+        import('./child.mjs').then(ns => Object.keys(ns));
+        import('./child.mjs').then(ns => ns);
+        const escaped = () => import('./child.mjs');
+        const awaitedEscape = async () => await import('./child.mjs');
+        return await import('./child.mjs').promiseProperty;
+    }";
+    let fresh = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("entry.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let record = CacheRecord::from_parsed(source, &fresh).unwrap();
     let encoded = record.encode(source).unwrap();
     let decoded = CacheRecord::decode(&encoded, source, record.config()).unwrap();
+    let cached = decoded.to_parsed(source).unwrap();
     assert_eq!(
-        decoded.module().facts().emission(),
-        record.module().facts().emission()
+        cached.facts().emission().dynamic_namespaces(),
+        fresh.facts().emission().dynamic_namespaces()
     );
+    assert!(cached.owned_facts().is_err());
+    assert!(cached.owned_segments().is_none());
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
     assert_eq!(
-        decoded
-            .module()
+        cached
             .facts()
             .emission()
             .dynamic_namespaces()
-            .get(0)
-            .unwrap()
-            .properties()
-            .unwrap()
             .iter()
+            .map(|n| n.properties().map(|p| p.iter().collect::<Vec<_>>()))
             .collect::<Vec<_>>(),
-        [("value", false)]
+        [
+            Some(vec![("first", false)]),
+            Some(vec![("first", false), ("second", false), ("second", true)]),
+            Some(vec![("third", false)]),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
     );
-    let damaged = corrupt(&record, |v| {
-        v.add("module.facts.emission.dynamic_namespaces.0.dependency", 1)
-    });
-    assert!(damaged.encode(source).is_err());
-    let damaged = corrupt(&record, |v| {
-        v.clear("module.facts.emission.dynamic_namespaces")
-    });
-    assert!(damaged.encode(source).is_err());
+    assert_eq!(decoded.encode(source).unwrap(), encoded);
+}
+
+#[test]
+fn dynamic_namespace_observations_reject_invalid_links_order_and_properties() {
+    let source = "import './eager.mjs'; export async function load() {
+        (await import('./child.mjs')).first;
+        return import('./child.mjs').then(ns => { ns.second(); return ns.first; });
+    }";
+    let original = record(source, "entry.mjs", ModuleFormat::Esm);
+    for edit in [
+        |v: &mut serde_json::Value| {
+            v.add("module.facts.emission.dynamic_namespaces.0.dependency", 1);
+        },
+        |v: &mut serde_json::Value| {
+            v.copy(
+                "module.facts.emission.dynamic_namespaces.0.dependency",
+                "module.facts.dependencies.0.id",
+            );
+        },
+        |v: &mut serde_json::Value| v.clear("module.facts.emission.dynamic_namespaces"),
+        |v: &mut serde_json::Value| v.pop("module.facts.emission.dynamic_namespaces"),
+        |v: &mut serde_json::Value| v.reverse("module.facts.emission.dynamic_namespaces"),
+        |v: &mut serde_json::Value| {
+            v.reverse("module.facts.emission.dynamic_namespaces.1.properties")
+        },
+        |v: &mut serde_json::Value| {
+            v.push(
+                "module.facts.emission.dynamic_namespaces.0.properties",
+                ("first", false),
+            );
+        },
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        // Reseal the malformed typed module to test semantic validation, not
+        // merely checksum/provenance rejection.
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    for (path, value) in [
+        ("extractor", serde_json::json!(16)),
+        (
+            "module.facts.emission.dynamic_namespaces.0.properties.0.0",
+            serde_json::json!("other"),
+        ),
+        (
+            "module.facts.emission.dynamic_namespaces.1.properties.1.1",
+            serde_json::json!(false),
+        ),
+    ] {
+        let damaged = corrupt(&original, |v| v.set(path, value));
+        assert!(CacheRecord::decode(&envelope(&damaged), source, original.config()).is_err());
+    }
 }
 
 #[test]

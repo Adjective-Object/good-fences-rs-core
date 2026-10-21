@@ -128,3 +128,6 @@ Resolve effect timing from its recorded deferred context by exact span identity,
 never operand containment; callable heritage/key operands do not defer their owners.
 Dynamic namespace observations inspect alias references by binding identity;
 persist syntax shapes/receiver and `this` facts, never target safety or placement.
+Awaited member reads and literal-import `.then` arrow parameters retain separate
+occurrences and sorted property/receiver pairs. Concise-arrow namespace returns escape;
+parameter writes/redeclarations and namespace reflection stay conservative.

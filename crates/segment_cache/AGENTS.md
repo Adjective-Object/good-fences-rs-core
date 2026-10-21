@@ -22,8 +22,10 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 13/extractor 16 activates typed nested module buffers and wire seals,
+- Schema 13/extractor 17 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes and async references.
+  Extractor 17 corrects parenthesized callbacks, parameter redeclarations and
+  concise-arrow namespace escapes without changing the wire schema.
   Shared `PreparedDeclarations`
   avoids per-file serialization; source/checksum/provenance remain SHA-256.
 - Reference `async_deferred` is required syntax evidence covered by provenance,

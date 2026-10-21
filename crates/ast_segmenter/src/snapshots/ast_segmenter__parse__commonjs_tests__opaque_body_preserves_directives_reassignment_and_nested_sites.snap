@@ -122,9 +122,7 @@ ModuleFacts {
                 dependency: DependencyId(
                     187,
                 ),
-                properties: Some(
-                    [],
-                ),
+                properties: None,
             },
         ],
         uses_this: false,

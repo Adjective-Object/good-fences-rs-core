@@ -15,6 +15,7 @@ pub(super) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> (Vec<Dynami
         reads: HashMap::new(),
         blocked: false,
         receiver: None,
+        returned_expression: None,
         uses_this: false,
     };
     visitor.visit_program(program);
@@ -67,6 +68,7 @@ struct Observations<'f> {
     reads: HashMap<u32, (String, bool)>,
     blocked: bool,
     receiver: Option<u32>,
+    returned_expression: Option<u32>,
     uses_this: bool,
 }
 
@@ -93,6 +95,11 @@ impl Observations<'_> {
                 else {
                     return;
                 };
+                // Parameter redeclarations can replace the namespace without an
+                // assignment reference (for example a hoisted function).
+                if binding.declarations().len() != 1 {
+                    return;
+                }
                 (Vec::new(), Some(binding.id()))
             }
             BindingPattern::ObjectPattern(object) if object.rest.is_none() => {
@@ -132,6 +139,10 @@ impl<'a> Visit<'a> for Observations<'_> {
     }
 
     fn visit_expression_statement(&mut self, statement: &ExpressionStatement<'a>) {
+        if self.returned_expression == Some(statement.span.start) {
+            walk::walk_expression_statement(self, statement);
+            return;
+        }
         if let Some(import) = awaited(&statement.expression) {
             self.imports.insert(import.span.start, (Vec::new(), None));
         } else if let Expression::ImportExpression(import) =
@@ -140,6 +151,17 @@ impl<'a> Visit<'a> for Observations<'_> {
             self.imports.insert(import.span.start, (Vec::new(), None));
         }
         walk::walk_expression_statement(self, statement);
+    }
+
+    fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
+        // OXC represents a concise arrow's returned value as an expression
+        // statement, but its namespace must not be classified as discarded.
+        let saved = self.returned_expression;
+        self.returned_expression = arrow
+            .expression
+            .then(|| arrow.body.statements[0].span().start);
+        walk::walk_arrow_function_expression(self, arrow);
+        self.returned_expression = saved;
     }
 
     fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
@@ -172,7 +194,10 @@ impl<'a> Visit<'a> for Observations<'_> {
         if let Expression::StaticMemberExpression(member) = call.callee.get_inner_expression() {
             if member.property.name == "then" && call.arguments.len() == 1 {
                 if let Expression::ImportExpression(import) = member.object.get_inner_expression() {
-                    if let Argument::ArrowFunctionExpression(arrow) = &call.arguments[0] {
+                    if let Some(Expression::ArrowFunctionExpression(arrow)) = call.arguments[0]
+                        .as_expression()
+                        .map(Expression::get_inner_expression)
+                    {
                         if arrow.params.items.len() == 1 && arrow.params.rest.is_none() {
                             self.pattern(import, &arrow.params.items[0].pattern);
                         }

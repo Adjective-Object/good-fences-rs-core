@@ -20,6 +20,13 @@ names remain linker decisions, never cached policy.
 each dynamic import: supported static property reads/call receivers, simple
 destructuring or discarded results, versus escaping/reflective/writable uses.
 Alias references are checked by binding identity, including nested uses.
+`(await import('./x')).name` and `import('./x').then(ns => ns.name)` retain
+source-local property observations, including parenthesized forms and receiver
+calls. Repeated imports stay separate; property/receiver pairs within each
+occurrence are sorted and unique, not a combined export-demand root.
+Parameter writes/redeclarations, namespace escapes and reflection fall back
+conservatively. Concise-arrow results are returned, not discarded;
+`await import('./x').name` reads the promise, not the module namespace.
 `uses_this` records source syntax for conservative receiver eligibility.
 Target export surfaces, retention and placement remain linker decisions.
 `module_parse_count()` reports source-module parser invocations on the current
