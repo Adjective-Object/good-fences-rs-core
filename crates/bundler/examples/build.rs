@@ -109,6 +109,15 @@ fn main() -> eyre::Result<()> {
             "warnings": build.warnings,
             "planWarnings": build.product.plan.retention.warnings,
             "publicationWarnings": published.warnings,
+            "generatedBoundaries": build.product.plan.generated_boundaries.len(),
+            "moduleMembers": build.product.artifacts.members.iter().filter_map(|(node, artifact)| {
+                let bundler::chunks::NodeId::Module(source) = node else { return None; };
+                Some(serde_json::json!({"source": source, "artifact": artifact}))
+            }).collect::<Vec<_>>(),
+            "segmentMembers": build.product.artifacts.members.iter().filter_map(|(node, artifact)| {
+                let bundler::chunks::NodeId::Segment {module, index} = node else { return None; };
+                Some(serde_json::json!({"source": module, "segment": index, "artifact": artifact}))
+            }).collect::<Vec<_>>(),
         })
     );
     Ok(())

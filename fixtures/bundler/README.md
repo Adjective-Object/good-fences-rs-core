@@ -5,8 +5,37 @@ JavaScript runtime semantics and CSS output contracts. One runner validates the
 inputs, builds through the public Rust library/publisher, and compares emitted
 observations. Ordinary JavaScript retains unbundled Node differential checks;
 CSS uses a separate explicit output observer because raw Node cannot import CSS.
-Opt-in generated async boundaries likewise use an explicit output contract,
-because their deliberate extra suspension precludes source scheduling comparison.
+Opt-in generated async boundaries run the same observer against source and
+output, comparing semantic checkpoints rather than exact suspension timing.
+
+## Permitted execution differences
+
+These exceptions define the oracle for relocation examples. They are not blanket
+permission to accept different source/output observations.
+
+| Difference | Permitted scope |
+| --- | --- |
+| TDZ errors | Emitted code need not reproduce a temporal-dead-zone error. A lowered binding may be visible as `undefined` before initialization. This does not waive ordinary user-thrown `ReferenceError`s, const/import write restrictions, or effects preceding initialization. |
+| Added suspension | Only with `output.synthesize_async_boundaries: true`: selected references may suspend, including before the function's first original await and when code is already available. Exact interleaving with outside work across that new suspension is not preserved. |
+| Added load failures | Only for newly synthesized loads: unavailable chunks may reject at the selected use. Rejection must follow that expression's surrounding `try`/`catch`/`finally`; it must not become a silent success or an eager startup failure. |
+| Physical loading | Hoisting/clustering may change filenames, request count, byte availability, and fetch timing. Loading an island's bytes does not authorize running its initialization. |
+
+Other observable behavior remains part of the contract: values; live bindings;
+function/object/namespace identity where observed; receivers and arguments;
+short-circuit guards; dependency/effect order; once-only ESM initialization and
+cached failure (including non-Error throws); CJS retry behavior; existing
+await/throw/return/finally structure; and unrelated eager module effects.
+Unsupported cycles, TLA, namespaces, or capture shapes must retain native
+behavior, not broaden these exceptions.
+
+Ordinary JS fixtures remain exact source/output differentials. Isolate explicit
+TDZ probes rather than dropping all `ReferenceError`s or ignoring whole traces.
+For generated boundaries, compare values and effect checkpoints after awaited
+operations, and assert introduced suspension separately. Do not normalize away
+arbitrary event permutations, error kinds, or missing effects. Avoid wall-clock
+assertions and incidental fetch races; test the required causal ordering.
+An adversarial case must also demonstrate that its intended transformation ran,
+or explicitly test the native fallback; a native no-op is not transform coverage.
 
 From the repository root, with Node.js 22 and the repository Rust toolchain:
 
@@ -188,12 +217,21 @@ The bounded driver accepts
 Enabled fixtures must also declare `"outputObservation": "observe.mjs"` and
 require the native backend. This sibling module exports `async function
 observe(build)` with the same build/entry inputs as CSS observers below.
-The harness syntax-checks all source JS and the observer before building, then
-runs the output observer instead of a source/output scheduling differential.
+The harness syntax-checks all source JS and the observer, then runs that observer
+on the original source before building. It runs the same observer on emitted
+code and compares stdout and runtime error outcomes. The observer receives
+`mode: "source"` or `"bundled"`, respectively. Only assertions about newly added
+suspension should branch on this mode; values, required effects, errors and
+identity checks must not. A source-side contract failure is an input failure and
+prevents building.
 Metadata/input, build, backend and output validation stages remain separate.
 `authored/native-generated-async` observes eager unrelated effects, a cold guard,
 introduced suspension, receiver semantics and concurrent stable identity.
 Do not use output observers to bypass ordinary JS differential contracts.
+The example driver exposes `generatedBoundaries` plus `moduleMembers` and
+`segmentMembers` containing source identities and final artifact paths. Use these
+to verify extraction/co-location, not generated filename patterns. These fields
+are build diagnostics; they are absent from the source observation.
 
 ### CSS output contracts and explicit options
 

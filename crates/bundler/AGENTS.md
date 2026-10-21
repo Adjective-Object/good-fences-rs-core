@@ -28,7 +28,8 @@ selected by the build's resource policy, never inferred from source extensions.
 Browser CJS entries use ESM
 snapshot facades; wrapper path parameters are availability URLs.
 Default condition lists follow target switches; custom lists stay caller policy.
-Keep native TDZ barriers and add-only forced-effect rules when refining syntax effects.
+Keep conservative initializer/effect ordering and add-only forced-effect rules.
+TDZ-error preservation is waived; other binding and write restrictions remain.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
 separate layer fingerprints, inventory config/add/delete changes, and derive
 affected users from the existing reverse index. Never return old success on error.

@@ -344,16 +344,32 @@ test('async synthesis output contracts validate inputs and retain build/backend/
       fixtureConfig: {output: {synthesize_async_boundaries: true}},
       outputObservation: 'observe.mjs',
       expectations: {stdout: ['hello'], backend: 'native'},
-      sources: {'entry.js': "throw Error('source must not execute');"},
+      sources: {'entry.js': 'export const value = 7;'},
     });
     const observer = path.join(directory, 'observe.mjs');
-    writeFileSync(observer, "export function observe({entry,entries}) { if (!entries[entry]) throw Error('missing'); console.log('hello'); }");
+    const validObserver = `
+      import assert from 'node:assert/strict';
+      import {pathToFileURL} from 'node:url';
+      export async function observe({entry, entries, mode}) {
+        assert(['source', 'bundled'].includes(mode));
+        const ns = await import(pathToFileURL(entries[entry]));
+        assert.equal(ns.value, 7);
+        console.log('hello');
+      }`;
+    writeFileSync(observer, validObserver);
     // The synthetic driver need only acknowledge this bounded fixture option.
     writeFileSync(driver, readFileSync(driver, 'utf8').replace(
       'const [root, directory, ...names] = process.argv.slice(2);',
-      "const [root, directory, ...args] = process.argv.slice(2); const names = args[0] === '--fixture-config' ? args.slice(2) : args;"));
+      "const [root, directory, ...args] = process.argv.slice(2); const names = args[0] === '--fixture-config' ? args.slice(2) : args;")
+      .replace("'import ' + JSON.stringify", "'export * from ' + JSON.stringify"));
     assert.equal(run()[0].status, 'passed');
-    writeFileSync(observer, "export function observe() { console.log('wrong'); }");
+    const successfulBuilds = readFileSync(builds, 'utf8');
+    writeFileSync(observer, validObserver.replace("console.log('hello');", "console.log(mode === 'source' ? 'wrong' : 'hello');"));
+    const source = run()[0];
+    assert.equal(source.stage, 'input');
+    assert.match(source.error.message, /async boundary source stdout mismatch/u);
+    assert.equal(readFileSync(builds, 'utf8'), successfulBuilds, 'invalid source checkpoints must not build');
+    writeFileSync(observer, validObserver.replace("console.log('hello');", "console.log(mode === 'bundled' ? 'wrong' : 'hello');"));
     const output = run()[0];
     assert.equal(output.stage, 'output');
     assert.match(output.error.message, /async boundary output stdout mismatch/u);
@@ -361,11 +377,11 @@ test('async synthesis output contracts validate inputs and retain build/backend/
     writeFileSync(observer, 'export const = ;');
     assert.equal(run()[0].stage, 'input');
     assert.equal(readFileSync(builds, 'utf8'), buildCount);
-    writeFileSync(observer, 'export function observe() {}');
+    writeFileSync(observer, validObserver);
     writeFileSync(path.join(directory, 'files/entry.js'), 'const = ;');
     assert.equal(run()[0].stage, 'input');
     assert.equal(readFileSync(builds, 'utf8'), buildCount);
-    writeFileSync(path.join(directory, 'files/entry.js'), '');
+    writeFileSync(path.join(directory, 'files/entry.js'), 'export const value = 7;');
     writeFileSync(driver, readFileSync(driver, 'utf8')
       .replace("backend:'native'", "backend:'legacy'")
       .replace("layout:'native-chunks-v1'", "layout:'exact-root-set-chunks-v1'"));
