@@ -28,8 +28,11 @@ pub(super) fn emit(
     symbols: &Symbols,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
-    let prepared = PreparedValues::new(graph, modules, symbols);
-    if let Some(output) = single(graph, plan, modules, manifest, &prepared)? {
+    let prepared = tracing::info_span!("emit.global_names")
+        .in_scope(|| PreparedValues::new(graph, modules, symbols));
+    if let Some(output) = tracing::info_span!("emit.single")
+        .in_scope(|| single(graph, plan, modules, manifest, &prepared))?
+    {
         return Ok(output);
     }
     chunks::emit(graph, plan, modules, manifest, &prepared, execution)

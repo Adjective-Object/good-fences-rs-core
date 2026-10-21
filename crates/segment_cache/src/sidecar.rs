@@ -126,6 +126,7 @@ pub fn load_or_parse_with_prepared_declarations(
 }
 
 fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
+    let _span = tracing::info_span!("cache.read").entered();
     let file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             MissReason::Missing
@@ -144,6 +145,7 @@ fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
 }
 
 fn unchanged(path: &Path, original: &[u8]) -> eyre::Result<()> {
+    let _span = tracing::info_span!("cache.recheck").entered();
     ensure!(
         fs::read(path).wrap_err_with(|| format!("{}: source recheck failed", path.display()))?
             == original,
@@ -187,6 +189,7 @@ fn load_prepared_inner(
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<CacheOutcome> {
     let source = prepared.source;
+    let _span = tracing::info_span!("cache.load", bytes = source.len()).entered();
     let config = ParserConfig::for_path(prepared.parser_path, prepared.package)?;
     let cached = if mode == CacheMode::Disabled {
         Err(MissReason::Disabled)
@@ -199,6 +202,7 @@ fn load_prepared_inner(
     let (record, status, write) = match cached {
         Ok(record) => (record, CacheStatus::Hit, CacheWrite::NotRequested),
         Err(reason) => {
+            let extraction_span = tracing::info_span!("cache.extract").entered();
             let parsed = ast_segmenter::parse_module_with_prepared_declarations(
                 logger,
                 source,
@@ -207,6 +211,7 @@ fn load_prepared_inner(
                 declarations,
             )?;
             let record = CacheRecord::from_parsed(source, &parsed)?;
+            drop(extraction_span);
             let write = if mode == CacheMode::ReadWrite {
                 match publish(path, source, prepared.original, &record, before_publish) {
                     Ok(()) => CacheWrite::Stored,
@@ -234,6 +239,7 @@ fn publish(
     record: &CacheRecord,
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<()> {
+    let _span = tracing::info_span!("cache.publish").entered();
     let bytes = record.encode(source)?;
     let destination = sidecar_path(path);
     let parent = destination

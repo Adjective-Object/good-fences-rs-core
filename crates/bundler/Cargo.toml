@@ -13,6 +13,7 @@ ecco = { path = "../ecco" }
 ast-segmenter = { path = "../ast_segmenter" }
 source_graph = { path = "../source_graph" }
 eyre.workspace = true
+tracing.workspace = true
 oxc_span.workspace = true
 oxc_allocator.workspace = true
 oxc_ast.workspace = true
@@ -29,6 +30,8 @@ tempfile = "3.27.0"
 url = "2"
 
 [dev-dependencies]
+tracing-chrome = "0.7"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 insta = { version = "1", default-features = false }
 test_tmpdir = { path = "../test_tmpdir" }
 

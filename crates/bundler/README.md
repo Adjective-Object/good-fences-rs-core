@@ -106,6 +106,45 @@ cold/warm/no-op/edit benchmarks; hold fixture inputs, cache mode and output
 settings constant. It reports `declarationFingerprints` alongside existing
 parse/cache counters. No throughput claim is made before those benchmarks.
 
+### Opt-in duration traces
+
+The library emits standard `tracing` spans and never installs a subscriber.
+Callers can use a thread-local `tracing::dispatcher::with_default` and an entered
+parent span around `BuildSession::build`, `build_and_publish`, or low-level
+emission. Both scoped worker stages explicitly propagate that dispatch and
+parent. Job spans start after dequeue and end before returning their results;
+waiting in a queue is not charged as source preparation or owner emission.
+Worker IDs and canonical batch-local owner IDs are numeric; spans never record
+source paths/text, entry labels, namespace fragments, options, or cache payloads.
+Tracing does not affect cache keys, artifact bytes, counters, or no-op reuse.
+
+The example driver accepts `--trace-file FILE` alongside `--fixture-config FILE`.
+It writes a local Chrome/Perfetto-compatible JSON trace, with per-thread duration
+spans for declarations/inventory, preparation/read/cache/decode/validation/
+extraction, serial resolution/planning/placement, owner emission, finalization,
+rendering, final validation/rechecks and publication. It flushes after worker
+joins and span exits on both success and returned build errors. Stdout remains
+the existing build-result JSON (errors remain on stderr).
+No administrator privileges, UAC elevation, global subscriber, or OS profiler
+are needed: these are application spans written to a normal user-owned file.
+
+The destination's parent must exist. Files are opened with `create_new`, never
+truncated. Keep traces outside the build root and output tree, or use a
+root-level `.bundler-trace-*` filename (excluded from source inventory).
+Existing files, published output trees, and parent-traversal paths are rejected.
+Use a new filename for every recording.
+
+For a project with an entry importing lodash, create `workers.json` containing
+`{"workers":4}` and record from PowerShell:
+
+```powershell
+cargo build -p bundler --release --example build
+.\target\release\examples\build.exe C:\work\lodash-project C:\work\lodash-project\.bundler-out --fixture-config C:\work\workers.json --trace-file C:\work\lodash-4-workers.json entry.mjs
+```
+
+Open that local file in a Chrome trace viewer or Perfetto; do not commit or upload
+traces. Warm/cold source cache state remains independent of recording.
+
 ## JSON modules
 
 Bare-string package `exports` exposes the selected root and arbitrary files

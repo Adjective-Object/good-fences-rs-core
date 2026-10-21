@@ -217,6 +217,12 @@ impl BuildSession {
     }
 
     pub fn build(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
+        let _span = tracing::info_span!(
+            "build",
+            entries = options.entries.len(),
+            workers = options.execution.workers().get()
+        )
+        .entered();
         let start = Instant::now();
         ensure!(
             !options.entries.is_empty(),
@@ -235,6 +241,7 @@ impl BuildSession {
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
         options.css.css_modules.validate()?;
+        let declaration_span = tracing::info_span!("build.declarations").entered();
         if self
             .declarations
             .as_ref()
@@ -250,6 +257,7 @@ impl BuildSession {
             .1
             .clone();
         let declarations_key = declarations.fingerprint();
+        drop(declaration_span);
         let inventory = inventory(&self.root)?;
         let mut styles = crate::css::Styles::new(
             &self.root,
@@ -274,7 +282,8 @@ impl BuildSession {
         let resolution_changed = self.resolution_key != Some(resolution_key);
         if resolution_changed {
             self.resolutions.clear();
-            self.pending_invalidated.extend(self.sources.keys().cloned());
+            self.pending_invalidated
+                .extend(self.sources.keys().cloned());
             self.resolution_key = Some(resolution_key);
         }
         let resolver = StructuralResolver::new(
@@ -326,6 +335,7 @@ impl BuildSession {
             (path, result)
         };
         let mut integrate = |(path, prepared): (PathBuf, eyre::Result<prepare::Prepared>)| {
+            let _span = tracing::info_span!("build.integrate").entered();
             let mut discovered = BTreeSet::new();
             let result = (|| -> eyre::Result<()> {
                 let kind = crate::resource::kind(&path, &options.css.css_modules);
@@ -402,6 +412,7 @@ impl BuildSession {
                     .get(&path)
                     .or_else(|| previous.get(&path))
                     .expect("loaded source");
+                let resolution_span = tracing::info_span!("build.resolve").entered();
                 let resolved = if let Some(cached) = self.resolutions.get(&path) {
                     cached.clone()
                 } else {
@@ -459,6 +470,7 @@ impl BuildSession {
                     self.resolutions.insert(path.clone(), resolved.clone());
                     resolved
                 };
+                drop(resolution_span);
                 for target in resolved.values() {
                     if let DependencyTarget::File(path) = target {
                         discovered.insert(path.clone());
@@ -485,6 +497,7 @@ impl BuildSession {
             }
             (discovered, failed)
         };
+        let preparation_span = tracing::info_span!("build.prepare").entered();
         'frontier: loop {
             let result = options.execution.replenish(jobs, &read, |result| {
                 let (discovered, _) = integrate(result);
@@ -512,6 +525,7 @@ impl BuildSession {
                 break;
             }
         }
+        drop(preparation_span);
         self.sources.extend(loaded_sources);
         // CSS closure identity can change while its generated module stays equal.
         for path in sources.keys() {
@@ -542,6 +556,7 @@ impl BuildSession {
         self.sources.retain(|path, _| sources.contains_key(path));
         self.resolutions
             .retain(|path, _| sources.contains_key(path));
+        let fingerprint_span = tracing::info_span!("build.fingerprints").entered();
         let parse = Fingerprint::of(
             format!(
                 "{}:{}:{}:{declarations_key:?}:{:?}",
@@ -629,6 +644,7 @@ impl BuildSession {
             )
             .as_bytes(),
         );
+        drop(fingerprint_span);
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &self.sources, &inventory)?;
@@ -647,9 +663,11 @@ impl BuildSession {
         }
         // shortcut: rebuild derived graph/retention/output after any key change;
         // optimize only after benchmarks justify a finer later-layer worklist.
+        let graph_span = tracing::info_span!("build.graph", modules = inputs.len()).entered();
         inputs.sort_by(|a, b| a.path.cmp(&b.path));
         let graph = SourceGraph::from_owned(inputs);
         graph.validate_links()?;
+        drop(graph_span);
         let roots: Vec<_> = entries
             .iter()
             .map(|(name, (path, namespace))| {
@@ -665,7 +683,8 @@ impl BuildSession {
                 }
             })
             .collect();
-        let plan = chunks::partition(&graph, &roots, &options.effects)?;
+        let plan = tracing::info_span!("build.plan")
+            .in_scope(|| chunks::partition(&graph, &roots, &options.effects))?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let mut artifacts = link::esm_plan_prepared(
             &graph,
@@ -675,6 +694,7 @@ impl BuildSession {
             &relocations,
             options.execution,
         )?;
+        let finalize_span = tracing::info_span!("build.finalize").entered();
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
             let kind = crate::resource::kind(path, &options.css.css_modules);
@@ -689,6 +709,7 @@ impl BuildSession {
         }
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to(&destinations)?;
+        drop(finalize_span);
         Self::recheck(&self.root, &self.sources, &inventory)?;
         styles.recheck()?;
         counters.emissions = 1;
@@ -723,6 +744,7 @@ impl BuildSession {
         sources: &BTreeMap<PathBuf, Source>,
         before: &BTreeMap<PathBuf, Option<[u8; 32]>>,
     ) -> eyre::Result<()> {
+        let _span = tracing::info_span!("build.recheck", sources = sources.len()).entered();
         for (path, source) in sources {
             ensure!(
                 fs::read(path)? == source.input,
@@ -803,6 +825,7 @@ fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
 /// Conservative resolver dependency inventory: all file names and all JSON
 /// config bytes, including package trees, without interpreting compiler configs.
 fn inventory(root: &Path) -> eyre::Result<BTreeMap<PathBuf, Option<[u8; 32]>>> {
+    let _span = tracing::info_span!("build.inventory").entered();
     fn visit(
         root: &Path,
         dir: &Path,

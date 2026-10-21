@@ -34,6 +34,7 @@ fn sorted<T: Ord>(values: impl IntoIterator<Item = T>) -> bool {
 
 impl CacheRecord {
     pub(crate) fn validate(&self, source: &str, config: ParserConfig) -> eyre::Result<()> {
+        let _span = tracing::info_span!("cache.validate").entered();
         ensure!(
             self.magic == "good-fences-segments"
                 && self.schema == SCHEMA_VERSION

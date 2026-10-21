@@ -117,6 +117,7 @@ pub fn apply(source: &str, edits: &[Edit]) -> eyre::Result<String> {
 /// Debug-only final JavaScript validation; `.cjs` uses wrapper grammar.
 #[cfg(debug_assertions)]
 pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
+    let _span = tracing::info_span!("build.validate_output", bytes = source.len()).entered();
     count_output_parse();
     FINAL_VALIDATIONS.with(|count| count.set(count.get() + 1));
     let allocator = Allocator::default();

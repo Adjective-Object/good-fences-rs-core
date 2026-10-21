@@ -83,6 +83,7 @@ impl Artifacts<crate::assembly::Code> {
         self,
         destinations: &BTreeMap<PathBuf, PathBuf>,
     ) -> eyre::Result<Artifacts> {
+        let _span = tracing::info_span!("build.render", artifacts = self.files.len()).entered();
         let files = self
             .files
             .iter()
@@ -185,6 +186,7 @@ pub(crate) fn esm_plan_prepared(
     relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
+    let _span = tracing::info_span!("build.link").entered();
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = BTreeMap::new();
@@ -206,7 +208,8 @@ pub(crate) fn esm_plan_prepared(
             },
         );
     }
-    let symbols = crate::symbols::Symbols::link(graph, plan)?;
+    let symbols = tracing::info_span!("build.symbols")
+        .in_scope(|| crate::symbols::Symbols::link(graph, plan))?;
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
