@@ -82,6 +82,8 @@ pub struct OutputOptions {
     pub base_url: String,
     /// Approximate retained UTF-8 bytes per small native library; zero disables clustering.
     pub min_chunk_bytes: usize,
+    /// Introduce suspension/load failures at supported private async-body references.
+    pub synthesize_async_boundaries: bool,
 }
 
 impl Default for OutputOptions {
@@ -89,6 +91,7 @@ impl Default for OutputOptions {
         Self {
             base_url: "./".into(),
             min_chunk_bytes: 0,
+            synthesize_async_boundaries: false,
         }
     }
 }
@@ -530,6 +533,7 @@ impl BuildSession {
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
                 include_str!("chunks.rs"),
+                include_str!("async_boundaries.rs"),
                 include_str!("manifest.rs"),
                 include_str!("effects.rs"),
                 include_str!("effect_analysis.rs"),
@@ -539,13 +543,14 @@ impl BuildSession {
         );
         fingerprints.output = hash(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
                 options.css,
                 styles.identities(),
                 options.output.min_chunk_bytes,
+                options.output.synthesize_async_boundaries,
             )
             .as_bytes(),
         );
@@ -584,7 +589,8 @@ impl BuildSession {
                 }
             })
             .collect();
-        let plan = chunks::partition(&graph, &roots, &options.effects)?;
+        let plan =
+            chunks::partition_with_options(&graph, &roots, &options.effects, &options.output)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let mut artifacts = link::esm_plan_configured(
             &graph,

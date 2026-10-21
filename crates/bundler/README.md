@@ -11,7 +11,7 @@ subject to normal usage/linking/grouping, not a native `.cjs`-per-input fallback
 
 The registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend
 is **deleted**, including its runtime and fingerprints. All linked output is
-native; there is no fallback or feature flag.
+native; there is no legacy-backend fallback or backend feature flag.
 The internal `symbols::Symbols::link` builds checked canonical
 `(file, BindingId)` definitions and import/export routes using the shared graph
 resolver. Native emission reuses that plan, preserving intermediate barrels and
@@ -74,14 +74,53 @@ The seam rejects unsupported declaration/namespace forms, `then` export
 surfaces, source TLA/static cycles, require/context/CJS activation, eager/public
 demands on deferred sources and incompatible co-location. It falls back to
 ordinary native emission rather than changing their evaluation. Deferred sources
-with their own dynamic imports currently stay native. Synthesized async
-boundaries remain unimplemented.
+with their own dynamic imports currently stay native.
 
 Owned references and checked source edges now retain per-occurrence
 `async_deferred` syntax tags. Retention preserves their source-edge indices even
 for mixed async/sync uses of one target; checked source provenance covers the
-tags on cold and cached inputs. They do not create async roots, insert awaits or
-change ordinary output. Generated async-load boundaries remain a later step.
+tags on cold and cached inputs. Tags alone do not change ordinary output.
+
+### Opt-in generated async boundaries
+
+`BuildOptions.output.synthesize_async_boundaries` defaults to **false**. Enabling
+it permits new suspension and native load failures at eligible references, even
+before an async function's first original await. Exact scheduling against outside
+work is deliberately not preserved. Guards, expression position, existing awaits,
+argument/spread order, plain-call receivers, shorthand keys, binding identity and
+surrounding exception handling remain intact.
+
+The supported subset is private top-level function-declaration islands in ESM
+sources without runtime dependencies or TLA. Functions can refer to their own
+parameters/locals, globals and other eligible functions; self/mutual recursion
+within an island stays synchronous. Bodies may have effects or throw: relocating
+declaration availability never executes them. Every retained incoming value
+reference must be a checked, read-only `async_deferred` occurrence with an existing
+reference recipe. Public exports/roots, retained synchronous consumers (including
+nested synchronous callbacks), captures of other top-level declarations, imported
+bindings, redeclarations, optional invocations and affected PURE-lowering sites
+block extraction. CJS, externals, source cycles, escaped namespaces and
+`import.meta` are not newly supported.
+
+`chunks::partition_with_options` applies this policy before physical optimization;
+`link::esm_with_options` also accepts the same option on an ordinary plan.
+BuildSession exposes the derived plan in its product. Source/cache facts stay
+unchanged. Low-level callers must repartition to disable an already derived
+plan. `ChunkPlan.generated_boundaries` records source-edge/reference
+occurrences and actual segment targets, not fabricated import dependencies.
+Selected binding demands and declaration-to-source evaluation demands are
+replaced before exact masks and the diagnostic manifest are recomputed.
+Unrelated source effects keep their original eager scheduling.
+
+Generated cross-owner uses load native segment artifacts and read direct bindings,
+without source-module namespace facades or runtime registries. Requests remain
+typed through naming/pruning. Ordinary parent-hoisting and library clustering
+still run. With a nonzero `min_chunk_bytes`, an undersized function-only island
+may also share its unique same-source evaluation parent; a local await remains
+observable even when no download is needed. Pure function declarations need no
+initializer guard. Existing physical deferred-module merges still use only their
+targeted guards. Configuration transitions reuse parse/resolution facts and
+invalidate derived output; unchanged enabled builds remain no-ops.
 
 ### Automatic single-parent placement
 

@@ -89,6 +89,9 @@ fn emit_inner(
                 entry_owners.insert(entry.clone(), owners);
             }
             RootId::Async(site) => {
+                if plan.generated_boundaries.contains_key(site) {
+                    continue;
+                }
                 if matches!(manifest.async_facades[site].target, NodeId::External { .. }) {
                     continue;
                 }
@@ -339,6 +342,7 @@ fn emit_inner(
         &boundaries,
         &cjs,
     )?;
+    placement.extract_generated(graph, plan)?;
     if let Some(activations) = activations {
         for (&key, owner) in &mut placement.owners {
             if activations.initializers.contains_key(&key.file_id) {
@@ -349,6 +353,7 @@ fn emit_inner(
         }
     }
     placement.cluster(graph, plan, modules, symbols, &owners, min_chunk_bytes)?;
+    placement.hoist_generated(graph, plan, modules, min_chunk_bytes)?;
     let resolved_activations = activations
         .map(|activations| {
             let mut resolved = activations.clone();
@@ -405,6 +410,12 @@ fn emit_inner(
         }
     }
     let mut changed = BTreeSet::new();
+    for boundary in plan.generated_boundaries.values() {
+        let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
+            unreachable!()
+        };
+        changed.insert(owners[&consumer.file_id]);
+    }
     if activations.is_some() {
         changed.extend(groups.keys().copied());
     }
@@ -468,6 +479,7 @@ fn emit_inner(
                 &recipes,
                 &cjs,
                 activations,
+                plan,
             )?
         } else if group.len() > 1 {
             concatenate(
@@ -628,6 +640,7 @@ fn emit_inner(
                 &recipes,
                 &cjs,
                 activations,
+                plan,
             )?;
             let path = owner.path(graph);
             files.insert(path, output);
@@ -745,6 +758,9 @@ fn emit_inner(
                         .unwrap_or_else(|| path(graph, owners[&file])),
                 )
             })
+            .chain(plan.generated_boundaries.iter().map(|(site, boundary)| {
+                (site.clone(), placement.owners[&boundary.target].path(graph))
+            }))
             .collect(),
         async_modules,
     })

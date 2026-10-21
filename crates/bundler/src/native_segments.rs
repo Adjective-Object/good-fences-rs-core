@@ -27,6 +27,123 @@ impl Owner {
 }
 
 impl Placement {
+    fn generated_islands(
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+    ) -> eyre::Result<Vec<BTreeSet<SegmentKey>>> {
+        let mut islands: Vec<BTreeSet<SegmentKey>> = Vec::new();
+        for boundary in plan.generated_boundaries.values() {
+            let mut island = BTreeSet::new();
+            let mut pending = vec![boundary.target];
+            while let Some(key) = pending.pop() {
+                if !island.insert(key) {
+                    continue;
+                }
+                eyre::ensure!(
+                    matches!(
+                        graph.file_facts(key.file_id).unwrap().emission.segments
+                            [key.segment_idx as usize]
+                            .deferred,
+                        ast_segmenter::emission::DeferredForm::Function
+                    ),
+                    "nonfunction generated island"
+                );
+                for edge in &plan.retention.edges {
+                    if edge.kind == RetentionEdgeKind::Binding
+                        && edge.from == GraphNode::Segment(key)
+                    {
+                        if let GraphNode::Segment(target) = edge.to {
+                            pending.push(target);
+                        }
+                    }
+                }
+            }
+            let mut index = 0;
+            while index < islands.len() {
+                if !islands[index].is_disjoint(&island) {
+                    island.extend(islands.remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            islands.push(island);
+        }
+        Ok(islands)
+    }
+
+    pub(super) fn extract_generated(
+        &mut self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+    ) -> eyre::Result<()> {
+        for island in Self::generated_islands(graph, plan)? {
+            let first = *island
+                .iter()
+                .min_by_key(|k| (graph.file_path(k.file_id), k.segment_idx))
+                .unwrap();
+            for key in island {
+                self.owners.insert(key, Owner::Bindings(first));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn hoist_generated(
+        &mut self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+        modules: &BTreeMap<u32, Module<'_>>,
+        target: usize,
+    ) -> eyre::Result<()> {
+        if target == 0 {
+            return Ok(());
+        }
+        for island in Self::generated_islands(graph, plan)? {
+            let owner = self.owners[island.first().unwrap()];
+            // Never split a library produced by the ordinary mask-based clustering.
+            if self
+                .owners
+                .iter()
+                .any(|(key, &assigned)| assigned == owner && !island.contains(key))
+            {
+                continue;
+            }
+            let bytes: usize = island
+                .iter()
+                .map(|key| {
+                    modules[&key.file_id].parsed.facts.emission.segments[key.segment_idx as usize]
+                        .source
+                        .as_slice()
+                        .iter()
+                        .map(|s| (s.end - s.start) as usize)
+                        .sum::<usize>()
+                })
+                .sum();
+            if bytes >= target {
+                continue;
+            }
+            let parents: BTreeSet<_> = plan
+                .generated_boundaries
+                .values()
+                .filter(|b| island.contains(&b.target))
+                .map(|b| match graph.edges()[b.source_edge].from {
+                    GraphNode::Segment(key) => self.owners[&key],
+                    _ => unreachable!(),
+                })
+                .collect();
+            if let Some(&parent @ Owner::Evaluation(file)) =
+                parents.first().filter(|_| parents.len() == 1)
+            {
+                if island.iter().all(|key| key.file_id == file) {
+                    for key in island {
+                        self.owners.insert(key, parent);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn cluster(
         &mut self,
         graph: &SourceGraph,
@@ -697,6 +814,7 @@ pub(super) fn emit(
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
     activations: Option<&Activations>,
+    plan: &ChunkPlan,
 ) -> eyre::Result<Code> {
     let live: BTreeSet<_> = placement
         .owners
@@ -710,6 +828,39 @@ pub(super) fn emit(
         .iter()
         .map(|(&f, &o)| (f, Code::request(path(graph, o), RequestKind::DynamicImport)))
         .collect();
+    for boundary in plan.generated_boundaries.values() {
+        let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
+            unreachable!()
+        };
+        if !live.contains(&consumer) {
+            continue;
+        }
+        let facts = &modules[&boundary.target.file_id].parsed.facts;
+        let binding = facts.emission.segments[boundary.target.segment_idx as usize]
+            .placement
+            .declarations[0];
+        let identity = ExportIdentity::Binding(boundary.target.file_id, binding);
+        let owner = placement.owners[&boundary.target];
+        let expression = if owner == root {
+            Code::from(format!(
+                "(await 0, {})",
+                values
+                    .name(&identity)
+                    .ok_or_eyre("missing generated local binding")?
+            ))
+        } else {
+            Code::request(owner.path(graph), RequestKind::DynamicImport).surrounded(
+                "(0, (await import(",
+                format!(
+                    "))[{}])",
+                    quote(&address(graph, &identity, owner, surfaces, &values)?)
+                ),
+            )
+        };
+        values
+            .generated
+            .insert((consumer.file_id, boundary.reference), expression);
+    }
     if let Some(activations) = activations {
         for &target in activations.initializers.keys() {
             values.dynamic.insert(
@@ -870,15 +1021,23 @@ pub(super) fn emit(
             .iter()
             .filter(|b| b.top_level)
         {
-            if !modules[&file].parsed.facts.references.iter().any(|r| {
-                r.binding == Some(binding.id)
-                    && live.iter().filter(|k| k.file_id == file).any(|k| {
-                        contains(
-                            modules[&file].parsed.segments[k.segment_idx as usize].span,
-                            r.span,
-                        )
-                    })
-            }) {
+            if !modules[&file]
+                .parsed
+                .facts
+                .references
+                .iter()
+                .enumerate()
+                .any(|(index, r)| {
+                    r.binding == Some(binding.id)
+                        && !values.generated.contains_key(&(file, index as u32))
+                        && live.iter().filter(|k| k.file_id == file).any(|k| {
+                            contains(
+                                modules[&file].parsed.segments[k.segment_idx as usize].span,
+                                r.span,
+                            )
+                        })
+                })
+            {
                 continue;
             }
             let identity = if symbols.definitions.contains_key(&(file, binding.id)) {

@@ -42,7 +42,7 @@ pub(super) fn emit(
             min_chunk_bytes,
         );
     }
-    if min_chunk_bytes != 0 {
+    if min_chunk_bytes != 0 || !plan.generated_boundaries.is_empty() {
         return chunks::emit_activated(
             graph,
             plan,
@@ -660,6 +660,7 @@ struct Values<'s> {
     dynamic: BTreeMap<u32, Code>,
     contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
     native_defaults: BTreeSet<u32>,
+    generated: BTreeMap<(u32, u32), Code>,
 }
 
 impl<'s> Values<'s> {
@@ -718,6 +719,7 @@ impl<'s> Values<'s> {
             dynamic: BTreeMap::new(),
             contexts: HashMap::new(),
             native_defaults: BTreeSet::new(),
+            generated: BTreeMap::new(),
         }
     }
 
@@ -890,14 +892,27 @@ fn reconstruct(
                 OperationKind::Reference {
                     reference,
                     shorthand,
-                } => facts.references[*reference as usize]
-                    .binding
-                    .and_then(|id| targets.get(&id))
-                    .map(|name| {
-                        rewrite::shorthand_replacement(module.source, span, name, *shorthand)
-                    })
-                    .transpose()?
-                    .map(Code::from),
+                } => {
+                    if let Some(expression) = values.generated.get(&(file, *reference)) {
+                        let prefix =
+                            rewrite::shorthand_replacement(module.source, span, "", *shorthand)?;
+                        Some(expression.clone().surrounded(prefix, ""))
+                    } else {
+                        facts.references[*reference as usize]
+                            .binding
+                            .and_then(|id| targets.get(&id))
+                            .map(|name| {
+                                rewrite::shorthand_replacement(
+                                    module.source,
+                                    span,
+                                    name,
+                                    *shorthand,
+                                )
+                            })
+                            .transpose()?
+                            .map(Code::from)
+                    }
+                }
                 OperationKind::Namespace { usage } => {
                     let usage = &recipe.namespaces[*usage as usize];
                     if let Some(target) = facts.references[usage.reference as usize]

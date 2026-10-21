@@ -18,6 +18,7 @@ struct FixtureConfig {
 struct FixtureOutput {
     base_url: String,
     min_chunk_bytes: usize,
+    synthesize_async_boundaries: bool,
 }
 
 impl Default for FixtureOutput {
@@ -25,6 +26,7 @@ impl Default for FixtureOutput {
         Self {
             base_url: OutputOptions::default().base_url,
             min_chunk_bytes: 0,
+            synthesize_async_boundaries: false,
         }
     }
 }
@@ -60,6 +62,7 @@ fn main() -> eyre::Result<()> {
         let config: FixtureConfig = serde_json::from_slice(&bytes)?;
         options.output.base_url = config.output.base_url;
         options.output.min_chunk_bytes = config.output.min_chunk_bytes;
+        options.output.synthesize_async_boundaries = config.output.synthesize_async_boundaries;
         options.css.load = config.css.load;
         options.css.css_modules = config.css.css_modules;
     }

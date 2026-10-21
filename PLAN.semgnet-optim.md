@@ -239,6 +239,28 @@ function's first original await and remains observable even when bytes are
 already loaded. Load failures follow the original expression's exception
 context. No timing analysis is required.
 
+Implemented supported subset (2.b): build-level
+`output.synthesize_async_boundaries`, default off; private top-level function
+declaration islands in dependency-free, non-TLA ESM sources. Checked occurrence
+records replace retained synchronous binding demands before exact masks and
+manifest construction; same-source helpers load actual segment artifacts.
+Self/mutual recursion stays synchronous, effectful bodies remain unexecuted until
+called, and native requests resolve final ownership. Cached recipes preserve
+guards, plain-call receivers, shorthand keys, argument/spread order and source
+awaits. Public/sync consumers, other top-level captures, optional invocations,
+affected PURE lowerings, CJS/externals and unsupported provenance remain native.
+Ordinary parent/library placement still runs; undersized declaration islands
+can share a unique same-source parent with nonzero min_chunk_bytes, retaining
+the introduced await. No new initializer is needed for function declarations.
+Portable enabled cases use an explicit output observer, not a source scheduling
+comparison. Broader declaration/cross-source extraction is deliberately deferred.
+
+Validation: all affected crate tests (479), both fixture harness test suites, and
+the public example build plus portable corpus (39 native cases / 51 executions)
+pass.
+Bundler all-target clippy passes with existing dependency warnings only.
+Independent review and the required `./scripts/spot-check` gate pass.
+
 ## Prior art and existing extension points
 
 - Feature 0: study esbuild's

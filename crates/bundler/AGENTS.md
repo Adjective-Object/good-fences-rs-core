@@ -163,6 +163,16 @@ islands. Physical ownership never replaces logical reachability. Effectful
 members reuse checked source guards; guard their synchronous closure without
 stealing existing parent/static owners. Pure binding merges must not introduce
 evaluation imports or import cycles. Keep requests typed through final naming.
+Generated async extraction is output.synthesize_async_boundaries opt-in only.
+Derive checked reference-occurrence → segment targets before placement; remove
+replaced binding demands and function-to-source evaluation demands, recomputing
+exact masks without moving unrelated effects. Initial islands are private
+capture-free function declarations in dependency-free, non-TLA ESM sources;
+all retained incoming uses must admit suspension. Internal recursion stays sync.
+Use cached reference operations and typed final-owner requests, never synthetic
+DependencyIds, source-cache policy or rendered-text decisions. Plain calls must
+not acquire a namespace receiver; shorthand keys survive. Co-located functions
+still await; declaration-only islands need no initialization guard.
 
 The symbol linker emits scope-hoisted direct ESM bindings; the rejected
 registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is
@@ -224,8 +234,9 @@ Canonical symbols use owned (file, BindingId) identities and checked export rout
 including barrels/redeclarations. Allocated lexical names are not observable source
 names or rewrite instructions; boundary values retain typed graph identities.
 No hooks, code JSON, source loading/assembly, eval or runtime compilation.
-Keep native live bindings, TDZ and const semantics. Only source await/for-await
-events suspend evaluation; never wrap every module in async.
+Keep native live bindings, TDZ and const semantics. Outside explicit generated
+boundary opt-in, only source await/for-await events suspend evaluation; never
+wrap every module in async.
 Derive async status over static runtime dependencies and reject all requires of
 async ESM with original require/TLA spans, including deferred sites.
 Do not persist derived async status. Never run a not-yet-evaluated module from a
