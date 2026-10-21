@@ -1,5 +1,14 @@
 # quickjs-bundler-harness
 
+```
+cd crates/quickjs-bundler-harness
+
+  CC=/usr/lib64/rocm/llvm/bin/clang \
+      CFLAGS="-fsanitize=address -fsanitize-coverage=inline-8bit-counters,pc-table,trace-cmp -fno-omit-frame-pointer" \
+      cargo fuzz run bundle_effects \
+        --target-dir fuzz/target/quick
+```
+
 The [cargo-fuzz target](fuzz/README.md) compares bounded generated programs with
 real native bundler output in four optimization configurations, entirely in Rust.
 
