@@ -1,5 +1,8 @@
 # quickjs-bundler-harness
 
+The [cargo-fuzz target](fuzz/README.md) compares bounded generated programs with
+real native bundler output in four optimization configurations, entirely in Rust.
+
 A native Rust QuickJS harness for effect-based bundler fuzzing. Each run receives
 one example's map of module paths to JavaScript source, a selected entry, and a
 fresh runtime. The only additional module is the built-in `harness` test library.
