@@ -1,0 +1,12 @@
+{
+  "id": "authored/adversarial-generated-recursion",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {"output": {"synthesize_async_boundaries": true, "min_chunk_bytes": 100000}},
+  "outputObservation": "observe.mjs",
+  "expectations": {"stdout": ["recursion: synchronous internals, concurrent stable identities"], "backend": "native"},
+  "goals": [
+    "Keep mutually recursive declaration islands synchronous internally and identity-stable across repeated/concurrent uses.",
+    "Keep body effects lazy despite eager source effects and generous co-location."
+  ]
+}

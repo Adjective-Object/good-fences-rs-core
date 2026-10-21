@@ -1,0 +1,14 @@
+{
+  "id": "authored/adversarial-parent-partial-order",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "expectations": {
+    "stdout": ["cold 0", "failed true true true", "partial seed,left,broken", "later 11 seed,left,broken,survivor", "retry true seed,left,broken,survivor"],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored source-order and partial-initialization contract; no upstream source copied.",
+    "A throwing static dependency prevents later sibling and parent effects, caches its string rejection and preserves completed diamond dependencies.",
+    "A later independent demand succeeds without activating the failed parent's unvisited sibling or rerunning its shared dependency."
+  ]
+}

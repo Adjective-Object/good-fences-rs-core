@@ -1,0 +1,12 @@
+import { count, object, bump } from './shared.mjs';
+console.log('eager', trace.join(','));
+const a = await import('./a.mjs');
+const b = await import('./b.mjs');
+console.log('parents', a.get() === object, b.get() === object, a.get() === b.get(), trace.join(','));
+const namespace = await import('./reflect.mjs');
+console.log('namespace', namespace === await import('./reflect.mjs'), Object.getPrototypeOf(namespace) === null, !Object.isExtensible(namespace), Object.keys(namespace).join(','), Object.getOwnPropertyDescriptor(namespace, 'count').writable);
+bump();
+console.log('live', count, namespace.count, object.count);
+const publicNamespace = await import('./public.mjs');
+console.log('public', publicNamespace === await import('./public.mjs'), publicNamespace.value);
+console.log('then', (await import('./then.mjs')).value, (await import('./then.mjs')).value, trace.join(','));

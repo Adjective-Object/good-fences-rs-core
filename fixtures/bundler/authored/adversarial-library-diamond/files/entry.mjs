@@ -1,0 +1,9 @@
+globalThis.trace = [];
+console.log('cold', trace.length);
+const a = (await import('./root-a.mjs')).read();
+console.log('left', trace.join(','), a.count);
+const c = (await import('./root-c.mjs')).read();
+console.log('right', trace.join(','), c.count);
+const b = (await import('./root-b.mjs')).read();
+console.log('both', trace.join(','), b[1].count, a.identity === c.identity, a.identity === b[0].identity);
+console.log('live', a.read(), c.read(), b[1].read());

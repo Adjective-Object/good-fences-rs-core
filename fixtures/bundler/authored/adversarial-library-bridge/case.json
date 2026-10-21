@@ -1,0 +1,19 @@
+{
+  "id": "authored/adversarial-library-bridge",
+  "moduleType": "module",
+  "entryPoints": ["forward.mjs", "reverse.mjs"],
+  "fixtureConfig": {"output": {"min_chunk_bytes": 65536}},
+  "expectations": {
+    "backend": "native",
+    "stdout": [
+      "cold 0", "a x 1", "b x,y 2:1", "c x,y,z 2:1", "d x,y,z 2", "retained true 12 x,y,z",
+      "cold 0", "d z 1", "c z,y 1:2", "b z,y,x 1:2", "a z,y,x 2", "retained true 12 z,y,x"
+    ]
+  },
+  "goals": [
+    "Locally authored exact differential requiring the native backend; no upstream material.",
+    "An explicit 65536-byte threshold enables small-island clustering of x={a,b}, y={b,c}, z={c,d}; the middle mask bridges the growing union.",
+    "Opposite awaited activation permutations preserve cold effects, mutable reads, shared object identity and closures retained across later root activation.",
+    "Loading shared bytes must not initialize an island until its own root is demanded."
+  ]
+}
