@@ -1,0 +1,19 @@
+[package]
+name = "quickjs-bundler-harness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "Apache-2.0"
+description = "Native in-memory QuickJS effect harness for bundler testing"
+
+[dependencies]
+eyre.workspace = true
+rquickjs = { version = "0.14.0", default-features = false, features = ["loader"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+ast-segmenter = { path = "../ast_segmenter" }
+bundler = { path = "../bundler" }
+ecco = { path = "../ecco" }
+logger = { path = "../logger" }
+source_graph = { path = "../source_graph" }
