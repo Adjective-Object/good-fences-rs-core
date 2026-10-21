@@ -87,6 +87,8 @@ test('driver rejects unknown, malformed and oversized config before publication'
     for (const config of [
       '{"css":{"nameMangling":"none"}}',
       '{"output":{"directory":"other"}}',
+      '{"output":{"min_chunk_bytes":-1}}',
+      '{"output":{"min_chunk_bytes":1.5}}',
       '{"entries":[]}', '{"css":{"load":"plugin"}}',
       '{"css":{"css_modules":"ext:../css"}}',
       '{"output":{"base_url":"javascript:bad"}}', '{',

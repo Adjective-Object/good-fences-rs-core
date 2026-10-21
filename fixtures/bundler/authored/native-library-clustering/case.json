@@ -1,0 +1,26 @@
+{
+  "id": "authored/native-library-clustering",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {
+    "output": { "min_chunk_bytes": 256 }
+  },
+  "expectations": {
+    "stdout": [
+      "before 0",
+      "pending 0",
+      "first x 1",
+      "shared true true 2 7",
+      "failure true true true",
+      "trace x,y,failure"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Locally authored portable contract; no upstream source is copied and no upstream license is required.",
+    "Small native islands have different overlapping masks through three independent async roots; the explicit size policy clusters their availability.",
+    "Fetching the merged availability file never co-activates its other members; shared captures, root function identity and live state survive.",
+    "A separate failed member caches thrown undefined across repeated and concurrent source uses.",
+    "Rust ownership, threshold and config tests separately prove actual merging and final typed artifact requests."
+  ]
+}

@@ -42,9 +42,9 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **37 cases / 49 entry executions**: six esbuild cases,
-six rspack cases and twenty-five authored cases. Four authored CSS cases use
-output observations; the 33 JS cases / 45 executions remain differential.
+The corpus contains **38 cases / 50 entry executions**: six esbuild cases,
+six rspack cases and twenty-six authored cases. Four authored CSS cases use
+output observations; the 34 JS cases / 46 executions remain differential.
 The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
@@ -58,6 +58,9 @@ public built-in mutation, failure retry and mixed-cycle error contracts,
 and independent demands on shared segments with live state and inferred names.
 The parent-hoisting contract covers deferred single-parent islands, static
 dependency order, guarded uses, live identity, empty targets and cached failures.
+The library-clustering contract explicitly enables a byte target and covers
+different overlapping async masks, no co-activation, shared identity/live state
+and cached undefined failures; Rust ownership tests verify actual merging.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -175,7 +178,7 @@ configure external dependencies, effects, entry renames or custom plugins:
 ```json
 {
   "fixtureConfig": {
-    "output": {"base_url": "./"},
+    "output": {"base_url": "./", "min_chunk_bytes": 0},
     "css": {"load": "caller-loaded", "css_modules": true}
   },
   "cssObservation": "observe.mjs"
@@ -183,7 +186,9 @@ configure external dependencies, effects, entry renames or custom plugins:
 ```
 
 All config objects/fields are optional; the shipped defaults are base `"./"`,
-load `"caller-loaded"` and modules `false`. The complete serialized config is
+chunk target `0` (disabled), load `"caller-loaded"` and modules `false`.
+`min_chunk_bytes` must be a nonnegative safe integer; it is also available for
+ordinary JS differential fixtures. The complete serialized config is
 bounded to 16 KiB, with unknown fields rejected at every level. Module selection
 also accepts `"everything"` (CSS only) and `"ext:.custom.suffix"`;
 `true` selects `.module.css`. `"auto-mount"` is independent of selection.

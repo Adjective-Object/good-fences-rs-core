@@ -17,12 +17,14 @@ struct FixtureConfig {
 #[serde(default, deny_unknown_fields)]
 struct FixtureOutput {
     base_url: String,
+    min_chunk_bytes: usize,
 }
 
 impl Default for FixtureOutput {
     fn default() -> Self {
         Self {
             base_url: OutputOptions::default().base_url,
+            min_chunk_bytes: 0,
         }
     }
 }
@@ -57,6 +59,7 @@ fn main() -> eyre::Result<()> {
         eyre::ensure!(bytes.len() <= 16 * 1024, "fixture config exceeds 16 KiB");
         let config: FixtureConfig = serde_json::from_slice(&bytes)?;
         options.output.base_url = config.output.base_url;
+        options.output.min_chunk_bytes = config.output.min_chunk_bytes;
         options.css.load = config.css.load;
         options.css.css_modules = config.css.css_modules;
     }

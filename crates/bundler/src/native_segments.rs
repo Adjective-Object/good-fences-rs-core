@@ -27,6 +27,95 @@ impl Owner {
 }
 
 impl Placement {
+    pub(super) fn cluster(
+        &mut self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+        modules: &BTreeMap<u32, Module<'_>>,
+        symbols: &Symbols,
+        seams: &BTreeMap<u32, u32>,
+        target: usize,
+    ) -> eyre::Result<()> {
+        if target == 0 {
+            return Ok(());
+        }
+        let mut groups = BTreeMap::<Owner, BTreeSet<SegmentKey>>::new();
+        for (&key, &owner) in &self.owners {
+            if matches!(owner, Owner::Bindings(_)) {
+                groups.entry(owner).or_default().insert(key);
+            }
+        }
+        let mut groups: Vec<_> = groups.into_iter().collect();
+        groups.sort_by_key(|(_, keys)| {
+            keys.iter()
+                .map(|k| (graph.file_path(k.file_id).unwrap(), k.segment_idx))
+                .min()
+        });
+        let mut eligible = Vec::new();
+        let mut inputs = Vec::new();
+        for (owner, keys) in groups {
+            let mask: BTreeSet<_> = keys
+                .iter()
+                .flat_map(|&key| {
+                    plan.node_roots
+                        .get(&crate::chunks::node_id(graph, GraphNode::Segment(key)).unwrap())
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                })
+                .collect();
+            let bytes = keys
+                .iter()
+                .map(|key| {
+                    modules[&key.file_id].parsed.facts.emission.segments[key.segment_idx as usize]
+                        .source
+                        .as_slice()
+                        .iter()
+                        .map(|s| (s.end - s.start) as usize)
+                        .sum::<usize>()
+                })
+                .sum();
+            if !mask.is_empty() && bytes < target {
+                eligible.push((owner, keys));
+                inputs.push((mask, bytes));
+            }
+        }
+        self.owners = libraries::select(
+            &inputs,
+            target,
+            self.owners.clone(),
+            |current, members, next| {
+                let owner = eligible[*members.first().unwrap()].0;
+                let mut proposed = current.clone();
+                for &key in &eligible[next].1 {
+                    proposed.insert(key, owner);
+                }
+                // A pure library must not import an evaluation job on another member's behalf.
+                // Reject new import cycles as well: they could expose eager-read TDZs.
+                if !binding_closure_safe(graph, modules, symbols, &proposed, owner)? {
+                    return Ok(None);
+                }
+                let mut values = Values::new(graph, modules, symbols);
+                values.names = local_names(graph, modules, symbols, &proposed, owner)?;
+                values.requests = seams
+                    .iter()
+                    .map(|(&f, &o)| (f, request(graph, o)))
+                    .collect();
+                let live: BTreeSet<_> = proposed
+                    .iter()
+                    .filter_map(|(&k, &o)| (o == owner).then_some(k))
+                    .collect();
+                for file in live.iter().map(|k| k.file_id).collect::<BTreeSet<_>>() {
+                    if !compatible(graph, file, &modules[&file], &values, &live)? {
+                        return Ok(None);
+                    }
+                }
+                Ok(Some(proposed))
+            },
+        )?;
+        Ok(())
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         graph: &SourceGraph,
@@ -417,6 +506,64 @@ impl Placement {
             eyre::ensure!(progress, "incompatible native lexical placement");
         }
     }
+}
+
+fn binding_closure_safe(
+    graph: &SourceGraph,
+    modules: &BTreeMap<u32, Module<'_>>,
+    symbols: &Symbols,
+    owners: &BTreeMap<SegmentKey, Owner>,
+    root: Owner,
+) -> eyre::Result<bool> {
+    let mut edges = BTreeMap::<Owner, BTreeSet<Owner>>::new();
+    for (&key, &owner) in owners {
+        let facts = &modules[&key.file_id].parsed.facts;
+        let span = modules[&key.file_id].parsed.segments[key.segment_idx as usize].span;
+        for reference in facts
+            .references
+            .iter()
+            .filter(|r| !r.type_only && contains(span, r.span))
+        {
+            let Some(binding) = reference.binding else {
+                continue;
+            };
+            let identity = symbols
+                .imports
+                .get(&(key.file_id, binding))
+                .map(|s| s.identity.clone())
+                .unwrap_or(ExportIdentity::Binding(key.file_id, binding));
+            let Some(target) = declaration(graph, &identity)? else {
+                if matches!(
+                    identity,
+                    ExportIdentity::Namespace(_) | ExportIdentity::CommonJs(..)
+                ) {
+                    edges
+                        .entry(owner)
+                        .or_default()
+                        .insert(Owner::Evaluation(key.file_id));
+                }
+                continue;
+            };
+            if let Some(&target) = owners.get(&target).filter(|&&target| target != owner) {
+                edges.entry(owner).or_default().insert(target);
+            }
+        }
+    }
+    let mut pending = vec![(root, false)];
+    let mut entered = BTreeSet::new();
+    let mut finished = BTreeSet::new();
+    while let Some((owner, finish)) = pending.pop() {
+        if finish {
+            finished.insert(owner);
+        } else if !finished.contains(&owner) {
+            if matches!(owner, Owner::Evaluation(_)) || !entered.insert(owner) {
+                return Ok(false);
+            }
+            pending.push((owner, true));
+            pending.extend(edges.get(&owner).into_iter().flatten().map(|&o| (o, false)));
+        }
+    }
+    Ok(true)
 }
 
 fn declaration(graph: &SourceGraph, identity: &ExportIdentity) -> eyre::Result<Option<SegmentKey>> {
@@ -1034,7 +1181,10 @@ fn address(
     match identity {
         ExportIdentity::Binding(file, binding) => {
             let original = &symbols.definitions[&(*file, *binding)].name;
-            if !original_exports.is_some_and(|exports| exports.contains_key(original)) {
+            // Synthetic namespace keys must not become dynamic-import assimilation hooks.
+            if original != "then"
+                && !original_exports.is_some_and(|exports| exports.contains_key(original))
+            {
                 return Ok(original.clone());
             }
             let mut name = format!(

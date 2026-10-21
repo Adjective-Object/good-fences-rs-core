@@ -17,13 +17,41 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
     placements: &BTreeMap<u32, u32>,
+    min_chunk_bytes: usize,
 ) -> eyre::Result<Artifacts<Code>> {
     if !placements.is_empty() {
-        return chunks::emit_activated(graph, plan, modules, manifest, symbols, placements);
+        return chunks::emit_activated(
+            graph,
+            plan,
+            modules,
+            manifest,
+            symbols,
+            placements,
+            min_chunk_bytes,
+        );
     }
     let placements = single_parent(graph, plan, modules, symbols)?;
     if !placements.is_empty() {
-        return chunks::emit_activated(graph, plan, modules, manifest, symbols, &placements);
+        return chunks::emit_activated(
+            graph,
+            plan,
+            modules,
+            manifest,
+            symbols,
+            &placements,
+            min_chunk_bytes,
+        );
+    }
+    if min_chunk_bytes != 0 {
+        return chunks::emit_activated(
+            graph,
+            plan,
+            modules,
+            manifest,
+            symbols,
+            &BTreeMap::new(),
+            min_chunk_bytes,
+        );
     }
     ordinary(graph, plan, modules, manifest, symbols)
 }
@@ -116,37 +144,12 @@ fn single_parent(
                     })
             })
             || uses.iter().any(|(file, dependency)| {
-                let facts = &modules[file].parsed.facts;
-                let Some(properties) = facts
-                    .emission
-                    .dynamic_namespaces
-                    .iter()
-                    .find(|n| n.dependency == dependency.id)
-                    .and_then(|n| n.properties.as_ref())
-                else {
-                    return true;
-                };
-                properties.iter().any(|(name, receiver)| {
-                    let Some(export) = symbols.exports[&target].get(name) else {
-                        return true;
-                    };
-                    *receiver
-                        && match export.identity {
-                            ExportIdentity::Binding(file, id) => {
-                                let facts = &modules[&file].parsed.facts;
-                                !facts.bindings.iter().any(|b| b.id == id && b.function)
-                                    || facts
-                                        .references
-                                        .iter()
-                                        .any(|r| r.binding == Some(id) && r.write && !r.type_only)
-                            }
-                            _ => true,
-                        }
-                })
+                !dynamic_namespace_safe(modules, symbols, *file, dependency, target)
             })
         {
             continue;
         }
+
         let candidate: BTreeMap<_, _> = island.iter().map(|&file| (file, parent)).collect();
         if Activations::checked(graph, plan, modules, symbols, &candidate)?.is_none() {
             continue;
@@ -158,6 +161,43 @@ fn single_parent(
         }
     }
     Ok(placements)
+}
+
+fn dynamic_namespace_safe(
+    modules: &BTreeMap<u32, Module<'_>>,
+    symbols: &Symbols,
+    file: u32,
+    dependency: &Dependency,
+    target: u32,
+) -> bool {
+    let Some(properties) = modules[&file]
+        .parsed
+        .facts
+        .emission
+        .dynamic_namespaces
+        .iter()
+        .find(|n| n.dependency == dependency.id)
+        .and_then(|n| n.properties.as_ref())
+    else {
+        return false;
+    };
+    properties.iter().all(|(name, receiver)| {
+        let Some(export) = symbols.exports[&target].get(name) else {
+            return false;
+        };
+        !receiver
+            || match export.identity {
+                ExportIdentity::Binding(file, id) => {
+                    let facts = &modules[&file].parsed.facts;
+                    facts.bindings.iter().any(|b| b.id == id && b.function)
+                        && !facts
+                            .references
+                            .iter()
+                            .any(|r| r.binding == Some(id) && r.write && !r.type_only)
+                }
+                _ => false,
+            }
+    })
 }
 
 #[derive(Clone)]
