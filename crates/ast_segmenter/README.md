@@ -59,6 +59,12 @@ certification. Extra arguments, spreads, options effects and initializer syntax
 are preserved, not evaluated, copied or certified. No promise rewrite, runtime
 recognition, target eligibility, graph obligations or emission plan is extracted.
 
+Optional `options_properties()` evidence is absent for values containing JSX,
+TypeScript types/generics, regexps or division, which the borrowed boundary proof
+does not support. This only disables later options eligibility: original
+candidates, references, dependencies and argument slots remain intact. JSX still
+requires transformation before the public bundler parse-policy gate accepts it.
+
 Read persisted records through borrowed accessors, for example
 `parsed.facts().emission().segments().get(i).unwrap().source().spans()`.
 `views` provides Copy owned-or-wire tables, value enums and indexed/iterable

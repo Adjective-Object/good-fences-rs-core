@@ -22,7 +22,7 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 15/extractor 20 retains typed nested module buffers and wire seals,
+- Schema 15/extractor 21 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
   Shared `PreparedDeclarations`

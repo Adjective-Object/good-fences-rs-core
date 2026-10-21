@@ -1,6 +1,6 @@
 # Typed source-cache FlatBuffers
 
-**Production source-cache backend: schema 15/extractor 20, `.seg.fb`.**
+**Production source-cache backend: schema 15/extractor 21, `.seg.fb`.**
 `segment_cache` reads these immutable buffers through AST/Ecco views and runs
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
@@ -62,7 +62,7 @@ while graph ranges and derived analysis/emission plans are explicitly owned.
 AST and bundler differential tests cover complete record equality, byte borrowing,
 owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-Schema 15/extractor 20 are active production identities, included in bundler
+Schema 15/extractor 21 are active production identities, included in bundler
 source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
 inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
 Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.

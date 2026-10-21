@@ -47,7 +47,8 @@ fn options_properties(new: &NewExpression<'_>) -> Option<Vec<LazyOptionProperty>
     let Expression::ObjectExpression(object) = new.arguments.get(1)?.as_expression()? else {
         return None;
     };
-    // The borrowed boundary proof does not lex regexps or division tokens.
+    // The borrowed boundary proof only balances JS delimiters, not JSX or TS
+    // type syntax, and does not lex regexps or division tokens.
     struct UnsupportedValue(bool);
     impl<'a> Visit<'a> for UnsupportedValue {
         fn visit_expression(&mut self, expression: &Expression<'a>) {
@@ -58,6 +59,26 @@ fn options_properties(new: &NewExpression<'_>) -> Option<Vec<LazyOptionProperty>
                 self.0 = true;
             }
             walk::walk_expression(self, expression);
+        }
+
+        fn visit_jsx_element(&mut self, _: &JSXElement<'a>) {
+            self.0 = true;
+        }
+
+        fn visit_jsx_fragment(&mut self, _: &JSXFragment<'a>) {
+            self.0 = true;
+        }
+
+        fn visit_ts_type(&mut self, _: &TSType<'a>) {
+            self.0 = true;
+        }
+
+        fn visit_ts_type_parameter_instantiation(&mut self, _: &TSTypeParameterInstantiation<'a>) {
+            self.0 = true;
+        }
+
+        fn visit_ts_type_parameter_declaration(&mut self, _: &TSTypeParameterDeclaration<'a>) {
+            self.0 = true;
         }
     }
     let mut unsupported = UnsupportedValue(false);

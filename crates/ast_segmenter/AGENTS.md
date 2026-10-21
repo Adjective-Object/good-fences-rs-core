@@ -139,4 +139,6 @@ Defaulted getter parameters are unsupported, including self-referencing defaults
 Optional lazy-options property evidence records complete plain object key/value
 spans, never purity. Unknown options, initializer/prototype keys, computed/spread/
 accessor/method properties, escaped keys and regexp/division-bearing values lack proof.
+JSX and TS type/generic syntax anywhere in options values also omit this optional
+evidence; ordinary candidates, references, dependencies and argument slots survive.
 No lazy recognition, transformed obligations or reconstruction plans enter caches.

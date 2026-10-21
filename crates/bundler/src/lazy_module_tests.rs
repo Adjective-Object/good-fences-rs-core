@@ -227,6 +227,26 @@ fn lazy_certification_requires_structurally_initializer_free_options() {
 }
 
 #[test]
+fn lazy_certification_falls_back_for_unsupported_typescript_options_on_owned_and_wire() {
+    for value in ["makeLabel<First, Second>()", "<[First, Second]>captured"] {
+        let mut input = input(&format!(
+            "const captured = 1;
+             const mod = new M(() => import('./target.mjs'), {{name: {value}}});
+             export const a = new R(mod, ns => ns.first);"
+        ));
+        let entry = input.remove(Path::new("entry.mjs")).unwrap();
+        input.insert("entry.ts".into(), entry);
+        for wire in [false, true] {
+            let graph = graph_with_storage(&input, false, ModuleFormat::Esm, wire);
+            for runtimes in [vec![], vec![runtime()]] {
+                let checked = certify(&graph, &EffectPolicy::default(), &runtimes).unwrap();
+                assert!(checked.modules().is_empty(), "{value}");
+            }
+        }
+    }
+}
+
+#[test]
 fn lazy_certification_rejects_nonlocal_context_commonjs_and_external_star_targets() {
     for mode in ["external", "context", "commonjs", "external-star"] {
         let mut input = input(

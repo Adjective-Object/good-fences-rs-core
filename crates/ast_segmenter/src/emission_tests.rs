@@ -14,6 +14,59 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn lazy_options_jsx_values_omit_only_optional_evidence_in_owned_and_wire_facts() {
+    // JSX extraction is supported below the public bundler's transform-policy gate.
+    for value in [
+        "<Label/>",
+        "<><Label>{capture}</Label></>",
+        "makeLabel({nested: <Label/>})",
+    ] {
+        let source = format!(
+            "const capture = 1;
+             const mod = new Unrelated(() => import('./child.mjs'),
+                 {{name: {value}, capture}});
+             const selected = new LI(mod, ns => ns.first);
+             const other = import('./other.mjs');"
+        );
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_utils_parse::parse_bundler_file(
+            &allocator,
+            &source,
+            std::path::Path::new("lazy.tsx"),
+            crate::ModuleFormat::Esm,
+        )
+        .unwrap();
+        let semantic = oxc_semantic::SemanticBuilder::new()
+            .with_check_syntax_error(true)
+            .build(&parsed.program);
+        assert!(semantic.errors.is_empty());
+        let owned = crate::owned::extract(&parsed.program, &semantic.semantic).unwrap();
+        let bytes = owned.encode_module(crate::ModuleBody::Esm, &[]);
+        let module =
+            flatbuffers::root::<cache_flatbuffers::wire::CachedModule<'_>>(&bytes).unwrap();
+        let wire = crate::views::ModuleFacts::Wire(module.facts());
+        let owned = crate::views::ModuleFacts::from(&owned);
+        assert_eq!(wire.emission(), owned.emission());
+        assert_eq!(wire.references(), owned.references());
+        assert_eq!(wire.dependencies(), owned.dependencies());
+        for facts in [owned, wire] {
+            let modules = facts.emission().lazy_modules();
+            assert_eq!(modules.len(), 1, "{value}");
+            let module = modules.get(0).unwrap();
+            assert!(module.options().is_some());
+            assert!(module.options_properties().is_none(), "{}", value);
+            assert_eq!(module.arguments().len(), 2);
+            assert_eq!(facts.emission().lazy_selectors().len(), 1);
+            assert_eq!(facts.dependencies().len(), 2);
+            assert!(facts
+                .references()
+                .iter()
+                .any(|r| r.name() == "Label" && r.read() && !r.type_only()));
+        }
+    }
+}
+
+#[test]
 fn lazy_options_record_complete_plain_property_shapes_not_effect_assumptions() {
     for (options, properties) in [
         ("{}", Some(0)),

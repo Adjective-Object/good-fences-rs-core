@@ -74,6 +74,77 @@ fn lazy_options_structural_evidence_roundtrips_and_rejects_incomplete_proofs() {
 }
 
 #[test]
+fn lazy_options_unsupported_typescript_fall_back_on_fresh_and_cached_paths() {
+    for (path, value) in [
+        ("lazy.ts", "makeLabel<A, B>()"),
+        ("lazy.ts", "new Label<A, B>()"),
+        ("lazy.ts", "makeLabel<A, B>"),
+        ("lazy.ts", "makeLabel<A, B>`label`"),
+        ("lazy.ts", "<[A, B]>capture"),
+        ("lazy.ts", "capture as [A, B]"),
+        ("lazy.ts", "capture satisfies [A, B]"),
+        ("lazy.ts", "<A, B>() => capture"),
+        ("lazy.ts", "(arg: [A, B]) => arg"),
+        ("lazy.ts", "makeLabel<A, B>(import('./label.mjs'))"),
+    ] {
+        for constructor in ["LM", "Unrelated"] {
+            let source = format!(
+                "const capture = 1;
+                 const mod = new {constructor}(() => import('./child.mjs'),
+                     {{name: {value}, capture}});
+                 const selected = new LI(mod, ns => ns.first);
+                 const other = import('./other.mjs');"
+            );
+            let parsed = ast_segmenter::parse_module(
+                &logger::StdioLogger::new(),
+                &source,
+                Path::new(path),
+                ModuleFormat::Esm,
+            )
+            .unwrap();
+            let facts = parsed.facts();
+            let modules = facts.emission().lazy_modules();
+            assert_eq!(modules.len(), 1, "{value}");
+            let module = modules.get(0).unwrap();
+            assert!(module.options().is_some(), "{value}");
+            assert!(module.options_properties().is_none(), "{value}");
+            assert_eq!(module.arguments().len(), 2);
+            assert_eq!(facts.emission().lazy_selectors().len(), 1);
+            assert_eq!(
+                facts.dependencies().len(),
+                if value.contains("import(") { 3 } else { 2 },
+                "{value}"
+            );
+            assert!(facts
+                .references()
+                .iter()
+                .any(|r| r.name() == "capture" && r.read() && !r.type_only()));
+            let parses = ast_segmenter::module_parse_count();
+            let original = CacheRecord::from_parsed(&source, &parsed).unwrap();
+            let cached = CacheRecord::decode(
+                &original.encode(&source).unwrap(),
+                &source,
+                original.config(),
+            )
+            .unwrap();
+            for restored in [
+                original.to_parsed(&source).unwrap(),
+                cached.to_parsed(&source).unwrap(),
+            ] {
+                assert_eq!(restored.facts().emission(), facts.emission(), "{value}");
+                assert_eq!(restored.facts().references(), facts.references(), "{value}");
+                assert_eq!(
+                    restored.facts().dependencies(),
+                    facts.dependencies(),
+                    "{value}"
+                );
+            }
+            assert_eq!(ast_segmenter::module_parse_count(), parses);
+        }
+    }
+}
+
+#[test]
 fn lazy_options_cannot_forge_a_value_across_initializer_properties_with_regexp_delimiters() {
     let source =
         r"const mod = new LM(() => import('./child.mjs'), {a: /\(/, initializer: init, b: /\)/});";
