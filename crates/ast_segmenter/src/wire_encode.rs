@@ -472,6 +472,8 @@ fn emission(v: &em::EmissionFacts) -> w::EmissionFactsT {
             .iter()
             .map(|v| table!(LazySelectorCandidateT {
                 segment: v.segment(),
+                result_binding: v.result_binding().map(|b| b.0),
+                result_declaration: v.result_declaration().map(span),
                 kind: lazy_wrapper_kind(v.kind()),
                 constructor: v.constructor(),
                 module_binding: v.module_binding().0,

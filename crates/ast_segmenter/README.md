@@ -40,7 +40,9 @@ argument slots. `import_span()` identifies the directly returned import, not
 imports nested in options. `callback()` and `options()` borrow the first/second
 slot without copying expressions. Selector candidates retain constructor/module/
 getter references, module binding, selected property/token span, construction
-span and every original argument;
+span and every original argument. Optional `result_binding()` and
+`result_declaration()` identify the actual directly initialized identifier and
+complete declarator, never a nearby local inferred from source positions;
 `module_argument()` and `getter()` borrow their original slots. Slot operations
 are composed against the owning segment recipe, including nested replacements.
 `property_span()` anchors the decoded property to its original identifier token,

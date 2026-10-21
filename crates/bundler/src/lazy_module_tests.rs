@@ -675,8 +675,8 @@ fn lazy_selected_demands_discover_nested_instances_but_not_dead_ones() {
 fn lazy_nested_escaping_result_is_not_confused_with_getter_local_reads() {
     let input = input(
         "const mod = new M(() => import('./target.mjs'));
-        (() => { const selected = new R(mod, ns => ns.first); globalThis.selected = selected; })();
-        (() => { const dead = new R(mod, ns => ns.second); globalThis.ran = true; })();",
+        (() => { globalThis.getSelected = () => selected; const selected = new R(mod, ns => ns.first); })();
+        (() => { const token = 1; const dead = new R(mod, ns => ns.second); globalThis.token = token; })();",
     );
     for wire in [false, true] {
         let (graph, plan) = planned(&input, wire);

@@ -12,6 +12,7 @@ pub(super) fn extract(
         recipes,
         modules: Vec::new(),
         selectors: Vec::new(),
+        initializers: Vec::new(),
     };
     visitor.visit_program(program);
     visitor.modules.sort_by_key(|c| c.construction().start);
@@ -24,6 +25,7 @@ struct Candidates<'f> {
     recipes: &'f [SegmentRecipe],
     modules: Vec<LazyModuleCandidate>,
     selectors: Vec<LazySelectorCandidate>,
+    initializers: Vec<(Span, BindingId, Span)>,
 }
 
 fn unparenthesized<'b, 'a>(mut expression: &'b Expression<'a>) -> &'b Expression<'a> {
@@ -202,6 +204,10 @@ impl<'a> Visit<'a> for Candidates<'_> {
             if let Some(Expression::NewExpression(new)) =
                 declaration.init.as_ref().map(unparenthesized)
             {
+                if let Some(binding) = self.binding(id.span) {
+                    self.initializers
+                        .push((new.span, binding, declaration.span));
+                }
                 let shape = || {
                     let binding = self.binding(id.span)?;
                     let constructor = self.reference(&new.callee)?;
@@ -291,7 +297,13 @@ impl<'a> Visit<'a> for Candidates<'_> {
                     member.property.name.to_string(),
                     member.property.span,
                 ),
-                new.span,
+                (
+                    new.span,
+                    self.initializers
+                        .iter()
+                        .find(|(span, _, _)| *span == new.span)
+                        .map(|(_, binding, declaration)| (*binding, *declaration)),
+                ),
                 self.arguments(new, segment),
                 self.wrapper_kind(constructor),
             ))

@@ -23424,15 +23424,17 @@ impl<'a> flatbuffers::Follow<'a> for LazySelectorCandidate<'a> {
 
 impl<'a> LazySelectorCandidate<'a> {
   pub const VT_SEGMENT: flatbuffers::VOffsetT = 4;
-  pub const VT_KIND: flatbuffers::VOffsetT = 6;
-  pub const VT_CONSTRUCTOR: flatbuffers::VOffsetT = 8;
-  pub const VT_MODULE_BINDING: flatbuffers::VOffsetT = 10;
-  pub const VT_MODULE_REFERENCE: flatbuffers::VOffsetT = 12;
-  pub const VT_GETTER_REFERENCE: flatbuffers::VOffsetT = 14;
-  pub const VT_PROPERTY: flatbuffers::VOffsetT = 16;
-  pub const VT_PROPERTY_SPAN: flatbuffers::VOffsetT = 18;
-  pub const VT_CONSTRUCTION: flatbuffers::VOffsetT = 20;
-  pub const VT_ARGUMENTS: flatbuffers::VOffsetT = 22;
+  pub const VT_RESULT_BINDING: flatbuffers::VOffsetT = 6;
+  pub const VT_RESULT_DECLARATION: flatbuffers::VOffsetT = 8;
+  pub const VT_KIND: flatbuffers::VOffsetT = 10;
+  pub const VT_CONSTRUCTOR: flatbuffers::VOffsetT = 12;
+  pub const VT_MODULE_BINDING: flatbuffers::VOffsetT = 14;
+  pub const VT_MODULE_REFERENCE: flatbuffers::VOffsetT = 16;
+  pub const VT_GETTER_REFERENCE: flatbuffers::VOffsetT = 18;
+  pub const VT_PROPERTY: flatbuffers::VOffsetT = 20;
+  pub const VT_PROPERTY_SPAN: flatbuffers::VOffsetT = 22;
+  pub const VT_CONSTRUCTION: flatbuffers::VOffsetT = 24;
+  pub const VT_ARGUMENTS: flatbuffers::VOffsetT = 26;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -23452,6 +23454,8 @@ impl<'a> LazySelectorCandidate<'a> {
     builder.add_module_reference(args.module_reference);
     builder.add_module_binding(args.module_binding);
     builder.add_constructor(args.constructor);
+    if let Some(x) = args.result_declaration { builder.add_result_declaration(x); }
+    if let Some(x) = args.result_binding { builder.add_result_binding(x); }
     builder.add_segment(args.segment);
     builder.add_kind(args.kind);
     builder.finish()
@@ -23459,6 +23463,10 @@ impl<'a> LazySelectorCandidate<'a> {
 
   pub fn unpack(&self) -> LazySelectorCandidateT {
     let segment = self.segment();
+    let result_binding = self.result_binding();
+    let result_declaration = self.result_declaration().map(|x| {
+      x.unpack()
+    });
     let kind = self.kind();
     let constructor = self.constructor();
     let module_binding = self.module_binding();
@@ -23482,6 +23490,8 @@ impl<'a> LazySelectorCandidate<'a> {
     };
     LazySelectorCandidateT {
       segment,
+      result_binding,
+      result_declaration,
       kind,
       constructor,
       module_binding,
@@ -23500,6 +23510,20 @@ impl<'a> LazySelectorCandidate<'a> {
     // Created from valid Table for this object
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_SEGMENT, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn result_binding(&self) -> Option<u32> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_RESULT_BINDING, None)}
+  }
+  #[inline]
+  pub fn result_declaration(&self) -> Option<&'a Span> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazySelectorCandidate::VT_RESULT_DECLARATION, None)}
   }
   #[inline]
   pub fn kind(&self) -> LazyWrapperKind {
@@ -23574,6 +23598,8 @@ impl flatbuffers::Verifiable for LazySelectorCandidate<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<u32>("segment", Self::VT_SEGMENT, false)?
+     .visit_field::<u32>("result_binding", Self::VT_RESULT_BINDING, false)?
+     .visit_field::<Span>("result_declaration", Self::VT_RESULT_DECLARATION, false)?
      .visit_field::<LazyWrapperKind>("kind", Self::VT_KIND, false)?
      .visit_field::<u32>("constructor", Self::VT_CONSTRUCTOR, false)?
      .visit_field::<u32>("module_binding", Self::VT_MODULE_BINDING, false)?
@@ -23589,6 +23615,8 @@ impl flatbuffers::Verifiable for LazySelectorCandidate<'_> {
 }
 pub struct LazySelectorCandidateArgs<'a> {
     pub segment: u32,
+    pub result_binding: Option<u32>,
+    pub result_declaration: Option<&'a Span>,
     pub kind: LazyWrapperKind,
     pub constructor: u32,
     pub module_binding: u32,
@@ -23604,6 +23632,8 @@ impl<'a> Default for LazySelectorCandidateArgs<'a> {
   fn default() -> Self {
     LazySelectorCandidateArgs {
       segment: 0,
+      result_binding: None,
+      result_declaration: None,
       kind: LazyWrapperKind::Unknown,
       constructor: 0,
       module_binding: 0,
@@ -23625,6 +23655,14 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> LazySelectorCandidateBuilder<'a
   #[inline]
   pub fn add_segment(&mut self, segment: u32) {
     self.fbb_.push_slot::<u32>(LazySelectorCandidate::VT_SEGMENT, segment, 0);
+  }
+  #[inline]
+  pub fn add_result_binding(&mut self, result_binding: u32) {
+    self.fbb_.push_slot_always::<u32>(LazySelectorCandidate::VT_RESULT_BINDING, result_binding);
+  }
+  #[inline]
+  pub fn add_result_declaration(&mut self, result_declaration: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazySelectorCandidate::VT_RESULT_DECLARATION, result_declaration);
   }
   #[inline]
   pub fn add_kind(&mut self, kind: LazyWrapperKind) {
@@ -23685,6 +23723,8 @@ impl core::fmt::Debug for LazySelectorCandidate<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("LazySelectorCandidate");
       ds.field("segment", &self.segment());
+      ds.field("result_binding", &self.result_binding());
+      ds.field("result_declaration", &self.result_declaration());
       ds.field("kind", &self.kind());
       ds.field("constructor", &self.constructor());
       ds.field("module_binding", &self.module_binding());
@@ -23701,6 +23741,8 @@ impl core::fmt::Debug for LazySelectorCandidate<'_> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LazySelectorCandidateT {
   pub segment: u32,
+  pub result_binding: Option<u32>,
+  pub result_declaration: Option<SpanT>,
   pub kind: LazyWrapperKind,
   pub constructor: u32,
   pub module_binding: u32,
@@ -23715,6 +23757,8 @@ impl Default for LazySelectorCandidateT {
   fn default() -> Self {
     Self {
       segment: 0,
+      result_binding: None,
+      result_declaration: None,
       kind: LazyWrapperKind::Unknown,
       constructor: 0,
       module_binding: 0,
@@ -23733,6 +23777,9 @@ impl LazySelectorCandidateT {
     _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
   ) -> flatbuffers::WIPOffset<LazySelectorCandidate<'b>> {
     let segment = self.segment;
+    let result_binding = self.result_binding;
+    let result_declaration_tmp = self.result_declaration.as_ref().map(|x| x.pack());
+    let result_declaration = result_declaration_tmp.as_ref();
     let kind = self.kind;
     let constructor = self.constructor;
     let module_binding = self.module_binding;
@@ -23752,6 +23799,8 @@ impl LazySelectorCandidateT {
     });
     LazySelectorCandidate::create(_fbb, &LazySelectorCandidateArgs{
       segment,
+      result_binding,
+      result_declaration,
       kind,
       constructor,
       module_binding,

@@ -116,6 +116,9 @@ impl LazyModuleCandidate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LazySelectorCandidate {
     segment: u32,
+    result_binding: Option<BindingId>,
+    #[serde(default, with = "crate::owned::span_serde::optional")]
+    result_declaration: Option<Span>,
     kind: LazyWrapperKind,
     constructor: u32,
     module_binding: BindingId,
@@ -135,14 +138,17 @@ impl LazySelectorCandidate {
         constructor: u32,
         module: (u32, BindingId),
         getter: (u32, String, Span),
-        construction: Span,
+        construction: (Span, Option<(BindingId, Span)>),
         arguments: Vec<SourceSlot>,
         kind: LazyWrapperKind,
     ) -> Self {
         let (module_reference, module_binding) = module;
         let (getter_reference, property, property_span) = getter;
+        let (construction, result) = construction;
         Self {
             segment,
+            result_binding: result.map(|(binding, _)| binding),
+            result_declaration: result.map(|(_, declaration)| declaration),
             kind,
             constructor,
             module_binding,
@@ -156,6 +162,12 @@ impl LazySelectorCandidate {
     }
     pub fn segment(&self) -> u32 {
         self.segment
+    }
+    pub fn result_binding(&self) -> Option<BindingId> {
+        self.result_binding
+    }
+    pub fn result_declaration(&self) -> Option<Span> {
+        self.result_declaration
     }
     pub fn kind(&self) -> LazyWrapperKind {
         self.kind

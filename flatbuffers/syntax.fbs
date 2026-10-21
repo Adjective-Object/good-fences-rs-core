@@ -170,6 +170,8 @@ table LazyModuleCandidate {
 }
 table LazySelectorCandidate {
   segment:uint;
+  result_binding:uint = null;
+  result_declaration:Span;
   kind:LazyWrapperKind;
   constructor:uint;
   module_binding:uint;

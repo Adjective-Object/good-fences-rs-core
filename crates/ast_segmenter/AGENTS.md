@@ -142,3 +142,5 @@ accessor/method properties, escaped keys and regexp/division-bearing values lack
 JSX and TS type/generic syntax anywhere in options values also omit this optional
 evidence; ordinary candidates, references, dependencies and argument slots survive.
 No lazy recognition, transformed obligations or reconstruction plans enter caches.
+Lazy selectors retain optional AST-linked result binding/declarator evidence;
+captured result reads are independent of textual order or unrelated local reads.

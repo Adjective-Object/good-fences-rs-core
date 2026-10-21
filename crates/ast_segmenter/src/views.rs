@@ -1265,6 +1265,10 @@ impl LazyOptionProperty<'_> {
 
 impl<'a> LazySelectorCandidate<'a> {
     scalar!(segment, u32);
+    scalar!(result_binding, Option<o::BindingId>, |v: Option<u32>| v
+        .map(o::BindingId));
+    scalar!(result_declaration, Option<Span>, |v: Option<&w::Span>| v
+        .map(span));
     scalar!(kind, em::LazyWrapperKind, lazy_wrapper_kind);
     scalar!(constructor, u32);
     scalar!(module_binding, o::BindingId, o::BindingId);
@@ -1417,6 +1421,8 @@ equal_view!(LazyOptionProperty, key, value);
 equal_view!(
     LazySelectorCandidate,
     segment,
+    result_binding,
+    result_declaration,
     kind,
     constructor,
     module_binding,

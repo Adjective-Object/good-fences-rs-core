@@ -298,6 +298,50 @@ fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
         }
     }
     for candidate in emission.lazy_selectors() {
+        match (candidate.result_binding(), candidate.result_declaration()) {
+            (None, None) => {}
+            (Some(binding), Some(declaration)) => {
+                let binding = facts
+                    .bindings()
+                    .iter()
+                    .find(|b| b.id() == binding)
+                    .ok_or_eyre("dangling lazy result binding")?;
+                span(source, declaration)?;
+                ensure!(
+                    emission
+                        .segments()
+                        .get(candidate.segment() as usize)
+                        .is_some_and(|recipe| recipe.source().contains(declaration)),
+                    "invalid lazy result declaration owner"
+                );
+                let name = binding
+                    .declarations()
+                    .iter()
+                    .find(|d| d.start == declaration.start)
+                    .ok_or_eyre("invalid lazy result declaration")?;
+                ensure!(
+                    name.end < candidate.construction().start
+                        && declaration.end >= candidate.construction().end,
+                    "invalid lazy result initializer"
+                );
+                let prefix = syntax_tokens(
+                    &source[name.end as usize..candidate.construction().start as usize],
+                )
+                .ok_or_eyre("invalid lazy result initializer prefix")?;
+                let suffix = syntax_tokens(
+                    &source[candidate.construction().end as usize..declaration.end as usize],
+                )
+                .ok_or_eyre("invalid lazy result initializer suffix")?;
+                ensure!(
+                    prefix.first() == Some(&"=")
+                        && prefix[1..].iter().all(|token| *token == "(")
+                        && suffix.len() + 1 == prefix.len()
+                        && suffix.iter().all(|token| *token == ")"),
+                    "invalid lazy result initializer boundary"
+                );
+            }
+            _ => eyre::bail!("incomplete lazy result evidence"),
+        }
         let call = lazy_construction(
             facts,
             source,

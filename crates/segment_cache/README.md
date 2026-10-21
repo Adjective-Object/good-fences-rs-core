@@ -18,7 +18,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 15/extractor 21.
+Production loading/publication uses typed FlatBuffers, schema 16/extractor 22.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.
 `validate_parsed(source, parsed)` shares the source-local semantic checks with
 the production codec and accepts `ParsedModule::from_wire` without decoding a fact

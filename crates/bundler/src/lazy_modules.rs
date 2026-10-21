@@ -67,7 +67,8 @@ pub struct CertifiedSelector {
     pub kind: LazyWrapperKind,
     pub value_use: ast_segmenter::invocation::ValueUse,
     /// Nested locals have no separate segment value demand. A read outside the
-    /// construction conservatively protects their initializer's result.
+    /// construction protects their actual initializer's result, including
+    /// captures whose source precedes the initializer.
     pub nested_result_read: bool,
     pub module_reference: u32,
     pub property: String,
@@ -490,24 +491,15 @@ fn eligible(
             constructor: identity,
             kind,
             value_use: call.value_use(),
-            nested_result_read: facts.bindings().iter().any(|binding| {
-                !binding.top_level()
-                    && binding.declarations().iter().any(|declaration| {
-                        contains(
-                            graph.file_segments(file).unwrap()[candidate.segment() as usize].span,
-                            declaration,
-                        ) && declaration.end <= candidate.construction().start
-                    })
+            nested_result_read: candidate.result_binding().is_some_and(|result| {
+                facts
+                    .bindings()
+                    .iter()
+                    .any(|binding| binding.id() == result && !binding.top_level())
                     && facts.references().iter().any(|reference| {
                         !reference.type_only()
                             && reference.read()
-                            && reference.binding() == Some(binding.id())
-                            && reference.span().start >= candidate.construction().end
-                            && contains(
-                                graph.file_segments(file).unwrap()[candidate.segment() as usize]
-                                    .span,
-                                reference.span(),
-                            )
+                            && reference.binding() == Some(result)
                     })
             }),
             module_reference: reference as u32,

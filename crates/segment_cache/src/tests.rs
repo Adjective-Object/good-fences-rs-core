@@ -447,6 +447,24 @@ fn lazy_candidates_reject_corrupt_links_spans_slots_and_kind_hints() {
         },
         |v: &mut serde_json::Value| {
             v.set(
+                "module.facts.emission.lazy_selectors.0.result_binding",
+                99999,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.copy(
+                "module.facts.emission.lazy_selectors.0.result_binding",
+                "module.facts.emission.lazy_selectors.1.result_binding",
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.add(
+                "module.facts.emission.lazy_selectors.0.result_declaration.end",
+                1,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set(
                 "module.facts.emission.lazy_selectors.0.module_binding",
                 99999,
             )
