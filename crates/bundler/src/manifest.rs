@@ -279,7 +279,7 @@ pub fn diagnostic_manifest(
             (initialize.clone(), NodeId::Module(module.clone())),
             (namespace.clone(), initialize.clone()),
         ];
-        let names = crate::cjs::names(graph, &plan.retention, file);
+        let names = crate::cjs::planned_names(graph, plan, file);
         for name in names.iter().filter(|name| name.as_str() != "default") {
             dependencies.push((
                 NodeId::CommonJsProxy {
@@ -289,7 +289,7 @@ pub fn diagnostic_manifest(
                 initialize.clone(),
             ));
         }
-        for (from, request) in crate::cjs::requests(graph, &plan.retention, file) {
+        for (from, request) in crate::cjs::planned_requests(graph, plan, file) {
             let from = node_id(graph, from)?;
             dependencies.push((from.clone(), initialize.clone()));
             let requested = match request {

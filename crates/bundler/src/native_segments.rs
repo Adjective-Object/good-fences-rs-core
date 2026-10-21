@@ -255,6 +255,19 @@ impl Placement {
             target,
             self.owners.clone(),
             |current, members, next| {
+                if inputs[next]
+                    .0
+                    .iter()
+                    .any(|root| matches!(root, RootId::AsyncExport { .. }))
+                    || members.iter().any(|&member| {
+                        inputs[member]
+                            .0
+                            .iter()
+                            .any(|root| matches!(root, RootId::AsyncExport { .. }))
+                    })
+                {
+                    return Ok(None);
+                }
                 let owner = eligible[*members.first().unwrap()].0;
                 let mut proposed = current.clone();
                 for &key in &eligible[next].1 {
@@ -625,7 +638,11 @@ impl Placement {
                 }
             }
         }
-        for seed in plan.roots.values() {
+        for seed in plan
+            .roots
+            .values()
+            .filter(|seed| !matches!(seed.id, RootId::AsyncExport { .. }))
+        {
             for node in &seed.binding_roots {
                 if let GraphNode::Segment(key) = node {
                     public_users
@@ -658,6 +675,7 @@ impl Placement {
             .map(|&k| (k, Owner::Evaluation(seams[&k.file_id])))
             .collect();
         let mut shared = BTreeMap::new();
+        let mut selected_owners = BTreeMap::new();
         let mut candidates: Vec<_> = movable
             .iter()
             .map(|&i| {
@@ -698,7 +716,24 @@ impl Placement {
                                 .is_some_and(|users| users.contains(owner))
                         })
                 });
-            let owner = if let Some(owner) = unique {
+            let mask: BTreeSet<_> = component
+                .iter()
+                .flat_map(|key| {
+                    &plan.node_roots[&NodeId::Segment {
+                        module: graph.file_path(key.file_id).unwrap().to_owned(),
+                        index: key.segment_idx,
+                    }]
+                })
+                .cloned()
+                .collect();
+            let owner = if mask
+                .iter()
+                .any(|root| matches!(root, RootId::AsyncExport { .. }))
+            {
+                *selected_owners
+                    .entry(mask)
+                    .or_insert(Owner::Bindings(component[0]))
+            } else if let Some(owner) = unique {
                 Owner::Evaluation(owner)
             } else {
                 *shared
@@ -1721,6 +1756,17 @@ pub(super) fn emit(
         .iter()
         .map(|(&f, route)| (f, Code::request(route.clone(), RequestKind::DynamicImport)))
         .collect();
+    for (site, route) in &connections.async_facades {
+        if selected_activation(graph, plan, site) {
+            values.dynamic_sites.insert(
+                (
+                    graph.file_id(&site.module).unwrap(),
+                    ast_segmenter::owned::DependencyId(site.offset),
+                ),
+                Code::request(route.clone(), RequestKind::DynamicImport),
+            );
+        }
+    }
     for boundary in plan.generated_boundaries.values() {
         let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
             unreachable!()

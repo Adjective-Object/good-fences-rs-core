@@ -41,7 +41,7 @@ native-external-validation and exact-public-surface obligations; they do not
 prescribe physical module seams. `RetentionPlan` and canonical symbols feed the
 segment owner solver. Source privacy never adds a placement constraint.
 
-### Precise dynamic-import planning (analysis-only)
+### Precise native dynamic imports
 
 `chunks::partition_precise` consumes checked `SourceGraph::dynamic_import_demand`
 routes. `RootId::AsyncExport { site, name }` identifies each requested export
@@ -64,14 +64,23 @@ demand/load set, and `facade` is their availability union, not another root.
 Nested occurrences are discovered only from reached consumers to a fixed point.
 Generated private-function boundaries retain their existing separate contract.
 
-**Compatibility gate:** `partition`/`partition_with_options` and `BuildSession`
-still plan complete import namespaces. Linked emission explicitly rejects precise
-plans, including evaluation-only plans: today's specifier-only rewrite assumes
-complete surfaces. The next emission phase must carry activation projections
-through physical placement into typed post-placement `Connections`, route each
-occurrence to its selected public namespace without exposing internal transport
-names, and preserve original-target evaluation/rejection/activation timing.
-Only then may the default planner switch; logical roots need not become files.
+`partition`, `partition_with_options` and `BuildSession` use precise planning by
+default. `partition_conservative` remains the namespace reference; both plans
+can emit. After physical placement, typed `Connections` gives each selected
+occurrence a native ESM projection: it evaluates the original target and reexports
+only its requested canonical live bindings. No private transport names escape.
+Both unchanged source recipes and reconstructed bodies route imports by source
+occurrence, not target. Missing properties have evaluation-only projections.
+Selected pure components group by their exact demand masks, independently of
+occurrence projections, and small-library clustering cannot merge these owners.
+Certification checks the complete initializer closure, so unrelated full-namespace
+islands cannot move selected targets behind guards that their projections bypass.
+Shared helpers retain union masks; original effect/TLA/failure jobs remain shared.
+Full/public consumers still use complete native namespaces. No source-loading
+runtime or mutable namespace cells are introduced.
+CommonJS snapshot recovery follows planned facade demands rather than retained
+multi-export statements; native external seams prune direct and local export
+clauses to the same retained surface.
 
 ### Native connections
 
@@ -861,8 +870,9 @@ coercion. An empty closure is not a successful empty namespace. Context dispatch
 shares the captured intrinsic shim with CJS even in ESM-only builds, so user
 bindings or later mutations of `Error` cannot intercept generated lookup errors.
 
-Dynamic namespace targets retain their complete public surfaces, without private
-exports. Source TLA status propagates over static runtime dependencies, including
+Full dynamic namespace observations retain their complete public surfaces, without
+private exports; checked selected observations use occurrence projections.
+Source TLA status propagates over static runtime dependencies, including
 SCCs. These async modules stay body-bearing native jobs rather than concatenating
 across source wait boundaries. Source await/for-await syntax is untouched; static
 siblings interleave natively, never through scalar effect-order dispatch,
@@ -1650,9 +1660,10 @@ Node owns native dependency/SCC scheduling, public namespaces and async jobs.
 Low-level roots naming multiple modules emit evaluation-only wrappers without invented
 namespace merges or exported arrays. `link::esm` itself writes no files.
 
-Literal source dynamic imports use the same native identities as static imports
-and entries. `Artifacts::async_facades` maps each reached source occurrence to
-its canonical executable target path (native ESM body chunk or CJS bridge job);
+Full literal source dynamic imports use the same native identities as static
+imports and entries. Selected occurrences instead project native live bindings
+without exposing a full namespace. `Artifacts::async_facades` maps each reached
+source occurrence to its native projection, canonical ESM target or CJS bridge job;
 ESM imports add no promise-unwrapping
 reaction. Native import promises preserve source suspension and
 deduplicate module evaluation. CJS imports unwrap the existing namespace bridge
@@ -1725,8 +1736,10 @@ evaluation alone does not imply namespace demand. This oracle describes code
 availability, not runtime evaluation, especially for deferred synchronous require.
 
 `chunks::partition(graph, entries, policy)` accepts only `RootId::Entry` seeds.
-It recomputes existing P4 retention as reachable async sites activate namespace
-roots, to a fixed point (including nested sites/cycles). External async sites
+It recomputes existing P4 retention as reachable async sites activate independent
+checked export roots (or conservative namespace roots), to a fixed point including
+nested sites/cycles. `partition_conservative` is the explicit namespace oracle.
+External async sites
 stay explicit, never become local evaluation demands. It returns a `ChunkPlan`
 containing the final retention, seeds, independent per-root reachability,
 `node_roots` (including empty dead sets), and sorted `chunks`. `ChunkId` is the

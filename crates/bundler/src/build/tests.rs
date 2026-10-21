@@ -28,6 +28,83 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn precise_native_dynamic_imports_inside_commonjs_use_occurrence_projections() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import load from './loader.cjs'; export {load};",
+    );
+    write(dir.root(), "loader.cjs", "module.exports = async () => { const {a,b} = await import('./dep.mjs'); return [a(),b()]; };");
+    write(dir.root(), "dep.mjs", "export function a() { return 42; } export function b() { return 7; } export const dead = 99;");
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    let plan = &result.product.plan;
+    assert_eq!(
+        plan.roots
+            .keys()
+            .filter(|root| matches!(root, crate::chunks::RootId::AsyncExport { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(observe_named(&result.product.artifacts,
+        "import assert from 'node:assert/strict'; const main = await import('./main.mjs'); assert.deepEqual(await main.load(), [42,7]);"), b"");
+}
+
+#[test]
+fn precise_native_external_seams_preserve_public_exports_after_connector_pruning() {
+    for source in [
+        "import 'node:fs'; import {unused} from './dep.mjs'; export const value = 42;",
+        "import 'node:fs'; import {value, unused} from './dep.mjs'; export {value};",
+        "import 'node:fs'; import * as ns from './dep.mjs'; export {ns}; export const value = 42;",
+        "import 'node:fs'; import {value as a} from './dep.mjs'; const value = 42; export {a, value};",
+    ] {
+        let dir = TmpDir::new();
+        write(dir.root(), "main.mjs", source);
+        write(dir.root(), "dep.mjs", "export const value = 42; export const unused = 1;");
+        let mut config = options();
+        config.externals.insert("node:fs".into());
+        let result = BuildSession::new(dir.root()).unwrap().build(&config).unwrap();
+        assert_eq!(observe_named(&result.product.artifacts,
+            "import assert from 'node:assert/strict'; const main = await import('./main.mjs'); assert.equal(main.value, 42); if (main.ns) assert.equal(main.ns.value, 42); if ('a' in main) assert.equal(main.a, 42);"), b"");
+    }
+}
+
+#[test]
+fn precise_native_external_seams_prune_direct_and_local_reexport_siblings() {
+    for barrel in [
+        "export {a,b} from './leaf.mjs';",
+        "import {a,b} from './leaf.mjs'; export {a,b};",
+        "import {a} from './leaf.mjs'; const b = 2; export {a,b};",
+    ] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            "import 'node:fs'; console.log((await import('./barrel.mjs')).a());",
+        );
+        write(dir.root(), "barrel.mjs", barrel);
+        write(
+            dir.root(),
+            "leaf.mjs",
+            "export function a() { return 42; } export function b() { return 7; }",
+        );
+        let mut config = options();
+        config.externals.insert("node:fs".into());
+        let result = BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap();
+        assert_eq!(
+            observe_named(&result.product.artifacts, "await import('./main.mjs');"),
+            b"42\n"
+        );
+    }
+}
+
+#[test]
 fn tracing_preserves_noop_product_and_counters() {
     use tracing_subscriber::prelude::*;
     let dir = TmpDir::new();

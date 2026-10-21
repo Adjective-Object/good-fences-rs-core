@@ -129,7 +129,7 @@ fn emit_inner(
                 }
                 entry_owners.insert(entry.clone(), owners);
             }
-            RootId::Async(site) => {
+            RootId::Async(site) | RootId::AsyncExport { site, .. } => {
                 if plan.generated_boundaries.contains_key(site) {
                     continue;
                 }
@@ -140,9 +140,6 @@ fn emit_inner(
                     eyre::bail!("nonmodule async target")
                 };
                 async_targets.insert(site.clone(), graph.file_id(target).unwrap());
-            }
-            RootId::AsyncExport { .. } => {
-                eyre::bail!("selected async demand roots require native projection support")
             }
         }
     }
@@ -195,7 +192,11 @@ fn emit_inner(
         );
     }
     let mut boundaries: BTreeSet<_> = entry_owners.values().flatten().copied().collect();
-    boundaries.extend(async_targets.values().copied());
+    boundaries.extend(
+        async_targets
+            .iter()
+            .filter_map(|(site, &file)| (!selected_activation(graph, plan, site)).then_some(file)),
+    );
     if let Some(activations) = activations {
         boundaries.extend(activations.owners.keys().copied());
         boundaries.extend(activations.owners.values().copied());
@@ -458,6 +459,18 @@ fn emit_inner(
         }
     }
     let mut changed = BTreeSet::new();
+    if plan.precise_dynamic_imports && !native_seams {
+        // Canonical routes may bypass an import declaration used only by a local
+        // export. Such clauses cannot be emitted verbatim without their binding.
+        for (&file, module) in modules {
+            if module.parsed.facts().imports().iter().any(|import| {
+                !symbols.imports.contains_key(&(file, import.binding()))
+                    && !symbols.exports[&file].is_empty()
+            }) {
+                changed.insert(owners[&file]);
+            }
+        }
+    }
     for boundary in plan.generated_boundaries.values() {
         let GraphNode::Segment(consumer) = graph.edges()[boundary.source_edge].from else {
             unreachable!()
@@ -538,6 +551,7 @@ fn emit_inner(
         graph,
         modules,
         &connections.namespaces,
+        &connections.async_facades,
         &entry_files,
         execution,
         plan,
@@ -632,6 +646,10 @@ fn emit_inner(
                     );
                     let index = key.segment_idx as usize;
                     let recipe = facts.emission().segments().get(index).unwrap();
+                    if let Some(exports) = connections.native_exports.get(&key) {
+                        imports.push(exports.clone());
+                        continue;
+                    }
                     let mut renderer = crate::emit::CachedRenderer::new(
                         module.source,
                         *facts,
@@ -761,15 +779,13 @@ fn emit_inner(
         .iter()
         .map(|(entry, path)| (RootId::Entry(entry.clone()), path.clone()))
         .collect();
-    root_routes.extend(async_targets.iter().map(|(site, file)| {
-        (
-            RootId::Async(site.clone()),
-            cjs.namespaces
-                .get(graph.file_path(*file).unwrap())
-                .cloned()
-                .unwrap_or_else(|| connections.namespaces[file].clone()),
-        )
-    }));
+    for (site, activation) in &plan.async_activations {
+        if let Some(route) = connections.async_facades.get(site) {
+            for root in &activation.roots {
+                root_routes.insert(root.clone(), route.clone());
+            }
+        }
+    }
     let empty_jobs: BTreeSet<_> = jobs
         .iter()
         .filter(|file| {
@@ -837,23 +853,28 @@ fn emit_inner(
         manifest: manifest.clone(),
         cjs_proxies: cjs.proxies,
         cjs_namespaces: cjs.namespaces.clone(),
-        async_facades: async_targets
+        async_facades: connections
+            .async_facades
             .into_iter()
-            .map(|(site, file)| {
-                (
-                    site,
-                    cjs.namespaces
-                        .get(graph.file_path(file).unwrap())
-                        .cloned()
-                        .unwrap_or_else(|| connections.namespaces[&file].clone()),
-                )
-            })
             .chain(plan.generated_boundaries.iter().map(|(site, boundary)| {
                 (site.clone(), placement.owners[&boundary.target].path(graph))
             }))
             .collect(),
         async_modules,
     })
+}
+
+pub(super) fn selected_activation(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    site: &AsyncSiteId,
+) -> bool {
+    plan.precise_dynamic_imports
+        && plan.async_activations.get(site).is_some_and(|activation| {
+            graph
+                .dynamic_import_demand(activation.source_edge)
+                .is_some_and(|demand| demand.bindings.is_some())
+        })
 }
 
 pub(super) fn path(graph: &SourceGraph, file: u32) -> PathBuf {

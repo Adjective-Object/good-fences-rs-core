@@ -1,3 +1,4 @@
+use super::partition_conservative as partition;
 use super::*;
 use crate::{retain, tests::input};
 use source_graph::SegmentKey;
@@ -296,19 +297,6 @@ fn precise_same_occurrence_has_independent_export_masks_and_shared_original_effe
     }
     assert!(plan.node_roots[&segment("leaf.ts", 5)].is_empty());
     assert_exact_partition(&plan);
-    let error = crate::link::esm_with_options(
-        &graph,
-        &plan,
-        &policy,
-        &BTreeMap::new(),
-        &crate::build::OutputOptions {
-            synthesize_async_boundaries: true,
-            ..Default::default()
-        },
-    )
-    .unwrap_err();
-    assert!(error.to_string().contains("analysis-only"));
-
     let reordered = SourceGraph::from_owned(sources.iter().rev().map(|(p, s)| input(p, s)));
     let other = partition_precise(
         &reordered,
@@ -466,15 +454,6 @@ fn precise_missing_properties_and_unused_results_are_evaluation_only() {
         assert!(plan.node_roots[&segment("target.ts", 1)].is_empty());
         let compatible = partition(&graph, &[entry(0)], &policy).unwrap();
         assert!(!compatible.node_roots[&segment("target.ts", 1)].is_empty());
-        let error = crate::link::esm(&graph, &plan, &policy, &BTreeMap::new()).unwrap_err();
-        assert!(error.to_string().contains("analysis-only"));
-        assert!(
-            crate::link::deferred_esm(&graph, &plan, &policy, &BTreeMap::new())
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("analysis-only")
-        );
     }
 }
 

@@ -115,7 +115,7 @@ impl CommonJs {
 
             // Equal availability roots alone do not permit evaluating a deferred
             // consumer. Merge only adjacent facade parts with equal demand seams.
-            let requests: Vec<_> = crate::cjs::requests(graph, &plan.retention, file)
+            let requests: Vec<_> = crate::cjs::planned_requests(graph, plan, file)
                 .into_iter()
                 .filter(|(from, _)| direct_request(graph, *from, file))
                 .collect();
@@ -591,6 +591,7 @@ impl CommonJs {
         graph: &SourceGraph,
         modules: &BTreeMap<u32, Module<'_>>,
         namespaces: &BTreeMap<u32, PathBuf>,
+        async_facades: &BTreeMap<AsyncSiteId, PathBuf>,
         factories: &[(u32, &Value)],
     ) -> eyre::Result<Code> {
         // Export initializers before pure cyclic availability imports. Only CJS
@@ -758,8 +759,19 @@ impl CommonJs {
                             self.dynamic(graph, target)?
                         }
                         DependencyKind::DynamicImport => {
-                            Code::request(namespaces[&target].clone(), RequestKind::DynamicImport)
-                                .surrounded("import(", ")")
+                            let site = AsyncSiteId {
+                                module: graph.file_path(file).unwrap().to_owned(),
+                                offset: dependency.id().0,
+                                candidate: None,
+                            };
+                            Code::request(
+                                async_facades
+                                    .get(&site)
+                                    .unwrap_or(&namespaces[&target])
+                                    .clone(),
+                                RequestKind::DynamicImport,
+                            )
+                            .surrounded("import(", ")")
                         }
                         _ => eyre::bail!("static ESM dependency in opaque CommonJS body"),
                     };
@@ -798,6 +810,7 @@ impl CommonJs {
         graph: &SourceGraph,
         modules: &BTreeMap<u32, Module<'_>>,
         namespaces: &BTreeMap<u32, PathBuf>,
+        async_facades: &BTreeMap<AsyncSiteId, PathBuf>,
         entries: &BTreeSet<u32>,
         execution: crate::execution::ExecutionOptions,
         plan: &ChunkPlan,
@@ -820,7 +833,7 @@ impl CommonJs {
                 tracing::info_span!("emit.cjs_availability", factories = factories.len()).entered();
             Ok((
                 artifact_path.clone(),
-                self.emit_factories(graph, modules, namespaces, factories)?,
+                self.emit_factories(graph, modules, namespaces, async_facades, factories)?,
             ))
         })?;
         for output in outputs {

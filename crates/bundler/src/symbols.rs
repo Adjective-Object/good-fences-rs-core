@@ -141,6 +141,11 @@ impl Symbols {
                     continue;
                 }
                 if binding.import() {
+                    if plan.precise_dynamic_imports
+                        && !crate::cjs::binding_used(graph, &plan.retention, file, binding.id())
+                    {
+                        continue;
+                    }
                     let import = facts
                         .imports()
                         .iter()

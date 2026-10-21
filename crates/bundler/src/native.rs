@@ -48,7 +48,15 @@ pub(super) fn emit(
             execution,
         );
     }
-    let placements = single_parent(graph, plan, modules, symbols)?;
+    let placements = if plan
+        .async_activations
+        .keys()
+        .any(|site| chunks::selected_activation(graph, plan, site))
+    {
+        BTreeMap::new()
+    } else {
+        single_parent(graph, plan, modules, symbols)?
+    };
     if !placements.is_empty() {
         return chunks::emit_activated(
             graph,
@@ -848,6 +856,7 @@ struct Values<'s> {
     imports: HashMap<(u32, ast_segmenter::owned::BindingId), String>,
     requests: BTreeMap<u32, Code>,
     dynamic: BTreeMap<u32, Code>,
+    dynamic_sites: HashMap<(u32, ast_segmenter::owned::DependencyId), Code>,
     contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
     native_defaults: BTreeSet<u32>,
     generated: BTreeMap<(u32, u32), Code>,
@@ -862,6 +871,7 @@ impl<'s> Values<'s> {
             imports: HashMap::new(),
             requests: BTreeMap::new(),
             dynamic: BTreeMap::new(),
+            dynamic_sites: HashMap::new(),
             contexts: HashMap::new(),
             native_defaults: BTreeSet::new(),
             generated: BTreeMap::new(),
@@ -1094,6 +1104,16 @@ fn reconstruct(
                 } else {
                     if let Some(dispatch) = values.contexts.get(&(file, dependency.id())) {
                         renderer.context(dependency, dispatch.clone());
+                        continue;
+                    }
+                    if let Some(request) = values.dynamic_sites.get(&(file, dependency.id())) {
+                        renderer.edit(
+                            operation_index as u32,
+                            Edit {
+                                span: dependency.specifier_span(),
+                                replacement: request.clone(),
+                            },
+                        );
                         continue;
                     }
                     let target = target_file(graph, file, dependency)?;

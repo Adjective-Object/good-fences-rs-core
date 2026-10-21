@@ -321,6 +321,9 @@ pub fn reference_reachability(
                 });
             let mut initialize = direct_entry || !demanded.is_empty();
             let mut namespace = direct_entry;
+            if root.binding_roots.contains(&GraphNode::Module(file)) {
+                demanded.extend(crate::cjs::names(graph, retention, file));
+            }
             for (from, request) in crate::cjs::requests(graph, retention, file) {
                 if !reached.contains(&node_id(graph, from)?) {
                     continue;
@@ -419,7 +422,7 @@ pub struct ChunkPlan {
     pub chunks: BTreeMap<ChunkId, Vec<NodeId>>,
     /// Derived reference occurrences, never source dependency IDs or cached facts.
     pub generated_boundaries: BTreeMap<AsyncSiteId, GeneratedBoundary>,
-    /// Opt-in analysis only until native connections support selected projections.
+    /// Select checked per-export demands rather than complete async namespaces.
     pub precise_dynamic_imports: bool,
     /// One original import activation projects onto several independent roots.
     pub async_activations: BTreeMap<AsyncSiteId, AsyncActivation>,
@@ -456,8 +459,17 @@ impl ChunkPlan {
 }
 
 /// Activate only reachable async occurrences, recomputing P4 retention as new
-/// namespace demands appear. No parent root crosses an asynchronous edge.
+/// checked export demands appear. No parent root crosses an asynchronous edge.
 pub fn partition(
+    graph: &SourceGraph,
+    entries: &[RootSeed],
+    policy: &EffectPolicy,
+) -> eyre::Result<ChunkPlan> {
+    partition_precise(graph, entries, policy)
+}
+
+/// Conservative namespace reference for callers comparing demand policies.
+pub fn partition_conservative(
     graph: &SourceGraph,
     entries: &[RootSeed],
     policy: &EffectPolicy,
@@ -465,8 +477,7 @@ pub fn partition(
     partition_impl(graph, entries, policy, false)
 }
 
-/// Precise planning/diagnostics only. Native emission still requires `partition`:
-/// it currently rewrites import specifiers to complete namespace surfaces.
+/// Plan independent requested-export roots with shared occurrence activation.
 pub fn partition_precise(
     graph: &SourceGraph,
     entries: &[RootSeed],

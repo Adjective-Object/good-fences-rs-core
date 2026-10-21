@@ -1,5 +1,5 @@
 use super::*;
-use crate::chunks::{partition, RootSeed};
+use crate::chunks::{partition_conservative as partition, RootSeed};
 use ast_segmenter::{parse_module, ModuleFormat};
 use source_graph::OwnedSourceFileInput;
 use std::path::{Component, Path};
@@ -8,6 +8,9 @@ use test_tmpdir::TmpDir;
 
 #[path = "parallel_tests.rs"]
 mod parallel;
+
+#[path = "precise_dynamic_tests.rs"]
+mod precise_dynamic;
 
 fn normalize(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();

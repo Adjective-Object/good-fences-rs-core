@@ -1,5 +1,5 @@
 use super::*;
-use crate::{chunks::partition, tests::input};
+use crate::{chunks::partition_conservative as partition, tests::input};
 use source_graph::{DependencyTarget, GraphNode, OwnedSourceFileInput};
 use std::path::Path;
 

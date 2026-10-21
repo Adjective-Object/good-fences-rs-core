@@ -174,6 +174,8 @@ pub(super) struct Connections {
     pub evaluation: BTreeMap<Owner, Code>,
     pub namespaces: BTreeMap<u32, PathBuf>,
     pub projections: BTreeMap<PathBuf, Code>,
+    pub async_facades: BTreeMap<AsyncSiteId, PathBuf>,
+    pub native_exports: BTreeMap<SegmentKey, Code>,
     pub native_requests: HashMap<(u32, ast_segmenter::owned::DependencyId), NativeRequest>,
     addresses: HashMap<ExportIdentity, String>,
     demanded: BTreeMap<Owner, Vec<ExportIdentity>>,
@@ -212,6 +214,8 @@ impl Connections {
                 .map(|(&file, &seam)| (file, path(graph, seam)))
                 .collect(),
             projections: BTreeMap::new(),
+            async_facades: BTreeMap::new(),
+            native_exports: BTreeMap::new(),
             native_requests: HashMap::new(),
             addresses: HashMap::new(),
             demanded: BTreeMap::new(),
@@ -268,10 +272,12 @@ impl Connections {
                 }
             }
         }
+        result.plan_async_projections(graph, plan, symbols, prepared, placement, cjs)?;
         // Unknown native export-star/name validation is not a canonical lexical
         // link. Placement keeps these jobs intact; cached native recipes retain
         // their typed external requests and original linking clauses.
         if modules.keys().any(|&file| has_externals(graph, file)) {
+            result.plan_pruned_exports(graph, modules, symbols, prepared, placement, cjs)?;
             result.plan_native_requests(graph, modules, symbols, placement, cjs)?;
             return Ok(result);
         }
@@ -395,6 +401,19 @@ impl Connections {
             output.default_export = symbols.exports[&file].contains_key("default");
             result.namespaces.insert(file, route.clone());
             result.projections.insert(route, output);
+        }
+        for (site, activation) in &plan.async_activations {
+            if !selected_activation(graph, plan, site) {
+                if let GraphNode::Module(target) = graph.edges()[activation.source_edge].to {
+                    result.async_facades.insert(
+                        site.clone(),
+                        cjs.namespaces
+                            .get(graph.file_path(target).unwrap())
+                            .unwrap_or(&result.namespaces[&target])
+                            .clone(),
+                    );
+                }
+            }
         }
         for (&owner, bindings) in &result.bindings {
             let mut output = Code::default();
@@ -599,9 +618,52 @@ impl Connections {
                             },
                             whole: true,
                         }
+                    } else if dependency.kind() == DependencyKind::Import
+                        && module.parsed.facts().imports().iter().any(|import| {
+                            import.dependency() == dependency.id()
+                                && !symbols.imports.contains_key(&(file, import.binding()))
+                        })
+                    {
+                        let facts = module.parsed.facts();
+                        let mut code = Code::evaluation(self.namespaces[&target].clone());
+                        for import in facts.imports().iter().filter(|import| {
+                            import.dependency() == dependency.id()
+                                && symbols.imports.contains_key(&(file, import.binding()))
+                        }) {
+                            let binding = facts
+                                .bindings()
+                                .iter()
+                                .find(|binding| binding.id() == import.binding())
+                                .ok_or_eyre("missing native import binding")?;
+                            let clause = match import.imported().to_owned() {
+                                ImportedName::Namespace => format!("* as {}", binding.name()),
+                                ImportedName::Name(name) => {
+                                    format!("{{{} as {}}}", quote(&name), binding.name())
+                                }
+                            };
+                            code.push(
+                                Code::request(self.namespaces[&target].clone(), kind)
+                                    .surrounded(format!("import {clause} from "), ";\n"),
+                            );
+                        }
+                        NativeRequest { code, whole: true }
                     } else {
                         NativeRequest {
-                            code: Code::request(self.namespaces[&target].clone(), kind),
+                            code: Code::request(
+                                if dependency.kind() == DependencyKind::DynamicImport {
+                                    self.async_facades
+                                        .get(&AsyncSiteId {
+                                            module: graph.file_path(file).unwrap().to_owned(),
+                                            offset: dependency.id().0,
+                                            candidate: None,
+                                        })
+                                        .unwrap_or(&self.namespaces[&target])
+                                        .clone()
+                                } else {
+                                    self.namespaces[&target].clone()
+                                },
+                                kind,
+                            ),
                             whole: false,
                         }
                     }
@@ -609,6 +671,199 @@ impl Connections {
                 self.native_requests
                     .insert((file, dependency.id()), request);
             }
+        }
+        Ok(())
+    }
+
+    fn plan_async_projections(
+        &mut self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+        symbols: &Symbols,
+        prepared: &PreparedValues<'_>,
+        placement: &Placement,
+        cjs: &commonjs::CommonJs,
+    ) -> eyre::Result<()> {
+        let defaults = Values::new(prepared);
+        for (site, activation) in &plan.async_activations {
+            let GraphNode::Module(target) = graph.edges()[activation.source_edge].to else {
+                continue;
+            };
+            if !selected_activation(graph, plan, site) {
+                self.async_facades.insert(
+                    site.clone(),
+                    cjs.namespaces
+                        .get(graph.file_path(target).unwrap())
+                        .unwrap_or(&self.namespaces[&target])
+                        .clone(),
+                );
+                continue;
+            }
+            let route = PathBuf::from(format!(
+                "native/async-{}-{}.mjs",
+                digest(site.module.to_str().unwrap()),
+                site.offset
+            ));
+            let mut output = Code::evaluation(self.namespaces[&target].clone());
+            for root in &activation.roots {
+                let RootId::AsyncExport { name, .. } = root else {
+                    continue;
+                };
+                let linked = graph.resolve_export(target, name, source_graph::Namespace::Value)?;
+                if let Some(key) = segments::declaration(graph, &linked.identity)? {
+                    let owner = placement.owners[&key];
+                    self.demand(graph, symbols, &defaults, owner, &linked.identity)?;
+                    output.push(
+                        Code::request(owner.path(graph), RequestKind::ReExport).surrounded(
+                            format!(
+                                "export {{{} as {}}} from ",
+                                quote(self.address(&linked.identity)?),
+                                quote(name)
+                            ),
+                            ";\n",
+                        ),
+                    );
+                } else if let ExportIdentity::Namespace(file) = linked.identity {
+                    output.push(
+                        Code::request(self.namespaces[&file].clone(), RequestKind::ReExport)
+                            .surrounded(format!("export * as {} from ", quote(name)), ";\n"),
+                    );
+                } else {
+                    eyre::bail!("non-native selected dynamic export");
+                }
+                output.default_export |= name == "default";
+            }
+            self.async_facades.insert(site.clone(), route.clone());
+            self.projections.insert(route, output);
+        }
+        Ok(())
+    }
+
+    fn plan_pruned_exports(
+        &mut self,
+        graph: &SourceGraph,
+        modules: &BTreeMap<u32, Module<'_>>,
+        symbols: &Symbols,
+        prepared: &PreparedValues<'_>,
+        placement: &Placement,
+        cjs: &commonjs::CommonJs,
+    ) -> eyre::Result<()> {
+        let defaults = Values::new(prepared);
+        for &key in placement.owners.keys() {
+            let file = key.file_id;
+            let module = &modules[&file];
+            let facts = module.parsed.facts();
+            let span = module
+                .parsed
+                .segments()
+                .get(key.segment_idx as usize)
+                .unwrap()
+                .span;
+            if !facts
+                .emission()
+                .segments()
+                .get(key.segment_idx as usize)
+                .unwrap()
+                .connector_only()
+            {
+                continue;
+            }
+            let exports = facts
+                .exports()
+                .iter()
+                .filter(|export| !export.type_only() && contains(span, export.span()))
+                .collect::<Vec<_>>();
+            if !exports.iter().any(|export| {
+                if export
+                    .name()
+                    .is_some_and(|name| !symbols.exports[&file].contains_key(name))
+                {
+                    return true;
+                }
+                let ExportValue::Binding(binding) = export.value() else {
+                    return false;
+                };
+                facts
+                    .imports()
+                    .iter()
+                    .any(|import| import.binding() == binding)
+                    && !symbols.imports.contains_key(&(file, binding))
+            }) {
+                continue;
+            }
+            let mut output = Code::default();
+            for export in exports {
+                if export
+                    .name()
+                    .is_some_and(|name| !symbols.exports[&file].contains_key(name))
+                {
+                    continue;
+                }
+                let name = export.name().ok_or_eyre("unnamed pruned local export")?;
+                let linked = graph.resolve_export(file, name, source_graph::Namespace::Value)?;
+                if let Some(declaration) = segments::declaration(graph, &linked.identity)? {
+                    let owner = placement.owners[&declaration];
+                    if owner == placement.owners[&key] {
+                        let local = match linked.identity {
+                            ExportIdentity::Binding(source, binding) => modules[&source]
+                                .parsed
+                                .facts()
+                                .bindings()
+                                .iter()
+                                .find(|candidate| candidate.id() == binding)
+                                .ok_or_eyre("missing original export binding")?
+                                .name()
+                                .to_owned(),
+                            _ => defaults
+                                .name(&linked.identity)
+                                .ok_or_eyre("missing native export value")?
+                                .to_owned(),
+                        };
+                        output.push_str(&format!("export {{{} as {}}};\n", local, quote(name),));
+                    } else {
+                        self.demand(graph, symbols, &defaults, owner, &linked.identity)?;
+                        output.push(
+                            Code::request(owner.path(graph), RequestKind::ReExport).surrounded(
+                                format!(
+                                    "export {{{} as {}}} from ",
+                                    quote(self.address(&linked.identity)?),
+                                    quote(name)
+                                ),
+                                ";\n",
+                            ),
+                        );
+                    }
+                } else {
+                    output.push(match &linked.identity {
+                        ExportIdentity::Namespace(target) if cjs.contains(*target) => {
+                            cjs.reexport(graph, *target, &ImportedName::Namespace, name)?
+                        }
+                        ExportIdentity::Namespace(target) => {
+                            Code::request(self.namespaces[target].clone(), RequestKind::ReExport)
+                                .surrounded(format!("export * as {} from ", quote(name)), ";\n")
+                        }
+                        ExportIdentity::CommonJs(target, imported) => cjs.reexport(
+                            graph,
+                            *target,
+                            &ImportedName::Name(imported.clone()),
+                            name,
+                        )?,
+                        ExportIdentity::External(specifier, Some(imported)) => {
+                            Code::external(specifier.clone(), RequestKind::ReExport).surrounded(
+                                format!("export {{{} as {}}} from ", quote(imported), quote(name)),
+                                ";\n",
+                            )
+                        }
+                        ExportIdentity::External(specifier, None) => {
+                            Code::external(specifier.clone(), RequestKind::ReExport)
+                                .surrounded(format!("export * as {} from ", quote(name)), ";\n")
+                        }
+                        _ => eyre::bail!("unsupported pruned native export"),
+                    });
+                }
+                output.default_export |= name == "default";
+            }
+            self.native_exports.insert(key, output);
         }
         Ok(())
     }

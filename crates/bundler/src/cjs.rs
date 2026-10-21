@@ -12,6 +12,23 @@ pub(crate) fn requests(
     retention: &RetentionPlan,
     file: u32,
 ) -> Vec<(GraphNode, ImportedName)> {
+    requests_with_plan(graph, retention, file, None)
+}
+
+pub(crate) fn planned_requests(
+    graph: &SourceGraph,
+    plan: &crate::chunks::ChunkPlan,
+    file: u32,
+) -> Vec<(GraphNode, ImportedName)> {
+    requests_with_plan(graph, &plan.retention, file, Some(plan))
+}
+
+fn requests_with_plan(
+    graph: &SourceGraph,
+    retention: &RetentionPlan,
+    file: u32,
+    plan: Option<&crate::chunks::ChunkPlan>,
+) -> Vec<(GraphNode, ImportedName)> {
     let native_externals = graph
         .module_ids()
         .any(|file| crate::link::has_externals(graph, file));
@@ -25,6 +42,11 @@ pub(crate) fn requests(
                 )
         })
         .filter_map(|edge| {
+            let from = match edge.from {
+                GraphNode::Module(file) => file,
+                GraphNode::Segment(key) => key.file_id,
+                GraphNode::Unlinked { .. } => return None,
+            };
             let demand_from = if retained(retention, edge.from) {
                 edge.from
             } else {
@@ -35,13 +57,13 @@ pub(crate) fn requests(
                         retained
                             .source_edge
                             .is_some_and(|index| std::ptr::eq(&graph.edges()[index], edge))
+                    })
+                    .map(|retained| retained.from)
+                    .or_else(|| {
+                        // Namespace routes can bypass an import connector. Only
+                        // the planned facade demand certifies its binding use.
+                        plan.filter(|_| edge.binding.is_some()).map(|_| edge.from)
                     })?
-                    .from
-            };
-            let from = match edge.from {
-                GraphNode::Module(file) => file,
-                GraphNode::Segment(key) => key.file_id,
-                GraphNode::Unlinked { .. } => return None,
             };
             if !native_externals
                 && edge
@@ -74,6 +96,21 @@ pub(crate) fn requests(
             Some(
                 imported
                     .into_iter()
+                    .filter(|imported| {
+                        plan.is_none_or(|plan| {
+                            let module = graph.file_path(file).unwrap().to_owned();
+                            let node = match imported {
+                                ImportedName::Namespace => {
+                                    crate::chunks::NodeId::CommonJsNamespace(module)
+                                }
+                                ImportedName::Name(name) => crate::chunks::NodeId::CommonJsProxy {
+                                    module,
+                                    name: (name != "default").then(|| name.clone()),
+                                },
+                            };
+                            plan.chunk_for(&node).is_some()
+                        })
+                    })
                     .map(|imported| (demand_from, imported))
                     .collect::<Vec<_>>(),
             )
@@ -126,6 +163,23 @@ pub(crate) fn names(graph: &SourceGraph, retention: &RetentionPlan, file: u32) -
                 ImportedName::Name(name) => Some(name),
                 ImportedName::Namespace => None,
             }),
+    );
+    names
+}
+
+pub(crate) fn planned_names(
+    graph: &SourceGraph,
+    plan: &crate::chunks::ChunkPlan,
+    file: u32,
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::from(["default".to_owned()]);
+    names.extend(
+        planned_requests(graph, plan, file).into_iter().filter_map(
+            |(_, imported)| match imported {
+                ImportedName::Name(name) => Some(name),
+                ImportedName::Namespace => None,
+            },
+        ),
     );
     names
 }

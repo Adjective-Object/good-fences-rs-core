@@ -85,6 +85,12 @@ pub(super) fn cluster(
         seams.insert(file, seams[&target]);
     }
     let placements = activations.map(|a| a.owners.clone()).unwrap_or_default();
+    let selected_roots: BTreeSet<_> = plan
+        .async_activations
+        .iter()
+        .filter(|(site, _)| selected_activation(graph, plan, site))
+        .flat_map(|(_, activation)| activation.roots.iter().cloned())
+        .collect();
     let mut islands = Vec::new();
     for (&owner, files) in groups {
         // Existing parent moves keep their certified owner, including its static closure.
@@ -122,7 +128,12 @@ pub(super) fn cluster(
                     .sum::<usize>()
             })
             .sum();
-        if mask.is_empty() || bytes >= target || mask.iter().any(|r| matches!(r, RootId::Entry(_)))
+        if mask.is_empty()
+            || bytes >= target
+            || !mask.is_disjoint(&selected_roots)
+            || mask
+                .iter()
+                .any(|r| matches!(r, RootId::Entry(_) | RootId::AsyncExport { .. }))
         {
             continue;
         }
@@ -280,6 +291,15 @@ fn certify(
     let Some(checked) = Activations::checked(graph, plan, modules, symbols, &placements)? else {
         return Ok(None);
     };
+    if plan.async_activations.iter().any(|(site, activation)| {
+        selected_activation(graph, plan, site)
+            && matches!(
+                graph.edges()[activation.source_edge].to,
+                GraphNode::Module(target) if checked.initializers.contains_key(&target)
+            )
+    }) {
+        return Ok(None);
+    }
     for (&file, module) in modules {
         for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
             !d.type_only()
