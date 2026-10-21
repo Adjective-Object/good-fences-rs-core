@@ -4,22 +4,40 @@ use eyre::{ensure, eyre, Result};
 use oxc_span::Span;
 use serde::{Deserialize, Serialize};
 
+use crate::views::{
+    BindingView, DefinitionMatchView, ExternalReferenceView, ParsedFileSource, ParsedFileView,
+};
 use crate::*;
 
 mod records;
 pub use records::*;
 
 impl ParsedFile {
+    pub fn view(&self) -> ParsedFileView<'_> {
+        self.into()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.view().validate()
+    }
+}
+
+impl ParsedFileView<'_> {
     /// Check deserialized IDs and references before they enter an interpreter.
     pub fn validate(&self) -> Result<()> {
-        crate::parser::validate_facts(&self.declarations())?;
+        if let Self::Wire(root) = self {
+            cache_flatbuffers::validate_ecco(*root)?;
+        }
+        crate::parser::validate_facts_view(self.declarations())?;
         ensure!(self.version() == 1, "unsupported Ecco parsed-file version");
         ensure!(self.values().len() >= 2, "missing Ecco constant values");
         ensure!(
-            self.values()[0].hazards() == Hazards::NONE
-                && self.values()[1].hazards() == Hazards::UNKNOWN
-                && self.values()[..2]
+            self.values().get(0).unwrap().hazards() == Hazards::NONE
+                && self.values().get(1).unwrap().hazards() == Hazards::UNKNOWN
+                && self
+                    .values()
                     .iter()
+                    .take(2)
                     .all(|v| v.alias().is_none() && v.definition().is_none()),
             "invalid Ecco constant values"
         );
@@ -77,9 +95,9 @@ impl ParsedFile {
                 root.function().returns().len() == 1,
                 "invalid Ecco root result"
             );
-            self.validate_function(&root.function())?;
+            self.validate_function(root.function())?;
         }
-        self.validate_function(&self.setup())?;
+        self.validate_function(self.setup())?;
         for function in self.functions() {
             self.validate_function(function)?;
         }
@@ -110,14 +128,14 @@ pub enum Resolution<K> {
 /// The caller owns import/export resolution. Errors (including ambiguous or
 /// missing exports) must be returned, not converted to `Unknown`.
 pub trait Resolver<K> {
-    fn resolve(&self, from: &K, reference: &ExternalReference) -> Result<Resolution<K>>;
+    fn resolve(&self, from: &K, reference: ExternalReferenceView<'_>) -> Result<Resolution<K>>;
 }
 
 impl<K, F> Resolver<K> for F
 where
-    F: Fn(&K, &ExternalReference) -> Result<Resolution<K>>,
+    F: Fn(&K, ExternalReferenceView<'_>) -> Result<Resolution<K>>,
 {
-    fn resolve(&self, from: &K, reference: &ExternalReference) -> Result<Resolution<K>> {
+    fn resolve(&self, from: &K, reference: ExternalReferenceView<'_>) -> Result<Resolution<K>> {
         self(from, reference)
     }
 }
@@ -140,7 +158,7 @@ pub struct AnalysisResult<K> {
 /// Register every file before solving, including files participating in cycles.
 #[derive(Debug, Clone)]
 pub struct Analysis<K> {
-    files: Vec<(K, Arc<ParsedFile>)>,
+    files: Vec<(K, Arc<dyn ParsedFileSource>)>,
 }
 
 impl<K> Default for Analysis<K> {
@@ -154,12 +172,12 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
         Self::default()
     }
 
-    pub fn add_file(&mut self, key: K, parsed: Arc<ParsedFile>) -> Result<()> {
+    pub fn add_file(&mut self, key: K, parsed: Arc<dyn ParsedFileSource>) -> Result<()> {
         ensure!(
             !self.files.iter().any(|(existing, _)| existing == &key),
             "duplicate Ecco file key"
         );
-        parsed.validate()?;
+        parsed.view().validate()?;
         self.files.push((key, parsed));
         Ok(())
     }
@@ -174,6 +192,7 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
         let mut namespaces = HashMap::new();
         let mut declaration_namespaces = HashMap::new();
         for (key, parsed) in &self.files {
+            let parsed = parsed.view();
             let environment = context.install_values(parsed);
             for symbol in parsed.symbols() {
                 symbols.insert(
@@ -193,6 +212,8 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
 
         let mut installed = Vec::new();
         for (key, parsed) in &self.files {
+            let owner = parsed;
+            let parsed = owner.view();
             let environment = &values[key];
             let mut externals = Vec::new();
             for reference in parsed.external_references() {
@@ -211,12 +232,12 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
                             .declarations()
                             .definitions()
                             .iter()
-                            .position(|definition| definition.binding() == &binding)
+                            .position(|definition| definition.binding() == (&binding).into())
                         {
                             context.declaration_value(parsed, environment, index)
                         } else {
                             ensure!(
-                                parsed.is_declared_namespace(&binding),
+                                parsed.is_declared_namespace((&binding).into()),
                                 "resolver returned a missing Ecco declaration"
                             );
                             *declaration_namespaces
@@ -228,7 +249,8 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
                 };
                 externals.push(value);
             }
-            let (setup, roots) = context.install_file(parsed, environment.clone(), externals);
+            let (setup, roots) =
+                context.install_file(owner.clone(), environment.clone(), externals);
             for (index, root) in roots.iter().enumerate() {
                 context.root_output(*root, root_values[&(key.clone(), RootId(index))]);
             }
@@ -256,7 +278,11 @@ impl<K: Clone + Eq + Hash> Analysis<K> {
                 key.clone(),
                 FileAnalysis {
                     roots,
-                    matches: parsed.definition_matches().to_vec(),
+                    matches: parsed
+                        .definition_matches()
+                        .iter()
+                        .map(DefinitionMatchView::to_owned)
+                        .collect(),
                     symbols: parsed
                         .symbols()
                         .iter()
@@ -289,15 +315,15 @@ pub(crate) fn analyze_parsed(parsed: ParsedFile) -> Result<SourceAnalysis> {
     let mut analysis = Analysis::new();
     let parsed = Arc::new(parsed);
     analysis.add_file((), parsed.clone())?;
-    let result = analysis.solve(&|_: &(), reference: &ExternalReference| {
+    let result = analysis.solve(&|_: &(), reference: ExternalReferenceView<'_>| {
         if parsed
             .declarations()
             .definitions()
             .iter()
-            .any(|d| d.binding() == reference.binding())
-            || parsed.is_declared_namespace(reference.binding())
+            .any(|d| BindingView::from(d.binding()) == reference.binding())
+            || parsed.view().is_declared_namespace(reference.binding())
         {
-            Ok(Resolution::Declaration(reference.binding().clone()))
+            Ok(Resolution::Declaration(reference.binding().to_owned()))
         } else {
             Ok(Resolution::Unknown)
         }
@@ -310,23 +336,27 @@ pub(crate) fn analyze_parsed(parsed: ParsedFile) -> Result<SourceAnalysis> {
     })
 }
 
-impl ParsedFile {
-    fn is_declared_namespace(&self, binding: &Binding) -> bool {
+impl ParsedFileView<'_> {
+    fn is_declared_namespace(&self, binding: BindingView<'_>) -> bool {
         self.declarations().definitions().iter().any(|definition| {
             match (binding, definition.binding()) {
-                (Binding::Global(prefix), Binding::Global(path)) => {
-                    prefix.len() < path.len() && path.starts_with(prefix)
+                (BindingView::Global(prefix), BindingView::Global(path)) => {
+                    prefix.len() < path.len() && path.iter().take(prefix.len()).eq(prefix)
                 }
                 (
-                    Binding::Module {
+                    BindingView::Module {
                         module,
                         path: prefix,
                     },
-                    Binding::Module {
+                    BindingView::Module {
                         module: other,
                         path,
                     },
-                ) => *module == *other && prefix.len() < path.len() && path.starts_with(prefix),
+                ) => {
+                    module == other
+                        && prefix.len() < path.len()
+                        && path.iter().take(prefix.len()).eq(prefix)
+                }
                 _ => false,
             }
         })

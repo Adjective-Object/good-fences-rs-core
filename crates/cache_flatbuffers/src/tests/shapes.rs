@@ -325,7 +325,7 @@ fn complete_ecco(file: &mut w::ParsedFileT) {
         })),
         w::InstructionValueT::CallInstruction(Box::new(w::CallInstructionT {
             arguments: vec![0, 1],
-            construct: true,
+            pure_: true,
             ..Default::default()
         })),
         w::InstructionValueT::ClosureInstruction(Box::default()),

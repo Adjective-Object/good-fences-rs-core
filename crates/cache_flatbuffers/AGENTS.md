@@ -8,6 +8,8 @@
 - `WireRecord` owns immutable shared bytes, not decoded DTOs. Verify both outer
   and nested roots with bounded runtime verification before any generated reads.
   Reject unknown discriminants independently; FlatBuffers permits them by default.
+- `WireEcco` provides the same immutable verified ownership for standalone
+  precursors; Ecco validates semantic links through borrowed views before solve.
 - The nested module is itself a typed FlatBuffer, never CBOR or an opaque DTO.
   Its exact SHA-256 is the extraction seal; the outer checksum covers framing and
   metadata. Generated object APIs are construction-only, never warm-load adapters.
