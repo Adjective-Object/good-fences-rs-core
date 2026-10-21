@@ -3729,6 +3729,95 @@ impl DeferredFormT {
   }
 }
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MIN_LAZY_WRAPPER_KIND: u8 = 0;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MAX_LAZY_WRAPPER_KIND: u8 = 2;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_LAZY_WRAPPER_KIND: [LazyWrapperKind; 3] = [
+  LazyWrapperKind::Unknown,
+  LazyWrapperKind::LazyImport,
+  LazyWrapperKind::LazyAction,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct LazyWrapperKind(pub u8);
+#[allow(non_upper_case_globals)]
+impl LazyWrapperKind {
+  pub const Unknown: Self = Self(0);
+  pub const LazyImport: Self = Self(1);
+  pub const LazyAction: Self = Self(2);
+
+  pub const ENUM_MIN: u8 = 0;
+  pub const ENUM_MAX: u8 = 2;
+  pub const ENUM_VALUES: &'static [Self] = &[
+    Self::Unknown,
+    Self::LazyImport,
+    Self::LazyAction,
+  ];
+  /// Returns the variant's name or "" if unknown.
+  pub fn variant_name(self) -> Option<&'static str> {
+    match self {
+      Self::Unknown => Some("Unknown"),
+      Self::LazyImport => Some("LazyImport"),
+      Self::LazyAction => Some("LazyAction"),
+      _ => None,
+    }
+  }
+}
+impl core::fmt::Debug for LazyWrapperKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    if let Some(name) = self.variant_name() {
+      f.write_str(name)
+    } else {
+      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    }
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for LazyWrapperKind {
+  type Inner = Self;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+    Self(b)
+  }
+}
+
+impl flatbuffers::Push for LazyWrapperKind {
+    type Output = LazyWrapperKind;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for LazyWrapperKind {
+  type Scalar = u8;
+  #[inline]
+  fn to_little_endian(self) -> u8 {
+    self.0.to_le()
+  }
+  #[inline]
+  #[allow(clippy::wrong_self_convention)]
+  fn from_little_endian(v: u8) -> Self {
+    let b = u8::from_le(v);
+    Self(b)
+  }
+}
+
+impl<'a> flatbuffers::Verifiable for LazyWrapperKind {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    u8::run_verifier(v, pos)
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for LazyWrapperKind {}
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_MODULE_BODY: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MAX_MODULE_BODY: u8 = 2;
@@ -22823,6 +22912,672 @@ impl DynamicNamespaceT {
     })
   }
 }
+pub enum LazyModuleCandidateOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct LazyModuleCandidate<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for LazyModuleCandidate<'a> {
+  type Inner = LazyModuleCandidate<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> LazyModuleCandidate<'a> {
+  pub const VT_SEGMENT: flatbuffers::VOffsetT = 4;
+  pub const VT_BINDING: flatbuffers::VOffsetT = 6;
+  pub const VT_CONSTRUCTOR: flatbuffers::VOffsetT = 8;
+  pub const VT_DEPENDENCY: flatbuffers::VOffsetT = 10;
+  pub const VT_IMPORT_SPAN: flatbuffers::VOffsetT = 12;
+  pub const VT_DECLARATION: flatbuffers::VOffsetT = 14;
+  pub const VT_CONSTRUCTION: flatbuffers::VOffsetT = 16;
+  pub const VT_ARGUMENTS: flatbuffers::VOffsetT = 18;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    LazyModuleCandidate { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args LazyModuleCandidateArgs<'args>
+  ) -> flatbuffers::WIPOffset<LazyModuleCandidate<'bldr>> {
+    let mut builder = LazyModuleCandidateBuilder::new(_fbb);
+    if let Some(x) = args.arguments { builder.add_arguments(x); }
+    if let Some(x) = args.construction { builder.add_construction(x); }
+    if let Some(x) = args.declaration { builder.add_declaration(x); }
+    if let Some(x) = args.import_span { builder.add_import_span(x); }
+    builder.add_dependency(args.dependency);
+    builder.add_constructor(args.constructor);
+    builder.add_binding(args.binding);
+    builder.add_segment(args.segment);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> LazyModuleCandidateT {
+    let segment = self.segment();
+    let binding = self.binding();
+    let constructor = self.constructor();
+    let dependency = self.dependency();
+    let import_span = {
+      let x = self.import_span();
+      x.unpack()
+    };
+    let declaration = {
+      let x = self.declaration();
+      x.unpack()
+    };
+    let construction = {
+      let x = self.construction();
+      x.unpack()
+    };
+    let arguments = {
+      let x = self.arguments();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    LazyModuleCandidateT {
+      segment,
+      binding,
+      constructor,
+      dependency,
+      import_span,
+      declaration,
+      construction,
+      arguments,
+    }
+  }
+
+  #[inline]
+  pub fn segment(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazyModuleCandidate::VT_SEGMENT, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn binding(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazyModuleCandidate::VT_BINDING, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn constructor(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazyModuleCandidate::VT_CONSTRUCTOR, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn dependency(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazyModuleCandidate::VT_DEPENDENCY, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn import_span(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazyModuleCandidate::VT_IMPORT_SPAN, None).unwrap()}
+  }
+  #[inline]
+  pub fn declaration(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazyModuleCandidate::VT_DECLARATION, None).unwrap()}
+  }
+  #[inline]
+  pub fn construction(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazyModuleCandidate::VT_CONSTRUCTION, None).unwrap()}
+  }
+  #[inline]
+  pub fn arguments(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot>>>>(LazyModuleCandidate::VT_ARGUMENTS, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for LazyModuleCandidate<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("segment", Self::VT_SEGMENT, false)?
+     .visit_field::<u32>("binding", Self::VT_BINDING, false)?
+     .visit_field::<u32>("constructor", Self::VT_CONSTRUCTOR, false)?
+     .visit_field::<u32>("dependency", Self::VT_DEPENDENCY, false)?
+     .visit_field::<Span>("import_span", Self::VT_IMPORT_SPAN, true)?
+     .visit_field::<Span>("declaration", Self::VT_DECLARATION, true)?
+     .visit_field::<Span>("construction", Self::VT_CONSTRUCTION, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SourceSlot>>>>("arguments", Self::VT_ARGUMENTS, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct LazyModuleCandidateArgs<'a> {
+    pub segment: u32,
+    pub binding: u32,
+    pub constructor: u32,
+    pub dependency: u32,
+    pub import_span: Option<&'a Span>,
+    pub declaration: Option<&'a Span>,
+    pub construction: Option<&'a Span>,
+    pub arguments: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot<'a>>>>>,
+}
+impl<'a> Default for LazyModuleCandidateArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    LazyModuleCandidateArgs {
+      segment: 0,
+      binding: 0,
+      constructor: 0,
+      dependency: 0,
+      import_span: None, // required field
+      declaration: None, // required field
+      construction: None, // required field
+      arguments: None, // required field
+    }
+  }
+}
+
+pub struct LazyModuleCandidateBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> LazyModuleCandidateBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_segment(&mut self, segment: u32) {
+    self.fbb_.push_slot::<u32>(LazyModuleCandidate::VT_SEGMENT, segment, 0);
+  }
+  #[inline]
+  pub fn add_binding(&mut self, binding: u32) {
+    self.fbb_.push_slot::<u32>(LazyModuleCandidate::VT_BINDING, binding, 0);
+  }
+  #[inline]
+  pub fn add_constructor(&mut self, constructor: u32) {
+    self.fbb_.push_slot::<u32>(LazyModuleCandidate::VT_CONSTRUCTOR, constructor, 0);
+  }
+  #[inline]
+  pub fn add_dependency(&mut self, dependency: u32) {
+    self.fbb_.push_slot::<u32>(LazyModuleCandidate::VT_DEPENDENCY, dependency, 0);
+  }
+  #[inline]
+  pub fn add_import_span(&mut self, import_span: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazyModuleCandidate::VT_IMPORT_SPAN, import_span);
+  }
+  #[inline]
+  pub fn add_declaration(&mut self, declaration: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazyModuleCandidate::VT_DECLARATION, declaration);
+  }
+  #[inline]
+  pub fn add_construction(&mut self, construction: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazyModuleCandidate::VT_CONSTRUCTION, construction);
+  }
+  #[inline]
+  pub fn add_arguments(&mut self, arguments: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<SourceSlot<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LazyModuleCandidate::VT_ARGUMENTS, arguments);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> LazyModuleCandidateBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    LazyModuleCandidateBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<LazyModuleCandidate<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, LazyModuleCandidate::VT_IMPORT_SPAN,"import_span");
+    self.fbb_.required(o, LazyModuleCandidate::VT_DECLARATION,"declaration");
+    self.fbb_.required(o, LazyModuleCandidate::VT_CONSTRUCTION,"construction");
+    self.fbb_.required(o, LazyModuleCandidate::VT_ARGUMENTS,"arguments");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for LazyModuleCandidate<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("LazyModuleCandidate");
+      ds.field("segment", &self.segment());
+      ds.field("binding", &self.binding());
+      ds.field("constructor", &self.constructor());
+      ds.field("dependency", &self.dependency());
+      ds.field("import_span", &self.import_span());
+      ds.field("declaration", &self.declaration());
+      ds.field("construction", &self.construction());
+      ds.field("arguments", &self.arguments());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct LazyModuleCandidateT {
+  pub segment: u32,
+  pub binding: u32,
+  pub constructor: u32,
+  pub dependency: u32,
+  pub import_span: SpanT,
+  pub declaration: SpanT,
+  pub construction: SpanT,
+  pub arguments: Vec<SourceSlotT>,
+}
+impl Default for LazyModuleCandidateT {
+  fn default() -> Self {
+    Self {
+      segment: 0,
+      binding: 0,
+      constructor: 0,
+      dependency: 0,
+      import_span: Default::default(),
+      declaration: Default::default(),
+      construction: Default::default(),
+      arguments: Default::default(),
+    }
+  }
+}
+impl LazyModuleCandidateT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<LazyModuleCandidate<'b>> {
+    let segment = self.segment;
+    let binding = self.binding;
+    let constructor = self.constructor;
+    let dependency = self.dependency;
+    let import_span_tmp = Some(self.import_span.pack());
+    let import_span = import_span_tmp.as_ref();
+    let declaration_tmp = Some(self.declaration.pack());
+    let declaration = declaration_tmp.as_ref();
+    let construction_tmp = Some(self.construction.pack());
+    let construction = construction_tmp.as_ref();
+    let arguments = Some({
+      let x = &self.arguments;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    LazyModuleCandidate::create(_fbb, &LazyModuleCandidateArgs{
+      segment,
+      binding,
+      constructor,
+      dependency,
+      import_span,
+      declaration,
+      construction,
+      arguments,
+    })
+  }
+}
+pub enum LazySelectorCandidateOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct LazySelectorCandidate<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for LazySelectorCandidate<'a> {
+  type Inner = LazySelectorCandidate<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> LazySelectorCandidate<'a> {
+  pub const VT_SEGMENT: flatbuffers::VOffsetT = 4;
+  pub const VT_KIND: flatbuffers::VOffsetT = 6;
+  pub const VT_CONSTRUCTOR: flatbuffers::VOffsetT = 8;
+  pub const VT_MODULE_BINDING: flatbuffers::VOffsetT = 10;
+  pub const VT_MODULE_REFERENCE: flatbuffers::VOffsetT = 12;
+  pub const VT_GETTER_REFERENCE: flatbuffers::VOffsetT = 14;
+  pub const VT_PROPERTY: flatbuffers::VOffsetT = 16;
+  pub const VT_PROPERTY_SPAN: flatbuffers::VOffsetT = 18;
+  pub const VT_CONSTRUCTION: flatbuffers::VOffsetT = 20;
+  pub const VT_ARGUMENTS: flatbuffers::VOffsetT = 22;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    LazySelectorCandidate { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args LazySelectorCandidateArgs<'args>
+  ) -> flatbuffers::WIPOffset<LazySelectorCandidate<'bldr>> {
+    let mut builder = LazySelectorCandidateBuilder::new(_fbb);
+    if let Some(x) = args.arguments { builder.add_arguments(x); }
+    if let Some(x) = args.construction { builder.add_construction(x); }
+    if let Some(x) = args.property_span { builder.add_property_span(x); }
+    if let Some(x) = args.property { builder.add_property(x); }
+    builder.add_getter_reference(args.getter_reference);
+    builder.add_module_reference(args.module_reference);
+    builder.add_module_binding(args.module_binding);
+    builder.add_constructor(args.constructor);
+    builder.add_segment(args.segment);
+    builder.add_kind(args.kind);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> LazySelectorCandidateT {
+    let segment = self.segment();
+    let kind = self.kind();
+    let constructor = self.constructor();
+    let module_binding = self.module_binding();
+    let module_reference = self.module_reference();
+    let getter_reference = self.getter_reference();
+    let property = {
+      let x = self.property();
+      x.to_string()
+    };
+    let property_span = {
+      let x = self.property_span();
+      x.unpack()
+    };
+    let construction = {
+      let x = self.construction();
+      x.unpack()
+    };
+    let arguments = {
+      let x = self.arguments();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    LazySelectorCandidateT {
+      segment,
+      kind,
+      constructor,
+      module_binding,
+      module_reference,
+      getter_reference,
+      property,
+      property_span,
+      construction,
+      arguments,
+    }
+  }
+
+  #[inline]
+  pub fn segment(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_SEGMENT, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn kind(&self) -> LazyWrapperKind {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<LazyWrapperKind>(LazySelectorCandidate::VT_KIND, Some(LazyWrapperKind::Unknown)).unwrap()}
+  }
+  #[inline]
+  pub fn constructor(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_CONSTRUCTOR, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn module_binding(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_MODULE_BINDING, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn module_reference(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_MODULE_REFERENCE, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn getter_reference(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(LazySelectorCandidate::VT_GETTER_REFERENCE, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn property(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(LazySelectorCandidate::VT_PROPERTY, None).unwrap()}
+  }
+  #[inline]
+  pub fn property_span(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazySelectorCandidate::VT_PROPERTY_SPAN, None).unwrap()}
+  }
+  #[inline]
+  pub fn construction(&self) -> &'a Span {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(LazySelectorCandidate::VT_CONSTRUCTION, None).unwrap()}
+  }
+  #[inline]
+  pub fn arguments(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot>>>>(LazySelectorCandidate::VT_ARGUMENTS, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for LazySelectorCandidate<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("segment", Self::VT_SEGMENT, false)?
+     .visit_field::<LazyWrapperKind>("kind", Self::VT_KIND, false)?
+     .visit_field::<u32>("constructor", Self::VT_CONSTRUCTOR, false)?
+     .visit_field::<u32>("module_binding", Self::VT_MODULE_BINDING, false)?
+     .visit_field::<u32>("module_reference", Self::VT_MODULE_REFERENCE, false)?
+     .visit_field::<u32>("getter_reference", Self::VT_GETTER_REFERENCE, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("property", Self::VT_PROPERTY, true)?
+     .visit_field::<Span>("property_span", Self::VT_PROPERTY_SPAN, true)?
+     .visit_field::<Span>("construction", Self::VT_CONSTRUCTION, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SourceSlot>>>>("arguments", Self::VT_ARGUMENTS, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct LazySelectorCandidateArgs<'a> {
+    pub segment: u32,
+    pub kind: LazyWrapperKind,
+    pub constructor: u32,
+    pub module_binding: u32,
+    pub module_reference: u32,
+    pub getter_reference: u32,
+    pub property: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub property_span: Option<&'a Span>,
+    pub construction: Option<&'a Span>,
+    pub arguments: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SourceSlot<'a>>>>>,
+}
+impl<'a> Default for LazySelectorCandidateArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    LazySelectorCandidateArgs {
+      segment: 0,
+      kind: LazyWrapperKind::Unknown,
+      constructor: 0,
+      module_binding: 0,
+      module_reference: 0,
+      getter_reference: 0,
+      property: None, // required field
+      property_span: None, // required field
+      construction: None, // required field
+      arguments: None, // required field
+    }
+  }
+}
+
+pub struct LazySelectorCandidateBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> LazySelectorCandidateBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_segment(&mut self, segment: u32) {
+    self.fbb_.push_slot::<u32>(LazySelectorCandidate::VT_SEGMENT, segment, 0);
+  }
+  #[inline]
+  pub fn add_kind(&mut self, kind: LazyWrapperKind) {
+    self.fbb_.push_slot::<LazyWrapperKind>(LazySelectorCandidate::VT_KIND, kind, LazyWrapperKind::Unknown);
+  }
+  #[inline]
+  pub fn add_constructor(&mut self, constructor: u32) {
+    self.fbb_.push_slot::<u32>(LazySelectorCandidate::VT_CONSTRUCTOR, constructor, 0);
+  }
+  #[inline]
+  pub fn add_module_binding(&mut self, module_binding: u32) {
+    self.fbb_.push_slot::<u32>(LazySelectorCandidate::VT_MODULE_BINDING, module_binding, 0);
+  }
+  #[inline]
+  pub fn add_module_reference(&mut self, module_reference: u32) {
+    self.fbb_.push_slot::<u32>(LazySelectorCandidate::VT_MODULE_REFERENCE, module_reference, 0);
+  }
+  #[inline]
+  pub fn add_getter_reference(&mut self, getter_reference: u32) {
+    self.fbb_.push_slot::<u32>(LazySelectorCandidate::VT_GETTER_REFERENCE, getter_reference, 0);
+  }
+  #[inline]
+  pub fn add_property(&mut self, property: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LazySelectorCandidate::VT_PROPERTY, property);
+  }
+  #[inline]
+  pub fn add_property_span(&mut self, property_span: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazySelectorCandidate::VT_PROPERTY_SPAN, property_span);
+  }
+  #[inline]
+  pub fn add_construction(&mut self, construction: &Span) {
+    self.fbb_.push_slot_always::<&Span>(LazySelectorCandidate::VT_CONSTRUCTION, construction);
+  }
+  #[inline]
+  pub fn add_arguments(&mut self, arguments: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<SourceSlot<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LazySelectorCandidate::VT_ARGUMENTS, arguments);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> LazySelectorCandidateBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    LazySelectorCandidateBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<LazySelectorCandidate<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, LazySelectorCandidate::VT_PROPERTY,"property");
+    self.fbb_.required(o, LazySelectorCandidate::VT_PROPERTY_SPAN,"property_span");
+    self.fbb_.required(o, LazySelectorCandidate::VT_CONSTRUCTION,"construction");
+    self.fbb_.required(o, LazySelectorCandidate::VT_ARGUMENTS,"arguments");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for LazySelectorCandidate<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("LazySelectorCandidate");
+      ds.field("segment", &self.segment());
+      ds.field("kind", &self.kind());
+      ds.field("constructor", &self.constructor());
+      ds.field("module_binding", &self.module_binding());
+      ds.field("module_reference", &self.module_reference());
+      ds.field("getter_reference", &self.getter_reference());
+      ds.field("property", &self.property());
+      ds.field("property_span", &self.property_span());
+      ds.field("construction", &self.construction());
+      ds.field("arguments", &self.arguments());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct LazySelectorCandidateT {
+  pub segment: u32,
+  pub kind: LazyWrapperKind,
+  pub constructor: u32,
+  pub module_binding: u32,
+  pub module_reference: u32,
+  pub getter_reference: u32,
+  pub property: String,
+  pub property_span: SpanT,
+  pub construction: SpanT,
+  pub arguments: Vec<SourceSlotT>,
+}
+impl Default for LazySelectorCandidateT {
+  fn default() -> Self {
+    Self {
+      segment: 0,
+      kind: LazyWrapperKind::Unknown,
+      constructor: 0,
+      module_binding: 0,
+      module_reference: 0,
+      getter_reference: 0,
+      property: "".to_string(),
+      property_span: Default::default(),
+      construction: Default::default(),
+      arguments: Default::default(),
+    }
+  }
+}
+impl LazySelectorCandidateT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<LazySelectorCandidate<'b>> {
+    let segment = self.segment;
+    let kind = self.kind;
+    let constructor = self.constructor;
+    let module_binding = self.module_binding;
+    let module_reference = self.module_reference;
+    let getter_reference = self.getter_reference;
+    let property = Some({
+      let x = &self.property;
+      _fbb.create_string(x)
+    });
+    let property_span_tmp = Some(self.property_span.pack());
+    let property_span = property_span_tmp.as_ref();
+    let construction_tmp = Some(self.construction.pack());
+    let construction = construction_tmp.as_ref();
+    let arguments = Some({
+      let x = &self.arguments;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    LazySelectorCandidate::create(_fbb, &LazySelectorCandidateArgs{
+      segment,
+      kind,
+      constructor,
+      module_binding,
+      module_reference,
+      getter_reference,
+      property,
+      property_span,
+      construction,
+      arguments,
+    })
+  }
+}
 pub enum SegmentRecipeOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -23283,6 +24038,8 @@ impl<'a> EmissionFacts<'a> {
   pub const VT_FREE_REFERENCES: flatbuffers::VOffsetT = 10;
   pub const VT_DYNAMIC_NAMESPACES: flatbuffers::VOffsetT = 12;
   pub const VT_USES_THIS: flatbuffers::VOffsetT = 14;
+  pub const VT_LAZY_MODULES: flatbuffers::VOffsetT = 16;
+  pub const VT_LAZY_SELECTORS: flatbuffers::VOffsetT = 18;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -23294,6 +24051,8 @@ impl<'a> EmissionFacts<'a> {
     args: &'args EmissionFactsArgs<'args>
   ) -> flatbuffers::WIPOffset<EmissionFacts<'bldr>> {
     let mut builder = EmissionFactsBuilder::new(_fbb);
+    if let Some(x) = args.lazy_selectors { builder.add_lazy_selectors(x); }
+    if let Some(x) = args.lazy_modules { builder.add_lazy_modules(x); }
     if let Some(x) = args.dynamic_namespaces { builder.add_dynamic_namespaces(x); }
     if let Some(x) = args.free_references { builder.add_free_references(x); }
     if let Some(x) = args.nested_bindings { builder.add_nested_bindings(x); }
@@ -23325,6 +24084,14 @@ impl<'a> EmissionFacts<'a> {
       x.iter().map(|t| t.unpack()).collect()
     };
     let uses_this = self.uses_this();
+    let lazy_modules = {
+      let x = self.lazy_modules();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    let lazy_selectors = {
+      let x = self.lazy_selectors();
+      x.iter().map(|t| t.unpack()).collect()
+    };
     EmissionFactsT {
       execution,
       segments,
@@ -23332,6 +24099,8 @@ impl<'a> EmissionFacts<'a> {
       free_references,
       dynamic_namespaces,
       uses_this,
+      lazy_modules,
+      lazy_selectors,
     }
   }
 
@@ -23377,6 +24146,20 @@ impl<'a> EmissionFacts<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<bool>(EmissionFacts::VT_USES_THIS, Some(false)).unwrap()}
   }
+  #[inline]
+  pub fn lazy_modules(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazyModuleCandidate<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazyModuleCandidate>>>>(EmissionFacts::VT_LAZY_MODULES, None).unwrap()}
+  }
+  #[inline]
+  pub fn lazy_selectors(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazySelectorCandidate<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazySelectorCandidate>>>>(EmissionFacts::VT_LAZY_SELECTORS, None).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for EmissionFacts<'_> {
@@ -23392,6 +24175,8 @@ impl flatbuffers::Verifiable for EmissionFacts<'_> {
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("free_references", Self::VT_FREE_REFERENCES, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<DynamicNamespace>>>>("dynamic_namespaces", Self::VT_DYNAMIC_NAMESPACES, true)?
      .visit_field::<bool>("uses_this", Self::VT_USES_THIS, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<LazyModuleCandidate>>>>("lazy_modules", Self::VT_LAZY_MODULES, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<LazySelectorCandidate>>>>("lazy_selectors", Self::VT_LAZY_SELECTORS, true)?
      .finish();
     Ok(())
   }
@@ -23403,6 +24188,8 @@ pub struct EmissionFactsArgs<'a> {
     pub free_references: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub dynamic_namespaces: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DynamicNamespace<'a>>>>>,
     pub uses_this: bool,
+    pub lazy_modules: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazyModuleCandidate<'a>>>>>,
+    pub lazy_selectors: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<LazySelectorCandidate<'a>>>>>,
 }
 impl<'a> Default for EmissionFactsArgs<'a> {
   #[inline]
@@ -23414,6 +24201,8 @@ impl<'a> Default for EmissionFactsArgs<'a> {
       free_references: None, // required field
       dynamic_namespaces: None, // required field
       uses_this: false,
+      lazy_modules: None, // required field
+      lazy_selectors: None, // required field
     }
   }
 }
@@ -23448,6 +24237,14 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EmissionFactsBuilder<'a, 'b, A>
     self.fbb_.push_slot::<bool>(EmissionFacts::VT_USES_THIS, uses_this, false);
   }
   #[inline]
+  pub fn add_lazy_modules(&mut self, lazy_modules: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<LazyModuleCandidate<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(EmissionFacts::VT_LAZY_MODULES, lazy_modules);
+  }
+  #[inline]
+  pub fn add_lazy_selectors(&mut self, lazy_selectors: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<LazySelectorCandidate<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(EmissionFacts::VT_LAZY_SELECTORS, lazy_selectors);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> EmissionFactsBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     EmissionFactsBuilder {
@@ -23463,6 +24260,8 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EmissionFactsBuilder<'a, 'b, A>
     self.fbb_.required(o, EmissionFacts::VT_NESTED_BINDINGS,"nested_bindings");
     self.fbb_.required(o, EmissionFacts::VT_FREE_REFERENCES,"free_references");
     self.fbb_.required(o, EmissionFacts::VT_DYNAMIC_NAMESPACES,"dynamic_namespaces");
+    self.fbb_.required(o, EmissionFacts::VT_LAZY_MODULES,"lazy_modules");
+    self.fbb_.required(o, EmissionFacts::VT_LAZY_SELECTORS,"lazy_selectors");
     flatbuffers::WIPOffset::new(o.value())
   }
 }
@@ -23476,6 +24275,8 @@ impl core::fmt::Debug for EmissionFacts<'_> {
       ds.field("free_references", &self.free_references());
       ds.field("dynamic_namespaces", &self.dynamic_namespaces());
       ds.field("uses_this", &self.uses_this());
+      ds.field("lazy_modules", &self.lazy_modules());
+      ds.field("lazy_selectors", &self.lazy_selectors());
       ds.finish()
   }
 }
@@ -23488,6 +24289,8 @@ pub struct EmissionFactsT {
   pub free_references: Vec<u32>,
   pub dynamic_namespaces: Vec<DynamicNamespaceT>,
   pub uses_this: bool,
+  pub lazy_modules: Vec<LazyModuleCandidateT>,
+  pub lazy_selectors: Vec<LazySelectorCandidateT>,
 }
 impl Default for EmissionFactsT {
   fn default() -> Self {
@@ -23498,6 +24301,8 @@ impl Default for EmissionFactsT {
       free_references: Default::default(),
       dynamic_namespaces: Default::default(),
       uses_this: false,
+      lazy_modules: Default::default(),
+      lazy_selectors: Default::default(),
     }
   }
 }
@@ -23527,6 +24332,14 @@ impl EmissionFactsT {
       let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
     });
     let uses_this = self.uses_this;
+    let lazy_modules = Some({
+      let x = &self.lazy_modules;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    let lazy_selectors = Some({
+      let x = &self.lazy_selectors;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
     EmissionFacts::create(_fbb, &EmissionFactsArgs{
       execution,
       segments,
@@ -23534,6 +24347,8 @@ impl EmissionFactsT {
       free_references,
       dynamic_namespaces,
       uses_this,
+      lazy_modules,
+      lazy_selectors,
     })
   }
 }

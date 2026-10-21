@@ -131,3 +131,8 @@ persist syntax shapes/receiver and `this` facts, never target safety or placemen
 Awaited member reads and literal-import `.then` arrow parameters retain separate
 occurrences and sorted property/receiver pairs. Concise-arrow namespace returns escape;
 parameter writes/redeclarations and namespace reflection stay conservative.
+Lazy module/selector candidates record general identifier-constructor shapes,
+binding/reference identities and composed original argument slots. Wrapper kinds
+are spelling hints only; aliases and lexical shadows are not runtime certification.
+Keep options in one original slot and leave unsupported getter references intact.
+No lazy recognition, transformed obligations or reconstruction plans enter caches.

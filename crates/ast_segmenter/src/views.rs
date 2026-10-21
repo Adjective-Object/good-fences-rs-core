@@ -427,6 +427,14 @@ enumeration!(
 );
 enumeration!(shorthand, em::Shorthand, Shorthand, None, Property, Proto);
 enumeration!(
+    lazy_wrapper_kind,
+    em::LazyWrapperKind,
+    LazyWrapperKind,
+    Unknown,
+    LazyImport,
+    LazyAction
+);
+enumeration!(
     namespace_reason,
     em::NamespaceReason,
     NamespaceReason,
@@ -460,6 +468,8 @@ view!(Operation, em::Operation);
 view!(SegmentRecipe, em::SegmentRecipe);
 view!(EmissionFacts, em::EmissionFacts);
 view!(DynamicNamespace, em::DynamicNamespace);
+view!(LazyModuleCandidate, em::LazyModuleCandidate);
+view!(LazySelectorCandidate, em::LazySelectorCandidate);
 
 impl<'a> ModuleFacts<'a> {
     pub fn ecco(self) -> Option<ecco::views::ParsedFileView<'a>> {
@@ -1187,6 +1197,8 @@ impl<'a> EmissionFacts<'a> {
     sequence!(nested_bindings, o::BindingId);
     sequence!(free_references, u32);
     sequence!(dynamic_namespaces, DynamicNamespace<'a>);
+    sequence!(lazy_modules, LazyModuleCandidate<'a>);
+    sequence!(lazy_selectors, LazySelectorCandidate<'a>);
     scalar!(uses_this, bool);
 }
 
@@ -1219,6 +1231,44 @@ impl<'a> DynamicNamespace<'a> {
             Self::Owned(v) => v.properties().map(Sequence::Owned),
             Self::Wire(v) => v.properties().map(Sequence::Wire),
         }
+    }
+}
+
+impl<'a> LazyModuleCandidate<'a> {
+    scalar!(segment, u32);
+    scalar!(binding, o::BindingId, o::BindingId);
+    scalar!(constructor, u32);
+    scalar!(dependency, o::DependencyId, o::DependencyId);
+    scalar!(import_span, Span, span);
+    scalar!(declaration, Span, span);
+    scalar!(construction, Span, span);
+    sequence!(arguments, SourceSlot<'a>);
+    pub fn callback(self) -> SourceSlot<'a> {
+        self.arguments().get(0).expect("validated lazy callback")
+    }
+    pub fn options(self) -> Option<SourceSlot<'a>> {
+        self.arguments().get(1)
+    }
+}
+
+impl<'a> LazySelectorCandidate<'a> {
+    scalar!(segment, u32);
+    scalar!(kind, em::LazyWrapperKind, lazy_wrapper_kind);
+    scalar!(constructor, u32);
+    scalar!(module_binding, o::BindingId, o::BindingId);
+    scalar!(module_reference, u32);
+    scalar!(getter_reference, u32);
+    scalar!(property, &'a str);
+    scalar!(property_span, Span, span);
+    scalar!(construction, Span, span);
+    sequence!(arguments, SourceSlot<'a>);
+    pub fn module_argument(self) -> SourceSlot<'a> {
+        self.arguments()
+            .get(0)
+            .expect("validated lazy module argument")
+    }
+    pub fn getter(self) -> SourceSlot<'a> {
+        self.arguments().get(1).expect("validated lazy getter")
     }
 }
 
@@ -1334,9 +1384,35 @@ equal_view!(
     nested_bindings,
     free_references,
     dynamic_namespaces,
+    lazy_modules,
+    lazy_selectors,
     uses_this
 );
 equal_view!(DynamicNamespace, dependency, properties);
+equal_view!(
+    LazyModuleCandidate,
+    segment,
+    binding,
+    constructor,
+    dependency,
+    import_span,
+    declaration,
+    construction,
+    arguments
+);
+equal_view!(
+    LazySelectorCandidate,
+    segment,
+    kind,
+    constructor,
+    module_binding,
+    module_reference,
+    getter_reference,
+    property,
+    property_span,
+    construction,
+    arguments
+);
 
 #[cfg(test)]
 #[path = "wire_tests.rs"]

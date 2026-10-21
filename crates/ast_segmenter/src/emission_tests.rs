@@ -14,6 +14,88 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn lazy_candidates_preserve_aliases_binding_identity_and_original_slots() {
+    let source =
+        "import { LazyModule as LM, LazyImport as LI, LazyAction as LA } from './runtime.mjs';
+        export const mod = new (LM)((() => (import('./child.mjs'))), options()),
+            first = new LI((mod), ((ns) => (ns.first)), extra()),
+            second = new LA(mod, ns => ns.second, ...rest);
+        function shadow(LM, LazyImport) {
+            const mod = new LM(() => import('./other.mjs'), { initializer: initialize });
+            return new LazyImport(mod, ns => ns.first);
+        }
+        const Unknown = LI;
+        const unknown = new Unknown(mod, ns => ns.first);
+        const unsupported = new LI(mod, ns => ns.first());
+        const computed = new LI(mod, ns => ns['first']);
+        const block = new LI(mod, ns => { return ns.first; });
+        const optional = new LI(mod, ns => ns?.first);
+        const destructured = new LI(mod, ({ first }) => first);
+        const asyncGetter = new LI(mod, async ns => ns.first);
+        const notCallback = new LM(async () => import('./child.mjs'));
+        const parameterCallback = new LM(x => import('./child.mjs'));
+        const patternCallback = new LM(() => import('./parts/' + name));";
+    let facts = parse(source);
+    let emission = facts.emission();
+    assert_eq!(emission.lazy_modules().len(), 2);
+    assert_eq!(emission.lazy_selectors().len(), 4);
+    let modules = emission.lazy_modules();
+    assert_ne!(modules[0].binding(), modules[1].binding());
+    let constructors: Vec<_> = modules
+        .iter()
+        .map(|c| facts.references()[c.constructor() as usize].binding())
+        .collect();
+    assert_ne!(constructors[0], constructors[1]);
+    let text = |span: Span| &source[span.start as usize..span.end as usize];
+    assert_eq!(
+        text(modules[0].callback().span()),
+        "(() => (import('./child.mjs')))"
+    );
+    assert_eq!(text(modules[0].options().unwrap().span()), "options()");
+    assert_eq!(
+        text(modules[1].options().unwrap().span()),
+        "{ initializer: initialize }"
+    );
+    let selectors = emission.lazy_selectors();
+    assert_eq!(
+        selectors
+            .iter()
+            .map(|c| (c.kind(), c.property()))
+            .collect::<Vec<_>>(),
+        [
+            (LazyWrapperKind::LazyImport, "first"),
+            (LazyWrapperKind::LazyAction, "second"),
+            (LazyWrapperKind::LazyImport, "first"),
+            (LazyWrapperKind::Unknown, "first")
+        ]
+    );
+    assert_eq!(selectors[0].module_binding(), modules[0].binding());
+    assert_eq!(selectors[1].module_binding(), modules[0].binding());
+    assert_eq!(selectors[2].module_binding(), modules[1].binding());
+    assert_eq!(text(selectors[0].module_argument().span()), "(mod)");
+    assert_eq!(text(selectors[0].getter().span()), "((ns) => (ns.first))");
+    assert_eq!(text(selectors[0].arguments()[2].span()), "extra()");
+    assert_eq!(text(selectors[1].arguments()[2].span()), "...rest");
+    assert!(!modules[0].options().unwrap().operations().is_empty());
+    assert_ne!(modules[0].segment(), selectors[0].segment());
+    // Unsupported uses remain ordinary references for the later all-reference gate.
+    assert_eq!(
+        facts
+            .references()
+            .iter()
+            .filter(|r| r.binding() == Some(modules[0].binding()))
+            .count(),
+        9
+    );
+    for c in selectors {
+        assert!(contains(
+            c.getter().span(),
+            facts.references()[c.getter_reference() as usize].span()
+        ));
+    }
+}
+
+#[test]
 fn execution_contexts_keep_immediate_calls_defaults_and_instance_fields_distinct() {
     use crate::execution::ContextKind;
     let source = "let x = 0; const stored = (p = x++) => x++; (() => x++)(); class C { [x++] = x++; static value = x++; static { x++; } method(p = x++) { return () => x++; } }";

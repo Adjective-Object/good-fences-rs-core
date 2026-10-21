@@ -18,7 +18,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 13/extractor 17.
+Production loading/publication uses typed FlatBuffers, schema 14/extractor 18.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.
 `validate_parsed(source, parsed)` shares the source-local semantic checks with
 the production codec and accepts `ParsedModule::from_wire` without decoding a fact
@@ -30,6 +30,7 @@ parented execution contexts, complete occurrence timing,
 eager read/write links, relative dependency patterns, owned lazy Ecco precursors,
 deferred declaration/source-slot alternatives,
 dynamic namespace observation shapes/receiver/`this` facts,
+lazy module/selector construction candidates with composed original argument slots,
 per-reference `async_deferred` syntax context,
 inferred user-function contracts and declaration identity,
 source-local emission recipes/placement constraints,
@@ -85,9 +86,18 @@ Deferred alternatives validate declaration binding links and complete initialize
 source-slot roots; CommonJS cannot carry these ESM reconstruction alternatives.
 Dynamic namespace observations cover exactly the dynamic dependency occurrences,
 with sorted unique property/receiver pairs; placement and target eligibility are
-never cached. Extractor 17 invalidates earlier callback/escape observations;
-the existing typed tables preserve each occurrence and each property pair
-without deriving combined export-demand roots.
+never cached. Schema 14/extractor 18 adds typed lazy construction candidates.
+Their borrowed validation checks segment/declaration/constructor/dependency and
+module/getter binding links, exact original argument spans, complete composed
+source-slot roots, ordering and wrapper spelling hints. Aliased or shadowed
+constructors remain syntax candidates, never runtime identity proof. Returned-import
+and complete property-token spans anchor dependency selection and Unicode-decoded
+property names to the original source without reparsing; receiver/dot trivia and
+token boundaries reject substring or comment-token substitutions. Unsupported
+getters retain ordinary references; options remain one original source slot.
+Fresh and wire facts agree without parsing or unpacking on hits. Lazy runtime
+recognition, all-reference certification, graph transformations and emission plans
+are deliberately absent.
 These are structural integrity checks on source-local evidence, not a second
 parser or authentication of a publisher; source/configuration hashes and bounded
 wire verification remain mandatory at the codec boundary.

@@ -1,6 +1,6 @@
 # Typed source-cache FlatBuffers
 
-**Production source-cache backend: schema 13/extractor 17, `.seg.fb`.**
+**Production source-cache backend: schema 14/extractor 18, `.seg.fb`.**
 `segment_cache` reads these immutable buffers through AST/Ecco views and runs
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
@@ -15,11 +15,11 @@ persisted record shape, rather than embedding CBOR bytes:
 | --- | --- |
 | `common.fbs` | `ParserConfig`; fixed-width spans, SHA-256, declaration fingerprints; optional IDs without sentinel collisions |
 | `ecco.fbs` | `HazardFields`, `Update`, `Definition`, `LocalFacts`, `GlobalSymbol`, `FunctionSignature`, `CallResult`, `OwnedFunction`, `ParsedSymbol`, `ExternalReference`, `ParsedRoot`, `ParsedValue`, `DefinitionMatch`, `ParsedFile` |
-| `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `EmissionFacts`, `ModuleFacts` |
+| `syntax.fbs` | `Binding`, `Reference`, `Dependency`, `ImportBinding`, `Export`, `Directive`, `EffectSite`, `IdentifierCallee`, `InvocationArgument`, `Invocation`, `ExecutionContext`, `ExecutionFacts`, `PlacementFacts`, `NameRestrictions`, `NamespaceUse`, `SourceSlot`, `CalleePlan`, `PureLowering`, `Operation`, `SegmentRecipe`, `DynamicNamespace`, `LazyModuleCandidate`, `LazySelectorCandidate`, `EmissionFacts`, `ModuleFacts` |
 | `module.fbs` | `CachedModule`, ESM/CommonJS body alternatives, ordered statement spans |
 | `cache.fbs` | `SourceProvenance`, `CacheRecord` |
 
-This covers the 40 persisted record types, plus explicit union alternatives for
+This covers persisted source records, plus explicit union alternatives for
 imports, exports, callees, namespace accesses, operations, export forms, chain
 steps, Ecco bindings, recursive hazard expressions, arguments, returns, and all
 13 Ecco instruction variants. `MultiSpan` uses a checked one-to-four span vector.
@@ -62,12 +62,19 @@ while graph ranges and derived analysis/emission plans are explicitly owned.
 AST and bundler differential tests cover complete record equality, byte borrowing,
 owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-Schema 13/extractor 17 are active production identities, included in bundler
+Schema 14/extractor 18 are active production identities, included in bundler
 source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
 inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
 Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.
 Owned AST provenance now hashes typed module bytes too; CBOR remains only in the
 independent declaration-configuration fingerprint and debug/test fixtures.
+
+Lazy module/selector tables persist only source-local binding/reference links,
+spelling-only wrapper hints and original composed argument slots. Options and
+getters remain source spans, never duplicated expressions or transformation
+plans. Known wrapper discriminants are checked before borrowed access; semantic
+span/link/slot validation remains in `segment_cache`. Existing sidecars rebuild
+under the new schema/extractor identities.
 
 Ecco's precursor substage is usable independently: `WireEcco` bounds and
 structurally verifies a standalone typed `ParsedFile`, then owns its immutable

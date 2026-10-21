@@ -237,6 +237,29 @@ fn rejects_unknown_and_missing_union_discriminants() {
     }
 }
 
+#[test]
+fn lazy_selector_kind_discriminants_are_checked_before_borrowed_access() {
+    for kind in [
+        w::LazyWrapperKind::Unknown,
+        w::LazyWrapperKind::LazyImport,
+        w::LazyWrapperKind::LazyAction,
+        w::LazyWrapperKind(255),
+    ] {
+        let mut module = module();
+        module
+            .facts
+            .emission
+            .lazy_selectors
+            .push(w::LazySelectorCandidateT {
+                kind,
+                property: "selected".into(),
+                ..Default::default()
+            });
+        let bytes = checksum(&payload(&record(&module)));
+        assert_eq!(load(bytes).is_ok(), kind.variant_name().is_some());
+    }
+}
+
 fn unknown_expression() -> w::HazardExprT {
     w::HazardExprT {
         value: w::HazardExprValueT::UnknownHazard(Box::default()),

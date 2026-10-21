@@ -32,6 +32,32 @@ Target export surfaces, retention and placement remain linker decisions.
 `module_parse_count()` reports source-module parser invocations on the current
 thread, distinguishing extraction from accidental re-extraction.
 
+`facts().emission().lazy_modules()` and `lazy_selectors()` expose syntax-only
+construction candidates through borrowed owned-or-wire sequences. Module candidates
+retain the owning segment, declared binding, constructor reference index, literal
+callback import occurrence, declarator/construction spans and all original
+argument slots. `import_span()` identifies the directly returned import, not
+imports nested in options. `callback()` and `options()` borrow the first/second
+slot without copying expressions. Selector candidates retain constructor/module/
+getter references, module binding, selected property/token span, construction
+span and every original argument;
+`module_argument()` and `getter()` borrow their original slots. Slot operations
+are composed against the owning segment recipe, including nested replacements.
+`property_span()` anchors the decoded property to its original identifier token,
+including Unicode escapes, without reparsing on cache hits.
+
+Constructors need only be identifier references: imported aliases, lexical shadows
+and unknown names all remain candidates. `LazyWrapperKind` is an imported/local
+spelling hint (`Unknown`, `LazyImport`, `LazyAction`), never runtime proof. Currently
+callbacks are non-async zero-parameter concise arrows returning a literal import;
+getters are non-async one-identifier-parameter concise arrows returning that
+binding's non-optional dotted property. Parentheses and parameter annotations are
+preserved; expression casts/assertions are not supported candidates. Unsupported
+getters are omitted, but all ordinary references remain for later all-reference
+certification. Extra arguments, spreads, options effects and initializer syntax
+are preserved, not evaluated, copied or certified. No promise rewrite, runtime
+recognition, target eligibility, graph obligations or emission plan is extracted.
+
 Read persisted records through borrowed accessors, for example
 `parsed.facts().emission().segments().get(i).unwrap().source().spans()`.
 `views` provides Copy owned-or-wire tables, value enums and indexed/iterable

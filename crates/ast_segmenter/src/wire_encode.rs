@@ -78,6 +78,14 @@ enumeration!(
     Required
 );
 enumeration!(
+    lazy_wrapper_kind,
+    em::LazyWrapperKind,
+    LazyWrapperKind,
+    Unknown,
+    LazyImport,
+    LazyAction
+);
+enumeration!(
     context_kind,
     crate::execution::ContextKind,
     ContextKind,
@@ -437,7 +445,37 @@ fn emission(v: &em::EmissionFacts) -> w::EmissionFactsT {
                     .collect())
             }))
             .collect(),
-        uses_this: v.uses_this()
+        uses_this: v.uses_this(),
+        lazy_modules: v
+            .lazy_modules()
+            .iter()
+            .map(|v| table!(LazyModuleCandidateT {
+                segment: v.segment(),
+                binding: v.binding().0,
+                constructor: v.constructor(),
+                dependency: v.dependency().0,
+                import_span: span(v.import_span()),
+                declaration: span(v.declaration()),
+                construction: span(v.construction()),
+                arguments: v.arguments().iter().map(slot).collect()
+            }))
+            .collect(),
+        lazy_selectors: v
+            .lazy_selectors()
+            .iter()
+            .map(|v| table!(LazySelectorCandidateT {
+                segment: v.segment(),
+                kind: lazy_wrapper_kind(v.kind()),
+                constructor: v.constructor(),
+                module_binding: v.module_binding().0,
+                module_reference: v.module_reference(),
+                getter_reference: v.getter_reference(),
+                property: v.property().to_owned(),
+                property_span: span(v.property_span()),
+                construction: span(v.construction()),
+                arguments: v.arguments().iter().map(slot).collect()
+            }))
+            .collect()
     })
 }
 fn facts<'b>(v: &o::ModuleFacts, b: &mut FlatBufferBuilder<'b>) -> WIPOffset<w::ModuleFacts<'b>> {

@@ -60,6 +60,9 @@ fn imported(name: w::ImportedName<'_>) -> Result<()> {
 }
 
 fn emission(emission: w::EmissionFacts<'_>) -> Result<()> {
+    for selector in emission.lazy_selectors() {
+        known!(selector.kind());
+    }
     for context in emission.execution().contexts() {
         known!(context.kind());
     }

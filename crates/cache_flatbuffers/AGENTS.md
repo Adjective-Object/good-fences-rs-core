@@ -1,6 +1,6 @@
 # cache_flatbuffers
 
-- This is the production `.seg.fb` backend (schema 13/extractor 17).
+- This is the production `.seg.fb` backend (schema 14/extractor 18).
   `segment_cache` adds source-local semantic validation before exposing records.
 - `flatbuffers/*.fbs` is authoritative. Keep `cache_generated.rs` byte-for-byte
   compiler output; regenerate using pinned flatc 25.2.10, matching the runtime.
@@ -18,3 +18,5 @@
   Do not manufacture seals around arbitrary source/facts or deserialize for checking.
 - AST construction/views live in `ast_segmenter`; shared `segment_cache` validators
   are the owned/wire semantic gate. Graph/Ecco/emission retain byte owners.
+- Lazy candidates are typed source-local tables with original composed slots;
+  wrapper-kind hints require discriminant validation and prove no runtime identity.

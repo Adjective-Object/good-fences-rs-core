@@ -127,7 +127,331 @@ pub(crate) fn validate(module: &ModuleView<'_>, source: &str) -> eyre::Result<()
             );
         }
     }
+    lazy_candidates(module, source)?;
     Ok(())
+}
+
+fn lazy_candidates(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
+    use ast_segmenter::emission::LazyWrapperKind;
+    let facts = module.facts();
+    let emission = facts.emission();
+    ensure!(
+        !facts.commonjs()
+            || (emission.lazy_modules().is_empty() && emission.lazy_selectors().is_empty()),
+        "nonopaque CommonJS lazy candidates"
+    );
+    ensure!(
+        strict(
+            emission
+                .lazy_modules()
+                .iter()
+                .map(|c| c.construction().start)
+        ) && strict(
+            emission
+                .lazy_selectors()
+                .iter()
+                .map(|c| c.construction().start)
+        ),
+        "invalid lazy candidate order"
+    );
+    for candidate in emission.lazy_modules() {
+        let call = lazy_construction(
+            facts,
+            source,
+            candidate.segment(),
+            candidate.constructor(),
+            candidate.construction(),
+            candidate.arguments(),
+        )?;
+        ensure!(!candidate.arguments().is_empty(), "missing lazy callback");
+        let binding = facts
+            .bindings()
+            .iter()
+            .find(|b| b.id() == candidate.binding())
+            .ok_or_eyre("dangling lazy module binding")?;
+        let range = module
+            .segments()
+            .get(candidate.segment() as usize)
+            .copied()
+            .ok_or_eyre("dangling lazy module segment")?;
+        within(source, range, candidate.declaration())?;
+        ensure!(
+            !binding.import()
+                && contains(candidate.declaration(), candidate.construction())
+                && binding
+                    .declarations()
+                    .iter()
+                    .any(|d| d.start == candidate.declaration().start && d.end < call.span().start),
+            "invalid lazy module declaration link"
+        );
+        let dependency = facts
+            .dependencies()
+            .iter()
+            .find(|d| d.id() == candidate.dependency())
+            .ok_or_eyre("dangling lazy callback dependency")?;
+        within(source, candidate.callback().span(), candidate.import_span())?;
+        let callback_context = emission
+            .execution()
+            .contexts()
+            .iter()
+            .find(|c| contains(candidate.callback().span(), c.span()))
+            .ok_or_eyre("missing lazy callback context")?;
+        ensure!(
+            dependency.kind() == DependencyKind::DynamicImport
+                && dependency.pattern().is_none()
+                && dependency.span() == candidate.import_span()
+                && callback_context.kind() == ast_segmenter::execution::ContextKind::Callable
+                && dependency.enclosing_function() == Some(callback_context.span()),
+            "invalid lazy callback dependency"
+        );
+        ensure!(
+            !call.arguments().get(0).unwrap().spread(),
+            "spread lazy callback"
+        );
+    }
+    for candidate in emission.lazy_selectors() {
+        let call = lazy_construction(
+            facts,
+            source,
+            candidate.segment(),
+            candidate.constructor(),
+            candidate.construction(),
+            candidate.arguments(),
+        )?;
+        ensure!(
+            candidate.arguments().len() >= 2,
+            "missing lazy selector arguments"
+        );
+        let reference = facts
+            .references()
+            .get(candidate.module_reference() as usize)
+            .ok_or_eyre("dangling lazy module reference")?;
+        ensure!(
+            reference.binding() == Some(candidate.module_binding())
+                && reference.read()
+                && !reference.write()
+                && !reference.type_only()
+                && contains(candidate.module_argument().span(), reference.span())
+                && !call.arguments().get(0).unwrap().spread()
+                && !call.arguments().get(1).unwrap().spread(),
+            "invalid lazy selector module link"
+        );
+        let getter = facts
+            .references()
+            .get(candidate.getter_reference() as usize)
+            .ok_or_eyre("dangling lazy getter reference")?;
+        let parameter = facts
+            .bindings()
+            .iter()
+            .find(|b| Some(b.id()) == getter.binding())
+            .ok_or_eyre("dangling lazy getter parameter")?;
+        within(source, candidate.getter().span(), candidate.property_span())?;
+        ensure!(
+            getter.read()
+                && !getter.write()
+                && !getter.type_only()
+                && contains(candidate.getter().span(), getter.span())
+                && parameter.declarations().len() == 1
+                && parameter
+                    .declarations()
+                    .iter()
+                    .all(|d| contains(candidate.getter().span(), d) && d.end < getter.span().start)
+                && facts
+                    .references()
+                    .iter()
+                    .filter(|r| !r.type_only() && r.binding() == Some(parameter.id()))
+                    .count()
+                    == 1
+                && getter.span().end < candidate.property_span().start
+                && !candidate.property().is_empty()
+                && property_token_matches(
+                    source,
+                    getter.span(),
+                    candidate.property_span(),
+                    candidate.property(),
+                ),
+            "invalid lazy getter link"
+        );
+        let constructor = facts
+            .references()
+            .get(candidate.constructor() as usize)
+            .unwrap();
+        let imported_name = facts
+            .imports()
+            .iter()
+            .find(|i| Some(i.binding()) == constructor.binding())
+            .and_then(|i| match i.imported() {
+                ImportedName::Name(name) => Some(name),
+                ImportedName::Namespace => None,
+            });
+        ensure!(
+            candidate.kind()
+                == LazyWrapperKind::from_name(imported_name.unwrap_or(constructor.name())),
+            "invalid lazy wrapper kind hint"
+        );
+    }
+    Ok(())
+}
+
+fn property_token_matches(source: &str, receiver: Span, property: Span, name: &str) -> bool {
+    let Some(mut gap) = trivia(&source[receiver.end as usize..property.start as usize]) else {
+        return false;
+    };
+    while let Some(rest) = gap.strip_prefix(')') {
+        let Some(rest) = trivia(rest) else {
+            return false;
+        };
+        gap = rest;
+    }
+    let Some(gap) = gap.strip_prefix('.').and_then(trivia) else {
+        return false;
+    };
+    if !gap.is_empty() {
+        return false;
+    }
+    // All non-ASCII nontrivia characters are conservatively token-continuing.
+    // This includes Unicode ID_Continue and escaped suffixes without a lexer.
+    if source[property.end as usize..]
+        .chars()
+        .next()
+        .is_some_and(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '$' | '\\')
+                || (!c.is_ascii() && !c.is_whitespace() && c != '\u{feff}')
+        })
+    {
+        return false;
+    }
+    identifier_matches(
+        &source[property.start as usize..property.end as usize],
+        name,
+    )
+}
+
+fn trivia(mut text: &str) -> Option<&str> {
+    loop {
+        text = text.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+        if let Some(comment) = text.strip_prefix("/*") {
+            text = &comment[comment.find("*/")? + 2..];
+        } else if let Some(comment) = text.strip_prefix("//") {
+            text = &comment[comment.find(['\n', '\r', '\u{2028}', '\u{2029}'])?..];
+        } else {
+            return Some(text);
+        }
+    }
+}
+
+// IdentifierName Unicode escapes are decoded without parsing or allocating on hits.
+fn identifier_matches(mut raw: &str, name: &str) -> bool {
+    let mut expected = name.chars();
+    while !raw.is_empty() {
+        let character = if let Some(escaped) = raw.strip_prefix("\\u") {
+            let (digits, rest) = if let Some(braced) = escaped.strip_prefix('{') {
+                let Some(end) = braced.find('}') else {
+                    return false;
+                };
+                (&braced[..end], &braced[end + 1..])
+            } else {
+                let Some(digits) = escaped.get(..4) else {
+                    return false;
+                };
+                (digits, &escaped[4..])
+            };
+            if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_hexdigit()) {
+                return false;
+            }
+            let Some(character) = u32::from_str_radix(digits, 16)
+                .ok()
+                .and_then(char::from_u32)
+            else {
+                return false;
+            };
+            raw = rest;
+            character
+        } else {
+            let character = raw.chars().next().unwrap();
+            raw = &raw[character.len_utf8()..];
+            character
+        };
+        if expected.next() != Some(character) {
+            return false;
+        }
+    }
+    expected.next().is_none()
+}
+
+fn lazy_construction<'a>(
+    facts: ModuleFacts<'a>,
+    source: &str,
+    segment: u32,
+    constructor: u32,
+    construction: Span,
+    arguments: Sequence<'a, SourceSlot<'a>>,
+) -> eyre::Result<Invocation<'a>> {
+    let recipe = facts
+        .emission()
+        .segments()
+        .get(segment as usize)
+        .ok_or_eyre("dangling lazy candidate segment")?;
+    span(source, construction)?;
+    ensure!(
+        construction.start < construction.end && recipe.source().contains(construction),
+        "invalid lazy construction span"
+    );
+    let call = facts
+        .invocations()
+        .iter()
+        .find(|i| i.span() == construction && i.construct())
+        .ok_or_eyre("dangling lazy construction")?;
+    let reference = facts
+        .references()
+        .get(constructor as usize)
+        .ok_or_eyre("dangling lazy constructor reference")?;
+    ensure!(
+        reference.read()
+            && !reference.write()
+            && !reference.type_only()
+            && contains(call.callee(), reference.span())
+            && matches!(call.shape(), CalleeShape::Identifier(id) if id.binding() == reference.binding() && id.name() == reference.name())
+            && call.arguments().len() == arguments.len(),
+        "invalid lazy constructor link"
+    );
+    let ranges: Vec<_> = recipe
+        .operations()
+        .iter()
+        .map(|o| o.kind().span(facts, recipe))
+        .collect();
+    for (argument, original) in arguments.iter().zip(call.arguments()) {
+        within(source, construction, argument.span())?;
+        ensure!(
+            argument.span() == original.span() && !original.spread()
+                || (original.spread()
+                    && contains(argument.span(), original.span())
+                    && argument.span().end == original.span().end
+                    && source[argument.span().start as usize..original.span().start as usize]
+                        .starts_with("...")),
+            "invalid lazy argument span"
+        );
+        let expected: Vec<_> = ranges
+            .iter()
+            .enumerate()
+            .filter(|&(i, &range)| {
+                contains(argument.span(), range)
+                    && !recipe
+                        .operations()
+                        .get(i)
+                        .unwrap()
+                        .parent()
+                        .is_some_and(|p| contains(argument.span(), ranges[p as usize]))
+            })
+            .map(|(i, _)| i as u32)
+            .collect();
+        ensure!(
+            argument.operations() == expected,
+            "invalid lazy source-slot composition"
+        );
+    }
+    Ok(call)
 }
 
 fn execution(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {

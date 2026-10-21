@@ -155,6 +155,29 @@ table VariableDeferred { binding:uint; initializer:SourceSlot; }
 union DeferredForm { UnsupportedDeferred, FunctionDeferred, EffectDeferred, VariableDeferred }
 table NamespaceProperty { name:string (required); receiver:bool; }
 table DynamicNamespace { dependency:uint; properties:[NamespaceProperty]; }
+enum LazyWrapperKind:ubyte { Unknown, LazyImport, LazyAction }
+table LazyModuleCandidate {
+  segment:uint;
+  binding:uint;
+  constructor:uint;
+  dependency:uint;
+  import_span:Span (required);
+  declaration:Span (required);
+  construction:Span (required);
+  arguments:[SourceSlot] (required);
+}
+table LazySelectorCandidate {
+  segment:uint;
+  kind:LazyWrapperKind;
+  constructor:uint;
+  module_binding:uint;
+  module_reference:uint;
+  getter_reference:uint;
+  property:string (required);
+  property_span:Span (required);
+  construction:Span (required);
+  arguments:[SourceSlot] (required);
+}
 table SegmentRecipe {
   source:[Span] (required);
   connector_only:bool;
@@ -171,6 +194,8 @@ table EmissionFacts {
   free_references:[uint] (required);
   dynamic_namespaces:[DynamicNamespace] (required);
   uses_this:bool;
+  lazy_modules:[LazyModuleCandidate] (required);
+  lazy_selectors:[LazySelectorCandidate] (required);
 }
 table ModuleFacts {
   ecco:ParsedFile;

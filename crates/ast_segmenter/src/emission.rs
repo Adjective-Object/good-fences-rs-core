@@ -17,6 +17,7 @@ pub use records::*;
 
 #[path = "dynamic_namespace.rs"]
 mod dynamic_namespace;
+mod lazy_candidates;
 
 impl OperationKind {
     /// Resolve ranges through existing occurrence IDs wherever possible.
@@ -384,6 +385,10 @@ pub(crate) fn extract(
         }
         compose(&mut recipe, facts);
         result.segments_mut().push(recipe);
+    }
+    if !facts.commonjs() {
+        let (modules, selectors) = lazy_candidates::extract(program, facts, result.segments());
+        result.set_lazy_candidates(modules, selectors);
     }
     result
 }

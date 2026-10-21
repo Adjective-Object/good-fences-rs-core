@@ -1,5 +1,171 @@
 use super::*;
 
+/// Spelling-only hints, never proof of linked runtime identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LazyWrapperKind {
+    Unknown,
+    LazyImport,
+    LazyAction,
+}
+
+impl LazyWrapperKind {
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "LazyImport" => Self::LazyImport,
+            "LazyAction" => Self::LazyAction,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LazyModuleCandidate {
+    segment: u32,
+    binding: BindingId,
+    constructor: u32,
+    dependency: DependencyId,
+    #[serde(with = "crate::owned::span_serde")]
+    import_span: Span,
+    #[serde(with = "crate::owned::span_serde")]
+    declaration: Span,
+    #[serde(with = "crate::owned::span_serde")]
+    construction: Span,
+    arguments: Vec<SourceSlot>,
+}
+
+impl LazyModuleCandidate {
+    pub(super) fn new(
+        segment: u32,
+        binding: BindingId,
+        constructor: u32,
+        callback: (DependencyId, Span),
+        declaration: Span,
+        construction: Span,
+        arguments: Vec<SourceSlot>,
+    ) -> Self {
+        let (dependency, import_span) = callback;
+        Self {
+            segment,
+            binding,
+            constructor,
+            dependency,
+            import_span,
+            declaration,
+            construction,
+            arguments,
+        }
+    }
+    pub fn segment(&self) -> u32 {
+        self.segment
+    }
+    pub fn binding(&self) -> BindingId {
+        self.binding
+    }
+    pub fn constructor(&self) -> u32 {
+        self.constructor
+    }
+    pub fn dependency(&self) -> DependencyId {
+        self.dependency
+    }
+    pub fn import_span(&self) -> Span {
+        self.import_span
+    }
+    pub fn declaration(&self) -> Span {
+        self.declaration
+    }
+    pub fn construction(&self) -> Span {
+        self.construction
+    }
+    pub fn arguments(&self) -> &[SourceSlot] {
+        &self.arguments
+    }
+    pub fn callback(&self) -> &SourceSlot {
+        &self.arguments[0]
+    }
+    pub fn options(&self) -> Option<&SourceSlot> {
+        self.arguments.get(1)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LazySelectorCandidate {
+    segment: u32,
+    kind: LazyWrapperKind,
+    constructor: u32,
+    module_binding: BindingId,
+    module_reference: u32,
+    getter_reference: u32,
+    property: String,
+    #[serde(with = "crate::owned::span_serde")]
+    property_span: Span,
+    #[serde(with = "crate::owned::span_serde")]
+    construction: Span,
+    arguments: Vec<SourceSlot>,
+}
+
+impl LazySelectorCandidate {
+    pub(super) fn new(
+        segment: u32,
+        constructor: u32,
+        module: (u32, BindingId),
+        getter: (u32, String, Span),
+        construction: Span,
+        arguments: Vec<SourceSlot>,
+        kind: LazyWrapperKind,
+    ) -> Self {
+        let (module_reference, module_binding) = module;
+        let (getter_reference, property, property_span) = getter;
+        Self {
+            segment,
+            kind,
+            constructor,
+            module_binding,
+            module_reference,
+            getter_reference,
+            property,
+            property_span,
+            construction,
+            arguments,
+        }
+    }
+    pub fn segment(&self) -> u32 {
+        self.segment
+    }
+    pub fn kind(&self) -> LazyWrapperKind {
+        self.kind
+    }
+    pub fn constructor(&self) -> u32 {
+        self.constructor
+    }
+    pub fn module_binding(&self) -> BindingId {
+        self.module_binding
+    }
+    pub fn module_reference(&self) -> u32 {
+        self.module_reference
+    }
+    pub fn getter_reference(&self) -> u32 {
+        self.getter_reference
+    }
+    pub fn property(&self) -> &str {
+        &self.property
+    }
+    pub fn property_span(&self) -> Span {
+        self.property_span
+    }
+    pub fn construction(&self) -> Span {
+        self.construction
+    }
+    pub fn arguments(&self) -> &[SourceSlot] {
+        &self.arguments
+    }
+    pub fn module_argument(&self) -> &SourceSlot {
+        &self.arguments[0]
+    }
+    pub fn getter(&self) -> &SourceSlot {
+        &self.arguments[1]
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DynamicNamespace {
     dependency: DependencyId,
@@ -41,6 +207,8 @@ pub struct EmissionFacts {
     nested_bindings: Vec<BindingId>,
     free_references: Vec<u32>,
     dynamic_namespaces: Vec<DynamicNamespace>,
+    lazy_modules: Vec<LazyModuleCandidate>,
+    lazy_selectors: Vec<LazySelectorCandidate>,
     uses_this: bool,
 }
 
@@ -59,12 +227,28 @@ impl EmissionFacts {
             nested_bindings,
             free_references,
             dynamic_namespaces,
+            lazy_modules: Vec::new(),
+            lazy_selectors: Vec::new(),
             uses_this,
         }
     }
 }
 
 impl EmissionFacts {
+    pub(super) fn set_lazy_candidates(
+        &mut self,
+        modules: Vec<LazyModuleCandidate>,
+        selectors: Vec<LazySelectorCandidate>,
+    ) {
+        self.lazy_modules = modules;
+        self.lazy_selectors = selectors;
+    }
+    pub fn lazy_modules(&self) -> &[LazyModuleCandidate] {
+        &self.lazy_modules
+    }
+    pub fn lazy_selectors(&self) -> &[LazySelectorCandidate] {
+        &self.lazy_selectors
+    }
     pub fn dynamic_namespaces(&self) -> &[DynamicNamespace] {
         &self.dynamic_namespaces
     }

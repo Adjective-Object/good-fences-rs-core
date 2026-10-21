@@ -125,6 +125,8 @@ ModuleFacts {
                 properties: None,
             },
         ],
+        lazy_modules: [],
+        lazy_selectors: [],
         uses_this: false,
     },
     bindings: [

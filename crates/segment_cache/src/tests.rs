@@ -18,6 +18,239 @@ fn envelope(record: &FixtureRecord) -> Vec<u8> {
 }
 
 #[test]
+fn lazy_candidates_roundtrip_borrowed_without_parsing_or_unpacking() {
+    let source =
+        "import { LazyModule as LM, LazyImport as LI, LazyAction as LA } from './runtime.mjs';
+        export const mod = new LM(() => import('./child.mjs'), options()),
+            a = new LI(mod, ns => ns.first, extra()),
+            b = new LA(mod, ns => ns.second, ...rest);
+        function shadow(LM, LI) {
+            const mod = new LM(() => import('./other.mjs'));
+            return new LI(mod, ns => ns.first);
+        }
+        const Unknown = LI;
+        const unknown = new Unknown(mod, ns => ns.first);
+        const unsupported = new LI(mod, ns => Object.keys(ns));
+        const called = new LI(mod, ns => ns.first());";
+    let fresh = ast_segmenter::parse_module(
+        &logger::StdioLogger::new(),
+        source,
+        Path::new("lazy.mjs"),
+        ModuleFormat::Esm,
+    )
+    .unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let original = CacheRecord::from_parsed(source, &fresh).unwrap();
+    let bytes = original.encode(source).unwrap();
+    let decoded = CacheRecord::decode(&bytes, source, original.config()).unwrap();
+    let cached = decoded.to_parsed(source).unwrap();
+    assert!(cached.owned_facts().is_err());
+    assert!(cached.owned_segments().is_none());
+    assert_eq!(cached.facts().emission(), fresh.facts().emission());
+    assert_eq!(cached.facts().emission().lazy_modules().len(), 2);
+    assert_eq!(cached.facts().emission().lazy_selectors().len(), 4);
+    assert_eq!(decoded.encode(source).unwrap(), bytes);
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    let property = cached
+        .facts()
+        .emission()
+        .lazy_selectors()
+        .get(0)
+        .unwrap()
+        .property();
+    assert_eq!(property, "first");
+    assert!(matches!(
+        cached.facts().emission().lazy_selectors().get(0).unwrap(),
+        ast_segmenter::views::LazySelectorCandidate::Wire(_)
+    ));
+}
+
+#[test]
+fn lazy_candidates_reject_corrupt_links_spans_slots_and_kind_hints() {
+    let source = "import { LazyModule as LM, LazyImport as LI } from './runtime.mjs';
+        const mod = new LM(() => import('./child.mjs'), options());
+        const a = new LI(mod, ns => ns.first);
+        const b = new LI(mod, ns => ns.second);";
+    let original = record(source, "lazy.mjs", ModuleFormat::Esm);
+    for edit in [
+        |v: &mut serde_json::Value| v.set("module.facts.emission.lazy_modules.0.segment", 99),
+        |v: &mut serde_json::Value| v.set("module.facts.emission.lazy_modules.0.binding", 99999),
+        |v: &mut serde_json::Value| {
+            v.set("module.facts.emission.lazy_modules.0.constructor", 99999)
+        },
+        |v: &mut serde_json::Value| v.add("module.facts.emission.lazy_modules.0.dependency", 1),
+        |v: &mut serde_json::Value| {
+            v.add("module.facts.emission.lazy_modules.0.construction.end", 1)
+        },
+        |v: &mut serde_json::Value| {
+            v.add("module.facts.emission.lazy_modules.0.declaration.start", 1)
+        },
+        |v: &mut serde_json::Value| {
+            v.add(
+                "module.facts.emission.lazy_modules.0.arguments.0.span.start",
+                1,
+            )
+        },
+        |v: &mut serde_json::Value| v.clear("module.facts.emission.lazy_modules.0.arguments"),
+        |v: &mut serde_json::Value| {
+            v.clear("module.facts.emission.lazy_modules.0.arguments.1.operations")
+        },
+        |v: &mut serde_json::Value| {
+            v.set("module.facts.emission.lazy_selectors.0.kind", "LazyAction")
+        },
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.emission.lazy_selectors.0.module_binding",
+                99999,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.copy(
+                "module.facts.emission.lazy_selectors.0.module_binding",
+                "module.facts.bindings.0.id",
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set(
+                "module.facts.emission.lazy_selectors.0.module_reference",
+                99999,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.copy(
+                "module.facts.emission.lazy_selectors.0.getter_reference",
+                "module.facts.emission.lazy_selectors.0.module_reference",
+            )
+        },
+        |v: &mut serde_json::Value| v.set("module.facts.emission.lazy_selectors.0.property", ""),
+        |v: &mut serde_json::Value| {
+            v.set("module.facts.emission.lazy_selectors.0.property", "second")
+        },
+        |v: &mut serde_json::Value| {
+            v.add(
+                "module.facts.emission.lazy_selectors.0.property_span.start",
+                1,
+            )
+        },
+        |v: &mut serde_json::Value| {
+            v.set("module.facts.emission.lazy_selectors.0.property", "irst");
+            v.add(
+                "module.facts.emission.lazy_selectors.0.property_span.start",
+                1,
+            );
+        },
+        |v: &mut serde_json::Value| {
+            v.set("module.facts.emission.lazy_selectors.0.property", "firs");
+            let end = v
+                .at("module.facts.emission.lazy_selectors.0.property_span.end")
+                .as_u64()
+                .unwrap();
+            v.set(
+                "module.facts.emission.lazy_selectors.0.property_span.end",
+                end - 1,
+            );
+        },
+        |v: &mut serde_json::Value| v.pop("module.facts.emission.lazy_selectors.0.arguments"),
+        |v: &mut serde_json::Value| v.reverse("module.facts.emission.lazy_selectors"),
+        |v: &mut serde_json::Value| {
+            v.push(
+                "module.facts.emission.lazy_selectors.0.arguments.1.operations",
+                99999,
+            )
+        },
+    ] {
+        let damaged = corrupt(&original, edit);
+        assert!(damaged.encode(source).is_err());
+        assert!(CacheRecord::decode(&damaged.envelope(true), source, original.config()).is_err());
+    }
+    for (field, version) in [("schema", 13), ("extractor", 17)] {
+        let stale = corrupt(&original, |v| v[field] = version.into());
+        assert!(CacheRecord::decode(&envelope(&stale), source, original.config()).is_err());
+    }
+}
+
+#[test]
+fn lazy_candidates_validate_returned_import_and_decoded_property_tokens() {
+    for options in [
+        "{ extra: () => import('./nested.mjs') }",
+        "{ extra: import('./nested.mjs') }",
+    ] {
+        let source = format!("const mod = new LM(() => (import('./returned.mjs')), {options});");
+        let original = record(&source, "lazy.mjs", ModuleFormat::Esm);
+        assert_eq!(original.module().facts().emission().lazy_modules().len(), 1);
+        let changed = corrupt(&original, |v| {
+            v.copy(
+                "module.facts.emission.lazy_modules.0.dependency",
+                "module.facts.dependencies.1.id",
+            )
+        });
+        assert!(CacheRecord::decode(&changed.envelope(true), &source, original.config()).is_err());
+        let changed = corrupt(&original, |v| {
+            v.copy(
+                "module.facts.emission.lazy_modules.0.import_span",
+                "module.facts.dependencies.1.span",
+            )
+        });
+        assert!(CacheRecord::decode(&changed.envelope(true), &source, original.config()).is_err());
+    }
+    let source = r"const mod = new LM(() => import('./child.mjs'));
+        const a = new LI(mod, ns => (((ns) /* receiver */)). /* decoy */ \u0066irst);
+        const b = new LI(mod, ns => ns.\u{03c0});
+        const c = new LI(mod, ns => ns.\u{1d49c});
+        const d = new LI(mod, ns => ns.東京);
+        const e = new LI(mod, ns => ns. // lineDecoy
+            first);";
+    let original = record(source, "lazy.mjs", ModuleFormat::Esm);
+    let decoded =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    assert_eq!(
+        decoded
+            .module()
+            .facts()
+            .emission()
+            .lazy_selectors()
+            .iter()
+            .map(|c| c.property())
+            .collect::<Vec<_>>(),
+        ["first", "π", "𝒜", "東京", "first"]
+    );
+    let parses = ast_segmenter::module_parse_count();
+    for index in 0..5 {
+        let changed = corrupt(&original, |v| {
+            v.set(
+                &format!("module.facts.emission.lazy_selectors.{index}.property"),
+                "other",
+            )
+        });
+        assert!(CacheRecord::decode(&changed.envelope(true), source, original.config()).is_err());
+    }
+    for (index, decoy) in [(0, "decoy"), (4, "lineDecoy")] {
+        let changed = corrupt(&original, |v| {
+            let start = source.find(decoy).unwrap();
+            v.set(
+                &format!("module.facts.emission.lazy_selectors.{index}.property"),
+                decoy,
+            );
+            v.set(
+                &format!("module.facts.emission.lazy_selectors.{index}.property_span"),
+                (start, start + decoy.len()),
+            );
+        });
+        assert!(CacheRecord::decode(&changed.envelope(true), source, original.config()).is_err());
+    }
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    let typed = record(
+        "const mod = new LM(() => import('./child.mjs'));
+        const a = new LI(mod, (ns: any) => ns.first);
+        const b = new LI(mod, (ns: any) => (ns as any).first);
+        const c = new LI(mod, (ns: any) => ns.first as any);",
+        "lazy.ts",
+        ModuleFormat::Esm,
+    );
+    assert_eq!(typed.module().facts().emission().lazy_selectors().len(), 1);
+}
+
+#[test]
 fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
     let source = "const target = 1; async function f(value = target) { target; (() => target)(); (async () => target)(); }";
     let original = record(source, "async.mjs", ModuleFormat::Esm);
