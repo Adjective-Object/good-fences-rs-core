@@ -1,0 +1,13 @@
+include "syntax.fbs";
+namespace source_cache;
+
+table EsmBody {}
+table CommonJsBody { span:Span (required); }
+union ModuleBody { EsmBody, CommonJsBody }
+table CachedModule {
+  body:ModuleBody (required);
+  segments:[Span] (required);
+  facts:ModuleFacts (required);
+}
+root_type CachedModule;
+file_identifier "GFSM";

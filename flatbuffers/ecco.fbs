@@ -1,0 +1,135 @@
+include "common.fbs";
+namespace source_cache;
+
+enum Hazard:ubyte {
+  PropertyRead, ToPrimitive, In, Instanceof, Call, Construct, Iterate, PrototypeRead
+}
+struct Hazards {
+  property_read:bool;
+  to_primitive:bool;
+  membership:bool;
+  instance_of:bool;
+  call:bool;
+  construct:bool;
+  iterate:bool;
+  prototype_read:bool;
+}
+
+table GlobalBinding { path:[string] (required); }
+table ModuleBinding { module:string (required); path:[string] (required); }
+table LocalBinding { name:string (required); }
+union EccoBindingValue { GlobalBinding, ModuleBinding, LocalBinding }
+table EccoBinding { value:EccoBindingValue (required); }
+
+table BooleanHazard { value:bool; }
+table UnknownHazard {}
+table ReadHazard { value:string (required); slot:Hazard; }
+table OrHazard { expressions:[HazardExpr] (required); }
+table CallHazard {
+  function:string (required);
+  arguments:[CallArgument] (required);
+  receiver:string;
+}
+union HazardExprValue { BooleanHazard, UnknownHazard, ReadHazard, OrHazard, CallHazard }
+table HazardExpr { value:HazardExprValue (required); }
+
+table ValueArgument { name:string (required); }
+table SpreadArgument { name:string (required); }
+table ForwardArgument {}
+union CallArgumentValue { ValueArgument, SpreadArgument, ForwardArgument }
+table CallArgument { value:CallArgumentValue (required); }
+table HazardField { slot:Hazard; expression:HazardExpr (required); }
+table HazardFields { default_expression:HazardExpr; fields:[HazardField] (required); }
+table FreshReturn {}
+table ArgumentReturn { name:string (required); }
+table VoidReturn {}
+table UnknownReturn {}
+union ReturnsValue { FreshReturn, ArgumentReturn, VoidReturn, UnknownReturn }
+table Returns { value:ReturnsValue (required); }
+table Update {
+  target:string (required);
+  slot:Hazard = null;
+  expression:HazardExpr (required);
+}
+table Definition {
+  binding:EccoBinding (required);
+  parameters:[string] (required);
+  rest:string;
+  variadic:bool;
+  hazards:HazardFields (required);
+  returns:Returns (required);
+  return_hazards:HazardFields (required);
+  updates:[Update] (required);
+}
+table GlobalSymbol { name:string (required); read_effects:bool; }
+table LocalFacts {
+  definitions:[Definition] (required);
+  global_symbols:[GlobalSymbol] (required);
+}
+
+// Interpreter-local usize IDs are explicitly 64-bit on wire, never OXC IDs.
+table FunctionSignature {
+  captures:[ulong] (required);
+  parameters:[ulong] (required);
+  receiver:ulong = null;
+  self_binding:ulong = null;
+  constructible:bool;
+  arguments:ulong = null;
+}
+table CallResult { value:ulong; effects:ulong; }
+table ValueInstruction { value:ulong; hazards:Hazards (required); }
+table AnyInstruction { effect:ulong; inputs:[ulong] (required); }
+table EqualityInstruction { effect:ulong; left:ulong; right:ulong; }
+table OperationInstruction { value:ulong; hazard:Hazard; }
+table UpdateInstruction { value:ulong; hazard:Hazard; effect:ulong; }
+table ReadInstruction { value:ulong; source:ulong; }
+table RetainInstruction { value:ulong; locals:[ulong] (required); }
+table BindInstruction { target:ulong; value:ulong; }
+table JoinInstruction { value:ulong; inputs:[ulong] (required); }
+table CallInstruction {
+  result:CallResult (required);
+  function:ulong;
+  arguments:[ulong] (required);
+  receiver:ulong;
+  construct:bool;
+}
+table ClosureInstruction { value:ulong; function:ulong; }
+table ExternalInstruction { value:ulong; reference:ulong; }
+table OpaqueInstruction {}
+union InstructionValue {
+  ValueInstruction, AnyInstruction, EqualityInstruction, OperationInstruction,
+  UpdateInstruction, ReadInstruction, RetainInstruction, BindInstruction,
+  JoinInstruction, CallInstruction, ClosureInstruction, ExternalInstruction,
+  OpaqueInstruction
+}
+table Instruction { value:InstructionValue (required); }
+// Strictly ascending effect keys preserve the BTreeMap identity and reject duplicates.
+table EffectSource { effect:ulong (key); value:ulong; hazard:Hazard; }
+table OwnedFunction {
+  signature:FunctionSignature (required);
+  instructions:[Instruction] (required);
+  returns:[ulong] (required);
+  effects:ulong = null;
+  sources:[EffectSource] (required);
+}
+table ParsedSymbol {
+  id:uint;
+  name:string (required);
+  span:Span (required);
+  value:ulong;
+}
+table ExternalReference { binding:EccoBinding (required); span:Span (required); }
+table ParsedRoot { span:Span (required); function:OwnedFunction (required); }
+table ParsedValue { hazards:Hazards (required); definition:ulong = null; alias:ulong = null; }
+table DefinitionMatch { span:Span (required); binding:EccoBinding (required); }
+table ParsedFile {
+  version:uint;
+  facts:LocalFacts (required);
+  values:[ParsedValue] (required);
+  functions:[OwnedFunction] (required);
+  setup:OwnedFunction (required);
+  symbols:[ParsedSymbol] (required);
+  roots:[ParsedRoot] (required);
+  externals:[ExternalReference] (required);
+  matches:[DefinitionMatch] (required);
+}
