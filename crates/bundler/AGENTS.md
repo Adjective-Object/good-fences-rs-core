@@ -232,7 +232,8 @@ summaries per owner, never transitive symbol sets or per-candidate owner scans.
 Pure prefixes before the first abrupt phase can use shared binding jobs only
 with explicit original-source imports after its static requests and before its
 body and the initialization projection proof. Preserve mandatory prefix-to-phase
-edges through those dependencies.
+edges through those dependencies. Retain original prefix SegmentKeys when
+rescheduling after owner remapping; owner-level dependencies cannot recover them.
 Never apply prefix movement to SCCs, async closures, forward refs or opaque inputs.
 The single-entrance fast path is bounded to a complete acyclic synchronous closure
 and checks its explicit source-ordered segment schedule against mandatory edges.
