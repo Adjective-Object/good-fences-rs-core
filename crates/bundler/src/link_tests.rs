@@ -336,6 +336,390 @@ fn deferred_esm_rejects_repaired_source_and_stale_policy() {
     assert!(deferred_esm(&graph, &plan, &changed_policy, &input).is_err());
 }
 
+fn activated(
+    input: &BTreeMap<PathBuf, String>,
+    placements: &[(&str, &str)],
+) -> Artifacts<crate::assembly::Code> {
+    let (graph, plan, _) = canonical(input, false);
+    let placements = placements
+        .iter()
+        .map(|(file, owner)| {
+            (
+                graph.file_id(Path::new(file)).unwrap(),
+                graph.file_id(Path::new(owner)).unwrap(),
+            )
+        })
+        .collect();
+    let parses = ast_segmenter::module_parse_count();
+    let output = esm_plan_activated(
+        &graph,
+        &plan,
+        &EffectPolicy::default(),
+        input,
+        &BTreeMap::new(),
+        &placements,
+    )
+    .unwrap();
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    output
+}
+
+fn observe_activated(mut output: Artifacts, observer: &str) {
+    output.files.insert(
+        PathBuf::from("observe.mjs"),
+        format!(
+            "import assert from 'node:assert/strict';\n\
+         globalThis.trace = [];\n\
+         const entry = await import({});\n{}",
+            quote(&format!("./{}", output.entries["entry"].display())),
+            observer,
+        ),
+    );
+    let actual = node(&output.files, Path::new("observe.mjs"));
+    assert!(
+        actual.status.success(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+}
+
+#[test]
+fn activated_esm_empty_local_target_initializes_without_retained_segments() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function load() { return import('./child.mjs'); }",
+        ),
+        ("child.mjs", ""),
+    ]);
+    let output = activated(&input, &[("child.mjs", "entry.mjs")])
+        .render()
+        .unwrap();
+    assert_eq!(output.files.len(), 1);
+    observe_activated(
+        output,
+        "const [a, b] = await Promise.all([entry.load(), entry.load()]);\n\
+         assert.equal(a, b);\n\
+         assert.deepEqual(Object.keys(a), []);\n\
+         assert.equal(await entry.load(), a);",
+    );
+}
+
+#[test]
+fn activated_esm_local_import_is_async_guarded_once_and_live() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export const Promise = null; \
+             export function load(enabled = true) { return enabled && import('./child.mjs'); }",
+        ),
+        (
+            "child.mjs",
+            "const secret = (trace.push('child'), {}); export let count = 0; \
+         export function read() { return secret; } export function increment() { return ++count; } \
+         export function receiver() { return this; }",
+        ),
+    ]);
+    let output = activated(&input, &[("child.mjs", "entry.mjs")])
+        .render()
+        .unwrap();
+    assert_eq!(output.files.len(), 1);
+    observe_activated(
+        output,
+        "assert.deepEqual(trace, []);\n\
+         assert.equal(entry.load(false), false);\n\
+         assert.deepEqual(trace, []);\n\
+         const first = entry.load(), second = entry.load();\n\
+         assert.deepEqual(trace, []);\n\
+         const [a, b] = await Promise.all([first, second]);\n\
+         assert.equal(a, b);\n\
+         assert.equal(a.receiver(), a);\n\
+         const read = a.read, secret = read();\n\
+         assert.equal(typeof secret, 'object');\n\
+         assert.equal(a.increment(), 1);\n\
+         assert.equal(a.count, 1);\n\
+         assert.equal(await entry.load(), a);\n\
+         assert.equal(a.read, read); assert.equal(a.read(), secret);\n\
+         assert.deepEqual(trace, ['child']);",
+    );
+}
+
+#[test]
+fn activated_esm_recipes_preserve_guards_receivers_and_argument_order() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export async function invoke(enabled) { \
+         return enabled && sink(first(), (await import('./child.mjs')).method(second())); } \
+         export function unused(enabled) { return enabled && import('./unused.mjs'); }",
+        ),
+        (
+            "child.mjs",
+            "trace.push('child'); export const value = 3; \
+         export function method(arg) { trace.push('method'); return this.value + arg; }",
+        ),
+        (
+            "unused.mjs",
+            "trace.push('unused'); export const unused = 1;",
+        ),
+    ]);
+    for owner in ["entry.mjs", "child.mjs"] {
+        let output = activated(&input, &[("child.mjs", owner), ("unused.mjs", owner)])
+            .render()
+            .unwrap();
+        observe_activated(
+            output,
+            "globalThis.first = () => (trace.push('first'), 1);\n\
+             globalThis.second = () => (trace.push('second'), 2);\n\
+             globalThis.sink = (a, b) => (trace.push('sink'), a + b);\n\
+             assert.equal(await entry.invoke(false), false);\n\
+             assert.equal(entry.unused(false), false);\n\
+             assert.deepEqual(trace, []);\n\
+             assert.equal(await entry.invoke(true), 6);\n\
+             assert.deepEqual(trace, ['first', 'child', 'second', 'method', 'sink']);",
+        );
+    }
+}
+
+#[test]
+fn activated_esm_cross_chunk_requests_survive_final_naming() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function load() { return import('./child.mjs'); }",
+        ),
+        ("child.mjs", "trace.push('child'); export const value = {};"),
+    ]);
+    let planned = activated(&input, &[("child.mjs", "child.mjs")]);
+    let destinations = planned
+        .files
+        .keys()
+        .enumerate()
+        .map(|(index, path)| {
+            (
+                path.clone(),
+                PathBuf::from(format!("renamed/depth-{index}/output.mjs")),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut output = planned.render_to(&destinations).unwrap();
+    for path in output.entries.values_mut() {
+        *path = destinations[path].clone();
+    }
+    let target = destinations[&output.async_facades.values().next().unwrap().clone()].clone();
+    observe_activated(
+        output,
+        &format!(
+            "assert.deepEqual(trace, []);\n\
+         await import({});\n\
+         assert.deepEqual(trace, []);\n\
+         const pending = entry.load();\n\
+         assert.deepEqual(trace, []);\n\
+         const [a, b] = await Promise.all([pending, entry.load()]);\n\
+         assert.equal(a, b); assert.equal(typeof a.value, 'object');\n\
+         assert.equal(await entry.load(), a);\n\
+         assert.deepEqual(trace, ['child']);",
+            quote(&format!("./{}", target.display())),
+        ),
+    );
+}
+
+#[test]
+fn activated_esm_missing_native_chunk_rejects_at_the_original_use() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export async function load() { \
+         try { return await import('./child.mjs'); } catch (error) { \
+         trace.push('caught'); return error.code; } }",
+        ),
+        ("child.mjs", "trace.push('child'); export const value = 1;"),
+    ]);
+    let mut output = activated(&input, &[("child.mjs", "child.mjs")])
+        .render()
+        .unwrap();
+    let target = output.async_facades.values().next().unwrap().clone();
+    output.files.remove(&target).unwrap();
+    observe_activated(
+        output,
+        "assert.deepEqual(trace, []);\n\
+         assert.equal(await entry.load(), 'ERR_MODULE_NOT_FOUND');\n\
+         assert.deepEqual(trace, ['caught']);",
+    );
+}
+
+#[test]
+fn activated_esm_static_dependencies_activate_inside_the_dependent_in_source_order() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function load() { return import('./child.mjs'); }",
+        ),
+        (
+            "child.mjs",
+            "import * as zns from './z.mjs'; import {a} from './a.mjs'; \
+         trace.push('child'); export const value = zns.z + a;",
+        ),
+        (
+            "z.mjs",
+            "import './shared.mjs'; trace.push('z'); export const z = 1;",
+        ),
+        (
+            "a.mjs",
+            "import './shared.mjs'; trace.push('a'); export const a = 2;",
+        ),
+        ("shared.mjs", "trace.push('shared');"),
+    ]);
+    for owner in ["entry.mjs", "child.mjs"] {
+        for colocated_dependencies in [false, true] {
+            let mut placements = vec![("child.mjs", owner)];
+            if colocated_dependencies {
+                placements.extend([("z.mjs", owner), ("a.mjs", owner), ("shared.mjs", owner)]);
+            }
+            let output = activated(&input, &placements).render().unwrap();
+            observe_activated(
+                output,
+                "assert.deepEqual(trace, []);\n\
+             const [a, b] = await Promise.all([entry.load(), entry.load()]);\n\
+             assert.equal(a, b); assert.equal(a.value, 3);\n\
+             assert.deepEqual(trace, ['shared', 'z', 'a', 'child']);",
+            );
+        }
+    }
+}
+
+#[test]
+fn activated_esm_static_failure_and_reexport_reads_share_the_dependency_guard() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function load() { return import('./child.mjs'); }",
+        ),
+        (
+            "child.mjs",
+            "import './dep.mjs'; import {value} from './dep.mjs'; \
+             export {value, change} from './dep.mjs'; trace.push('child');",
+        ),
+        (
+            "dep.mjs",
+            "trace.push('dep'); export let value = 1; export function change() { value++; }",
+        ),
+    ]);
+    let output = activated(&input, &[("child.mjs", "entry.mjs")])
+        .render()
+        .unwrap();
+    observe_activated(
+        output,
+        "assert.deepEqual(trace, []);\n\
+             const a = await entry.load(); assert.equal(a.value, 1);\n\
+             a.change(); assert.equal(a.value, 2);\n\
+             assert.deepEqual(trace, ['dep', 'child']);\n\
+             assert.equal(await entry.load(), a);",
+    );
+
+    let mut input = input;
+    input.insert(
+        PathBuf::from("dep.mjs"),
+        "trace.push('dep'); throw undefined; export let value = 1; export function change() {}"
+            .into(),
+    );
+    let output = activated(&input, &[("child.mjs", "entry.mjs")])
+        .render()
+        .unwrap();
+    observe_activated(
+        output,
+        "const results = await Promise.allSettled([entry.load(), entry.load(), entry.load()]);\n\
+             for (const result of results) {\n\
+               assert.equal(result.status, 'rejected'); assert.equal(result.reason, undefined);\n\
+             }\n\
+             assert.deepEqual(trace, ['dep']);",
+    );
+}
+
+#[test]
+fn activated_esm_failure_rejects_in_original_try_context_and_is_cached() {
+    for owner in ["entry.mjs", "child.mjs"] {
+        for thrown in ["undefined", "null", "0", "'failure'", "{reason: 1}"] {
+            let input = sources(&[
+                (
+                    "entry.mjs",
+                    "export function load() { return import('./child.mjs'); } \
+                 export async function caught() { try { await import('./child.mjs'); } \
+                 catch (error) { trace.push('caught'); return {error}; } }",
+                ),
+                (
+                    "child.mjs",
+                    "trace.push('child'); throw globalThis.thrown; export const value = 1;",
+                ),
+            ]);
+            let output = activated(&input, &[("child.mjs", owner)]).render().unwrap();
+            observe_activated(
+                output,
+                &format!(
+                    "globalThis.thrown = {thrown};\n\
+                 const first = entry.load(), second = entry.load();\n\
+                 assert.deepEqual(trace, []);\n\
+                 const results = await Promise.allSettled([first, second]);\n\
+                 for (const result of results) {{\n\
+                   assert.equal(result.status, 'rejected'); assert.equal(result.reason, thrown);\n\
+                 }}\n\
+                 assert.deepEqual(await entry.caught(), {{error: thrown}});\n\
+                 assert.deepEqual(await entry.caught(), {{error: thrown}});\n\
+                 assert.deepEqual(trace, ['child', 'caught', 'caught']);"
+                ),
+            );
+        }
+    }
+}
+
+#[test]
+fn activated_esm_unsupported_targets_keep_native_boundaries() {
+    for source in [
+        "export const value = await Promise.resolve(1);",
+        "export class Thing {}",
+        "export const {x} = {x: 1};",
+        "export default function () {}",
+        "export const value = 1; export function write() { value = 2; }",
+        "export function then(resolve) { resolve(1); }",
+        "export * as namespace from './dep.mjs';",
+        "import * as ns from './dep.mjs'; export const value = ns;",
+        "import './dep.mjs'; export const value = 1;",
+    ] {
+        let input = sources(&[
+            (
+                "entry.mjs",
+                "export function load() { return import('./child.mjs'); }",
+            ),
+            ("child.mjs", source),
+            ("dep.mjs", "import './child.mjs'; export const value = 1;"),
+        ]);
+        let output = activated(&input, &[("child.mjs", "entry.mjs")])
+            .render()
+            .unwrap();
+        assert!(
+            !output
+                .files
+                .values()
+                .any(|code| code.contains("Unsupported deferred ESM reentry")),
+            "{source}"
+        );
+    }
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function read() { return import('./child.mjs'); }",
+        ),
+        ("child.mjs", "export function read() { return 1; }"),
+    ]);
+    let output = activated(&input, &[("child.mjs", "entry.mjs")])
+        .render()
+        .unwrap();
+    assert!(!output
+        .files
+        .values()
+        .any(|code| code.contains("Unsupported deferred ESM reentry")));
+}
+
 #[test]
 fn native_concatenation_preserves_late_import_statement_boundaries() {
     assert_native_observation(

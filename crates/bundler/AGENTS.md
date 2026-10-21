@@ -145,6 +145,13 @@ Explicit deferred reconstruction shares native recipes/name gates: keep function
 and var-lowered bindings at ESM root, defer assignments/effects in source order,
 cache success/all thrown values separately, and reject reentry. Only this opt-in
 synchronous acyclic mode waives TDZ; ordinary native emission remains unchanged.
+Internal esm_plan_activated accepts explicit certified placements only; default
+prepared emission passes none. Deferred closures keep one root-binding guard per
+source, with source-ordered static activation inside the guard. Dynamic recipe
+operations yield before local activation or load the final typed owner then
+invoke its exported guard. Per-island getter literals support certified live
+reads/receivers/identity only; reflective/escaped namespaces remain native.
+Availability owners are not independently executable source namespace routes.
 
 The symbol linker emits scope-hoisted direct ESM bindings; the rejected
 registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is

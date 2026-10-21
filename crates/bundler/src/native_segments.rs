@@ -549,6 +549,7 @@ pub(super) fn emit(
     surfaces: &BTreeSet<u32>,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
+    activations: Option<&Activations>,
 ) -> eyre::Result<Code> {
     let live: BTreeSet<_> = placement
         .owners
@@ -562,6 +563,14 @@ pub(super) fn emit(
         .iter()
         .map(|(&f, &o)| (f, Code::request(path(graph, o), RequestKind::DynamicImport)))
         .collect();
+    if let Some(activations) = activations {
+        for &target in activations.initializers.keys() {
+            values.dynamic.insert(
+                target,
+                activations.dynamic(graph, target, &root.path(graph)),
+            );
+        }
+    }
     for (&file, module) in modules {
         for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
             !d.type_only
@@ -639,11 +648,23 @@ pub(super) fn emit(
     let mut relocated: Vec<_> = live
         .iter()
         .map(|k| k.file_id)
-        .filter(|f| !group.contains(f))
+        .filter(|f| {
+            !group.contains(f) || activations.is_some_and(|a| a.initializers.contains_key(f))
+        })
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    if let Some(activations) = activations {
+        relocated.extend(
+            activations
+                .initializers
+                .keys()
+                .filter(|file| Owner::Evaluation(seams[file]) == root)
+                .copied(),
+        );
+    }
     relocated.sort_by_key(|&f| graph.file_path(f));
+    relocated.dedup();
     relocated.extend(order);
     let mut ordered = Vec::new();
     let owned_files: BTreeSet<_> = relocated.iter().copied().collect();
@@ -720,6 +741,17 @@ pub(super) fn emit(
             } else {
                 continue;
             };
+            if let ExportIdentity::Namespace(target) = identity {
+                if let Some(initialization) = activations.and_then(|a| a.initializers.get(&target))
+                {
+                    if Owner::Evaluation(seams[&target]) == root {
+                        values
+                            .imports
+                            .insert((file, binding.id), initialization.namespace.clone());
+                        continue;
+                    }
+                }
+            }
             let owner = declaration(graph, &identity)?.map(|key| placement.owners[&key]);
             let readonly = binding.import
                 && modules[&file]
@@ -756,6 +788,18 @@ pub(super) fn emit(
                             &alias,
                         )?);
                     }
+                    ExportIdentity::Namespace(target)
+                        if activations.is_some_and(|a| a.initializers.contains_key(target)) =>
+                    {
+                        let namespace = &activations.unwrap().initializers[target].namespace;
+                        output.push(
+                            Code::request(path(graph, seams[target]), RequestKind::Import)
+                                .surrounded(
+                                    format!("import {{{namespace} as {alias}}} from "),
+                                    ";\n",
+                                ),
+                        );
+                    }
                     ExportIdentity::Namespace(target) => output.push(
                         Code::request(path(graph, seams[target]), RequestKind::Import)
                             .surrounded(format!("import * as {alias} from "), ";\n"),
@@ -787,11 +831,80 @@ pub(super) fn emit(
     }
     let mut bodies = Code::default();
     for file in relocated {
-        let (hoisted, body) = body(graph, file, &modules[&file], &values, &live, recipes)?
-            .ok_or_eyre("relocated lexical group changed compatibility")?;
+        let initialization = activations.and_then(|a| a.initializers.get(&file));
+        let (hoisted, mut body) = reconstruct(
+            graph,
+            file,
+            &modules[&file],
+            &values,
+            &live,
+            recipes,
+            initialization.is_some(),
+        )?
+        .ok_or_eyre("relocated lexical group changed compatibility")?;
         output.push(hoisted);
-        bodies.push(body);
-        bodies.push_str("\n;\n");
+        if let Some(initialization) = initialization {
+            let activations = activations.unwrap();
+            let mut dependencies = Code::default();
+            for dependency in modules[&file].parsed.facts.dependencies.iter().filter(|d| {
+                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            }) {
+                let target = target_file(graph, file, dependency)?;
+                let target_init = &activations.initializers[&target].init;
+                if Owner::Evaluation(seams[&target]) != root && imported.insert(target_init.clone())
+                {
+                    output.push(
+                        Code::request(path(graph, seams[&target]), RequestKind::Import)
+                            .surrounded(format!("import {{{target_init}}} from "), ";\n"),
+                    );
+                }
+                dependencies.push_str(&format!("{target_init}();\n"));
+            }
+            dependencies.push(body);
+            body = initialization.guard(dependencies);
+            output.push(body);
+            let mut getters = String::new();
+            for (index, (name, linked)) in symbols.exports[&file].iter().enumerate() {
+                let key = declaration(graph, &linked.identity)?
+                    .ok_or_eyre("nonlexical deferred namespace export")?;
+                let owner = placement.owners[&key];
+                let value = if owner == root {
+                    values
+                        .name(&linked.identity)
+                        .ok_or_eyre("missing deferred namespace binding")?
+                        .to_owned()
+                } else {
+                    let mut alias = format!("{}_{}", initialization.namespace, index);
+                    while !occupied.insert(alias.clone()) {
+                        alias.push('$');
+                    }
+                    output.push(
+                        Code::request(owner.path(graph), RequestKind::Import).surrounded(
+                            format!(
+                                "import {{{} as {alias}}} from ",
+                                quote(&address(graph, &linked.identity, owner, surfaces, &values)?)
+                            ),
+                            ";\n",
+                        ),
+                    );
+                    alias
+                };
+                getters.push_str(&format!("get {}() {{ return {value}; }},\n", quote(name)));
+            }
+            output.push_str(&format!(
+                "var {} = {{__proto__: null,\n{getters}}};\n",
+                initialization.namespace
+            ));
+            if activations.exports.contains(&file) {
+                output.push_str(&format!(
+                    "export {{{}, {}}};\n",
+                    initialization.init, initialization.namespace
+                ));
+            }
+        } else {
+            bodies.push(body);
+            bodies.push_str("\n;\n");
+        }
     }
     output.push(bodies);
     let mut exported = BTreeSet::new();
