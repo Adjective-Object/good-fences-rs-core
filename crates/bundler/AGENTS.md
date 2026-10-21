@@ -168,6 +168,13 @@ operations yield before local activation or load the final typed owner then
 invoke its exported guard. Per-island getter literals support certified live
 reads/receivers/identity only; reflective/escaped namespaces remain native.
 Availability owners are not independently executable source namespace routes.
+Small libraries use output.min_chunk_bytes (zero disables), retained recipe-piece
+byte sums and exact node_roots masks. Greedy path/segment seeds rank against the
+current union by Jaccard overlap; never merge disjoint or individually large
+islands. Physical ownership never replaces logical reachability. Effectful
+members reuse checked source guards; guard their synchronous closure without
+stealing existing parent/static owners. Pure binding merges must not introduce
+evaluation imports or import cycles. Keep requests typed through final naming.
 
 The symbol linker emits scope-hoisted direct ESM bindings; the rejected
 registration/cell/alias/subscriber/generator-dispatch/capture-cycle backend is

@@ -138,8 +138,12 @@ function validateFixtureConfig(config) {
   object(config, [], 'fixtureConfig', ['output', 'css']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
   if (Object.hasOwn(config, 'output')) {
-    object(config.output, [], 'fixtureConfig.output', ['base_url']);
+    object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes']);
     if (Object.hasOwn(config.output, 'base_url')) text(config.output.base_url, 'output.base_url');
+    if (Object.hasOwn(config.output, 'min_chunk_bytes')) {
+      check(Number.isSafeInteger(config.output.min_chunk_bytes) && config.output.min_chunk_bytes >= 0,
+        'output.min_chunk_bytes must be a nonnegative safe integer');
+    }
   }
   if (Object.hasOwn(config, 'css')) {
     object(config.css, [], 'fixtureConfig.css', ['load', 'css_modules']);

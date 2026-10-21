@@ -11,6 +11,8 @@ mod segments;
 
 #[path = "native_connections.rs"]
 mod connections;
+#[path = "native_libraries.rs"]
+mod libraries;
 
 pub(super) fn emit(
     graph: &SourceGraph,
@@ -19,7 +21,7 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
 ) -> eyre::Result<Artifacts<Code>> {
-    emit_inner(graph, plan, modules, manifest, symbols, None)
+    emit_inner(graph, plan, modules, manifest, symbols, None, 0)
 }
 
 pub(super) fn emit_activated(
@@ -29,11 +31,31 @@ pub(super) fn emit_activated(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
     placements: &BTreeMap<u32, u32>,
+    min_chunk_bytes: usize,
 ) -> eyre::Result<Artifacts<Code>> {
+    if placements.is_empty() {
+        return emit_inner(
+            graph,
+            plan,
+            modules,
+            manifest,
+            symbols,
+            None,
+            min_chunk_bytes,
+        );
+    }
     let Some(activations) = Activations::checked(graph, plan, modules, symbols, placements)? else {
         return super::ordinary(graph, plan, modules, manifest, symbols);
     };
-    emit_inner(graph, plan, modules, manifest, symbols, Some(&activations))
+    emit_inner(
+        graph,
+        plan,
+        modules,
+        manifest,
+        symbols,
+        Some(&activations),
+        min_chunk_bytes,
+    )
 }
 
 fn emit_inner(
@@ -43,6 +65,7 @@ fn emit_inner(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
     activations: Option<&Activations>,
+    min_chunk_bytes: usize,
 ) -> eyre::Result<Artifacts<Code>> {
     let mut entry_owners = BTreeMap::new();
     let mut async_targets = BTreeMap::new();
@@ -227,8 +250,24 @@ fn emit_inner(
             pending.extend(edges[&file].iter().copied());
         }
     }
+    let groups = jobs.iter().map(|&file| (file, BTreeSet::from([file]))).collect();
+    let clustered = libraries::cluster(
+        graph,
+        plan,
+        modules,
+        symbols,
+        &groups,
+        &redirects,
+        &live,
+        &cjs,
+        activations,
+        min_chunk_bytes,
+    )?;
+    let activations = clustered.as_ref().or(activations);
     if let Some(activations) = activations {
         for (&file, &owner) in &activations.owners {
+            let file = owners[&file];
+            let owner = owners[&owner];
             if file == owner {
                 continue;
             }
@@ -275,11 +314,13 @@ fn emit_inner(
             let retained = placement.schedule(owner).iter().copied().collect();
             for file in placement.schedule(owner).iter().map(|key| key.file_id).collect::<BTreeSet<_>>() {
                 if !compatible(graph, file, &modules[&file], &values, &retained)? {
-                    return super::emit(graph, plan, modules, manifest, symbols, &BTreeMap::new());
+                    return super::ordinary(graph, plan, modules, manifest, symbols);
                 }
             }
         }
     }
+    placement.cluster(graph, plan, modules, symbols, &owners, min_chunk_bytes)?;
+    placement.reschedule(graph, plan, modules, symbols, &owners)?;
     let resolved_activations = activations
         .map(|activations| {
             let mut resolved = activations.clone();

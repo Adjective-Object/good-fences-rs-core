@@ -80,12 +80,15 @@ impl CssLoad {
 pub struct OutputOptions {
     /// Public resource directory URL, relative to the output root by default.
     pub base_url: String,
+    /// Approximate retained UTF-8 bytes per small native library; zero disables clustering.
+    pub min_chunk_bytes: usize,
 }
 
 impl Default for OutputOptions {
     fn default() -> Self {
         Self {
             base_url: "./".into(),
+            min_chunk_bytes: 0,
         }
     }
 }
@@ -511,6 +514,7 @@ impl BuildSession {
                 include_str!("symbols.rs"),
                 include_str!("native.rs"),
                 include_str!("native_chunks.rs"),
+                include_str!("native_libraries.rs"),
                 include_str!("native_segments.rs"),
                 include_str!("native_cjs.rs"),
                 include_str!("cjs.rs"),
@@ -535,12 +539,13 @@ impl BuildSession {
         );
         fingerprints.output = hash(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
                 options.css,
                 styles.identities(),
+                options.output.min_chunk_bytes,
             )
             .as_bytes(),
         );
@@ -581,8 +586,15 @@ impl BuildSession {
             .collect();
         let plan = chunks::partition(&graph, &roots, &options.effects)?;
         warnings.extend(plan.retention.warnings.iter().cloned());
-        let mut artifacts =
-            link::esm_plan_prepared(&graph, &plan, &options.effects, &sources, &relocations)?;
+        let mut artifacts = link::esm_plan_configured(
+            &graph,
+            &plan,
+            &options.effects,
+            &sources,
+            &relocations,
+            &BTreeMap::new(),
+            options.output.min_chunk_bytes,
+        )?;
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
             let kind = crate::resource::kind(path, &options.css.css_modules);
