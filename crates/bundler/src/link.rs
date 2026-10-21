@@ -149,6 +149,29 @@ pub fn esm(
     esm_plan(graph, plan, policy, sources)?.render()
 }
 
+/// Emit native chunks with the same small-library size policy as BuildSession.
+/// Resource URL preparation remains the public build's responsibility.
+pub fn esm_with_options(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    policy: &EffectPolicy,
+    sources: &BTreeMap<PathBuf, String>,
+    options: &crate::build::OutputOptions,
+) -> eyre::Result<Artifacts> {
+    esm_plan_configured(
+        graph,
+        plan,
+        policy,
+        sources,
+        &BTreeMap::new(),
+        false,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        options.min_chunk_bytes,
+    )?
+    .render()
+}
+
 /// Explicit reconstruction only: no activation calls or physical placement policy.
 /// `None` means the island must retain ordinary native evaluation.
 pub fn deferred_esm(
@@ -199,7 +222,7 @@ pub(crate) fn esm_plan_prepared(
     browser: bool,
     require_defaults: &BTreeSet<PathBuf>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_activated_prepared(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new())
+    esm_plan_configured(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new(), 0)
 }
 
 /// Internal placement; an empty selection derives single-parent placements.
@@ -214,10 +237,10 @@ pub(crate) fn esm_plan_activated(
     relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
     placements: &BTreeMap<u32, u32>,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    esm_plan_activated_prepared(graph, plan, policy, sources, relocations, false, &BTreeSet::new(), placements)
+    esm_plan_configured(graph, plan, policy, sources, relocations, false, &BTreeSet::new(), placements, 0)
 }
 
-fn esm_plan_activated_prepared(
+pub(crate) fn esm_plan_configured(
     graph: &SourceGraph,
     plan: &ChunkPlan,
     policy: &EffectPolicy,
@@ -226,6 +249,7 @@ fn esm_plan_activated_prepared(
     browser: bool,
     require_defaults: &BTreeSet<PathBuf>,
     placements: &BTreeMap<u32, u32>,
+    min_chunk_bytes: usize,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
@@ -234,7 +258,17 @@ fn esm_plan_activated_prepared(
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
     }
-    native::emit(graph, plan, &modules, &manifest, &symbols, browser, require_defaults, placements)
+    native::emit(
+        graph,
+        plan,
+        &modules,
+        &manifest,
+        &symbols,
+        browser,
+        require_defaults,
+        placements,
+        min_chunk_bytes,
+    )
 }
 
 fn load_modules<'a>(

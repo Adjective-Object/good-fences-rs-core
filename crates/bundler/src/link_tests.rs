@@ -391,6 +391,420 @@ fn automatically_hoisted(input: &BTreeMap<PathBuf, String>) -> Artifacts {
     output
 }
 
+fn clustered(input: &BTreeMap<PathBuf, String>, target: usize) -> (ChunkPlan, Artifacts) {
+    let (graph, plan, _) = canonical(input, false);
+    let parses = ast_segmenter::module_parse_count();
+    let output = esm_with_options(
+        &graph,
+        &plan,
+        &EffectPolicy::default(),
+        input,
+        &crate::build::OutputOptions {
+            min_chunk_bytes: target,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    (plan, output)
+}
+
+fn library_input(failure: bool) -> BTreeMap<PathBuf, String> {
+    let mut input = sources(&[
+        (
+            "entry.mjs",
+            "export async function a() { return (await import('./root-a.mjs')).read(); } \
+          export async function b() { return (await import('./root-b.mjs')).read(); } \
+          export async function c() { return (await import('./root-c.mjs')).read(); }",
+        ),
+        (
+            "lib-x.mjs",
+            "trace.push('x'); const secret = {}; export let count = 0; \
+          export function readX() { count++; return [secret, readX, count]; }",
+        ),
+        (
+            "lib-y.mjs",
+            if failure {
+                "trace.push('y'); throw undefined; export function readY() { return 7; }"
+            } else {
+                "trace.push('y'); export function readY() { return 7; }"
+            },
+        ),
+    ]);
+    for (file, deps, body) in [
+        (
+            "root-a.mjs",
+            "import {readX} from './lib-x.mjs';",
+            "return readX();",
+        ),
+        (
+            "root-b.mjs",
+            "import {readX} from './lib-x.mjs'; import {readY} from './lib-y.mjs';",
+            "return [readX(), readY()];",
+        ),
+        (
+            "root-c.mjs",
+            "import {readY} from './lib-y.mjs';",
+            "return readY();",
+        ),
+    ] {
+        input.insert(
+            file.into(),
+            format!(
+                "{deps} export function read() {{ if (false) return '{}'; {body} }}",
+                "padding".repeat(400)
+            ),
+        );
+    }
+    input
+}
+
+fn module_owner<'a>(output: &'a Artifacts, file: &str) -> &'a PathBuf {
+    &output.members[&NodeId::Module(file.into())]
+}
+
+#[test]
+fn libraries_merge_different_overlapping_masks_without_coactivation_or_binding_copies() {
+    let input = library_input(false);
+    let (plan, output) = clustered(&input, 1024);
+    let x = NodeId::Module("lib-x.mjs".into());
+    let y = NodeId::Module("lib-y.mjs".into());
+    assert_ne!(plan.node_roots[&x], plan.node_roots[&y]);
+    assert_eq!(
+        plan.node_roots[&x]
+            .intersection(&plan.node_roots[&y])
+            .count(),
+        1
+    );
+    assert_eq!(output.members[&x], output.members[&y]);
+    assert_ne!(
+        module_owner(&output, "lib-x.mjs"),
+        module_owner(&output, "root-a.mjs")
+    );
+    assert_eq!(clustered(&input, 1024).1, output);
+    assert_ne!(
+        module_owner(&clustered(&input, 0).1, "lib-x.mjs"),
+        module_owner(&clustered(&input, 0).1, "lib-y.mjs")
+    );
+    observe_activated(
+        output,
+        "assert.deepEqual(trace, []); const first = await entry.a(); \
+         assert.deepEqual(trace, ['x']); const again = await entry.a(); \
+         assert.equal(first[0],again[0]); assert.equal(first[1],again[1]); \
+         const both = await entry.b(); assert.deepEqual(trace,['x','y']); \
+         assert.equal(both[0][0],first[0]); assert.equal(both[0][1],first[1]); \
+         assert.equal(both[0][2],3); assert.equal(both[1],7); assert.equal(await entry.c(),7);",
+    );
+}
+
+#[test]
+fn libraries_resolve_barrel_redirects_to_final_physical_owners() {
+    let mut input = library_input(false);
+    input.insert("barrel.mjs".into(), "export * from './lib-x.mjs';".into());
+    let root = input.get_mut(Path::new("root-a.mjs")).unwrap();
+    *root = root.replace("./lib-x.mjs", "./barrel.mjs");
+    let (_, output) = clustered(&input, 1024);
+    assert_eq!(
+        module_owner(&output, "barrel.mjs"),
+        module_owner(&output, "lib-x.mjs")
+    );
+    assert_eq!(
+        module_owner(&output, "lib-x.mjs"),
+        module_owner(&output, "lib-y.mjs")
+    );
+    observe_activated(
+        output,
+        "assert.deepEqual(trace,[]); const first = await entry.a(); \
+         assert.deepEqual(trace,['x']); const both = await entry.b(); \
+         assert.equal(first[0],both[0][0]); assert.equal(first[1],both[0][1]); \
+         assert.equal(both[0][2],2); assert.equal(both[1],7); \
+         assert.equal(await entry.c(),7); assert.deepEqual(trace,['x','y']);",
+    );
+}
+
+#[test]
+fn libraries_private_then_does_not_assimilate_dynamic_availability_imports() {
+    let mut input = library_input(false);
+    input.insert(
+        "entry.mjs".into(),
+        "export async function a() { return (await import('./lib-x.mjs')).readX(); } \
+         export async function b() { return (await import('./root-b.mjs')).read(); } \
+         export async function c() { return (await import('./root-c.mjs')).read(); }"
+            .into(),
+    );
+    input.remove(Path::new("root-a.mjs"));
+    input.insert(
+        "lib-x.mjs".into(),
+        "trace.push('x'); function then(resolve) { resolve(123); } \
+         export function readX() { return then; }"
+            .into(),
+    );
+    let (_, output) = clustered(&input, 1024);
+    let owner = module_owner(&output, "lib-x.mjs");
+    assert_eq!(owner, module_owner(&output, "lib-y.mjs"));
+    assert_ne!(owner, &output.entries["entry"]);
+    observe_activated(
+        output,
+        "assert.deepEqual(trace,[]); const privateThen = await entry.a(); \
+         assert.equal(typeof privateThen,'function'); let value; privateThen(v => value = v); \
+         assert.equal(value,123); assert.deepEqual(trace,['x']); \
+         const both = await entry.b(); assert.equal(both[0],privateThen); \
+         assert.equal(both[1],7); assert.equal(await entry.c(),7); \
+         assert.equal(await entry.a(),privateThen); assert.deepEqual(trace,['x','y']);",
+    );
+}
+
+#[test]
+fn libraries_cache_undefined_failures_across_consumers_and_preserve_dependency_order() {
+    let (_, output) = clustered(&library_input(true), 1024);
+    assert_eq!(
+        module_owner(&output, "lib-x.mjs"),
+        module_owner(&output, "lib-y.mjs")
+    );
+    observe_activated(
+        output,
+        "assert.deepEqual(trace, []); const reject = error => error === undefined; \
+         const [a,b] = await Promise.allSettled([entry.b(),entry.c()]); \
+         assert.equal(a.status,'rejected'); assert.equal(b.status,'rejected'); \
+         assert.equal(a.reason,undefined); assert.equal(b.reason,undefined); \
+         await assert.rejects(entry.b(),reject); await assert.rejects(entry.c(),reject); \
+         assert.deepEqual(trace,['x','y']); const live = await entry.a(); \
+         assert.equal(live[2],1); assert.deepEqual(trace,['x','y']);",
+    );
+}
+
+fn bridge_input() -> BTreeMap<PathBuf, String> {
+    let mut input = sources(&[
+        (
+            "entry.mjs",
+            "export async function a() { await import('./root-a.mjs'); } \
+          export async function b() { await import('./root-b.mjs'); } \
+          export async function c() { await import('./root-c.mjs'); } \
+          export async function d() { await import('./root-d.mjs'); }",
+        ),
+        ("a-only.mjs", "trace.push('a');"),
+        ("b-bridge.mjs", "trace.push('bridge');"),
+        ("c-only.mjs", "trace.push('b');"),
+        ("d-disjoint.mjs", "trace.push('disjoint');"),
+    ]);
+    for (file, deps) in [
+        (
+            "root-a.mjs",
+            "import './a-only.mjs'; import './b-bridge.mjs';",
+        ),
+        (
+            "root-b.mjs",
+            "import './b-bridge.mjs'; import './c-only.mjs';",
+        ),
+        ("root-c.mjs", "import './d-disjoint.mjs';"),
+        ("root-d.mjs", "import './d-disjoint.mjs';"),
+    ] {
+        input.insert(
+            file.into(),
+            format!("{deps} trace.push('{}');", "padding".repeat(400)),
+        );
+    }
+    input
+}
+
+#[test]
+fn libraries_update_union_for_bridge_masks_and_leave_disjoint_or_large_islands_out() {
+    let input = bridge_input();
+    let (plan, output) = clustered(&input, 80);
+    let mask = |name: &str| &plan.node_roots[&NodeId::Module(name.into())];
+    assert!(mask("a-only.mjs").is_disjoint(mask("c-only.mjs")));
+    assert_eq!(
+        module_owner(&output, "a-only.mjs"),
+        module_owner(&output, "b-bridge.mjs")
+    );
+    assert_eq!(
+        module_owner(&output, "a-only.mjs"),
+        module_owner(&output, "c-only.mjs")
+    );
+    assert_ne!(
+        module_owner(&output, "a-only.mjs"),
+        module_owner(&output, "d-disjoint.mjs")
+    );
+    assert_ne!(
+        module_owner(&output, "a-only.mjs"),
+        module_owner(&output, "root-a.mjs")
+    );
+    assert_eq!(plan.node_roots, canonical(&input, false).1.node_roots);
+}
+
+#[test]
+fn libraries_threshold_stopping_overshoot_and_exact_large_cutoff_are_deterministic() {
+    let input = bridge_input();
+    let first = input[Path::new("a-only.mjs")].len();
+    let bridge = input[Path::new("b-bridge.mjs")].len();
+    let size = first + bridge;
+    for target in [size, size - 1] {
+        let (_, output) = clustered(&input, target);
+        assert_eq!(
+            module_owner(&output, "a-only.mjs"),
+            module_owner(&output, "b-bridge.mjs")
+        );
+        assert_ne!(
+            module_owner(&output, "a-only.mjs"),
+            module_owner(&output, "c-only.mjs")
+        );
+        assert!(size < 2 * target);
+        assert_eq!(clustered(&input, target).1, output);
+    }
+    let (_, output) = clustered(&input, bridge);
+    assert_ne!(
+        module_owner(&output, "a-only.mjs"),
+        module_owner(&output, "b-bridge.mjs")
+    );
+    assert_ne!(
+        module_owner(&output, "a-only.mjs"),
+        module_owner(&output, "c-only.mjs")
+    );
+    let (_, larger) = clustered(&input, size + 1);
+    assert_eq!(
+        module_owner(&larger, "a-only.mjs"),
+        module_owner(&larger, "c-only.mjs")
+    );
+}
+
+#[test]
+fn libraries_unsupported_activation_boundaries_remain_native() {
+    for unsupported in [
+        "await 0; trace.push('y'); export function readY() { return 7; }",
+        "export class readY {}",
+        "import './root-c.mjs'; trace.push('y'); export function readY() { return 7; }",
+    ] {
+        let mut input = library_input(false);
+        input.insert("lib-y.mjs".into(), unsupported.into());
+        let (_, output) = clustered(&input, 1024);
+        assert_ne!(
+            module_owner(&output, "lib-x.mjs"),
+            module_owner(&output, "lib-y.mjs")
+        );
+    }
+
+    let mut input = library_input(false);
+    input.insert(
+        "entry.mjs".into(),
+        "export function a() { return import('./root-a.mjs'); } \
+         export function b() { return import('./root-b.mjs'); } \
+         export function c() { return import('./root-c.mjs'); }"
+            .into(),
+    );
+    let (_, output) = clustered(&input, 1024);
+    assert_ne!(
+        module_owner(&output, "lib-x.mjs"),
+        module_owner(&output, "lib-y.mjs")
+    );
+}
+
+#[test]
+fn libraries_cluster_compatible_binding_islands_without_wrapping_ordinary_sources() {
+    let mut input = library_input(false);
+    input.insert("lib-x.mjs".into(), "export class X {}".into());
+    input.insert("lib-y.mjs".into(), "export class Y {}".into());
+    for (file, deps, body) in [
+        ("root-a.mjs", "import {X} from './lib-x.mjs';", "return X;"),
+        (
+            "root-b.mjs",
+            "import {X} from './lib-x.mjs'; import {Y} from './lib-y.mjs';",
+            "return [X,Y];",
+        ),
+        ("root-c.mjs", "import {Y} from './lib-y.mjs';", "return Y;"),
+    ] {
+        input.insert(
+            file.into(),
+            format!(
+                "{deps} export function read() {{ if(false) return '{}'; {body} }}",
+                "padding".repeat(400)
+            ),
+        );
+    }
+    let (_, output) = clustered(&input, 1024);
+    let segment = |name: &str| NodeId::Segment {
+        module: name.into(),
+        index: 0,
+    };
+    assert_eq!(
+        output.members[&segment("lib-x.mjs")],
+        output.members[&segment("lib-y.mjs")]
+    );
+    assert!(!output
+        .files
+        .values()
+        .any(|s| s.contains("Unsupported deferred ESM reentry")));
+    observe_activated(
+        output,
+        "const x = await entry.a(); const y = await entry.c(); const both = await entry.b(); \
+         assert.equal(x,both[0]); assert.equal(y,both[1]); assert.equal(x.name,'X'); \
+         assert.equal(y.name,'Y'); assert.deepEqual(trace,[]);",
+    );
+}
+
+#[test]
+fn libraries_keep_existing_parent_and_shared_static_initializer_owners() {
+    let mut input = library_input(false);
+    input.get_mut(Path::new("entry.mjs")).unwrap().push_str(
+        " export async function child() { return (await import('./child.mjs')).read(); }",
+    );
+    input.insert(
+        "child.mjs".into(),
+        "import './child-dependency.mjs'; trace.push('child'); \
+         export function read() { return 9; }"
+            .into(),
+    );
+    input.insert(
+        "child-dependency.mjs".into(),
+        "trace.push('child-dependency');".into(),
+    );
+    let (_, output) = clustered(&input, 1024);
+    assert_eq!(module_owner(&output, "child.mjs"), &output.entries["entry"]);
+    assert_eq!(
+        module_owner(&output, "child-dependency.mjs"),
+        &output.entries["entry"]
+    );
+    assert_ne!(module_owner(&output, "lib-x.mjs"), &output.entries["entry"]);
+    observe_activated(
+        output,
+        "assert.deepEqual(trace,[]); await entry.a(); assert.deepEqual(trace,['x']); \
+         assert.equal(await entry.child(),9); \
+         assert.deepEqual(trace,['x','child-dependency','child']); \
+         const both = await entry.b(); assert.equal(both[1],7); \
+         assert.deepEqual(trace,['x','child-dependency','child','y']);",
+    );
+}
+
+#[test]
+fn libraries_portable_fixture_really_clusters_different_masks() {
+    macro_rules! fixture {
+        ($file:literal) => {
+            include_str!(concat!(
+                "../../../fixtures/bundler/authored/native-library-clustering/files/",
+                $file
+            ))
+        };
+    }
+    let input = sources(&[
+        ("entry.mjs", fixture!("entry.mjs")),
+        ("lib-x.mjs", fixture!("lib-x.mjs")),
+        ("lib-y.mjs", fixture!("lib-y.mjs")),
+        ("root-a.mjs", fixture!("root-a.mjs")),
+        ("root-b.mjs", fixture!("root-b.mjs")),
+        ("root-c.mjs", fixture!("root-c.mjs")),
+        ("failure.mjs", fixture!("failure.mjs")),
+    ]);
+    let (plan, output) = clustered(&input, 256);
+    assert_ne!(
+        plan.node_roots[&NodeId::Module("lib-x.mjs".into())],
+        plan.node_roots[&NodeId::Module("lib-y.mjs".into())]
+    );
+    assert_eq!(
+        module_owner(&output, "lib-x.mjs"),
+        module_owner(&output, "lib-y.mjs")
+    );
+    assert_ne!(module_owner(&output, "lib-x.mjs"), &output.entries["entry"]);
+}
+
 #[test]
 fn single_parent_public_esm_hoists_retained_sites_and_preserves_live_root_identity() {
     let input = sources(&[

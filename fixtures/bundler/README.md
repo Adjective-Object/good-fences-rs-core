@@ -42,9 +42,9 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **43 cases / 59 entry executions**: six esbuild cases,
-six rspack cases and thirty-one authored cases. Four authored CSS cases use
-output observations; the 39 JS cases / 55 executions remain differential.
+The corpus contains **44 cases / 60 entry executions**: six esbuild cases,
+six rspack cases and thirty-two authored cases. Four authored CSS cases use
+output observations; the 40 JS cases / 56 executions remain differential.
 The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
@@ -66,6 +66,9 @@ pure prefix evaluates first.
 class/control-flow bindings without widening observable namespaces.
 The parent-hoisting contract covers deferred single-parent islands, static
 dependency order, guarded uses, live identity, empty targets and cached failures.
+The library-clustering contract explicitly enables a byte target and covers
+different overlapping async masks, no co-activation, shared identity/live state
+and cached undefined failures; Rust ownership tests verify actual merging.
 Rspack-derived webpack fixtures retain webpack's notices as well as rspack's.
 The conformance CI job builds the driver and runs this corpus and the runner's
 tests.
@@ -183,7 +186,7 @@ configure external dependencies, effects, entry renames or custom plugins:
 ```json
 {
   "fixtureConfig": {
-    "output": {"base_url": "./"},
+    "output": {"base_url": "./", "min_chunk_bytes": 0},
     "css": {"load": "caller-loaded", "css_modules": true}
   },
   "cssObservation": "observe.mjs"
@@ -191,7 +194,9 @@ configure external dependencies, effects, entry renames or custom plugins:
 ```
 
 All config objects/fields are optional; the shipped defaults are base `"./"`,
-load `"caller-loaded"` and modules `false`. The complete serialized config is
+chunk target `0` (disabled), load `"caller-loaded"` and modules `false`.
+`min_chunk_bytes` must be a nonnegative safe integer; it is also available for
+ordinary JS differential fixtures. The complete serialized config is
 bounded to 16 KiB, with unknown fields rejected at every level. Module selection
 also accepts `"everything"` (CSS only) and `"ext:.custom.suffix"`;
 `true` selects `.module.css`. `"auto-mount"` is independent of selection.

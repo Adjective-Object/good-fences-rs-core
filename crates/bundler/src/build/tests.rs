@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunks::NodeId;
 use test_tmpdir::TmpDir;
 
 mod browser;
@@ -24,6 +25,105 @@ fn options() -> BuildOptions {
         )]),
         ..Default::default()
     }
+}
+
+#[test]
+fn libraries_build_configuration_invalidation_noop_cache_and_final_typed_requests() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export async function a() { return (await import('./root-a.mjs')).read(); } \
+         export async function b() { return (await import('./root-b.mjs')).read(); } \
+         export async function c() { return (await import('./root-c.mjs')).read(); }",
+    );
+    write(
+        dir.root(),
+        "lib-x.mjs",
+        "globalThis.trace.push('x'); const secret = {}; export function x() { return secret; }",
+    );
+    write(
+        dir.root(),
+        "lib-y.mjs",
+        "globalThis.trace.push('y'); export function y() { return 7; }",
+    );
+    for (name, imports, result) in [
+        ("root-a.mjs", "import {x} from './lib-x.mjs';", "x()"),
+        (
+            "root-b.mjs",
+            "import {x} from './lib-x.mjs'; import {y} from './lib-y.mjs';",
+            "[x(),y()]",
+        ),
+        ("root-c.mjs", "import {y} from './lib-y.mjs';", "y()"),
+    ] {
+        write(
+            dir.root(),
+            name,
+            &format!(
+                "{imports} export function read() {{ if(false) return '{}'; return {result}; }}",
+                "padding".repeat(400)
+            ),
+        );
+    }
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("deep/start.js".into());
+    config.entries.insert(
+        "alias".into(),
+        Entry {
+            path: "main.mjs".into(),
+            output_name: Some("aliases/other.mjs".into()),
+            namespace: true,
+        },
+    );
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    assert_eq!(config.output.min_chunk_bytes, 0);
+    let disabled = parity(&mut session, &config);
+    config.output.min_chunk_bytes = 1024;
+    let enabled = parity(&mut session, &config);
+    assert_eq!(enabled.counters.source_parses, 0);
+    assert_eq!(enabled.counters.resolutions, 0);
+    assert_eq!(enabled.counters.emissions, 1);
+    assert_eq!(
+        enabled.product.fingerprints.parse,
+        disabled.product.fingerprints.parse
+    );
+    assert_eq!(
+        enabled.product.fingerprints.resolution,
+        disabled.product.fingerprints.resolution
+    );
+    assert_ne!(
+        enabled.product.fingerprints.output,
+        disabled.product.fingerprints.output
+    );
+    assert_eq!(
+        enabled.product.plan.node_roots,
+        disabled.product.plan.node_roots
+    );
+    let owner = |result: &BuildResult, name: &str| {
+        result.product.artifacts.members[&NodeId::Module(dir.root().join(name))].clone()
+    };
+    assert_eq!(owner(&enabled, "lib-x.mjs"), owner(&enabled, "lib-y.mjs"));
+    assert_ne!(owner(&disabled, "lib-x.mjs"), owner(&disabled, "lib-y.mjs"));
+    observe_named(&enabled.product.artifacts,
+        "import assert from 'node:assert/strict'; globalThis.trace=[]; \
+         const entry = await import('./deep/start.js'); const alias = await import('./aliases/other.mjs'); \
+         assert.equal(entry.a,alias.a); assert.deepEqual(trace,[]); \
+         const x = await alias.a(); assert.deepEqual(trace,['x']); \
+         const both = await entry.b(); assert.equal(x,both[0]); \
+         assert.equal(both[1],7); assert.deepEqual(trace,['x','y']);");
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&noop.product, &enabled.product));
+    assert_eq!(noop.counters.output_parses, 0);
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.disk_hits, 6);
+    assert_eq!(disk.product.artifacts, enabled.product.artifacts);
+    config.output.min_chunk_bytes = 0;
+    let restored = parity(&mut session, &config);
+    assert_eq!(restored.product.artifacts, disabled.product.artifacts);
 }
 
 #[test]
@@ -3892,8 +3992,18 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
             (path, source)
         })
         .collect();
-    let mut checked =
-        link::esm_plan(graph, &incremental.product.plan, &options.effects, &sources).unwrap();
+    let mut checked = link::esm_plan_configured(
+        graph,
+        &incremental.product.plan,
+        &options.effects,
+        &sources,
+        &BTreeMap::new(),
+        options.resolver.target_env == TargetEnv::Browser,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        options.output.min_chunk_bytes,
+    )
+    .unwrap();
     let destinations = entry_outputs::apply(session.root(), options, &mut checked).unwrap();
     let mut checked = checked.render_to(&destinations).unwrap();
     // Low-level emission consumes prepared JS, not original resource discovery.

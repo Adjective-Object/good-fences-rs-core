@@ -112,7 +112,7 @@ no emitted-source parsing or runtime source loading is involved.
 
 The internal `link::esm_plan_activated` reconstruction seam takes explicit
 source-file → physical evaluation-owner selections. Ordinary prepared emission
-derives these selections from retained dependency uses; there is no build option.
+derives parent selections from retained dependency uses without an enable flag.
 Explicit callers must certify that dynamic
 namespace results are used only for live reads, call receivers and identity,
 not reflection, mutation, escaping to unknown consumers or namespace reexports.
@@ -135,8 +135,8 @@ The seam rejects unsupported declaration/namespace forms, `then` export
 surfaces, source TLA/static cycles, require/context/CJS activation, eager/public
 demands on deferred sources and incompatible co-location. It falls back to
 ordinary native emission rather than changing their evaluation. Deferred sources
-with their own dynamic imports currently stay native. Clustering and synthesized
-async boundaries remain unimplemented.
+with their own dynamic imports currently stay native. Synthesized async
+boundaries remain unimplemented.
 
 ### Automatic single-parent placement
 
@@ -160,6 +160,38 @@ islands containing `this` stay native. Escaping promises or namespaces (includin
 rest/default destructuring, namespace exports and `then` surfaces stay native.
 Unsupported TLA, cycles, externals, CJS, nested dynamic dependencies, declaration
 forms and observable-name collisions likewise retain native placement.
+
+### Small-island libraries
+
+`BuildOptions.output.min_chunk_bytes` is one approximate uncompressed UTF-8 byte
+target; **0 (the default) disables clustering**. Low-level callers can pass the same
+`OutputOptions` to `link::esm_with_options`; `link::esm` retains the default.
+Changing this option invalidates output, not source extraction or resolution,
+and unchanged builds still reuse their immutable generation.
+
+Existing placement-compatible native groups and pure lexical binding islands
+use their retained recipe source-piece byte lengths, not trial emission or
+compressed-size predictions. Nonempty masks come directly from
+`ChunkPlan.node_roots`. Seeds follow source-path/segment order. Individually
+undersized candidates rank by Jaccard overlap with the **current union** of the
+library's masks; zero overlap is ineligible and ties use the same source order.
+After each merge, both the mask union and byte estimate grow. Selection stops
+at the target or when no compatible overlapping candidate remains. The last
+merge may overshoot, but its estimate stays below twice the target; already-large
+islands never participate.
+
+Different overlapping masks can share one native file without changing logical
+retention/reachability. Effectful islands reuse the checked, source-ordered,
+failure-caching guards above. Synchronous consumers/dependencies receive their
+own guards but retain their physical owners unless selected for a merge; this
+keeps shared initializer identity and avoids co-activation. Existing parent moves
+keep their certified owners. Ordinary native sources remain unwrapped. Pure
+binding libraries require a pure native import closure and no new import cycle.
+Public/eager activation, TLA, cycles, escaped/reflective namespaces, unsupported
+declarations, CJS/externals and resource relocations still prevent deferred
+clustering; they retain their native evaluation boundaries. Artifact members,
+availability routes and typed requests follow final ownership through pruning,
+entry aliases and naming.
 
 ## JSON modules
 
@@ -193,7 +225,7 @@ content-addressed `assets/<sha256>.<extension>` paths. Default imports and
 `require` return a public URL string. `BuildOptions.output.base_url` defaults to
 `"./"`: these URLs are relative to the **build output root**, not the importing
 chunk. Resolve relative URLs against your output-root URL; renaming entries does
-not change them. `OutputOptions { base_url: "/static/".into() }` instead exports
+not change them. `OutputOptions { base_url: "/static/".into(), ..Default::default() }` instead exports
 `/static/assets/<hash>.<extension>`; HTTP(S) CDN bases and relative subdirectories
 such as `"./public/"` are also supported. Directory bases gain a trailing slash,
 and URL paths are percent-escaped without double-encoding existing escapes.
