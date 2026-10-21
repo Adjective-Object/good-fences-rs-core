@@ -228,3 +228,56 @@ untraced control uses another output directory and another result file, avoiding
 publication/result-file races. These overlapping diagnostic runs are not
 benchmarks; the control distinguishes tracing overhead from inability to finish.
 Full-app packaging and runtime correctness remain unverified.
+
+The thirty-minute instrumented attempt also hit its limit without a diagnostic
+or completed publication. Its recoverable trace prefix has 23,203 completed
+preparation jobs. Crucially, one completed `build.resolve` interval took
+1,378.3 s (about 23 minutes); all completed resolution intervals together took
+1,483.9 s. The longest completed preparation job was 593 ms, cache decode 586 ms
+and extraction 232 ms. This isolates the major observed stall to serial
+dependency resolution/integration, not FlatBuffers decoding or worker extraction.
+The trace does not identify the individual request, so its exact root cause is
+not established.
+
+`build.resolve` currently encloses all dependencies of one module, including
+context capture. The context candidate walker performs root-reachability searches
+while projecting aliases, and the context resolver filters inventory candidates.
+Those are plausible large-tree suspects from code inspection, not a demonstrated
+root cause. A follow-up should distinguish literal/context requests and record
+numeric candidate/visit counts, without placing source paths or payloads in traces.
+
+Redundant monolithic/batched compiler output directories were removed after the
+staged source copies completed. PowerShell removal hit Windows long-path errors;
+Node filesystem removal of those two exact generated directories succeeded.
+Staged inputs, build outputs, reports and diagnostic traces remain local for
+reproduction; no original client files were removed or changed.
+
+### Final checkpoint and remaining blocker
+
+The untraced control also reached its thirty-minute limit without a diagnostic
+or complete publication. Removing tracing did not make this overlapping control
+finish within the window; isolated tracing overhead remains unmeasured. Both
+bounded processes have exited. No full-app success, linker completion, browser
+execution or worker runtime correctness is claimed.
+
+Completed: worktree isolation/cleanup, both Windows publication fixes, the
+per-file FlatBuffers migration, small-package runtime/build checks, the
+client-discovered Unicode panic fix, and editor-worker packaging/syntax checks.
+Remaining: a successful combined mail/data/analytics/editor build. The measured
+serial resolution stall needs request-level diagnosis before treating these
+timeouts as an understood implementation bug or attempting further optimization.
+This is not a fully packaged application checkpoint.
+
+Reproduction artifacts are in this session's local `files` directory:
+`client-web-prepare.json`, `client-web-vendor-repair.json`,
+`client-web-esm-scopes.json`, `client-web-results.json`,
+`client-web-full-results.json`, `client-web-full-control-results.json`, and
+the corresponding traces/logs. `exercise-client-web.mjs` drives the small cases;
+`exercise-client-web-full.mjs editor-worker`, `... whole-app`, and
+`... whole-app-no-trace` drive the staged full cases with Node 22.14 and
+`--experimental-vm-modules`. The staged corpus must stay local; only this
+aggregate report and non-proprietary fixes are committed.
+
+The client worktree still has only its original modified type file and
+untracked configuration file. No dependencies were installed and no global
+Cargo/Node configuration was changed.
