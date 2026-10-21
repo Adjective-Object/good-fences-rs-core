@@ -202,3 +202,29 @@ The editor trace spent 246.5 s in the build but only 27.5 ms preparing its two
 script jobs. Full-tree setup/inventory dominates this early failure. Analytics
 had 405 preparation jobs and data worker 5,390; their traces are retained locally.
 Large-root setup is already a bottleneck before testing linker scaling.
+
+### Retry after the Unicode fix and vendor adaptation
+
+The distribution audit checked 37,672 scripts, adding 934 local ESM scopes and
+skipping 629 mixed/script candidates. It covers the three initial format failures
+without changing root vendor manifests or original installed packages.
+
+The editor worker now builds with native output: five source modules, four fresh
+parses and one disk hit; all six emitted scripts pass syntax checks. No browser
+worker runtime claim is made. Its instrumented run took 577.1 s. The completed
+trace attributes 265.5 s to final `build.recheck`, but only 78 ms to preparation;
+initial tree setup/inventory accounts for most of the other multi-minute gap.
+
+The combined four-entry retry reached the ten-minute harness limit without a
+diagnostic or completed publication. This is an imposed limit, not evidence of
+a correctness failure. Its partial trace contains over 21,000 completed
+preparation jobs, with extraction and resolution still open; the linker was not
+demonstrated to complete. Aggregate worker-span times overlap and cannot be
+summed as wall time. A forcibly terminated trace is truncated, not a valid
+complete trace; only its complete event prefix was inspected.
+
+Retrying the combined workload with a thirty-minute window. A separate
+untraced control uses another output directory and another result file, avoiding
+publication/result-file races. These overlapping diagnostic runs are not
+benchmarks; the control distinguishes tracing overhead from inability to finish.
+Full-app packaging and runtime correctness remain unverified.
