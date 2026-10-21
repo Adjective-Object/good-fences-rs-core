@@ -202,7 +202,8 @@ pub(crate) fn esm_plan_prepared(
     esm_plan_activated_prepared(graph, plan, policy, sources, relocations, browser, require_defaults, &BTreeMap::new())
 }
 
-/// Explicit internal placement, before automatic selection. Callers must exclude
+/// Internal placement; an empty selection derives single-parent placements.
+/// Explicit callers must exclude
 /// escaped/reflective namespace observations; namespaces here support live reads
 /// and identity only. Unsupported reconstruction returns native output.
 pub(crate) fn esm_plan_activated(

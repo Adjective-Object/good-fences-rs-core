@@ -7,6 +7,8 @@
 - Bump extractor identity for parser defaults, extraction or support-policy
   changes; bump schema for incompatible wire layout. Keep OXC revision in sync
   with workspace pins.
+- Dynamic namespace observations cover all dynamic dependency IDs in source order;
+  property/receiver pairs are sorted and unique. Target safety stays derived.
 - Cache ESM top-level suspension spans only; async dependency/SCC state and
   require compatibility belong to the linker/native host, not sidecars.
 - Preflight CBOR byte/item/depth limits before serde; validate source hash,

@@ -27,6 +27,92 @@ fn options() -> BuildOptions {
 }
 
 #[test]
+fn single_parent_build_session_uses_cached_observations_and_final_output_ownership() {
+    let dir = TmpDir::new();
+    let main = "export async function load(enabled = true) { if (!enabled) return false; \
+                const child = await import('./child.mjs'); return child.read(); }";
+    write(dir.root(), "main.mjs", main);
+    write(dir.root(), "child.mjs",
+        "const secret = (globalThis.trace.push('child'), {}); export function read() { return secret; }");
+    let mut config = options();
+    config.entries.get_mut("main").unwrap().output_name = Some("nested/start.mjs".into());
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = parity(&mut session, &config);
+    let artifacts = &cold.product.artifacts;
+    assert_eq!(artifacts.files.len(), 1);
+    assert_eq!(artifacts.entries["main"], Path::new("nested/start.mjs"));
+    assert!(artifacts
+        .async_facades
+        .values()
+        .all(|p| p == &artifacts.entries["main"]));
+    assert!(!artifacts
+        .modules
+        .contains_key(&dir.root().join("child.mjs")));
+    assert_eq!(cold.counters.source_reparses, 0);
+    assert_eq!(cold.counters.fragment_reparses, 0);
+    assert_eq!(
+        observe_named(
+            artifacts,
+            "import assert from 'node:assert/strict'; globalThis.trace = []; \
+         const entry = await import('./nested/start.mjs'); assert.deepEqual(trace,[]); \
+         assert.equal(await entry.load(false),false); assert.deepEqual(trace,[]); \
+         const pending = entry.load(); assert.deepEqual(trace,[]); \
+         const [a,b] = await Promise.all([pending,entry.load()]); assert.equal(a,b); \
+         assert.equal(await entry.load(),a); assert.deepEqual(trace,['child']);"
+        ),
+        b""
+    );
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.disk_hits, 2);
+    assert_eq!(disk.product.artifacts, *artifacts);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&noop.product, &cold.product));
+    assert_eq!(noop.counters.output_parses, 0);
+
+    write(dir.root(), "main.mjs",
+        "export async function load() { const child = await import('./child.mjs'); return Object.keys(child); }");
+    let reflective = parity(&mut session, &config);
+    assert_eq!(reflective.counters.source_parses, 1);
+    assert!(reflective
+        .product
+        .artifacts
+        .modules
+        .contains_key(&dir.root().join("child.mjs")));
+    assert!(!reflective
+        .product
+        .artifacts
+        .files
+        .values()
+        .any(|text| text.contains("Unsupported deferred ESM reentry")));
+    write(dir.root(), "main.mjs", main);
+    let restored = parity(&mut session, &config);
+    assert_eq!(restored.product.artifacts, *artifacts);
+    write(
+        dir.root(),
+        "child.mjs",
+        "import {sep} from 'node:path'; export function read() { return sep; }",
+    );
+    config.externals.insert("node:path".into());
+    let external = parity(&mut session, &config);
+    assert!(!external
+        .product
+        .artifacts
+        .files
+        .values()
+        .any(|text| text.contains("Unsupported deferred ESM reentry")));
+    assert_eq!(
+        observe_named(
+            &external.product.artifacts,
+            "const entry = await import('./nested/start.mjs'); console.log(await entry.load());"
+        ),
+        b"/\n"
+    );
+}
+
+#[test]
 fn css_configuration_transitions_keep_javascript_warm_and_low_level_sources_prepared() {
     let dir = TmpDir::new();
     write(

@@ -36,7 +36,7 @@ pub(super) fn emit_activated(
 ) -> eyre::Result<Artifacts<Code>> {
     let symbols = prepared.symbols;
     let Some(activations) = Activations::checked(graph, plan, modules, symbols, placements)? else {
-        return emit(graph, plan, modules, manifest, prepared, browser, require_defaults);
+        return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults);
     };
     emit_inner(graph, plan, modules, manifest, prepared, browser, require_defaults, Some(&activations))
 }
@@ -244,7 +244,7 @@ fn emit_inner(
                 || asynchronous.contains(&owner)
                 || cycles.contains(&owner)
             {
-                return emit(graph, plan, modules, manifest, prepared, browser, require_defaults);
+                return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults);
             }
             jobs.remove(&file);
             for assigned in owners.values_mut() {
@@ -340,7 +340,7 @@ fn emit_inner(
                     .flatten()
                     .any(|owner| *owner == owners[file])
         }) {
-            return emit(graph, plan, modules, manifest, prepared, browser, require_defaults);
+            return super::ordinary(graph, plan, modules, manifest, prepared, browser, require_defaults);
         }
     }
     let mut changed = BTreeSet::new();

@@ -152,6 +152,60 @@ fn execution_effects_use_the_owning_operation_context_not_callable_operands() {
 }
 
 #[test]
+fn dynamic_namespace_observations_check_every_alias_reference_and_receiver() {
+    for (body, expected) in [
+        (
+            "return (await import('./x')).value;",
+            Some(vec![("value".into(), false)]),
+        ),
+        (
+            "const ns = await import('./x'); ns.change(); return ns.value;",
+            Some(vec![("change".into(), true), ("value".into(), false)]),
+        ),
+        (
+            "return import('./x').then(ns => ns.value);",
+            Some(vec![("value".into(), false)]),
+        ),
+        (
+            "const {value} = await import('./x'); return value;",
+            Some(vec![("value".into(), false)]),
+        ),
+        ("await import('./x');", Some(vec![])),
+        ("return import('./x');", None),
+        ("const ns = await import('./x'); return ns;", None),
+        (
+            "const ns = await import('./x'); return Object.keys(ns);",
+            None,
+        ),
+        ("const ns = await import('./x'); return ns['value'];", None),
+        ("const ns = await import('./x'); ns.value++;", None),
+        ("const ns = await import('./x'); delete ns.value;", None),
+        ("const ns = await import('./x'); ns.value = 1;", None),
+        ("let ns = await import('./x'); return ns.value;", None),
+        (
+            "const {value = 1} = await import('./x'); return value;",
+            None,
+        ),
+        ("const {...rest} = await import('./x'); return rest;", None),
+    ] {
+        let facts = parse(&format!("export async function load() {{ {body} }}"));
+        assert_eq!(facts.emission.dynamic_namespaces.len(), 1);
+        assert_eq!(
+            facts.emission.dynamic_namespaces[0].properties, expected,
+            "{body}"
+        );
+    }
+    let facts = parse("const ns = await import('./x'); export {ns}; ns.value;");
+    assert_eq!(facts.emission.dynamic_namespaces[0].properties, None);
+    assert!(!facts.emission.uses_this);
+    assert!(
+        parse("export function receiver() { return this; }")
+            .emission
+            .uses_this
+    );
+}
+
+#[test]
 fn deferred_forms_keep_split_initializer_slots_in_original_coordinates() {
     let source = "export const secret = makeSecret(), other = {secret}; function read() { return secret; } trace(); class Unsupported {} const {x} = {};";
     let facts = parse(source);
