@@ -383,6 +383,256 @@ fn observe_activated(mut output: Artifacts, observer: &str) {
     );
 }
 
+fn automatically_hoisted(input: &BTreeMap<PathBuf, String>) -> Artifacts {
+    let (graph, plan, _) = canonical(input, false);
+    let parses = ast_segmenter::module_parse_count();
+    let output = esm(&graph, &plan, &EffectPolicy::default(), input).unwrap();
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    output
+}
+
+#[test]
+fn single_parent_public_esm_hoists_retained_sites_and_preserves_live_root_identity() {
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export async function load(enabled) { if (!enabled) return false; \
+          const ns = await import('./child.mjs'); const saved = ns.read; \
+          const before = ns.value; ns.change(); return [before, ns.value, saved(), saved]; } \
+          export function other() { return import('./child.mjs').then(ns => ns.value); } \
+          function dead() { return import('./child.mjs'); }",
+        ),
+        (
+            "child.mjs",
+            "const secret = (trace.push('child'), {}); export let value = 1; \
+          export function read() { return secret; } export function change() { value++; }",
+        ),
+    ]);
+    let output = automatically_hoisted(&input);
+    assert_eq!(output.files.len(), 1, "{:#?}", output.files);
+    assert!(output
+        .async_facades
+        .values()
+        .all(|p| p == &output.entries["entry"]));
+    assert!(!output.modules.contains_key(Path::new("child.mjs")));
+    observe_activated(
+        output,
+        "assert.deepEqual(trace, []); assert.equal(await entry.load(false), false); \
+         assert.deepEqual(trace, []); const pending = entry.load(true); \
+         assert.deepEqual(trace, []); const a = await pending; const b = await entry.load(true); \
+         assert.deepEqual(a.slice(0,2), [1,2]); assert.deepEqual(b.slice(0,2), [2,3]); \
+         assert.equal(a[2], b[2]); assert.equal(a[3], b[3]); \
+         assert.equal(await entry.other(), 3); assert.deepEqual(trace, ['child']);",
+    );
+}
+
+#[test]
+fn single_parent_public_esm_static_island_order_and_cached_undefined_failure() {
+    for failure in [false, true] {
+        let input = sources(&[
+            ("entry.mjs",
+             "export async function load() { try { return (await import('./child.mjs')).value; } \
+              catch (error) { return {error}; } }"),
+            ("child.mjs",
+             "import './z.mjs'; import './a.mjs'; export {value} from './a.mjs'; trace.push('child');"),
+            ("z.mjs", "import './shared.mjs'; trace.push('z');"),
+            ("a.mjs", "import './shared.mjs'; trace.push('a'); export const value = 3;"),
+            ("shared.mjs", if failure { "trace.push('shared'); throw undefined;" } else { "trace.push('shared');" }),
+        ]);
+        let output = automatically_hoisted(&input);
+        assert_eq!(output.files.len(), 1);
+        observe_activated(
+            output,
+            if failure {
+                "assert.deepEqual(trace, []); const [a,b] = await Promise.all([entry.load(),entry.load()]); \
+             assert.deepEqual(a, {error:undefined}); assert.deepEqual(b,a); \
+             assert.deepEqual(await entry.load(),a); assert.deepEqual(trace,['shared']);"
+            } else {
+                "assert.deepEqual(trace, []); assert.equal(await entry.load(),3); \
+             assert.equal(await entry.load(),3); assert.deepEqual(trace,['shared','z','a','child']);"
+            },
+        );
+    }
+}
+
+#[test]
+fn single_parent_public_esm_empty_and_destructured_targets() {
+    for (child, load, expected) in [
+        ("", "await import('./child.mjs'); return 1;", 1),
+        (
+            "export const value = 2;",
+            "const {value} = await import('./child.mjs'); return value;",
+            2,
+        ),
+    ] {
+        let input = sources(&[
+            (
+                "entry.mjs",
+                &format!("export async function load() {{ {load} }}"),
+            ),
+            ("child.mjs", child),
+        ]);
+        let output = automatically_hoisted(&input);
+        assert_eq!(output.files.len(), 1);
+        observe_activated(
+            output,
+            &format!("assert.equal(await entry.load(),{expected});"),
+        );
+    }
+}
+
+#[test]
+fn single_parent_public_esm_multiple_parents_and_eager_targets_stay_native() {
+    for entry in [
+        "export {other} from './other.mjs'; export async function load() { return (await import('./child.mjs')).value; }",
+        "import './child.mjs'; export async function load() { return (await import('./child.mjs')).value; }",
+        "export {value} from './child.mjs'; export async function load() { return (await import('./child.mjs')).value; }",
+    ] {
+        let input = sources(&[
+            ("entry.mjs", entry),
+            ("other.mjs", "export async function other() { return (await import('./child.mjs')).value; }"),
+            ("child.mjs", "trace.push('child'); export const value = 1;"),
+        ]);
+        let output = automatically_hoisted(&input);
+        assert!(!output.files.values().any(|s| s.contains("Unsupported deferred ESM reentry")));
+        observe_activated(output, "assert.equal(await entry.load(),1); assert.deepEqual(trace,['child']);");
+    }
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export async function load() { return (await import('./child.mjs')).value; }",
+        ),
+        ("child.mjs", "export const value = 1;"),
+    ]);
+    let (_, output) = build(&input, &[("entry.mjs", true), ("child.mjs", true)], false);
+    assert!(!output
+        .files
+        .values()
+        .any(|s| s.contains("Unsupported deferred ESM reentry")));
+}
+
+#[test]
+fn single_parent_public_esm_unsupported_observations_and_islands_stay_native() {
+    for usage in [
+        "return import('./child.mjs');",
+        "const ns = await import('./child.mjs'); return ns;",
+        "const ns = await import('./child.mjs'); return Object.keys(ns);",
+        "const ns = await import('./child.mjs'); return Object.getOwnPropertyDescriptor(ns,'value');",
+        "const ns = await import('./child.mjs'); return ns[globalThis.key];",
+        "const ns = await import('./child.mjs'); ns.value = 2;",
+        "const ns = await import('./child.mjs'); delete ns.value;",
+        "const {...ns} = await import('./child.mjs'); return ns;",
+        "return (await import('./child.mjs')).missing;",
+    ] {
+        let input = sources(&[
+            ("entry.mjs", &format!("export async function load() {{ {usage} }}")),
+            ("child.mjs", "export const value = 1;"),
+        ]);
+        let output = automatically_hoisted(&input);
+        assert!(!output.files.values().any(|s| s.contains("Unsupported deferred ESM reentry")), "{usage}");
+        assert!(output.modules.contains_key(Path::new("child.mjs")));
+    }
+    for child in [
+        "export const value = await Promise.resolve(1);",
+        "export const value = 1; export function then(resolve) { resolve(1); }",
+        "import './dep.mjs'; export const value = 1;",
+        "export function value() { return this; }",
+        "export const value = globalThis.fn;",
+        "export function value() {} value = globalThis.fn;",
+    ] {
+        let input = sources(&[
+            (
+                "entry.mjs",
+                "export async function load() { return (await import('./child.mjs')).value(); }",
+            ),
+            ("child.mjs", child),
+            ("dep.mjs", "import './child.mjs';"),
+        ]);
+        let output = automatically_hoisted(&input);
+        assert!(
+            !output
+                .files
+                .values()
+                .any(|s| s.contains("Unsupported deferred ESM reentry")),
+            "{child}"
+        );
+    }
+}
+
+#[test]
+fn single_parent_native_fallback_keeps_namespace_then_tla_and_cycle_behavior() {
+    for (child, usage, check) in [
+        (
+            "export const value = 2; export function then(resolve) { trace.push('then'); resolve({value:3}); }",
+            "return (await import('./child.mjs')).value;",
+            "assert.equal(await entry.load(),3); assert.deepEqual(trace,['then']);",
+        ),
+        (
+            "trace.push('start'); export const value = await Promise.resolve(4); trace.push('done');",
+            "return (await import('./child.mjs')).value;",
+            "assert.equal(await entry.load(),4); assert.deepEqual(trace,['start','done']);",
+        ),
+        (
+            "import './dep.mjs'; trace.push('child'); export const value = 5;",
+            "return (await import('./child.mjs')).value;",
+            "assert.equal(await entry.load(),5); assert.deepEqual(trace,['dep','child']);",
+        ),
+        (
+            "export let value = 6; export function change() { value++; }",
+            "const ns = await import('./child.mjs'); return ns;",
+            "const ns = await entry.load(); assert.equal(ns,await entry.load()); \
+             assert.equal(Object.getPrototypeOf(ns),null); assert.equal(Object.isExtensible(ns),false); \
+             assert.deepEqual(Object.getOwnPropertyDescriptor(ns,'value'), \
+             {value:6,writable:true,enumerable:true,configurable:false}); \
+             ns.change(); assert.equal(ns.value,7); assert.throws(()=>{ns.value=8},TypeError);",
+        ),
+    ] {
+        let input = sources(&[
+            ("entry.mjs", &format!("export async function load() {{ {usage} }}")),
+            ("child.mjs", child),
+            ("dep.mjs", "import './child.mjs'; trace.push('dep');"),
+        ]);
+        let output = automatically_hoisted(&input);
+        assert!(!output.files.values().any(|s| s.contains("Unsupported deferred ESM reentry")));
+        observe_activated(output, check);
+    }
+}
+
+#[test]
+fn single_parent_generated_names_avoid_source_exports_and_named_collisions_fall_back() {
+    let helper = format!("__gf_init_{}", digest("child.mjs"));
+    let input = sources(&[
+        (
+            "entry.mjs",
+            &format!(
+                "export const {helper} = 7; \
+         export async function load() {{ return (await import('./child.mjs')).value; }}"
+            ),
+        ),
+        ("child.mjs", "export const value = (trace.push('child'),8);"),
+    ]);
+    let output = automatically_hoisted(&input);
+    assert_eq!(output.files.len(), 1);
+    observe_activated(
+        output,
+        &format!("assert.equal(entry.{helper},7); assert.equal(await entry.load(),8);"),
+    );
+    let input = sources(&[
+        (
+            "entry.mjs",
+            "export function read() {} \
+         export async function load() { return (await import('./child.mjs')).read(); }",
+        ),
+        ("child.mjs", "export function read() { return read.name; }"),
+    ]);
+    let output = automatically_hoisted(&input);
+    assert!(!output
+        .files
+        .values()
+        .any(|s| s.contains("Unsupported deferred ESM reentry")));
+    observe_activated(output, "assert.equal(await entry.load(),'read');");
+}
+
 #[test]
 fn activated_esm_empty_local_target_initializes_without_retained_segments() {
     let input = sources(&[

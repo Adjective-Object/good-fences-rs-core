@@ -28,8 +28,8 @@ hoisting/initialization semantics.
 `link::deferred_esm` explicitly reconstructs one checked synchronous, acyclic,
 single-root/single-chunk ESM island. It returns `Some(DeferredEsm)` with ordinary
 native artifacts and the generated initializer export name, or `None` when the
-island needs native evaluation. Ordinary `link::esm` and `BuildSession` output
-are unchanged: no automatic deferred-target selection or parent-hoisting yet.
+island needs native evaluation. `link::esm` and `BuildSession` also select
+eligible single-parent dynamic islands automatically, as described below.
 
 Supported retained declarations are named root functions and simple identifier
 `var`/`let`/`const` declarations (including split declarators and named exports).
@@ -39,7 +39,7 @@ become root `var`s, with assignments/effects inside one lexical guarded initiali
 The native export list remains live, not a returned factory namespace. Merely
 loading the artifact does not initialize the island. Success and every failure,
 including `throw undefined`, are cached permanently; reentry is rejected.
-This explicit reconstruction mode does not preserve TDZ errors.
+This deferred reconstruction mode does not preserve TDZ errors.
 
 CommonJS, externals, TLA, cycles, dynamic/require dependencies, observable
 namespace uses, default declarations/expressions, classes, destructuring,
@@ -50,9 +50,9 @@ slots use the same checked operation renderer as ordinary native emission;
 no emitted-source parsing or runtime source loading is involved.
 
 The internal `link::esm_plan_activated` reconstruction seam takes explicit
-source-file → physical evaluation-owner selections; it is also the ordinary
-prepared-emission path with an empty selection. Selection is not a build option
-or an automatic single-parent policy. Its caller must certify that dynamic
+source-file → physical evaluation-owner selections. Ordinary prepared emission
+derives these selections from retained dependency uses; there is no build option.
+Explicit callers must certify that dynamic
 namespace results are used only for live reads, call receivers and identity,
 not reflection, mutation, escaping to unknown consumers or namespace reexports.
 Those unsupported observations must retain their native boundary. Eligible
@@ -74,8 +74,31 @@ The seam rejects unsupported declaration/namespace forms, `then` export
 surfaces, source TLA/static cycles, require/context/CJS activation, eager/public
 demands on deferred sources and incompatible co-location. It falls back to
 ordinary native emission rather than changing their evaluation. Deferred sources
-with their own dynamic imports currently stay native. Selection and placement
-heuristics, clustering and synthesized async boundaries remain unimplemented.
+with their own dynamic imports currently stay native. Clustering and synthesized
+async boundaries remain unimplemented.
+
+### Automatic single-parent placement
+
+A retained dynamic target with exactly one logical source parent across all its
+runtime uses can share that parent's file. Multiple sites in the same parent
+count as one parent. Its complete synchronous static dependency island moves
+with it only when no outside consumer or public/eager root needs that island.
+Existing acyclicity, declaration, naming and deferred-activation checks remain
+mandatory. Logical reachability masks do not change; physical artifact members
+and typed async routes resolve to the final owner. There is no child artifact or
+fetch for a selected island, and loading the parent alone never initializes it.
+
+Selection checks cached AST observations, not just namespace demand. Supported
+uses are discarded imports, discarded awaits, direct `(await import()).name`,
+`const ns = await import()` with exclusively static property reads, simple
+object destructuring, and one-arrow `.then(ns => ...)` consumers with those same
+property observations. Live reads and root function/capture identity survive.
+Receiver calls additionally require checked, unreassigned function declarations;
+islands containing `this` stay native. Escaping promises or namespaces (including returning
+`import()` from a public loader), reflection, computed property accesses, writes,
+rest/default destructuring, namespace exports and `then` surfaces stay native.
+Unsupported TLA, cycles, externals, CJS, nested dynamic dependencies, declaration
+forms and observable-name collisions likewise retain native placement.
 
 ## JSON modules
 

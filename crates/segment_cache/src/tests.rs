@@ -22,6 +22,28 @@ fn envelope(record: &CacheRecord) -> Vec<u8> {
 }
 
 #[test]
+fn dynamic_namespace_observations_roundtrip_and_reject_dangling_dependencies() {
+    let source =
+        "export async function load() { const ns = await import('./child.mjs'); return ns.value; }";
+    let record = record(source, "entry.mjs", ModuleFormat::Esm);
+    let encoded = record.encode(source).unwrap();
+    let decoded = CacheRecord::decode(&encoded, source, record.config).unwrap();
+    assert_eq!(decoded.module.facts.emission, record.module.facts.emission);
+    assert_eq!(
+        decoded.module.facts.emission.dynamic_namespaces[0].properties,
+        Some(vec![("value".into(), false)])
+    );
+    let mut damaged = record.clone();
+    damaged.module.facts.emission.dynamic_namespaces[0]
+        .dependency
+        .0 += 1;
+    assert!(damaged.encode(source).is_err());
+    let mut damaged = record;
+    damaged.module.facts.emission.dynamic_namespaces.clear();
+    assert!(damaged.encode(source).is_err());
+}
+
+#[test]
 fn provenance_rejects_repaired_source_config_and_fact_pairings() {
     let source = "export const value = 1;";
     let parsed = ast_segmenter::parse_module(

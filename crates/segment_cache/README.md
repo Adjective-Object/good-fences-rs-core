@@ -7,8 +7,9 @@ resolution and fixed-point effect solving remain build-local.
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
-Syntax-local effect reasons/timing are persisted and range-checked (schema 11 /
-extractor 14, including deferred declaration/source-slot alternatives,
+Syntax-local effect reasons/timing are persisted and range-checked (schema 12 /
+extractor 15, including dynamic namespace observation shapes/receiver/`this`
+facts, deferred declaration/source-slot alternatives,
 relative dependency patterns, owned lazy Ecco precursors,
 inferred user-function contracts and declaration identity,
 source-local emission recipes/placement constraints,
@@ -54,6 +55,9 @@ boundaries/known module-await vetoes are checked. CJS recipes permit only
 dependency and source-hint slots, never lexical or invocation rewrites.
 Deferred alternatives validate declaration binding links and complete initializer
 source-slot roots; CommonJS cannot carry these ESM reconstruction alternatives.
+Dynamic namespace observations cover exactly the dynamic dependency occurrences,
+with sorted unique property/receiver pairs; placement and target eligibility are
+never cached.
 These are structural integrity checks on source-local evidence, not a second
 parser or authentication of a publisher; source/configuration hashes and bounded
 CBOR preflight remain mandatory on both codec boundaries.

@@ -141,12 +141,16 @@ IDs; replacing parents own nested rewrites, never reconnect generated text.
 Materialize complete recipe MultiSpans, not just segment ownership ranges.
 Split declarators share source prefixes, not binding/effect ownership; terminate
 each reconstructed declaration independently.
-Explicit deferred reconstruction shares native recipes/name gates: keep functions
+Selected deferred reconstruction shares native recipes/name gates: keep functions
 and var-lowered bindings at ESM root, defer assignments/effects in source order,
-cache success/all thrown values separately, and reject reentry. Only this opt-in
+cache success/all thrown values separately, and reject reentry. Only this checked
 synchronous acyclic mode waives TDZ; ordinary native emission remains unchanged.
-Internal esm_plan_activated accepts explicit certified placements only; default
-prepared emission passes none. Deferred closures keep one root-binding guard per
+Internal esm_plan_activated accepts explicit certified placements; ordinary
+emission derives single-parent static-island placements from all retained uses,
+public/eager constraints and cached AST namespace observations. Never infer
+namespace safety from reachability alone. Escapes/reflection stay native;
+receiver calls require unreassigned functions and no island `this` observations.
+Deferred closures keep one root-binding guard per
 source, with source-ordered static activation inside the guard. Dynamic recipe
 operations yield before local activation or load the final typed owner then
 invoke its exported guard. Per-island getter literals support certified live

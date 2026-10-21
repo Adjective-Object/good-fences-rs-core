@@ -96,3 +96,5 @@ the invocation's own function scope. CJS remains one opaque recipe with only
 dependency/hint slots. Never persist chosen names, targets or transform policy.
 Namespace-use candidates cover all import bindings; only linked namespace
 identities activate them, including named/default imports of namespace reexports.
+Dynamic namespace observations inspect alias references by binding identity;
+persist syntax shapes/receiver and `this` facts, never target safety or placement.

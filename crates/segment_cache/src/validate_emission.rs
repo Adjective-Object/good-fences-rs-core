@@ -38,6 +38,26 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
         "emission segment count mismatch"
     );
     ensure!(
+        emission
+            .dynamic_namespaces
+            .iter()
+            .map(|n| n.dependency)
+            .eq(facts
+                .dependencies
+                .iter()
+                .filter(|d| d.kind == DependencyKind::DynamicImport)
+                .map(|d| d.id)),
+        "invalid dynamic namespace dependency links"
+    );
+    for observation in &emission.dynamic_namespaces {
+        if let Some(properties) = &observation.properties {
+            ensure!(
+                properties.windows(2).all(|w| w[0] < w[1]),
+                "invalid dynamic namespace properties"
+            );
+        }
+    }
+    ensure!(
         emission.nested_bindings
             == facts
                 .bindings
