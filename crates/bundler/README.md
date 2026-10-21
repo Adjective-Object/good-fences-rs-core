@@ -2,6 +2,11 @@
 
 ## Replacement direction and current status
 
+The [fixture semantic contract](../../fixtures/bundler/README.md#permitted-execution-differences)
+lists permitted execution differences and the observations adversarial tests
+must preserve. TDZ-error preservation is waived; generated suspension and new
+load failures require explicit async-boundary opt-in.
+
 The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { execute, runBundlerCases, runFixtures } from './bundler-fixtures.mjs';
+import { buildProject, execute, observeEntries, runBundlerCases, runFixtures } from './bundler-fixtures.mjs';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const managedRoot = path.join(project, 'target/p1-test-tmp');
@@ -49,6 +49,86 @@ test('real public pipeline executes emitted output without modifying original fi
     assert.deepEqual(run(), [{ id: 'synthetic/example', status: 'passed', backend: 'native', executions: 1, stdout: ['hello'] }]);
   });
 });
+
+for (const [name, source, assertions] of [
+  ['guarded arguments and spread', `
+    function helper(...values) {
+      globalThis.events.push('body');
+      return [this === undefined, values];
+    }
+    export async function run(enabled) {
+      globalThis.events = [];
+      const value = enabled && helper(
+        (globalThis.events.push('argument'), 1),
+        ...{ *[Symbol.iterator]() { globalThis.events.push('spread'); yield 2; } }
+      );
+      return [await value, globalThis.events];
+    }`,
+  `assert.deepEqual(await ns.run(false), [false, []]);
+   assert.deepEqual(await ns.run(true), [[true, [1, 2]], ['argument', 'spread', 'body']]);`],
+  ['throw identity and finally', `
+    function fail(value) { globalThis.events.push('body'); throw value; }
+    export async function run(value) {
+      globalThis.events = [];
+      try { fail(value); }
+      catch (error) { globalThis.events.push(error === value ? 'caught' : 'wrong'); }
+      finally { globalThis.events.push('finally'); }
+      return globalThis.events;
+    }`,
+  `for (const value of [undefined, null, {reason: 'identity'}, new ReferenceError('user')])
+     assert.deepEqual(await ns.run(value), ['body', 'caught', 'finally']);`],
+  ['recursive binding identity', `
+    function even(n) { return n ? odd(n - 1) : true; }
+    function odd(n) { return n ? even(n - 1) : false; }
+    export async function run() { return {values: [even(6), odd(5)], even}; }`,
+  `const a = await ns.run(), b = await ns.run();
+   assert.deepEqual(a.values, [true, true]);
+   assert.equal(a.even, b.even);
+   assert.equal(a.even(4), true);`],
+]) {
+  test(`relocation option matrix preserves ${name}`, () => {
+    withCorpus(source, ({ caseDir }) => {
+      const root = path.join(caseDir, 'files');
+      const observer = path.join(caseDir, 'observe.mjs');
+      writeFileSync(observer, `
+        import assert from 'node:assert/strict';
+        import {pathToFileURL} from 'node:url';
+        export async function observe({entries, entry}) {
+          const ns = await import(pathToFileURL(entries[entry]));
+          ${assertions}
+          console.log('hello');
+        }`);
+      const manifest = {
+        id: `matrix/${name}`, entryPoints: ['entry.js'],
+        expectations: {stdout: ['hello']},
+      };
+      const observerEntries = {'entry.js': observer};
+      const baseline = observeEntries(manifest, observerEntries, root, 5000, 'source', {
+        entries: {'entry.js': path.join(root, 'entry.js')}, directory: root, mode: 'source',
+      });
+      for (const synthesize_async_boundaries of [false, true]) {
+        for (const min_chunk_bytes of [0, 4096]) {
+          const build = buildProject(path.join(project, 'target/debug/examples/build'),
+            root, manifest.entryPoints, 30000, {
+              output: {synthesize_async_boundaries, min_chunk_bytes},
+            });
+          assert.equal(build.generatedBoundaries > 0, synthesize_async_boundaries,
+            'enabled extraction must run; disabled extraction must not create boundaries');
+          const entryArtifact = path.relative(build.directory, build.entries['entry.js']);
+          if (synthesize_async_boundaries) {
+            assert.equal(build.segmentMembers.some(member => member.artifact !== entryArtifact),
+              min_chunk_bytes === 0,
+              'typed members must prove separate loading versus co-location');
+          }
+          const result = observeEntries(manifest, observerEntries, root, 5000,
+            `synthesis=${synthesize_async_boundaries}, size=${min_chunk_bytes}`,
+            {...build, mode: 'bundled'});
+          assert.deepEqual(result, baseline);
+        }
+      }
+    }, {'package.json': '{"type":"module"}'});
+  });
+}
 
 for (const suffix of ['.module.css', '.module.cjs']) {
   test(`explicit fixture configuration selects ${suffix} CSS transforms and preserves byte resources`, () => {

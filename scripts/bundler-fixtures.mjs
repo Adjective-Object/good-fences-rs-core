@@ -411,6 +411,13 @@ export function runFixtures(root = defaultRoot, {
           cpSync(path.join(path.dirname(files), observation), outputObserver);
           successful(execute(process.execPath, ['--check', outputObserver], directory),
             `${manifest.id}: ${manifest.cssObservation ? 'CSS' : 'output'} observer syntax validation`);
+          if (manifest.outputObservation) {
+            const entries = Object.fromEntries(manifest.entryPoints.map(entry => [entry, path.join(native, entry)]));
+            baseline = observeEntries(manifest,
+              Object.fromEntries(manifest.entryPoints.map(entry => [entry, outputObserver])),
+              native, timeoutMs, 'async boundary source',
+              { entries, directory: native, mode: 'source' });
+          }
         } else {
           baseline = observeEntries(manifest,
             Object.fromEntries(manifest.entryPoints.map((entry) => [entry, path.join(native, entry)])),
@@ -437,8 +444,9 @@ export function runFixtures(root = defaultRoot, {
         stage = 'output';
         const bundled = observeEntries(manifest,
           outputObserver ? Object.fromEntries(manifest.entryPoints.map(entry => [entry, outputObserver])) : build.entries,
-          source, timeoutMs, outputObserver ? observationLabel : 'bundled', outputObserver ? build : undefined);
-        if (!outputObserver) assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
+          source, timeoutMs, outputObserver ? observationLabel : 'bundled',
+          outputObserver ? { ...build, mode: 'bundled' } : undefined);
+        if (baseline) assert.deepEqual(bundled, baseline, `${manifest.id}: emitted/source runtime observation mismatch`);
         return { id: manifest.id, status: 'passed', backend, ...(warnings ? { warnings } : {}),
           executions: manifest.entryPoints.length, stdout: bundled.stdout, ...retained };
       } catch (error) {
