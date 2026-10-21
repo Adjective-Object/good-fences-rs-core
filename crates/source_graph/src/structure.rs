@@ -155,6 +155,8 @@ pub struct OccurrenceEdge {
     pub binding: Option<BindingId>,
     pub read: bool,
     pub write: bool,
+    /// Source-reference syntax context, not dependency activation timing.
+    pub async_deferred: bool,
 }
 
 impl SourceGraph {
@@ -294,6 +296,7 @@ impl SourceGraph {
                             binding: Some(binding),
                             read: reference.read,
                             write: reference.write,
+                            async_deferred: reference.async_deferred,
                         });
                     }
                 }
@@ -388,6 +391,7 @@ impl SourceGraph {
                     binding: None,
                     read: false,
                     write: false,
+                    async_deferred: false,
                 };
                 if let Some(DependencyTarget::Context(candidates)) =
                     input.resolutions.get(&dependency.id)
@@ -518,6 +522,49 @@ pub(crate) mod tests {
             })
             .collect();
         OwnedSourceFileInput::from_parsed(path.into(), parsed, resolutions)
+    }
+
+    #[test]
+    fn async_deferred_reference_occurrences_keep_mixed_contexts_and_both_indexes() {
+        let source = "const target = 1; async function caller() { target; (() => target)(); target; const local = 2; local; }";
+        let graph = SourceGraph::from_owned([input("main.mjs", source)]);
+        graph.validate_links().unwrap();
+        let caller = GraphNode::Segment(SegmentKey::new(0, 1));
+        let target = GraphNode::Segment(SegmentKey::new(0, 0));
+        let references: Vec<_> = graph
+            .outgoing_indexed(caller)
+            .filter(|(_, edge)| edge.kind == EdgeKind::LocalReference && edge.to == target)
+            .collect();
+        assert_eq!(
+            references
+                .iter()
+                .map(|(_, edge)| edge.async_deferred)
+                .collect::<Vec<_>>(),
+            [true, false, true]
+        );
+        assert!(references
+            .windows(2)
+            .all(|pair| pair[0].1.site.start < pair[1].1.site.start));
+        for (index, edge) in references {
+            assert_eq!(graph.edges()[index], *edge);
+            assert!(graph
+                .incoming(target)
+                .any(|reverse| std::ptr::eq(edge, reverse)));
+            let reference = graph
+                .file_facts(0)
+                .unwrap()
+                .references
+                .iter()
+                .find(|reference| reference.span == edge.site)
+                .unwrap();
+            assert_eq!(edge.async_deferred, reference.async_deferred);
+        }
+        let same_segment: Vec<_> = graph
+            .outgoing(caller)
+            .filter(|edge| edge.to == caller)
+            .collect();
+        assert_eq!(same_segment.len(), 1);
+        assert!(same_segment[0].async_deferred);
     }
 
     #[test]

@@ -199,6 +199,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: Some(
                 Require,
             ),
@@ -213,6 +214,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: Some(
                 Module,
             ),
@@ -231,6 +233,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -243,6 +246,7 @@ ModuleFacts {
             read: false,
             write: true,
             type_only: false,
+            async_deferred: false,
             commonjs: Some(
                 Exports,
             ),
@@ -257,6 +261,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: Some(
                 Require,
             ),
@@ -271,6 +276,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: Some(
                 Module,
             ),
@@ -289,6 +295,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -305,6 +312,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: None,
         },
         Reference {
@@ -317,6 +325,7 @@ ModuleFacts {
             read: true,
             write: false,
             type_only: false,
+            async_deferred: false,
             commonjs: Some(
                 Require,
             ),

@@ -22,6 +22,72 @@ fn envelope(record: &CacheRecord) -> Vec<u8> {
 }
 
 #[test]
+fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
+    let source = "const target = 1; async function f(value = target) { target; (() => target)(); (async () => target)(); }";
+    let original = record(source, "async.mjs", ModuleFormat::Esm);
+    let bytes = original.encode(source).unwrap();
+    let decoded = CacheRecord::decode(&bytes, source, original.config).unwrap();
+    let parsed = decoded.to_parsed(source).unwrap();
+    assert_eq!(parsed.facts, original.module.facts);
+    assert_eq!(
+        parsed
+            .facts
+            .references
+            .iter()
+            .map(|r| r.async_deferred)
+            .collect::<Vec<_>>(),
+        [false, true, false, true]
+    );
+    for index in [0, 1] {
+        let mut changed = original.clone();
+        changed.module.facts.references[index].async_deferred ^= true;
+        assert!(changed.encode(source).is_err());
+        assert!(changed.to_parsed(source).is_err());
+        assert!(CacheRecord::decode(&envelope(&changed), source, original.config).is_err());
+    }
+    for mutate in [
+        |r: &mut CacheRecord| r.schema = 12,
+        |r: &mut CacheRecord| r.extractor = 15,
+    ] {
+        let mut stale = original.clone();
+        mutate(&mut stale);
+        assert!(stale.to_parsed(source).is_err());
+        assert!(CacheRecord::decode(&envelope(&stale), source, original.config).is_err());
+    }
+    let mut missing = serde_cbor::value::to_value(&original).unwrap();
+    let serde_cbor::Value::Map(root) = &mut missing else {
+        panic!()
+    };
+    let serde_cbor::Value::Map(module) = root.get_mut(&String::from("module").into()).unwrap()
+    else {
+        panic!()
+    };
+    let serde_cbor::Value::Map(facts) = module.get_mut(&String::from("facts").into()).unwrap()
+    else {
+        panic!()
+    };
+    let serde_cbor::Value::Array(references) =
+        facts.get_mut(&String::from("references").into()).unwrap()
+    else {
+        panic!()
+    };
+    let serde_cbor::Value::Map(reference) = &mut references[0] else {
+        panic!()
+    };
+    reference.remove(&String::from("async_deferred").into());
+    let payload = serde_cbor::to_vec(&missing).unwrap();
+    let bytes = serde_cbor::to_vec(&Envelope {
+        checksum: digest(&payload),
+        payload,
+    })
+    .unwrap();
+    assert!(CacheRecord::decode(&bytes, source, original.config)
+        .unwrap_err()
+        .to_string()
+        .contains("missing field `async_deferred`"));
+}
+
+#[test]
 fn dynamic_namespace_observations_roundtrip_and_reject_dangling_dependencies() {
     let source =
         "export async function load() { const ns = await import('./child.mjs'); return ns.value; }";

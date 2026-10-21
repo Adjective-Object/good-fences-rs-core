@@ -18,6 +18,8 @@
 - Schema 12 combines execution contexts with typed XXH3 declaration identity.
   Shared `PreparedDeclarations`
   avoids per-file serialization; source/checksum/provenance remain SHA-256.
+- Reference `async_deferred` is required syntax evidence covered by provenance,
+  not an optimization decision; stale/missing/mutated tags must fail validation.
 - Prepared sources cache generated-JS coordinates and parser identity, but recheck
   original resource bytes before sidecar publication and return, including hits.
 - Prepared parser path/format overrides resource extensions/package defaults;
