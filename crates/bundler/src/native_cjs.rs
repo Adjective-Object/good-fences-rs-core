@@ -182,6 +182,27 @@ impl CommonJs {
                 );
             }
         }
+        for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
+            let original = graph.file_path(file).unwrap().to_owned();
+            if let Ok(default) = result.value(graph, file, &ImportedName::Name("default".into())) {
+                let mut path = default.path.clone();
+                for name in &module.surface {
+                    if result
+                        .value(graph, file, &ImportedName::Name(name.clone()))?
+                        .path
+                        != default.path
+                    {
+                        path = interop_path(&original, "proxy");
+                    }
+                }
+                result
+                    .proxies
+                    .insert(original.clone(), (path, module.surface.clone()));
+            }
+            if let Ok(value) = result.value(graph, file, &ImportedName::Namespace) {
+                result.namespaces.insert(original, value.path.clone());
+            }
+        }
         Ok(result)
     }
 
@@ -267,7 +288,7 @@ impl CommonJs {
         graph: &SourceGraph,
         file: u32,
         dependency: &Dependency,
-        owners: &BTreeMap<u32, u32>,
+        namespaces: &BTreeMap<u32, PathBuf>,
     ) -> eyre::Result<Option<crate::context::Dispatch>> {
         let Some(DependencyTarget::Context(candidates)) =
             graph.dependency_target(file, dependency.id)
@@ -280,7 +301,7 @@ impl CommonJs {
             let expression = if self.contains(target) {
                 self.dynamic(graph, target)?
             } else {
-                Code::request(path(graph, owners[&target]), RequestKind::DynamicImport)
+                Code::request(namespaces[&target].clone(), RequestKind::DynamicImport)
                     .surrounded("import(", ")")
             };
             requests.insert(request.clone(), expression);
@@ -425,7 +446,7 @@ impl CommonJs {
         &mut self,
         graph: &SourceGraph,
         modules: &BTreeMap<u32, Module<'_>>,
-        owners: &BTreeMap<u32, u32>,
+        namespaces: &BTreeMap<u32, PathBuf>,
         entries: &BTreeSet<u32>,
     ) -> eyre::Result<()> {
         // Export initializers before pure cyclic availability imports. Only CJS
@@ -475,7 +496,7 @@ impl CommonJs {
                 {
                     renderer.context(
                         dependency,
-                        self.context_dynamic(graph, file, dependency, owners)?
+                        self.context_dynamic(graph, file, dependency, namespaces)?
                             .ok_or_eyre("missing dynamic context")?,
                     );
                     continue;
@@ -518,7 +539,7 @@ impl CommonJs {
                                 Code::from(format!("{}()", other.name))
                             } else {
                                 // Native require is intentionally inside the original call site.
-                                Code::request(path(graph, owners[&target]), RequestKind::Require)
+                                Code::request(namespaces[&target].clone(), RequestKind::Require)
                                     .surrounded("require(", ")")
                             }
                         }
@@ -526,7 +547,7 @@ impl CommonJs {
                             self.dynamic(graph, target)?
                         }
                         DependencyKind::DynamicImport => {
-                            Code::request(path(graph, owners[&target]), RequestKind::DynamicImport)
+                            Code::request(namespaces[&target].clone(), RequestKind::DynamicImport)
                                 .surrounded("import(", ")")
                         }
                         _ => eyre::bail!("static ESM dependency in opaque CommonJS body"),
@@ -630,12 +651,9 @@ impl CommonJs {
         for (&file, module) in modules.iter().filter(|(_, m)| m.parsed.facts.commonjs) {
             let original = graph.file_path(file).unwrap().to_owned();
             if let Ok(default) = self.value(graph, file, &ImportedName::Name("default".into())) {
-                let mut path = default.path.clone();
+                let path = &self.proxies[&original].0;
                 let mut output = Code::default();
-                let mut separate = false;
                 for name in &module.surface {
-                    let value = self.value(graph, file, &ImportedName::Name(name.clone()))?;
-                    separate |= value.path != default.path;
                     output.push(self.reexport(
                         graph,
                         file,
@@ -647,15 +665,9 @@ impl CommonJs {
                     self.files.contains_key(&default.path),
                     "missing CommonJS default job"
                 );
-                if separate {
-                    path = interop_path(&original, "proxy");
+                if *path != default.path {
                     self.files.insert(path.clone(), output);
                 }
-                self.proxies
-                    .insert(original.clone(), (path, module.surface.clone()));
-            }
-            if let Ok(value) = self.value(graph, file, &ImportedName::Namespace) {
-                self.namespaces.insert(original.clone(), value.path.clone());
             }
             if entries.contains(&file) {
                 let factory = &self.factories[&file];

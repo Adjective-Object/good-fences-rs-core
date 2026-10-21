@@ -23,6 +23,32 @@ The internal `symbols::Symbols::link` builds checked canonical
 `(file, BindingId)` definitions and import/export routes using the shared graph
 resolver. Native emission reuses that plan, preserving intermediate barrels and
 every retained var declaration.
+Source imports and references carry binding-availability, execution/activation,
+native-external-validation and exact-public-surface obligations; they do not
+prescribe physical module seams. `RetentionPlan` and canonical symbols feed the
+segment owner solver. Source privacy never adds a placement constraint.
+
+After placement, internal `native_connections::Connections` fixes owner-local
+names, demanded cross-owner binding addresses, typed native requests and public
+namespace routes before body emission. Placement compatibility and emission share
+one declaration/import name plan, preserving inference-sensitive source names
+and native read-only import writes. Same-owner references stay lexical.
+Only private bindings actually crossing owners receive internal exports. If
+those names would widen an observable namespace, one exact public projection
+wraps that body; it is not a per-source facade family. Static namespaces, dynamic
+imports, entry aliases and require-of-ESM use the public route, while lexical
+imports use actual body owners. `Artifacts::modules` reports namespace routes;
+segment and module members still report their actual binding/evaluation owners.
+Body-free private evaluation connectors, including connector-only cycles, are
+reduced over the reconstructed typed artifact graph in each entrance's request
+order. Cycles containing or reaching a body/native identity retain their
+evaluation and shared failure barriers; async closures keep their native requests.
+The final phase proof traverses the actual typed static requests after connector
+pruning and runtime insertion, including public projections and root routes.
+Original native linking
+clauses remain for unknown external surfaces and unchanged async request
+accounting; opaque CommonJS retains its separate factory/facade activation
+contract. These conservative boundaries are not private-address workarounds.
 Lexical names are allocated in path/declaration order, avoiding nested bindings,
 free references, keywords and helpers. Observable function/class/inferred names
 remain separate from those allocations. Namespace,
@@ -422,19 +448,22 @@ constraints may still require co-location. No cells, registration, interpreter,
 source loading or runtime compilation is permitted.
 
 This supersedes the earlier rule that observable namespace seams force private
-declarations and deferred readers together. The current placement workaround
-still imposes that rule, and emission still derives internal export addresses
-from public source surfaces. The defensive private-boundary regression requires
-distinct actual owners for a pinned initializer and shared reader; it intentionally
-fails until explicit internal routes and public projections replace that coupling.
+declarations and deferred readers together. Private cut-edge addresses and public
+projections allow a pinned initializer and shared reader to keep distinct owners
+without widening the observable namespace.
 
 Namespaces and CJS-consuming modules no longer impose whole-module placement
 barriers. Namespace demand retains checked visible exports and ordinary effects,
 not unrelated private declarations. Empty private evaluation chunks are removed,
 their evaluation imports are spliced in original order, and no-op metadata owners
 are remapped to surviving consumers. Public, escaped and dynamic namespace
-boundaries remain native modules with exact keys and identity. Cyclic connector
-jobs remain where splicing would bypass a still-evaluating job's dependency order.
+boundaries remain native modules with exact keys and identity. Reduction uses SCCs
+of the reconstructed typed artifact graph, not source import cycles. Body-free
+private evaluation SCCs disappear, expanding outgoing obligations in each
+entrance's source order; independent entries gain no global order. A component
+containing a retained job keeps its connectors so a revisit cannot bypass that
+still-evaluating job's dependency order. Native binding/namespace requests and
+external linking clauses also keep their identities.
 The physical plan carries source fragments and typed ordered requests, not an
 emitted AST. Cached retained-content flags select empty private jobs before final
 rendering; binding requests cannot target a deleted job. Ownership projections

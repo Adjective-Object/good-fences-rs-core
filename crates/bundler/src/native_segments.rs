@@ -6,8 +6,9 @@ use crate::RetentionEdgeKind;
 
 pub(super) struct Placement {
     pub owners: BTreeMap<SegmentKey, Owner>,
+    pub names: BTreeMap<Owner, connections::OwnerNames>,
     schedules: BTreeMap<Owner, Vec<SegmentKey>>,
-    phase_dependencies: BTreeMap<Owner, BTreeSet<Owner>>,
+    pub(super) phase_dependencies: BTreeMap<Owner, BTreeSet<Owner>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -292,43 +293,6 @@ impl Placement {
                 }
             }
         }
-        // A public namespace cannot grow private export addresses. Keep local
-        // readers with private declarations even when their accesses are deferred;
-        // otherwise a pinned declaration can strand its relocated reader.
-        let boundary_exports: BTreeMap<_, BTreeSet<_>> = surfaces
-            .iter()
-            .map(|&file| {
-                (
-                    file,
-                    symbols.exports[&file]
-                        .values()
-                        .filter_map(|linked| match linked.identity {
-                            ExportIdentity::Binding(file, binding) => Some((file, binding.0)),
-                            _ => None,
-                        })
-                        .collect(),
-                )
-            })
-            .collect();
-        for access in &plan.retention.execution.accesses {
-            if access.segment.file_id != access.declaration.file_id {
-                continue;
-            }
-            let file = access.segment.file_id;
-            let Some(exports) = boundary_exports.get(&seams[&file]) else {
-                continue;
-            };
-            let reference = &modules[&file].parsed.facts.references[access.reference as usize];
-            let Some(binding) = reference.binding else {
-                continue;
-            };
-            if !exports.contains(&(file, binding.0)) {
-                let before = indices[&access.declaration];
-                let after = indices[&access.segment];
-                constraints[before].insert(after);
-                constraints[after].insert(before);
-            }
-        }
         let components = crate::effect_dependencies::components(&constraints);
         let mut component_for = BTreeMap::new();
         for (index, component) in components.iter().enumerate() {
@@ -484,29 +448,16 @@ impl Placement {
         // physical group before applying any ownership change.
         loop {
             let mut rejected = BTreeSet::new();
+            let names = connections::name_plan(graph, modules, symbols, &owners, seams)?;
             for (owner, members) in &activation.members {
-                let names = local_names(graph, modules, symbols, &owners, *owner)?;
                 let mut values = Values::new(graph, modules, symbols);
-                values.names = names;
+                values.names = names[owner].locals.clone();
                 values.requests = seams
                     .iter()
                     .map(|(&file, &owner)| (file, request(graph, owner)))
                     .collect();
-                for (&symbol @ (file, binding), linked) in &symbols.imports {
-                    if matches!(
-                        linked.identity,
-                        ExportIdentity::Namespace(_) | ExportIdentity::CommonJs(..)
-                    ) {
-                        let name = &modules[&file]
-                            .parsed
-                            .facts
-                            .bindings
-                            .iter()
-                            .find(|b| b.id == binding)
-                            .ok_or_eyre("missing namespace import binding")?
-                            .name;
-                        values.imports.insert(symbol, name.clone());
-                    }
+                for binding in &names[owner].bindings {
+                    values.imports.insert(binding.symbol, binding.alias.clone());
                 }
                 let group_live: BTreeSet<_> = members.iter().copied().collect();
                 for file in group_live
@@ -523,9 +474,11 @@ impl Placement {
                 }
             }
             if rejected.is_empty() {
-                let placement = Self::scheduled(graph, plan, modules, owners.clone(), &prefixes)?;
+                let mut placement =
+                    Self::scheduled(graph, plan, modules, owners.clone(), &prefixes)?;
+                placement.names = names;
                 let (safe, initializers) = activation_safe(
-                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes,
+                    graph, plan, modules, symbols, seams, surfaces, &placement, &prefixes, None,
                 )?;
                 if !safe {
                     // Reject contraction, not native cycles. Prefer retaining
@@ -668,6 +621,7 @@ impl Placement {
         let phase_dependencies = phase_dependencies(&owners, prefixes);
         Ok(Self {
             owners,
+            names: BTreeMap::new(),
             schedules,
             phase_dependencies,
         })
@@ -894,6 +848,7 @@ fn activation_safe(
     surfaces: &BTreeSet<u32>,
     placement: &Placement,
     prefixes: &BTreeSet<SegmentKey>,
+    connections: Option<(&BTreeMap<PathBuf, Code>, &BTreeMap<RootId, PathBuf>)>,
 ) -> eyre::Result<(bool, BTreeSet<SegmentKey>)> {
     let owners = &placement.owners;
     let mut native = BTreeMap::new();
@@ -996,26 +951,26 @@ fn activation_safe(
             }
         }
     }
-    fn completion<K: Copy + Ord>(root: K, edges: &BTreeMap<K, Vec<K>>) -> Vec<K> {
+    fn completion<K: Clone + Ord>(roots: Vec<K>, edges: &BTreeMap<K, Vec<K>>) -> Vec<K> {
         let mut seen = BTreeSet::new();
-        let mut pending = vec![(root, false)];
+        let mut pending: Vec<_> = roots.into_iter().rev().map(|root| (root, false)).collect();
         let mut order = Vec::new();
         while let Some((node, finish)) = pending.pop() {
             if finish {
                 order.push(node);
                 continue;
             }
-            if !seen.insert(node) {
+            if !seen.insert(node.clone()) {
                 continue;
             }
-            pending.push((node, true));
+            pending.push((node.clone(), true));
             pending.extend(
                 edges
                     .get(&node)
                     .into_iter()
                     .flatten()
                     .rev()
-                    .map(|&target| (target, false)),
+                    .map(|target| (target.clone(), false)),
             );
         }
         order
@@ -1031,6 +986,11 @@ fn activation_safe(
     let mut events = BTreeSet::new();
     let mut native_events: BTreeMap<_, Vec<_>> = BTreeMap::new();
     for &key in owners.keys() {
+        // Opaque factories/facade jobs have their own activation contract.
+        // This final check projects the reconstructed native ESM body events.
+        if connections.is_some() && modules[&key.file_id].parsed.facts.commonjs {
+            continue;
+        }
         let recipe =
             &modules[&key.file_id].parsed.facts.emission.segments[key.segment_idx as usize];
         if recipe.connector_only || recipe.placement.instantiable {
@@ -1059,26 +1019,64 @@ fn activation_safe(
         // every demanded public value before that entrance completes.
         phases
     };
-    for seed in plan.roots.values() {
+    let reconstructed = connections.map(|(files, routes)| {
+        let dependencies: BTreeMap<_, Vec<_>> = files.iter().map(|(path, code)| {
+            (path.clone(), code.static_dependencies().map(|(target, _)| target.clone()).collect())
+        }).collect();
+        let schedules: BTreeMap<_, _> = placement.schedules.iter()
+            .filter(|(owner, _)| !matches!(owner, Owner::Evaluation(file) if modules[file].parsed.facts.commonjs))
+            .map(|(owner, schedule)| (owner.path(graph), schedule)).collect();
+        (dependencies, schedules, routes)
+    });
+    for (root, seed) in &plan.roots {
         let mut entrances = seed.evaluation_roots.clone();
         entrances.extend(seed.binding_roots.iter().filter_map(|node| match node {
             GraphNode::Module(file) => Some(*file),
             GraphNode::Segment(key) => Some(key.file_id),
             GraphNode::Unlinked { .. } => None,
         }));
-        for file in entrances {
+        let groups = if connections.is_some() {
+            vec![entrances]
+        } else {
+            entrances.into_iter().map(|file| vec![file]).collect()
+        };
+        for entrances in groups {
             let before = projection(
-                completion(file, &native)
+                completion(entrances.clone(), &native)
                     .into_iter()
                     .flat_map(|file| native_events.get(&file).into_iter().flatten().copied())
                     .collect(),
             );
-            let after = projection(
-                completion(Owner::Evaluation(seams[&file]), &physical)
+            let after = if let Some((dependencies, schedules, routes)) = &reconstructed {
+                let Some(route) = routes.get(root) else {
+                    // External async roots have no owned executable entrance.
+                    continue;
+                };
+                projection(
+                    completion(vec![route.clone()], dependencies)
+                        .into_iter()
+                        .flat_map(|path| {
+                            schedules
+                                .get(&path)
+                                .into_iter()
+                                .flat_map(|schedule| schedule.iter().copied())
+                        })
+                        .collect(),
+                )
+            } else {
+                projection(
+                    completion(
+                        entrances
+                            .iter()
+                            .map(|file| Owner::Evaluation(seams[file]))
+                            .collect(),
+                        &physical,
+                    )
                     .into_iter()
                     .flat_map(|owner| placement.schedule(owner).iter().copied())
                     .collect(),
-            );
+                )
+            };
             if before != after {
                 let mut changed = BTreeSet::new();
                 for ((before_phase, before_init), (after_phase, after_init)) in
@@ -1087,6 +1085,7 @@ fn activation_safe(
                     if before_phase != after_phase {
                         return Ok((false, BTreeSet::new()));
                     }
+
                     changed.extend(before_init.symmetric_difference(after_init).copied());
                 }
                 return Ok((false, changed));
@@ -1096,7 +1095,60 @@ fn activation_safe(
     Ok((true, BTreeSet::new()))
 }
 
-fn declaration(graph: &SourceGraph, identity: &ExportIdentity) -> eyre::Result<Option<SegmentKey>> {
+#[expect(clippy::too_many_arguments)]
+pub(super) fn validate_connections(
+    graph: &SourceGraph,
+    plan: &ChunkPlan,
+    modules: &BTreeMap<u32, Module<'_>>,
+    symbols: &Symbols,
+    seams: &BTreeMap<u32, u32>,
+    surfaces: &BTreeSet<u32>,
+    placement: &Placement,
+    files: &BTreeMap<PathBuf, Code>,
+    routes: &BTreeMap<RootId, PathBuf>,
+) -> eyre::Result<()> {
+    for (path, code) in files {
+        for (target, _) in code.static_dependencies() {
+            eyre::ensure!(
+                files.contains_key(target),
+                "native connection in {} targets missing artifact {}",
+                path.display(),
+                target.display()
+            );
+        }
+    }
+    for route in routes.values() {
+        eyre::ensure!(
+            files.contains_key(route),
+            "native entrance targets missing artifact {}",
+            route.display()
+        );
+    }
+    if modules.keys().any(|&file| has_externals(graph, file)) {
+        return Ok(());
+    }
+    let (safe, _) = activation_safe(
+        graph,
+        plan,
+        modules,
+        symbols,
+        seams,
+        surfaces,
+        placement,
+        &BTreeSet::new(),
+        Some((files, routes)),
+    )?;
+    eyre::ensure!(
+        safe,
+        "reconstructed native connections change source initialization phases"
+    );
+    Ok(())
+}
+
+pub(super) fn declaration(
+    graph: &SourceGraph,
+    identity: &ExportIdentity,
+) -> eyre::Result<Option<SegmentKey>> {
     Ok(match identity {
         ExportIdentity::Binding(file, binding) => {
             let facts = graph.file_facts(*file).ok_or_eyre("missing symbol facts")?;
@@ -1221,12 +1273,10 @@ pub(super) fn local_names(
 pub(super) fn emit(
     graph: &SourceGraph,
     root: Owner,
-    seams: &BTreeMap<u32, u32>,
-    redirects: &BTreeMap<u32, u32>,
     modules: &BTreeMap<u32, Module<'_>>,
     symbols: &Symbols,
     placement: &Placement,
-    surfaces: &BTreeSet<u32>,
+    connections: &connections::Connections,
     recipes: &BTreeMap<SegmentKey, &[crate::effects::InvocationRewrite]>,
     cjs: &commonjs::CommonJs,
 ) -> eyre::Result<Code> {
@@ -1237,10 +1287,15 @@ pub(super) fn emit(
         .map(|(&k, _)| k)
         .collect();
     let mut values = Values::new(graph, modules, symbols);
-    values.names = local_names(graph, modules, symbols, &placement.owners, root)?;
-    values.requests = seams
+    values.names = connections
+        .names
+        .get(&root)
+        .cloned()
+        .ok_or_eyre("missing planned owner names")?;
+    values.requests = connections
+        .namespaces
         .iter()
-        .map(|(&f, &o)| (f, Code::request(path(graph, o), RequestKind::DynamicImport)))
+        .map(|(&f, route)| (f, Code::request(route.clone(), RequestKind::DynamicImport)))
         .collect();
     for (&file, module) in modules {
         for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
@@ -1254,7 +1309,9 @@ pub(super) fn emit(
                         )
                 })
         }) {
-            if let Some(dispatch) = cjs.context_dynamic(graph, file, dependency, seams)? {
+            if let Some(dispatch) =
+                cjs.context_dynamic(graph, file, dependency, &connections.namespaces)?
+            {
                 values.contexts.insert((file, dependency.id), dispatch);
                 continue;
             }
@@ -1276,146 +1333,15 @@ pub(super) fn emit(
             values.native_defaults.insert(file);
         }
     }
-    if let Owner::Evaluation(file) = root {
-        for dependency in modules[&file].parsed.facts.dependencies.iter().filter(|d| {
-            !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
-        }) {
-            let target = redirects[&target_file(graph, file, dependency)?];
-            if cjs.contains(target) {
-                output.push(cjs.evaluate(graph, file, target)?);
-            } else if seams[&target] != file {
-                output.push(Code::evaluation(path(graph, seams[&target])));
-            }
-        }
-    }
-    let mut phase_dependencies: Vec<_> = placement
-        .phase_dependencies
-        .get(&root)
-        .into_iter()
-        .flatten()
-        .copied()
-        .collect();
-    phase_dependencies.sort_by_key(|owner| owner.path(graph));
-    for owner in phase_dependencies {
-        output.push(Code::evaluation(owner.path(graph)));
+    if let Some(requests) = connections.evaluation.get(&root) {
+        output.push(requests.clone());
     }
     let schedule = placement.schedule(root);
-    let mut relocated: Vec<_> = schedule
-        .iter()
-        .map(|key| key.file_id)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    relocated.sort_by_key(|&file| graph.file_path(file));
-    let mut imported = BTreeSet::new();
-    let mut occupied: BTreeSet<_> = values
-        .names
-        .values()
-        .chain(values.defaults.values())
-        .cloned()
-        .collect();
-    for module in modules.values() {
-        occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
-        occupied.extend(
-            module
-                .parsed
-                .facts
-                .references
-                .iter()
-                .map(|r| r.name.clone()),
-        );
+    if let Some(imports) = connections.imports.get(&root) {
+        output.push(imports.clone());
     }
-    occupied.extend(symbols.definitions.values().map(|d| d.name.clone()));
-    for &file in &relocated {
-        for binding in modules[&file]
-            .parsed
-            .facts
-            .bindings
-            .iter()
-            .filter(|b| b.top_level)
-        {
-            if !modules[&file].parsed.facts.references.iter().any(|r| {
-                r.binding == Some(binding.id)
-                    && live.iter().filter(|k| k.file_id == file).any(|k| {
-                        contains(
-                            modules[&file].parsed.segments[k.segment_idx as usize].span,
-                            r.span,
-                        )
-                    })
-            }) {
-                continue;
-            }
-            let identity = if symbols.definitions.contains_key(&(file, binding.id)) {
-                ExportIdentity::Binding(file, binding.id)
-            } else if let Some(linked) = symbols.imports.get(&(file, binding.id)) {
-                linked.identity.clone()
-            } else {
-                continue;
-            };
-            let owner = declaration(graph, &identity)?.map(|key| placement.owners[&key]);
-            let readonly = binding.import
-                && modules[&file]
-                    .parsed
-                    .facts
-                    .references
-                    .iter()
-                    .any(|r| r.binding == Some(binding.id) && r.write);
-            if owner == Some(root) && !readonly {
-                continue;
-            }
-            let alias = symbols
-                .definitions
-                .get(&(file, binding.id))
-                .map(|d| d.name.clone())
-                .unwrap_or_else(|| {
-                    let mut alias = format!(
-                        "__gf_segment_import_{}_{}",
-                        digest(graph.file_path(file).unwrap().to_str().unwrap()),
-                        binding.id.0
-                    );
-                    while !occupied.insert(alias.clone()) {
-                        alias.push('_');
-                    }
-                    alias
-                });
-            if imported.insert(alias.clone()) {
-                match &identity {
-                    ExportIdentity::Namespace(target) if cjs.contains(*target) => {
-                        output.push(cjs.import(
-                            graph,
-                            *target,
-                            &ImportedName::Namespace,
-                            &alias,
-                        )?);
-                    }
-                    ExportIdentity::Namespace(target) => output.push(
-                        Code::request(path(graph, seams[target]), RequestKind::Import)
-                            .surrounded(format!("import * as {alias} from "), ";\n"),
-                    ),
-                    ExportIdentity::CommonJs(target, name) => {
-                        output.push(cjs.import(
-                            graph,
-                            *target,
-                            &ImportedName::Name(name.clone()),
-                            &alias,
-                        )?);
-                    }
-                    _ => {
-                        let owner = owner.ok_or_eyre("missing lexical segment owner")?;
-                        output.push(
-                            Code::request(owner.path(graph), RequestKind::Import).surrounded(
-                                format!(
-                                    "import {{{} as {alias}}} from ",
-                                    quote(&address(graph, &identity, owner, surfaces, &values)?)
-                                ),
-                                ";\n",
-                            ),
-                        );
-                    }
-                }
-            }
-            values.imports.insert((file, binding.id), alias);
-        }
+    for binding in connections.bindings.get(&root).into_iter().flatten() {
+        values.imports.insert(binding.symbol, binding.alias.clone());
     }
     let mut bodies = Code::default();
     for &key in schedule {
@@ -1427,154 +1353,9 @@ pub(super) fn emit(
         bodies.push_str("\n;\n");
     }
     output.push(bodies);
-    let mut exported = BTreeSet::new();
-    let public_exports = match root {
-        Owner::Evaluation(file) => symbols.exports.get(&file),
-        Owner::Bindings(_) => None,
-    };
-    let public = matches!(root, Owner::Evaluation(file) if surfaces.contains(&file));
-    for (public_name, linked) in public_exports.into_iter().flatten() {
-        if public_name == "default"
-            && matches!(linked.identity, ExportIdentity::Expression(key) if values.native_defaults.contains(&key.file_id))
-        {
-            exported.insert(public_name.clone());
-            continue;
-        }
-        if let ExportIdentity::Namespace(file) = linked.identity {
-            if public {
-                if cjs.contains(file) {
-                    output.push(cjs.reexport(
-                        graph,
-                        file,
-                        &ImportedName::Namespace,
-                        public_name,
-                    )?);
-                } else {
-                    output.push(
-                        Code::request(path(graph, seams[&file]), RequestKind::ReExport)
-                            .surrounded(format!("export * as {} from ", quote(public_name)), ";\n"),
-                    );
-                }
-                exported.insert(public_name.clone());
-            }
-            continue;
-        }
-        if let ExportIdentity::CommonJs(file, ref name) = linked.identity {
-            if public {
-                output.push(cjs.reexport(
-                    graph,
-                    file,
-                    &ImportedName::Name(name.clone()),
-                    public_name,
-                )?);
-                exported.insert(public_name.clone());
-            }
-            continue;
-        }
-        let key = declaration(graph, &linked.identity)?
-            .ok_or_eyre("nonlexical relocated public export")?;
-        let owner = placement.owners[&key];
-        if owner == root {
-            output.push_str(&format!(
-                "export {{{} as {}}};\n",
-                values
-                    .name(&linked.identity)
-                    .ok_or_eyre("missing relocated export")?,
-                quote(public_name)
-            ));
-            exported.insert(public_name.clone());
-        } else if public {
-            output.push(
-                Code::request(owner.path(graph), RequestKind::ReExport).surrounded(
-                    format!(
-                        "export {{{} as {}}} from ",
-                        quote(&address(graph, &linked.identity, owner, surfaces, &values)?),
-                        quote(public_name)
-                    ),
-                    ";\n",
-                ),
-            );
-            exported.insert(public_name.clone());
-        }
+    if let Some(exports) = connections.exports.get(&root) {
+        output.push(exports.clone());
+        output.default_export |= exports.default_export;
     }
-    if !public {
-        let mut definitions: Vec<_> = symbols.definitions.iter().collect();
-        definitions.sort_by_key(|(&(file, binding), _)| (graph.file_path(file), binding.0));
-        for (&symbol @ (file, binding), definition) in definitions {
-            let identity = ExportIdentity::Binding(file, binding);
-            if declaration(graph, &identity)?.is_some_and(|k| placement.owners[&k] == root) {
-                let address = address(graph, &identity, root, surfaces, &values)?;
-                if !exported.insert(address.clone()) {
-                    continue;
-                }
-                let name = values.names.get(&symbol).unwrap_or(&definition.name);
-                output.push_str(&format!("export {{{name} as {}}};\n", quote(&address)));
-            }
-        }
-        for (key, name) in &values.defaults {
-            if placement.owners.get(key) == Some(&root) {
-                let address = address(
-                    graph,
-                    &ExportIdentity::Expression(*key),
-                    root,
-                    surfaces,
-                    &values,
-                )?;
-                if exported.insert(address.clone()) {
-                    output.push_str(&format!("export {{{name} as {}}};\n", quote(&address)));
-                }
-            }
-        }
-    }
-    output.default_export = exported.contains("default");
     Ok(output)
-}
-
-fn address(
-    graph: &SourceGraph,
-    identity: &ExportIdentity,
-    owner: Owner,
-    surfaces: &BTreeSet<u32>,
-    values: &Values<'_>,
-) -> eyre::Result<String> {
-    let symbols = values.symbols;
-    let original_exports = match owner {
-        Owner::Evaluation(file) => symbols.exports.get(&file),
-        Owner::Bindings(_) => None,
-    };
-    if let Some(exports) = original_exports {
-        if let Some((name, _)) = exports.iter().find(|(_, e)| &e.identity == identity) {
-            return Ok(name.clone());
-        }
-    }
-    eyre::ensure!(
-        !matches!(owner, Owner::Evaluation(file) if surfaces.contains(&file)),
-        "missing boundary symbol export"
-    );
-    match identity {
-        ExportIdentity::Binding(file, binding) => {
-            let original = &symbols.definitions[&(*file, *binding)].name;
-            if !original_exports.is_some_and(|exports| exports.contains_key(original)) {
-                return Ok(original.clone());
-            }
-            let mut name = format!(
-                "__gf_segment_binding_{}_{}",
-                digest(graph.file_path(*file).unwrap().to_str().unwrap()),
-                binding.0
-            );
-            while original_exports.is_some_and(|exports| exports.contains_key(&name))
-                || symbols.definitions.values().any(|d| d.name == name)
-                || values.defaults.values().any(|n| *n == name)
-            {
-                name.push('_');
-            }
-            Ok(name)
-        }
-        ExportIdentity::Expression(key) => values
-            .defaults
-            .get(key)
-            .cloned()
-            .ok_or_eyre("missing relocated expression address"),
-        _ => eyre::bail!("unsupported nonlexical relocated address"),
-    }
 }

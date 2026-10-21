@@ -1548,6 +1548,404 @@ fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
 }
 
 #[test]
+fn native_connections_separate_private_transport_from_all_namespace_aliases() {
+    let source = sources(&[
+        ("dep.mjs", "const secret = (console.log('initialize'), {value: 7}); const spare = (console.log('spare'), 9); export let current = 1; export {current as live}; export default current; export function bump() { current++; } export function read() { return secret.value; }"),
+        ("entry.mjs", "import * as ns from './dep.mjs'; import {current} from './dep.mjs'; export {ns}; export const load = () => import('./dep.mjs'); export function invalid() { current = 9; }"),
+        ("other.mjs", "export {read} from './dep.mjs';"),
+        ("loader.cjs", "module.exports = () => import('./dep.mjs');"),
+    ]);
+    let observer = "const entry = await import('./entry.mjs'); const direct = await import('./dep.mjs'); const dynamic = await entry.load(); const loaded = await (await import('./loader.cjs')).default(); console.log(entry.ns === direct, direct === dynamic, direct === loaded, Object.keys(dynamic).join(',')); direct.bump(); try { entry.invalid(); } catch (error) { console.log(error.name); } console.log(direct.default, direct.current, direct.live, direct.read(), (await import('./other.mjs')).read === direct.read);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    assert!(baseline.status.success());
+    assert!(baseline.stderr.is_empty());
+    assert_eq!(baseline.stdout, b"initialize\nspare\ntrue true true bump,current,default,live,read\nTypeError\n1 2 2 7 true\n");
+    for reverse in [false, true] {
+        let (plan, output) = build(
+            &source,
+            &[
+                ("dep.mjs", true),
+                ("entry.mjs", true),
+                ("other.mjs", true),
+                ("loader.cjs", true),
+            ],
+            reverse,
+        );
+        let body = &output.members[&NodeId::Segment {
+            module: "dep.mjs".into(),
+            index: 0,
+        }];
+        let reader = &output.members[&NodeId::Segment {
+            module: "dep.mjs".into(),
+            index: 6,
+        }];
+        assert_ne!(body, reader);
+        assert_ne!(body, &output.modules[Path::new("dep.mjs")]);
+        let module = NodeId::Module("dep.mjs".into());
+        assert_eq!(body, &output.members[&module]);
+        let projected = &output.chunk_artifacts[&plan.chunk_for(&module).unwrap()];
+        assert!(projected.contains(body));
+        assert!(projected.contains(&output.modules[Path::new("dep.mjs")]));
+        let mut actual = output.files.clone();
+        actual.insert("observe.mjs".into(), observation(&output, observer));
+        let observed = node(&actual, Path::new("observe.mjs"));
+        assert!(
+            observed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&observed.stderr)
+        );
+        assert!(observed.stderr.is_empty());
+        assert_eq!(observed.stdout, baseline.stdout);
+        actual.insert("inspect.mjs".into(), format!(
+            "const body = await import({}); const publicNs = await import({}); const internal = Object.keys(body).filter(key => !Object.hasOwn(publicNs, key)); console.log(internal.length, body[internal[0]].value);",
+            serde_json::to_string(&format!("./{}", body.to_string_lossy().replace('\\', "/"))).unwrap(),
+            serde_json::to_string(&format!("./{}", output.modules[Path::new("dep.mjs")].to_string_lossy().replace('\\', "/"))).unwrap(),
+        ));
+        let inspected = node(&actual, Path::new("inspect.mjs"));
+        assert!(
+            inspected.status.success(),
+            "{}",
+            String::from_utf8_lossy(&inspected.stderr)
+        );
+        assert_eq!(inspected.stdout, b"initialize\nspare\n1 7\n");
+    }
+}
+
+#[test]
+fn native_connections_preserve_import_assignment_inference() {
+    let source = sources(&[
+        ("dep.mjs", "export let value = (console.log('init'), 1);"),
+        ("entry.mjs", "import {value} from './dep.mjs'; export function run() { try { value = () => {}; } catch (error) { console.log(error.name); } }"),
+    ]);
+    let observer = "const entry = await import('./entry.mjs'); entry.run();";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    assert!(baseline.status.success());
+    assert_eq!(baseline.stdout, b"init\nTypeError\n");
+    for reverse in [false, true] {
+        let (_, output) = build(&source, &[("dep.mjs", true), ("entry.mjs", true)], reverse);
+        let mut actual = output.files.clone();
+        actual.insert("observe.mjs".into(), observation(&output, observer));
+        let observed = node(&actual, Path::new("observe.mjs"));
+        assert!(
+            observed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&observed.stderr)
+        );
+        assert_eq!(observed.stdout, baseline.stdout);
+    }
+}
+
+#[test]
+fn native_connections_preserve_readonly_import_rhs_names() {
+    for (declaration, clause, local, keys, prefix) in [
+        ("export let value = 1;", "{value}", "value", "value", ""),
+        (
+            "export let value = 1;",
+            "{value as local}",
+            "local",
+            "value",
+            "",
+        ),
+        ("export default 1;", "value", "value", "default", ""),
+        ("export let value = 1;", "* as value", "value", "value", ""),
+        (
+            "export let value = (console.log('init'), 1);",
+            "* as value",
+            "value",
+            "value",
+            "init\n",
+        ),
+    ] {
+        let source = sources(&[
+            ("dep.mjs", declaration),
+            (
+                "entry.mjs",
+                &format!(
+                    "import {clause} from './dep.mjs'; export function run() {{ try {{ {local} = () => {{}}; }} catch (error) {{ console.log('arrow', error.name); }} try {{ {local} = class {{ static {{ console.log(this.name); }} }}; }} catch (error) {{ console.log('class', error.name); }} }}"
+                ),
+            ),
+        ]);
+        let observer = "const entry = await import('./entry.mjs'); entry.run(); const dep = await import('./dep.mjs'); console.log(Object.keys(dep).join(','), dep.value ?? dep.default);";
+        let mut baseline = source.clone();
+        baseline.insert("observe.mjs".into(), observer.into());
+        let baseline = node(&baseline, Path::new("observe.mjs"));
+        assert!(
+            baseline.status.success(),
+            "{}",
+            String::from_utf8_lossy(&baseline.stderr)
+        );
+        assert!(baseline.stderr.is_empty());
+        assert_eq!(
+            baseline.stdout,
+            format!("{prefix}arrow TypeError\n{local}\nclass TypeError\n{keys} 1\n").as_bytes(),
+        );
+        for reverse in [false, true] {
+            let (_, output) = build(&source, &[("dep.mjs", true), ("entry.mjs", true)], reverse);
+            let mut actual = output.files.clone();
+            actual.insert("observe.mjs".into(), observation(&output, observer));
+            let observed = node(&actual, Path::new("observe.mjs"));
+            assert!(
+                observed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&observed.stderr)
+            );
+            assert!(observed.stderr.is_empty());
+            assert_eq!(observed.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
+fn native_connections_split_incompatible_import_and_declaration_names() {
+    let source = sources(&[
+        ("dep.mjs", "export let value = 1;"),
+        (
+            "writer.mjs",
+            "import {value as collision} from './dep.mjs'; export function run() { try { collision = class { static { console.log(this.name); } }; } catch (error) { console.log(error.name); } }",
+        ),
+        (
+            "reader.mjs",
+            "const collision = 7; export function read() { return collision; }",
+        ),
+        (
+            "entry.mjs",
+            "export {run} from './writer.mjs'; export {read} from './reader.mjs';",
+        ),
+    ]);
+    let observer = "const entry = await import('./entry.mjs'); entry.run(); console.log(entry.read(), (await import('./dep.mjs')).value);";
+    let mut baseline = source.clone();
+    baseline.insert("observe.mjs".into(), observer.into());
+    let baseline = node(&baseline, Path::new("observe.mjs"));
+    assert!(baseline.status.success());
+    assert_eq!(baseline.stdout, b"collision\nTypeError\n7 1\n");
+    for reverse in [false, true] {
+        let (_, output) = build(&source, &[("dep.mjs", true), ("entry.mjs", true)], reverse);
+        let owner = |module: &str, index| {
+            &output.members[&NodeId::Segment {
+                module: module.into(),
+                index,
+            }]
+        };
+        assert_ne!(owner("writer.mjs", 1), owner("reader.mjs", 0));
+        let mut actual = output.files.clone();
+        actual.insert("observe.mjs".into(), observation(&output, observer));
+        let observed = node(&actual, Path::new("observe.mjs"));
+        assert!(
+            observed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&observed.stderr)
+        );
+        assert!(observed.stderr.is_empty());
+        assert_eq!(observed.stdout, baseline.stdout);
+    }
+}
+
+#[test]
+fn native_connections_remove_obligation_free_private_cycles() {
+    for indirect in [false, true] {
+        let mut source = sources(&[
+            (
+                "a.mjs",
+                "import {b} from './b.mjs'; export function a(n) { return n ? b(n - 1) : 'a'; }",
+            ),
+            (
+                "b.mjs",
+                "import {a} from './a.mjs'; export function b(n) { return n ? a(n - 1) : 'b'; }",
+            ),
+            (
+                "entry.mjs",
+                "export {a} from './a.mjs'; export {b} from './b.mjs';",
+            ),
+            (
+                "other.mjs",
+                "export {a} from './a.mjs'; export {b} from './b.mjs';",
+            ),
+        ]);
+        if indirect {
+            source.insert("b.mjs".into(), "import {a} from './bridge.mjs'; export function b(n) { return n ? a(n - 1) : 'b'; }".into());
+            source.insert("bridge.mjs".into(), "export {a} from './a.mjs';".into());
+        }
+        for reverse in [false, true] {
+            let (_, output) = build(
+                &source,
+                &[("entry.mjs", true), ("other.mjs", true)],
+                reverse,
+            );
+            let owner = &output.members[&NodeId::Segment {
+                module: "a.mjs".into(),
+                index: 1,
+            }];
+            assert_eq!(
+                owner,
+                &output.members[&NodeId::Segment {
+                    module: "b.mjs".into(),
+                    index: 1,
+                }]
+            );
+            assert_eq!(
+                output.files.keys().cloned().collect::<BTreeSet<_>>(),
+                BTreeSet::from([
+                    owner.clone(),
+                    output.entries["entry.mjs"].clone(),
+                    output.entries["other.mjs"].clone(),
+                ]),
+                "body-free private connectors must not impose source-module seams",
+            );
+            assert!(!output.modules.contains_key(Path::new("a.mjs")));
+            assert!(!output.modules.contains_key(Path::new("b.mjs")));
+            for first in ["entry", "other"] {
+                let second = if first == "entry" { "other" } else { "entry" };
+                let observer = format!(
+                    "const first = await import('./{first}.mjs'); const second = await import('./{second}.mjs'); console.log(first !== second, first.a === second.a, first.b === second.b, Object.keys(first).join(','), Object.keys(second).join(','), first.a.name, first.b.name, first.a(2), first.b(2), first.a(3), first.b(3));"
+                );
+                let mut baseline = source.clone();
+                baseline.insert("observe.mjs".into(), observer.clone());
+                let baseline = node(&baseline, Path::new("observe.mjs"));
+                assert!(baseline.status.success());
+                assert!(baseline.stderr.is_empty());
+                assert_eq!(baseline.stdout, b"true true true a,b a,b a b a b b a\n");
+                let mut actual = output.files.clone();
+                actual.insert("observe.mjs".into(), observation(&output, &observer));
+                let observed = node(&actual, Path::new("observe.mjs"));
+                assert!(
+                    observed.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&observed.stderr)
+                );
+                assert!(observed.stderr.is_empty());
+                assert_eq!(observed.stdout, baseline.stdout);
+            }
+        }
+    }
+}
+
+#[test]
+fn native_connections_preserve_empty_cycles_with_ordered_effectful_descendants() {
+    let source = sources(&[
+        ("entry.mjs", "import './x.mjs'; console.log('entry');"),
+        ("other.mjs", "import './y.mjs'; console.log('other');"),
+        ("x.mjs", "import './y.mjs'; import './first.mjs';"),
+        ("y.mjs", "import './x.mjs'; import './second.mjs';"),
+        ("first.mjs", "console.log('first');"),
+        ("second.mjs", "console.log('second');"),
+    ]);
+    for reverse in [false, true] {
+        let (_, output) = build(
+            &source,
+            &[("entry.mjs", true), ("other.mjs", true)],
+            reverse,
+        );
+        for (first, second, expected) in [
+            ("entry", "other", "second\nfirst\nentry\nother\n"),
+            ("other", "entry", "first\nsecond\nother\nentry\n"),
+        ] {
+            let observer =
+                format!("await import('./{first}.mjs'); await import('./{second}.mjs');");
+            let mut baseline = source.clone();
+            baseline.insert("observe.mjs".into(), observer.clone());
+            let baseline = node(&baseline, Path::new("observe.mjs"));
+            assert!(baseline.status.success());
+            assert_eq!(baseline.stdout, expected.as_bytes());
+            let mut actual = output.files.clone();
+            actual.insert("observe.mjs".into(), observation(&output, &observer));
+            let observed = node(&actual, Path::new("observe.mjs"));
+            assert!(
+                observed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&observed.stderr)
+            );
+            assert!(observed.stderr.is_empty());
+            assert_eq!(observed.stdout, baseline.stdout);
+        }
+    }
+}
+
+#[test]
+fn native_connections_preserve_connector_cycle_failure_across_entrances() {
+    for fail_on in ["first", "second"] {
+        let source = sources(&[
+            ("entry.mjs", "import './x.mjs'; console.log('entry');"),
+            ("other.mjs", "import './y.mjs'; console.log('other');"),
+            ("x.mjs", "import './y.mjs'; import './first.mjs';"),
+            ("y.mjs", "import './x.mjs'; import './second.mjs';"),
+            ("first.mjs", "import './first-effect.mjs';"),
+            ("second.mjs", "import './second-effect.mjs';"),
+            (
+                "first-effect.mjs",
+                "console.log('first'); if (globalThis.failOn === 'first') throw Error('first');",
+            ),
+            (
+                "second-effect.mjs",
+                "console.log('second'); if (globalThis.failOn === 'second') throw Error('second');",
+            ),
+        ]);
+        for reverse in [false, true] {
+            let (_, output) = build(
+                &source,
+                &[("entry.mjs", true), ("other.mjs", true)],
+                reverse,
+            );
+            for (first, second) in [("entry", "other"), ("other", "entry")] {
+                let observer = format!(
+                    "globalThis.failOn = '{fail_on}'; let saved; try {{ await import('./{first}.mjs'); }} catch (error) {{ saved = error; console.log('caught', error.message); }} try {{ await import('./{second}.mjs'); }} catch (error) {{ console.log('same failure', error === saved); }}"
+                );
+                let mut baseline = source.clone();
+                baseline.insert("observe.mjs".into(), observer.clone());
+                let baseline = node(&baseline, Path::new("observe.mjs"));
+                assert!(baseline.status.success());
+                assert!(baseline.stderr.is_empty());
+                let mut actual = output.files.clone();
+                actual.insert("observe.mjs".into(), observation(&output, &observer));
+                let observed = node(&actual, Path::new("observe.mjs"));
+                assert!(
+                    observed.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&observed.stderr)
+                );
+                assert!(observed.stderr.is_empty());
+                assert_eq!(observed.stdout, baseline.stdout);
+            }
+        }
+    }
+}
+
+#[test]
+fn native_connections_keep_same_owner_dependencies_local() {
+    let source = sources(&[
+        (
+            "dep.mjs",
+            "const secret = 7; export function read() { return secret; }",
+        ),
+        ("entry.mjs", "export {read} from './dep.mjs';"),
+        ("other.mjs", "export {read} from './dep.mjs';"),
+    ]);
+    let (_, output) = build(&source, &[("entry.mjs", true), ("other.mjs", true)], false);
+    let owner = |index| {
+        &output.members[&NodeId::Segment {
+            module: "dep.mjs".into(),
+            index,
+        }]
+    };
+    assert_eq!(owner(0), owner(1));
+    let mut actual = output.files.clone();
+    actual.insert("observe.mjs".into(), format!(
+        "const ns = await import({}); console.log(Object.keys(ns).length, Object.values(ns)[0]());",
+        serde_json::to_string(&format!("./{}", owner(0).to_string_lossy().replace('\\', "/"))).unwrap(),
+    ));
+    let observed = node(&actual, Path::new("observe.mjs"));
+    assert!(
+        observed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&observed.stderr)
+    );
+    assert_eq!(observed.stdout, b"1 7\n");
+}
+
+#[test]
 fn native_segment_schedule_preserves_abrupt_export_initialization_state() {
     let source = sources(&[
         (

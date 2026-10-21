@@ -78,6 +78,81 @@ impl Code {
         candidates: &BTreeSet<PathBuf>,
         members: &mut BTreeMap<crate::chunks::NodeId, PathBuf>,
     ) -> eyre::Result<()> {
+        for path in candidates {
+            ensure!(files.contains_key(path), "missing planned empty chunk");
+        }
+        // Binding/namespace requests carry an identity, not merely evaluation.
+        // External clauses likewise retain their native linking contract.
+        let mut candidates = candidates.clone();
+        for (path, code) in files.iter() {
+            for part in &code.parts {
+                match part {
+                    Part::Request(target, _) => {
+                        candidates.remove(target);
+                    }
+                    Part::External(_, _) => {
+                        candidates.remove(path);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let paths: Vec<_> = files.keys().collect();
+        let indices: BTreeMap<_, _> = paths
+            .iter()
+            .enumerate()
+            .map(|(index, &path)| (path, index))
+            .collect();
+        let dependencies: Vec<BTreeSet<_>> = paths
+            .iter()
+            .map(|path| {
+                files[*path]
+                    .static_dependencies()
+                    .filter_map(|(target, _)| indices.get(target).copied())
+                    .collect()
+            })
+            .collect();
+        let mut users = vec![Vec::new(); paths.len()];
+        for (user, targets) in dependencies.iter().enumerate() {
+            for &target in targets {
+                users[target].push(user);
+            }
+        }
+        let mut reaches_retained: Vec<_> = paths
+            .iter()
+            .map(|path| !candidates.contains(*path))
+            .collect();
+        let mut pending: Vec<_> = reaches_retained
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &retained)| retained.then_some(index))
+            .collect();
+        while let Some(target) = pending.pop() {
+            for &user in &users[target] {
+                if !reaches_retained[user] {
+                    reaches_retained[user] = true;
+                    pending.push(user);
+                }
+            }
+        }
+        for component in crate::effect_dependencies::components(&dependencies) {
+            let cyclic = component.len() > 1 || dependencies[component[0]].contains(&component[0]);
+            if component
+                .iter()
+                .any(|&index| !candidates.contains(paths[index]))
+                || (cyclic && component.iter().any(|&index| reaches_retained[index]))
+            {
+                // An evaluating retained job is a barrier: replacing a revisit
+                // with its connector's remaining requests could run them early.
+                // Cyclic connectors also cache a descendant's failure together;
+                // another entrance must not execute its remaining siblings.
+                for index in component {
+                    candidates.remove(paths[index]);
+                }
+            }
+        }
+        // Removed cycles have no reachable retained execution/identity jobs.
+        // Acyclic connectors splice their outgoing obligations in request order.
         let empty: BTreeMap<_, _> = candidates
             .iter()
             .map(|path| {
@@ -449,6 +524,58 @@ mod tests {
                 .unwrap(),
             "import \"./first.mjs\";\nimport \"./second.mjs\";\nconsole.log('entry');"
         );
+    }
+
+    #[test]
+    fn pruning_keeps_empty_sccs_with_ordered_outgoing_obligations() {
+        let mut a = Code::evaluation("b.mjs".into());
+        a.push(Code::evaluation("first.mjs".into()));
+        let mut b = Code::evaluation("a.mjs".into());
+        b.push(Code::evaluation("second.mjs".into()));
+        let mut files = BTreeMap::from([
+            ("left.mjs".into(), Code::evaluation("a.mjs".into())),
+            ("right.mjs".into(), Code::evaluation("b.mjs".into())),
+            ("a.mjs".into(), a),
+            ("b.mjs".into(), b),
+            ("first.mjs".into(), Code::from("console.log('first');")),
+            ("second.mjs".into(), Code::from("console.log('second');")),
+        ]);
+        let original = files.clone();
+        Code::prune(
+            &mut files,
+            &BTreeSet::from(["a.mjs".into(), "b.mjs".into()]),
+            &mut BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(files, original);
+    }
+
+    #[test]
+    fn pruning_keeps_retained_evaluation_and_namespace_barriers() {
+        let mut connector = Code::evaluation("effect.mjs".into());
+        connector.push(Code::evaluation("later.mjs".into()));
+        let mut effect = Code::evaluation("connector.mjs".into());
+        effect.push_str("console.log('effect');");
+        let mut files = BTreeMap::from([
+            ("entry.mjs".into(), Code::evaluation("connector.mjs".into())),
+            ("connector.mjs".into(), connector),
+            ("effect.mjs".into(), effect),
+            ("later.mjs".into(), Code::from("console.log('later');")),
+            ("namespace.mjs".into(), Code::default()),
+            (
+                "loader.mjs".into(),
+                Code::request("namespace.mjs".into(), RequestKind::DynamicImport)
+                    .surrounded("import(", ");"),
+            ),
+        ]);
+        let original = files.clone();
+        Code::prune(
+            &mut files,
+            &BTreeSet::from(["connector.mjs".into(), "namespace.mjs".into()]),
+            &mut BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(files, original);
     }
 
     #[test]

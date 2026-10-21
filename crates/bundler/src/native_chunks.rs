@@ -9,6 +9,9 @@ mod commonjs;
 #[path = "native_segments.rs"]
 mod segments;
 
+#[path = "native_connections.rs"]
+mod connections;
+
 pub(super) fn emit(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -239,12 +242,24 @@ pub(super) fn emit(
             }
         }
     }
+    // Opaque external linking and unchanged async request accounting keep their
+    // native clauses. Other ESM jobs share canonical post-placement connections.
+    if !native_seams {
+        changed.extend(
+            jobs.iter()
+                .filter(|&&file| !cjs.contains(file) && !wait_bound.contains(&file))
+                .copied(),
+        );
+    }
     let mut surfaces = boundaries.clone();
     surfaces.extend(jobs.iter().filter(|f| !changed.contains(f)).copied());
     let mut files = BTreeMap::new();
     let mut namespaces = BTreeMap::new();
     let entry_files = entry_owners.values().flatten().copied().collect();
-    cjs.emit(graph, modules, &owners, &entry_files)?;
+    let connections = connections::Connections::new(
+        graph, modules, symbols, &owners, &placement, &surfaces, &cjs,
+    )?;
+    cjs.emit(graph, modules, &connections.namespaces, &entry_files)?;
     for &root in &jobs {
         if cjs.contains(root) {
             continue;
@@ -254,12 +269,10 @@ pub(super) fn emit(
             segments::emit(
                 graph,
                 segments::Owner::Evaluation(root),
-                &owners,
-                &redirects,
                 modules,
                 symbols,
                 &placement,
-                &surfaces,
+                &connections,
                 &recipes,
                 &cjs,
             )?
@@ -278,79 +291,19 @@ pub(super) fn emit(
                     live.contains(&SegmentKey::new(root, index as u32))
                 })
                 .filter(|d| d.pattern.is_none())
-                .map(|d| {
-                    if let Some(DependencyTarget::External(specifier)) =
-                        graph.dependency_target(root, d.id)
-                    {
-                        return Ok((
-                            d,
-                            Code::external(
-                                specifier.clone(),
-                                match d.kind {
-                                    DependencyKind::Import => RequestKind::Import,
-                                    DependencyKind::ReExport => RequestKind::ReExport,
-                                    DependencyKind::DynamicImport => RequestKind::DynamicImport,
-                                    DependencyKind::Require => RequestKind::Require,
-                                    DependencyKind::ImportType => {
-                                        eyre::bail!("type dependency in executable JavaScript")
-                                    }
-                                },
-                            ),
-                            false,
-                        ));
-                    }
-                    let target = target_file(graph, root, d)?;
-                    if cjs.contains(target) {
-                        Ok((
-                            d,
-                            if d.kind == DependencyKind::DynamicImport {
-                                cjs.dynamic(graph, target)?
-                            } else {
-                                cjs.static_dependency(graph, root, target, d, facts, symbols)?
-                            },
-                            true,
-                        ))
-                    } else {
-                        Ok((
-                            d,
-                            Code::request(
-                                path(graph, owners[&target]),
-                                match d.kind {
-                                    DependencyKind::DynamicImport => RequestKind::DynamicImport,
-                                    DependencyKind::ReExport => RequestKind::ReExport,
-                                    DependencyKind::Require => RequestKind::Require,
-                                    DependencyKind::Import => RequestKind::Import,
-                                    DependencyKind::ImportType => {
-                                        eyre::bail!("type import in executable JavaScript")
-                                    }
-                                },
-                            ),
-                            false,
-                        ))
-                    }
+                .map(|dependency| {
+                    let request = connections
+                        .native_requests
+                        .get(&(root, dependency.id))
+                        .ok_or_eyre("missing planned native request")?;
+                    Ok((dependency, request))
                 })
                 .collect::<eyre::Result<Vec<_>>>()?;
-            let mut imports = Code::default();
-            // Evaluation-only connectors need not own a retained statement.
-            for dependency in facts.dependencies.iter().filter(|d| {
-                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
-            }) {
-                if let Some(DependencyTarget::External(specifier)) =
-                    graph.dependency_target(root, dependency.id)
-                {
-                    imports.push(
-                        Code::external(specifier.clone(), RequestKind::Import)
-                            .surrounded("import ", ";\n"),
-                    );
-                    continue;
-                }
-                let target = target_file(graph, root, dependency)?;
-                if cjs.contains(target) {
-                    imports.push(cjs.evaluate(graph, root, target)?);
-                } else {
-                    imports.push(Code::evaluation(path(graph, owners[&target])));
-                }
-            }
+            let mut imports = connections
+                .evaluation
+                .get(&segments::Owner::Evaluation(root))
+                .cloned()
+                .unwrap_or_default();
             for &key in placement.schedule(segments::Owner::Evaluation(root)) {
                 eyre::ensure!(
                     key.file_id == root,
@@ -365,13 +318,15 @@ pub(super) fn emit(
                     recipes.get(&key).copied().unwrap_or_default(),
                 );
                 renderer.relocate_urls(module.relocations)?;
-                for (dependency, replacement, whole) in &edits {
-                    renderer.dependency(dependency, replacement.clone(), *whole);
+                for (dependency, request) in &edits {
+                    renderer.dependency(dependency, request.code.clone(), request.whole);
                 }
                 for dependency in facts.dependencies.iter().filter(|d| {
                     d.pattern.is_some() && contains(module.parsed.segments[index].span, d.span)
                 }) {
-                    if let Some(dispatch) = cjs.context_dynamic(graph, root, dependency, &owners)? {
+                    if let Some(dispatch) =
+                        cjs.context_dynamic(graph, root, dependency, &connections.namespaces)?
+                    {
                         renderer.context(dependency, dispatch);
                     }
                 }
@@ -396,7 +351,7 @@ pub(super) fn emit(
         if surfaces.contains(&root) {
             namespaces.insert(
                 graph.file_path(root).unwrap().to_owned(),
-                artifact_path.clone(),
+                connections.namespaces[&root].clone(),
             );
         }
         files.insert(artifact_path, output);
@@ -404,8 +359,14 @@ pub(super) fn emit(
     for owner in placement.owners.values().copied().collect::<BTreeSet<_>>() {
         if matches!(owner, segments::Owner::Bindings(_)) {
             let output = segments::emit(
-                graph, owner, &owners, &redirects, modules, symbols, &placement, &surfaces,
-                &recipes, &cjs,
+                graph,
+                owner,
+                modules,
+                symbols,
+                &placement,
+                &connections,
+                &recipes,
+                &cjs,
             )?;
             let path = owner.path(graph);
             files.insert(path, output);
@@ -417,6 +378,12 @@ pub(super) fn emit(
     for (path, output) in &cjs.files {
         files.insert(path.clone(), output.clone());
     }
+    files.extend(
+        connections
+            .projections
+            .iter()
+            .map(|(path, code)| (path.clone(), code.clone())),
+    );
     let mut members = BTreeMap::new();
     let mut chunk_artifacts = BTreeMap::new();
     for (chunk, nodes) in &plan.chunks {
@@ -453,7 +420,7 @@ pub(super) fn emit(
             cjs.entries
                 .get(&file)
                 .cloned()
-                .unwrap_or_else(|| path(graph, owners[&file]))
+                .unwrap_or_else(|| connections.namespaces[&file].clone())
         };
         if let [file] = roots.as_slice() {
             // Multi-owner roots never invent a combined public namespace.
@@ -476,11 +443,24 @@ pub(super) fn emit(
         files.insert(entry_path.clone(), source);
         entry_paths.insert(entry, entry_path);
     }
-    let removable: BTreeSet<_> = jobs
+    let mut root_routes: BTreeMap<_, _> = entry_paths
+        .iter()
+        .map(|(entry, path)| (RootId::Entry(entry.clone()), path.clone()))
+        .collect();
+    root_routes.extend(async_targets.iter().map(|(site, file)| {
+        (
+            RootId::Async(site.clone()),
+            cjs.namespaces
+                .get(graph.file_path(*file).unwrap())
+                .cloned()
+                .unwrap_or_else(|| connections.namespaces[file].clone()),
+        )
+    }));
+    let empty_jobs: BTreeSet<_> = jobs
         .iter()
         .filter(|file| {
             !boundaries.contains(file)
-                && !cycles.contains(file)
+                && !wait_bound.contains(file)
                 && !cjs.contains(**file)
                 && placement
                     .owners
@@ -494,18 +474,36 @@ pub(super) fn emit(
         })
         .map(|&file| path(graph, file))
         .collect();
-    Code::prune(&mut files, &removable, &mut members)?;
+    Code::prune(&mut files, &empty_jobs, &mut members)?;
     namespaces.retain(|_, path| files.contains_key(path));
     for (chunk, nodes) in &plan.chunks {
-        chunk_artifacts.insert(
-            chunk.clone(),
-            nodes
-                .iter()
-                .filter_map(|node| members.get(node).cloned())
-                .collect(),
-        );
+        let mut paths: BTreeSet<_> = nodes
+            .iter()
+            .filter_map(|node| members.get(node).cloned())
+            .collect();
+        for node in nodes {
+            if let NodeId::Module(module) = node {
+                if let Some(route) = namespaces.get(module) {
+                    if connections.projections.contains_key(route) {
+                        paths.insert(route.clone());
+                    }
+                }
+            }
+        }
+        chunk_artifacts.insert(chunk.clone(), paths);
     }
     cjs.add_runtime(&mut files, &mut chunk_artifacts)?;
+    segments::validate_connections(
+        graph,
+        plan,
+        modules,
+        symbols,
+        &owners,
+        &surfaces,
+        &placement,
+        &files,
+        &root_routes,
+    )?;
     Ok(Artifacts {
         resources: BTreeMap::new(),
         stylesheets: BTreeMap::new(),
@@ -526,7 +524,7 @@ pub(super) fn emit(
                     cjs.namespaces
                         .get(graph.file_path(file).unwrap())
                         .cloned()
-                        .unwrap_or_else(|| path(graph, owners[&file])),
+                        .unwrap_or_else(|| connections.namespaces[&file].clone()),
                 )
             })
             .collect(),

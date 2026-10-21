@@ -158,6 +158,20 @@ public projection wrappers only for actual observable surfaces, not facade famil
 This supersedes the private-declaration/deferred-reader co-location rule.
 Keep deferred binding edges abstract, never eager execution; scheduling edges
 must not retain segments. Plan routes/projections explicitly, not during emission.
+`native_connections::Connections` is immutable post-placement derived state:
+owner-local names, canonical cut-edge addresses, typed evaluation/import/export
+requests and exact namespace routes. Placement checks the same owner-local
+declaration/import name plan consumed by connections and emission; keep native
+read-only imports and inference-sensitive source names. Export only demanded
+private cut bindings.
+Split a public projection from its body owner only when internal transport adds
+names; static/dynamic namespaces and require-of-ESM all use the public route,
+lexical links use body owners. Module members still name evaluation bodies.
+Validate reconstructed typed static connections, including projections, against
+source initialization phases after transparent empty-job pruning and runtime
+insertion; validate final targets and root routes against actual artifacts. Opaque CJS
+activation retains its separate native contract; unknown external surfaces keep
+original native linking clauses, not invented canonical exports.
 Never greedily absorb whole modules or use SCC completeness as relocation proof.
 Mandatory execution components and consumer demand choose segment owners.
 Emit a complete exactly-once SegmentKey schedule per owner, using full cached
@@ -177,7 +191,7 @@ and checks its explicit source-ordered segment schedule against mandatory edges.
 Keep initialization/await phases and observable namespace/name/read-only
 boundaries native, not cells. Logical artifact projections
 may overlap or contain several body owners; root sets do not prescribe files.
-Native dynamic imports rewrite only literal specifiers to canonical body chunks;
+Native dynamic imports rewrite only literal specifiers to canonical namespace routes;
 protect complete target namespaces. Keep statically async source modules as
 native jobs, preserving original await/for-await and sibling interleaving.
 Redirect pure barrels only for equal export-name/canonical-identity maps,
@@ -196,6 +210,10 @@ into separate binding chunks, not original-module groups. Namespace demand follo
 checked export routes, not private statements; evaluation alone never traverses
 namespace edges. Splice empty private evaluation chunks in source order and remap
 their no-op artifact members; preserve public/escaped/async namespace identities.
+Reduce body-free connector SCCs on the reconstructed typed artifact graph, not
+source topology. Preserve each entrance's ordered outgoing obligations; retain
+connectors in SCCs containing or reaching a nonempty or native-identity job,
+including shared descendant-failure caching across entrances.
 Keep cyclic connector evaluation barriers: revisiting an evaluating job must not
 execute its remaining dependencies early. Hoisted availability cannot introduce
 new transitive native-initializer activation across a source phase.
