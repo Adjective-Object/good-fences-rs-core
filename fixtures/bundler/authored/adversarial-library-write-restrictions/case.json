@@ -7,7 +7,7 @@
     "cold 0", "a state TypeError 4", "b state,writer TypeError 4 5", "c state,writer TypeError 5"
   ]},
   "goals": [
-    "Locally authored native exact differential; 65536-byte target permits state={a,b,c} and writer={b,c} overlapping groups.",
+    "Locally authored native exact differential; immutable binding writes require native fallback despite the 65536-byte clustering target and overlapping root sets.",
     "Const assignment and imported-binding assignment remain errors even when guarded extraction lowers other mutable bindings.",
     "A retained closure reads the live mutable binding after a different async root updates it; immutable write restrictions are not covered by the TDZ waiver."
   ]

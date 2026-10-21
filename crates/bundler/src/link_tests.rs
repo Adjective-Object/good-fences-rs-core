@@ -890,6 +890,7 @@ fn libraries_cache_undefined_failures_across_consumers_and_preserve_dependency_o
     observe_activated(
         output,
         "assert.deepEqual(trace, []); const reject = error => error === undefined; \
+         await assert.rejects(entry.b(),reject); assert.deepEqual(trace,['x','y']); \
          const [a,b] = await Promise.allSettled([entry.b(),entry.c()]); \
          assert.equal(a.status,'rejected'); assert.equal(b.status,'rejected'); \
          assert.equal(a.reason,undefined); assert.equal(b.reason,undefined); \
@@ -5137,13 +5138,45 @@ fn dynamic_native_file_load_and_parse_failures_reject_without_eager_execution() 
 
 #[test]
 fn tla_static_dependency_chains_diamonds_and_for_await_use_native_order() {
-    let output = compare(&sources(&[
+    let input = sources(&[
         ("entry.mjs", "console.log('entry'); Promise.all([import('./a.mjs'), import('./a.mjs'), import('./b.mjs')]).then(([a, again, b]) => console.log(a === again, a.value, b.value, globalThis.count));"),
         ("a.mjs", "import {value} from './barrel.mjs'; console.log('a', value); export {value};"),
         ("b.mjs", "import {value} from './leaf.mjs'; await 0; console.log('b', value); export {value};"),
         ("barrel.mjs", "export {value} from './leaf.mjs'; console.log('barrel');"),
         ("leaf.mjs", "console.log('leaf before'); globalThis.count = (globalThis.count || 0) + 1; export let value = await Promise.resolve(7); for await (const x of [1,2]) { console.log('iterate', x); } console.log('leaf after');"),
-    ]), "entry.mjs");
+    ]);
+    let (_, output) = build(&input, &[("entry.mjs", false)], false);
+    for result in [
+        node(&input, Path::new("entry.mjs")),
+        node(&output.files, &output.entries["entry.mjs"]),
+    ] {
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let stdout = String::from_utf8(result.stdout).unwrap();
+        let lines: Vec<_> = stdout.lines().collect();
+        assert_eq!(
+            &lines[..5],
+            [
+                "entry",
+                "leaf before",
+                "iterate 1",
+                "iterate 2",
+                "leaf after"
+            ]
+        );
+        assert_eq!(lines.last(), Some(&"true 7 7 1"));
+        // Independent dynamic roots race on native module loading, even without bundling.
+        let mut siblings = lines[5..lines.len() - 1].to_vec();
+        siblings.sort_unstable();
+        assert_eq!(siblings, ["a 7", "b 7", "barrel"]);
+        assert!(
+            lines.iter().position(|line| *line == "barrel")
+                < lines.iter().position(|line| *line == "a 7")
+        );
+    }
     assert_eq!(output.backend, Backend::Native);
     assert_eq!(
         output.async_modules,

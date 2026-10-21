@@ -556,11 +556,11 @@ pub(crate) mod tests {
             let reference = graph
                 .file_facts(0)
                 .unwrap()
-                .references
+                .references()
                 .iter()
-                .find(|reference| reference.span == edge.site)
+                .find(|reference| reference.span() == edge.site)
                 .unwrap();
-            assert_eq!(edge.async_deferred, reference.async_deferred);
+            assert_eq!(edge.async_deferred, reference.async_deferred());
         }
         let same_segment: Vec<_> = graph
             .outgoing(caller)

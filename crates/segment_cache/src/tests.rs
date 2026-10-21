@@ -27,33 +27,31 @@ fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
     let source = "const target = 1; async function f(value = target) { target; (() => target)(); (async () => target)(); }";
     let original = record(source, "async.mjs", ModuleFormat::Esm);
     let bytes = original.encode(source).unwrap();
-    let decoded = CacheRecord::decode(&bytes, source, original.config).unwrap();
+    let decoded = CacheRecord::decode(&bytes, source, original.config()).unwrap();
     let parsed = decoded.to_parsed(source).unwrap();
-    assert_eq!(parsed.facts, original.module.facts);
+    assert_eq!(parsed.facts(), original.module().facts());
     assert_eq!(
         parsed
-            .facts
-            .references
+            .facts()
+            .references()
             .iter()
-            .map(|r| r.async_deferred)
+            .map(|r| r.async_deferred())
             .collect::<Vec<_>>(),
         [false, true, false, true]
     );
     for index in [0, 1] {
-        let mut changed = original.clone();
-        changed.module.facts.references[index].async_deferred ^= true;
+        let changed = corrupt(&original, |v| {
+            let tag = &mut v["module"]["facts"]["references"][index]["async_deferred"];
+            *tag = (!tag.as_bool().unwrap()).into();
+        });
         assert!(changed.encode(source).is_err());
         assert!(changed.to_parsed(source).is_err());
-        assert!(CacheRecord::decode(&envelope(&changed), source, original.config).is_err());
+        assert!(CacheRecord::decode(&envelope(&changed), source, original.config()).is_err());
     }
-    for mutate in [
-        |r: &mut CacheRecord| r.schema = 12,
-        |r: &mut CacheRecord| r.extractor = 15,
-    ] {
-        let mut stale = original.clone();
-        mutate(&mut stale);
+    for (field, version) in [("schema", 12), ("extractor", 15)] {
+        let stale = corrupt(&original, |v| v[field] = version.into());
         assert!(stale.to_parsed(source).is_err());
-        assert!(CacheRecord::decode(&envelope(&stale), source, original.config).is_err());
+        assert!(CacheRecord::decode(&envelope(&stale), source, original.config()).is_err());
     }
     let mut missing = serde_cbor::value::to_value(&original).unwrap();
     let serde_cbor::Value::Map(root) = &mut missing else {
@@ -82,7 +80,7 @@ fn async_deferred_roundtrips_and_rejects_missing_mutated_and_stale_facts() {
         payload,
     })
     .unwrap();
-    assert!(CacheRecord::decode(&bytes, source, original.config)
+    assert!(CacheRecord::decode(&bytes, source, original.config())
         .unwrap_err()
         .to_string()
         .contains("missing field `async_deferred`"));
@@ -94,19 +92,22 @@ fn dynamic_namespace_observations_roundtrip_and_reject_dangling_dependencies() {
         "export async function load() { const ns = await import('./child.mjs'); return ns.value; }";
     let record = record(source, "entry.mjs", ModuleFormat::Esm);
     let encoded = record.encode(source).unwrap();
-    let decoded = CacheRecord::decode(&encoded, source, record.config).unwrap();
-    assert_eq!(decoded.module.facts.emission, record.module.facts.emission);
+    let decoded = CacheRecord::decode(&encoded, source, record.config()).unwrap();
     assert_eq!(
-        decoded.module.facts.emission.dynamic_namespaces[0].properties,
-        Some(vec![("value".into(), false)])
+        decoded.module().facts().emission(),
+        record.module().facts().emission()
     );
-    let mut damaged = record.clone();
-    damaged.module.facts.emission.dynamic_namespaces[0]
-        .dependency
-        .0 += 1;
+    assert_eq!(
+        decoded.module().facts().emission().dynamic_namespaces()[0].properties(),
+        Some(vec![("value".into(), false)]).as_deref()
+    );
+    let damaged = corrupt(&record, |v| {
+        v.add("module.facts.emission.dynamic_namespaces.0.dependency", 1)
+    });
     assert!(damaged.encode(source).is_err());
-    let mut damaged = record;
-    damaged.module.facts.emission.dynamic_namespaces.clear();
+    let damaged = corrupt(&record, |v| {
+        v.clear("module.facts.emission.dynamic_namespaces")
+    });
     assert!(damaged.encode(source).is_err());
 }
 
@@ -257,47 +258,23 @@ fn reject_emission(source: &str, mutations: &[fn(&mut serde_json::Value)]) {
 
 #[test]
 fn deferred_recipe_roundtrip_and_invalid_binding_or_source_slots() {
-    use ast_segmenter::{emission::*, owned::BindingId};
     let source =
         "export const first = make(), second = {first}; function read(){return second;} effect();";
     let original = record(source, "deferred.mjs", ModuleFormat::Esm);
     let bytes = original.encode(source).unwrap();
-    let decoded = CacheRecord::decode(&bytes, source, original.config).unwrap();
+    let decoded = CacheRecord::decode(&bytes, source, original.config()).unwrap();
     assert_eq!(
-        decoded.to_parsed(source).unwrap().facts.emission,
-        original.module.facts.emission
+        decoded.to_parsed(source).unwrap().facts().emission(),
+        original.module().facts().emission()
     );
     reject_emission(
         source,
         &[
-            |e| {
-                let DeferredForm::Variable { binding, .. } = &mut e.segments[0].deferred else {
-                    panic!()
-                };
-                *binding = BindingId(u32::MAX);
-            },
-            |e| {
-                let DeferredForm::Variable {
-                    initializer: Some(slot),
-                    ..
-                } = &mut e.segments[0].deferred
-                else {
-                    panic!()
-                };
-                slot.operations.clear();
-            },
-            |e| {
-                let DeferredForm::Variable {
-                    initializer: Some(slot),
-                    ..
-                } = &mut e.segments[0].deferred
-                else {
-                    panic!()
-                };
-                slot.span.start = 0;
-            },
-            |e| e.segments[0].deferred = DeferredForm::Function,
-            |e| e.segments[0].deferred = DeferredForm::Effect,
+            |e| e.set("segments.0.deferred.Variable.binding", u32::MAX),
+            |e| e.clear("segments.0.deferred.Variable.initializer.operations"),
+            |e| e.set("segments.0.deferred.Variable.initializer.span.start", 0),
+            |e| e.set("segments.0.deferred", "Function"),
+            |e| e.set("segments.0.deferred", "Effect"),
         ],
     );
 }

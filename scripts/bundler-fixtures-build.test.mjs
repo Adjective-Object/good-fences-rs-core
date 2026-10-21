@@ -7,6 +7,7 @@ import { buildProject, execute, managed, observeEntries, runBundlerCases, runFix
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const managedRoot = path.join(project, 'target/p1-test-tmp');
+const driver = path.join(project, `target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`);
 
 function withCorpus(source, callback, extra = {}) {
   mkdirSync(managedRoot, { recursive: true });
@@ -60,7 +61,7 @@ for (const [name, relocated] of [
   ['failure-cache', ['x.mjs', 'y.mjs']],
   ['helper-names', ['x.mjs', 'y.mjs']],
   ['native-fallback', []],
-  ['write-restrictions', ['state.mjs', 'writer.mjs']],
+  ['write-restrictions', []],
 ]) {
   test(`adversarial library ${name} proves placement or explicit native fallback`, () => {
     const fixture = path.join(project, 'fixtures/bundler/authored', `adversarial-library-${name}`);
@@ -69,23 +70,27 @@ for (const [name, relocated] of [
       const root = path.join(directory, 'source');
       cpSync(path.join(fixture, 'files'), root, {recursive: true});
       const members = [0, manifest.fixtureConfig.output.min_chunk_bytes].map(min_chunk_bytes => {
-        const build = buildProject(path.join(project, 'target/debug/examples/build'),
+        const build = buildProject(driver,
           root, manifest.entryPoints, 30000, {
             ...manifest.fixtureConfig,
             output: {...manifest.fixtureConfig.output, min_chunk_bytes},
           });
         assert.equal(build.backend, 'native');
         return new Map(build.segmentMembers.map(member =>
-          [`${path.relative(root, member.source)}:${member.segment}`, member.artifact]));
+          [`${path.relative(path.toNamespacedPath(root), path.toNamespacedPath(member.source))}:${member.segment}`, member.artifact]));
       });
       assert.deepEqual([...members[0].keys()], [...members[1].keys()], 'placement must preserve retained segments');
       if (relocated.length === 0) {
         assert.deepEqual(members[0], members[1], 'unsupported islands must retain native owners');
       } else {
+        const selected = [...members[0]].filter(([key]) =>
+          relocated.some(source => key.startsWith(`${source}:`)));
         for (const source of relocated) {
-          assert([...members[0]].some(([key, owner]) =>
-            key.startsWith(`${source}:`) && members[1].get(key) !== owner),
-          `${source} must have a genuinely relocated segment`);
+          assert(selected.some(([key, owner]) => key.startsWith(`${source}:`)
+            && (members[1].get(key) !== owner
+              || selected.some(([other, previous]) => !other.startsWith(`${source}:`)
+                && previous !== owner && members[1].get(key) === members[1].get(other)))),
+          `${source} must move segments or receive previously separate library segments`);
         }
       }
     });
@@ -150,7 +155,7 @@ for (const [name, source, assertions] of [
       });
       for (const synthesize_async_boundaries of [false, true]) {
         for (const min_chunk_bytes of [0, 4096]) {
-          const build = buildProject(path.join(project, 'target/debug/examples/build'),
+          const build = buildProject(driver,
             root, manifest.entryPoints, 30000, {
               output: {synthesize_async_boundaries, min_chunk_bytes},
             });
@@ -189,7 +194,6 @@ test('explicit conditions select package exports while JSONC tsconfigs stay iner
     }));
     writeFileSync(path.join(pkg, 'source.js'), "export const value = 'source';");
     writeFileSync(path.join(pkg, 'default.js'), "export const value = 'hello';");
-    const driver = path.join(project, `target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`);
     for (const [resolveConditions, value] of [[[], 'hello'], [['source'], 'source']]) {
       const manifest = {
         id: 'synthetic/example', entryPoints: ['entry.js'],
@@ -233,7 +237,6 @@ for (const suffix of ['.module.css', '.module.cjs']) {
 test('driver rejects unknown, malformed and oversized config before publication', () => {
   withCorpus("console.log('hello');", ({ caseDir }) => {
     const root = path.join(caseDir, 'files');
-    const driver = path.join(project, 'target/debug/examples/build');
     const configFile = path.join(root, '.bundler-fixture-config.json');
     const output = path.join(root, '.bundler-output');
     for (const config of [

@@ -242,7 +242,7 @@ declarations, CJS/externals and resource relocations still prevent deferred
 clustering; they retain their native evaluation boundaries. Artifact members,
 availability routes and typed requests follow final ownership through pruning,
 entry aliases and naming.
-### Bounded output emission
+
 ### Bounded preparation and output emission
 
 `BuildOptions.execution` and low-level `link::esm_with_execution` accept

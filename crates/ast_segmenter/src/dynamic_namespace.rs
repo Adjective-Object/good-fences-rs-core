@@ -22,35 +22,38 @@ pub(super) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> (Vec<Dynami
         .dependencies()
         .iter()
         .filter(|d| d.kind() == DependencyKind::DynamicImport)
-        .map(|d| DynamicNamespace {
-            dependency: d.id(),
-            properties: visitor
-                .imports
-                .remove(&d.id().0)
-                .and_then(|(mut properties, binding)| {
-                    if let Some(binding) = binding {
-                        if facts
-                            .exports()
-                            .iter()
-                            .any(|e| *e.value() == ExportValue::Binding(binding))
-                        {
-                            return None;
-                        }
-                        for reference in facts
-                            .references()
-                            .iter()
-                            .filter(|r| !r.type_only() && r.binding() == Some(binding))
-                        {
-                            if reference.write() {
+        .map(|d| {
+            DynamicNamespace::new(
+                d.id(),
+                visitor
+                    .imports
+                    .remove(&d.id().0)
+                    .and_then(|(mut properties, binding)| {
+                        if let Some(binding) = binding {
+                            if facts
+                                .exports()
+                                .iter()
+                                .any(|e| *e.value() == ExportValue::Binding(binding))
+                            {
                                 return None;
                             }
-                            properties.push(visitor.reads.get(&reference.span().start)?.clone());
+                            for reference in facts
+                                .references()
+                                .iter()
+                                .filter(|r| !r.type_only() && r.binding() == Some(binding))
+                            {
+                                if reference.write() {
+                                    return None;
+                                }
+                                properties
+                                    .push(visitor.reads.get(&reference.span().start)?.clone());
+                            }
                         }
-                    }
-                    properties.sort();
-                    properties.dedup();
-                    Some(properties)
-                }),
+                        properties.sort();
+                        properties.dedup();
+                        Some(properties)
+                    }),
+            )
         })
         .collect();
     (observations, visitor.uses_this)

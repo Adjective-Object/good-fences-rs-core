@@ -189,60 +189,59 @@ fn dynamic_namespace_observations_check_every_alias_reference_and_receiver() {
         ("const {...rest} = await import('./x'); return rest;", None),
     ] {
         let facts = parse(&format!("export async function load() {{ {body} }}"));
-        assert_eq!(facts.emission.dynamic_namespaces.len(), 1);
+        assert_eq!(facts.emission().dynamic_namespaces().len(), 1);
         assert_eq!(
-            facts.emission.dynamic_namespaces[0].properties, expected,
+            facts.emission().dynamic_namespaces()[0].properties(),
+            expected.as_deref(),
             "{body}"
         );
     }
     let facts = parse("const ns = await import('./x'); export {ns}; ns.value;");
-    assert_eq!(facts.emission.dynamic_namespaces[0].properties, None);
-    assert!(!facts.emission.uses_this);
-    assert!(
-        parse("export function receiver() { return this; }")
-            .emission
-            .uses_this
-    );
+    assert_eq!(facts.emission().dynamic_namespaces()[0].properties(), None);
+    assert!(!facts.emission().uses_this());
+    assert!(parse("export function receiver() { return this; }")
+        .emission()
+        .uses_this());
 }
 
 #[test]
 fn deferred_forms_keep_split_initializer_slots_in_original_coordinates() {
     let source = "export const secret = makeSecret(), other = {secret}; function read() { return secret; } trace(); class Unsupported {} const {x} = {};";
     let facts = parse(source);
-    let recipes = &facts.emission.segments;
+    let recipes = &facts.emission().segments();
     for (index, name, text) in [(0, "secret", "makeSecret()"), (1, "other", "{secret}")] {
         let DeferredForm::Variable {
             binding,
             initializer: Some(slot),
-        } = &recipes[index].deferred
+        } = &recipes[index].deferred()
         else {
             panic!("missing split variable alternative");
         };
         assert_eq!(
             facts
-                .bindings
+                .bindings()
                 .iter()
-                .find(|b| b.id == *binding)
+                .find(|b| b.id() == *binding)
                 .unwrap()
-                .name,
+                .name(),
             name
         );
         assert_eq!(
-            &source[slot.span.start as usize..slot.span.end as usize],
+            &source[slot.span().start as usize..slot.span().end as usize],
             text
         );
-        assert!(!slot.operations.is_empty());
-        assert!(slot.operations.iter().all(|&i| contains(
-            slot.span,
-            recipes[index].operations[i as usize]
-                .kind
+        assert!(!slot.operations().is_empty());
+        assert!(slot.operations().iter().all(|&i| contains(
+            slot.span(),
+            recipes[index].operations()[i as usize]
+                .kind()
                 .span(&facts, &recipes[index])
         )));
     }
-    assert_eq!(recipes[2].deferred, DeferredForm::Function);
-    assert_eq!(recipes[3].deferred, DeferredForm::Effect);
-    assert_eq!(recipes[4].deferred, DeferredForm::Unsupported);
-    assert_eq!(recipes[5].deferred, DeferredForm::Unsupported);
+    assert_eq!(*recipes[2].deferred(), DeferredForm::Function);
+    assert_eq!(*recipes[3].deferred(), DeferredForm::Effect);
+    assert_eq!(*recipes[4].deferred(), DeferredForm::Unsupported);
+    assert_eq!(*recipes[5].deferred(), DeferredForm::Unsupported);
 }
 
 #[test]

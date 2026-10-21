@@ -102,9 +102,9 @@ pub struct Reference {
     read: bool,
     write: bool,
     type_only: bool,
+    async_deferred: bool,
     /// Wrapper parameter in CommonJS; never set for a lexical shadow.
     commonjs: Option<CommonJsGlobal>,
-    async_deferred: bool,
 }
 
 impl Reference {

@@ -217,20 +217,20 @@ export function guarded() {
 export const loaderType = typeof (require);
 "#;
     let parsed = parse(source, "probes.mjs").unwrap();
-    assert_eq!(parsed.body, ModuleBody::Esm);
-    assert!(!parsed.facts.commonjs);
-    assert!(parsed.facts.dependencies.is_empty());
+    assert_eq!(parsed.body(), ModuleBody::Esm);
+    assert!(!parsed.facts().commonjs());
+    assert!(parsed.facts().dependencies().is_empty());
     for name in ["exports", "module", "require"] {
         let references: Vec<_> = parsed
-            .facts
-            .references
+            .facts()
+            .references()
             .iter()
-            .filter(|r| r.name == name)
+            .filter(|r| r.name() == name)
             .collect();
         assert!(!references.is_empty());
         assert!(references
             .iter()
-            .all(|r| r.binding.is_none() && r.commonjs.is_none() && !r.write));
+            .all(|r| r.binding().is_none() && r.commonjs().is_none() && !r.write()));
     }
 }
 

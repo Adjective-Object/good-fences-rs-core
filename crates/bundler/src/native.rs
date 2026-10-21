@@ -40,7 +40,9 @@ pub(super) fn emit(
             plan,
             modules,
             manifest,
-            &prepared, browser, require_defaults,
+            &prepared,
+            browser,
+            require_defaults,
             placements,
             min_chunk_bytes,
             execution,
@@ -53,7 +55,9 @@ pub(super) fn emit(
             plan,
             modules,
             manifest,
-            &prepared, browser, require_defaults,
+            &prepared,
+            browser,
+            require_defaults,
             &placements,
             min_chunk_bytes,
             execution,
@@ -65,13 +69,24 @@ pub(super) fn emit(
             plan,
             modules,
             manifest,
-            &prepared, browser, require_defaults,
+            &prepared,
+            browser,
+            require_defaults,
             &BTreeMap::new(),
             min_chunk_bytes,
             execution,
         );
     }
-    ordinary(graph, plan, modules, manifest, &prepared, browser, require_defaults, execution)
+    ordinary(
+        graph,
+        plan,
+        modules,
+        manifest,
+        &prepared,
+        browser,
+        require_defaults,
+        execution,
+    )
 }
 
 fn ordinary(
@@ -85,11 +100,19 @@ fn ordinary(
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     if let Some(output) = tracing::info_span!("emit.single")
-        .in_scope(|| single(graph, plan, modules, manifest, prepared, None))? {
+        .in_scope(|| single(graph, plan, modules, manifest, prepared, None))?
+    {
         return Ok(output);
     }
     chunks::emit(
-        graph, plan, modules, manifest, prepared, browser, require_defaults, execution,
+        graph,
+        plan,
+        modules,
+        manifest,
+        prepared,
+        browser,
+        require_defaults,
+        execution,
     )
 }
 
@@ -149,7 +172,8 @@ fn single_parent(
                 continue;
             };
             for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
-                !d.type_only() && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
+                !d.type_only()
+                    && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             }) {
                 pending.extend(target_files(graph, file, dependency)?);
             }
@@ -213,7 +237,10 @@ fn dynamic_namespace_safe(
             || match export.identity {
                 ExportIdentity::Binding(file, id) => {
                     let facts = &modules[&file].parsed.facts();
-                    facts.bindings().iter().any(|b| b.id() == id && b.function())
+                    facts
+                        .bindings()
+                        .iter()
+                        .any(|b| b.id() == id && b.function())
                         && !facts
                             .references()
                             .iter()
@@ -247,7 +274,13 @@ impl Initialization {
                     .bindings()
                     .iter()
                     .map(|b| b.name().to_owned())
-                    .chain(m.parsed.facts().references().iter().map(|r| r.name().to_owned()))
+                    .chain(
+                        m.parsed
+                            .facts()
+                            .references()
+                            .iter()
+                            .map(|r| r.name().to_owned()),
+                    )
             })
             .chain(symbols.definitions.values().map(|d| d.name.clone()))
             .chain(symbols.exports.values().flat_map(|e| e.keys().cloned()))
@@ -355,14 +388,14 @@ impl Activations {
             }
             for recipe in facts.emission().segments() {
                 for usage in recipe.namespaces() {
-                    let binding = facts.references()[usage.reference as usize].binding;
+                    let binding = facts.references()[usage.reference() as usize].binding();
                     if binding
                         .and_then(|b| symbols.imports.get(&(file, b)))
                         .is_some_and(|linked| {
                             matches!(linked.identity, ExportIdentity::Namespace(_))
                         })
                         && !matches!(
-                            usage.access,
+                            usage.access(),
                             ast_segmenter::emission::NamespaceAccess::DirectRead { .. }
                         )
                     {
@@ -560,8 +593,12 @@ fn single(
             let facts = &module.parsed.facts();
             facts.references().iter().any(|r| {
                 r.write()
-                    && r.binding()
-                        .is_some_and(|id| facts.bindings().iter().any(|b| b.id() == id && b.constant()))
+                    && r.binding().is_some_and(|id| {
+                        facts
+                            .bindings()
+                            .iter()
+                            .any(|b| b.id() == id && b.constant())
+                    })
             })
         })
     {

@@ -1,5 +1,38 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicNamespace {
+    dependency: DependencyId,
+    properties: Option<Vec<(String, bool)>>,
+}
+
+impl DynamicNamespace {
+    pub(super) fn new(dependency: DependencyId, properties: Option<Vec<(String, bool)>>) -> Self {
+        Self {
+            dependency,
+            properties,
+        }
+    }
+    pub fn dependency(&self) -> DependencyId {
+        self.dependency
+    }
+    pub fn properties(&self) -> Option<&[(String, bool)]> {
+        self.properties.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeferredForm {
+    #[default]
+    Unsupported,
+    Function,
+    Effect,
+    Variable {
+        binding: BindingId,
+        initializer: Option<SourceSlot>,
+    },
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmissionFacts {
     execution: crate::execution::ExecutionFacts,

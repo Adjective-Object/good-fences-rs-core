@@ -118,7 +118,11 @@ fn linked_packages_ignore_reserved_names_above_inventory_roots() {
     for name in ["target", ".git", ".bundler-out"] {
         let root = dir.root().join(name).join("project");
         let package = dir.root().join(name).join("packages/package");
-        write(&root, "main.mjs", "import {value} from './linked/value.mjs'; console.log(value);");
+        write(
+            &root,
+            "main.mjs",
+            "import {value} from './linked/value.mjs'; console.log(value);",
+        );
         write(&package, "value.mjs", "export const value = 42;");
         let alias = root.join("linked");
         directory_link(&package, &alias);
@@ -247,7 +251,7 @@ fn retarget_source_metadata_and_membership_edits_invalidate() {
 }
 
 #[test]
-fn external_ancestor_conditions_are_tracked_without_enumerating_siblings() {
+fn external_ancestor_configs_are_tracked_but_conditions_remain_explicit() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
     let package = dir.root().join("workspace/package");
@@ -271,7 +275,7 @@ fn external_ancestor_conditions_are_tracked_without_enumerating_siblings() {
     );
     write(dir.root(), "workspace/unrelated/invalid.json", "unrelated");
     directory_link(&package, &root.join("node_modules/pkg"));
-    let config = linked_options();
+    let mut config = linked_options();
     let mut session = BuildSession::new(&root).unwrap();
     let default = fresh_parity(&mut session, &config);
     assert!(session
@@ -282,11 +286,16 @@ fn external_ancestor_conditions_are_tracked_without_enumerating_siblings() {
         "workspace/tsconfig.json",
         r#"{"compilerOptions":{"customConditions":["source"]}}"#,
     );
-    let source = fresh_parity(&mut session, &config);
+    let compiler_only = fresh_parity(&mut session, &config);
     assert_ne!(
         default.product.fingerprints.resolution,
-        source.product.fingerprints.resolution
+        compiler_only.product.fingerprints.resolution
     );
+    assert!(session
+        .sources
+        .contains_key(&package.join("node_modules/dep/default.mjs")));
+    config.resolver.export_conditions.push("source".into());
+    fresh_parity(&mut session, &config);
     assert!(session
         .sources
         .contains_key(&package.join("node_modules/dep/source.mjs")));
@@ -299,6 +308,10 @@ fn external_ancestor_conditions_are_tracked_without_enumerating_siblings() {
         r#"{"compilerOptions":{}}"#,
     );
     assert!(BuildSession::recheck(&root, &session.sources, &before).is_err());
+    config
+        .resolver
+        .export_conditions
+        .retain(|condition| condition != "source");
     fresh_parity(&mut session, &config);
     assert!(session
         .sources
@@ -380,8 +393,7 @@ fn contexts_include_linked_directory_aliases_and_new_members() {
 
 #[test]
 fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_prefix() {
-    use ast_segmenter::owned::{Dependency, DependencyId};
-    use oxc_span::Span;
+    use ast_segmenter::owned::Dependency;
 
     let dir = TmpDir::new();
     let directories: Vec<_> = (0..=20)
@@ -401,16 +413,12 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     let inventory = inventory(root).unwrap();
     assert_eq!(inventory.directory_reads(), 21);
     let prefix = format!("./{}", "a/".repeat(19));
-    let mut dependency = Dependency {
-        id: DependencyId(0),
-        kind: DependencyKind::DynamicImport,
-        span: Span::new(0, 0),
-        specifier: String::new(),
-        pattern: Some(vec![prefix.clone(), "/one.mjs".into()]),
-        specifier_span: Span::new(0, 0),
-        type_only: false,
-        enclosing_function: None,
-    };
+    let mut dependency: Dependency = serde_json::from_value(serde_json::json!({
+        "id": 0, "kind": "DynamicImport", "span": [0, 0], "specifier": "",
+        "pattern": [prefix.clone(), "/one.mjs"], "specifier_span": [0, 0],
+        "type_only": false, "enclosing_function": null
+    }))
+    .unwrap();
     let importer = root.join("main.mjs");
     let (candidates, visits) = inventory.context_candidates(root, &importer, &dependency);
     // Nineteen fixed edges and only the final diamond are expanded.
@@ -429,8 +437,14 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     assert_eq!(
         resolved,
         BTreeMap::from([
-            (format!("{prefix}a/one.mjs"), directories[20].join("one.mjs")),
-            (format!("{prefix}b/one.mjs"), directories[20].join("one.mjs")),
+            (
+                format!("{prefix}a/one.mjs"),
+                directories[20].join("one.mjs")
+            ),
+            (
+                format!("{prefix}b/one.mjs"),
+                directories[20].join("one.mjs")
+            ),
         ])
     );
     directory_link(root, &directories[20].join("cycle"));
@@ -465,9 +479,8 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
 #[cfg(windows)]
 #[test]
 fn context_cross_volume_candidates_keep_same_volume_lexical_aliases() {
-    use ast_segmenter::owned::{Dependency, DependencyId};
+    use ast_segmenter::owned::Dependency;
     use import_resolver::structural::{DependencyResolver, ResolvedDependency};
-    use oxc_span::Span;
 
     struct Resolver;
     impl DependencyResolver for Resolver {
@@ -489,16 +502,12 @@ fn context_cross_volume_candidates_keep_same_volume_lexical_aliases() {
         let root = Path::new(root);
         let importer = root.join("main.mjs");
         for kind in [DependencyKind::DynamicImport, DependencyKind::Require] {
-            let dependency = Dependency {
-                id: DependencyId(0),
-                kind,
-                span: Span::new(0, 0),
-                specifier: String::new(),
-                pattern: Some(vec!["./linked/".into(), ".mjs".into()]),
-                specifier_span: Span::new(0, 0),
-                type_only: false,
-                enclosing_function: None,
-            };
+            let dependency: Dependency = serde_json::from_value(serde_json::json!({
+                "id": 0, "kind": kind, "span": [0, 0], "specifier": "",
+                "pattern": ["./linked/", ".mjs"], "specifier_span": [0, 0],
+                "type_only": false, "enclosing_function": null
+            }))
+            .unwrap();
             let resolved = crate::context::resolve(
                 root,
                 &importer,

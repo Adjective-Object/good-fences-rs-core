@@ -74,16 +74,16 @@ after_module_sync;
 "#,
     );
     let contexts: Vec<_> = facts
-        .references
+        .references()
         .iter()
         .map(|reference| {
             assert_eq!(
-                reference.async_deferred,
-                reference.name.ends_with("_async"),
+                reference.async_deferred(),
+                reference.name().ends_with("_async"),
                 "{}",
-                reference.name
+                reference.name()
             );
-            (reference.name.as_str(), reference.async_deferred)
+            (reference.name(), reference.async_deferred())
         })
         .collect();
     insta::assert_debug_snapshot!(contexts);

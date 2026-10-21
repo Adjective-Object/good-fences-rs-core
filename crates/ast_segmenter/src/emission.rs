@@ -18,29 +18,6 @@ pub use records::*;
 #[path = "dynamic_namespace.rs"]
 mod dynamic_namespace;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DynamicNamespace {
-    dependency: DependencyId,
-    properties: Option<Vec<(String, bool)>>,
-}
-
-impl DynamicNamespace {
-    pub(super) fn new(dependency: DependencyId, properties: Option<Vec<(String, bool)>>) -> Self {
-        Self { dependency, properties }
-    }
-    pub fn dependency(&self) -> DependencyId { self.dependency }
-    pub fn properties(&self) -> Option<&[(String, bool)]> { self.properties.as_deref() }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DeferredForm {
-    #[default]
-    Unsupported,
-    Function,
-    Effect,
-    Variable { binding: BindingId, initializer: Option<SourceSlot> },
-}
-
 impl OperationKind {
     /// Resolve ranges through existing occurrence IDs wherever possible.
     pub fn span(&self, facts: &ModuleFacts, recipe: &SegmentRecipe) -> Span {
