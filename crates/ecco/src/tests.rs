@@ -59,8 +59,8 @@ fn unknown_contract_behavior_is_not_executed_while_building_facts() {
     let value = context.value(Hazards::NONE);
     assert_eq!(context.evaluate().hazards(value), Hazards::NONE);
     let result = context.call(local(&context, "opaque"), &[], None);
-    assert_eq!(result.value, context.unknown());
-    assert!(context.evaluate().effect(result.effects));
+    assert_eq!(result.value(), context.unknown());
+    assert!(context.evaluate().effect(result.effects()));
     assert_eq!(context.evaluate().hazards(value), Hazards::UNKNOWN);
     parse_declarations("fn f(unknown) { call_effects = unknown.call_effects returns = unknown }")
         .unwrap();
@@ -78,9 +78,9 @@ fn argument_dependent_contracts_specialize_without_losing_bare_callable_hazards(
     let value = context.value(Hazards::NONE);
     let result = context.call(local(&context, "invoke"), &[read, value], None);
     assert!(context.evaluate().hazards(read).get(Hazard::Call));
-    assert!(!context.evaluate().effect(result.effects));
+    assert!(!context.evaluate().effect(result.effects()));
     context.update(read, Hazard::Call, context.effectful());
-    assert!(context.evaluate().effect(result.effects));
+    assert!(context.evaluate().effect(result.effects()));
 }
 
 fn effects(analysis: &SourceAnalysis) -> Vec<bool> {
@@ -99,9 +99,9 @@ fn parsed(javascript: &str) -> Arc<ParsedFile> {
 fn symbol(file: &ParsedFile, name: &str) -> SymbolId {
     file.symbols()
         .iter()
-        .find(|symbol| symbol.name == name)
+        .find(|symbol| symbol.name() == name)
         .unwrap()
-        .id
+        .id()
 }
 
 #[test]
@@ -158,8 +158,8 @@ fn graph_calls_use_external_symbol_resolutions_and_actual_arguments() {
                 .solve(&|from: &&str, reference: &ExternalReference| {
                     assert_eq!(*from, "entry");
                     assert_eq!(
-                        reference.binding,
-                        Binding::Module {
+                        reference.binding(),
+                        &Binding::Module {
                             module: "resolved-by-caller".into(),
                             path: vec!["read".into()],
                         }
@@ -201,7 +201,7 @@ fn graph_links_cyclic_functions_before_instantiating_calls() {
         }
         let result = analysis
             .solve(
-                &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                &|_: &&str, reference: &ExternalReference| match &reference.binding() {
                     Binding::Module { module, .. } if module == "a" => {
                         Ok(Resolution::Symbol(Symbol {
                             file: "a",
@@ -244,7 +244,7 @@ fn graph_materializes_foreign_initializers_and_anonymous_default_roots_lazily() 
         }
         let result = analysis
             .solve(
-                &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                &|_: &&str, reference: &ExternalReference| match &reference.binding() {
                     Binding::Module { path, .. } if path == &["default"] => Ok(Resolution::Root {
                         file: "library",
                         root: RootId(1),
@@ -317,7 +317,7 @@ fn graph_namespace_aliases_resolve_static_members_with_shared_identity() {
     analysis.add_file("library", library).unwrap();
     let result = analysis
         .solve(
-            &|_: &&str, reference: &ExternalReference| match &reference.binding {
+            &|_: &&str, reference: &ExternalReference| match &reference.binding() {
                 Binding::Module { path, .. } if path.is_empty() => {
                     Ok(Resolution::Namespace("library"))
                 }
@@ -362,13 +362,13 @@ fn graph_callback_queries_subscribe_to_foreign_live_bindings() {
         analysis.add_file("library", library).unwrap();
         let result = analysis
             .solve(
-                &|_: &&str, reference: &ExternalReference| match &reference.binding {
+                &|_: &&str, reference: &ExternalReference| match &reference.binding() {
                     Binding::Module { .. } => Ok(Resolution::Symbol(Symbol {
                         file: "library",
                         local: callback,
                     })),
                     Binding::Global(path) if path == &["query"] => {
-                        Ok(Resolution::Declaration(reference.binding.clone()))
+                        Ok(Resolution::Declaration(reference.binding().clone()))
                     }
                     _ => Ok(Resolution::Unknown),
                 },
@@ -414,12 +414,12 @@ fn graph_initializers_execute_updates_even_when_demanded_by_latent_queries() {
     analysis.add_file("library", library).unwrap();
     let result = analysis
         .solve(
-            &|_: &&str, reference: &ExternalReference| match &reference.binding {
+            &|_: &&str, reference: &ExternalReference| match &reference.binding() {
                 Binding::Module { .. } => Ok(Resolution::Symbol(Symbol {
                     file: "library",
                     local: value,
                 })),
-                _ => Ok(Resolution::Declaration(reference.binding.clone())),
+                _ => Ok(Resolution::Declaration(reference.binding().clone())),
             },
         )
         .unwrap();
@@ -482,12 +482,12 @@ fn graph_local_contracts_are_scoped_to_their_parsed_files() {
 #[test]
 fn parses_node_contracts_and_document_examples() {
     let facts = parse_declarations(DECLARATIONS).unwrap();
-    assert_eq!(facts.definitions.len(), 6);
-    assert_eq!(facts.definitions[0].returns, Returns::Void);
-    assert!(facts.definitions[0].variadic);
+    assert_eq!(facts.definitions().len(), 6);
+    assert_eq!(facts.definitions()[0].returns(), &Returns::Void);
+    assert!(facts.definitions()[0].variadic());
     assert_eq!(
-        facts.definitions[4].binding,
-        Binding::Module {
+        facts.definitions()[4].binding(),
+        &Binding::Module {
             module: "node:buffer".into(),
             path: vec!["Buffer".into(), "alloc".into()]
         }
@@ -537,7 +537,7 @@ fn global_symbol_declarations_validate_owned_facts() {
         "global symbol ambient { read_effects=true } global symbol ordinary { read_effects=false }",
     )
     .unwrap();
-    insta::assert_debug_snapshot!(facts.global_symbols, @r#"
+    insta::assert_debug_snapshot!(facts.global_symbols(), @r#"
     [
         GlobalSymbol {
             name: "ambient",
@@ -551,10 +551,13 @@ fn global_symbol_declarations_validate_owned_facts() {
     "#);
     Context::from_local_facts(facts.clone()).unwrap();
     let mut invalid = facts.clone();
-    invalid.global_symbols[0].name.clear();
+    invalid.global_symbols_mut()[0] =
+        GlobalSymbol::new(String::new(), facts.global_symbols()[0].read_effects());
     assert!(Context::from_local_facts(invalid).is_err());
     let mut invalid = facts.clone();
-    invalid.global_symbols.push(facts.global_symbols[0].clone());
+    invalid
+        .global_symbols_mut()
+        .push(facts.global_symbols()[0].clone());
     assert!(Context::from_local_facts(invalid).is_err());
 }
 
@@ -562,12 +565,12 @@ fn global_symbol_declarations_validate_owned_facts() {
 fn callable_parameter_names_and_owned_fact_validation() {
     let facts = parse_declarations("fn check(call) { call_effects = call.call_effects }").unwrap();
     let mut invalid = facts.clone();
-    invalid.definitions[0].parameters.clear();
+    invalid.definitions_mut()[0].parameters_mut().clear();
     assert!(Context::from_local_facts(invalid).is_err());
     let mut context = Context::from_local_facts(facts).unwrap();
     let argument = context.value(Hazards::NONE);
     let result = context.call(local(&context, "check"), &[argument], None);
-    assert!(!context.evaluate().effect(result.effects));
+    assert!(!context.evaluate().effect(result.effects()));
 }
 
 #[test]
@@ -586,11 +589,15 @@ fn wildcard_defaults_and_omitted_hazards_are_distinct() {
     let ordinary = context.call(local(&context, "ordinary"), &[], None);
     let defaults = context.call(local(&context, "defaults"), &[], None);
     let evaluation = context.evaluate();
-    assert!(!evaluation.effect(ordinary.effects));
-    assert_eq!(evaluation.hazards(ordinary.value), Hazards::UNKNOWN);
-    assert!(!evaluation.effect(defaults.effects));
-    assert!(!evaluation.hazards(defaults.value).get(Hazard::PropertyRead));
-    assert!(evaluation.hazards(defaults.value).get(Hazard::ToPrimitive));
+    assert!(!evaluation.effect(ordinary.effects()));
+    assert_eq!(evaluation.hazards(ordinary.value()), Hazards::UNKNOWN);
+    assert!(!evaluation.effect(defaults.effects()));
+    assert!(!evaluation
+        .hazards(defaults.value())
+        .get(Hazard::PropertyRead));
+    assert!(evaluation
+        .hazards(defaults.value())
+        .get(Hazard::ToPrimitive));
 }
 
 #[test]
@@ -602,14 +609,14 @@ fn conditional_calls_and_missing_parameters() {
     let safe = context.call(function, &[primitive], None);
     let missing = context.call(function, &[], None);
     let evaluation = context.evaluate();
-    assert!(!evaluation.effect(safe.effects));
-    assert!(!evaluation.effect(missing.effects));
-    assert_eq!(evaluation.hazards(safe.value), Hazards::NONE);
+    assert!(!evaluation.effect(safe.effects()));
+    assert!(!evaluation.effect(missing.effects()));
+    assert_eq!(evaluation.hazards(safe.value()), Hazards::NONE);
     let hazardous = context.call(function, &[context.unknown()], None);
     let evaluation = context.evaluate();
-    assert!(evaluation.effect(hazardous.effects));
+    assert!(evaluation.effect(hazardous.effects()));
     assert!(
-        evaluation.effect(safe.effects),
+        evaluation.effect(safe.effects()),
         "unknown coercion may replace other call targets"
     );
 }
@@ -628,9 +635,9 @@ fn updates_revisit_earlier_safe_reads_and_passthrough_aliases() {
     );
     let object = context.value(Hazards::NONE);
     let alias = context.call(local(&context, "identity"), &[object], None);
-    assert_eq!(alias.value, object);
-    let read = context.hazard(alias.value, Hazard::PropertyRead);
-    let dependent = context.any([read, alias.effects]);
+    assert_eq!(alias.value(), object);
+    let read = context.hazard(alias.value(), Hazard::PropertyRead);
+    let dependent = context.any([read, alias.effects()]);
     assert!(!context.evaluate().effect(dependent));
     context.call(local(&context, "mutate"), &[object], None);
     let evaluation = context.evaluate();
@@ -643,11 +650,11 @@ fn fresh_returns_do_not_alias_other_calls() {
     let mut context = context("fn fresh() { call_effects = false returns.*_effects = false }");
     let first = context.call(local(&context, "fresh"), &[], None);
     let second = context.call(local(&context, "fresh"), &[], None);
-    assert_ne!(first.value, second.value);
-    context.update(first.value, Hazard::PropertyRead, context.effectful());
+    assert_ne!(first.value(), second.value());
+    context.update(first.value(), Hazard::PropertyRead, context.effectful());
     let evaluation = context.evaluate();
-    assert!(evaluation.hazards(first.value).get(Hazard::PropertyRead));
-    assert!(!evaluation.hazards(second.value).get(Hazard::PropertyRead));
+    assert!(evaluation.hazards(first.value()).get(Hazard::PropertyRead));
+    assert!(!evaluation.hazards(second.value()).get(Hazard::PropertyRead));
 }
 
 #[test]
@@ -671,10 +678,10 @@ fn conditional_getter_effects_are_latent_and_use_receiver() {
     let evaluation = context.evaluate();
     assert!(evaluation.effect(read));
     assert!(
-        !evaluation.effect(result.effects),
+        !evaluation.effect(result.effects()),
         "installing a getter must not execute it"
     );
-    assert_eq!(object, result.value);
+    assert_eq!(object, result.value());
 }
 
 #[test]
@@ -689,14 +696,14 @@ fn rest_parameters_and_forwarded_calls() {
     let convert = local(&context, "convert");
     let primitive = context.value(Hazards::NONE);
     let safe = context.call(local(&context, "forward"), &[convert, primitive], None);
-    assert!(!context.evaluate().effect(safe.effects));
+    assert!(!context.evaluate().effect(safe.effects()));
     let unsafe_call = context.call(
         local(&context, "explicit"),
         &[convert, context.unknown()],
         None,
     );
     let evaluation = context.evaluate();
-    assert!(evaluation.effect(unsafe_call.effects));
+    assert!(evaluation.effect(unsafe_call.effects()));
 }
 
 #[test]
@@ -704,9 +711,9 @@ fn recursive_summaries_converge_and_propagate_new_hazards() {
     let mut context = context("fn recursive(f) { call_effects = call(f, f) }");
     let function = local(&context, "recursive");
     let result = context.call(function, &[function], None);
-    assert!(!context.evaluate().effect(result.effects));
+    assert!(!context.evaluate().effect(result.effects()));
     context.update(function, Hazard::Call, context.effectful());
-    assert!(context.evaluate().effect(result.effects));
+    assert!(context.evaluate().effect(result.effects()));
 }
 
 #[test]
@@ -773,7 +780,7 @@ fn source_matches_globals_import_aliases_and_namespace_members() {
     let matches: Vec<_> = analysis
         .matches
         .iter()
-        .map(|matched| format!("{:?}", matched.binding))
+        .map(|matched| format!("{:?}", matched.binding()))
         .collect();
     insta::assert_debug_snapshot!(matches, @r#"
     [
@@ -798,7 +805,7 @@ fn lexical_shadows_and_wrong_modules_do_not_match() {
             analysis
                 .matches
                 .iter()
-                .all(|matched| matches!(matched.binding, Binding::Local(_))),
+                .all(|matched| matches!(matched.binding(), &Binding::Local(_))),
             "{javascript}"
         );
     }
@@ -808,9 +815,9 @@ fn inferred<'s>(analysis: &'s SourceAnalysis, name: &str) -> &'s Definition {
     analysis
         .context
         .facts()
-        .definitions
+        .definitions()
         .iter()
-        .find(|definition| definition.binding == Binding::Local(name.into()))
+        .find(|definition| *definition.binding() == Binding::Local(name.into()))
         .unwrap()
 }
 
@@ -834,10 +841,10 @@ fn isolated_inference_produces_contracts_independent_of_callers() {
     let definition = inferred(&standalone, "user_function");
     assert_eq!(definition, inferred(&called, "user_function"));
     insta::assert_debug_snapshot!((
-            &definition.binding, &definition.parameters,
-            definition.hazards.get(Hazard::Call), &definition.returns,
-            definition.return_hazards.get(Hazard::PropertyRead),
-            &definition.updates,
+            &definition.binding(), &definition.parameters(),
+            definition.hazards().get(Hazard::Call), &definition.returns(),
+            definition.return_hazards().get(Hazard::PropertyRead),
+            &definition.updates(),
         ), @r#"
         (
             Local(
@@ -877,25 +884,27 @@ fn isolated_parameter_hazards_and_return_aliases_apply_at_calls() {
     assert_eq!(effects(&analysis), vec![false; 9]);
     assert_eq!(analysis.roots[4].value, analysis.roots[5].value);
     assert_eq!(
-        inferred(&analysis, "read").hazards.get(Hazard::Call),
+        inferred(&analysis, "read").hazards().get(Hazard::Call),
         HazardExpr::Read {
             value: "value".into(),
             slot: Hazard::PropertyRead
         }
     );
     assert_eq!(
-        inferred(&analysis, "convert").hazards.get(Hazard::Call),
+        inferred(&analysis, "convert").hazards().get(Hazard::Call),
         HazardExpr::Read {
             value: "value".into(),
             slot: Hazard::ToPrimitive
         }
     );
     assert_eq!(
-        inferred(&analysis, "identity").returns,
-        Returns::Argument("value".into())
+        inferred(&analysis, "identity").returns(),
+        &Returns::Argument("value".into())
     );
     assert_eq!(
-        inferred(&analysis, "double").hazards.get(Hazard::Construct),
+        inferred(&analysis, "double")
+            .hazards()
+            .get(Hazard::Construct),
         HazardExpr::Bool(false)
     );
     let unsafe_read = source(
@@ -917,7 +926,7 @@ fn isolated_dependencies_compose_without_source_order_or_caller_values() {
     );
     assert_eq!(effects(&analysis), vec![false; 3]);
     assert_eq!(
-        inferred(&analysis, "first").hazards.get(Hazard::Call),
+        inferred(&analysis, "first").hazards().get(Hazard::Call),
         HazardExpr::Read {
             value: "input".into(),
             slot: Hazard::ToPrimitive
@@ -949,8 +958,8 @@ fn isolated_dependencies_compose_without_source_order_or_caller_values() {
     assert_eq!(effects(&exported), vec![false; 4]);
     for name in ["named", "fallback", "expression"] {
         assert_eq!(
-            inferred(&exported, name).returns,
-            Returns::Argument("value".into())
+            inferred(&exported, name).returns(),
+            &Returns::Argument("value".into())
         );
     }
 }
@@ -967,14 +976,14 @@ fn isolated_callbacks_remain_symbolic_and_specialize_in_contract_solver() {
     );
     assert_eq!(effects(&analysis), vec![false; 3]);
     assert_eq!(
-        inferred(&analysis, "invoke").hazards.get(Hazard::Call),
+        inferred(&analysis, "invoke").hazards().get(Hazard::Call),
         HazardExpr::Call {
             function: "callback".into(),
             arguments: vec![CallArgument::Value("value".into())],
             receiver: None
         }
     );
-    assert_eq!(inferred(&analysis, "invoke").returns, Returns::Unknown);
+    assert_eq!(inferred(&analysis, "invoke").returns(), &Returns::Unknown);
 }
 
 #[test]
@@ -1005,25 +1014,25 @@ fn isolated_known_updates_and_receiver_dependencies_are_composed() {
     );
     assert_eq!(effects(&analysis), vec![false; 6]);
     let wrapper = inferred(&analysis, "wrapper");
-    assert_eq!(wrapper.returns, Returns::Argument("input".into()));
+    assert_eq!(wrapper.returns(), &Returns::Argument("input".into()));
     assert_eq!(
-        wrapper.updates,
-        vec![Update {
-            target: "input".into(),
-            slot: Some(Hazard::PropertyRead),
-            expression: HazardExpr::Bool(true)
-        }]
+        wrapper.updates(),
+        vec![Update::new(
+            "input".into(),
+            Some(Hazard::PropertyRead),
+            HazardExpr::Bool(true)
+        )]
     );
     assert_eq!(
-        inferred(&analysis, "register").updates,
-        vec![Update {
-            target: "target".into(),
-            slot: Some(Hazard::PropertyRead),
-            expression: HazardExpr::Read {
+        inferred(&analysis, "register").updates(),
+        vec![Update::new(
+            "target".into(),
+            Some(Hazard::PropertyRead),
+            HazardExpr::Read {
                 value: "target".into(),
                 slot: Hazard::ToPrimitive
-            },
-        }]
+            }
+        )]
     );
 }
 
@@ -1041,12 +1050,12 @@ fn isolated_callbacks_propagate_known_updates_without_executing_queries() {
     );
     assert_eq!(effects(&analysis), vec![false; 2]);
     assert_eq!(
-        inferred(&analysis, "wrapper").updates,
-        vec![Update {
-            target: "target".into(),
-            slot: Some(Hazard::PropertyRead),
-            expression: HazardExpr::Bool(true),
-        }]
+        inferred(&analysis, "wrapper").updates(),
+        vec![Update::new(
+            "target".into(),
+            Some(Hazard::PropertyRead),
+            HazardExpr::Bool(true)
+        )]
     );
 }
 
@@ -1061,11 +1070,11 @@ fn isolated_returns_join_conservatively_without_live_identity_tracking() {
             function stopped() { return 1; unknown(); }
         "#,
     );
-    assert_eq!(inferred(&analysis, "choose").returns, Returns::Unknown);
-    assert_eq!(inferred(&analysis, "fresh").returns, Returns::Fresh);
-    assert_eq!(inferred(&analysis, "empty").returns, Returns::Void);
+    assert_eq!(inferred(&analysis, "choose").returns(), &Returns::Unknown);
+    assert_eq!(inferred(&analysis, "fresh").returns(), &Returns::Fresh);
+    assert_eq!(inferred(&analysis, "empty").returns(), &Returns::Void);
     assert_eq!(
-        inferred(&analysis, "stopped").hazards.get(Hazard::Call),
+        inferred(&analysis, "stopped").hazards().get(Hazard::Call),
         HazardExpr::Bool(false)
     );
 }
@@ -1084,20 +1093,20 @@ fn isolated_unsupported_bodies_and_cycles_are_conservative_but_deferred() {
         let uncalled = source("", &format!("{function} +1;"));
         assert_eq!(effects(&uncalled), vec![false; 2], "{function}");
         assert_eq!(
-            inferred(&uncalled, "f").hazards.get(Hazard::Call),
+            inferred(&uncalled, "f").hazards().get(Hazard::Call),
             HazardExpr::Unknown,
             "{function}"
         );
         assert_eq!(
-            inferred(&uncalled, "f").returns,
-            Returns::Unknown,
+            inferred(&uncalled, "f").returns(),
+            &Returns::Unknown,
             "{function}"
         );
         let mut context = Context::from_local_facts(uncalled.context.facts().clone()).unwrap();
         let argument = context.value(Hazards::NONE);
         let function = context.definition(&Binding::Local("f".into())).unwrap();
         let called = context.call(function, &[argument], None);
-        assert!(context.evaluate().effect(called.effects));
+        assert!(context.evaluate().effect(called.effects()));
     }
 }
 
@@ -1112,11 +1121,11 @@ fn isolated_contracts_respect_lexical_shadows() {
         "#,
     );
     assert_eq!(
-        inferred(&analysis, "wrapper").hazards.get(Hazard::Call),
+        inferred(&analysis, "wrapper").hazards().get(Hazard::Call),
         HazardExpr::Unknown
     );
     assert_eq!(
-        inferred(&analysis, "parameter").hazards.get(Hazard::Call),
+        inferred(&analysis, "parameter").hazards().get(Hazard::Call),
         HazardExpr::Call {
             function: "Number".into(),
             arguments: vec![CallArgument::Value("value".into())],
@@ -1136,9 +1145,9 @@ fn isolated_contract_growth_is_bounded_for_shared_dependencies_and_large_bodies(
         ));
     }
     let analysis = source("", &javascript);
-    assert_eq!(analysis.context.facts().definitions.len(), 1000);
+    assert_eq!(analysis.context.facts().definitions().len(), 1000);
     assert_eq!(
-        inferred(&analysis, "f999").hazards.get(Hazard::Call),
+        inferred(&analysis, "f999").hazards().get(Hazard::Call),
         HazardExpr::Read {
             value: "input".into(),
             slot: Hazard::PropertyRead
@@ -1152,7 +1161,7 @@ fn isolated_contract_growth_is_bounded_for_shared_dependencies_and_large_bodies(
         ),
     );
     assert_eq!(
-        inferred(&large, "large").hazards.get(Hazard::Call),
+        inferred(&large, "large").hazards().get(Hazard::Call),
         HazardExpr::Unknown
     );
     let parameters = (0..80)
@@ -1176,10 +1185,10 @@ fn isolated_contract_growth_is_bounded_for_shared_dependencies_and_large_bodies(
         &growing,
     );
     assert_eq!(
-        inferred(&expanded, "growing").hazards.get(Hazard::Call),
+        inferred(&expanded, "growing").hazards().get(Hazard::Call),
         HazardExpr::Unknown
     );
-    assert_eq!(inferred(&expanded, "growing").returns, Returns::Unknown);
+    assert_eq!(inferred(&expanded, "growing").returns(), &Returns::Unknown);
 }
 
 #[test]
@@ -1202,8 +1211,8 @@ fn isolated_contract_api_returns_owned_facts_without_an_analysis_context() {
             .unwrap()
     };
     assert_eq!(
-        inferred.definitions[0].returns,
-        Returns::Argument("value".into())
+        inferred.definitions()[0].returns(),
+        &Returns::Argument("value".into())
     );
     Context::from_local_facts(inferred).unwrap();
 }
@@ -1245,8 +1254,8 @@ fn commonjs_duplicate_parameters_produce_valid_unknown_contracts() {
     .unwrap();
     parsed.validate().unwrap();
     assert_eq!(
-        parsed.declarations().definitions[0]
-            .hazards
+        parsed.declarations().definitions()[0]
+            .hazards()
             .get(Hazard::Call),
         HazardExpr::Unknown
     );
@@ -1259,11 +1268,11 @@ fn cached_contracts_preserve_redeclarations_getters_pure_and_nested_shadows() {
         "function read() { return ambient; } function unused() { /*@__PURE__*/ unknown(); }",
     );
     assert_eq!(
-        inferred(&analysis, "read").hazards.get(Hazard::Call),
+        inferred(&analysis, "read").hazards().get(Hazard::Call),
         HazardExpr::Unknown
     );
     assert_eq!(
-        inferred(&analysis, "unused").hazards.get(Hazard::Call),
+        inferred(&analysis, "unused").hazards().get(Hazard::Call),
         HazardExpr::Bool(false)
     );
     let redeclared = parse_source(
@@ -1273,8 +1282,8 @@ fn cached_contracts_preserve_redeclarations_getters_pure_and_nested_shadows() {
     )
     .unwrap();
     assert_eq!(
-        redeclared.declarations().definitions[0]
-            .hazards
+        redeclared.declarations().definitions()[0]
+            .hazards()
             .get(Hazard::Call),
         HazardExpr::Unknown
     );
@@ -1358,7 +1367,7 @@ fn recursive_argument_growth_is_bounded() {
     let function = local(&context, "grow");
     let argument = context.value(Hazards::NONE);
     let result = context.call(function, &[function, argument], None);
-    assert!(context.evaluate().effect(result.effects));
+    assert!(context.evaluate().effect(result.effects()));
 }
 
 #[test]
@@ -1367,7 +1376,7 @@ fn unknown_callback_summaries_widen_mutations() {
     let victim = context.value(Hazards::NONE);
     let result = context.call(local(&context, "invoke"), &[context.unknown()], None);
     let evaluation = context.evaluate();
-    assert!(evaluation.effect(result.effects));
+    assert!(evaluation.effect(result.effects()));
     assert_eq!(evaluation.hazards(victim), Hazards::UNKNOWN);
 }
 
@@ -1895,11 +1904,11 @@ fn inferred_arrows_capture_lexical_this_and_ordinary_functions_use_receiver() {
     let make = analysis.roots[0].value;
     let closure = analysis.context.call(make, &[], Some(receiver));
     let other = analysis.context.value(Hazards::NONE);
-    let result = analysis.context.call(closure.value, &[], Some(other));
-    assert_eq!(result.value, receiver);
+    let result = analysis.context.call(closure.value(), &[], Some(other));
+    assert_eq!(result.value(), receiver);
     let evaluation = analysis.context.evaluate();
-    assert!(!evaluation.effect(closure.effects));
-    assert!(!evaluation.effect(result.effects));
+    assert!(!evaluation.effect(closure.effects()));
+    assert!(!evaluation.effect(result.effects()));
 }
 
 #[test]
@@ -2428,7 +2437,7 @@ fn global_symbol_reads_respect_lexical_bindings_and_callable_contracts() {
             !analysis
                 .matches
                 .iter()
-                .any(|matched| matches!(matched.binding, Binding::Global(_))),
+                .any(|matched| matches!(matched.binding(), &Binding::Global(_))),
             "{javascript}"
         );
     }

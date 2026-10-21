@@ -38,9 +38,9 @@ impl SourceGraph {
                 .filter_map(|id| self.files[id as usize].owned.as_ref())
                 .all(|input| input
                     .facts
-                    .dependencies
+                    .dependencies()
                     .iter()
-                    .all(|dependency| dependency.pattern.is_none())),
+                    .all(|dependency| dependency.pattern().is_none())),
             "context resolution requires a bounded file inventory; rebuild owned inputs"
         );
         for (file, &live) in self.files.iter_mut().zip(&self.live_files) {
@@ -51,19 +51,19 @@ impl SourceGraph {
                 continue;
             };
             input.resolutions.clear();
-            for dependency in &input.facts.dependencies {
-                let mode = if dependency.kind == DependencyKind::Require {
+            for dependency in input.facts.dependencies() {
+                let mode = if dependency.kind() == DependencyKind::Require {
                     ResolutionMode::Require
                 } else {
                     ResolutionMode::Import
                 };
                 let target =
-                    match resolver.resolve_dependency(&input.path, &dependency.specifier, mode) {
+                    match resolver.resolve_dependency(&input.path, &dependency.specifier(), mode) {
                         Ok(ResolvedDependency::File(path)) => DependencyTarget::File(path),
                         Ok(ResolvedDependency::External(name)) => DependencyTarget::External(name),
                         Err(error) => DependencyTarget::Missing(error.to_string()),
                     };
-                input.resolutions.insert(dependency.id, target);
+                input.resolutions.insert(dependency.id(), target);
             }
         }
         self.revision.resolution += 1;

@@ -225,8 +225,8 @@ fn async_modules(
         .filter_map(|(&file, module)| {
             module
                 .parsed
-                .facts
-                .top_level_await
+                .facts()
+                .top_level_await()
                 .first()
                 .map(|&span| (file, (file, span)))
         })
@@ -239,11 +239,12 @@ fn async_modules(
             if asynchronous.contains_key(&file) {
                 continue;
             }
-            for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
-                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
+                !d.type_only()
+                    && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             }) {
                 if matches!(
-                    graph.dependency_target(file, dependency.id),
+                    graph.dependency_target(file, dependency.id()),
                     Some(DependencyTarget::External(_))
                 ) {
                     continue;
@@ -263,10 +264,10 @@ fn async_modules(
     for (&file, module) in modules {
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
-            .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+            .filter(|d| !d.type_only() && d.kind() == DependencyKind::Require)
         {
             for target in target_files(graph, file, dependency)? {
                 if let Some(&(origin, span)) = asynchronous.get(&target) {
@@ -274,8 +275,8 @@ fn async_modules(
                     "{}: require of async ESM {} at bytes {}..{} (top-level await in {} at bytes {}..{})",
                     graph.file_path(file).unwrap().display(),
                     graph.file_path(target).unwrap().display(),
-                    dependency.span.start,
-                    dependency.span.end,
+                    dependency.span().start,
+                    dependency.span().end,
                     graph.file_path(origin).unwrap().display(),
                     span.start,
                     span.end
@@ -295,15 +296,15 @@ pub(super) fn target_file(
     file: u32,
     dependency: &Dependency,
 ) -> eyre::Result<u32> {
-    match graph.dependency_target(file, dependency.id) {
+    match graph.dependency_target(file, dependency.id()) {
         Some(DependencyTarget::File(path)) => {
             graph.file_id(path).ok_or_eyre("resolved target is absent")
         }
         _ => eyre::bail!(
             "{}: external/unresolved emission has no declared policy at bytes {}..{}",
             graph.file_path(file).unwrap().display(),
-            dependency.span.start,
-            dependency.span.end
+            dependency.span().start,
+            dependency.span().end
         ),
     }
 }
@@ -314,12 +315,12 @@ pub(super) fn target_files(
     dependency: &Dependency,
 ) -> eyre::Result<Vec<u32>> {
     if matches!(
-        graph.dependency_target(file, dependency.id),
+        graph.dependency_target(file, dependency.id()),
         Some(DependencyTarget::External(_))
     ) {
         Ok(vec![])
     } else if let Some(DependencyTarget::Context(candidates)) =
-        graph.dependency_target(file, dependency.id)
+        graph.dependency_target(file, dependency.id())
     {
         candidates
             .values()
@@ -335,11 +336,11 @@ pub(super) fn has_externals(graph: &SourceGraph, file: u32) -> bool {
     graph
         .file_facts(file)
         .into_iter()
-        .flat_map(|facts| &facts.dependencies)
+        .flat_map(|facts| facts.dependencies())
         .any(|dependency| {
-            !dependency.type_only
+            !dependency.type_only()
                 && matches!(
-                    graph.dependency_target(file, dependency.id),
+                    graph.dependency_target(file, dependency.id()),
                     Some(DependencyTarget::External(_))
                 )
         })
@@ -363,15 +364,15 @@ pub(super) fn namespace_export_names(
         .map(|file| {
             (
                 file,
-                if graph.file_facts(file).is_some_and(|facts| facts.commonjs) {
+                if graph.file_facts(file).is_some_and(|facts| facts.commonjs()) {
                     commonjs(file)
                 } else {
                     graph
                         .file_facts(file)
                         .into_iter()
-                        .flat_map(|f| &f.exports)
-                        .filter(|e| !e.type_only)
-                        .filter_map(|e| e.name.clone())
+                        .flat_map(|f| f.exports())
+                        .filter(|e| !e.type_only())
+                        .filter_map(|e| e.name().map(str::to_owned))
                         .collect()
                 },
             )
@@ -383,12 +384,12 @@ pub(super) fn namespace_export_names(
             for export in graph
                 .file_facts(file)
                 .into_iter()
-                .flat_map(|f| &f.exports)
-                .filter(|e| !e.type_only && e.name.is_none())
+                .flat_map(|f| f.exports())
+                .filter(|e| !e.type_only() && e.name().is_none())
             {
-                if let ExportValue::ReExport { dependency, .. } = export.value {
+                if let ExportValue::ReExport { dependency, .. } = export.value() {
                     if let Some(DependencyTarget::File(path)) =
-                        graph.dependency_target(file, dependency)
+                        graph.dependency_target(file, *dependency)
                     {
                         if let Some(target) = graph.file_id(path) {
                             names.get_mut(&file).unwrap().extend(

@@ -1,5 +1,9 @@
 # ecco
 
+- Read persisted precursors and nested contracts through borrowed accessors.
+  Keep extraction construction distinct from immutable parsed files and mutable
+  interpreter state; retain Serde names/order when moving record definitions.
+
 - Target statement-level bundler analysis for massive applications; throughput,
   memory usage, and parallel scalability are explicit design goals.
 - Infer contracts from inputs and referenced symbols; already-defined dependency

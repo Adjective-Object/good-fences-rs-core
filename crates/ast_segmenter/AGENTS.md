@@ -1,5 +1,9 @@
 # ast_segmenter
 
+`records` submodules own private persisted fields. Extraction uses restricted
+constructors/finalizers; all readers, including extraction queries and tests,
+use borrowed accessors. Never expose mutable facts through `ParsedModule`.
+
 ## Parser stack
 
 Uses the oxc parser (`oxc_parser`) with `oxc_semantic` for scope analysis.

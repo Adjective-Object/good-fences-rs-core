@@ -65,19 +65,19 @@ pub(super) fn emit(
     let mut connectors = BTreeSet::new();
     let live: BTreeSet<_> = plan.retention.segments.iter().map(|s| s.key).collect();
     for (&file, module) in modules {
-        if module.parsed.facts.commonjs {
+        if module.parsed.facts().commonjs() {
             edges.insert(file, Vec::new());
             continue;
         }
         if module
             .parsed
-            .facts
-            .emission
-            .segments
+            .facts()
+            .emission()
+            .segments()
             .iter()
             .enumerate()
             .filter(|(index, _)| live.contains(&SegmentKey::new(file, *index as u32)))
-            .all(|(_, recipe)| recipe.connector_only)
+            .all(|(_, recipe)| recipe.connector_only())
         {
             connectors.insert(file);
         }
@@ -85,16 +85,16 @@ pub(super) fn emit(
             file,
             module
                 .parsed
-                .facts
-                .dependencies
+                .facts()
+                .dependencies()
                 .iter()
                 .filter(|d| {
-                    !d.type_only
-                        && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+                    !d.type_only()
+                        && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
                 })
                 .filter(|d| {
                     !matches!(
-                        graph.dependency_target(file, d.id),
+                        graph.dependency_target(file, d.id()),
                         Some(DependencyTarget::External(_))
                     )
                 })
@@ -113,10 +113,10 @@ pub(super) fn emit(
     for (&file, module) in modules {
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
-            .filter(|d| !d.type_only && d.kind == DependencyKind::Require)
+            .filter(|d| !d.type_only() && d.kind() == DependencyKind::Require)
         {
             boundaries.extend(target_files(graph, file, dependency)?);
         }
@@ -302,28 +302,28 @@ pub(super) fn emit(
             )?
         } else {
             let module = &modules[&root];
-            let facts = &module.parsed.facts;
+            let facts = &module.parsed.facts();
             let edits = facts
-                .dependencies
+                .dependencies()
                 .iter()
-                .filter(|d| !d.type_only)
+                .filter(|d| !d.type_only())
                 .filter(|dependency| {
                     let index = module
                         .parsed
-                        .segments
-                        .partition_point(|segment| segment.span.end <= dependency.span.start);
+                        .segments()
+                        .partition_point(|segment| segment.span.end <= dependency.span().start);
                     live.contains(&SegmentKey::new(root, index as u32))
                 })
-                .filter(|d| d.pattern.is_none())
+                .filter(|d| d.pattern().is_none())
                 .map(|d| {
                     if let Some(DependencyTarget::External(specifier)) =
-                        graph.dependency_target(root, d.id)
+                        graph.dependency_target(root, d.id())
                     {
                         return Ok((
                             d,
                             Code::external(
                                 specifier.clone(),
-                                match d.kind {
+                                match d.kind() {
                                     DependencyKind::Import => RequestKind::Import,
                                     DependencyKind::ReExport => RequestKind::ReExport,
                                     DependencyKind::DynamicImport => RequestKind::DynamicImport,
@@ -340,7 +340,7 @@ pub(super) fn emit(
                     if cjs.contains(target) {
                         Ok((
                             d,
-                            if d.kind == DependencyKind::DynamicImport {
+                            if d.kind() == DependencyKind::DynamicImport {
                                 cjs.dynamic(graph, target)?
                             } else {
                                 cjs.static_dependency(graph, root, target, d, facts, symbols)?
@@ -352,7 +352,7 @@ pub(super) fn emit(
                             d,
                             Code::request(
                                 path(graph, owners[&target]),
-                                match d.kind {
+                                match d.kind() {
                                     DependencyKind::DynamicImport => RequestKind::DynamicImport,
                                     DependencyKind::ReExport => RequestKind::ReExport,
                                     DependencyKind::Require => RequestKind::Require,
@@ -369,11 +369,12 @@ pub(super) fn emit(
                 .collect::<eyre::Result<Vec<_>>>()?;
             let mut imports = Code::default();
             // Evaluation-only connectors need not own a retained statement.
-            for dependency in facts.dependencies.iter().filter(|d| {
-                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            for dependency in facts.dependencies().iter().filter(|d| {
+                !d.type_only()
+                    && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             }) {
                 if let Some(DependencyTarget::External(specifier)) =
-                    graph.dependency_target(root, dependency.id)
+                    graph.dependency_target(root, dependency.id())
                 {
                     imports.push(
                         Code::external(specifier.clone(), RequestKind::Import)
@@ -394,7 +395,7 @@ pub(super) fn emit(
                     "relocated segment in unchanged native job"
                 );
                 let index = key.segment_idx as usize;
-                let recipe = &facts.emission.segments[index];
+                let recipe = &facts.emission().segments()[index];
                 let mut renderer = crate::emit::CachedRenderer::new(
                     module.source,
                     facts,
@@ -405,8 +406,9 @@ pub(super) fn emit(
                 for (dependency, replacement, whole) in &edits {
                     renderer.dependency(dependency, replacement.clone(), *whole);
                 }
-                for dependency in facts.dependencies.iter().filter(|d| {
-                    d.pattern.is_some() && contains(module.parsed.segments[index].span, d.span)
+                for dependency in facts.dependencies().iter().filter(|d| {
+                    d.pattern().is_some()
+                        && contains(module.parsed.segments()[index].span, d.span())
                 }) {
                     if let Some(dispatch) = cjs.context_dynamic(graph, root, dependency, &owners)? {
                         renderer.context(dependency, dispatch);
@@ -415,17 +417,17 @@ pub(super) fn emit(
                 imports.push(renderer.materialize()?);
                 imports.push_str("\n;\n");
             }
-            imports.default_export |= facts.exports.iter().any(|export| {
-                !export.type_only
-                    && export.name.as_deref() == Some("default")
+            imports.default_export |= facts.exports().iter().any(|export| {
+                !export.type_only()
+                    && export.name().as_deref() == Some("default")
                     && module
                         .parsed
-                        .segments
+                        .segments()
                         .iter()
                         .enumerate()
                         .any(|(index, segment)| {
                             live.contains(&SegmentKey::new(root, index as u32))
-                                && contains(segment.span, export.span)
+                                && contains(segment.span, export.span())
                         })
             });
             imports
@@ -519,9 +521,9 @@ pub(super) fn emit(
                     .iter()
                     .filter(|(_, owner)| **owner == segments::Owner::Evaluation(**file))
                     .all(|(key, _)| {
-                        modules[&key.file_id].parsed.facts.emission.segments
+                        modules[&key.file_id].parsed.facts().emission().segments()
                             [key.segment_idx as usize]
-                            .connector_only
+                            .connector_only()
                     })
         })
         .map(|&file| path(graph, file))

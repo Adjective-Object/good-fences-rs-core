@@ -275,14 +275,15 @@ fn parallel_preparation_corrupt_stale_caches_and_source_errors_are_deterministic
         assert_eq!(warm.counters.disk_hits, 3);
 
         // Even a memory hit must validate sealed source/facts provenance.
-        session
+        let record = &mut session
             .sources
             .get_mut(&dir.root().join("a.mjs"))
             .unwrap()
-            .record
-            .module
-            .segments[0]
-            .end -= 1;
+            .record;
+        *record = crate::tests::corrupt(record, |v| {
+            let end = v["module"]["segments"][0][1].as_u64().unwrap();
+            v["module"]["segments"][0][1] = (end - 1).into();
+        });
         assert!(session.build(&config).is_err());
         assert!(Rc::ptr_eq(
             session.last.as_ref().unwrap(),
@@ -483,14 +484,26 @@ fn parallel_preparation_failed_build_keeps_invalidations_until_success() {
 #[test]
 fn parallel_preparation_panic_preserves_resolution_invalidations_for_retry() {
     let dir = TmpDir::new();
-    write(dir.root(), "main.mjs", "import value from 'choice'; console.log(value);");
+    write(
+        dir.root(),
+        "main.mjs",
+        "import value from 'choice'; console.log(value);",
+    );
     write(
         dir.root(),
         "node_modules/choice/package.json",
         r#"{"type":"module","exports":{".":{"alternate":"./b.mjs","default":"./a.mjs"}}}"#,
     );
-    write(dir.root(), "node_modules/choice/a.mjs", "export default 'a';");
-    write(dir.root(), "node_modules/choice/b.mjs", "export default 'b';");
+    write(
+        dir.root(),
+        "node_modules/choice/a.mjs",
+        "export default 'a';",
+    );
+    write(
+        dir.root(),
+        "node_modules/choice/b.mjs",
+        "export default 'b';",
+    );
     let mut config = options();
     config.execution =
         crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(2).unwrap());
@@ -510,13 +523,21 @@ fn parallel_preparation_panic_preserves_resolution_invalidations_for_retry() {
     let observer = observe_preparation(|_| panic!("expected preparation panic"));
     assert!(session.build(&config).is_err());
     drop(observer);
-    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &previous.product));
+    assert!(Rc::ptr_eq(
+        session.last.as_ref().unwrap(),
+        &previous.product
+    ));
     let repaired = session.build(&config).unwrap();
     assert!(repaired.invalidated.contains(&dir.root().join("main.mjs")));
     assert_eq!(repaired.counters.source_parses, 0);
     assert_eq!(
         repaired.product.artifacts,
-        BuildSession::new(dir.root()).unwrap().build(&config).unwrap().product.artifacts
+        BuildSession::new(dir.root())
+            .unwrap()
+            .build(&config)
+            .unwrap()
+            .product
+            .artifacts
     );
     assert!(session.build(&config).unwrap().invalidated.is_empty());
 }
@@ -750,8 +771,8 @@ fn css_loader_transitions_preserve_resources_mappings_and_sealed_generated_sourc
         let before = ast_segmenter::module_parse_count();
         let parsed =
             crate::emit::checked_source(graph, file, &session.sources[&path].text).unwrap();
-        assert!(!parsed.provenance().config().commonjs);
-        assert!(parsed.facts.top_level_await.is_empty());
+        assert!(!parsed.provenance().config().commonjs());
+        assert!(parsed.facts().top_level_await().is_empty());
         assert!(crate::emit::checked_source(graph, file, ".used, .unused { color: red }").is_err());
         if load == CssLoad::AutoMount {
             assert!(crate::emit::checked_source(graph, file, &caller_text).is_err());
@@ -1298,7 +1319,7 @@ export const dynamic = () => import('./style.module.css');
         assert_eq!(cold.product.artifacts, disk.product.artifacts);
         assert_eq!(disk.counters.source_parses, 0);
         let prepared = &session.sources[&dir.root().join("style.module.css")];
-        assert!(!prepared.record.config.commonjs);
+        assert!(!prepared.record.config().commonjs());
         let stylesheet = &cold.product.artifacts.stylesheets[&dir.root().join("style.module.css")];
         let css = std::str::from_utf8(&cold.product.artifacts.resources[stylesheet]).unwrap();
         let check = format!(
@@ -1726,10 +1747,10 @@ fn css_modules_cross_file_composition_rechecks_closure_and_invalidates_reverse_u
         let mut session = BuildSession::new(dir.root()).unwrap();
         let cold = session.build(&config).unwrap();
         let consumer = dir.root().join("button.module.css");
-        let before = session.sources[&consumer].record.source_hash;
+        let before = session.sources[&consumer].record.source_hash();
         write(dir.root(), "base.module.css", &base.replace("old", "new"));
         let changed = session.build(&config).unwrap();
-        assert_ne!(before, session.sources[&consumer].record.source_hash);
+        assert_ne!(before, session.sources[&consumer].record.source_hash());
         assert!(session.sources[&consumer].text.contains(" new"));
         assert_eq!(changed.counters.source_parses, 3);
         for path in [
@@ -1747,7 +1768,7 @@ fn css_modules_cross_file_composition_rechecks_closure_and_invalidates_reverse_u
             cold.product.artifacts.stylesheets,
             changed.product.artifacts.stylesheets
         );
-        let mapping_hash = session.sources[&consumer].record.source_hash;
+        let mapping_hash = session.sources[&consumer].record.source_hash();
         for (path, text) in [
             ("pixel.bin", "two"),
             ("imported.css", ".global { color: blue }"),
@@ -1759,7 +1780,10 @@ fn css_modules_cross_file_composition_rechecks_closure_and_invalidates_reverse_u
                 if load == CssLoad::CallerLoaded { 0 } else { 3 }
             );
             if load == CssLoad::CallerLoaded {
-                assert_eq!(mapping_hash, session.sources[&consumer].record.source_hash);
+                assert_eq!(
+                    mapping_hash,
+                    session.sources[&consumer].record.source_hash()
+                );
             }
             for path in [
                 "main.mjs",
@@ -1827,7 +1851,7 @@ fn css_modules_cross_file_composition_hashes_resolved_edges_not_only_closure_mem
         let built = session.build(&config).unwrap();
         let consumer = dir.root().join("button.module.css");
         let identity = built.product.artifacts.stylesheets[&consumer].clone();
-        let mapping = session.sources[&consumer].record.source_hash;
+        let mapping = session.sources[&consumer].record.source_hash();
         if let Some((previous_identity, previous_mapping)) = previous {
             assert_ne!(identity, previous_identity);
             assert_ne!(mapping, previous_mapping);
@@ -2136,7 +2160,7 @@ fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
         b".button { color: red; }\n"
     );
     assert_eq!(cold.counters.source_parses, 2);
-    assert!(session.sources[&path].record.config.commonjs);
+    assert!(session.sources[&path].record.config().commonjs());
     assert_eq!(
         observe_named(
             &cold.product.artifacts,
@@ -2149,13 +2173,8 @@ fn caller_loaded_css_preserves_default_artifacts_across_memory_and_disk_hits() {
     assert!(Rc::ptr_eq(&memory.product, &cold.product));
     assert_eq!(memory.counters.memory_hits, 2);
     assert_eq!(memory.counters.output_parses, 0);
-    session
-        .sources
-        .get_mut(&path)
-        .unwrap()
-        .record
-        .config
-        .commonjs = false;
+    let record = &mut session.sources.get_mut(&path).unwrap().record;
+    *record = crate::tests::corrupt(record, |v| v["config"]["commonjs"] = false.into());
     let mismatched_memory = session.build(&config).unwrap();
     assert_eq!(mismatched_memory.counters.memory_hits, 1);
     assert_eq!(mismatched_memory.counters.disk_hits, 1);
@@ -6239,6 +6258,6 @@ fn package_classification_only_edit_reparses_only_effective_mode_change() {
         .graph
         .file_id(&dir.root().join("dep.js"))
         .unwrap();
-    assert!(cjs.product.graph.file_facts(dep).unwrap().commonjs);
+    assert!(cjs.product.graph.file_facts(dep).unwrap().commonjs());
     assert_ne!(fs::read(sidecar).unwrap(), previous);
 }

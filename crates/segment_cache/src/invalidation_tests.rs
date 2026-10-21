@@ -63,9 +63,9 @@ fn cold_warm_and_disabled_match_every_owned_fact_and_segment() {
         assert_eq!(cold.write, CacheWrite::Stored);
         assert_eq!(warm.status, CacheStatus::Hit);
         for record in [&cold.record, &warm.record, &disabled.record] {
-            assert_eq!(record.module.facts, parsed.facts);
-            assert_eq!(record.module.body, parsed.body);
-            assert_eq!(record.module.segments, parsed.segments.iter().map(|s| s.span).collect::<Vec<_>>());
+            assert_eq!(record.module().facts(), parsed.facts());
+            assert_eq!(record.module().body(), parsed.body());
+            assert_eq!(record.module().segments(), parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>());
         }
         assert_eq!(cold.record, disabled.record);
         assert_eq!(cold.record, warm.record);
@@ -88,7 +88,7 @@ fn changed_bytes_with_identical_length_and_mtime_miss() {
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
     let edited = load(&path, ModuleFormat::Esm);
     assert_eq!(edited.source.len(), original.source.len());
-    assert_ne!(edited.record.source_hash, original.record.source_hash);
+    assert_ne!(edited.record.source_hash(), original.record.source_hash());
     assert!(matches!(
         edited.status,
         CacheStatus::Miss(MissReason::InvalidRecord(_))
@@ -109,12 +109,12 @@ fn package_type_changes_reparse_but_explicit_extensions_override_it() {
         cjs.status,
         CacheStatus::Miss(MissReason::InvalidRecord(_))
     ));
-    assert_eq!(esm.record.module.body, ModuleBody::Esm);
+    assert_eq!(esm.record.module().body(), ModuleBody::Esm);
     assert!(matches!(
-        cjs.record.module.body,
+        cjs.record.module().body(),
         ModuleBody::CommonJs { .. }
     ));
-    assert_ne!(esm.record.config, cjs.record.config);
+    assert_ne!(esm.record.config(), cjs.record.config());
     for (extension, expected) in [("mjs", false), ("mts", false), ("cjs", true), ("cts", true)] {
         let explicit = write(
             dir.root(),
@@ -123,7 +123,7 @@ fn package_type_changes_reparse_but_explicit_extensions_override_it() {
         );
         let first = load(&explicit, ModuleFormat::Esm);
         let second = load(&explicit, ModuleFormat::CommonJs);
-        assert_eq!(first.record.config.commonjs, expected);
+        assert_eq!(first.record.config().commonjs(), expected);
         assert_eq!(second.status, CacheStatus::Hit);
         assert_eq!(first.record, second.record);
     }
@@ -153,7 +153,7 @@ fn every_effective_parser_mode_matches_the_pinned_parser() {
                 config,
                 CacheRecord::from_parsed("const value = 1;", &parsed)
                     .unwrap()
-                    .config,
+                    .config(),
                 "{extension}"
             );
         }
@@ -178,7 +178,7 @@ fn language_and_definition_changes_invalidate_copied_sidecars() {
             ),
             "{name}"
         );
-        assert_ne!(baseline.record.config, result.record.config);
+        assert_ne!(baseline.record.config(), result.record.config());
         assert_eq!(
             load(&destination, ModuleFormat::Esm).status,
             CacheStatus::Hit
@@ -201,7 +201,7 @@ fn relocation_reuses_bytes_but_resolves_dependencies_under_new_root() {
     let warm = load(&relocated, ModuleFormat::Esm);
     assert_eq!(warm.status, CacheStatus::Hit);
     assert_eq!(cold.record, warm.record);
-    let specifier = &warm.record.module.facts.dependencies[0].specifier;
+    let specifier = warm.record.module().facts().dependencies()[0].specifier();
     assert_eq!(specifier, "./dep");
     let old_target = resolver(&a, &["js"])
         .resolve(&original, specifier)
@@ -244,13 +244,13 @@ fn resolver_and_effect_configuration_changes_leave_parse_cache_unchanged() {
         .unwrap()
         .modified()
         .unwrap();
-    let dep = &cold.record.module.facts.dependencies[0];
-    assert_eq!(dep.kind, DependencyKind::Import);
+    let dep = &cold.record.module().facts().dependencies()[0];
+    assert_eq!(dep.kind(), DependencyKind::Import);
     let js = resolver(dir.root(), &["jsx"])
-        .resolve(&path, &dep.specifier)
+        .resolve(&path, &dep.specifier())
         .unwrap();
     let ts = resolver(dir.root(), &["ts"])
-        .resolve(&path, &dep.specifier)
+        .resolve(&path, &dep.specifier())
         .unwrap();
     assert_eq!(js.path, dir.root_join("dep.jsx"));
     assert_eq!(ts.path, dir.root_join("dep.ts"));

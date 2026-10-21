@@ -107,10 +107,11 @@ fn shared_chunk_module_records_do_not_turn_deferred_require_into_eager_evaluatio
 fn external_async_facades_are_explicit_and_never_local_evaluation_roots() {
     let mut source: OwnedSourceFileInput =
         input("entry.ts", "import('external'); import('external');");
-    for dependency in &source.facts.dependencies {
-        source
-            .resolutions
-            .insert(dependency.id, DependencyTarget::External("external".into()));
+    for dependency in source.facts.dependencies() {
+        source.resolutions.insert(
+            dependency.id(),
+            DependencyTarget::External("external".into()),
+        );
     }
     let graph = SourceGraph::from_owned([source]);
     let policy = EffectPolicy::default();

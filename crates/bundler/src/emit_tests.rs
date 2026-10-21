@@ -24,29 +24,29 @@ fn cached_operations_compose_names_shorthand_dependencies_and_nested_pure() {
         ModuleFormat::Esm,
     )
     .unwrap();
-    let segment = &parsed.segments[1];
-    let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+    let segment = &parsed.segments()[1];
+    let rewrites = crate::effects::summarize(&parsed.facts(), segment.span, false).rewrites;
     assert_eq!(rewrites.len(), 2);
-    let recipe = &parsed.facts.emission.segments[1];
-    let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, &rewrites);
-    for (index, operation) in recipe.operations.iter().enumerate() {
+    let recipe = &parsed.facts().emission().segments()[1];
+    let mut renderer = CachedRenderer::new(source, &parsed.facts(), recipe, &rewrites);
+    for (index, operation) in recipe.operations().iter().enumerate() {
         if let OperationKind::Reference {
             reference,
             shorthand,
-        } = operation.kind
+        } = operation.kind()
         {
-            let reference = &parsed.facts.references[reference as usize];
-            if reference.name == "value" {
+            let reference = &parsed.facts().references()[*reference as usize];
+            if reference.name() == "value" {
                 renderer.replace(
                     index as u32,
-                    rewrite::shorthand_replacement(source, reference.span, "renamed", shorthand)
+                    rewrite::shorthand_replacement(source, reference.span(), "renamed", *shorthand)
                         .unwrap()
                         .into(),
                 );
             }
         }
     }
-    let dependency = &parsed.facts.dependencies[0];
+    let dependency = &parsed.facts().dependencies()[0];
     renderer.dependency(dependency, "'./resolved.mjs'".into(), false);
     let count = rewrite::output_parse_count();
     let output = rendered(renderer.render(segment.span).unwrap());
@@ -103,22 +103,26 @@ console.log(log.join(','));
     )
     .unwrap();
     let binding = parsed
-        .facts
-        .bindings
+        .facts()
+        .bindings()
         .iter()
-        .find(|binding| binding.name == "holder")
+        .find(|binding| binding.name() == "holder")
         .unwrap()
-        .id;
+        .id();
     let before = rewrite::output_parse_count();
     let mut output = Code::default();
-    for (segment, recipe) in parsed.segments.iter().zip(&parsed.facts.emission.segments) {
-        let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
-        let mut renderer = CachedRenderer::new(source, &parsed.facts, recipe, &rewrites);
-        for (index, operation) in recipe.operations.iter().enumerate() {
-            let id = match operation.kind {
-                OperationKind::Binding { binding, .. } => Some(binding),
+    for (segment, recipe) in parsed
+        .segments()
+        .iter()
+        .zip(parsed.facts().emission().segments())
+    {
+        let rewrites = crate::effects::summarize(&parsed.facts(), segment.span, false).rewrites;
+        let mut renderer = CachedRenderer::new(source, &parsed.facts(), recipe, &rewrites);
+        for (index, operation) in recipe.operations().iter().enumerate() {
+            let id = match operation.kind() {
+                OperationKind::Binding { binding, .. } => Some(*binding),
                 OperationKind::Reference { reference, .. } => {
-                    parsed.facts.references[reference as usize].binding
+                    parsed.facts().references()[*reference as usize].binding()
                 }
                 _ => None,
             };
@@ -160,13 +164,13 @@ fn cached_await_guard_selection_does_not_parse_callees() {
             ModuleFormat::Esm,
         )
         .unwrap();
-        let segment = &parsed.segments[0];
-        let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+        let segment = &parsed.segments()[0];
+        let rewrites = crate::effects::summarize(&parsed.facts(), segment.span, false).rewrites;
         assert_eq!(rewrites.len(), 1);
         let mut renderer = CachedRenderer::new(
             &source,
-            &parsed.facts,
-            &parsed.facts.emission.segments[0],
+            &parsed.facts(),
+            &parsed.facts().emission().segments()[0],
             &rewrites,
         );
         let before = rewrite::output_parse_count();
@@ -192,21 +196,21 @@ fn typed_dynamic_request_survives_nested_optional_pure_templates() {
         ModuleFormat::Esm,
     )
     .unwrap();
-    let segment = &parsed.segments[0];
-    let rewrites = crate::effects::summarize(&parsed.facts, segment.span, false).rewrites;
+    let segment = &parsed.segments()[0];
+    let rewrites = crate::effects::summarize(&parsed.facts(), segment.span, false).rewrites;
     let mut renderer = CachedRenderer::new(
         source,
-        &parsed.facts,
-        &parsed.facts.emission.segments[0],
+        &parsed.facts(),
+        &parsed.facts().emission().segments()[0],
         &rewrites,
     );
     renderer.dependency(
-        &parsed.facts.dependencies[0],
+        &parsed.facts().dependencies()[0],
         Code::request("target.mjs".into(), RequestKind::DynamicImport),
         false,
     );
     renderer.dependency(
-        &parsed.facts.dependencies[1],
+        &parsed.facts().dependencies()[1],
         Code::request("second.mjs".into(), RequestKind::DynamicImport),
         false,
     );
@@ -258,24 +262,24 @@ fn checked_dependency_ids_address_static_import_and_reexport_wrappers() {
         .unwrap();
         let mut renderer = CachedRenderer::new(
             source,
-            &parsed.facts,
-            &parsed.facts.emission.segments[0],
+            &parsed.facts(),
+            &parsed.facts().emission().segments()[0],
             &[],
         );
         renderer.dependency(
-            &parsed.facts.dependencies[0],
+            &parsed.facts().dependencies()[0],
             "'./changed.mjs'".into(),
             false,
         );
-        let output = rendered(renderer.render(parsed.segments[0].span).unwrap());
+        let output = rendered(renderer.render(parsed.segments()[0].span).unwrap());
         assert_eq!(output, source.replace("./original.mjs", "./changed.mjs"));
         renderer.dependency(
-            &parsed.facts.dependencies[0],
+            &parsed.facts().dependencies()[0],
             "import './evaluate.mjs';".into(),
             true,
         );
         assert_eq!(
-            rendered(renderer.render(parsed.segments[0].span).unwrap()),
+            rendered(renderer.render(parsed.segments()[0].span).unwrap()),
             "import './evaluate.mjs';"
         );
     }
@@ -321,7 +325,9 @@ fn source_provenance_rejects_changed_bytes_modes_and_unprovenanced_inputs() {
         .contains("missing source extraction provenance"));
 
     let mut input = crate::tests::input("input.mjs", source);
-    input.facts.emission.segments[0].connector_only = true;
+    input.facts = crate::tests::corrupt(&input.facts, |v| {
+        v["emission"]["segments"][0]["connector_only"] = true.into()
+    });
     assert!(check(&SourceGraph::from_owned([input]), source).is_err());
 }
 
@@ -391,7 +397,9 @@ fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
         assert!(checked_source(&SourceGraph::from_owned([renamed]), 0, source).is_err());
 
         let mut mismatched = input();
-        mismatched.facts.commonjs = !mismatched.facts.commonjs;
+        mismatched.facts = crate::tests::corrupt(&mismatched.facts, |v| {
+            v["commonjs"] = (!mismatched.facts.commonjs()).into()
+        });
         let error = checked_source(&SourceGraph::from_owned([mismatched]), 0, source)
             .unwrap_err()
             .to_string();
@@ -413,9 +421,11 @@ fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
         }
 
         let mut forged = input();
-        forged.facts.commonjs = !forged.facts.commonjs;
+        forged.facts = crate::tests::corrupt(&forged.facts, |v| {
+            v["commonjs"] = (!forged.facts.commonjs()).into()
+        });
         let mut value = serde_json::to_value(forged.provenance.as_ref().unwrap()).unwrap();
-        value["config"]["commonjs"] = serde_json::Value::Bool(forged.facts.commonjs);
+        value["config"]["commonjs"] = serde_json::Value::Bool(forged.facts.commonjs());
         forged.provenance = Some(serde_json::from_value(value).unwrap());
         let error = checked_source(&SourceGraph::from_owned([forged]), 0, source).unwrap_err();
         assert!(
@@ -425,8 +435,10 @@ fn prepared_css_emission_uses_sealed_mode_and_rejects_forged_provenance() {
         );
 
         let mut changed = input();
-        changed.facts.emission.segments[0].connector_only =
-            !changed.facts.emission.segments[0].connector_only;
+        changed.facts = crate::tests::corrupt(&changed.facts, |v| {
+            v["emission"]["segments"][0]["connector_only"] =
+                (!changed.facts.emission().segments()[0].connector_only()).into()
+        });
         assert!(checked_source(&SourceGraph::from_owned([changed]), 0, source).is_err());
     }
 }

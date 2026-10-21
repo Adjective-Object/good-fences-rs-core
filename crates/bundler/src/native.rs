@@ -65,17 +65,18 @@ fn single(
         return Ok(None);
     }
     for module in modules.values() {
-        let facts = &module.parsed.facts;
-        let imports: HashSet<_> = facts.imports.iter().map(|i| i.binding).collect();
-        if facts.commonjs
-            || !facts.top_level_await.is_empty()
-            || facts.dependencies.iter().any(|d| {
-                !d.type_only && !matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+        let facts = &module.parsed.facts();
+        let imports: HashSet<_> = facts.imports().iter().map(|i| i.binding()).collect();
+        if facts.commonjs()
+            || !facts.top_level_await().is_empty()
+            || facts.dependencies().iter().any(|d| {
+                !d.type_only()
+                    && !matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             })
             || facts
-                .references
+                .references()
                 .iter()
-                .any(|r| r.write && r.binding.is_some_and(|b| imports.contains(&b)))
+                .any(|r| r.write() && r.binding().is_some_and(|b| imports.contains(&b)))
         {
             return Ok(None);
         }
@@ -108,11 +109,11 @@ fn single(
         let module = modules.get(&file).ok_or_eyre("missing native dependency")?;
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
             .rev()
-            .filter(|d| !d.type_only)
+            .filter(|d| !d.type_only())
         {
             stack.push((target_file(graph, file, dependency)?, false));
         }
@@ -127,7 +128,7 @@ fn single(
     let schedule: Vec<_> = order
         .iter()
         .flat_map(|&file| {
-            (0..modules[&file].parsed.segments.len())
+            (0..modules[&file].parsed.segments().len())
                 .map(move |index| SegmentKey::new(file, index as u32))
                 .filter(|key| live.contains(key))
         })
@@ -156,9 +157,9 @@ fn single(
         .filter(|e| !e.summary.rewrites.is_empty())
         .map(|e| (e.key, e.summary.rewrites.as_slice()))
         .collect();
-    if let Some(hashbang) = &modules[file].parsed.facts.hashbang {
+    if let Some(hashbang) = &modules[file].parsed.facts().hashbang() {
         output.push_str(
-            &modules[file].source[hashbang.span.start as usize..hashbang.span.end as usize],
+            &modules[file].source[hashbang.span().start as usize..hashbang.span().end as usize],
         );
         output.push_str("\n");
     }
@@ -235,14 +236,21 @@ impl<'s> PreparedValues<'s> {
             .flat_map(|exports| exports.keys().map(String::as_str))
             .collect();
         for module in modules.values() {
-            occupied.extend(module.parsed.facts.bindings.iter().map(|b| b.name.clone()));
             occupied.extend(
                 module
                     .parsed
-                    .facts
-                    .references
+                    .facts()
+                    .bindings()
                     .iter()
-                    .map(|r| r.name.clone()),
+                    .map(|b| b.name().to_owned()),
+            );
+            occupied.extend(
+                module
+                    .parsed
+                    .facts()
+                    .references()
+                    .iter()
+                    .map(|r| r.name().to_owned()),
             );
         }
         let mut files: Vec<_> = modules.keys().copied().collect();
@@ -251,11 +259,11 @@ impl<'s> PreparedValues<'s> {
         let mut fresh = 0;
         for &file in &files {
             let module = &modules[&file];
-            for export in &module.parsed.facts.exports {
-                if let ExportValue::Expression(span) = export.value {
+            for export in module.parsed.facts().exports() {
+                if let ExportValue::Expression(span) = export.value() {
                     let index = module
                         .parsed
-                        .segments
+                        .segments()
                         .partition_point(|s| s.span.end <= span.start);
                     let name = loop {
                         let name = format!("__gf_default_{fresh}");
@@ -348,10 +356,10 @@ fn compatible(
     live: &BTreeSet<SegmentKey>,
 ) -> eyre::Result<bool> {
     use ast_segmenter::emission::NamespaceAccess;
-    let facts = &module.parsed.facts;
+    let facts = &module.parsed.facts();
     let retained: Vec<_> = facts
-        .emission
-        .segments
+        .emission()
+        .segments()
         .iter()
         .enumerate()
         .filter(|(index, _)| live.contains(&SegmentKey::new(file, *index as u32)))
@@ -359,50 +367,54 @@ fn compatible(
         .collect();
     let mut changed = HashSet::new();
     let mut namespaces = HashMap::new();
-    for binding in facts.bindings.iter().filter(|binding| binding.top_level) {
-        let symbol = (file, binding.id);
+    for binding in facts
+        .bindings()
+        .iter()
+        .filter(|binding| binding.top_level())
+    {
+        let symbol = (file, binding.id());
         let target = if let Some(name) = values.imports.get(&symbol) {
             Some(name.as_str())
         } else if values.symbols.definitions.contains_key(&symbol) {
-            values.name(&ExportIdentity::Binding(file, binding.id))
+            values.name(&ExportIdentity::Binding(file, binding.id()))
         } else if let Some(import) = values.symbols.imports.get(&symbol) {
             if let ExportIdentity::Namespace(target) = import.identity {
-                namespaces.insert(binding.id, target);
+                namespaces.insert(binding.id(), target);
             }
             values.name(&import.identity)
         } else {
             None
         };
-        if target.is_some_and(|name| name != binding.name) {
-            changed.insert(binding.id);
+        if target.is_some_and(|name| name != binding.name()) {
+            changed.insert(binding.id());
         }
     }
     for recipe in retained {
         let inference_changes = recipe
-            .placement
-            .declarations
+            .placement()
+            .declarations()
             .iter()
             .any(|id| changed.contains(id))
-            || recipe.placement.writes.iter().any(|&index| {
-                facts.references[index as usize]
-                    .binding
+            || recipe.placement().writes().iter().any(|&index| {
+                facts.references()[index as usize]
+                    .binding()
                     .is_some_and(|id| changed.contains(&id))
             });
-        if recipe.names.named.iter().any(|id| changed.contains(id))
-            || (inference_changes && recipe.names.inference_sensitive)
+        if recipe.names().named().iter().any(|id| changed.contains(id))
+            || (inference_changes && recipe.names().inference_sensitive())
         {
             return Ok(false);
         }
-        for usage in &recipe.namespaces {
-            let reference = &facts.references[usage.reference as usize];
-            let Some(target) = reference.binding.and_then(|id| namespaces.get(&id)) else {
+        for usage in recipe.namespaces() {
+            let reference = &facts.references()[usage.reference() as usize];
+            let Some(target) = reference.binding().and_then(|id| namespaces.get(&id)) else {
                 continue;
             };
-            let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
+            let NamespaceAccess::DirectRead { property, .. } = &usage.access() else {
                 return Ok(false);
             };
             let Ok(linked) =
-                graph.resolve_export(*target, property, source_graph::Namespace::Value)
+                graph.resolve_export(*target, &property, source_graph::Namespace::Value)
             else {
                 return Ok(false);
             };
@@ -426,31 +438,35 @@ fn body(
     if !compatible(graph, file, module, values, &BTreeSet::from([key]))? {
         return Ok(None);
     }
-    let facts = &module.parsed.facts;
+    let facts = &module.parsed.facts();
     let mut targets = HashMap::new();
     let mut namespaces = HashMap::new();
-    for binding in facts.bindings.iter().filter(|binding| binding.top_level) {
-        let symbol = (file, binding.id);
+    for binding in facts
+        .bindings()
+        .iter()
+        .filter(|binding| binding.top_level())
+    {
+        let symbol = (file, binding.id());
         let target = if let Some(name) = values.imports.get(&symbol) {
             Some(name.as_str())
         } else if values.symbols.definitions.contains_key(&symbol) {
-            values.name(&ExportIdentity::Binding(file, binding.id))
+            values.name(&ExportIdentity::Binding(file, binding.id()))
         } else if let Some(import) = values.symbols.imports.get(&symbol) {
             if let ExportIdentity::Namespace(target) = import.identity {
-                namespaces.insert(binding.id, target);
+                namespaces.insert(binding.id(), target);
             }
             values.name(&import.identity)
         } else {
             None
         };
-        if let Some(name) = target.filter(|name| *name != binding.name) {
-            targets.insert(binding.id, name);
+        if let Some(name) = target.filter(|name| *name != binding.name()) {
+            targets.insert(binding.id(), name);
         }
     }
     let mut hoisted = Code::default();
     let mut output = Code::default();
     let index = key.segment_idx as usize;
-    let recipe = &facts.emission.segments[index];
+    let recipe = &facts.emission().segments()[index];
     let mut renderer = crate::emit::CachedRenderer::new(
         module.source,
         facts,
@@ -458,36 +474,36 @@ fn body(
         recipes.get(&key).copied().unwrap_or_default(),
     );
     renderer.relocate_urls(module.relocations)?;
-    for (operation_index, operation) in recipe.operations.iter().enumerate() {
-        let span = operation.kind.span(facts, recipe);
-        let replacement = match &operation.kind {
+    for (operation_index, operation) in recipe.operations().iter().enumerate() {
+        let span = operation.kind().span(facts, recipe);
+        let replacement = match &operation.kind() {
             OperationKind::Binding {
                 binding, shorthand, ..
             } => targets
-                .get(binding)
+                .get(&binding)
                 .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
                 .transpose()?
                 .map(Code::from),
             OperationKind::Reference {
                 reference,
                 shorthand,
-            } => facts.references[*reference as usize]
-                .binding
+            } => facts.references()[*reference as usize]
+                .binding()
                 .and_then(|id| targets.get(&id))
                 .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
                 .transpose()?
                 .map(Code::from),
             OperationKind::Namespace { usage } => {
-                let usage = &recipe.namespaces[*usage as usize];
-                if let Some(target) = facts.references[usage.reference as usize]
-                    .binding
+                let usage = &recipe.namespaces()[*usage as usize];
+                if let Some(target) = facts.references()[usage.reference() as usize]
+                    .binding()
                     .and_then(|id| namespaces.get(&id))
                 {
-                    let NamespaceAccess::DirectRead { property, .. } = &usage.access else {
+                    let NamespaceAccess::DirectRead { property, .. } = &usage.access() else {
                         unreachable!()
                     };
                     let linked =
-                        graph.resolve_export(*target, property, source_graph::Namespace::Value)?;
+                        graph.resolve_export(*target, &property, source_graph::Namespace::Value)?;
                     Some(Code::from(
                         values
                             .name(&linked.identity)
@@ -500,19 +516,21 @@ fn body(
             }
             OperationKind::Dependency { dependency } => {
                 let dependency = facts
-                    .dependencies
+                    .dependencies()
                     .iter()
-                    .find(|d| d.id == *dependency)
+                    .find(|d| d.id() == *dependency)
                     .ok_or_eyre("missing original dependency")?;
                 if matches!(
-                    dependency.kind,
+                    dependency.kind(),
                     DependencyKind::Import | DependencyKind::ReExport
                 ) {
                     Some(";".into())
-                } else if dependency.type_only || dependency.kind != DependencyKind::DynamicImport {
+                } else if dependency.type_only()
+                    || dependency.kind() != DependencyKind::DynamicImport
+                {
                     None
                 } else {
-                    if let Some(dispatch) = values.contexts.get(&(file, dependency.id)) {
+                    if let Some(dispatch) = values.contexts.get(&(file, dependency.id())) {
                         renderer.context(dependency, dispatch.clone());
                         continue;
                     }
@@ -523,7 +541,7 @@ fn body(
                         renderer.edit(
                             operation_index as u32,
                             Edit {
-                                span: dependency.specifier_span,
+                                span: dependency.specifier_span(),
                                 replacement: values
                                     .requests
                                     .get(&target)
@@ -541,8 +559,8 @@ fn body(
             renderer.replace(operation_index as u32, replacement);
         }
     }
-    for (operation_index, operation) in recipe.operations.iter().enumerate().rev() {
-        let OperationKind::Export { form, .. } = &operation.kind else {
+    for (operation_index, operation) in recipe.operations().iter().enumerate().rev() {
+        let OperationKind::Export { form, .. } = &operation.kind() else {
             continue;
         };
         let replacement = match form {
@@ -561,7 +579,7 @@ fn body(
                     .defaults
                     .get(&key)
                     .ok_or_eyre("missing native default binding")?;
-                let value = renderer.slot(value)?;
+                let value = renderer.slot(&value)?;
                 if *is_hoisted {
                     hoisted.push(
                         value.surrounded(format!("var {name} = ({{default: "), "}).default;\n"),

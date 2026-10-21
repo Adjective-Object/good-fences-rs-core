@@ -37,6 +37,9 @@ candidate modules; an empty closure is valid and fails only when requested.
 Run `cargo test -p source_graph`.
 
 `file_facts` exposes owned syntax records (None for legacy/tombstoned modules).
+Traverse their borrowed accessors rather than depending on persisted field
+layout. `from_parsed` consumes `ParsedModule::into_parts` without cloning the
+fact tree; graph-derived identities and indexes remain separate from storage.
 `outgoing_indexed` exposes shared occurrence indices for derived plans; indices
 are revision-local, not persistent IDs. The `bundler` library consumes these
 without adding effects policy or usage tags to the shared graph.

@@ -201,13 +201,11 @@ pub fn diagnostic_manifest(
             }
         }
     }
-    for file in plan
-        .retention
-        .modules
-        .iter()
-        .copied()
-        .filter(|file| graph.file_facts(*file).is_some_and(|facts| facts.commonjs))
-    {
+    for file in plan.retention.modules.iter().copied().filter(|file| {
+        graph
+            .file_facts(*file)
+            .is_some_and(|facts| facts.commonjs())
+    }) {
         let module = graph.file_path(file).unwrap().to_owned();
         let initialize = NodeId::CommonJsProxy {
             module: module.clone(),

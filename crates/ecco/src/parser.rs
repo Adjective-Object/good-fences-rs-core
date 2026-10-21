@@ -100,7 +100,7 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
                     module: module.clone(),
                     path,
                 })?;
-                facts.definitions.push(definition);
+                facts.definitions_mut().push(definition);
             }
         } else {
             let global = parser.word("global");
@@ -117,8 +117,8 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
                 };
                 parser.symbol('}')?;
                 facts
-                    .global_symbols
-                    .push(GlobalSymbol { name, read_effects });
+                    .global_symbols_mut()
+                    .push(GlobalSymbol::new(name, read_effects));
                 continue;
             }
             parser.keyword("fn")?;
@@ -132,7 +132,7 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
             } else {
                 Binding::Local(path[0].clone())
             };
-            facts.definitions.push(parser.function(binding)?);
+            facts.definitions_mut().push(parser.function(binding)?);
         }
     }
     validate_facts(&facts)?;
@@ -140,22 +140,22 @@ pub fn parse_declarations(source: &str) -> Result<LocalFacts> {
 }
 
 pub(crate) fn validate_facts(facts: &LocalFacts) -> Result<()> {
-    for (index, symbol) in facts.global_symbols.iter().enumerate() {
-        ensure!(!symbol.name.is_empty(), "empty global symbol name");
+    for (index, symbol) in facts.global_symbols().iter().enumerate() {
+        ensure!(!symbol.name().is_empty(), "empty global symbol name");
         ensure!(
-            !facts.global_symbols[..index]
+            !facts.global_symbols()[..index]
                 .iter()
-                .any(|previous| previous.name == symbol.name),
+                .any(|previous| previous.name() == symbol.name()),
             "duplicate global symbol: {}",
-            symbol.name
+            symbol.name()
         );
     }
     let mut bindings = std::collections::HashSet::new();
-    for definition in &facts.definitions {
+    for definition in facts.definitions() {
         ensure!(
-            bindings.insert(&definition.binding),
+            bindings.insert(definition.binding()),
             "duplicate definition: {:?}",
-            definition.binding
+            definition.binding()
         );
         validate_definition(definition)?;
     }
@@ -163,7 +163,7 @@ pub(crate) fn validate_facts(facts: &LocalFacts) -> Result<()> {
 }
 
 fn validate_definition(definition: &Definition) -> Result<()> {
-    match &definition.binding {
+    match definition.binding() {
         Binding::Global(path) | Binding::Module { path, .. } => {
             ensure!(
                 !path.is_empty() && path.iter().all(|name| !name.is_empty()),
@@ -172,27 +172,30 @@ fn validate_definition(definition: &Definition) -> Result<()> {
         }
         Binding::Local(name) => ensure!(!name.is_empty(), "empty local definition name"),
     }
-    for (index, parameter) in definition.parameters.iter().enumerate() {
+    for (index, parameter) in definition.parameters().iter().enumerate() {
         ensure!(
             !parameter.is_empty()
                 && parameter != "this"
-                && !definition.parameters[..index].contains(parameter),
+                && !definition.parameters()[..index].contains(parameter),
             "duplicate or reserved parameter {parameter}"
         );
     }
-    if let Some(rest) = &definition.rest {
+    if let Some(rest) = definition.rest() {
         ensure!(
-            definition.variadic
+            definition.variadic()
                 && !rest.is_empty()
                 && rest != "this"
-                && !definition.parameters.contains(rest),
+                && !definition
+                    .parameters()
+                    .iter()
+                    .any(|parameter| parameter == rest),
             "invalid rest parameter {rest}"
         );
     }
-    for fields in [&definition.hazards, &definition.return_hazards] {
-        for (index, (slot, _)) in fields.fields.iter().enumerate() {
+    for fields in [definition.hazards(), definition.return_hazards()] {
+        for (index, (slot, _)) in fields.fields().iter().enumerate() {
             ensure!(
-                !fields.fields[..index]
+                !fields.fields()[..index]
                     .iter()
                     .any(|(previous, _)| previous == slot),
                 "duplicate hazard field {}",
@@ -200,7 +203,7 @@ fn validate_definition(definition: &Definition) -> Result<()> {
             );
         }
     }
-    let scalar = |name: &str| name == "this" || definition.parameters.iter().any(|p| p == name);
+    let scalar = |name: &str| name == "this" || definition.parameters().iter().any(|p| p == name);
     fn validate(
         expression: &HazardExpr,
         definition: &Definition,
@@ -229,7 +232,7 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                             ensure!(scalar(name), "unknown argument {name}")
                         }
                         CallArgument::Spread(name) => ensure!(
-                            definition.rest.as_ref() == Some(name),
+                            definition.rest() == Some(name),
                             "unknown argument list {name}"
                         ),
                         CallArgument::Forward => {}
@@ -240,31 +243,31 @@ fn validate_definition(definition: &Definition) -> Result<()> {
         Ok(())
     }
     ensure!(
-        matches!(definition.returns, Returns::Fresh)
-            || (definition.return_hazards.default.is_none()
-                && definition.return_hazards.fields.is_empty()),
+        matches!(definition.returns(), Returns::Fresh)
+            || (definition.return_hazards().default_expression().is_none()
+                && definition.return_hazards().fields().is_empty()),
         "return hazard assignments require an implicit fresh return"
     );
     for expression in definition
-        .hazards
-        .fields
+        .hazards()
+        .fields()
         .iter()
-        .chain(&definition.return_hazards.fields)
+        .chain(definition.return_hazards().fields())
         .map(|(_, e)| e)
-        .chain(definition.hazards.default.iter())
-        .chain(definition.return_hazards.default.iter())
-        .chain(definition.updates.iter().map(|u| &u.expression))
+        .chain(definition.hazards().default_expression())
+        .chain(definition.return_hazards().default_expression())
+        .chain(definition.updates().iter().map(|u| u.expression()))
     {
         validate(expression, definition, &scalar)?;
     }
-    for update in &definition.updates {
+    for update in definition.updates() {
         ensure!(
-            scalar(&update.target),
+            scalar(&update.target()),
             "unknown update target {}",
-            update.target
+            update.target()
         );
     }
-    if let Returns::Argument(name) = &definition.returns {
+    if let Returns::Argument(name) = definition.returns() {
         ensure!(scalar(name), "unknown return value {name}");
     }
     Ok(())
@@ -360,54 +363,64 @@ impl Parser {
         let expression = self.expression()?;
         if let Some(slot) = slot {
             ensure!(
-                !fields.fields.iter().any(|(previous, _)| *previous == slot),
+                !fields
+                    .fields()
+                    .iter()
+                    .any(|(previous, _)| *previous == slot),
                 "duplicate hazard field {}",
                 slot.name()
             );
-            fields.fields.push((slot, expression));
+            fields.fields_mut().push((slot, expression));
         } else {
-            ensure!(fields.default.is_none(), "duplicate wildcard default");
-            fields.default = Some(expression);
+            ensure!(
+                fields.default_expression().is_none(),
+                "duplicate wildcard default"
+            );
+            *fields.default_mut() = Some(expression);
         }
         Ok(())
     }
 
     fn function(&mut self, binding: Binding) -> Result<Definition> {
-        let mut definition = Definition {
+        let mut definition = Definition::new(
             binding,
-            parameters: Vec::new(),
-            rest: None,
-            variadic: false,
-            hazards: HazardFields::default(),
-            returns: Returns::Fresh,
-            return_hazards: HazardFields::default(),
-            updates: Vec::new(),
-        };
+            Vec::new(),
+            None,
+            false,
+            HazardFields::default(),
+            Returns::Fresh,
+            HazardFields::default(),
+            Vec::new(),
+        );
         self.symbol('(')?;
         while !self.take_symbol(')') {
             if self.peek() == Some(&Token::Rest) {
                 self.next()?;
-                definition.variadic = true;
+                *definition.variadic_mut() = true;
                 if matches!(self.peek(), Some(Token::Name(_))) {
-                    definition.rest = Some(self.name()?);
+                    *definition.rest_mut() = Some(self.name()?);
                 }
                 self.symbol(')')?;
                 break;
             }
             let parameter = self.name()?;
             ensure!(
-                parameter != "this" && !definition.parameters.contains(&parameter),
+                parameter != "this" && !definition.parameters().contains(&parameter),
                 "duplicate or reserved parameter {parameter}"
             );
-            definition.parameters.push(parameter);
+            definition.parameters_mut().push(parameter);
             if !self.take_symbol(',') {
                 self.symbol(')')?;
                 break;
             }
         }
-        if let Some(rest) = &definition.rest {
+        if let Some(rest) = definition.rest() {
             ensure!(
-                rest != "this" && !definition.parameters.contains(rest),
+                rest != "this"
+                    && !definition
+                        .parameters()
+                        .iter()
+                        .any(|parameter| parameter == rest),
                 "duplicate or reserved rest parameter {rest}"
             );
         }
@@ -416,11 +429,11 @@ impl Parser {
         while !self.take_symbol('}') {
             if self.word("returns") {
                 if self.take_symbol('.') {
-                    self.fields(&mut definition.return_hazards)?;
+                    self.fields(definition.return_hazards_mut())?;
                 } else {
                     ensure!(!return_mode, "duplicate return identity");
                     return_mode = true;
-                    definition.returns = if self.word("void") {
+                    *definition.returns_mut() = if self.word("void") {
                         Returns::Void
                     } else if self.word("unknown") {
                         Returns::Unknown
@@ -435,19 +448,17 @@ impl Parser {
                 let slot = self.slot()?;
                 ensure!(self.next()? == Token::Merge, "updates require |=");
                 let expression = self.expression()?;
-                definition.updates.push(Update {
-                    target,
-                    slot,
-                    expression,
-                });
+                definition
+                    .updates_mut()
+                    .push(Update::new(target, slot, expression));
             } else {
-                self.fields(&mut definition.hazards)?;
+                self.fields(definition.hazards_mut())?;
             }
         }
         ensure!(
-            matches!(definition.returns, Returns::Fresh)
-                || (definition.return_hazards.default.is_none()
-                    && definition.return_hazards.fields.is_empty()),
+            matches!(definition.returns(), Returns::Fresh)
+                || (definition.return_hazards().default_expression().is_none()
+                    && definition.return_hazards().fields().is_empty()),
             "return hazard assignments require an implicit fresh return"
         );
         validate_definition(&definition)?;

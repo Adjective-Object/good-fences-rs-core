@@ -64,8 +64,8 @@ impl SourceGraph {
     /// Representative declaration; checked export routes include every declaration.
     pub fn resolve_binding(&self, file_id: u32, id: BindingId) -> Option<GraphNode> {
         let input = self.live_file(file_id)?.owned.as_ref()?;
-        let binding = input.facts.bindings.iter().find(|b| b.id == id)?;
-        Some(self.segment_at(file_id, *binding.declarations.first()?))
+        let binding = input.facts.bindings().iter().find(|b| b.id() == id)?;
+        Some(self.segment_at(file_id, *binding.declarations().first()?))
     }
 
     /// Fails on missing or ambiguous bindings; a cycle alone does not define an export.
@@ -138,11 +138,11 @@ impl SourceGraph {
             for export in self
                 .file_facts(file)
                 .into_iter()
-                .flat_map(|facts| &facts.exports)
-                .filter(|export| !export.type_only && export.name.is_none())
+                .flat_map(|facts| facts.exports())
+                .filter(|export| !export.type_only() && export.name().is_none())
             {
-                if let ExportValue::ReExport { dependency, .. } = export.value {
-                    match self.dependency_target(file, dependency) {
+                if let ExportValue::ReExport { dependency, .. } = export.value() {
+                    match self.dependency_target(file, *dependency) {
                         Some(DependencyTarget::External(_)) => return true,
                         Some(DependencyTarget::File(path)) => pending.extend(self.file_id(path)),
                         _ => {}
@@ -187,7 +187,7 @@ impl SourceGraph {
             && file
                 .owned
                 .as_ref()
-                .is_some_and(|input| input.facts.commonjs)
+                .is_some_and(|input| input.facts.commonjs())
         {
             active.remove(&key);
             return vec![LinkedExport {
@@ -200,25 +200,28 @@ impl SourceGraph {
         let mut stars = Vec::new();
         let mut has_explicit = false;
         if let Some(input) = &file.owned {
-            for export in &input.facts.exports {
-                if namespace == Namespace::Value && export.type_only {
+            for export in input.facts.exports() {
+                if namespace == Namespace::Value && export.type_only() {
                     continue;
                 }
-                let node = self.segment_at(file_id, export.span);
-                let is_explicit = export.name.as_deref() == Some(name);
-                if !is_explicit && export.name.is_some() {
+                let node = self.segment_at(file_id, export.span());
+                let is_explicit = export.name().as_deref() == Some(name);
+                if !is_explicit && export.name().is_some() {
                     continue;
                 }
                 has_explicit |= is_explicit;
-                match &export.value {
+                match &export.value() {
                     ExportValue::Binding(binding) if is_explicit => {
-                        if let Some(import) =
-                            input.facts.imports.iter().find(|i| i.binding == *binding)
+                        if let Some(import) = input
+                            .facts
+                            .imports()
+                            .iter()
+                            .find(|i| i.binding() == *binding)
                         {
                             if let Some(candidate) = self.resolved_candidate(
                                 file_id,
-                                import.dependency,
-                                &import.imported,
+                                import.dependency(),
+                                &import.imported(),
                                 node,
                             ) {
                                 explicit.push(candidate);
@@ -231,10 +234,10 @@ impl SourceGraph {
                                     .chain(
                                         input
                                             .facts
-                                            .bindings
+                                            .bindings()
                                             .iter()
-                                            .filter(|b| b.id == *binding)
-                                            .flat_map(|b| &b.declarations)
+                                            .filter(|b| b.id() == *binding)
+                                            .flat_map(|b| b.declarations())
                                             .map(|&span| self.segment_at(file_id, span)),
                                     )
                                     .collect(),
@@ -256,7 +259,7 @@ impl SourceGraph {
                     } => {
                         if is_explicit {
                             if let Some(candidate) =
-                                self.resolved_candidate(file_id, *dependency, imported, node)
+                                self.resolved_candidate(file_id, *dependency, &imported, node)
                             {
                                 explicit.push(candidate);
                             }

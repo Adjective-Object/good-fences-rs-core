@@ -417,17 +417,17 @@ impl BuildSession {
                     cached.clone()
                 } else {
                     let mut resolved = HashMap::new();
-                    for dependency in &source.record.module.facts.dependencies {
-                        if dependency.type_only {
+                    for dependency in source.record.module().facts().dependencies() {
+                        if dependency.type_only() {
                             continue;
                         }
                         counters.resolutions += 1;
-                        let mode = if dependency.kind == DependencyKind::Require {
+                        let mode = if dependency.kind() == DependencyKind::Require {
                             ResolutionMode::Require
                         } else {
                             ResolutionMode::Import
                         };
-                        if dependency.pattern.is_some() {
+                        if dependency.pattern().is_some() {
                             let candidates = crate::context::resolve(
                                 &self.root,
                                 &path,
@@ -440,25 +440,25 @@ impl BuildSession {
                                 format!(
                                     "{}: context at bytes {}..{}",
                                     path.display(),
-                                    dependency.span.start,
-                                    dependency.span.end
+                                    dependency.span().start,
+                                    dependency.span().end
                                 )
                             })?;
-                            resolved.insert(dependency.id, DependencyTarget::Context(candidates));
+                            resolved.insert(dependency.id(), DependencyTarget::Context(candidates));
                             continue;
                         }
                         let target = resolver
-                            .resolve_dependency(&path, &dependency.specifier, mode)
+                            .resolve_dependency(&path, &dependency.specifier(), mode)
                             .wrap_err_with(|| {
                                 format!(
                                     "{}: bytes {}..{}",
                                     path.display(),
-                                    dependency.span.start,
-                                    dependency.span.end
+                                    dependency.span().start,
+                                    dependency.span().end
                                 )
                             })?;
                         resolved.insert(
-                            dependency.id,
+                            dependency.id(),
                             match target {
                                 ResolvedDependency::File(path) => DependencyTarget::File(path),
                                 ResolvedDependency::External(name) => {
@@ -565,7 +565,7 @@ impl BuildSession {
                 segment_cache::OXC_REVISION,
                 self.sources
                     .iter()
-                    .map(|(p, s)| (p, s.record.source_hash, s.record.config))
+                    .map(|(p, s)| (p, s.record.source_hash(), s.record.config()))
                     .collect::<Vec<_>>()
             )
             .as_bytes(),
@@ -579,7 +579,7 @@ impl BuildSession {
                 targets.sort_by_key(|(id, _)| *id);
                 (
                     path,
-                    &self.sources[path].record.module.facts.dependencies,
+                    self.sources[path].record.module().facts().dependencies(),
                     targets,
                 )
             })

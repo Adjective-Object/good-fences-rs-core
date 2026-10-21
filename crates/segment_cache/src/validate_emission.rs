@@ -31,33 +31,33 @@ fn within(source: &str, outer: Span, inner: Span) -> eyre::Result<()> {
 }
 
 pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> {
-    let facts = &module.facts;
-    let emission = &facts.emission;
+    let facts = module.facts();
+    let emission = &facts.emission();
     execution(module, source)?;
     ensure!(
-        emission.segments.len() == module.segments.len(),
+        emission.segments().len() == module.segments().len(),
         "emission segment count mismatch"
     );
     ensure!(
-        emission.nested_bindings
+        emission.nested_bindings()
             == facts
-                .bindings
+                .bindings()
                 .iter()
-                .filter(|b| !b.top_level)
-                .map(|b| b.id)
+                .filter(|b| !b.top_level())
+                .map(|b| b.id())
                 .collect::<Vec<_>>()
-            && emission.free_references
+            && emission.free_references()
                 == facts
-                    .references
+                    .references()
                     .iter()
                     .enumerate()
-                    .filter(|(_, r)| r.binding.is_none())
+                    .filter(|(_, r)| r.binding().is_none())
                     .map(|(i, _)| i as u32)
                     .collect::<Vec<_>>(),
         "invalid emission capture links"
     );
-    for (&range, recipe) in module.segments.iter().zip(&emission.segments) {
-        let pieces = recipe.source.as_slice();
+    for (&range, recipe) in module.segments().iter().zip(emission.segments()) {
+        let pieces = recipe.source().as_slice();
         ensure!(
             !pieces.is_empty() && pieces.len() <= 4,
             "invalid source pieces"
@@ -66,7 +66,7 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
             span(source, piece)?;
         }
         ensure!(
-            recipe.source.contains(range)
+            recipe.source().contains(range)
                 && pieces.windows(2).all(|w| w[0].end <= w[1].start)
                 && (pieces == [range]
                     || (pieces.len() == 2 && pieces[1] == range && pieces[0].end <= range.start)),
@@ -75,14 +75,14 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
         placement(facts, recipe, range)?;
         namespaces(facts, recipe, source, range)?;
         operations(facts, recipe, source, range)?;
-        if facts.commonjs {
+        if facts.commonjs() {
             ensure!(
-                !recipe.connector_only
-                    && recipe.placement == PlacementFacts::default()
-                    && recipe.names == NameRestrictions::default()
-                    && recipe.namespaces.is_empty()
-                    && recipe.operations.iter().all(|o| matches!(
-                        o.kind,
+                !recipe.connector_only()
+                    && *recipe.placement() == PlacementFacts::default()
+                    && *recipe.names() == NameRestrictions::default()
+                    && recipe.namespaces().is_empty()
+                    && recipe.operations().iter().all(|o| matches!(
+                        o.kind(),
                         OperationKind::Dependency { .. } | OperationKind::SourceHint { .. }
                     )),
                 "nonopaque CommonJS emission recipe"
@@ -94,66 +94,69 @@ pub(crate) fn validate(module: &CachedModule, source: &str) -> eyre::Result<()> 
 
 fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
     use ast_segmenter::execution::{ContextKind, ExecutionFacts};
-    let facts = &module.facts;
-    let execution = &facts.emission.execution;
-    if facts.commonjs {
+    let facts = module.facts();
+    let execution = &facts.emission().execution();
+    if facts.commonjs() {
         ensure!(
-            execution == &ExecutionFacts::default(),
+            *execution == &ExecutionFacts::default(),
             "nonopaque CommonJS execution facts"
         );
         return Ok(());
     }
-    for (index, context) in execution.contexts.iter().enumerate() {
-        span(source, context.span)?;
+    for (index, context) in execution.contexts().iter().enumerate() {
+        span(source, context.span())?;
         ensure!(
-            context.span.start < context.span.end
-                && module.segments.iter().any(|&s| contains(s, context.span)),
+            context.span().start < context.span().end
+                && module
+                    .segments()
+                    .iter()
+                    .any(|&s| contains(s, context.span())),
             "execution context outside segment"
         );
-        let preceding = &execution.contexts[..index];
+        let preceding = &execution.contexts()[..index];
         ensure!(
-            context.parent
+            context.parent()
                 == preceding
                     .iter()
-                    .rposition(|c| contains(c.span, context.span))
+                    .rposition(|c| contains(c.span(), context.span()))
                     .map(|i| i as u32)
                 && preceding
                     .last()
-                    .is_none_or(|p| p.span.start <= context.span.start)
+                    .is_none_or(|p| p.span().start <= context.span().start)
                 && preceding.iter().all(|p| {
-                    p.span.end <= context.span.start || contains(p.span, context.span)
+                    p.span().end <= context.span().start || contains(p.span(), context.span())
                 }),
             "invalid execution context parent/order"
         );
-        if let Some(call) = context.immediate {
+        if let Some(call) = context.immediate() {
             ensure!(
-                context.kind == ContextKind::Callable
-                    && facts.invocations.get(call as usize).is_some_and(|call| {
-                        !call.construct && contains(call.callee, context.span)
+                context.kind() == ContextKind::Callable
+                    && facts.invocations().get(call as usize).is_some_and(|call| {
+                        !call.construct() && contains(call.callee(), context.span())
                     }),
                 "invalid immediate execution context"
             );
         }
     }
     ensure!(
-        execution.references
+        execution.references()
             == facts
-                .references
+                .references()
                 .iter()
-                .map(|r| execution.context_at(r.span))
+                .map(|r| execution.context_at(r.span()))
                 .collect::<Vec<_>>()
-            && execution.invocations
+            && execution.invocations()
                 == facts
-                    .invocations
+                    .invocations()
                     .iter()
-                    .map(|c| execution.context_at(c.span))
+                    .map(|c| execution.context_at(c.span()))
                     .collect::<Vec<_>>(),
         "invalid execution occurrence coverage"
     );
-    for context in &execution.contexts {
-        if let Some(call) = context.immediate {
+    for context in execution.contexts() {
+        if let Some(call) = context.immediate() {
             ensure!(
-                execution.invocations[call as usize] == context.parent,
+                execution.invocations()[call as usize] == context.parent(),
                 "immediate execution context escapes caller"
             );
         }
@@ -162,95 +165,97 @@ fn execution(module: &CachedModule, source: &str) -> eyre::Result<()> {
 }
 
 fn placement(facts: &ModuleFacts, recipe: &SegmentRecipe, range: Span) -> eyre::Result<()> {
-    let placement = &recipe.placement;
-    if facts.commonjs {
+    let placement = &recipe.placement();
+    if facts.commonjs() {
         return Ok(());
     }
     let definitions: Vec<_> = facts
-        .bindings
+        .bindings()
         .iter()
-        .filter(|b| b.top_level && !b.import && b.declarations.iter().any(|&s| contains(range, s)))
+        .filter(|b| {
+            b.top_level() && !b.import() && b.declarations().iter().any(|&s| contains(range, s))
+        })
         .collect();
     ensure!(
-        placement.declarations == definitions.iter().map(|b| b.id).collect::<Vec<_>>()
-            && placement.forward_references
+        placement.declarations() == definitions.iter().map(|b| b.id()).collect::<Vec<_>>()
+            && placement.forward_references()
                 == definitions
                     .iter()
                     .filter(|b| {
                         facts
-                            .references
+                            .references()
                             .iter()
-                            .any(|r| r.binding == Some(b.id) && r.span.start < range.start)
+                            .any(|r| r.binding() == Some(b.id()) && r.span().start < range.start)
                     })
-                    .map(|b| b.id)
+                    .map(|b| b.id())
                     .collect::<Vec<_>>(),
         "invalid emission declaration/forward links"
     );
     ensure!(
-        strict(placement.hoisted.iter().map(|b| b.0))
+        strict(placement.hoisted().iter().map(|b| b.0))
             && placement
-                .hoisted
+                .hoisted()
                 .iter()
-                .all(|id| definitions.iter().any(|b| b.id == *id && b.function))
-            && placement.instantiable
-                == (!definitions.is_empty() && placement.declarations == placement.hoisted),
+                .all(|id| definitions.iter().any(|b| b.id() == *id && b.function()))
+            && placement.instantiable()
+                == (!definitions.is_empty() && placement.declarations() == placement.hoisted()),
         "invalid hoisted availability"
     );
     ensure!(
-        placement.default_expression
+        placement.default_expression()
             == facts
-                .exports
+                .exports()
                 .iter()
-                .any(|e| matches!(e.value, ExportValue::Expression(s) if contains(range, s))),
+                .any(|e| matches!(e.value(), ExportValue::Expression(s) if contains(range, *s))),
         "invalid default-expression placement"
     );
     ensure!(
-        placement.eager_reads
+        placement.eager_reads()
             == facts
-                .references
+                .references()
                 .iter()
                 .enumerate()
                 .filter(|(i, r)| {
-                    r.read
-                        && contains(range, r.span)
+                    r.read()
+                        && contains(range, r.span())
                         && facts
-                            .emission
-                            .execution
-                            .is_module_evaluation(facts.emission.execution.references[*i])
+                            .emission()
+                            .execution()
+                            .is_module_evaluation(facts.emission().execution().references()[*i])
                 })
                 .map(|(i, _)| i as u32)
                 .collect::<Vec<_>>()
-            && placement.eager_writes
+            && placement.eager_writes()
                 == facts
-                    .references
+                    .references()
                     .iter()
                     .enumerate()
                     .filter(|(i, r)| {
-                        r.write
-                            && contains(range, r.span)
+                        r.write()
+                            && contains(range, r.span())
                             && facts
-                                .emission
-                                .execution
-                                .is_module_evaluation(facts.emission.execution.references[*i])
+                                .emission()
+                                .execution()
+                                .is_module_evaluation(facts.emission().execution().references()[*i])
                     })
                     .map(|(i, _)| i as u32)
                     .collect::<Vec<_>>()
-            && placement.writes
+            && placement.writes()
                 == facts
-                    .references
+                    .references()
                     .iter()
                     .enumerate()
-                    .filter(|(_, r)| r.write && contains(range, r.span))
+                    .filter(|(_, r)| r.write() && contains(range, r.span()))
                     .map(|(i, _)| i as u32)
                     .collect::<Vec<_>>(),
         "invalid eager-read/write links"
     );
     ensure!(
-        strict(recipe.names.named.iter().map(|b| b.0))
-            && recipe.names.named.iter().all(|id| facts
-                .bindings
+        strict(recipe.names().named().iter().map(|b| b.0))
+            && recipe.names().named().iter().all(|id| facts
+                .bindings()
                 .iter()
-                .any(|b| b.id == *id && b.declarations.iter().any(|&s| contains(range, s)))),
+                .any(|b| b.id() == *id && b.declarations().iter().any(|&s| contains(range, s)))),
         "invalid name-sensitive binding links"
     );
     Ok(())
@@ -263,32 +268,35 @@ fn namespaces(
     range: Span,
 ) -> eyre::Result<()> {
     let expected: Vec<_> = facts
-        .references
+        .references()
         .iter()
         .enumerate()
         .filter(|(_, r)| {
-            !facts.commonjs
-                && contains(range, r.span)
-                && facts.imports.iter().any(|i| Some(i.binding) == r.binding)
+            !facts.commonjs()
+                && contains(range, r.span())
+                && facts
+                    .imports()
+                    .iter()
+                    .any(|i| Some(i.binding()) == r.binding())
         })
         .map(|(i, _)| i as u32)
         .collect();
     ensure!(
         recipe
-            .namespaces
+            .namespaces()
             .iter()
-            .map(|u| u.reference)
+            .map(|u| u.reference())
             .collect::<Vec<_>>()
             == expected,
         "invalid namespace reference links"
     );
-    for usage in &recipe.namespaces {
-        if let NamespaceAccess::DirectRead { member, property } = &usage.access {
+    for usage in recipe.namespaces() {
+        if let NamespaceAccess::DirectRead { member, property } = &usage.access() {
             within(source, range, *member)?;
-            let reference = &facts.references[usage.reference as usize];
+            let reference = &facts.references()[usage.reference() as usize];
             ensure!(
-                member.start == reference.span.start
-                    && reference.span.end < member.end
+                member.start == reference.span().start
+                    && reference.span().end < member.end
                     && !property.is_empty(),
                 "invalid namespace member range"
             );
@@ -314,81 +322,81 @@ fn operations(
     source: &str,
     range: Span,
 ) -> eyre::Result<()> {
-    let bindings: HashMap<_, _> = facts.bindings.iter().map(|b| (b.id, b)).collect();
+    let bindings: HashMap<_, _> = facts.bindings().iter().map(|b| (b.id(), b)).collect();
     let mut keys = HashSet::new();
-    let mut ranges = Vec::with_capacity(recipe.operations.len());
+    let mut ranges = Vec::with_capacity(recipe.operations().len());
     let mut connector = false;
-    for operation in &recipe.operations {
-        let key = match &operation.kind {
+    for operation in recipe.operations() {
+        let key = match &operation.kind() {
             OperationKind::Binding {
                 binding,
                 declaration,
                 shorthand,
             } => {
                 let binding = bindings
-                    .get(binding)
+                    .get(&binding)
                     .ok_or_eyre("dangling emission binding")?;
                 binding
-                    .declarations
+                    .declarations()
                     .get(*declaration as usize)
                     .ok_or_eyre("dangling emission declaration")?;
-                ensure!(!facts.commonjs, "lexical CJS rewrite");
-                shorthand_check(&binding.name, *shorthand)?;
-                Key::Binding(binding.id, *declaration)
+                ensure!(!facts.commonjs(), "lexical CJS rewrite");
+                shorthand_check(&binding.name(), *shorthand)?;
+                Key::Binding(binding.id(), *declaration)
             }
             OperationKind::Reference {
                 reference,
                 shorthand,
             } => {
                 let reference_record = facts
-                    .references
+                    .references()
                     .get(*reference as usize)
                     .ok_or_eyre("dangling emission reference")?;
-                ensure!(!facts.commonjs, "lexical CJS rewrite");
-                shorthand_check(&reference_record.name, *shorthand)?;
+                ensure!(!facts.commonjs(), "lexical CJS rewrite");
+                shorthand_check(&reference_record.name(), *shorthand)?;
                 Key::Reference(*reference)
             }
             OperationKind::Namespace { usage } => {
                 let usage_record = recipe
-                    .namespaces
+                    .namespaces()
                     .get(*usage as usize)
                     .ok_or_eyre("dangling emission namespace")?;
                 ensure!(
-                    matches!(usage_record.access, NamespaceAccess::DirectRead { .. }),
+                    matches!(usage_record.access(), NamespaceAccess::DirectRead { .. }),
                     "native namespace has direct-read operation"
                 );
                 Key::Namespace(*usage)
             }
             OperationKind::Dependency { dependency } => {
                 let dependency = facts
-                    .dependencies
+                    .dependencies()
                     .iter()
-                    .find(|d| d.id == *dependency)
+                    .find(|d| d.id() == *dependency)
                     .ok_or_eyre("dangling emission dependency")?;
                 ensure!(
                     matches!(
-                        dependency.kind,
+                        dependency.kind(),
                         DependencyKind::Import
                             | DependencyKind::DynamicImport
                             | DependencyKind::Require
                     ),
                     "invalid emission dependency kind"
                 );
-                if dependency.kind == DependencyKind::Import {
-                    ensure!(dependency.span == range, "nonstatement import operation");
+                if dependency.kind() == DependencyKind::Import {
+                    ensure!(dependency.span() == range, "nonstatement import operation");
                     connector = true;
                 }
-                Key::Dependency(dependency.id.0)
+                Key::Dependency(dependency.id().0)
             }
             OperationKind::Export {
                 span: wrapper,
                 form,
             } => {
                 ensure!(
-                    !facts.commonjs
+                    !facts.commonjs()
                         && (*wrapper == range
-                            || (recipe.source.as_slice().len() > 1
-                                && *wrapper == recipe.source.as_slice()[0]
+                            || (recipe.source().as_slice().len() > 1
+                                && *wrapper == recipe.source().as_slice()[0]
                                 && matches!(form, ExportForm::Declaration { .. }))),
                     "invalid export wrapper range"
                 );
@@ -401,9 +409,9 @@ fn operations(
                 match form {
                     ExportForm::Remove => {
                         ensure!(
-                            recipe.placement.declarations.is_empty()
-                                && !facts.exports.iter().any(|e| e.span == *wrapper
-                                    && matches!(e.value, ExportValue::Expression(_))),
+                            recipe.placement().declarations().is_empty()
+                                && !facts.exports().iter().any(|e| e.span() == *wrapper
+                                    && matches!(e.value(), ExportValue::Expression(_))),
                             "removed default value"
                         );
                         connector = true;
@@ -415,16 +423,16 @@ fn operations(
                             "invalid export declaration wrapper"
                         );
                         ensure!(
-                            !facts.exports.iter().any(|e| contains(*wrapper, e.span)
-                                && !matches!(e.value, ExportValue::Binding(_))),
+                            !facts.exports().iter().any(|e| contains(*wrapper, e.span())
+                                && !matches!(e.value(), ExportValue::Binding(_))),
                             "invalid export declaration facts"
                         );
                     }
                     ExportForm::Default { value, .. } => {
                         ensure!(
-                            facts.exports.iter().any(|e| e.span == *wrapper
-                                && e.name.as_deref() == Some("default")
-                                && e.value == ExportValue::Expression(value.span)),
+                            facts.exports().iter().any(|e| e.span() == *wrapper
+                                && e.name().as_deref() == Some("default")
+                                && *e.value() == ExportValue::Expression(value.span())),
                             "invalid default value link"
                         );
                     }
@@ -441,33 +449,34 @@ fn operations(
             }
             OperationKind::Invocation { invocation, .. } => {
                 ensure!(
-                    !facts.commonjs && facts.invocations.get(*invocation as usize).is_some(),
+                    !facts.commonjs() && facts.invocations().get(*invocation as usize).is_some(),
                     "dangling emission invocation"
                 );
                 Key::Invocation(*invocation)
             }
         };
         ensure!(keys.insert(key), "duplicate emission operation");
-        let operation_range = operation.kind.span(facts, recipe);
+        let operation_range = operation.kind().span(facts, recipe);
         span(source, operation_range)?;
         ensure!(
-            operation_range.start < operation_range.end && recipe.source.contains(operation_range),
+            operation_range.start < operation_range.end
+                && recipe.source().contains(operation_range),
             "invalid emission containment"
         );
         ranges.push(operation_range);
     }
-    if !facts.commonjs {
+    if !facts.commonjs() {
         connector |= source
             .get(range.start as usize..range.end as usize)
             .is_some_and(|s| s.trim() == ";");
         ensure!(
-            recipe.connector_only == connector,
+            recipe.connector_only() == connector,
             "invalid connector classification"
         );
     }
     let mut stack: Vec<usize> = Vec::new();
     let mut previous = None;
-    for (i, (&operation_range, operation)) in ranges.iter().zip(&recipe.operations).enumerate() {
+    for (i, (&operation_range, operation)) in ranges.iter().zip(recipe.operations()).enumerate() {
         let key = (
             operation_range.start,
             std::cmp::Reverse(operation_range.end),
@@ -488,27 +497,35 @@ fn operations(
             );
         }
         ensure!(
-            operation.parent == stack.last().map(|&p| p as u32),
+            operation.parent() == stack.last().map(|&p| p as u32),
             "invalid emission parent composition"
         );
         stack.push(i);
     }
-    for (owner, operation) in recipe.operations.iter().enumerate() {
-        match &operation.kind {
+    for (owner, operation) in recipe.operations().iter().enumerate() {
+        match &operation.kind() {
             OperationKind::Export {
                 span: outer,
                 form: ExportForm::Default { value, .. },
-            } => source_slot(source, *outer, value, owner, &ranges, &recipe.operations)?,
+            } => source_slot(source, *outer, &value, owner, &ranges, &recipe.operations())?,
             OperationKind::Invocation {
                 invocation,
                 lowering,
-            } => pure(facts, *invocation, lowering, owner, recipe, source, &ranges)?,
+            } => pure(
+                facts,
+                *invocation,
+                &lowering,
+                owner,
+                recipe,
+                source,
+                &ranges,
+            )?,
             _ => {}
         }
     }
     for (binding, info) in &bindings {
-        for (i, &declaration) in info.declarations.iter().enumerate() {
-            if !facts.commonjs && contains(range, declaration) {
+        for (i, &declaration) in info.declarations().iter().enumerate() {
+            if !facts.commonjs() && contains(range, declaration) {
                 ensure!(
                     keys.contains(&Key::Binding(*binding, i as u32)),
                     "missing emission declaration"
@@ -516,47 +533,47 @@ fn operations(
             }
         }
     }
-    for (i, reference) in facts.references.iter().enumerate() {
-        if !facts.commonjs && contains(range, reference.span) {
+    for (i, reference) in facts.references().iter().enumerate() {
+        if !facts.commonjs() && contains(range, reference.span()) {
             ensure!(
                 keys.contains(&Key::Reference(i as u32)),
                 "missing emission reference"
             );
         }
     }
-    for (i, usage) in recipe.namespaces.iter().enumerate() {
-        if matches!(usage.access, NamespaceAccess::DirectRead { .. }) {
+    for (i, usage) in recipe.namespaces().iter().enumerate() {
+        if matches!(usage.access(), NamespaceAccess::DirectRead { .. }) {
             ensure!(
                 keys.contains(&Key::Namespace(i as u32)),
                 "missing namespace operation"
             );
         }
     }
-    for dependency in &facts.dependencies {
-        if contains(range, dependency.span)
+    for dependency in facts.dependencies() {
+        if contains(range, dependency.span())
             && matches!(
-                dependency.kind,
+                dependency.kind(),
                 DependencyKind::Import | DependencyKind::DynamicImport | DependencyKind::Require
             )
         {
             ensure!(
-                keys.contains(&Key::Dependency(dependency.id.0)),
+                keys.contains(&Key::Dependency(dependency.id().0)),
                 "missing emission dependency"
             );
         }
     }
-    for (i, invocation) in facts.invocations.iter().enumerate() {
-        if contains(range, invocation.span) {
+    for (i, invocation) in facts.invocations().iter().enumerate() {
+        if contains(range, invocation.span()) {
             ensure!(
                 keys.contains(&Key::Invocation(i as u32)),
                 "missing emission invocation"
             );
         }
     }
-    for export in &facts.exports {
-        if contains(range, export.span) {
+    for export in facts.exports() {
+        if contains(range, export.span()) {
             ensure!(
-                keys.contains(&Key::Export(recipe.source.as_slice()[0].start)),
+                keys.contains(&Key::Export(recipe.source().as_slice()[0].start)),
                 "missing export wrapper"
             );
         }
@@ -589,24 +606,24 @@ fn source_slot(
     ranges: &[Span],
     operations: &[Operation],
 ) -> eyre::Result<()> {
-    within(source, outer, slot.span)?;
+    within(source, outer, slot.span())?;
     ensure!(
-        slot.span != ranges[owner] && slot.operations.iter().all(|&i| i as usize > owner),
+        slot.span() != ranges[owner] && slot.operations().iter().all(|&i| i as usize > owner),
         "recursive source-slot composition"
     );
     let expected: Vec<_> = ranges
         .iter()
         .enumerate()
         .filter(|&(i, &range)| {
-            contains(slot.span, range)
+            contains(slot.span(), range)
                 && !operations[i]
-                    .parent
-                    .is_some_and(|p| contains(slot.span, ranges[p as usize]))
+                    .parent()
+                    .is_some_and(|p| contains(slot.span(), ranges[p as usize]))
         })
         .map(|(i, _)| i as u32)
         .collect();
     ensure!(
-        slot.operations == expected,
+        slot.operations() == expected,
         "invalid source-slot composition"
     );
     Ok(())
@@ -621,56 +638,64 @@ fn pure(
     source: &str,
     ranges: &[Span],
 ) -> eyre::Result<()> {
-    let call = &facts.invocations[invocation as usize];
+    let call = &facts.invocations()[invocation as usize];
     ensure!(
-        lowering.callee.span == call.callee && lowering.arguments.len() == call.arguments.len(),
+        lowering.callee().span() == call.callee()
+            && lowering.arguments().len() == call.arguments().len(),
         "invalid PURE input links"
     );
     source_slot(
         source,
-        call.span,
-        &lowering.callee,
+        call.span(),
+        &lowering.callee(),
         owner,
         ranges,
-        &recipe.operations,
+        &recipe.operations(),
     )?;
-    for (slot, argument) in lowering.arguments.iter().zip(&call.arguments) {
-        ensure!(slot.span == argument.span, "invalid PURE argument link");
-        source_slot(source, call.span, slot, owner, ranges, &recipe.operations)?;
+    for (slot, argument) in lowering.arguments().iter().zip(call.arguments()) {
+        ensure!(slot.span() == argument.span(), "invalid PURE argument link");
+        source_slot(
+            source,
+            call.span(),
+            slot,
+            owner,
+            ranges,
+            &recipe.operations(),
+        )?;
     }
-    if let Some(start) = lowering.guard_start {
+    if let Some(start) = lowering.guard_start() {
         ensure!(
-            call.callee.start < start
-                && start <= call.callee.end
+            call.callee().start < start
+                && start <= call.callee().end
                 && source.is_char_boundary(start as usize),
             "invalid PURE guard boundary"
         );
     }
     ensure!(
-        !lowering.crosses_await_guard || lowering.guard_start.is_some(),
+        !lowering.crosses_await_guard() || lowering.guard_start().is_some(),
         "await veto without PURE guard"
     );
-    if call.deferred.is_none() {
+    if call.deferred().is_none() {
         ensure!(
-            lowering.crosses_await_guard
-                == lowering.guard_start.is_some_and(|start| facts
-                    .top_level_await
+            lowering.crosses_await_guard()
+                == lowering.guard_start().is_some_and(|start| facts
+                    .top_level_await()
                     .iter()
-                    .any(|s| start <= s.start && s.end <= call.span.end)),
+                    .any(|s| start <= s.start && s.end <= call.span().end)),
             "invalid module await guard veto"
         );
     }
-    if let Some(chain) = &lowering.chain {
+    if let Some(chain) = &lowering.chain() {
         source_slot(
             source,
-            call.callee,
-            &chain.base,
+            call.callee(),
+            &chain.base(),
             owner,
             ranges,
-            &recipe.operations,
+            &recipe.operations(),
         )?;
         ensure!(
-            chain.base.span.start == call.callee.start,
+            chain.base().span().start == call.callee().start,
             "invalid PURE chain base"
         );
         let optional = |step: &ChainStep| {
@@ -680,27 +705,27 @@ fn pure(
                     | ChainStep::Computed { optional: true, .. }
             )
         };
-        if chain.steps.iter().any(optional) {
+        if chain.steps().iter().any(optional) {
             ensure!(
-                lowering
-                    .guard_start
-                    .is_some_and(|start| chain.base.span.end <= start && start < call.callee.end),
+                lowering.guard_start().is_some_and(
+                    |start| chain.base().span().end <= start && start < call.callee().end
+                ),
                 "invalid member guard boundary"
             );
-            if chain.steps.first().is_some_and(optional) {
+            if chain.steps().first().is_some_and(optional) {
                 ensure!(
-                    lowering.guard_start == Some(chain.base.span.end),
+                    lowering.guard_start() == Some(chain.base().span().end),
                     "invalid first member guard"
                 );
             }
         } else {
             ensure!(
-                lowering.guard_start == call.optional_call.then_some(call.callee.end),
+                lowering.guard_start() == call.optional_call().then_some(call.callee().end),
                 "invalid unguarded chain boundary"
             );
         }
-        let mut end = chain.base.span.end;
-        for step in &chain.steps {
+        let mut end = chain.base().span().end;
+        for step in chain.steps() {
             let slot = match step {
                 ChainStep::Static { property, .. } => {
                     ensure!(!property.is_empty(), "empty PURE member property");
@@ -710,14 +735,21 @@ fn pure(
                 ChainStep::Call { suffix } => Some(suffix),
             };
             if let Some(slot) = slot {
-                source_slot(source, call.callee, slot, owner, ranges, &recipe.operations)?;
-                ensure!(end <= slot.span.start, "unordered PURE chain slots");
-                end = slot.span.end;
+                source_slot(
+                    source,
+                    call.callee(),
+                    &slot,
+                    owner,
+                    ranges,
+                    &recipe.operations(),
+                )?;
+                ensure!(end <= slot.span().start, "unordered PURE chain slots");
+                end = slot.span().end;
             }
         }
-        if chain.steps.is_empty() {
+        if chain.steps().is_empty() {
             ensure!(
-                chain.base.span == call.callee,
+                chain.base().span() == call.callee(),
                 "incomplete opaque PURE callee"
             );
         }

@@ -232,17 +232,19 @@ impl SourceGraph {
             let span = file.segments.get(referencing_segment_idx as usize)?.span;
             let binding = input
                 .facts
-                .references
+                .references()
                 .iter()
-                .find(|r| r.name == name && span.start <= r.span.start && r.span.end <= span.end)
-                .and_then(|r| r.binding)
+                .find(|r| {
+                    r.name() == name && span.start <= r.span().start && r.span().end <= span.end
+                })
+                .and_then(|r| r.binding())
                 .or_else(|| {
                     input
                         .facts
-                        .bindings
+                        .bindings()
                         .iter()
-                        .find(|b| b.top_level && b.name == name)
-                        .map(|b| b.id)
+                        .find(|b| b.top_level() && b.name() == name)
+                        .map(|b| b.id())
                 })?;
             return match self.resolve_binding(file_id, binding)? {
                 GraphNode::Segment(key) => Some(key),
