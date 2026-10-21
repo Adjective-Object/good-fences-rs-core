@@ -99,13 +99,12 @@ pub(crate) fn binding_used(
         )
     };
     facts
-        .references
+        .references()
         .iter()
-        .any(|r| !r.type_only && r.binding == Some(binding) && live(r.span))
-        || facts
-            .exports
-            .iter()
-            .any(|e| !e.type_only && e.value == ExportValue::Binding(binding) && live(e.span))
+        .any(|r| !r.type_only() && r.binding() == Some(binding) && live(r.span()))
+        || facts.exports().iter().any(|e| {
+            !e.type_only() && *e.value() == ExportValue::Binding(binding) && live(e.span())
+        })
 }
 
 fn retained(retention: &RetentionPlan, node: GraphNode) -> bool {

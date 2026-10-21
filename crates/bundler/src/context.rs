@@ -25,7 +25,7 @@ pub(crate) fn resolve(
             "context source paths must be UTF-8"
         );
         let request = assembly::relative_request(importer, &target, false);
-        if dependency.kind == DependencyKind::DynamicImport {
+        if dependency.kind() == DependencyKind::DynamicImport {
             let encoded = assembly::relative_request(importer, &target, true);
             if dependency.matches_specifier(&encoded) {
                 requests.insert(encoded, request.clone());
@@ -37,7 +37,7 @@ pub(crate) fn resolve(
         if dependency.matches_specifier(&request) {
             requests.insert(request.clone(), request.clone());
         }
-        if dependency.kind == DependencyKind::Require {
+        if dependency.kind() == DependencyKind::Require {
             for extension in extensions {
                 if let Some(stem) =
                     request.strip_suffix(&format!(".{}", extension.trim_start_matches('.')))
@@ -59,7 +59,7 @@ pub(crate) fn resolve(
     requests
         .into_iter()
         .map(|(key, request)| {
-            let mode = if dependency.kind == DependencyKind::Require {
+            let mode = if dependency.kind() == DependencyKind::Require {
                 ResolutionMode::Require
             } else {
                 ResolutionMode::Import

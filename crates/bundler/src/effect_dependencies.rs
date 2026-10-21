@@ -194,7 +194,7 @@ fn chain_static_evaluation(
         .filter(|&file| {
             graph
                 .file_facts(file)
-                .is_some_and(|facts| !facts.top_level_await.is_empty())
+                .is_some_and(|facts| !facts.top_level_await().is_empty())
         })
         .collect();
     while let Some(file) = pending.pop() {

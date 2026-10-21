@@ -22,40 +22,38 @@ fn opaque_body_preserves_directives_reassignment_and_nested_sites() {
         module['exports'].load = load;\n\
         if (café) return; require('./after-return');";
     let module = parse(source, "test.cjs").unwrap();
-    let span = module.segments[0].span;
-    assert_eq!(module.body, ModuleBody::CommonJs { span });
-    assert_eq!(module.segments.len(), 1);
+    let span = module.segments()[0].span;
+    assert_eq!(module.body(), ModuleBody::CommonJs { span });
+    assert_eq!(module.segments().len(), 1);
     assert_eq!(
         &source[span.start as usize..span.end as usize],
         &source[source.find('\n').unwrap()..]
     );
-    assert_eq!(module.facts.directives[0].value, "use strict");
-    assert_eq!(module.facts.dependencies.len(), 4);
-    assert_eq!(module.facts.dependencies[0].enclosing_function, None);
-    for dependency in &module.facts.dependencies[1..3] {
-        let function = dependency.enclosing_function.unwrap();
-        assert!(function.start <= dependency.span.start && function.end >= dependency.span.end);
+    assert_eq!(module.facts().directives()[0].value(), "use strict");
+    assert_eq!(module.facts().dependencies().len(), 4);
+    assert_eq!(module.facts().dependencies()[0].enclosing_function(), None);
+    for dependency in &module.facts().dependencies()[1..3] {
+        let function = dependency.enclosing_function().unwrap();
+        assert!(function.start <= dependency.span().start && function.end >= dependency.span().end);
     }
-    assert_eq!(module.facts.dependencies[3].enclosing_function, None);
+    assert_eq!(module.facts().dependencies()[3].enclosing_function(), None);
     assert!(module
-        .facts
-        .references
+        .facts()
+        .references()
         .iter()
-        .any(|r| r.commonjs == Some(CommonJsGlobal::Module)));
+        .any(|r| r.commonjs() == Some(CommonJsGlobal::Module)));
     assert!(module
-        .facts
-        .references
+        .facts()
+        .references()
         .iter()
-        .any(|r| r.commonjs == Some(CommonJsGlobal::Exports) && r.write));
-    assert_eq!(module.segments[0].module_deps.requires.len(), 2);
-    assert_eq!(module.segments[0].module_deps.dynamic_imports.len(), 1);
-    assert!(module.facts.exports.is_empty());
-    assert_eq!(module.facts, parse(source, "test.cjs").unwrap().facts);
-    assert!(module.facts.ecco.is_none());
-    let facts = crate::owned::ModuleFacts {
-        ecco_declarations_hash: Default::default(),
-        ..module.facts
-    };
+        .any(|r| r.commonjs() == Some(CommonJsGlobal::Exports) && r.write()));
+    assert_eq!(module.segments()[0].module_deps.requires.len(), 2);
+    assert_eq!(module.segments()[0].module_deps.dynamic_imports.len(), 1);
+    assert!(module.facts().exports().is_empty());
+    assert_eq!(module.facts(), parse(source, "test.cjs").unwrap().facts());
+    assert!(module.facts().ecco().is_none());
+    let mut facts = module.into_facts();
+    *facts.ecco_declarations_hash_mut() = Default::default();
     insta::assert_debug_snapshot!(facts);
 }
 
@@ -72,19 +70,19 @@ fn global_wrapper_names_are_distinct_from_lexical_shadows() {
         "shadow.cjs",
     )
     .unwrap();
-    assert_eq!(module.facts.dependencies.len(), 1);
-    assert_eq!(module.facts.dependencies[0].specifier, "./real");
+    assert_eq!(module.facts().dependencies().len(), 1);
+    assert_eq!(module.facts().dependencies()[0].specifier(), "./real");
     for name in ["require", "module", "exports"] {
         assert!(module
-            .facts
-            .references
+            .facts()
+            .references()
             .iter()
-            .any(|r| r.name == name && r.binding.is_some() && r.commonjs.is_none()));
+            .any(|r| r.name() == name && r.binding().is_some() && r.commonjs().is_none()));
         assert!(module
-            .facts
-            .references
+            .facts()
+            .references()
             .iter()
-            .any(|r| r.name == name && r.binding.is_none() && r.commonjs.is_some()));
+            .any(|r| r.name() == name && r.binding().is_none() && r.commonjs().is_some()));
     }
     let module = parse(
         "type require = string; interface module {x: number} type exports = number;\n\
@@ -92,9 +90,13 @@ fn global_wrapper_names_are_distinct_from_lexical_shadows() {
         "types.cts",
     )
     .unwrap();
-    assert_eq!(module.facts.dependencies.len(), 1);
-    assert_eq!(module.facts.dependencies[0].specifier, "./runtime");
-    assert!(module.facts.references.iter().all(|r| r.commonjs.is_some()));
+    assert_eq!(module.facts().dependencies().len(), 1);
+    assert_eq!(module.facts().dependencies()[0].specifier(), "./runtime");
+    assert!(module
+        .facts()
+        .references()
+        .iter()
+        .all(|r| r.commonjs().is_some()));
 }
 
 #[test]
@@ -106,16 +108,16 @@ fn commonjs_empty_bodies_and_top_level_return_are_deliberate() {
         "module.exports = 1; return;",
     ] {
         let module = parse(source, "test.cjs").unwrap();
-        assert_eq!(module.segments.len(), 1);
-        assert_eq!(module.segments[0].span.start, 0);
-        assert_eq!(module.segments[0].span.end as usize, source.len());
+        assert_eq!(module.segments().len(), 1);
+        assert_eq!(module.segments()[0].span.start, 0);
+        assert_eq!(module.segments()[0].span.end as usize, source.len());
     }
     let module = parse(
         "const x: number = 1; module.exports = x; return;",
         "test.cts",
     )
     .unwrap();
-    assert!(matches!(module.body, ModuleBody::CommonJs { .. }));
+    assert!(matches!(module.body(), ModuleBody::CommonJs { .. }));
     assert!(parse("return;", "test.mjs").is_err());
     assert!(parse("'use strict'; with (value) {}", "strict.cjs").is_err());
     for path in ["file.js", "file.ts", "file.jsx", "file.tsx"] {
@@ -126,8 +128,8 @@ fn commonjs_empty_bodies_and_top_level_return_are_deliberate() {
             ModuleFormat::CommonJs,
         )
         .unwrap();
-        assert!(matches!(module.body, ModuleBody::CommonJs { .. }));
-        assert_eq!(module.segments.len(), 1);
+        assert!(matches!(module.body(), ModuleBody::CommonJs { .. }));
+        assert_eq!(module.segments().len(), 1);
     }
     let module = parse_module(
         &logger::StdioLogger::new(),
@@ -136,7 +138,7 @@ fn commonjs_empty_bodies_and_top_level_return_are_deliberate() {
         ModuleFormat::CommonJs,
     )
     .unwrap();
-    assert_eq!(module.body, ModuleBody::Esm);
+    assert_eq!(module.body(), ModuleBody::Esm);
 }
 
 #[test]
@@ -178,13 +180,13 @@ fn require_shapes_and_mutation_have_span_diagnostics() {
         "valid.cjs",
     )
     .unwrap();
-    assert_eq!(module.facts.dependencies[0].specifier, "./x");
-    assert_eq!(module.facts.dependencies[1].specifier, "./y");
+    assert_eq!(module.facts().dependencies()[0].specifier(), "./x");
+    assert_eq!(module.facts().dependencies()[1].specifier(), "./y");
     assert!(module
-        .facts
-        .references
+        .facts()
+        .references()
         .iter()
-        .any(|r| r.commonjs == Some(CommonJsGlobal::Module) && r.write));
+        .any(|r| r.commonjs() == Some(CommonJsGlobal::Module) && r.write()));
 }
 
 #[test]
@@ -231,8 +233,8 @@ fn esm_top_level_await_facts_exclude_function_bodies_and_cjs_remains_sync() {
     let source = "await (await 1); for await (const x of stream) { await x; } async function f() { await 2; for await (const y of stream) {} } const g = async () => await 3;";
     let parsed = parse(source, "async.mjs").unwrap();
     let sites: Vec<_> = parsed
-        .facts
-        .top_level_await
+        .facts()
+        .top_level_await()
         .iter()
         .map(|s| &source[s.start as usize..s.end as usize])
         .collect();
@@ -249,8 +251,8 @@ fn esm_top_level_await_facts_exclude_function_bodies_and_cjs_remains_sync() {
     assert!(parse("for await (const x of stream) {}", "async.cjs").is_err());
     assert!(parse("async function f() { await 1; }", "sync.cjs")
         .unwrap()
-        .facts
-        .top_level_await
+        .facts()
+        .top_level_await()
         .is_empty());
 }
 
@@ -338,24 +340,25 @@ fn unsupported_transforms_and_execution_features_are_diagnostics() {
 fn owned_utf8_spans_cover_declarations_references_and_dependency_sites() {
     let source = "const café = require('./dépendance'); module.exports = café;";
     let module = parse(source, "unicode.cjs").unwrap();
-    let binding = &module.facts.bindings[0];
+    let binding = &module.facts().bindings()[0];
     assert_eq!(
-        &source[binding.declarations[0].start as usize..binding.declarations[0].end as usize],
+        &source[binding.declarations()[0].start as usize..binding.declarations()[0].end as usize],
         "café"
     );
-    for reference in &module.facts.references {
+    for reference in module.facts().references() {
         assert_eq!(
-            &source[reference.span.start as usize..reference.span.end as usize],
-            reference.name
+            &source[reference.span().start as usize..reference.span().end as usize],
+            reference.name()
         );
     }
-    let dependency = &module.facts.dependencies[0];
+    let dependency = &module.facts().dependencies()[0];
     assert_eq!(
-        &source[dependency.specifier_span.start as usize..dependency.specifier_span.end as usize],
+        &source
+            [dependency.specifier_span().start as usize..dependency.specifier_span().end as usize],
         "'./dépendance'"
     );
     assert_eq!(
-        &source[dependency.span.start as usize..dependency.span.end as usize],
+        &source[dependency.span().start as usize..dependency.span().end as usize],
         "require('./dépendance')"
     );
 }
@@ -368,13 +371,13 @@ fn parse_only_target_facts_are_not_resolution_or_transformation_claims() {
          module.exports = value;",
         "targets.cts",
     ).unwrap();
-    assert_eq!(module.facts.dependencies.len(), 5);
+    assert_eq!(module.facts().dependencies().len(), 5);
     assert_eq!(
         module
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
-            .map(|d| d.specifier.as_str())
+            .map(|d| d.specifier())
             .collect::<Vec<_>>(),
         [
             "./types",
@@ -385,10 +388,10 @@ fn parse_only_target_facts_are_not_resolution_or_transformation_claims() {
         ]
     );
     assert_eq!(
-        module.facts.dependencies[0].kind,
+        module.facts().dependencies()[0].kind(),
         DependencyKind::ImportType
     );
-    assert!(module.facts.dependencies[0].type_only);
-    assert_eq!(module.segments[0].module_deps.requires.len(), 2);
-    assert_eq!(module.segments[0].module_deps.dynamic_imports.len(), 2);
+    assert!(module.facts().dependencies()[0].type_only());
+    assert_eq!(module.segments()[0].module_deps.requires.len(), 2);
+    assert_eq!(module.segments()[0].module_deps.dynamic_imports.len(), 2);
 }

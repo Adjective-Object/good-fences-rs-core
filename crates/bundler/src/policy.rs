@@ -96,7 +96,7 @@ fn identifier(name: &str) -> bool {
 }
 
 fn global(id: &IdentifierCallee, name: &str) -> bool {
-    id.binding.is_none() && id.name == name
+    id.binding().is_none() && id.name() == name
 }
 
 impl Pattern {
@@ -138,15 +138,15 @@ impl Pattern {
     }
 
     fn matches(&self, call: &Invocation) -> bool {
-        match (&self.shape, &call.shape) {
-            (PatternShape::Global(name), CalleeShape::Identifier(id)) => global(id, name),
+        match (&self.shape, &call.shape()) {
+            (PatternShape::Global(name), CalleeShape::Identifier(id)) => global(&id, name),
             (
                 PatternShape::AnyMember(name),
                 CalleeShape::Member {
                     property: Some(property),
                     ..
                 },
-            ) => name == property,
+            ) => *name == *property,
             (
                 PatternShape::GlobalMember {
                     receiver,
@@ -157,7 +157,7 @@ impl Pattern {
                     property: Some(property),
                     ..
                 },
-            ) => global(id, receiver) && name == property,
+            ) => global(&id, receiver) && *name == *property,
             _ => false,
         }
     }

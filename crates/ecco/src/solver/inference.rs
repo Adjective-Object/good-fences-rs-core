@@ -31,26 +31,8 @@ pub(super) struct Recording {
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FunctionSignature {
-    pub captures: Vec<ValueId>,
-    pub parameters: Vec<ValueId>,
-    pub receiver: Option<ValueId>,
-    pub self_binding: Option<ValueId>,
-    pub constructible: bool,
-    pub arguments: Option<ValueId>,
-}
-
-/// Owned, lazy operations. IDs are local to the containing `ParsedFile`, not
-/// handles into an interpreter. Serializing this never saves analyzed calls.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OwnedFunction {
-    pub(crate) signature: FunctionSignature,
-    pub(crate) instructions: Vec<Instruction>,
-    pub(crate) returns: Vec<ValueId>,
-    pub(crate) effects: Option<Effect>,
-    pub(crate) sources: std::collections::BTreeMap<Effect, (ValueId, Hazard)>,
-}
+mod records;
+pub use records::*;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Environment {
@@ -143,13 +125,13 @@ impl Context {
                 Some((effect, (ValueId(index), slot)))
             })
             .collect();
-        let function = OwnedFunction {
+        let function = OwnedFunction::new(
             signature,
-            instructions: recording.instructions,
+            recording.instructions,
             returns,
-            effects: Some(effects),
+            Some(effects),
             sources,
-        };
+        );
         self.values.truncate(recording.values);
         self.initial.truncate(recording.cells);
         self.equations.truncate(recording.equations);
@@ -317,18 +299,18 @@ impl Context {
     ) {
         let captures = self.templates[index]
             .function
-            .signature
-            .captures
+            .signature()
+            .captures()
             .iter()
             .map(|capture| (*capture, mapped(environment, *capture)))
             .collect();
         // A bare call hazard has no arguments to specialize. Keep it separate
         // from replacement hazards consulted by a known, instantiated call.
         self.initial[self.values[value.0].cells[Hazard::Call as usize]] =
-            self.templates[index].function.effects != Some(self.pure);
+            self.templates[index].function.effects() != Some(self.pure);
         self.initial[self.values[value.0].cells[Hazard::Construct as usize]] =
-            self.templates[index].function.signature.constructible
-                && self.templates[index].function.effects != Some(self.pure);
+            self.templates[index].function.signature().constructible()
+                && self.templates[index].function.effects() != Some(self.pure);
         self.values[value.0].closure = Some(Closure {
             template: index,
             captures,
@@ -356,15 +338,12 @@ impl Context {
         }
         // Exact recursive contexts share graph cells; changing contexts widen.
         if !self.expanding_templates.insert(closure.template) {
-            return CallResult {
-                value: self.unknown,
-                effects: self.opaque_effects(),
-            };
+            return CallResult::new(self.unknown, self.opaque_effects());
         }
-        let pending = CallResult {
-            value: self.value(Hazards::NONE),
-            effects: self.expression(Expression::Constant(false)),
-        };
+        let pending = CallResult::new(
+            self.value(Hazards::NONE),
+            self.expression(Expression::Constant(false)),
+        );
         self.inferred_calls.insert(invocation.clone(), pending);
         let template = self.templates[closure.template].clone();
         let mut capture_dependencies = Vec::new();
@@ -372,7 +351,7 @@ impl Context {
         captures.extend(
             template
                 .function
-                .instructions
+                .instructions()
                 .iter()
                 .filter_map(|instruction| {
                     if let Instruction::External(_, reference) = instruction {
@@ -393,7 +372,13 @@ impl Context {
         }
         let mut values = template.environment.values.clone();
         values.extend(closure.captures);
-        for (index, parameter) in template.function.signature.parameters.iter().enumerate() {
+        for (index, parameter) in template
+            .function
+            .signature()
+            .parameters()
+            .iter()
+            .enumerate()
+        {
             let slot = self.value(Hazards::NONE);
             self.set_binding(
                 slot,
@@ -401,17 +386,17 @@ impl Context {
             );
             values.insert(*parameter, slot);
         }
-        if let Some(parameter) = template.function.signature.receiver {
+        if let Some(parameter) = template.function.signature().receiver() {
             values.insert(parameter, receiver);
         }
-        if let Some(binding) = template.function.signature.arguments {
+        if let Some(binding) = template.function.signature().arguments() {
             values.insert(binding, self.value(Hazards::UNKNOWN));
         }
-        if let Some(binding) = template.function.signature.self_binding {
+        if let Some(binding) = template.function.signature().self_binding() {
             values.insert(binding, resolved);
         }
         let (value, body, hypothetical_writes) = self.replay(&template, values);
-        self.bind_value(pending.value, value);
+        self.bind_value(pending.value(), value);
         let effects = self.any(capture_dependencies.into_iter().chain([
             body,
             self.values[function.0].call_mutations,
@@ -423,15 +408,12 @@ impl Context {
             },
         ]));
         self.equations.push(Equation {
-            target: pending.effects.0,
+            target: pending.effects().0,
             expression: Expression::Read(effects.0),
         });
         self.inferred_calls.remove(&invocation);
         self.expanding_templates.remove(&closure.template);
-        CallResult {
-            value,
-            effects: pending.effects,
-        }
+        CallResult::new(value, pending.effects())
     }
 
     fn replay(
@@ -442,7 +424,7 @@ impl Context {
         let mut effects = HashMap::from([(Effect(0), self.pure), (Effect(1), self.effectful)]);
         let mut hypothetical_writes = false;
         let function = &template.function;
-        for instruction in &function.instructions {
+        for instruction in function.instructions() {
             match instruction {
                 Instruction::Value(target, hazards) => {
                     let value = self.value(*hazards);
@@ -499,8 +481,8 @@ impl Context {
                         Some(mapped(&values, *receiver)),
                         *pure,
                     );
-                    values.insert(target.value, result.value);
-                    effects.insert(target.effects, result.effects);
+                    values.insert(target.value(), result.value());
+                    effects.insert(target.effects(), result.effects());
                 }
                 Instruction::Closure(target, index) => {
                     self.install_closure(
@@ -519,7 +501,7 @@ impl Context {
             }
         }
         let returns: Vec<_> = function
-            .returns
+            .returns()
             .iter()
             .map(|value| self.resolve_alias(mapped(&values, *value)))
             .collect();
@@ -528,7 +510,7 @@ impl Context {
         } else {
             self.join_values(&returns)
         };
-        let body = function.effects.map_or(self.effectful, |effect| {
+        let body = function.effects().map_or(self.effectful, |effect| {
             self.template_effect(effect, function, &values, &effects)
         });
         (value, body, hypothetical_writes)
@@ -544,17 +526,19 @@ impl Context {
         if let Some(effect) = effects.get(&effect) {
             return *effect;
         }
-        let (value, slot) = template.sources[&effect];
+        let (value, slot) = template.sources()[&effect];
         self.hazard(mapped(values, value), slot)
     }
 
     pub(crate) fn parsed_values(&self) -> Vec<crate::analysis::ParsedValue> {
         self.values
             .iter()
-            .map(|value| crate::analysis::ParsedValue {
-                hazards: Hazards(value.cells.map(|cell| self.initial[cell])),
-                definition: value.definition,
-                alias: value.alias,
+            .map(|value| {
+                crate::analysis::ParsedValue::new(
+                    Hazards(value.cells.map(|cell| self.initial[cell])),
+                    value.definition,
+                    value.alias,
+                )
             })
             .collect()
     }
@@ -570,31 +554,35 @@ impl Context {
         &mut self,
         parsed: &crate::ParsedFile,
     ) -> HashMap<ValueId, ValueId> {
-        let start = self.facts.definitions.len();
+        let start = self.facts.definitions().len();
         self.facts
-            .definitions
-            .extend(parsed.facts.definitions.clone());
+            .definitions_mut()
+            .extend_from_slice(parsed.declarations().definitions());
         self.facts
-            .global_symbols
-            .extend(parsed.facts.global_symbols.clone());
+            .global_symbols_mut()
+            .extend_from_slice(parsed.declarations().global_symbols());
         let mut values = HashMap::new();
-        for (index, value) in parsed.values.iter().enumerate() {
+        for (index, value) in parsed.values().iter().enumerate() {
             let runtime = match index {
                 0 => self.undefined,
                 1 => self.unknown,
-                _ => self.value(value.hazards),
+                _ => self.value(value.hazards()),
             };
-            if let Some(definition) = value.definition {
+            if let Some(definition) = value.definition() {
                 self.values[runtime.0].definition = Some(start + definition);
                 self.bindings
-                    .entry(parsed.facts.definitions[definition].binding.clone())
+                    .entry(
+                        parsed.declarations().definitions()[definition]
+                            .binding()
+                            .clone(),
+                    )
                     .or_insert(start + definition);
                 self.functions.push(runtime);
             }
             values.insert(ValueId(index), runtime);
         }
-        for (index, value) in parsed.values.iter().enumerate() {
-            if let Some(alias) = value.alias {
+        for (index, value) in parsed.values().iter().enumerate() {
+            if let Some(alias) = value.alias() {
                 self.values[values[&ValueId(index)].0].alias = Some(values[&alias]);
             }
         }
@@ -613,7 +601,7 @@ impl Context {
             externals,
             functions: self.templates.len(),
         });
-        for function in &parsed.functions {
+        for function in parsed.functions() {
             self.templates.push(Arc::new(Template {
                 function: Arc::new(function.clone()),
                 environment: environment.clone(),
@@ -621,10 +609,10 @@ impl Context {
         }
         let setup = self.roots.len();
         for function in
-            std::iter::once(&parsed.setup).chain(parsed.roots.iter().map(|root| &root.function))
+            std::iter::once(parsed.setup()).chain(parsed.roots().iter().map(|root| root.function()))
         {
             let index = self.roots.len();
-            for instruction in &function.instructions {
+            for instruction in function.instructions() {
                 if let Instruction::Bind(target, _) = instruction {
                     if let Some(target) = environment.values.get(target) {
                         self.producers.entry(*target).or_insert(index);
@@ -648,10 +636,7 @@ impl Context {
             return result;
         }
         if self.roots[root].running {
-            return CallResult {
-                value: self.unknown,
-                effects: self.effectful,
-            };
+            return CallResult::new(self.unknown, self.effectful);
         }
         self.roots[root].running = true;
         let template = self.roots[root].template.clone();
@@ -659,7 +644,7 @@ impl Context {
         self.latent = false;
         let (value, effects, _) = self.replay(&template, template.environment.values.clone());
         self.latent = latent;
-        let result = CallResult { value, effects };
+        let result = CallResult::new(value, effects);
         if let Some(output) = self.root_outputs.get(&root).copied() {
             self.bind_value(output, value);
         }
@@ -679,9 +664,9 @@ impl Context {
         definition: usize,
     ) -> ValueId {
         let index = parsed
-            .values
+            .values()
             .iter()
-            .position(|v| v.definition == Some(definition))
+            .position(|v| v.definition() == Some(definition))
             .expect("validated declaration slot");
         values[&ValueId(index)]
     }
@@ -689,24 +674,24 @@ impl Context {
 
 impl crate::ParsedFile {
     pub(crate) fn valid_value(&self, value: ValueId) -> bool {
-        value.0 < self.values.len()
+        value.0 < self.values().len()
     }
 
     pub(crate) fn validate_function(&self, function: &OwnedFunction) -> eyre::Result<()> {
         use eyre::ensure;
 
-        let signature = &function.signature;
+        let signature = function.signature();
         for value in signature
-            .captures
+            .captures()
             .iter()
-            .chain(&signature.parameters)
-            .chain(signature.receiver.iter())
-            .chain(signature.self_binding.iter())
-            .chain(signature.arguments.iter())
+            .chain(signature.parameters())
+            .chain(signature.receiver().iter())
+            .chain(signature.self_binding().iter())
+            .chain(signature.arguments().iter())
         {
             ensure!(self.valid_value(*value), "invalid Ecco function binding");
         }
-        let mut values: HashSet<_> = (0..self.values.len()).map(ValueId).collect();
+        let mut values: HashSet<_> = (0..self.values().len()).map(ValueId).collect();
         let mut effects = HashSet::from([Effect(0), Effect(1)]);
         let check_value = |value: &ValueId, values: &HashSet<ValueId>| {
             ensure!(values.contains(value), "undefined Ecco template value");
@@ -717,14 +702,14 @@ impl crate::ParsedFile {
                 ensure!(
                     effects.contains(effect)
                         || function
-                            .sources
+                            .sources()
                             .get(effect)
                             .is_some_and(|(value, _)| values.contains(value)),
                     "undefined Ecco template effect"
                 );
                 Ok::<_, eyre::Report>(())
             };
-        for instruction in &function.instructions {
+        for instruction in function.instructions() {
             match instruction {
                 Instruction::Value(target, _) => {
                     ensure!(target.0 >= 2, "cannot replace Ecco constants");
@@ -732,65 +717,68 @@ impl crate::ParsedFile {
                 }
                 Instruction::Any(target, inputs) => {
                     for input in inputs {
-                        check_effect(input, &values, &effects)?;
+                        check_effect(&input, &values, &effects)?;
                     }
                     effects.insert(*target);
                 }
                 Instruction::Equality(target, left, right) => {
-                    check_value(left, &values)?;
-                    check_value(right, &values)?;
+                    check_value(&left, &values)?;
+                    check_value(&right, &values)?;
                     effects.insert(*target);
                 }
-                Instruction::Operation(value, _) => check_value(value, &values)?,
+                Instruction::Operation(value, _) => check_value(&value, &values)?,
                 Instruction::Update(value, _, effect) => {
-                    check_value(value, &values)?;
-                    check_effect(effect, &values, &effects)?;
+                    check_value(&value, &values)?;
+                    check_effect(&effect, &values, &effects)?;
                 }
                 Instruction::Bind(target, source) | Instruction::Read(target, source) => {
-                    check_value(target, &values)?;
-                    check_value(source, &values)?;
+                    check_value(&target, &values)?;
+                    check_value(&source, &values)?;
                     ensure!(target.0 >= 2, "cannot rebind Ecco constants");
                 }
                 Instruction::Retain(value, locals) => {
-                    check_value(value, &values)?;
+                    check_value(&value, &values)?;
                     for local in locals {
-                        check_value(local, &values)?;
+                        check_value(&local, &values)?;
                     }
                 }
                 Instruction::Join(target, inputs) => {
-                    check_value(target, &values)?;
+                    check_value(&target, &values)?;
                     for input in inputs {
-                        check_value(input, &values)?;
+                        check_value(&input, &values)?;
                     }
                 }
                 Instruction::Call(target, callee, arguments, receiver, _) => {
-                    check_value(&target.value, &values)?;
-                    check_value(callee, &values)?;
-                    check_value(receiver, &values)?;
+                    check_value(&target.value(), &values)?;
+                    check_value(&callee, &values)?;
+                    check_value(&receiver, &values)?;
                     for argument in arguments {
-                        check_value(argument, &values)?;
+                        check_value(&argument, &values)?;
                     }
-                    effects.insert(target.effects);
+                    effects.insert(target.effects());
                 }
                 Instruction::Closure(target, index) => {
-                    check_value(target, &values)?;
-                    ensure!(*index < self.functions.len(), "invalid Ecco function index");
+                    check_value(&target, &values)?;
+                    ensure!(
+                        *index < self.functions().len(),
+                        "invalid Ecco function index"
+                    );
                 }
                 Instruction::External(target, index) => {
-                    check_value(target, &values)?;
+                    check_value(&target, &values)?;
                     ensure!(
-                        *index < self.externals.len(),
+                        *index < self.external_references().len(),
                         "invalid Ecco external reference"
                     );
                 }
                 Instruction::Opaque => {}
             }
         }
-        for value in &function.returns {
+        for value in function.returns() {
             check_value(value, &values)?;
         }
         let effect = function
-            .effects
+            .effects()
             .ok_or_else(|| eyre::eyre!("missing Ecco body effect"))?;
         check_effect(&effect, &values, &effects)?;
         Ok(())

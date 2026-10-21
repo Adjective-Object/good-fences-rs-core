@@ -29,20 +29,20 @@ pub(super) fn name_plan(
     let mut generated = OccupiedNames::new(prepared);
     let mut references: BTreeMap<Owner, HashMap<crate::symbols::Symbol, bool>> = BTreeMap::new();
     for (&file, module) in modules {
-        for reference in &module.parsed.facts.references {
-            let Some(binding) = reference.binding else {
+        for reference in module.parsed.facts().references() {
+            let Some(binding) = reference.binding() else {
                 continue;
             };
             let index = module
                 .parsed
-                .segments
-                .partition_point(|s| s.span.end <= reference.span.start);
+                .segments()
+                .partition_point(|s| s.span.end <= reference.span().start);
             if let Some(&owner) = owners.get(&SegmentKey::new(file, index as u32)) {
                 *references
                     .entry(owner)
                     .or_default()
                     .entry((file, binding))
-                    .or_default() |= reference.write;
+                    .or_default() |= reference.write();
             }
         }
     }
@@ -75,51 +75,51 @@ pub(super) fn name_plan(
             .collect();
         files.sort_by_key(|&file| graph.file_path(file));
         for &file in &files {
-            let facts = &modules[&file].parsed.facts;
+            let facts = &modules[&file].parsed.facts();
             occupied.extend(
                 facts
-                    .emission
-                    .free_references
+                    .emission()
+                    .free_references()
                     .iter()
-                    .map(|&index| facts.references[index as usize].name.clone()),
+                    .map(|&index| facts.references()[index as usize].name().to_owned()),
             );
         }
         let mut bindings = Vec::new();
         for file in files {
             for binding in modules[&file]
                 .parsed
-                .facts
-                .bindings
+                .facts()
+                .bindings()
                 .iter()
-                .filter(|b| b.top_level)
+                .filter(|b| b.top_level())
             {
                 let Some(&written) = references
                     .get(&owner)
-                    .and_then(|references| references.get(&(file, binding.id)))
+                    .and_then(|references| references.get(&(file, binding.id())))
                 else {
                     continue;
                 };
-                let identity = if symbols.definitions.contains_key(&(file, binding.id)) {
-                    ExportIdentity::Binding(file, binding.id)
-                } else if let Some(linked) = symbols.imports.get(&(file, binding.id)) {
+                let identity = if symbols.definitions.contains_key(&(file, binding.id())) {
+                    ExportIdentity::Binding(file, binding.id())
+                } else if let Some(linked) = symbols.imports.get(&(file, binding.id())) {
                     linked.identity.clone()
                 } else {
                     continue;
                 };
                 let target = segments::declaration(graph, &identity)?.map(|key| owners[&key]);
                 // Writes through source imports must remain native import writes.
-                if target == Some(owner) && !(binding.import && written) {
+                if target == Some(owner) && !(binding.import() && written) {
                     continue;
                 }
-                let alias = if let Some(definition) = symbols.definitions.get(&(file, binding.id)) {
+                let alias = if let Some(definition) = symbols.definitions.get(&(file, binding.id())) {
                     definition.name.clone()
-                } else if occupied.insert(binding.name.clone()) {
-                    binding.name.clone()
+                } else if occupied.insert(binding.name().to_owned()) {
+                    binding.name().to_owned()
                 } else {
                     let mut alias = format!(
                         "__gf_segment_import_{}_{}",
                         digest(graph.file_path(file).unwrap().to_str().unwrap()),
-                        binding.id.0
+                        binding.id().0
                     );
                     while !generated.insert(alias.clone()) {
                         alias.push('_');
@@ -127,7 +127,7 @@ pub(super) fn name_plan(
                     alias
                 };
                 bindings.push(BindingConnection {
-                    symbol: (file, binding.id),
+                    symbol: (file, binding.id()),
                     identity,
                     owner: target,
                     alias,
@@ -203,11 +203,11 @@ impl Connections {
                 .evaluation
                 .entry(Owner::Evaluation(file))
                 .or_default();
-            for dependency in modules[&file].parsed.facts.dependencies.iter().filter(|d| {
-                !d.type_only && matches!(d.kind, DependencyKind::Import | DependencyKind::ReExport)
+            for dependency in modules[&file].parsed.facts().dependencies().iter().filter(|d| {
+                !d.type_only() && matches!(d.kind(), DependencyKind::Import | DependencyKind::ReExport)
             }) {
                 if let Some(DependencyTarget::External(specifier)) =
-                    graph.dependency_target(file, dependency.id)
+                    graph.dependency_target(file, dependency.id())
                 {
                     requests.push(
                         Code::external(specifier.clone(), RequestKind::Import)
@@ -451,22 +451,22 @@ impl Connections {
             }
             for dependency in module
                 .parsed
-                .facts
-                .dependencies
+                .facts()
+                .dependencies()
                 .iter()
-                .filter(|d| !d.type_only && d.pattern.is_none())
+                .filter(|d| !d.type_only() && d.pattern().is_none())
             {
                 let index = module
                     .parsed
-                    .segments
-                    .partition_point(|s| s.span.end <= dependency.span.start);
+                    .segments()
+                    .partition_point(|s| s.span.end <= dependency.span().start);
                 if !placement
                     .owners
                     .contains_key(&SegmentKey::new(file, index as u32))
                 {
                     continue;
                 }
-                let kind = match dependency.kind {
+                let kind = match dependency.kind() {
                     DependencyKind::Import => RequestKind::Import,
                     DependencyKind::ReExport => RequestKind::ReExport,
                     DependencyKind::DynamicImport => RequestKind::DynamicImport,
@@ -476,7 +476,7 @@ impl Connections {
                     }
                 };
                 let request = if let Some(DependencyTarget::External(specifier)) =
-                    graph.dependency_target(file, dependency.id)
+                    graph.dependency_target(file, dependency.id())
                 {
                     NativeRequest {
                         code: Code::external(specifier.clone(), kind),
@@ -486,7 +486,7 @@ impl Connections {
                     let target = target_file(graph, file, dependency)?;
                     if cjs.contains(target) {
                         NativeRequest {
-                            code: if dependency.kind == DependencyKind::DynamicImport {
+                            code: if dependency.kind() == DependencyKind::DynamicImport {
                                 cjs.dynamic(graph, target)?
                             } else {
                                 cjs.static_dependency(
@@ -494,7 +494,7 @@ impl Connections {
                                     file,
                                     target,
                                     dependency,
-                                    &module.parsed.facts,
+                                    &module.parsed.facts(),
                                     symbols,
                                 )?
                             },
@@ -507,7 +507,7 @@ impl Connections {
                         }
                     }
                 };
-                self.native_requests.insert((file, dependency.id), request);
+                self.native_requests.insert((file, dependency.id()), request);
             }
         }
         Ok(())

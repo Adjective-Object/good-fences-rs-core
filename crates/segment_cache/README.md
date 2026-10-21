@@ -15,6 +15,10 @@ local Chrome/Perfetto trace driver.
 Source-local parse persistence for `ast_segmenter::parse_module`, separate from
 the legacy tracker adapter. It stores the existing owned occurrence facts,
 module body and ordered statement ranges, not lossy legacy dependency/name sets.
+`CacheRecord` and `CachedModule` have private storage. Consumers and validators
+use borrowed accessors such as `record.module().facts()` and
+`record.module().segments()`; no mutable view of sealed records is exposed.
+This accessor-only migration retains the existing CBOR bytes and versions.
 Syntax-local effect reasons/timing are persisted and range-checked (schema 12 /
 extractor 14, including parented execution contexts, complete occurrence timing,
 eager read/write links, relative dependency patterns, owned lazy Ecco precursors,
@@ -79,7 +83,7 @@ No generated source is written to the input path.
 The prepared parser path/format, not the original resource extension or package
 mode, keys sidecar reuse. Changing only that effective mode is a cache miss even
 for identical generated text. `to_parsed` preserves that checked mode in sealed
-provenance for parse-free emission; mutating the public record configuration
+provenance for parse-free emission; tampering with serialized configuration
 cannot override its extraction identity.
 Original-only CSS edits may hit the same generated-text record; passing stale
 original bytes still fails on that hit. Complete CSS/composition closure checking

@@ -37,11 +37,11 @@ fn graph_with_format(
         .map(|(path, source)| {
             let parsed = parse_module(&logger::StdioLogger::new(), source, path, format).unwrap();
             let resolutions = parsed
-                .facts
-                .dependencies
+                .facts()
+                .dependencies()
                 .iter()
                 .map(|d| {
-                    let target = normalize(&path.parent().unwrap().join(&d.specifier));
+                    let target = normalize(&path.parent().unwrap().join(&d.specifier()));
                     let target = if sources.contains_key(&target) {
                         target
                     } else {
@@ -51,7 +51,7 @@ fn graph_with_format(
                             .find(|path| sources.contains_key(path))
                             .unwrap_or(target)
                     };
-                    (d.id, DependencyTarget::File(target))
+                    (d.id(), DependencyTarget::File(target))
                 })
                 .collect();
             OwnedSourceFileInput::from_parsed(path.clone(), parsed, resolutions)
@@ -194,12 +194,12 @@ fn lexical_rename_preserves_proto_literal_binding_and_assignment_shorthand() {
     let parsed =
         parse_module(&logger::StdioLogger::new(), source, path, ModuleFormat::Esm).unwrap();
     let id = parsed
-        .facts
-        .bindings
+        .facts()
+        .bindings()
         .iter()
-        .find(|b| b.name == "__proto__")
+        .find(|b| b.name() == "__proto__")
         .unwrap()
-        .id;
+        .id();
     let renamed = crate::rewrite::rename_private(path, source, &[(id, "renamed".into())]).unwrap();
     let baseline = node(&sources(&[("entry.mjs", source)]), path);
     let observed = node(&sources(&[("entry.mjs", &renamed)]), path);
@@ -606,29 +606,29 @@ fn canonical_imports_and_public_aliases_share_definitions_not_names() {
     let binding = graph
         .file_facts(leaf)
         .unwrap()
-        .bindings
+        .bindings()
         .iter()
-        .find(|b| b.name == "value")
+        .find(|b| b.name() == "value")
         .unwrap();
-    let imported = &graph.file_facts(entry).unwrap().imports[0];
-    let identity = ExportIdentity::Binding(leaf, binding.id);
+    let imported = &graph.file_facts(entry).unwrap().imports()[0];
+    let identity = ExportIdentity::Binding(leaf, binding.id());
     assert_eq!(
-        symbols.imports[&(entry, imported.binding)].identity,
+        symbols.imports[&(entry, imported.binding())].identity,
         identity
     );
     assert!(graph
         .file_facts(entry)
         .unwrap()
-        .imports
+        .imports()
         .iter()
-        .all(|import| { symbols.imports[&(entry, import.binding)].identity == identity }));
-    assert!(symbols.imports[&(entry, imported.binding)]
+        .all(|import| { symbols.imports[&(entry, import.binding())].identity == identity }));
+    assert!(symbols.imports[&(entry, imported.binding())]
         .route
         .iter()
         .all(|&node| retained(&plan, node)));
     assert_eq!(symbols.exports[&entry]["public"].identity, identity);
     assert_eq!(symbols.exports[&entry]["other"].identity, identity);
-    let definition = &symbols.definitions[&(leaf, binding.id)];
+    let definition = &symbols.definitions[&(leaf, binding.id())];
     assert_eq!(definition.name, "value");
     let route = &symbols.exports[&entry]["public"].route;
     assert!([SegmentKey::new(leaf, 0), SegmentKey::new(leaf, 1)]
@@ -683,14 +683,14 @@ fn canonical_names_avoid_shadowing_globals_and_reordered_inputs() {
                 let original = graph
                     .file_facts(file)
                     .unwrap()
-                    .bindings
+                    .bindings()
                     .iter()
-                    .find(|b| b.id == binding)
+                    .find(|b| b.id() == binding)
                     .unwrap();
                 (
                     graph.file_path(file).unwrap().to_owned(),
                     binding.0,
-                    original.name.clone(),
+                    original.name().to_owned(),
                     definition.name.clone(),
                 )
             })
@@ -1612,9 +1612,9 @@ fn native_public_namespaces_keep_private_deferred_dependencies_addressable() {
                 let access = plan.retention.execution.accesses.iter()
                     .find(|access| access.segment == reader && access.declaration == secret)
                     .unwrap();
-                let placement = &graph.file_facts(file).unwrap().emission.segments[1].placement;
-                assert!(placement.instantiable);
-                assert!(!placement.eager_reads.contains(&access.reference));
+                let placement = &graph.file_facts(file).unwrap().emission().segments()[1].placement();
+                assert!(placement.instantiable());
+                assert!(!placement.eager_reads().contains(&access.reference));
                 assert!(!plan.retention.execution.constraints.iter().any(|constraint| {
                     (constraint.before == secret && constraint.after == reader)
                         || (constraint.before == reader && constraint.after == secret)
@@ -3702,17 +3702,18 @@ fn cached_async_facts_flow_through_graph_retention_chunks_and_native_output() {
                 parse_module(&logger::StdioLogger::new(), text, path, ModuleFormat::Esm).unwrap();
             let record = segment_cache::CacheRecord::from_parsed(text, &parsed).unwrap();
             let bytes = record.encode(text).unwrap();
-            let decoded = segment_cache::CacheRecord::decode(&bytes, text, record.config).unwrap();
+            let decoded =
+                segment_cache::CacheRecord::decode(&bytes, text, record.config()).unwrap();
             let resolutions = decoded
-                .module
-                .facts
-                .dependencies
+                .module()
+                .facts()
+                .dependencies()
                 .iter()
                 .map(|d| {
                     (
-                        d.id,
+                        d.id(),
                         DependencyTarget::File(normalize(
-                            &path.parent().unwrap().join(&d.specifier),
+                            &path.parent().unwrap().join(&d.specifier()),
                         )),
                     )
                 })

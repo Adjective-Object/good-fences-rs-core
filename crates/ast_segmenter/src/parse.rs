@@ -21,45 +21,8 @@ pub fn module_parse_count() -> usize {
 #[path = "commonjs_tests.rs"]
 mod commonjs_tests;
 
-/// Owned parse facts, not transformed JavaScript or an executable bundle.
-#[derive(Debug, Clone)]
-pub struct ParsedModule {
-    pub source_type: SourceType,
-    pub body: ModuleBody,
-    pub segments: Vec<Segment>,
-    pub facts: crate::owned::ModuleFacts,
-    provenance: crate::SourceProvenance,
-}
-
-impl ParsedModule {
-    pub fn provenance(&self) -> &crate::SourceProvenance {
-        &self.provenance
-    }
-
-    /// Reconstitute owned extraction records only with matching extraction/cache provenance.
-    pub fn from_provenance(
-        source: &str,
-        provenance: crate::SourceProvenance,
-        body: ModuleBody,
-        segments: Vec<Segment>,
-        facts: crate::owned::ModuleFacts,
-    ) -> eyre::Result<Self> {
-        provenance.verify(
-            source,
-            provenance.config(),
-            body,
-            &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
-            &facts,
-        )?;
-        Ok(Self {
-            source_type: provenance.config().source_type(),
-            body,
-            segments,
-            facts,
-            provenance,
-        })
-    }
-}
+mod records;
+pub use records::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ModuleBody {
@@ -126,7 +89,7 @@ pub fn parse_module_with_prepared_declarations(
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
     crate::policy::check(&parsed.program, &facts)
         .wrap_err_with(|| format!("{}: unsupported bundler syntax", path.display()))?;
-    facts.ecco_declarations_hash = declarations.fingerprint();
+    *facts.ecco_declarations_hash_mut() = declarations.fingerprint();
     let (body, segments) = if parsed.program.source_type.is_commonjs() {
         let span = Span::new(
             parsed.program.hashbang.as_ref().map_or(0, |h| h.span.end),
@@ -136,15 +99,17 @@ pub fn parse_module_with_prepared_declarations(
                 .wrap_err("source exceeds span range")?,
         );
         let mut module_deps = crate::raw_module_deps::RawModuleDeps::default();
-        for dependency in &facts.dependencies {
-            match dependency.kind {
+        for dependency in facts.dependencies() {
+            match dependency.kind() {
                 crate::owned::DependencyKind::Require => {
-                    module_deps.requires.insert(dependency.specifier.clone());
+                    module_deps
+                        .requires
+                        .insert(dependency.specifier().to_owned());
                 }
                 crate::owned::DependencyKind::DynamicImport => {
                     module_deps
                         .dynamic_imports
-                        .entry(dependency.specifier.clone())
+                        .entry(dependency.specifier().to_owned())
                         .or_default()
                         .insert(crate::raw_module_deps::Symbol::Namespace);
                 }
@@ -167,23 +132,22 @@ pub fn parse_module_with_prepared_declarations(
         (ModuleBody::Esm, segments)
     };
     if matches!(body, ModuleBody::Esm) {
-        let mut used_declarations = declarations.facts().clone();
-        used_declarations
-            .definitions
-            .retain(|definition| match &definition.binding {
-                ecco::Binding::Global(path) => facts.references.iter().any(|reference| {
-                    reference.binding.is_none() && path.first() == Some(&reference.name)
-                }),
-                ecco::Binding::Module { module, .. } => facts
-                    .dependencies
-                    .iter()
-                    .any(|dependency| !dependency.type_only && dependency.specifier == *module),
-                ecco::Binding::Local(_) => true,
-            });
-        facts.ecco = Some(ecco::parse_from_ast_with_segments(
+        let (mut definitions, symbols) = declarations.facts().clone().into_parts();
+        definitions.retain(|definition| match definition.binding() {
+            ecco::Binding::Global(path) => facts.references().iter().any(|reference| {
+                reference.binding().is_none()
+                    && path.first().map(String::as_str) == Some(reference.name())
+            }),
+            ecco::Binding::Module { module, .. } => facts
+                .dependencies()
+                .iter()
+                .any(|dependency| !dependency.type_only() && *dependency.specifier() == *module),
+            ecco::Binding::Local(_) => true,
+        });
+        *facts.ecco_mut() = Some(ecco::parse_from_ast_with_segments(
             &parsed.program,
             &semantic.semantic,
-            used_declarations,
+            ecco::LocalFacts::new(definitions, symbols),
             &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
         )?);
     }
@@ -194,13 +158,13 @@ pub fn parse_module_with_prepared_declarations(
         &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
         &facts,
     )?;
-    Ok(ParsedModule {
-        source_type: parsed.program.source_type,
+    Ok(ParsedModule::new(
+        parsed.program.source_type,
         body,
         segments,
         facts,
         provenance,
-    })
+    ))
 }
 
 #[cfg(test)]
@@ -216,8 +180,8 @@ mod tests {
         let before = declaration_fingerprint_count();
         let prepared = PreparedDeclarations::new(facts.clone()).unwrap();
         let shared = prepared.clone();
-        facts.definitions.clear();
-        assert_eq!(prepared.facts().definitions.len(), 1);
+        facts = ecco::LocalFacts::default();
+        assert_eq!(prepared.facts().definitions().len(), 1);
         for (path, source) in [
             ("file.mjs", "noop(); export const value = 1;"),
             ("file.cjs", "noop(); module.exports = 1;"),
@@ -230,16 +194,19 @@ mod tests {
                 &shared,
             )
             .unwrap();
-            assert_eq!(parsed.facts.ecco_declarations_hash, prepared.fingerprint());
-            let mut changed = parsed.facts.clone();
-            changed.ecco_declarations_hash = Default::default();
+            assert_eq!(
+                parsed.facts().ecco_declarations_hash(),
+                prepared.fingerprint()
+            );
+            let mut changed = parsed.facts().clone();
+            *changed.ecco_declarations_hash_mut() = Default::default();
             assert!(parsed
                 .provenance()
                 .verify(
                     source,
-                    crate::ParserConfig::from_source_type(parsed.source_type),
-                    parsed.body,
-                    &parsed.segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+                    crate::ParserConfig::from_source_type(parsed.source_type()),
+                    parsed.body(),
+                    &parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>(),
                     &changed,
                 )
                 .is_err());
@@ -247,8 +214,9 @@ mod tests {
         assert_eq!(declaration_fingerprint_count(), before + 1);
         let changed = PreparedDeclarations::new(facts).unwrap();
         assert_ne!(prepared.fingerprint(), changed.fingerprint());
-        let mut invalid = prepared.facts().clone();
-        invalid.definitions.push(invalid.definitions[0].clone());
+        let (mut definitions, symbols) = prepared.facts().clone().into_parts();
+        definitions.push(definitions[0].clone());
+        let invalid = ecco::LocalFacts::new(definitions, symbols);
         assert!(PreparedDeclarations::new(invalid).is_err());
         assert_eq!(declaration_fingerprint_count(), before + 2);
     }
@@ -266,15 +234,15 @@ mod tests {
     fn compound_declarations_have_disjoint_ownership_and_shared_source_prefixes() {
         let source = "export const café = 1, { value: next = café } = {}, last = next;\nlet a, b = last;\nvar c = b, d = c;";
         let parsed = parse(source, "file.mjs").unwrap();
-        assert_eq!(parsed.segments.len(), 7);
+        assert_eq!(parsed.segments().len(), 7);
         let pieces: Vec<_> = parsed
-            .facts
-            .emission
-            .segments
+            .facts()
+            .emission()
+            .segments()
             .iter()
             .map(|recipe| {
                 recipe
-                    .source
+                    .source()
                     .as_slice()
                     .iter()
                     .map(|span| &source[span.start as usize..span.end as usize])
@@ -294,11 +262,11 @@ mod tests {
             ]
         );
         assert!(parsed
-            .segments
+            .segments()
             .windows(2)
             .all(|s| s[0].span.end <= s[1].span.start));
         assert_eq!(
-            parsed.segments[1]
+            parsed.segments()[1]
                 .variables
                 .get_locals()
                 .map(|s| s.as_str())
@@ -306,16 +274,16 @@ mod tests {
             ["next"]
         );
         assert_eq!(
-            parsed.segments[1]
+            parsed.segments()[1]
                 .variables
                 .get_escaped_symbols()
                 .map(|s| s.as_str())
                 .collect::<Vec<_>>(),
             ["café"]
         );
-        for (index, export) in parsed.facts.exports.iter().enumerate() {
-            assert_eq!(export.span, parsed.segments[index].span);
-            assert_eq!(parsed.segments[index].module_deps.exports_locals.len(), 1);
+        for (index, export) in parsed.facts().exports().iter().enumerate() {
+            assert_eq!(export.span(), parsed.segments()[index].span);
+            assert_eq!(parsed.segments()[index].module_deps.exports_locals.len(), 1);
         }
     }
 
@@ -325,24 +293,24 @@ mod tests {
         let before = module_parse_count();
         let parsed = parse(source, "file.mjs").unwrap();
         assert_eq!(module_parse_count(), before + 1);
-        let ecco = parsed.facts.ecco.as_ref().unwrap();
-        assert_eq!(ecco.roots().len(), parsed.segments.len());
+        let ecco = parsed.facts().ecco().unwrap();
+        assert_eq!(ecco.roots().len(), parsed.segments().len());
         assert_eq!(ecco.functions().len(), 1);
-        for (root, segment) in ecco.roots().iter().zip(&parsed.segments) {
-            assert!(segment.span.start <= root.span.start && root.span.end <= segment.span.end);
+        for (root, segment) in ecco.roots().iter().zip(parsed.segments()) {
+            assert!(segment.span.start <= root.span().start && root.span().end <= segment.span.end);
         }
-        assert!(ecco.symbols().iter().any(|s| s.name == "lazy"));
-        let encoded = serde_cbor::to_vec(&parsed.facts).unwrap();
+        assert!(ecco.symbols().iter().any(|s| s.name() == "lazy"));
+        let encoded = serde_cbor::to_vec(&parsed.facts()).unwrap();
         let decoded: crate::owned::ModuleFacts = serde_cbor::from_slice(&encoded).unwrap();
-        assert_eq!(decoded, parsed.facts);
+        assert_eq!(&decoded, parsed.facts());
         assert_eq!(serde_cbor::to_vec(&decoded).unwrap(), encoded);
         parsed
             .provenance()
             .verify(
                 source,
-                crate::ParserConfig::from_source_type(parsed.source_type),
-                parsed.body,
-                &parsed.segments.iter().map(|s| s.span).collect::<Vec<_>>(),
+                crate::ParserConfig::from_source_type(parsed.source_type()),
+                parsed.body(),
+                &parsed.segments().iter().map(|s| s.span).collect::<Vec<_>>(),
                 &decoded,
             )
             .unwrap();
@@ -356,19 +324,19 @@ mod tests {
             "file.mjs",
         )
         .unwrap();
-        assert_eq!(parsed.segments.len(), 2);
+        assert_eq!(parsed.segments().len(), 2);
         assert_eq!(
             parsed
-                .facts
-                .bindings
+                .facts()
+                .bindings()
                 .iter()
-                .find(|b| b.name == "value")
+                .find(|b| b.name() == "value")
                 .unwrap()
-                .declarations
+                .declarations()
                 .len(),
             2
         );
-        for segment in &parsed.segments {
+        for segment in parsed.segments() {
             assert_eq!(
                 segment
                     .variables
@@ -379,9 +347,9 @@ mod tests {
             );
             assert_eq!(segment.module_deps.dynamic_imports.len(), 1);
         }
-        assert!(parsed.segments[0].module_deps.dynamic_imports["./first"]
+        assert!(parsed.segments()[0].module_deps.dynamic_imports["./first"]
             .contains(&Symbol::named("named")));
-        assert!(parsed.segments[1]
+        assert!(parsed.segments()[1]
             .module_deps
             .dynamic_imports
             .contains_key("./second"));
@@ -392,10 +360,10 @@ mod tests {
             ModuleFormat::CommonJs,
         )
         .unwrap();
-        assert_eq!(cjs.segments.len(), 1);
+        assert_eq!(cjs.segments().len(), 1);
         assert_eq!(
-            cjs.facts.emission.segments[0].source.as_slice(),
-            [cjs.segments[0].span]
+            cjs.facts().emission().segments()[0].source().as_slice(),
+            [cjs.segments()[0].span]
         );
     }
 
@@ -408,9 +376,9 @@ mod tests {
             ("file.tsx", "export const value: unknown = 1;"),
         ] {
             let module = parse(source, path).unwrap();
-            assert_eq!(module.segments.len(), 1);
-            assert_eq!(module.segments[0].span.end as usize, source.len());
-            assert_eq!(module.segments[0].module_deps.exports_locals.len(), 1);
+            assert_eq!(module.segments().len(), 1);
+            assert_eq!(module.segments()[0].span.end as usize, source.len());
+            assert_eq!(module.segments()[0].module_deps.exports_locals.len(), 1);
         }
     }
 
@@ -445,7 +413,7 @@ mod tests {
     #[test]
     fn generated_markers_do_not_skip_bundler_input() {
         let source = "// This file is auto-generated\nexport const value = 1;";
-        assert_eq!(parse(source, "generated.js").unwrap().segments.len(), 1);
+        assert_eq!(parse(source, "generated.js").unwrap().segments().len(), 1);
         assert!(parse("// This file is auto-generated\nconst = ;", "generated.js").is_err());
     }
 

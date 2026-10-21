@@ -9,31 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::owned::ModuleFacts;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionFacts {
-    /// Preorder contexts; `None` denotes module evaluation.
-    pub contexts: Vec<ExecutionContext>,
-    /// Same indices as the canonical reference and invocation collections.
-    pub references: Vec<Option<u32>>,
-    pub invocations: Vec<Option<u32>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ContextKind {
-    Callable,
-    InstanceInitializer,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionContext {
-    #[serde(with = "crate::owned::span_serde")]
-    pub span: Span,
-    pub parent: Option<u32>,
-    pub kind: ContextKind,
-    /// Only a synchronous, non-generator literal callee is proven immediate.
-    /// Named/aliased calls and callback invocation remain conservative.
-    pub immediate: Option<u32>,
-}
+mod records;
+pub use records::*;
 
 impl ExecutionFacts {
     /// Resolve the effect's recorded owner, then follow immediate-call ancestry.
@@ -42,13 +19,13 @@ impl ExecutionFacts {
         site: &crate::effects::EffectSite,
     ) -> eyre::Result<bool> {
         let context = site
-            .deferred
+            .deferred()
             .map(|span| {
                 // The operand can itself be a callable literal. Its context is
                 // not the context of the operation evaluating/coercing it.
-                self.contexts
+                self.contexts()
                     .iter()
-                    .rposition(|context| context.span == span)
+                    .rposition(|context| context.span() == span)
                     .map(|index| index as u32)
                     .ok_or_eyre("missing recorded effect execution context")
             })
@@ -58,25 +35,25 @@ impl ExecutionFacts {
 
     pub fn is_module_evaluation(&self, mut context: Option<u32>) -> bool {
         while let Some(index) = context {
-            let current = &self.contexts[index as usize];
-            if current.immediate.is_none() {
+            let current = &self.contexts()[index as usize];
+            if current.immediate().is_none() {
                 return false;
             }
-            context = current.parent;
+            context = current.parent();
         }
         true
     }
 
     pub fn context_at(&self, span: Span) -> Option<u32> {
-        self.contexts
+        self.contexts()
             .iter()
-            .rposition(|c| c.span.start <= span.start && span.end <= c.span.end)
+            .rposition(|c| c.span().start <= span.start && span.end <= c.span().end)
             .map(|i| i as u32)
     }
 }
 
 pub(crate) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> ExecutionFacts {
-    if facts.commonjs {
+    if facts.commonjs() {
         return ExecutionFacts::default();
     }
     let mut visitor = Contexts {
@@ -87,15 +64,15 @@ pub(crate) fn extract(program: &Program<'_>, facts: &ModuleFacts) -> ExecutionFa
     };
     visitor.visit_program(program);
     let mut result = visitor.result;
-    result.references = facts
-        .references
+    *result.references_mut() = facts
+        .references()
         .iter()
-        .map(|reference| result.context_at(reference.span))
+        .map(|reference| result.context_at(reference.span()))
         .collect();
-    result.invocations = facts
-        .invocations
+    *result.invocations_mut() = facts
+        .invocations()
         .iter()
-        .map(|call| result.context_at(call.span))
+        .map(|call| result.context_at(call.span()))
         .collect();
     result
 }
@@ -110,15 +87,13 @@ struct Contexts<'f> {
 impl Contexts<'_> {
     fn enter(&mut self, span: Span, kind: ContextKind, synchronous: bool) -> Option<u32> {
         let parent = self.parent;
-        self.parent = Some(self.result.contexts.len() as u32);
-        self.result.contexts.push(ExecutionContext {
-            span,
-            parent,
-            kind,
-            immediate: synchronous
-                .then(|| self.immediate.get(&span.start).copied())
-                .flatten(),
-        });
+        self.parent = Some(self.result.contexts().len() as u32);
+        let immediate = synchronous
+            .then(|| self.immediate.get(&span.start).copied())
+            .flatten();
+        self.result
+            .contexts_mut()
+            .push(ExecutionContext::new(span, parent, kind, immediate));
         parent
     }
 }
@@ -131,9 +106,9 @@ impl<'a> Visit<'a> for Contexts<'_> {
         ) {
             if let Ok(index) = self
                 .facts
-                .invocations
+                .invocations()
                 .binary_search_by_key(&(call.span.start, call.span.end), |c| {
-                    (c.span.start, c.span.end)
+                    (c.span().start, c.span().end)
                 })
             {
                 self.immediate.insert(

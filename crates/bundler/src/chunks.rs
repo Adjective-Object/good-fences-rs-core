@@ -204,12 +204,11 @@ pub fn reference_reachability(
                 }
             }
         }
-        for file in retention
-            .modules
-            .iter()
-            .copied()
-            .filter(|file| graph.file_facts(*file).is_some_and(|facts| facts.commonjs))
-        {
+        for file in retention.modules.iter().copied().filter(|file| {
+            graph
+                .file_facts(*file)
+                .is_some_and(|facts| facts.commonjs())
+        }) {
             let module = graph.file_path(file).unwrap().to_owned();
             let mut demanded = BTreeSet::new();
             let direct_entry = root.evaluation_roots.contains(&file)

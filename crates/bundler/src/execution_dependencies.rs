@@ -97,7 +97,11 @@ pub(crate) fn plan(
         let facts = graph
             .file_facts(segment.file_id)
             .ok_or_eyre("missing execution facts")?;
-        let Some(recipe) = facts.emission.segments.get(segment.segment_idx as usize) else {
+        let Some(recipe) = facts
+            .emission()
+            .segments()
+            .get(segment.segment_idx as usize)
+        else {
             // Analysis-only graphs cannot grant relocation permission.
             barriers.insert(ExecutionBarrier {
                 segment,
@@ -105,17 +109,17 @@ pub(crate) fn plan(
             });
             continue;
         };
-        if !recipe.connector_only && !recipe.placement.instantiable {
+        if !recipe.connector_only() && !recipe.placement().instantiable() {
             local_phases
                 .entry(segment.file_id)
                 .or_default()
                 .push(segment);
         }
-        for &binding in &recipe.placement.declarations {
+        for &binding in recipe.placement().declarations() {
             declarations
                 .entry((segment.file_id, binding))
                 .or_insert(segment);
-            if !recipe.placement.hoisted.contains(&binding) {
+            if !recipe.placement().hoisted().contains(&binding) {
                 events
                     .entry((segment.file_id, binding))
                     .or_default()
@@ -138,27 +142,27 @@ pub(crate) fn plan(
             .file_segments(file)
             .ok_or_eyre("missing execution ranges")?;
         let range = ranges[segment.segment_idx as usize].span;
-        let timing = &facts.emission.execution;
+        let timing = &facts.emission().execution();
         let mut pin = |reason| {
             barriers.insert(ExecutionBarrier { segment, reason });
         };
-        if facts.commonjs || facts.emission.segments.is_empty() {
+        if facts.commonjs() || facts.emission().segments().is_empty() {
             pin(BarrierReason::Opaque);
             continue;
         }
-        if !facts.top_level_await.is_empty() {
+        if !facts.top_level_await().is_empty() {
             pin(BarrierReason::Suspension);
         }
         // Use original syntax evidence, never annotation/solver-derived purity.
         // Calls are not the only way to execute unknown code: property access,
         // coercion, iteration and unsupported expressions (including tags) can too.
         let effect_start = facts
-            .effects
-            .partition_point(|e| e.span.start < range.start);
-        for site in facts.effects[effect_start..]
+            .effects()
+            .partition_point(|e| e.span().start < range.start);
+        for site in facts.effects()[effect_start..]
             .iter()
-            .take_while(|e| e.span.start < range.end)
-            .filter(|e| crate::effects::contains(range, e.span))
+            .take_while(|e| e.span().start < range.end)
+            .filter(|e| crate::effects::contains(range, e.span()))
         {
             if !timing.effect_is_module_evaluation(site)? {
                 continue;
@@ -166,72 +170,74 @@ pub(crate) fn plan(
             pin(BarrierReason::AbruptCompletion);
             abrupt_phases.insert(segment);
             if !matches!(
-                site.reason,
+                site.reason(),
                 EffectReason::Invocation | EffectReason::Construction | EffectReason::BindingRead
             ) {
                 pin(BarrierReason::UnknownExecution);
             }
         }
         let call_start = facts
-            .invocations
-            .partition_point(|c| c.span.start < range.start);
-        for (relative, _) in facts.invocations[call_start..]
+            .invocations()
+            .partition_point(|c| c.span().start < range.start);
+        for (relative, _) in facts.invocations()[call_start..]
             .iter()
             .enumerate()
-            .take_while(|(_, c)| c.span.start < range.end)
-            .filter(|(_, c)| crate::effects::contains(range, c.span))
+            .take_while(|(_, c)| c.span().start < range.end)
+            .filter(|(_, c)| crate::effects::contains(range, c.span()))
         {
             let index = call_start + relative;
             if !timing
-                .contexts
+                .contexts()
                 .iter()
-                .any(|c| c.immediate == Some(index as u32))
+                .any(|c| c.immediate() == Some(index as u32))
             {
                 pin(BarrierReason::UnknownInvocation);
             }
             // Even syntactically immediate calls inside deferred contexts do not
             // authorize moving the surrounding callable's captured accesses.
-            if !timing.is_module_evaluation(timing.invocations[index]) {
+            if !timing.is_module_evaluation(timing.invocations()[index]) {
                 pin(BarrierReason::UnknownInvocation);
             }
         }
         let reference_start = facts
-            .references
-            .partition_point(|r| r.span.start < range.start);
-        for (relative, reference) in facts.references[reference_start..]
+            .references()
+            .partition_point(|r| r.span().start < range.start);
+        for (relative, reference) in facts.references()[reference_start..]
             .iter()
             .enumerate()
-            .take_while(|(_, r)| r.span.start < range.end)
-            .filter(|(_, r)| !r.type_only && crate::effects::contains(range, r.span))
+            .take_while(|(_, r)| r.span().start < range.end)
+            .filter(|(_, r)| !r.type_only() && crate::effects::contains(range, r.span()))
         {
             let index = reference_start + relative;
-            let Some(binding) = reference
-                .binding
-                .and_then(|id| facts.bindings.iter().find(|b| b.id == id && b.top_level))
-            else {
+            let Some(binding) = reference.binding().and_then(|id| {
+                facts
+                    .bindings()
+                    .iter()
+                    .find(|b| b.id() == id && b.top_level())
+            }) else {
                 continue;
             };
-            let eager = timing.is_module_evaluation(timing.references[index]);
+            let eager = timing.is_module_evaluation(timing.references()[index]);
             if !eager {
                 pin(BarrierReason::DeferredAccess);
             }
-            let declaration = if binding.import {
-                if let Some(&declaration) = imported_declarations.get(&(file, binding.id)) {
+            let declaration = if binding.import() {
+                if let Some(&declaration) = imported_declarations.get(&(file, binding.id())) {
                     declaration
                 } else {
                     let import = facts
-                        .imports
+                        .imports()
                         .iter()
-                        .find(|i| i.binding == binding.id)
+                        .find(|i| i.binding() == binding.id())
                         .ok_or_eyre("missing execution import")?;
                     let declaration = match (
-                        graph.dependency_target(file, import.dependency),
-                        &import.imported,
+                        graph.dependency_target(file, import.dependency()),
+                        &import.imported(),
                     ) {
                         (Some(DependencyTarget::File(path)), ImportedName::Name(name)) => {
                             let target =
                                 graph.file_id(path).ok_or_eyre("missing execution target")?;
-                            let linked = graph.resolve_export(target, name, Namespace::Value)?;
+                            let linked = graph.resolve_export(target, &name, Namespace::Value)?;
                             match linked.identity {
                                 ExportIdentity::Binding(owner, id) => {
                                     declarations.get(&(owner, id)).copied()
@@ -242,11 +248,11 @@ pub(crate) fn plan(
                         }
                         _ => None,
                     };
-                    imported_declarations.insert((file, binding.id), declaration);
+                    imported_declarations.insert((file, binding.id()), declaration);
                     declaration
                 }
             } else {
-                declarations.get(&(file, binding.id)).copied()
+                declarations.get(&(file, binding.id())).copied()
             };
             if let Some(declaration) = declaration.filter(|key| retained.contains(key)) {
                 accesses.insert(LinkedAccess {
@@ -260,12 +266,12 @@ pub(crate) fn plan(
             } else {
                 pin(BarrierReason::Opaque);
             }
-            if eager && !binding.import {
-                events.entry((file, binding.id)).or_default().push(Event {
+            if eager && !binding.import() {
+                events.entry((file, binding.id())).or_default().push(Event {
                     segment,
-                    offset: reference.span.start,
-                    read: reference.read,
-                    write: reference.write,
+                    offset: reference.span().start,
+                    read: reference.read(),
+                    write: reference.write(),
                     initialization: false,
                 });
             }

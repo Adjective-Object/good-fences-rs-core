@@ -12,18 +12,14 @@ mod inference;
 pub(crate) use inference::FunctionSignature;
 pub use inference::OwnedFunction;
 use inference::{Closure, Instruction, Recording, Template};
+mod records;
+pub use records::CallResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ValueId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Effect(usize);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CallResult {
-    pub value: ValueId,
-    pub effects: Effect,
-}
 
 #[derive(Debug, Clone)]
 enum Expression {
@@ -95,7 +91,7 @@ impl Frame<'_> {
         }
         let index = self
             .definition
-            .parameters
+            .parameters()
             .iter()
             .position(|parameter| parameter == name)
             .expect("validated parameter reference");
@@ -110,7 +106,7 @@ impl Frame<'_> {
                 CallArgument::Spread(_) => values.extend(
                     self.arguments
                         .iter()
-                        .skip(self.definition.parameters.len())
+                        .skip(self.definition.parameters().len())
                         .copied(),
                 ),
                 CallArgument::Forward => values.extend_from_slice(self.arguments),
@@ -186,21 +182,21 @@ impl Context {
         context.undefined = context.value(Hazards::NONE);
         context.unknown = context.value(Hazards::UNKNOWN);
         context.initial[context.values[context.unknown.0].external_aliases.0] = true;
-        for index in 0..context.facts.definitions.len() {
+        for index in 0..context.facts.definitions().len() {
             let value = context.value(Hazards::NONE);
             context.values[value.0].definition = Some(index);
             context.functions.push(value);
             context
                 .bindings
-                .insert(context.facts.definitions[index].binding.clone(), index);
+                .insert(context.facts.definitions()[index].binding().clone(), index);
         }
         Ok(context)
     }
 
     fn instantiate_declarations(&mut self, start: usize) {
-        for index in start..self.facts.definitions.len() {
-            let definition = self.facts.definitions[index].clone();
-            let arguments = vec![self.unknown; definition.parameters.len()];
+        for index in start..self.facts.definitions().len() {
+            let definition = self.facts.definitions()[index].clone();
+            let arguments = vec![self.unknown; definition.parameters().len()];
             let frame = Frame {
                 definition: &definition,
                 arguments: &arguments,
@@ -208,7 +204,7 @@ impl Context {
                 undefined: self.undefined,
             };
             for slot in Hazard::ALL {
-                let expression = self.instantiate(&definition.hazards.get(slot), &frame);
+                let expression = self.instantiate(&definition.hazards().get(slot), &frame);
                 let target = self.values[self.functions[index].0].cells[slot as usize];
                 self.equations.push(Equation { target, expression });
             }
@@ -400,7 +396,7 @@ impl Context {
         if self.recording.is_some() {
             let value = self.value(Hazards::NONE);
             let effects = self.expression(Expression::Constant(false));
-            let result = CallResult { value, effects };
+            let result = CallResult::new(value, effects);
             self.recording
                 .as_mut()
                 .expect("recording")
@@ -419,10 +415,7 @@ impl Context {
             self.latent = true;
             let result = self.call(function, arguments, Some(receiver));
             self.latent = previous;
-            return CallResult {
-                value: result.value,
-                effects: self.pure,
-            };
+            return CallResult::new(result.value(), self.pure);
         }
         let resolved = self.resolve_alias(function);
         if !self.latent {
@@ -436,17 +429,11 @@ impl Context {
         }
         let function = resolved;
         let Some(index) = self.values[function.0].definition else {
-            return CallResult {
-                value: self.unknown,
-                effects: self.opaque_effects(),
-            };
+            return CallResult::new(self.unknown, self.opaque_effects());
         };
-        let definition = self.facts.definitions[index].clone();
-        if !definition.variadic && arguments.len() > definition.parameters.len() {
-            return CallResult {
-                value: self.unknown,
-                effects: self.opaque_effects(),
-            };
+        let definition = self.facts.definitions()[index].clone();
+        if !definition.variadic() && arguments.len() > definition.parameters().len() {
+            return CallResult::new(self.unknown, self.opaque_effects());
         }
         let effects = self.call_effects(function, arguments, receiver);
         let frame = Frame {
@@ -464,18 +451,19 @@ impl Context {
             if Self::growing_context(&self.executing, &invocation) {
                 self.opaque_effects();
             } else if self.executing.insert(invocation.clone()) {
-                self.execute_dependencies(&definition.hazards.get(Hazard::Call), &frame);
+                self.execute_dependencies(&definition.hazards().get(Hazard::Call), &frame);
                 self.executing.remove(&invocation);
             }
         }
-        let value = match &definition.returns {
+        let value = match definition.returns() {
             Returns::Argument(name) => frame.value(name),
             Returns::Void => self.undefined,
             Returns::Unknown => self.unknown,
             Returns::Fresh => {
                 let value = self.value(Hazards::NONE);
                 for slot in Hazard::ALL {
-                    let expression = self.instantiate(&definition.return_hazards.get(slot), &frame);
+                    let expression =
+                        self.instantiate(&definition.return_hazards().get(slot), &frame);
                     self.equations.push(Equation {
                         target: self.values[value.0].cells[slot as usize],
                         expression,
@@ -484,20 +472,20 @@ impl Context {
                 value
             }
         };
-        for update in &definition.updates {
+        for update in definition.updates() {
             if self.latent {
                 break;
             }
-            let target = frame.value(&update.target);
-            let expression = self.instantiate(&update.expression, &frame);
+            let target = frame.value(&update.target());
+            let expression = self.instantiate(&update.expression(), &frame);
             let effects = self.expression(expression);
             for slot in Hazard::ALL {
-                if update.slot.is_none_or(|updated| updated == slot) {
+                if update.slot().is_none_or(|updated| updated == slot) {
                     self.update(target, slot, effects);
                 }
             }
         }
-        CallResult { value, effects }
+        CallResult::new(value, effects)
     }
 
     fn expression(&mut self, expression: Expression) -> Effect {
@@ -519,7 +507,7 @@ impl Context {
             self.latent = true;
             let result = self.call(function, arguments, Some(receiver));
             self.latent = previous;
-            return result.effects;
+            return result.effects();
         }
         let Some(index) = self.values[function.0].definition else {
             if !self.latent && function != self.undefined {
@@ -527,12 +515,12 @@ impl Context {
             }
             return self.hazard(function, Hazard::Call);
         };
-        let definition = self.facts.definitions[index].clone();
+        let definition = self.facts.definitions()[index].clone();
         // shortcut: hypothetical writes need an isolated heap to specialize.
-        if self.latent && !definition.updates.is_empty() {
+        if self.latent && !definition.updates().is_empty() {
             return self.effectful;
         }
-        if !definition.variadic && arguments.len() > definition.parameters.len() {
+        if !definition.variadic() && arguments.len() > definition.parameters().len() {
             return self.effectful;
         }
         let invocation = Invocation {
@@ -560,7 +548,7 @@ impl Context {
             receiver,
             undefined: self.undefined,
         };
-        let body = self.instantiate(&definition.hazards.get(Hazard::Call), &frame);
+        let body = self.instantiate(&definition.hazards().get(Hazard::Call), &frame);
         self.expanding.remove(&invocation);
         self.equations.push(Equation {
             target: effect.0,

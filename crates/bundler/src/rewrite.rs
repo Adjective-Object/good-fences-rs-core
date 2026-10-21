@@ -168,18 +168,18 @@ pub fn rename_private(
     let mut renamed = BTreeMap::new();
     for (id, name) in names {
         let binding = parsed
-            .facts
-            .bindings
+            .facts()
+            .bindings()
             .iter()
-            .find(|b| b.id == *id)
+            .find(|b| b.id() == *id)
             .ok_or_eyre("rename references missing lexical binding")?;
         ensure!(
-            !binding.import
+            !binding.import()
                 && !parsed
-                    .facts
-                    .exports
+                    .facts()
+                    .exports()
                     .iter()
-                    .any(|e| matches!(e.value, ExportValue::Binding(value) if value == *id)),
+                    .any(|e| matches!(e.value(), ExportValue::Binding(value) if *value == *id)),
             "{}: public binding rename needs linker at bytes {}",
             path.display(),
             id.0
@@ -191,41 +191,41 @@ pub fn rename_private(
         ensure!(targets.insert(name), "duplicate rename target");
         ensure!(
             !parsed
-                .facts
-                .bindings
+                .facts()
+                .bindings()
                 .iter()
-                .any(|b| b.id != *id && b.name == *name)
+                .any(|b| b.id() != *id && b.name() == *name)
                 && !parsed
-                    .facts
-                    .references
+                    .facts()
+                    .references()
                     .iter()
-                    .any(|r| r.binding != Some(*id) && r.name == *name),
+                    .any(|r| r.binding() != Some(*id) && r.name() == *name),
             "rename would capture {}",
             name
         );
         renamed.insert(id.0, name);
     }
     let mut edits = BTreeMap::new();
-    for recipe in &parsed.facts.emission.segments {
-        for operation in &recipe.operations {
+    for recipe in parsed.facts().emission().segments() {
+        for operation in recipe.operations() {
             use ast_segmenter::emission::OperationKind;
-            let (binding, shorthand) = match operation.kind {
+            let (binding, shorthand) = match operation.kind() {
                 OperationKind::Binding {
                     binding, shorthand, ..
-                } => (Some(binding), shorthand),
+                } => (Some(*binding), *shorthand),
                 OperationKind::Reference {
                     reference,
                     shorthand,
                 } => (
-                    parsed.facts.references[reference as usize].binding,
-                    shorthand,
+                    parsed.facts().references()[*reference as usize].binding(),
+                    *shorthand,
                 ),
                 _ => continue,
             };
             let Some(name) = binding.and_then(|id| renamed.get(&id.0)) else {
                 continue;
             };
-            let span = operation.kind.span(&parsed.facts, recipe);
+            let span = operation.kind().span(&parsed.facts(), recipe);
             edits.insert(
                 (span.start, span.end),
                 Edit {
@@ -296,13 +296,13 @@ mod tests {
             ast_segmenter::ModuleFormat::Esm,
         )
         .unwrap()
-        .facts;
+        .into_facts();
         let id = facts
-            .bindings
+            .bindings()
             .iter()
-            .find(|b| b.name == "x" && b.top_level)
+            .find(|b| b.name() == "x" && b.top_level())
             .unwrap()
-            .id;
+            .id();
         let output = rename_private(path, source, &[(id, "renamed".into())]).unwrap();
         insta::assert_snapshot!(output, @r###"
         #!/usr/bin/env node
@@ -353,11 +353,11 @@ mod tests {
         .unwrap();
         let output = crate::emit::CachedRenderer::new(
             source,
-            &parsed.facts,
-            &parsed.facts.emission.segments[0],
+            &parsed.facts(),
+            &parsed.facts().emission().segments()[0],
             &[],
         )
-        .render(parsed.segments[0].span)
+        .render(parsed.segments()[0].span)
         .unwrap()
         .render(
             Path::new("output.mjs"),

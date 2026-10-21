@@ -59,11 +59,11 @@ pub(crate) fn contains(outer: Span, inner: Span) -> bool {
 }
 
 fn removable(call: &Invocation, value_demanded: bool, policy: &EffectPolicy) -> bool {
-    call.deferred.is_none()
-        && call.pure.is_some()
+    call.deferred().is_none()
+        && call.pure().is_some()
         && policy.honors_pure_annotations()
         && policy.matching_patterns(call).next().is_none()
-        && match call.value_use {
+        && match call.value_use() {
             ValueUse::Discarded => true,
             ValueUse::StatementValue => !value_demanded,
             ValueUse::Required => false,
@@ -81,53 +81,53 @@ pub fn summarize_with_policy(
     policy: &EffectPolicy,
 ) -> StatementEffects {
     let first = facts
-        .invocations
-        .partition_point(|c| c.span.start < statement.start);
-    let calls: Vec<_> = facts.invocations[first..]
+        .invocations()
+        .partition_point(|c| c.span().start < statement.start);
+    let calls: Vec<_> = facts.invocations()[first..]
         .iter()
-        .take_while(|c| c.span.start <= statement.end)
-        .filter(|c| contains(statement, c.span) && removable(c, value_demanded, policy))
+        .take_while(|c| c.span().start <= statement.end)
+        .filter(|c| contains(statement, c.span()) && removable(c, value_demanded, policy))
         .collect();
     let start = facts
-        .effects
-        .partition_point(|s| s.span.start < statement.start);
-    let sites = facts.effects[start..]
+        .effects()
+        .partition_point(|s| s.span().start < statement.start);
+    let sites = facts.effects()[start..]
         .iter()
-        .take_while(|s| s.span.start <= statement.end)
-        .filter(|s| s.deferred.is_none() && contains(statement, s.span))
+        .take_while(|s| s.span().start <= statement.end)
+        .filter(|s| s.deferred().is_none() && contains(statement, s.span()))
         .filter(|s| {
             !matches!(
-                s.reason,
+                s.reason(),
                 EffectReason::Invocation | EffectReason::Construction
-            ) || !calls.iter().any(|c| c.span == s.span)
+            ) || !calls.iter().any(|c| c.span() == s.span())
         })
         .cloned()
         .collect();
     let rewrites = calls
         .into_iter()
         .map(|call| InvocationRewrite {
-            invocation: call.span,
-            callee: call.callee,
-            reference: call.shape.clone(),
-            arguments: call.arguments.clone(),
-            guard: if call.optional_call || call.optional_chain {
+            invocation: call.span(),
+            callee: call.callee(),
+            reference: call.shape().clone(),
+            arguments: call.arguments().to_vec(),
+            guard: if call.optional_call() || call.optional_chain() {
                 ArgumentGuard::OriginalChain {
-                    optional_call: call.optional_call,
+                    optional_call: call.optional_call(),
                 }
             } else {
                 ArgumentGuard::Always
             },
-            construct: call.construct,
-            value_use: call.value_use,
+            construct: call.construct(),
+            value_use: call.value_use(),
         })
         .collect();
-    let known_effects = facts.invocations[first..]
+    let known_effects = facts.invocations()[first..]
         .iter()
-        .take_while(|c| c.span.start <= statement.end)
-        .filter(|c| c.deferred.is_none() && contains(statement, c.span))
+        .take_while(|c| c.span().start <= statement.end)
+        .filter(|c| c.deferred().is_none() && contains(statement, c.span()))
         .flat_map(|c| {
             policy.matching_patterns(c).map(move |pattern| KnownEffect {
-                invocation: c.span,
+                invocation: c.span(),
                 pattern: pattern.to_owned(),
             })
         })

@@ -10,10 +10,28 @@ use crate::{owned::ModuleFacts, ModuleBody, ModuleFormat};
 /// Effective parser policy, independent of package discovery and source paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParserConfig {
-    pub typescript: bool,
-    pub jsx: bool,
-    pub definition: bool,
-    pub commonjs: bool,
+    typescript: bool,
+    jsx: bool,
+    definition: bool,
+    commonjs: bool,
+}
+
+impl ParserConfig {
+    pub fn typescript(&self) -> bool {
+        self.typescript
+    }
+
+    pub fn jsx(&self) -> bool {
+        self.jsx
+    }
+
+    pub fn definition(&self) -> bool {
+        self.definition
+    }
+
+    pub fn commonjs(&self) -> bool {
+        self.commonjs
+    }
 }
 
 impl ParserConfig {

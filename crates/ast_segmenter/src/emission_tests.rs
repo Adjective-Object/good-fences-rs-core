@@ -8,7 +8,7 @@ fn parse(source: &str) -> ModuleFacts {
         crate::ModuleFormat::Esm,
     )
     .unwrap()
-    .facts
+    .into_facts()
 }
 
 #[test]
@@ -16,17 +16,17 @@ fn execution_contexts_keep_immediate_calls_defaults_and_instance_fields_distinct
     use crate::execution::ContextKind;
     let source = "let x = 0; const stored = (p = x++) => x++; (() => x++)(); class C { [x++] = x++; static value = x++; static { x++; } method(p = x++) { return () => x++; } }";
     let facts = parse(source);
-    let execution = &facts.emission.execution;
+    let execution = &facts.emission().execution();
     let accesses: Vec<_> = facts
-        .references
+        .references()
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.name == "x")
+        .filter(|(_, r)| r.name() == "x")
         .map(|(index, _)| {
-            let context = execution.references[index];
+            let context = execution.references()[index];
             (
                 execution.is_module_evaluation(context),
-                context.map(|c| execution.contexts[c as usize].kind),
+                context.map(|c| execution.contexts()[c as usize].kind()),
             )
         })
         .collect();
@@ -44,42 +44,45 @@ fn execution_contexts_keep_immediate_calls_defaults_and_instance_fields_distinct
             (false, Some(ContextKind::Callable)),
         ]
     );
-    let nested = execution.contexts.last().unwrap();
-    assert!(nested.parent.is_some());
+    let nested = execution.contexts().last().unwrap();
+    assert!(nested.parent().is_some());
     assert_eq!(
         facts
-            .emission
-            .segments
+            .emission()
+            .segments()
             .iter()
-            .map(|r| r.placement.eager_writes.len())
+            .map(|r| r.placement().eager_writes().len())
             .collect::<Vec<_>>(),
         [0, 0, 1, 3]
     );
-    assert_eq!(facts.emission.segments[1].placement.writes.len(), 2);
+    assert_eq!(facts.emission().segments()[1].placement().writes().len(), 2);
 }
 
 #[test]
 fn only_direct_synchronous_literal_calls_prove_module_execution() {
     let facts = parse("let x; function known(p = x) { return x; } known(); unknown(() => x); (function*(){ return x; })(); (async () => x)(); (() => () => x)(); (() => { (() => x)(); })();");
-    let timing = &facts.emission.execution;
+    let timing = &facts.emission().execution();
     let eager: Vec<_> = facts
-        .references
+        .references()
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.name == "x")
-        .map(|(i, _)| timing.is_module_evaluation(timing.references[i]))
+        .filter(|(_, r)| r.name() == "x")
+        .map(|(i, _)| timing.is_module_evaluation(timing.references()[i]))
         .collect();
     assert_eq!(eager, [false, false, false, false, false, false, true]);
-    assert!(facts.emission.segments[1].placement.eager_reads.is_empty());
+    assert!(facts.emission().segments()[1]
+        .placement()
+        .eager_reads()
+        .is_empty());
 
     let facts = parse("let x; class C { [x](){ return x; } static [x] = x; field = () => x; }");
-    let timing = &facts.emission.execution;
+    let timing = &facts.emission().execution();
     let eager: Vec<_> = facts
-        .references
+        .references()
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.name == "x")
-        .map(|(i, _)| timing.is_module_evaluation(timing.references[i]))
+        .filter(|(_, r)| r.name() == "x")
+        .map(|(i, _)| timing.is_module_evaluation(timing.references()[i]))
         .collect();
     assert_eq!(eager, [true, false, true, true, false]);
 }
@@ -112,18 +115,18 @@ fn execution_effects_use_the_owning_operation_context_not_callable_operands() {
             ),
         ] {
             let facts = parse(&source);
-            let timing = &facts.emission.execution;
+            let timing = &facts.emission().execution();
             let site = facts
-                .effects
+                .effects()
                 .iter()
                 .find(|site| {
                     matches!(
-                        site.reason,
+                        site.reason(),
                         EffectReason::ClassHeritage | EffectReason::ComputedKey
                     )
                 })
                 .unwrap();
-            assert_eq!(site.deferred.is_none(), source == operation, "{source}");
+            assert_eq!(site.deferred().is_none(), source == operation, "{source}");
             assert_eq!(
                 timing.effect_is_module_evaluation(site).unwrap(),
                 eager,
@@ -131,22 +134,19 @@ fn execution_effects_use_the_owning_operation_context_not_callable_operands() {
             );
             // Every operand here is a non-immediate literal, unlike its owning operation.
             assert!(
-                !timing.is_module_evaluation(timing.context_at(site.span)),
+                !timing.is_module_evaluation(timing.context_at(site.span())),
                 "{}",
                 source
             );
         }
     }
-    let mut facts = parse("function stored() { class C extends async function() {} {} }");
+    let facts = parse("function stored() { class C extends async function() {} {} }");
     let site = facts
-        .effects
+        .effects()
         .iter()
-        .find(|site| site.reason == EffectReason::ClassHeritage)
+        .find(|site| site.reason() == EffectReason::ClassHeritage)
         .unwrap();
-    facts.emission.execution.contexts.clear();
-    assert!(facts
-        .emission
-        .execution
+    assert!(crate::execution::ExecutionFacts::default()
         .effect_is_module_evaluation(site)
         .is_err());
 }
@@ -154,46 +154,52 @@ fn execution_effects_use_the_owning_operation_context_not_callable_operands() {
 #[test]
 fn connectors_and_placement_keep_initialization_and_writes_local() {
     let facts = parse("import {x} from './x'; export {}; ; before; let before = x; function f(){ return before; } before++; const arrow = () => before;");
-    let recipes = &facts.emission.segments;
+    let recipes = &facts.emission().segments();
     assert_eq!(
-        recipes.iter().map(|r| r.connector_only).collect::<Vec<_>>(),
+        recipes
+            .iter()
+            .map(|r| r.connector_only())
+            .collect::<Vec<_>>(),
         [true, true, true, false, false, false, false, false]
     );
     let before = facts
-        .bindings
+        .bindings()
         .iter()
-        .find(|b| b.name == "before")
+        .find(|b| b.name() == "before")
         .unwrap()
-        .id;
-    assert_eq!(recipes[4].placement.forward_references, [before]);
-    assert_eq!(recipes[4].placement.declarations, [before]);
-    assert!(!recipes[4].placement.instantiable);
-    assert!(recipes[5].placement.instantiable);
+        .id();
+    assert_eq!(recipes[4].placement().forward_references(), [before]);
+    assert_eq!(recipes[4].placement().declarations(), [before]);
+    assert!(!recipes[4].placement().instantiable());
+    assert!(recipes[5].placement().instantiable());
     assert_eq!(
-        recipes[5].placement.declarations,
-        recipes[5].placement.hoisted
+        recipes[5].placement().declarations(),
+        recipes[5].placement().hoisted()
     );
-    assert!(recipes[5].placement.eager_reads.is_empty());
-    assert!(recipes[7].placement.eager_reads.is_empty());
-    assert_eq!(recipes[6].placement.writes.len(), 1);
-    assert!(recipes[7].names.inference_sensitive);
-    assert_eq!(recipes[5].names.named, recipes[5].placement.declarations);
+    assert!(recipes[5].placement().eager_reads().is_empty());
+    assert!(recipes[7].placement().eager_reads().is_empty());
+    assert_eq!(recipes[6].placement().writes().len(), 1);
+    assert!(recipes[7].names().inference_sensitive());
+    assert_eq!(
+        recipes[5].names().named(),
+        recipes[5].placement().declarations()
+    );
 }
 
 #[test]
 fn shorthand_expansion_distinguishes_literal_proto_from_patterns() {
     let facts = parse("let __proto__, x; const obj = {__proto__, x}; const {x: y, __proto__: z} = obj; ({__proto__, x = 1} = obj); function f({x = 2}) {}");
     let expansions: Vec<_> = facts
-        .emission
-        .segments
+        .emission()
+        .segments()
         .iter()
-        .flat_map(|r| &r.operations)
-        .filter_map(|o| match o.kind {
+        .flat_map(|r| r.operations())
+        .filter_map(|o| match o.kind() {
             OperationKind::Binding { shorthand, .. }
             | OperationKind::Reference { shorthand, .. }
-                if shorthand != Shorthand::None =>
+                if *shorthand != Shorthand::None =>
             {
-                Some(shorthand)
+                Some(*shorthand)
             }
             _ => None,
         })
@@ -214,11 +220,11 @@ fn shorthand_expansion_distinguishes_literal_proto_from_patterns() {
 fn namespaces_distinguish_values_from_receiver_tag_and_mutation() {
     let facts = parse("import * as ns from './ns'; ns.value; ns.method(); ns.tag`text`; ns.value = 1; ns.value++; delete ns.value; consume(ns); ns['computed']; consume(ns.value);");
     let uses: Vec<_> = facts
-        .emission
-        .segments
+        .emission()
+        .segments()
         .iter()
-        .flat_map(|r| &r.namespaces)
-        .map(|u| &u.access)
+        .flat_map(|r| r.namespaces())
+        .map(|u| u.access())
         .collect();
     assert!(matches!(uses[0], NamespaceAccess::DirectRead { property, .. } if property == "value"));
     assert_eq!(uses[1], &NamespaceAccess::Native(NamespaceReason::Receiver));
@@ -229,12 +235,12 @@ fn namespaces_distinguish_values_from_receiver_tag_and_mutation() {
     assert_eq!(uses[6], &NamespaceAccess::Native(NamespaceReason::Other));
     assert_eq!(uses[7], &NamespaceAccess::Native(NamespaceReason::Other));
     assert!(matches!(uses[8], NamespaceAccess::DirectRead { .. }));
-    let recipe = &facts.emission.segments[1];
+    let recipe = &facts.emission().segments()[1];
     assert!(matches!(
-        recipe.operations[0].kind,
+        recipe.operations()[0].kind(),
         OperationKind::Namespace { .. }
     ));
-    assert_eq!(recipe.operations[1].parent, Some(0));
+    assert_eq!(recipe.operations()[1].parent(), Some(0));
 }
 
 #[test]
@@ -248,29 +254,29 @@ fn named_and_default_imports_can_resolve_to_namespace_reexports() {
             declaration
         ));
         let uses: Vec<_> = facts
-            .emission
-            .segments
+            .emission()
+            .segments()
             .iter()
-            .flat_map(|r| &r.namespaces)
+            .flat_map(|r| r.namespaces())
             .collect();
         assert_eq!(uses.len(), 3);
         assert!(
-            matches!(&uses[0].access, NamespaceAccess::DirectRead { property, .. } if property == "value")
+            matches!(&uses[0].access(), NamespaceAccess::DirectRead { property, .. } if property == "value")
         );
         assert_eq!(
-            uses[1].access,
-            NamespaceAccess::Native(NamespaceReason::Receiver)
+            uses[1].access(),
+            &NamespaceAccess::Native(NamespaceReason::Receiver)
         );
         assert_eq!(
-            uses[2].access,
-            NamespaceAccess::Native(NamespaceReason::Other)
+            uses[2].access(),
+            &NamespaceAccess::Native(NamespaceReason::Other)
         );
         assert!(facts
-            .emission
-            .segments
+            .emission()
+            .segments()
             .last()
             .unwrap()
-            .namespaces
+            .namespaces()
             .is_empty());
     }
 }
@@ -286,11 +292,11 @@ fn export_wrappers_and_default_initialization_are_preclassified() {
         ("export {};", "remove", false),
     ] {
         let facts = parse(source);
-        let recipe = &facts.emission.segments[0];
+        let recipe = &facts.emission().segments()[0];
         let form = recipe
-            .operations
+            .operations()
             .iter()
-            .find_map(|o| match &o.kind {
+            .find_map(|o| match &o.kind() {
                 OperationKind::Export { form, .. } => Some(form),
                 _ => None,
             })
@@ -302,21 +308,21 @@ fn export_wrappers_and_default_initialization_are_preclassified() {
             ExportForm::Remove => "remove",
         };
         assert_eq!(actual, expected, "{source}");
-        assert_eq!(recipe.names.inference_sensitive, inference, "{source}");
+        assert_eq!(recipe.names().inference_sensitive(), inference, "{source}");
     }
 }
 
 fn lowering(facts: &ModuleFacts) -> &PureLowering {
     facts
-        .emission
-        .segments
+        .emission()
+        .segments()
         .iter()
-        .flat_map(|r| &r.operations)
-        .find_map(|o| match &o.kind {
+        .flat_map(|r| r.operations())
+        .find_map(|o| match &o.kind() {
             OperationKind::Invocation {
                 invocation,
                 lowering,
-            } if facts.invocations[*invocation as usize].pure.is_some() => Some(lowering),
+            } if facts.invocations()[*invocation as usize].pure().is_some() => Some(lowering),
             _ => None,
         })
         .unwrap()
@@ -326,37 +332,39 @@ fn lowering(facts: &ModuleFacts) -> &PureLowering {
 fn pure_chain_compilation_preserves_parenthesis_guards_and_nested_slots() {
     let facts = parse("/*#__PURE__*/ obj?.method?.(await value, ...items);");
     let plan = lowering(&facts);
-    assert!(plan.crosses_await_guard);
-    assert!(plan.guard_start.is_some());
-    assert_eq!(plan.arguments.len(), 2);
+    assert!(plan.crosses_await_guard());
+    assert!(plan.guard_start().is_some());
+    assert_eq!(plan.arguments().len(), 2);
     assert!(matches!(
-        plan.chain.as_ref().unwrap().steps[0],
+        plan.chain().unwrap().steps()[0],
         ChainStep::Static { optional: true, .. }
     ));
     let facts = parse("/*#__PURE__*/ (obj?.method)(await value);");
     let plan = lowering(&facts);
-    assert!(!plan.crosses_await_guard);
-    assert!(plan.guard_start.is_none());
-    assert!(plan.chain.as_ref().unwrap().steps.is_empty());
+    assert!(!plan.crosses_await_guard());
+    assert!(plan.guard_start().is_none());
+    assert!(plan.chain().unwrap().steps().is_empty());
     let facts = parse("async function f(){ /*#__PURE__*/ obj?.method(await value); }");
-    assert!(lowering(&facts).crosses_await_guard);
+    assert!(lowering(&facts).crosses_await_guard());
     let facts = parse("/*#__PURE__*/ obj?.method(async () => await value);");
-    assert!(!lowering(&facts).crosses_await_guard);
+    assert!(!lowering(&facts).crosses_await_guard());
     let facts = parse("/*#__PURE__*/ obj.method?.()();");
-    assert!(facts.emission.segments[0].operations.iter().any(|o|
-        matches!(&o.kind, OperationKind::Invocation { lowering, .. } if lowering.chain.is_none())));
+    assert!(facts.emission().segments()[0].operations().iter().any(|o|
+        matches!(&o.kind(), OperationKind::Invocation { lowering, .. } if lowering.chain().is_none())));
     let facts = parse("/*#__PURE__*/ obj?.[key()](/*#__PURE__*/ inner(value));");
-    let recipe = &facts.emission.segments[0];
+    let recipe = &facts.emission().segments()[0];
     let plan = lowering(&facts);
-    assert!(!plan.arguments[0].operations.is_empty());
-    assert!(matches!(&plan.chain.as_ref().unwrap().steps[0],
-        ChainStep::Computed { property, .. } if !property.operations.is_empty()));
-    for (i, operation) in recipe.operations.iter().enumerate() {
-        if let Some(parent) = operation.parent {
+    assert!(!plan.arguments()[0].operations().is_empty());
+    assert!(matches!(&plan.chain().unwrap().steps()[0],
+        ChainStep::Computed { property, .. } if !property.operations().is_empty()));
+    for (i, operation) in recipe.operations().iter().enumerate() {
+        if let Some(parent) = operation.parent() {
             assert!((parent as usize) < i);
             assert!(contains(
-                recipe.operations[parent as usize].kind.span(&facts, recipe),
-                operation.kind.span(&facts, recipe)
+                recipe.operations()[parent as usize]
+                    .kind()
+                    .span(&facts, recipe),
+                operation.kind().span(&facts, recipe)
             ));
         }
     }
@@ -368,21 +376,21 @@ fn hints_and_opaque_cjs_keep_only_source_local_request_slots() {
     let facts = parse(source);
     assert_eq!(
         facts
-            .emission
-            .segments
+            .emission()
+            .segments()
             .iter()
-            .flat_map(|r| &r.operations)
-            .filter(|o| matches!(o.kind, OperationKind::SourceHint { .. }))
+            .flat_map(|r| r.operations())
+            .filter(|o| matches!(o.kind(), OperationKind::SourceHint { .. }))
             .count(),
         0,
         "out-of-segment hint cleanup is deliberately out of scope"
     );
     let source = "const x = (/*# sourceURL=input.js */ 1);";
     let facts = parse(source);
-    assert!(facts.emission.segments[0]
-        .operations
+    assert!(facts.emission().segments()[0]
+        .operations()
         .iter()
-        .any(|o| matches!(o.kind, OperationKind::SourceHint { .. })));
+        .any(|o| matches!(o.kind(), OperationKind::SourceHint { .. })));
     let source =
         "const x = require('./x'); function f(){ return import('./y'); } /*# sourceURL=input.js */";
     let parsed = crate::parse_module(
@@ -392,12 +400,12 @@ fn hints_and_opaque_cjs_keep_only_source_local_request_slots() {
         crate::ModuleFormat::CommonJs,
     )
     .unwrap();
-    let recipe = &parsed.facts.emission.segments[0];
-    assert!(!recipe.connector_only);
-    assert!(recipe.placement.declarations.is_empty());
-    assert_eq!(recipe.operations.len(), 3);
-    assert!(recipe.operations.iter().all(|o| matches!(
-        o.kind,
+    let recipe = &parsed.facts().emission().segments()[0];
+    assert!(!recipe.connector_only());
+    assert!(recipe.placement().declarations().is_empty());
+    assert_eq!(recipe.operations().len(), 3);
+    assert!(recipe.operations().iter().all(|o| matches!(
+        o.kind(),
         OperationKind::Dependency { .. } | OperationKind::SourceHint { .. }
     )));
 }

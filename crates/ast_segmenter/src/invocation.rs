@@ -5,60 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::owned::{BindingId, ModuleFacts};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ValueUse {
-    Discarded,
-    /// A variable initializer/default export; demand for its statement keeps the result.
-    StatementValue,
-    Required,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IdentifierCallee {
-    pub name: String,
-    pub binding: Option<BindingId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CalleeShape {
-    Identifier(IdentifierCallee),
-    Member {
-        #[serde(with = "crate::owned::span_serde")]
-        receiver: Span,
-        receiver_identifier: Option<IdentifierCallee>,
-        /// Static name or computed string literal, not an inferred runtime key.
-        property: Option<String>,
-        computed: bool,
-    },
-    Other,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InvocationArgument {
-    #[serde(with = "crate::owned::span_serde")]
-    pub span: Span,
-    /// True requires iteration, not just evaluation of the iterable expression.
-    pub spread: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Invocation {
-    #[serde(with = "crate::owned::span_serde")]
-    pub span: Span,
-    #[serde(with = "crate::owned::span_serde")]
-    pub callee: Span,
-    pub shape: CalleeShape,
-    pub arguments: Vec<InvocationArgument>,
-    pub construct: bool,
-    pub optional_call: bool,
-    /// The callee's original chain can short-circuit before argument evaluation.
-    pub optional_chain: bool,
-    #[serde(with = "crate::owned::span_serde::optional")]
-    pub pure: Option<Span>,
-    #[serde(with = "crate::owned::span_serde::optional")]
-    pub deferred: Option<Span>,
-    pub value_use: ValueUse,
-}
+mod records;
+pub use records::*;
 
 pub(crate) fn identifier(
     expression: &Expression<'_>,
@@ -68,16 +16,13 @@ pub(crate) fn identifier(
         return None;
     };
     let binding = facts
-        .references
+        .references()
         .binary_search_by_key(&(id.span.start, id.span.end), |r| {
-            (r.span.start, r.span.end)
+            (r.span().start, r.span().end)
         })
         .ok()
-        .and_then(|i| facts.references[i].binding);
-    Some(IdentifierCallee {
-        name: id.name.to_string(),
-        binding,
-    })
+        .and_then(|i| facts.references()[i].binding());
+    Some(IdentifierCallee::new(id.name.to_string(), binding))
 }
 
 pub(crate) fn shape(callee: &Expression<'_>, facts: &ModuleFacts) -> CalleeShape {
@@ -136,14 +81,10 @@ pub(crate) fn arguments(arguments: &[Argument<'_>]) -> Vec<InvocationArgument> {
     arguments
         .iter()
         .map(|argument| match argument {
-            Argument::SpreadElement(spread) => InvocationArgument {
-                span: spread.argument.span(),
-                spread: true,
-            },
-            _ => InvocationArgument {
-                span: argument.span(),
-                spread: false,
-            },
+            Argument::SpreadElement(spread) => {
+                InvocationArgument::new(spread.argument.span(), true)
+            }
+            _ => InvocationArgument::new(argument.span(), false),
         })
         .collect()
 }

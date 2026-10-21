@@ -4,7 +4,10 @@ use policy::EffectPolicy;
 use std::{fs, path::Path};
 
 fn calls(source: &str) -> Vec<Invocation> {
-    crate::tests::input("file.ts", source).facts.invocations
+    crate::tests::input("file.ts", source)
+        .facts
+        .invocations()
+        .to_vec()
 }
 
 #[test]
@@ -148,7 +151,7 @@ fn matching_rules_are_add_only_and_override_pure_without_making_deferred_creatio
         known
             .sites
             .iter()
-            .filter(|s| s.reason == EffectReason::Invocation)
+            .filter(|s| s.reason() == EffectReason::Invocation)
             .count(),
         2
     );
@@ -167,7 +170,7 @@ fn matching_rules_are_add_only_and_override_pure_without_making_deferred_creatio
     assert!(result
         .sites
         .iter()
-        .any(|s| s.reason == EffectReason::Invocation));
+        .any(|s| s.reason() == EffectReason::Invocation));
     assert!(policy.matching_patterns(&plain[0]).next().is_none());
 }
 
@@ -193,12 +196,12 @@ fn source_value_context_preserves_concise_arrow_returns_and_binding_roots_reach_
         "entry.ts",
         "export const arrow = () => /*@__PURE__*/ node.appendChild(child); effect();",
     )]);
-    let call = &graph.file_facts(0).unwrap().invocations[0];
+    let call = &graph.file_facts(0).unwrap().invocations()[0];
     assert_eq!(
-        call.value_use,
+        call.value_use(),
         ast_segmenter::invocation::ValueUse::Required
     );
-    assert!(call.deferred.is_some());
+    assert!(call.deferred().is_some());
     let root = GraphNode::Segment(SegmentKey::new(0, 0));
     let policy = EffectPolicy::parse(["*.appendChild(...)"]).unwrap();
     let plan = retain_with_policy(&graph, &[], &[root], &policy).unwrap();

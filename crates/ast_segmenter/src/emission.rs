@@ -12,179 +12,8 @@ use crate::owned::{BindingId, DependencyId, ExportValue, ModuleFacts};
 #[path = "emission_tests.rs"]
 mod tests;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EmissionFacts {
-    pub execution: crate::execution::ExecutionFacts,
-    /// Same indices as `ParsedModule::segments`; CommonJS has one opaque recipe.
-    pub segments: Vec<SegmentRecipe>,
-    pub nested_bindings: Vec<BindingId>,
-    pub free_references: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SegmentRecipe {
-    /// Original-source assembly pieces, independent of the segment's ownership range.
-    pub source: crate::MultiSpan,
-    pub connector_only: bool,
-    pub placement: PlacementFacts,
-    pub names: NameRestrictions,
-    pub namespaces: Vec<NamespaceUse>,
-    /// Preorder, with parents before children. A replacing parent owns its children.
-    pub operations: Vec<Operation>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PlacementFacts {
-    pub declarations: Vec<BindingId>,
-    /// Top-level function declarations available during module instantiation.
-    pub hoisted: Vec<BindingId>,
-    /// All declarations in this segment are hoisted function declarations.
-    pub instantiable: bool,
-    pub default_expression: bool,
-    pub forward_references: Vec<BindingId>,
-    /// Indices into `ModuleFacts::references`, not OXC reference IDs.
-    pub eager_reads: Vec<u32>,
-    pub eager_writes: Vec<u32>,
-    pub writes: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NameRestrictions {
-    /// Renaming one of these function/class names changes observable `.name`.
-    pub named: Vec<BindingId>,
-    /// Preserve the existing conservative anonymous function/class/arrow gate.
-    pub inference_sensitive: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Shorthand {
-    #[default]
-    None,
-    Property,
-    /// Object literals need a computed key to avoid the __proto__ setter.
-    Proto,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NamespaceUse {
-    /// Any import-binding use; only linked Namespace identities select this alternative.
-    pub reference: u32,
-    pub access: NamespaceAccess,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NamespaceAccess {
-    DirectRead {
-        #[serde(with = "crate::owned::span_serde")]
-        member: Span,
-        property: String,
-    },
-    Native(NamespaceReason),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NamespaceReason {
-    Other,
-    Receiver,
-    Tag,
-    Write,
-    Delete,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Operation {
-    pub parent: Option<u32>,
-    pub kind: OperationKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OperationKind {
-    Binding {
-        binding: BindingId,
-        declaration: u32,
-        shorthand: Shorthand,
-    },
-    Reference {
-        reference: u32,
-        shorthand: Shorthand,
-    },
-    Namespace {
-        usage: u32,
-    },
-    Dependency {
-        dependency: DependencyId,
-    },
-    Export {
-        /// Export-list facts address individual specifiers, not this wrapper.
-        #[serde(with = "crate::owned::span_serde")]
-        span: Span,
-        form: ExportForm,
-    },
-    SourceHint {
-        #[serde(with = "crate::owned::span_serde")]
-        span: Span,
-    },
-    Invocation {
-        invocation: u32,
-        lowering: PureLowering,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExportForm {
-    Remove,
-    Declaration {
-        #[serde(with = "crate::owned::span_serde")]
-        declaration: Span,
-    },
-    /// Consumers may keep the native default wrapper instead of using this alternative.
-    Default {
-        value: SourceSlot,
-        hoisted: bool,
-    },
-}
-
-/// Original source plus already-composed operation roots for this subexpression.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SourceSlot {
-    #[serde(with = "crate::owned::span_serde")]
-    pub span: Span,
-    pub operations: Vec<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PureLowering {
-    pub callee: SourceSlot,
-    /// `None` rejects nested optional calls/private chains, as the current backend does.
-    pub chain: Option<CalleePlan>,
-    pub arguments: Vec<SourceSlot>,
-    /// First original guard boundary; parentheses terminate the outer chain.
-    pub guard_start: Option<u32>,
-    pub crosses_await_guard: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CalleePlan {
-    pub base: SourceSlot,
-    /// Inner to outer, so receiver evaluation and call receiver identity survive.
-    pub steps: Vec<ChainStep>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ChainStep {
-    Static {
-        property: String,
-        optional: bool,
-    },
-    Computed {
-        property: SourceSlot,
-        optional: bool,
-    },
-    Call {
-        /// Includes parentheses, arguments and intervening trivia.
-        suffix: SourceSlot,
-    },
-}
+mod records;
+pub use records::*;
 
 impl OperationKind {
     /// Resolve ranges through existing occurrence IDs wherever possible.
@@ -194,30 +23,26 @@ impl OperationKind {
                 binding,
                 declaration,
                 ..
-            } => {
-                facts
-                    .bindings
-                    .iter()
-                    .find(|b| b.id == *binding)
-                    .expect("validated binding")
-                    .declarations[*declaration as usize]
-            }
-            Self::Reference { reference, .. } => facts.references[*reference as usize].span,
-            Self::Namespace { usage } => match recipe.namespaces[*usage as usize].access {
-                NamespaceAccess::DirectRead { member, .. } => member,
+            } => facts
+                .bindings()
+                .iter()
+                .find(|b| b.id() == *binding)
+                .expect("validated binding")
+                .declarations()[*declaration as usize],
+            Self::Reference { reference, .. } => facts.references()[*reference as usize].span(),
+            Self::Namespace { usage } => match recipe.namespaces()[*usage as usize].access() {
+                NamespaceAccess::DirectRead { member, .. } => *member,
                 NamespaceAccess::Native(_) => unreachable!("only direct reads have operations"),
             },
-            Self::Dependency { dependency } => {
-                facts
-                    .dependencies
-                    .iter()
-                    .find(|d| d.id == *dependency)
-                    .expect("validated dependency")
-                    .span
-            }
+            Self::Dependency { dependency } => facts
+                .dependencies()
+                .iter()
+                .find(|d| d.id() == *dependency)
+                .expect("validated dependency")
+                .span(),
             Self::Export { span, .. } => *span,
             Self::SourceHint { span } => *span,
-            Self::Invocation { invocation, .. } => facts.invocations[*invocation as usize].span,
+            Self::Invocation { invocation, .. } => facts.invocations()[*invocation as usize].span(),
         }
     }
 }
@@ -227,10 +52,7 @@ fn contains(outer: Span, inner: Span) -> bool {
 }
 
 fn slot(span: Span) -> SourceSlot {
-    SourceSlot {
-        span,
-        operations: Vec::new(),
-    }
+    SourceSlot::new(span, Vec::new())
 }
 
 fn chain(expression: &Expression<'_>) -> Option<CalleePlan> {
@@ -275,19 +97,14 @@ fn chain(expression: &Expression<'_>) -> Option<CalleePlan> {
             },
         ),
         Expression::CallExpression(_) => return None,
-        _ => {
-            return Some(CalleePlan {
-                base: slot(expression.span()),
-                steps: Vec::new(),
-            })
-        }
+        _ => return Some(CalleePlan::new(slot(expression.span()), Vec::new())),
     };
     member_chain(object, step)
 }
 
 fn member_chain(object: &Expression<'_>, step: ChainStep) -> Option<CalleePlan> {
     let mut plan = chain(object)?;
-    plan.steps.push(step);
+    plan.steps_mut().push(step);
     Some(plan)
 }
 
@@ -322,7 +139,7 @@ pub(crate) fn extract(
         awaits: Vec::new(),
         enclosing_function: None,
     };
-    if !facts.commonjs {
+    if !facts.commonjs() {
         visitor.visit_program(program);
     }
     let awaits = &visitor.awaits;
@@ -332,89 +149,99 @@ pub(crate) fn extract(
             lowering,
         } = operation
         {
-            let call = &facts.invocations[*invocation as usize];
-            lowering.crosses_await_guard = lowering.guard_start.is_some_and(|start| {
+            let call = &facts.invocations()[*invocation as usize];
+            *lowering.crosses_await_guard_mut() = lowering.guard_start().is_some_and(|start| {
                 awaits.iter().any(|(span, function)| {
-                    *function == call.deferred && start <= span.start && span.end <= call.span.end
+                    *function == call.deferred()
+                        && start <= span.start
+                        && span.end <= call.span().end
                 })
             });
         }
     }
-    let mut result = EmissionFacts {
-        execution: crate::execution::extract(program, facts),
-        nested_bindings: facts
-            .bindings
+    let mut result = EmissionFacts::new(
+        crate::execution::extract(program, facts),
+        Default::default(),
+        facts
+            .bindings()
             .iter()
-            .filter(|b| !b.top_level)
-            .map(|b| b.id)
+            .filter(|b| !b.top_level())
+            .map(|b| b.id())
             .collect(),
-        free_references: facts
-            .references
+        facts
+            .references()
             .iter()
             .enumerate()
-            .filter(|(_, r)| r.binding.is_none())
+            .filter(|(_, r)| r.binding().is_none())
             .map(|(i, _)| i as u32)
             .collect(),
-        ..EmissionFacts::default()
-    };
+    );
     for (span, source) in segments {
         let span = *span;
-        let mut recipe = SegmentRecipe {
-            source: source.clone(),
-            ..SegmentRecipe::default()
-        };
+        let mut recipe = SegmentRecipe::new(
+            source.clone(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
         for &piece in source.as_slice() {
             source_operations(&mut recipe, program, facts, piece);
         }
-        if facts.commonjs {
+        if facts.commonjs() {
             compose(&mut recipe, facts);
-            result.segments.push(recipe);
+            result.segments_mut().push(recipe);
             continue;
         }
         let statement = program
             .body
             .get(program.body.partition_point(|s| s.span().end <= span.start));
-        recipe.connector_only = statement
-            .filter(|s| s.span() == span)
-            .is_some_and(|s| match s {
-                Statement::ImportDeclaration(_)
-                | Statement::ExportAllDeclaration(_)
-                | Statement::EmptyStatement(_) => true,
-                Statement::ExportNamedDeclaration(e) => e.declaration.is_none(),
-                _ => false,
-            });
-        for binding in &facts.bindings {
-            if binding.top_level
-                && !binding.import
-                && binding.declarations.iter().any(|&s| contains(span, s))
+        *recipe.connector_only_mut() =
+            statement
+                .filter(|s| s.span() == span)
+                .is_some_and(|s| match s {
+                    Statement::ImportDeclaration(_)
+                    | Statement::ExportAllDeclaration(_)
+                    | Statement::EmptyStatement(_) => true,
+                    Statement::ExportNamedDeclaration(e) => e.declaration.is_none(),
+                    _ => false,
+                });
+        for binding in facts.bindings() {
+            if binding.top_level()
+                && !binding.import()
+                && binding.declarations().iter().any(|&s| contains(span, s))
             {
-                recipe.placement.declarations.push(binding.id);
+                recipe.placement_mut().declarations_mut().push(binding.id());
                 if binding
-                    .declarations
+                    .declarations()
                     .iter()
                     .filter(|&&s| contains(span, s))
                     .all(|s| visitor.hoisted.contains(&s.start))
                 {
-                    recipe.placement.hoisted.push(binding.id);
+                    recipe.placement_mut().hoisted_mut().push(binding.id());
                 }
                 if facts
-                    .references
+                    .references()
                     .iter()
-                    .any(|r| r.binding == Some(binding.id) && r.span.start < span.start)
+                    .any(|r| r.binding() == Some(binding.id()) && r.span().start < span.start)
                 {
-                    recipe.placement.forward_references.push(binding.id);
+                    recipe
+                        .placement_mut()
+                        .forward_references_mut()
+                        .push(binding.id());
                 }
             }
             for (i, &declaration) in binding
-                .declarations
+                .declarations()
                 .iter()
                 .enumerate()
                 .filter(|(_, s)| contains(span, **s))
             {
-                recipe.operations.push(Operation {
-                    parent: None,
-                    kind: OperationKind::Binding {
-                        binding: binding.id,
+                recipe.operations_mut().push(Operation::new(
+                    None,
+                    OperationKind::Binding {
+                        binding: binding.id(),
                         declaration: i as u32,
                         shorthand: visitor
                             .shorthand
@@ -422,97 +249,95 @@ pub(crate) fn extract(
                             .copied()
                             .unwrap_or_default(),
                     },
-                });
+                ));
             }
         }
-        recipe.placement.instantiable = !recipe.placement.declarations.is_empty()
-            && recipe.placement.declarations == recipe.placement.hoisted;
-        recipe.placement.default_expression = facts
-            .exports
+        *recipe.placement_mut().instantiable_mut() = !recipe.placement().declarations().is_empty()
+            && recipe.placement().declarations() == recipe.placement().hoisted();
+        *recipe.placement_mut().default_expression_mut() = facts
+            .exports()
             .iter()
-            .any(|e| matches!(e.value, ExportValue::Expression(s) if contains(span, s)));
+            .any(|e| matches!(e.value(), ExportValue::Expression(s) if contains(span, *s)));
         for (i, reference) in facts
-            .references
+            .references()
             .iter()
             .enumerate()
-            .filter(|(_, r)| contains(span, r.span))
+            .filter(|(_, r)| contains(span, r.span()))
         {
             let index = i as u32;
             if result
-                .execution
-                .is_module_evaluation(result.execution.references[i])
+                .execution()
+                .is_module_evaluation(result.execution().references()[i])
             {
-                if reference.read {
-                    recipe.placement.eager_reads.push(index);
+                if reference.read() {
+                    recipe.placement_mut().eager_reads_mut().push(index);
                 }
-                if reference.write {
-                    recipe.placement.eager_writes.push(index);
+                if reference.write() {
+                    recipe.placement_mut().eager_writes_mut().push(index);
                 }
             }
-            if reference.write {
-                recipe.placement.writes.push(index);
+            if reference.write() {
+                recipe.placement_mut().writes_mut().push(index);
             }
-            recipe.operations.push(Operation {
-                parent: None,
-                kind: OperationKind::Reference {
+            recipe.operations_mut().push(Operation::new(
+                None,
+                OperationKind::Reference {
                     reference: index,
                     shorthand: visitor
                         .shorthand
-                        .get(&reference.span.start)
+                        .get(&reference.span().start)
                         .copied()
                         .unwrap_or_default(),
                 },
-            });
+            ));
             if let Some(access) = visitor.namespace_uses.get(&index) {
-                let usage = recipe.namespaces.len() as u32;
-                recipe.namespaces.push(NamespaceUse {
-                    reference: index,
-                    access: access.clone(),
-                });
+                let usage = recipe.namespaces().len() as u32;
+                recipe
+                    .namespaces_mut()
+                    .push(NamespaceUse::new(index, access.clone()));
                 if matches!(access, NamespaceAccess::DirectRead { .. }) {
-                    recipe.operations.push(Operation {
-                        parent: None,
-                        kind: OperationKind::Namespace { usage },
-                    });
+                    recipe
+                        .operations_mut()
+                        .push(Operation::new(None, OperationKind::Namespace { usage }));
                 }
             }
         }
         for (name_span, binding) in &visitor.names {
             if contains(span, *name_span) {
                 if let Some(binding) = binding {
-                    recipe.names.named.push(*binding);
+                    recipe.names_mut().named_mut().push(*binding);
                 } else {
-                    recipe.names.inference_sensitive = true;
+                    *recipe.names_mut().inference_sensitive_mut() = true;
                 }
             }
         }
-        recipe.names.named.sort_by_key(|b| b.0);
-        recipe.names.named.dedup();
+        recipe.names_mut().named_mut().sort_by_key(|b| b.0);
+        recipe.names_mut().named_mut().dedup();
         let syntax: Vec<_> = visitor
             .operations
             .iter()
             .filter(|kind| contains(span, kind.span(facts, &recipe)))
             .cloned()
-            .map(|kind| Operation { parent: None, kind })
+            .map(|kind| Operation::new(None, kind))
             .collect();
-        recipe.operations.extend(syntax);
+        recipe.operations_mut().extend(syntax);
         if source.as_slice().len() > 1 {
             let prefix = source.as_slice()[0];
             if let Some(Statement::ExportNamedDeclaration(export)) = statement {
                 let declaration = export.declaration.as_ref().expect("split declaration");
-                recipe.operations.push(Operation {
-                    parent: None,
-                    kind: OperationKind::Export {
+                recipe.operations_mut().push(Operation::new(
+                    None,
+                    OperationKind::Export {
                         span: prefix,
                         form: ExportForm::Declaration {
                             declaration: Span::new(declaration.span().start, prefix.end),
                         },
                     },
-                });
+                ));
             }
         }
         compose(&mut recipe, facts);
-        result.segments.push(recipe);
+        result.segments_mut().push(recipe);
     }
     result
 }
@@ -523,19 +348,19 @@ fn source_operations(
     facts: &ModuleFacts,
     span: Span,
 ) {
-    for dependency in facts.dependencies.iter().filter(|d| {
-        contains(span, d.span)
+    for dependency in facts.dependencies().iter().filter(|d| {
+        contains(span, d.span())
             && matches!(
-                d.kind,
+                d.kind(),
                 crate::owned::DependencyKind::DynamicImport | crate::owned::DependencyKind::Require
             )
     }) {
-        recipe.operations.push(Operation {
-            parent: None,
-            kind: OperationKind::Dependency {
-                dependency: dependency.id,
+        recipe.operations_mut().push(Operation::new(
+            None,
+            OperationKind::Dependency {
+                dependency: dependency.id(),
             },
-        });
+        ));
     }
     for comment in &program.comments {
         if !contains(span, comment.span) {
@@ -552,68 +377,68 @@ fn source_operations(
                     || b.trim_start().starts_with("sourceURL=")
             })
         {
-            recipe.operations.push(Operation {
-                parent: None,
-                kind: OperationKind::SourceHint { span: comment.span },
-            });
+            recipe.operations_mut().push(Operation::new(
+                None,
+                OperationKind::SourceHint { span: comment.span },
+            ));
         }
     }
 }
 
 fn compose(recipe: &mut SegmentRecipe, facts: &ModuleFacts) {
     let ranges: Vec<_> = recipe
-        .operations
+        .operations()
         .iter()
-        .map(|o| o.kind.span(facts, recipe))
+        .map(|o| o.kind().span(facts, recipe))
         .collect();
     let mut order: Vec<_> = (0..ranges.len()).collect();
     order.sort_by_key(|&i| (ranges[i].start, std::cmp::Reverse(ranges[i].end)));
-    recipe.operations = order
+    *recipe.operations_mut() = order
         .into_iter()
-        .map(|i| recipe.operations[i].clone())
+        .map(|i| recipe.operations()[i].clone())
         .collect();
     let ranges: Vec<_> = recipe
-        .operations
+        .operations()
         .iter()
-        .map(|o| o.kind.span(facts, recipe))
+        .map(|o| o.kind().span(facts, recipe))
         .collect();
     let mut stack: Vec<usize> = Vec::new();
     for (i, &range) in ranges.iter().enumerate() {
         while stack.last().is_some_and(|&p| !contains(ranges[p], range)) {
             stack.pop();
         }
-        recipe.operations[i].parent = stack.last().map(|&p| p as u32);
+        *recipe.operations_mut()[i].parent_mut() = stack.last().map(|&p| p as u32);
         stack.push(i);
     }
-    let parents: Vec<_> = recipe.operations.iter().map(|o| o.parent).collect();
-    for (i, operation) in recipe.operations.iter_mut().enumerate() {
+    let parents: Vec<_> = recipe.operations().iter().map(|o| o.parent()).collect();
+    for (i, operation) in recipe.operations_mut().iter_mut().enumerate() {
         let fill = |slot: &mut SourceSlot| {
-            slot.operations = ranges
+            *slot.operations_mut() = ranges
                 .iter()
                 .enumerate()
                 .filter(|&(j, &range)| {
                     j != i
-                        && contains(slot.span, range)
+                        && contains(slot.span(), range)
                         && !parents[j].is_some_and(|p| {
-                            p as usize != i && contains(slot.span, ranges[p as usize])
+                            p as usize != i && contains(slot.span(), ranges[p as usize])
                         })
                 })
                 .map(|(j, _)| j as u32)
                 .collect();
         };
-        match &mut operation.kind {
+        match operation.kind_mut() {
             OperationKind::Export {
                 form: ExportForm::Default { value, .. },
                 ..
             } => fill(value),
             OperationKind::Invocation { lowering, .. } => {
-                fill(&mut lowering.callee);
-                for argument in &mut lowering.arguments {
+                fill(lowering.callee_mut());
+                for argument in lowering.arguments_mut() {
                     fill(argument);
                 }
-                if let Some(chain) = &mut lowering.chain {
-                    fill(&mut chain.base);
-                    for step in &mut chain.steps {
+                if let Some(chain) = lowering.chain_mut() {
+                    fill(chain.base_mut());
+                    for step in chain.steps_mut() {
                         match step {
                             ChainStep::Computed { property, .. } => fill(property),
                             ChainStep::Call { suffix } => fill(suffix),
@@ -642,22 +467,22 @@ struct Extractor<'f> {
 impl Extractor<'_> {
     fn binding(&self, span: Span) -> Option<BindingId> {
         self.facts
-            .bindings
+            .bindings()
             .iter()
-            .find(|b| b.declarations.contains(&span))
-            .map(|b| b.id)
+            .find(|b| b.declarations().contains(&span))
+            .map(|b| b.id())
     }
 
     fn namespace(&self, span: Span) -> Option<u32> {
         let i = self
             .facts
-            .references
-            .binary_search_by_key(&(span.start, span.end), |r| (r.span.start, r.span.end))
+            .references()
+            .binary_search_by_key(&(span.start, span.end), |r| (r.span().start, r.span().end))
             .ok()?;
         self.facts
-            .imports
+            .imports()
             .iter()
-            .any(|import| Some(import.binding) == self.facts.references[i].binding)
+            .any(|import| Some(import.binding()) == self.facts.references()[i].binding())
             .then_some(i as u32)
     }
 
@@ -668,23 +493,23 @@ impl Extractor<'_> {
     fn invocation(&mut self, span: Span, callee: &Expression<'_>) {
         let Ok(i) = self
             .facts
-            .invocations
-            .binary_search_by_key(&(span.start, span.end), |c| (c.span.start, c.span.end))
+            .invocations()
+            .binary_search_by_key(&(span.start, span.end), |c| (c.span().start, c.span().end))
         else {
             return;
         };
-        let call = &self.facts.invocations[i];
+        let call = &self.facts.invocations()[i];
         let boundary =
-            guard_start(callee).or_else(|| call.optional_call.then_some(call.callee.end));
+            guard_start(callee).or_else(|| call.optional_call().then_some(call.callee().end));
         self.operations.push(OperationKind::Invocation {
             invocation: i as u32,
-            lowering: PureLowering {
-                callee: slot(call.callee),
-                chain: chain(callee),
-                arguments: call.arguments.iter().map(|a| slot(a.span)).collect(),
-                guard_start: boundary,
-                crosses_await_guard: false,
-            },
+            lowering: PureLowering::new(
+                slot(call.callee()),
+                chain(callee),
+                call.arguments().iter().map(|a| slot(a.span())).collect(),
+                boundary,
+                false,
+            ),
         });
     }
 }
@@ -718,11 +543,10 @@ impl<'a> Visit<'a> for Extractor<'_> {
     }
     fn visit_export_default_declaration(&mut self, export: &ExportDefaultDeclaration<'a>) {
         let anonymous_function = matches!(&export.declaration, ExportDefaultDeclarationKind::FunctionDeclaration(f) if f.id.is_none());
-        let expression = self
-            .facts
-            .exports
-            .iter()
-            .any(|e| e.span == export.span && matches!(e.value, ExportValue::Expression(_)));
+        let expression =
+            self.facts.exports().iter().any(|e| {
+                e.span() == export.span && matches!(e.value(), ExportValue::Expression(_))
+            });
         self.export(
             export.span,
             if expression {
@@ -748,9 +572,9 @@ impl<'a> Visit<'a> for Extractor<'_> {
             if let Some(id) = &f.id {
                 if self
                     .facts
-                    .bindings
+                    .bindings()
                     .iter()
-                    .any(|b| b.id == BindingId(id.span.start) && b.top_level)
+                    .any(|b| b.id() == BindingId(id.span.start) && b.top_level())
                 {
                     self.hoisted.push(id.span.start);
                 }

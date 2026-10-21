@@ -82,57 +82,61 @@ impl Placement {
         let mut fenced: BTreeSet<_> = barriers.keys().copied().collect();
         for (&file, reasons) in &barriers {
             let module = &modules[&file];
-            let facts = &module.parsed.facts;
+            let facts = &module.parsed.facts();
             // Local immutable reads after initialization cannot invoke user code
             // or throw. Mandatory components still carry their exact ordering.
-            let safe_reads = !facts.commonjs
-                && facts.top_level_await.is_empty()
-                && facts.references.iter().all(|reference| !reference.write)
+            let safe_reads = !facts.commonjs()
+                && facts.top_level_await().is_empty()
                 && facts
-                    .emission
-                    .segments
+                    .references()
                     .iter()
-                    .all(|recipe| recipe.placement.forward_references.is_empty())
+                    .all(|reference| !reference.write())
+                && facts
+                    .emission()
+                    .segments()
+                    .iter()
+                    .all(|recipe| recipe.placement().forward_references().is_empty())
                 && reasons.iter().all(|reason| {
                     matches!(
                         reason,
                         BarrierReason::AbruptCompletion | BarrierReason::DeferredAccess
                     )
                 })
-                && facts.effects.iter().all(|site| {
+                && facts.effects().iter().all(|site| {
                     if !facts
-                        .emission
-                        .execution
+                        .emission()
+                        .execution()
                         .effect_is_module_evaluation(site)
                         .unwrap_or(true)
                     {
                         return true;
                     }
-                    site.reason == ast_segmenter::effects::EffectReason::BindingRead
+                    site.reason() == ast_segmenter::effects::EffectReason::BindingRead
                         && facts
-                            .references
+                            .references()
                             .iter()
-                            .filter(|reference| reference.span == site.span)
+                            .filter(|reference| reference.span() == site.span())
                             .any(|reference| {
                                 reference
-                                    .binding
+                                    .binding()
                                     .and_then(|id| {
-                                        facts.bindings.iter().find(|binding| {
-                                            binding.id == id && !binding.import && binding.top_level
+                                        facts.bindings().iter().find(|binding| {
+                                            binding.id() == id
+                                                && !binding.import()
+                                                && binding.top_level()
                                         })
                                     })
                                     .is_some_and(|binding| {
-                                        binding.declarations.first().is_some_and(|span| {
-                                            let index =
-                                                module.parsed.segments.partition_point(|segment| {
-                                                    segment.span.end <= span.start
-                                                });
-                                            module.parsed.segments[index].span.end
-                                                <= reference.span.start
-                                                || facts.emission.segments[index]
-                                                    .placement
-                                                    .hoisted
-                                                    .contains(&binding.id)
+                                        binding.declarations().first().is_some_and(|span| {
+                                            let index = module.parsed.segments().partition_point(
+                                                |segment| segment.span.end <= span.start,
+                                            );
+                                            module.parsed.segments()[index].span.end
+                                                <= reference.span().start
+                                                || facts.emission().segments()[index]
+                                                    .placement()
+                                                    .hoisted()
+                                                    .contains(&binding.id())
                                         })
                                     })
                             })
@@ -159,16 +163,16 @@ impl Placement {
             .iter()
             .copied()
             .filter(|key| {
-                let placement = &modules[&key.file_id].parsed.facts.emission.segments
+                let placement = &modules[&key.file_id].parsed.facts().emission().segments()
                     [key.segment_idx as usize]
-                    .placement;
+                    .placement();
                 fenced.contains(&key.file_id)
                     && !phase_bound.contains(&key.file_id)
                     && !wait_bound.contains(&key.file_id)
                     && !cjs.contains(key.file_id)
                     && !effects.contains(key)
-                    && !placement.instantiable
-                    && (!placement.declarations.is_empty() || placement.default_expression)
+                    && !placement.instantiable()
+                    && (!placement.declarations().is_empty() || placement.default_expression())
                     && first_abrupt
                         .get(&key.file_id)
                         .is_none_or(|&index| key.segment_idx < index)
@@ -196,38 +200,38 @@ impl Placement {
         }
         for &key in &live {
             let module = &modules[&key.file_id];
-            let facts = &module.parsed.facts;
-            let placement = &facts.emission.segments[key.segment_idx as usize].placement;
+            let facts = &module.parsed.facts();
+            let placement = &facts.emission().segments()[key.segment_idx as usize].placement();
             let definitions = placement
-                .declarations
+                .declarations()
                 .iter()
                 .map(|id| {
                     facts
-                        .bindings
+                        .bindings()
                         .iter()
-                        .find(|b| b.id == *id)
+                        .find(|b| b.id() == *id)
                         .ok_or_eyre("missing placement binding")
                 })
                 .collect::<eyre::Result<Vec<_>>>()?;
-            if !definitions.is_empty() || placement.default_expression {
+            if !definitions.is_empty() || placement.default_expression() {
                 declarations.insert(key);
             }
             if cjs.contains(key.file_id)
                 || wait_bound.contains(&key.file_id)
                 || effects.contains(&key)
-                || (phase_bound.contains(&key.file_id) && !placement.instantiable)
+                || (phase_bound.contains(&key.file_id) && !placement.instantiable())
                 || (fenced.contains(&key.file_id)
-                    && !placement.instantiable
+                    && !placement.instantiable()
                     && !prefixes.contains(&key))
-                || !placement.forward_references.is_empty()
+                || !placement.forward_references().is_empty()
             {
                 pinned.insert(key);
             }
             for binding in &definitions {
-                for &declaration in &binding.declarations {
+                for &declaration in binding.declarations() {
                     let index = module
                         .parsed
-                        .segments
+                        .segments()
                         .partition_point(|s| s.span.end <= declaration.start);
                     let other = SegmentKey::new(key.file_id, index as u32);
                     if let Some(&other) = indices.get(&other) {
@@ -236,18 +240,19 @@ impl Placement {
                     }
                 }
             }
-            for &index in &placement.writes {
-                let reference = &facts.references[index as usize];
-                let Some(binding) = reference.binding.and_then(|id| {
+            for &index in placement.writes() {
+                let reference = &facts.references()[index as usize];
+                let Some(binding) = reference.binding().and_then(|id| {
                     facts
-                        .bindings
+                        .bindings()
                         .iter()
-                        .find(|b| b.id == id && b.top_level && !b.import)
+                        .find(|b| b.id() == id && b.top_level() && !b.import())
                 }) else {
                     continue;
                 };
                 let dependency =
-                    declaration(graph, &ExportIdentity::Binding(key.file_id, binding.id))?.unwrap();
+                    declaration(graph, &ExportIdentity::Binding(key.file_id, binding.id()))?
+                        .unwrap();
                 constraints[indices[&key]].insert(indices[&dependency]);
                 constraints[indices[&dependency]].insert(indices[&key]);
             }
@@ -256,30 +261,30 @@ impl Placement {
         // chunks as live imports. This also keeps snapshots ahead of later writes.
         for &key in &live {
             let module = &modules[&key.file_id];
-            for &index in &module.parsed.facts.emission.segments[key.segment_idx as usize]
-                .placement
-                .eager_reads
+            for &index in module.parsed.facts().emission().segments()[key.segment_idx as usize]
+                .placement()
+                .eager_reads()
             {
-                let reference = &module.parsed.facts.references[index as usize];
-                let Some(binding) = reference.binding.and_then(|id| {
+                let reference = &module.parsed.facts().references()[index as usize];
+                let Some(binding) = reference.binding().and_then(|id| {
                     module
                         .parsed
-                        .facts
-                        .bindings
+                        .facts()
+                        .bindings()
                         .iter()
-                        .find(|b| b.id == id && b.top_level)
+                        .find(|b| b.id() == id && b.top_level())
                 }) else {
                     continue;
                 };
-                if binding.import {
-                    if let Some(linked) = symbols.imports.get(&(key.file_id, binding.id)) {
+                if binding.import() {
+                    if let Some(linked) = symbols.imports.get(&(key.file_id, binding.id())) {
                         if let ExportIdentity::Binding(file, id) = linked.identity {
                             if modules[&file]
                                 .parsed
-                                .facts
-                                .references
+                                .facts()
+                                .references()
                                 .iter()
-                                .any(|r| r.binding == Some(id) && r.write)
+                                .any(|r| r.binding() == Some(id) && r.write())
                             {
                                 pinned.insert(key);
                             }
@@ -287,7 +292,7 @@ impl Placement {
                     }
                 } else {
                     let dependency =
-                        declaration(graph, &ExportIdentity::Binding(key.file_id, binding.id))?
+                        declaration(graph, &ExportIdentity::Binding(key.file_id, binding.id()))?
                             .unwrap();
                     constraints[indices[&key]].insert(indices[&dependency]);
                     constraints[indices[&dependency]].insert(indices[&key]);
@@ -346,15 +351,15 @@ impl Placement {
         }
         let mut readonly_users: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
         for (&(file, binding), linked) in &symbols.imports {
-            let facts = &modules[&file].parsed.facts;
-            if facts.references.iter().any(|reference| {
-                if !reference.write || reference.binding != Some(binding) {
+            let facts = &modules[&file].parsed.facts();
+            if facts.references().iter().any(|reference| {
+                if !reference.write() || reference.binding() != Some(binding) {
                     return false;
                 }
                 let index = modules[&file]
                     .parsed
-                    .segments
-                    .partition_point(|segment| segment.span.end <= reference.span.start);
+                    .segments()
+                    .partition_point(|segment| segment.span.end <= reference.span().start);
                 live.contains(&SegmentKey::new(file, index as u32))
             }) {
                 if let Some(key) = declaration(graph, &linked.identity)? {
@@ -494,10 +499,10 @@ impl Placement {
                                 && component.iter().any(|key| {
                                     let module = &modules[&key.file_id];
                                     let span =
-                                        module.parsed.segments[key.segment_idx as usize].span;
-                                    module.parsed.facts.references.iter().any(|reference| {
-                                        contains(span, reference.span)
-                                            && reference.binding.is_some()
+                                        module.parsed.segments()[key.segment_idx as usize].span;
+                                    module.parsed.facts().references().iter().any(|reference| {
+                                        contains(span, reference.span())
+                                            && reference.binding().is_some()
                                     })
                                 }))
                         {
@@ -577,9 +582,9 @@ impl Placement {
                 && owners[&access.segment] == owners[&access.declaration]
                 && access.segment.file_id != access.declaration.file_id
             {
-                let facts = &modules[&access.segment.file_id].parsed.facts;
-                if facts.emission.execution.is_module_evaluation(
-                    facts.emission.execution.references[access.reference as usize],
+                let facts = &modules[&access.segment.file_id].parsed.facts();
+                if facts.emission().execution().is_module_evaluation(
+                    facts.emission().execution().references()[access.reference as usize],
                 ) {
                     dependencies
                         .get_mut(&access.segment)
@@ -684,16 +689,16 @@ impl ActivationIndex {
     ) -> eyre::Result<Self> {
         let mut index = Self::from_owners(owners);
         for (&file, module) in modules {
-            for reference in &module.parsed.facts.references {
+            for reference in module.parsed.facts().references() {
                 let segment = module
                     .parsed
-                    .segments
-                    .partition_point(|s| s.span.end <= reference.span.start);
+                    .segments()
+                    .partition_point(|s| s.span.end <= reference.span().start);
                 let key = SegmentKey::new(file, segment as u32);
                 let Some(&owner) = owners.get(&key) else {
                     continue;
                 };
-                let Some(binding) = reference.binding else {
+                let Some(binding) = reference.binding() else {
                     continue;
                 };
                 let identity = if symbols.definitions.contains_key(&(file, binding)) {
@@ -861,13 +866,13 @@ fn activation_safe(
         let mut dependencies = Vec::new();
         for dependency in module
             .parsed
-            .facts
-            .dependencies
+            .facts()
+            .dependencies()
             .iter()
             .filter(|dependency| {
-                !dependency.type_only
+                !dependency.type_only()
                     && matches!(
-                        dependency.kind,
+                        dependency.kind(),
                         DependencyKind::Import | DependencyKind::ReExport
                     )
             })
@@ -904,26 +909,26 @@ fn activation_safe(
             let module = &modules[&file];
             for binding in module
                 .parsed
-                .facts
-                .bindings
+                .facts()
+                .bindings()
                 .iter()
-                .filter(|binding| binding.top_level)
+                .filter(|binding| binding.top_level())
             {
-                if !module.parsed.facts.references.iter().any(|reference| {
-                    if reference.binding != Some(binding.id) {
+                if !module.parsed.facts().references().iter().any(|reference| {
+                    if reference.binding() != Some(binding.id()) {
                         return false;
                     }
                     let index = module
                         .parsed
-                        .segments
-                        .partition_point(|segment| segment.span.end <= reference.span.start);
+                        .segments()
+                        .partition_point(|segment| segment.span.end <= reference.span().start);
                     owners.get(&SegmentKey::new(file, index as u32)) == Some(&owner)
                 }) {
                     continue;
                 }
-                let identity = if symbols.definitions.contains_key(&(file, binding.id)) {
-                    ExportIdentity::Binding(file, binding.id)
-                } else if let Some(linked) = symbols.imports.get(&(file, binding.id)) {
+                let identity = if symbols.definitions.contains_key(&(file, binding.id())) {
+                    ExportIdentity::Binding(file, binding.id())
+                } else if let Some(linked) = symbols.imports.get(&(file, binding.id())) {
                     linked.identity.clone()
                 } else {
                     continue;
@@ -991,18 +996,19 @@ fn activation_safe(
     for &key in owners.keys() {
         // Opaque factories/facade jobs have their own activation contract.
         // This final check projects the reconstructed native ESM body events.
-        if connections.is_some() && modules[&key.file_id].parsed.facts.commonjs {
+        if connections.is_some() && modules[&key.file_id].parsed.facts().commonjs() {
             continue;
         }
         let recipe =
-            &modules[&key.file_id].parsed.facts.emission.segments[key.segment_idx as usize];
-        if recipe.connector_only || recipe.placement.instantiable {
+            &modules[&key.file_id].parsed.facts().emission().segments()[key.segment_idx as usize];
+        if recipe.connector_only() || recipe.placement().instantiable() {
             continue;
         }
         events.insert(key);
         native_events.entry(key.file_id).or_default().push(key);
         if !effects.contains(&key)
-            && (!recipe.placement.declarations.is_empty() || recipe.placement.default_expression)
+            && (!recipe.placement().declarations().is_empty()
+                || recipe.placement().default_expression())
         {
             lexical.insert(key);
         }
@@ -1027,7 +1033,7 @@ fn activation_safe(
             (path.clone(), code.static_dependencies().map(|(target, _)| target.clone()).collect())
         }).collect();
         let schedules: BTreeMap<_, _> = placement.schedules.iter()
-            .filter(|(owner, _)| !matches!(owner, Owner::Evaluation(file) if modules[file].parsed.facts.commonjs))
+            .filter(|(owner, _)| !matches!(owner, Owner::Evaluation(file) if modules[file].parsed.facts().commonjs()))
             .map(|(owner, schedule)| (owner.path(graph), schedule)).collect();
         (dependencies, schedules, routes)
     });
@@ -1170,12 +1176,12 @@ pub(super) fn declaration(graph: &SourceGraph, identity: &ExportIdentity) -> eyr
         ExportIdentity::Binding(file, binding) => {
             let facts = graph.file_facts(*file).ok_or_eyre("missing symbol facts")?;
             let binding = facts
-                .bindings
+                .bindings()
                 .iter()
-                .find(|b| b.id == *binding)
+                .find(|b| b.id() == *binding)
                 .ok_or_eyre("missing symbol binding")?;
             let span = *binding
-                .declarations
+                .declarations()
                 .first()
                 .ok_or_eyre("missing symbol declaration")?;
             let segments = graph
@@ -1207,22 +1213,22 @@ pub(super) fn local_names(
         .flat_map(|file| {
             modules[file]
                 .parsed
-                .facts
-                .emission
-                .free_references
+                .facts()
+                .emission()
+                .free_references()
                 .iter()
                 .map(|&index| {
-                    modules[file].parsed.facts.references[index as usize]
-                        .name
-                        .clone()
+                    modules[file].parsed.facts().references()[index as usize]
+                        .name()
+                        .to_owned()
                 })
         })
         .collect();
     let local: HashSet<_> = definitions.iter().copied().collect();
     for &file in &files {
         let module = &modules[&file];
-        for reference in &module.parsed.facts.references {
-            let Some(binding) = reference.binding else {
+        for reference in module.parsed.facts().references() {
+            let Some(binding) = reference.binding() else {
                 continue;
             };
             let symbol = (file, binding);
@@ -1234,8 +1240,8 @@ pub(super) fn local_names(
             };
             let index = module
                 .parsed
-                .segments
-                .partition_point(|segment| segment.span.end <= reference.span.start);
+                .segments()
+                .partition_point(|segment| segment.span.end <= reference.span().start);
             if owners.get(&SegmentKey::new(file, index as u32)) == Some(&owner) {
                 occupied.insert(definition.name.clone());
             }
@@ -1245,10 +1251,10 @@ pub(super) fn local_names(
     for &symbol @ (file, binding) in definitions {
         let original = modules[&file]
             .parsed
-            .facts
-            .bindings
+            .facts()
+            .bindings()
             .iter()
-            .find(|b| b.id == binding)
+            .find(|b| b.id() == binding)
             .ok_or_eyre("missing relocated symbol binding")?;
         let exported = symbols.exports[&file]
             .values()
@@ -1258,21 +1264,21 @@ pub(super) fn local_names(
                 other != file
                     && modules[&other]
                         .parsed
-                        .facts
-                        .emission
-                        .nested_bindings
+                        .facts()
+                        .emission()
+                        .nested_bindings()
                         .iter()
                         .any(|id| {
                             modules[&other]
                                 .parsed
-                                .facts
-                                .bindings
+                                .facts()
+                                .bindings()
                                 .iter()
-                                .any(|b| b.id == *id && b.name == original.name)
+                                .any(|b| b.id() == *id && b.name() == original.name())
                         })
             });
-        let name = if !captured && occupied.insert(original.name.clone()) {
-            original.name.clone()
+        let name = if !captured && occupied.insert(original.name().to_owned()) {
+            original.name().to_owned()
         } else {
             let name = symbols.definitions[&symbol].name.clone();
             occupied.insert(name.clone());
@@ -1312,21 +1318,21 @@ pub(super) fn emit(
         .map(|(&f, route)| (f, Code::request(route.clone(), RequestKind::DynamicImport)))
         .collect();
     for (&file, module) in modules {
-        for dependency in module.parsed.facts.dependencies.iter().filter(|d| {
-            !d.type_only
-                && d.kind == DependencyKind::DynamicImport
+        for dependency in module.parsed.facts().dependencies().iter().filter(|d| {
+            !d.type_only()
+                && d.kind() == DependencyKind::DynamicImport
                 && live.iter().any(|key| {
                     key.file_id == file
                         && contains(
-                            module.parsed.segments[key.segment_idx as usize].span,
-                            d.span,
+                            module.parsed.segments()[key.segment_idx as usize].span,
+                            d.span(),
                         )
                 })
         }) {
             if let Some(dispatch) =
                 cjs.context_dynamic(graph, file, dependency, &connections.namespaces)?
             {
-                values.contexts.insert((file, dependency.id), dispatch);
+                values.contexts.insert((file, dependency.id()), dispatch);
                 continue;
             }
             let target = target_file(graph, file, dependency)?;
@@ -1427,13 +1433,13 @@ mod tests {
                         graph
                             .file_facts(file)
                             .unwrap()
-                            .bindings
+                            .bindings()
                             .iter()
                             .map(move |binding| {
                                 (
-                                    (file, binding.id),
+                                    (file, binding.id()),
                                     crate::symbols::Definition {
-                                        name: binding.name.clone(),
+                                        name: binding.name().to_owned(),
                                     },
                                 )
                             })
