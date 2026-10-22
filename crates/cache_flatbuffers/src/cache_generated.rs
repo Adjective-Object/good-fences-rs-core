@@ -4326,10 +4326,10 @@ impl FingerprintT {
 // struct ParserConfig, aligned to 1
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub struct ParserConfig(pub [u8; 4]);
+pub struct ParserConfig(pub [u8; 5]);
 impl Default for ParserConfig { 
   fn default() -> Self { 
-    Self([0; 4])
+    Self([0; 5])
   }
 }
 impl core::fmt::Debug for ParserConfig {
@@ -4339,6 +4339,7 @@ impl core::fmt::Debug for ParserConfig {
       .field("jsx", &self.jsx())
       .field("definition", &self.definition())
       .field("commonjs", &self.commonjs())
+      .field("detect_esm", &self.detect_esm())
       .finish()
   }
 }
@@ -4388,12 +4389,14 @@ impl<'a> ParserConfig {
     jsx: bool,
     definition: bool,
     commonjs: bool,
+    detect_esm: bool,
   ) -> Self {
-    let mut s = Self([0; 4]);
+    let mut s = Self([0; 5]);
     s.set_typescript(typescript);
     s.set_jsx(jsx);
     s.set_definition(definition);
     s.set_commonjs(commonjs);
+    s.set_detect_esm(detect_esm);
     s
   }
 
@@ -4513,12 +4516,42 @@ impl<'a> ParserConfig {
     }
   }
 
+  pub fn detect_esm(&self) -> bool {
+    let mut mem = core::mem::MaybeUninit::<<bool as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[4..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<bool as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_detect_esm(&mut self, x: bool) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[4..].as_mut_ptr(),
+        core::mem::size_of::<<bool as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
   pub fn unpack(&self) -> ParserConfigT {
     ParserConfigT {
       typescript: self.typescript(),
       jsx: self.jsx(),
       definition: self.definition(),
       commonjs: self.commonjs(),
+      detect_esm: self.detect_esm(),
     }
   }
 }
@@ -4529,6 +4562,7 @@ pub struct ParserConfigT {
   pub jsx: bool,
   pub definition: bool,
   pub commonjs: bool,
+  pub detect_esm: bool,
 }
 impl ParserConfigT {
   pub fn pack(&self) -> ParserConfig {
@@ -4537,6 +4571,7 @@ impl ParserConfigT {
       self.jsx,
       self.definition,
       self.commonjs,
+      self.detect_esm,
     )
   }
 }
@@ -4903,8 +4938,8 @@ impl HazardsT {
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
 pub struct MapToken(pub [u8; 24]);
-impl Default for MapToken {
-  fn default() -> Self {
+impl Default for MapToken { 
+  fn default() -> Self { 
     Self([0; 24])
   }
 }
@@ -27081,3 +27116,4 @@ pub fn finish_size_prefixed_cache_record_buffer<'a, 'b, A: flatbuffers::Allocato
   fbb.finish_size_prefixed(root, Some(CACHE_RECORD_IDENTIFIER));
 }
 }  // pub mod source_cache
+

@@ -77,6 +77,42 @@ fn cold_warm_and_disabled_match_every_owned_fact_and_segment() {
 }
 
 #[test]
+fn syntax_detected_formats_are_cached_without_reparsing_and_recheck_changed_inputs() {
+    let dir = TmpDir::new();
+    let path = write(dir.root(), "vendor.js", "export const value = 1;");
+    let before = ast_segmenter::module_parse_count();
+    let cold = load(&path, ModuleFormat::CommonJs);
+    assert_eq!(cold.write, CacheWrite::Stored);
+    assert_eq!(cold.record.module().body(), ModuleBody::Esm);
+    assert!(cold.record.config().detect_esm());
+    assert!(!cold.record.config().commonjs());
+    assert_eq!(ast_segmenter::module_parse_count(), before + 1);
+    let warm = load(&path, ModuleFormat::CommonJs);
+    assert_eq!(warm.status, CacheStatus::Hit);
+    assert_eq!(cold.record, warm.record);
+    assert_eq!(ast_segmenter::module_parse_count(), before + 1);
+    assert!(matches!(
+        warm.record.module().facts(),
+        ast_segmenter::views::ModuleFacts::Wire(_)
+    ));
+
+    let forced = load(&path, ModuleFormat::Esm);
+    assert!(matches!(
+        forced.status,
+        CacheStatus::Miss(MissReason::InvalidRecord(_))
+    ));
+    assert!(!forced.record.config().detect_esm());
+    fs::write(&path, "module.exports = 1; return;").unwrap();
+    let commonjs = load(&path, ModuleFormat::CommonJs);
+    assert!(commonjs.record.config().commonjs());
+    assert!(matches!(
+        commonjs.record.module().body(),
+        ModuleBody::CommonJs { .. }
+    ));
+    assert_eq!(load(&path, ModuleFormat::CommonJs).status, CacheStatus::Hit);
+}
+
+#[test]
 fn changed_bytes_with_identical_length_and_mtime_miss() {
     let dir = TmpDir::new();
     let path = write(dir.root(), "entry.js", "export const value = 1;");
@@ -353,7 +389,7 @@ fn diagnostics_are_regenerated_for_current_source_policy_and_path() {
     fs::write(&path, "export const value = 1;").unwrap();
     load(&path, ModuleFormat::Esm);
     let bytes = fs::read(sidecar_path(&path)).unwrap();
-    let relocated = write(dir.root(), "new-path.js", "export const value = 1;");
+    let relocated = write(dir.root(), "new-path.cjs", "export const value = 1;");
     fs::write(sidecar_path(&relocated), &bytes).unwrap();
     let error = load_or_parse(
         &logger::StdioLogger::new(),

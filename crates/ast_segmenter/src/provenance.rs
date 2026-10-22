@@ -14,6 +14,7 @@ pub struct ParserConfig {
     jsx: bool,
     definition: bool,
     commonjs: bool,
+    detect_esm: bool,
 }
 
 impl ParserConfig {
@@ -32,18 +33,35 @@ impl ParserConfig {
     pub fn commonjs(&self) -> bool {
         self.commonjs
     }
+
+    pub fn detect_esm(&self) -> bool {
+        self.detect_esm
+    }
+
+    /// Match a requested policy without recomputing its cached syntax decision.
+    pub fn accepts(&self, effective: Self) -> bool {
+        cache_flatbuffers::parser_config_matches(&self.wire(), &effective.wire())
+    }
+
+    pub fn resolved(mut self, source_type: SourceType) -> Self {
+        self.commonjs = source_type.is_commonjs();
+        self
+    }
 }
 
 impl ParserConfig {
     pub fn for_path(path: &Path, package: ModuleFormat) -> eyre::Result<Self> {
-        let mut source_type = SourceType::from_path(path)?;
+        let mut source_type = oxc_utils_parse::bundler_source_type(path)?;
+        let detect_esm = source_type.is_unambiguous() && package == ModuleFormat::CommonJs;
         if source_type.is_unambiguous() {
             source_type = match package {
                 ModuleFormat::Esm => source_type.with_module(true),
                 ModuleFormat::CommonJs => source_type.with_commonjs(true),
             };
         }
-        Ok(Self::from_source_type(source_type))
+        let mut config = Self::from_source_type(source_type);
+        config.detect_esm = detect_esm;
+        Ok(config)
     }
 
     pub fn from_source_type(source_type: SourceType) -> Self {
@@ -52,6 +70,7 @@ impl ParserConfig {
             jsx: source_type.is_jsx(),
             definition: source_type.is_typescript_definition(),
             commonjs: source_type.is_commonjs(),
+            detect_esm: false,
         }
     }
 
@@ -171,6 +190,7 @@ impl SourceProvenance {
                 jsx: c.jsx(),
                 definition: c.definition(),
                 commonjs: c.commonjs(),
+                detect_esm: c.detect_esm(),
             },
             records_hash: std::array::from_fn(|i| p.records_hash().bytes().get(i)),
             wire: Some(wire.clone()),

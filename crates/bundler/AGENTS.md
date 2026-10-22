@@ -17,6 +17,9 @@ still rejects raw typed/JSX modes. Automatic JSX runtime requests use normal
 resolution, never implicit packages or tsconfig discovery. Carry optional compiler
 maps beside prepared source, then compose original-input upstream maps. Include
 compiler-map identity in output keys even when generated JS is unchanged.
+Parse-time ESM syntax disambiguates CommonJS-default .js/.jsx/.ts/.tsx;
+explicit m/c extensions, including JSX variants, retain their format. Reuse
+sealed effective format and detection policy on hits, never rescan cached source.
 Solve cached Ecco precursors on the complete checked graph, using canonical export
 identities; never cache solved effects. Share a solve across async partition rounds.
 Declaration structs key source metadata, memory reuse and parse fingerprints.
@@ -144,10 +147,13 @@ layers and cycles. Closure hashes include transitive original CSS/asset bytes;
 recheck every input. Stylesheets maps CSS roots only; caller-loaded styles remain
 application-ordered. Never flatten CSS imports or mount their discovered
 dependencies as unconditional JS effects.
-Validate css_modules before graph loading; central resource selection precedes
+Validate css_modules and css_modules_exclude before graph loading; central resource selection precedes
 assets for entries/imports/contexts. Custom suffixes identify CSS; Everything
 selects known CSS inputs, never arbitrary JS/JSON/binary graph inputs. CSS imports
 use their own selection, not an inherited module flag.
+Filename suffix exclusions override scoping, never stylesheet classification;
+excluded inputs retain global URL defaults and cannot be composition targets.
+The same CssOptions must reach entries, CSS closures and output naming.
 Keep CSS Oxc pinned separately from JS Oxc and use its re-exported allocator
 (locked 0.137.0; Rust >=1.95). Own decoded selector names, original checked UTF-8
 spans, scope markers and composition requests; never persist its arena nodes.

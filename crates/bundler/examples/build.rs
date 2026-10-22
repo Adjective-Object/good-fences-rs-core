@@ -124,6 +124,7 @@ impl FixtureConstructor {
 struct FixtureCss {
     load: CssLoad,
     css_modules: CssModules,
+    css_modules_exclude: Vec<String>,
 }
 
 fn main() -> eyre::Result<()> {
@@ -333,6 +334,7 @@ fn build(
         options.output.source_maps = config.output.source_maps;
         options.css.load = config.css.load;
         options.css.css_modules = config.css.css_modules;
+        options.css.css_modules_exclude = config.css.css_modules_exclude;
     }
     if auto_mount {
         options.css.load = CssLoad::AutoMount;

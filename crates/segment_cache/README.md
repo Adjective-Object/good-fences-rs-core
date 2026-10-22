@@ -18,7 +18,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 17/extractor 24.
+Production loading/publication uses typed FlatBuffers, schema 18/extractor 25.
 The last parser-identified source-map directive span is sealed and validated;
 resolved upstream maps remain separate output-only bundler inputs.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.
@@ -54,6 +54,10 @@ source bytes and protects the payload against accidental corruption. Identity
 includes schema/extractor versions, the pinned OXC revision and effective parser
 language/module/definition mode. Current parser defaults are part of the
 extractor version; bump it when defaults or extraction/support policy change.
+Syntax detection for ambiguous CommonJS-default extensions is cached with the
+effective module format. Memory/disk hits compare the requested detection policy
+without parsing again; package-policy changes or changed source bytes invalidate
+the decision. Borrowed semantic validation uses the sealed effective mode.
 
 `CacheRecord::from_parsed` and `decode` validate all UTF-8 ranges,
 source-local IDs, links and ordering. Decode limits input to 16 MiB, 2,097,152

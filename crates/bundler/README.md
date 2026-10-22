@@ -11,7 +11,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 17/extractor 24); parse fingerprints include both active
+`.seg.fb` records (schema 18/extractor 25); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -44,15 +44,19 @@ separate from the production AST cache's typed FlatBuffer records.
 
 ### TypeScript and JSX inputs
 
-`BuildSession` precompiles `.ts`, `.mts`, `.cts`, `.tsx` and `.jsx` inputs with the
+`BuildSession` precompiles `.ts`, `.mts`, `.cts`, `.tsx`, `.jsx` and their explicit
+module JSX variants `.mtsx`/`.mjsx`/`.ctsx`/`.cjsx` with the
 pinned Oxc transformer/code generator before extraction and dependency resolution.
 Type-only dependencies disappear before resolution; runtime TypeScript constructs
 and JSX become JavaScript. Declaration files are not executable inputs.
 The generated parser mode preserves the input's module format, including
 CommonJS `.cts` inputs. Default entry names use JavaScript `.mjs`/`.cjs` extensions.
-As with JavaScript, ambiguous extensions follow the package module format.
-The pinned transformer does not convert ESM imports/exports to CommonJS; use
-`.mts` or `"type":"module"` for ESM, and CommonJS syntax for CommonJS inputs.
+Static import/export syntax or `import.meta` disambiguates CommonJS-default
+`.js`/`.jsx`/`.ts`/`.tsx` as ESM; dynamic import alone does not. The effective mode
+and detection policy are cached, so hits never repeat syntax classification.
+Explicit m/c extensions always win, including JSX variants; ESM syntax in
+`.cjs`/`.cjsx` is an error. The pinned transformer does not convert ESM imports/
+exports to CommonJS in `.cts`/`.ctsx`; type-only imports are still erased.
 
 JSX uses the automatic production runtime with the default `react` import source;
 its injected runtime requests resolve through the ordinary checked package graph.
@@ -755,6 +759,15 @@ Suffixes such as `.module.cjs`, `.module.ts` and `.module.json` still use the
 sealed generated JavaScript parser mode, not the original extension's mode.
 `"everything"` does not reclassify JavaScript, JSON or binary inputs as CSS.
 Each imported stylesheet uses its own selection rule, not its parent's flag.
+`BuildOptions.css.css_modules_exclude` is a default-empty list of dotted filename
+suffixes using the same grammar. Exclusions override module selection, including
+`Everything` and custom suffixes, without changing a selected file's stylesheet
+kind. For example, `[".global.css", ".global.scss", ".global.sass"]` keeps those
+selectors global while other styles remain scoped. Matching is case-sensitive
+and uses the filename only. Excluded styles retain the global stylesheet
+URL-default export contract, not a CSS Modules mapping object. The same policy
+applies to entries, transitive CSS imports and composition targets; composing
+from an excluded stylesheet is an error.
 
 Selected modules scope classes and IDs to `_` plus ten base64url SHA-256 digest
 characters. The versioned `css-local-v1` hash uses the normalized project-relative
@@ -1333,7 +1346,7 @@ shipped defaults); unknown fields, including nested fields, are errors:
 {
   "target": "node",
   "output": {"base_url": "./"},
-  "css": {"load": "caller-loaded", "css_modules": false},
+  "css": {"load": "caller-loaded", "css_modules": false, "css_modules_exclude": []},
   "resolveConditions": []
 }
 ```
@@ -1347,7 +1360,9 @@ Sass stylesheets compile through the native resource pipeline.
 `css_modules` accepts `false`, `true` (`.module.css`/`.module.scss`/`.module.sass`), `"everything"` (known CSS/Sass
 inputs only) or `"ext:.custom.suffix"`; `load` accepts `"caller-loaded"` or
 `"auto-mount"`, independently of selection. Export-name conversion is fixed
-camelCase, not configurable. Invalid bases/suffixes, collisions, illegal or cyclic
+camelCase, not configurable. `css_modules_exclude` accepts dotted filename
+suffixes such as `[".global.css", ".global.scss"]`, overriding module selection.
+Invalid bases/suffixes, collisions, illegal or cyclic
 composition and unsupported/recovered module syntax return errors, never partial
 transform success. ICSS `:import`/`:export` and `@value` are unsupported; preprocessors
 other than Sass are unsupported. See the full CSS contract above for selector/value boundaries.

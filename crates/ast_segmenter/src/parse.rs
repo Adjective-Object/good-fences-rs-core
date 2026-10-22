@@ -153,7 +153,7 @@ pub fn parse_module_with_prepared_declarations(
     }
     let provenance = crate::SourceProvenance::extracted(
         source,
-        crate::ParserConfig::from_source_type(parsed.program.source_type),
+        crate::ParserConfig::for_path(path, package_format)?.resolved(parsed.program.source_type),
         body,
         &segments.iter().map(|s| s.span).collect::<Vec<_>>(),
         &facts,

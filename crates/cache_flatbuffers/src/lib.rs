@@ -23,8 +23,8 @@ use eyre::{ensure, Result};
 use sha2::{Digest, Sha256};
 
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-pub const SCHEMA_VERSION: u32 = 17;
-pub const EXTRACTOR_VERSION: u32 = 24;
+pub const SCHEMA_VERSION: u32 = 18;
+pub const EXTRACTOR_VERSION: u32 = 25;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 32;
 
@@ -32,6 +32,18 @@ const CHECKSUM_BYTES: usize = 32;
 /// structural verification, including when Ecco is embedded in another root.
 pub fn validate_ecco(root: wire::ParsedFile<'_>) -> Result<()> {
     verify::ecco(root)
+}
+
+/// Detection policy is an input; the effective format is sealed extraction output.
+pub fn parser_config_matches(
+    requested: &wire::ParserConfig,
+    effective: &wire::ParserConfig,
+) -> bool {
+    requested.typescript() == effective.typescript()
+        && requested.jsx() == effective.jsx()
+        && requested.definition() == effective.definition()
+        && requested.detect_esm() == effective.detect_esm()
+        && (requested.detect_esm() || requested.commonjs() == effective.commonjs())
 }
 
 fn options() -> flatbuffers::VerifierOptions {
@@ -117,11 +129,12 @@ impl WireRecord {
             "cache source mismatch"
         );
         ensure!(
-            root.config() == &config
-                && provenance.config() == &config
+            parser_config_matches(&config, root.config())
+                && provenance.config() == root.config()
                 && (!config.definition() || config.typescript()),
             "cache parser configuration mismatch"
         );
+        let config = root.config();
         let module_bytes = root.module().bytes();
         let records_hash: [u8; 32] = Sha256::digest(module_bytes).into();
         ensure!(

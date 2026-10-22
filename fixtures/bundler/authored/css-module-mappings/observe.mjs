@@ -7,7 +7,11 @@ export async function observe({ entries, entry, directory, stylesheets }) {
   const mapping = await import(pathToFileURL(entries[entry]));
   assert.deepEqual(Object.keys(mapping), ['buttonLabel']);
   assert.match(mapping.buttonLabel, /^_[A-Za-z0-9_-]{10}$/u);
-  const css = readFileSync(path.join(directory, Object.values(stylesheets)[0]), 'utf8');
+  const styles = Object.entries(stylesheets);
+  const module = styles.find(([source]) => source.endsWith('style.module.css'))[1];
+  const global = styles.find(([source]) => source.endsWith('theme.global.css'))[1];
+  assert(readFileSync(path.join(directory, global), 'utf8').includes('.external-shell'));
+  const css = readFileSync(path.join(directory, module), 'utf8');
   assert(css.includes(`.${mapping.buttonLabel}, #${mapping.buttonLabel}`));
   assert(css.includes(`.theme .${mapping.buttonLabel}`));
   assert(css.includes('color: green'));

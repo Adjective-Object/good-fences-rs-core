@@ -185,7 +185,11 @@ impl CacheRecord {
         };
         // Integrity was checked above. This gate traverses borrowed records once,
         // before any CacheRecord can escape, including on the cold write path.
-        crate::validate::validate_module(&(&module).into(), source, config)?;
+        crate::validate::validate_module(
+            &(&module).into(),
+            source,
+            module.parsed.provenance().config(),
+        )?;
         Ok(Self {
             source_len: wire.root().source_len(),
             source_hash: std::array::from_fn(|i| wire.root().source_hash().bytes().get(i)),

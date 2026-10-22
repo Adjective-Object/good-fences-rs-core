@@ -59,16 +59,7 @@ impl From<CssModules> for Value {
 impl CssModules {
     pub(crate) fn validate(&self) -> eyre::Result<()> {
         if let Self::Extension(suffix) = self {
-            ensure!(
-                suffix.starts_with('.')
-                    && suffix[1..].split('.').all(|part| {
-                        !part.is_empty()
-                            && part
-                                .bytes()
-                                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-                    }),
-                "invalid css_modules extension {suffix:?}: expected a dotted suffix such as .module.css"
-            );
+            validate_suffix(suffix, "css_modules")?;
         }
         Ok(())
     }
@@ -99,10 +90,54 @@ impl CssModules {
     }
 }
 
+fn validate_suffix(suffix: &str, option: &str) -> eyre::Result<()> {
+    ensure!(
+        suffix.starts_with('.')
+            && suffix[1..].split('.').all(|part| {
+                !part.is_empty()
+                    && part
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            }),
+        "invalid {option} extension {suffix:?}: expected a dotted suffix such as .module.css"
+    );
+    Ok(())
+}
+
+impl crate::build::CssOptions {
+    pub(crate) fn validate(&self) -> eyre::Result<()> {
+        self.css_modules.validate()?;
+        for suffix in &self.css_modules_exclude {
+            validate_suffix(suffix, "css_modules_exclude")?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn excludes_module(&self, path: &Path) -> bool {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                self.css_modules_exclude
+                    .iter()
+                    .any(|suffix| name.ends_with(suffix))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resource::{kind, ResourceKind};
+    use crate::resource::ResourceKind;
+
+    fn kind(path: &Path, selection: &CssModules) -> ResourceKind {
+        crate::resource::kind(
+            path,
+            &crate::build::CssOptions {
+                css_modules: selection.clone(),
+                ..Default::default()
+            },
+        )
+    }
 
     #[test]
     fn selection_is_validated_and_round_trips() {
@@ -134,6 +169,56 @@ mod tests {
             );
         }
         assert!(CssModules::Extension(String::new()).validate().is_err());
+    }
+
+    #[test]
+    fn suffix_exclusions_override_selection_without_changing_resource_kinds() {
+        let mut options = crate::build::CssOptions {
+            css_modules: CssModules::Everything,
+            css_modules_exclude: vec![
+                ".global.css".into(),
+                ".global.scss".into(),
+                ".global.sass".into(),
+            ],
+            ..Default::default()
+        };
+        options.validate().unwrap();
+        assert_eq!(
+            serde_json::from_str::<crate::build::CssOptions>(
+                &serde_json::to_string(&options).unwrap()
+            )
+            .unwrap(),
+            options
+        );
+        for suffix in ["css", "scss", "sass"] {
+            assert_eq!(
+                crate::resource::kind(Path::new(&format!("theme.global.{suffix}")), &options),
+                ResourceKind::Stylesheet { module: false }
+            );
+            assert_eq!(
+                crate::resource::kind(Path::new(&format!("theme.module.{suffix}")), &options),
+                ResourceKind::Stylesheet { module: true }
+            );
+        }
+        assert_eq!(
+            crate::resource::stylesheet_kind(Path::new("import.global.css"), &options),
+            ResourceKind::Stylesheet { module: false }
+        );
+        assert_eq!(
+            crate::resource::kind(Path::new("directory.global.css/local.css"), &options),
+            ResourceKind::Stylesheet { module: true }
+        );
+        options.css_modules = CssModules::Extension(".js".into());
+        options.css_modules_exclude = vec![".global.js".into()];
+        assert_eq!(
+            crate::resource::kind(Path::new("theme.global.js"), &options),
+            ResourceKind::Stylesheet { module: false }
+        );
+        for suffix in ["", "global.css", "..css", ".css/path", ".css?raw"] {
+            options.css_modules_exclude = vec![suffix.into()];
+            let error = options.validate().unwrap_err();
+            assert!(error.to_string().contains("css_modules_exclude"), "{error}");
+        }
     }
 
     #[test]
@@ -179,7 +264,10 @@ mod tests {
         assert_eq!(
             crate::resource::stylesheet_kind(
                 Path::new("extensionless-import"),
-                &CssModules::Everything
+                &crate::build::CssOptions {
+                    css_modules: CssModules::Everything,
+                    ..Default::default()
+                }
             ),
             ResourceKind::Stylesheet { module: true }
         );

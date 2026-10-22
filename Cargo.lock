@@ -259,6 +259,7 @@ dependencies = [
  "oxc_sourcemap",
  "oxc_span",
  "oxc_transformer",
+ "oxc_utils_parse",
  "percent-encoding",
  "sasso",
  "segment_cache",

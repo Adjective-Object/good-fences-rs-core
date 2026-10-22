@@ -20,31 +20,35 @@ pub(crate) enum RequireValue {
     Namespace,
 }
 
-pub(crate) fn kind(path: &Path, selection: &crate::build::CssModules) -> ResourceKind {
-    if selection.matches(path)
+pub(crate) fn kind(path: &Path, options: &crate::build::CssOptions) -> ResourceKind {
+    if options.css_modules.matches(path)
         || path
             .extension()
             .is_some_and(|extension| matches!(extension.to_str(), Some("css" | "scss" | "sass")))
     {
-        return stylesheet_kind(path, selection);
+        return stylesheet_kind(path, options);
     }
     match path.extension().and_then(|extension| extension.to_str()) {
         Some("json" | "jsonc") => ResourceKind::Json,
-        Some("js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx") => ResourceKind::Script,
+        Some(
+            "js" | "mjs" | "cjs" | "jsx" | "mjsx" | "cjsx" | "ts" | "mts" | "cts" | "tsx" | "mtsx"
+            | "ctsx",
+        ) => ResourceKind::Script,
         _ => ResourceKind::Asset,
     }
 }
 
 /// A CSS @import supplies a stylesheet even if its filename has no CSS suffix.
-pub(crate) fn stylesheet_kind(path: &Path, selection: &crate::build::CssModules) -> ResourceKind {
+pub(crate) fn stylesheet_kind(path: &Path, options: &crate::build::CssOptions) -> ResourceKind {
     ResourceKind::Stylesheet {
-        module: matches!(selection, crate::build::CssModules::Everything)
-            || selection.matches(path),
+        module: (matches!(options.css_modules, crate::build::CssModules::Everything)
+            || options.css_modules.matches(path))
+            && !options.excludes_module(path),
     }
 }
 
 pub(crate) fn is_asset(path: &Path) -> bool {
-    kind(path, &crate::build::CssModules::Disabled) == ResourceKind::Asset
+    kind(path, &crate::build::CssOptions::default()) == ResourceKind::Asset
 }
 
 pub(crate) fn url_module(

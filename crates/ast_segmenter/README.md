@@ -211,7 +211,7 @@ unchanged.
 | CJS directives/hashbang/top-level return | Preserved; hashbang recorded separately; one opaque body even when empty |
 | CJS wrapper `arguments` access, including arrows capturing it | Diagnostic; ordinary nested functions' own `arguments` supported |
 | ESM environment probes | `typeof require`, read-only `module`/`exports` references and property reads remain native globals, including lodash-style short-circuit aliases; no injected bindings or constant replacement |
-| Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or ESM loader use other than `typeof require` | Diagnostic; explicit extension/package format is never guessed from content |
+| Mixed-file static ESM/CJS syntax, ESM wrapper writes/deletes/updates/calls/construction/tags, or ESM loader use other than `typeof require` | Diagnostic; detecting ESM never enables CommonJS wrapper operations in it |
 | Unshadowed eval, nested `with`, `import.meta` | Diagnostic; lexically shadowed eval is an ordinary call |
 | Top-level await/for-await | ESM source spans in `facts.top_level_await`, excluding nested functions; CJS diagnostic. Dependency/SCC scheduling belongs to the native bundler host |
 | Import attributes/options/phases (including type import options) | Diagnostic |
@@ -223,8 +223,11 @@ Environment reads do not prove a guard true or false: host globals, getters,
 short-circuit evaluation, unguarded ReferenceErrors and shadowed lexical TDZ all
 retain JavaScript semantics. Aliases are ordinary values, not inferred CommonJS
 wrappers or loaders. Direct wrapper operations remain a conservative source-local
-gate, even inside a guard. ESM syntax in CommonJS-mode `.js` produces an actionable
-package `"type":"module"` / `.mjs` diagnostic, not content-based format inference.
+gate, even inside a guard. Static ESM syntax disambiguates CommonJS-default
+`.js`/`.jsx`/`.ts`/`.tsx`; dynamic import alone does not. Explicit m/c extensions,
+including JSX variants, override that fallback. ESM syntax in `.cjs`/`.cjsx`
+is an error, not a format override. Provenance seals the effective format and
+detection policy so cache hits do not repeat syntax classification.
 Conditional callee tests and discarded sequence prefixes are reads, not invoked
 values; selected branches and final sequence values still undergo operation checks.
 Logical callee operands are conservatively checked because either can supply a value.

@@ -1,7 +1,10 @@
 # cache_flatbuffers
 
-- This is the production `.seg.fb` backend (schema 17/extractor 24).
+- This is the production `.seg.fb` backend (schema 18/extractor 25).
   `segment_cache` adds source-local semantic validation before exposing records.
+- Parser config seals effective format and syntax-detection policy. Requested
+  CommonJS-default detection may match cached ESM only under identical policy;
+  root/provenance configs and module/facts/Ecco format must still agree exactly.
 - Upstream maps use verified typed `WireSourceMap` bytes in `.upstream.seg.fb`,
   with script/input/location seals, bounded verification and borrowed token/index
   validation. Preserve null contents and unmapped tokens; never unpack on hits.

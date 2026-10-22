@@ -87,7 +87,7 @@ pub(crate) fn checked_source(
         ast_segmenter::ParserConfig::for_path(&crate::resource::parser_path(path, format), format)?
     };
     ensure!(
-        provenance.config() == config,
+        provenance.config().source_type() == config.source_type(),
         "{}: source parser configuration mismatch; reparse and rebuild before emission",
         path.display()
     );

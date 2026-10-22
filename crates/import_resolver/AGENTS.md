@@ -47,6 +47,8 @@ defaults. Select a subpath before evaluating its conditions.
 Apply exact one-step aliases before builtin/external policy and downstream Node
 builtin resolution. Do not expand prefixes or recurse through aliases. Resolved
 stubs remain real files subject to consumer inventory/graph validation.
+Explicit .mjsx/.cjsx requests may resolve .mtsx/.ctsx, matching .mjs/.cjs
+TypeScript substitution; do not widen default extension probing implicitly.
 Browser defaults activate browser; structural browser requests reject remaining
 Node builtins even with explicit external policy and native addons, never inject
 polyfills/empty stubs. Preserve original importer/request in errors.

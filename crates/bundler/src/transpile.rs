@@ -10,7 +10,6 @@ use eyre::{ensure, WrapErr};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::Statement;
 use oxc_codegen::{Codegen, CodegenOptions};
-use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_transformer::{Module, TransformOptions, Transformer};
 use url::Url;
@@ -26,7 +25,7 @@ pub(crate) struct Compiled {
 pub(crate) fn required(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|extension| extension.to_str()),
-        Some("ts" | "mts" | "cts" | "tsx" | "jsx")
+        Some("ts" | "mts" | "cts" | "tsx" | "mtsx" | "ctsx" | "jsx" | "mjsx" | "cjsx")
     )
 }
 
@@ -53,7 +52,8 @@ fn compile_inner(
         "TypeScript declaration files are not executable inputs"
     );
     let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, config.source_type()).parse();
+    let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package)?;
+    let config = config.resolved(parsed.program.source_type);
     check_errors(
         "parse",
         parsed
@@ -205,6 +205,7 @@ fn checked_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxc_parser::Parser;
 
     fn compile_source(path: &str, source: &str, package: ModuleFormat) -> Compiled {
         let compiled = compile(Path::new(path), source, package, false).unwrap();
@@ -274,7 +275,7 @@ export = result;"#,
 
     #[test]
     fn transpile_jsx_automatic_runtime_preserves_module_format() {
-        for path in ["view.jsx", "view.tsx"] {
+        for path in ["view.jsx", "view.tsx", "view.mjsx", "view.mtsx"] {
             let esm = compile_source(
                 path,
                 "export const view = <><div title=\"hello\" /></>;",
@@ -293,6 +294,11 @@ export = result;"#,
             } else {
                 assert!(commonjs.source.contains("import "));
             }
+        }
+        for path in ["view.cjsx", "view.ctsx"] {
+            let commonjs = compile_source(path, "module.exports = <div />;", ModuleFormat::Esm);
+            assert!(commonjs.source.contains("require(\"react/jsx-runtime\")"));
+            assert!(!commonjs.source.contains("import "));
         }
     }
 
@@ -341,17 +347,14 @@ export = result;"#,
             "export {} from './side-effects';",
             "export {};",
         ] {
-            let error = compile(
-                Path::new("invalid.cts"),
-                source,
-                ModuleFormat::CommonJs,
-                false,
-            )
-            .unwrap_err();
-            assert!(
-                format!("{error:#}").contains("cannot lower ESM imports/exports to CommonJS"),
-                "{source}: {error:#}"
-            );
+            for path in ["invalid.cts", "invalid.ctsx"] {
+                let error =
+                    compile(Path::new(path), source, ModuleFormat::CommonJs, false).unwrap_err();
+                assert!(
+                    format!("{error:#}").contains("cannot lower ESM imports/exports to CommonJS"),
+                    "{source}: {error:#}"
+                );
+            }
         }
         assert!(!required(Path::new("plain.js")));
     }

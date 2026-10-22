@@ -224,6 +224,8 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                     "jsx" => &["ts", "tsx"],
                     "mjs" => &["mts"],
                     "cjs" => &["cts"],
+                    "mjsx" => &["mtsx"],
+                    "cjsx" => &["ctsx"],
                     _ => &[],
                 };
 

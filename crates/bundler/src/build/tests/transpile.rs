@@ -12,11 +12,73 @@ fn coordinates(text: &str, offset: usize) -> (u32, u32) {
                 line += 1;
                 column = 0;
             }
+
             _ => column += ch.len_utf16() as u32,
         }
         cr = ch == '\r';
     }
     (line, column)
+}
+
+#[test]
+fn explicit_jsx_module_extensions_preserve_format_through_resolution_and_cache_hits() {
+    let dir = TmpDir::new();
+    write(dir.root(), "package.json", r#"{"type":"commonjs"}"#);
+    write(dir.root(), "main.mjs",
+        "import typed from './typed.mjsx'; import plain from './plain.mjsx'; \
+         import legacy from './legacy.cjsx'; import legacyTyped from './legacy-typed.cjsx'; \
+         console.log(typed.props.children, plain.props.children, legacy.props.children, legacyTyped.props.children);");
+    write(
+        dir.root(),
+        "typed.mtsx",
+        "const view: unknown = <div>typed</div>; export default view;",
+    );
+    write(dir.root(), "plain.mjsx", "export default <div>plain</div>;");
+    write(
+        dir.root(),
+        "legacy.cjsx",
+        "module.exports = <div>legacy</div>;",
+    );
+    write(
+        dir.root(),
+        "legacy-typed.ctsx",
+        "const view: unknown = <div>typed-legacy</div>; export = view;",
+    );
+    write(
+        dir.root(),
+        "node_modules/react/package.json",
+        r#"{"exports":{"./jsx-runtime":{"import":"./runtime.mjs","require":"./runtime.cjs"}}}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/react/runtime.mjs",
+        "export function jsx(type, props) { return {type, props}; } export {jsx as jsxs};",
+    );
+    write(
+        dir.root(),
+        "node_modules/react/runtime.cjs",
+        "exports.jsx = exports.jsxs = (type, props) => ({type, props});",
+    );
+    let config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    assert_eq!(
+        observe(&cold.product.artifacts),
+        b"typed plain legacy typed-legacy\n"
+    );
+    assert_eq!(session.build(&config).unwrap().counters.source_parses, 0);
+    let mut fresh = BuildSession::new(dir.root()).unwrap();
+    let disk = fresh.build(&config).unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.counters.source_reparses, 0);
+    assert_eq!(disk.product.artifacts, cold.product.artifacts);
+    write(
+        dir.root(),
+        "legacy.cjsx",
+        "export default <div>invalid</div>;",
+    );
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(error.contains("explicit .cjs/.cjsx"), "{error}");
 }
 
 fn origin(artifacts: &Artifacts, needle: &str) -> (String, u32, u32, Option<String>, String) {

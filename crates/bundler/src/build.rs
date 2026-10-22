@@ -62,6 +62,8 @@ pub struct BuildOptions {
 pub struct CssOptions {
     pub load: CssLoad,
     pub css_modules: CssModules,
+    /// Dotted filename suffixes excluded from module scoping, even when selected.
+    pub css_modules_exclude: Vec<String>,
 }
 
 /// Built-in stylesheet loading policies; custom strategies are not public API.
@@ -265,7 +267,7 @@ impl BuildSession {
         let before_parses = crate::rewrite::parse_counts();
         let mut warnings = Vec::new();
         let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
-        options.css.css_modules.validate()?;
+        options.css.validate()?;
         let declaration_span = tracing::info_span!("build.declarations").entered();
         let environment = match options.resolver.target_env {
             TargetEnv::Node => ecco::Environment::Node,
@@ -293,7 +295,7 @@ impl BuildSession {
             &self.root,
             &inventory,
             &public_base,
-            &options.css.css_modules,
+            &options.css,
             &options.resolver,
             options.output.source_maps,
         );
@@ -381,7 +383,7 @@ impl BuildSession {
             let _span = tracing::info_span!("build.integrate").entered();
             let mut discovered = BTreeSet::new();
             let result = (|| -> eyre::Result<()> {
-                let kind = crate::resource::kind(&path, &options.css.css_modules);
+                let kind = crate::resource::kind(&path, &options.css);
                 if matches!(
                     kind,
                     crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset
@@ -610,7 +612,7 @@ impl BuildSession {
         // CSS closure identity can change while its generated module stays equal.
         for path in sources.keys() {
             if matches!(
-                crate::resource::kind(path, &options.css.css_modules),
+                crate::resource::kind(path, &options.css),
                 crate::resource::ResourceKind::Stylesheet { .. }
             ) {
                 self.sources
@@ -629,7 +631,7 @@ impl BuildSession {
         let mut upstreams = BTreeMap::new();
         if options.output.source_maps {
             for path in sources.keys().filter(|path| {
-                crate::resource::kind(path, &options.css.css_modules)
+                crate::resource::kind(path, &options.css)
                     == crate::resource::ResourceKind::Script
             }) {
                 let source = &self.sources[path];
@@ -841,7 +843,7 @@ impl BuildSession {
             .iter()
             .filter(|(path, _)| {
                 options.output.source_maps
-                    && crate::resource::kind(path, &options.css.css_modules)
+                    && crate::resource::kind(path, &options.css)
                         == crate::resource::ResourceKind::Script
             })
             .map(|(path, text)| {
@@ -880,7 +882,7 @@ impl BuildSession {
         let finalize_span = tracing::info_span!("build.finalize").entered();
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
-            let kind = crate::resource::kind(path, &options.css.css_modules);
+            let kind = crate::resource::kind(path, &options.css);
             if kind == crate::resource::ResourceKind::Asset {
                 let input = &self.sources[path].input;
                 artifacts

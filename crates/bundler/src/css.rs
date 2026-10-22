@@ -41,7 +41,7 @@ pub(crate) struct Styles<'a> {
     requests: BTreeMap<PathBuf, Vec<Request>>,
     compositions: BTreeMap<PathBuf, Vec<(crate::css_syntax::Name, PathBuf)>>,
     public_base: &'a crate::output_url::PublicBase,
-    selection: &'a crate::build::CssModules,
+    options: &'a crate::build::CssOptions,
     transform_identity: [u8; 32],
     names: BTreeMap<PathBuf, crate::css_names::PreparedNames>,
     name_registry: crate::css_names::Registry,
@@ -52,7 +52,7 @@ impl<'a> Styles<'a> {
         root: &'a Path,
         inventory: &'a crate::build::Inventory,
         public_base: &'a crate::output_url::PublicBase,
-        selection: &'a crate::build::CssModules,
+        options: &'a crate::build::CssOptions,
         resolver_options: &import_resolver::node_resolver::caching::NodeModulesResolverOptions,
         source_maps: bool,
     ) -> Self {
@@ -70,7 +70,7 @@ impl<'a> Styles<'a> {
             requests: BTreeMap::new(),
             compositions: BTreeMap::new(),
             public_base,
-            selection,
+            options,
             transform_identity: {
                 let mut digest = Sha256::new();
                 digest.update(crate::css_names::REVISION);
@@ -148,7 +148,7 @@ impl<'a> Styles<'a> {
             let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
             let mut compositions = Vec::new();
             if matches!(
-                resource::stylesheet_kind(&path, self.selection),
+                resource::stylesheet_kind(&path, self.options),
                 resource::ResourceKind::Stylesheet { module: true }
             ) {
                 for composition in crate::css_syntax::parse(&path, text)?.compositions {
@@ -187,7 +187,7 @@ impl<'a> Styles<'a> {
                     );
                     ensure!(
                         matches!(
-                            resource::kind(&target, self.selection),
+                            resource::kind(&target, self.options),
                             resource::ResourceKind::Stylesheet { module: true }
                         ),
                         "{}: non-module composition target {}",
@@ -289,7 +289,7 @@ impl<'a> Styles<'a> {
                     continue;
                 }
                 if matches!(
-                    resource::stylesheet_kind(path, self.selection),
+                    resource::stylesheet_kind(path, self.options),
                     resource::ResourceKind::Stylesheet { module: true }
                 ) {
                     let text = &self.texts[path];

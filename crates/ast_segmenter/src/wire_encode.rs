@@ -548,6 +548,7 @@ impl crate::ParserConfig {
             self.jsx(),
             self.definition(),
             self.commonjs(),
+            self.detect_esm(),
         )
     }
 }

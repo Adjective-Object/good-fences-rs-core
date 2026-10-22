@@ -22,9 +22,12 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 17/extractor 24 retains typed nested module buffers and wire seals,
+- Schema 18/extractor 25 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
+- Persist effective syntax-detected format alongside its requested detection
+  policy. Match requests without reparsing; run semantic validation against the
+  cached sealed effective config, never the unresolved package fallback.
 - The last parser-identified source-map directive span is extraction evidence;
   validate its UTF-8 range and directive syntax without reparsing. Actual maps
   are output-only bundler inputs independent of JS extraction.

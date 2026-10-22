@@ -1902,6 +1902,126 @@ fn css_modules_prune_bindings_not_stylesheets_and_keep_loader_effects() {
 }
 
 #[test]
+fn css_modules_suffix_exclusions_follow_closures_entries_and_cache_transitions() {
+    let dir = TmpDir::new();
+    write(dir.root(), "local.css", ".localName { color: red }");
+    write(
+        dir.root(),
+        "theme.global.css",
+        ".external { color: blue } #app { height: 100% }",
+    );
+    write(
+        dir.root(),
+        "theme.global.scss",
+        "$color: green; .sassExternal { color: $color }",
+    );
+    write(
+        dir.root(),
+        "theme.global.sass",
+        ".indentedExternal\n  color: purple\n",
+    );
+    write(
+        dir.root(),
+        "parent.css",
+        "@import './theme.global.css'; .parentName { color: black }",
+    );
+    let entry = "export { localName } from './local.css';\n\
+        export { default as globalCss } from './theme.global.css';\n\
+        import './theme.global.scss'; import './theme.global.sass'; import './parent.css';";
+    let mut config = options();
+    config.css.css_modules = CssModules::Everything;
+    config.entries.insert(
+        "global".into(),
+        Entry {
+            path: "theme.global.css".into(),
+            output_name: None,
+            namespace: true,
+        },
+    );
+    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+        write(dir.root(), "main.mjs", entry);
+        config.css.load = load;
+        config.css.css_modules_exclude = vec![
+            ".global.css".into(),
+            ".global.scss".into(),
+            ".global.sass".into(),
+        ];
+        let mut session = BuildSession::new(dir.root()).unwrap();
+        let cold = session.build(&config).unwrap();
+        for (filename, selector) in [
+            ("theme.global.css", ".external"),
+            ("theme.global.scss", ".sassExternal"),
+            ("theme.global.sass", ".indentedExternal"),
+        ] {
+            let resource = &cold.product.artifacts.stylesheets[&dir.root().join(filename)];
+            let css = std::str::from_utf8(&cold.product.artifacts.resources[resource]).unwrap();
+            assert!(css.contains(selector), "{filename}: {css}");
+        }
+        let global_entry = &cold.product.artifacts.entries["global"];
+        assert_eq!(
+            observe_named(
+                &cold.product.artifacts,
+                &format!(
+                    "{CSS_DOM_RECORDER}\nconst main = await import('./main.mjs'); \
+                 const global = await import('./{}'); \
+                 assert.equal(typeof main.globalCss, 'string'); \
+                 assert.equal(main.globalCss, global.default); \
+                 assert.deepEqual(Object.keys(global), ['default']); \
+                 assert.match(main.localName, /^_[A-Za-z0-9_-]{{10}}$/); \
+                 assert.equal(links.length, {}); console.log('excluded');",
+                    global_entry.display().to_string().replace('\\', "/"),
+                    if load == CssLoad::AutoMount { 5 } else { 0 },
+                )
+            ),
+            b"excluded\n"
+        );
+        let warm = session.build(&config).unwrap();
+        assert_eq!(warm.counters.source_parses, 0);
+        let mut fresh = BuildSession::new(dir.root()).unwrap();
+        let disk = fresh.build(&config).unwrap();
+        assert_eq!(disk.counters.source_parses, 0);
+        assert_eq!(disk.product.artifacts.files, cold.product.artifacts.files);
+
+        config.css.css_modules_exclude.clear();
+        let scoped = session.build(&config).unwrap();
+        let resource = &scoped.product.artifacts.stylesheets[&dir.root().join("theme.global.css")];
+        let css = std::str::from_utf8(&scoped.product.artifacts.resources[resource]).unwrap();
+        assert!(!css.contains(".external") && !css.contains("#app"), "{css}");
+        config.css.css_modules_exclude = vec![
+            ".global.css".into(),
+            ".global.scss".into(),
+            ".global.sass".into(),
+        ];
+        let restored = session.build(&config).unwrap();
+        assert_eq!(
+            restored.product.artifacts.files,
+            cold.product.artifacts.files
+        );
+        assert_eq!(
+            restored.product.artifacts.resources,
+            cold.product.artifacts.resources
+        );
+
+        write(
+            dir.root(),
+            "composed.css",
+            ".composed { composes: external from './theme.global.css' }",
+        );
+        write(
+            dir.root(),
+            "main.mjs",
+            "export { composed } from './composed.css';",
+        );
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(error.contains("non-module composition target"), "{error}");
+        write(dir.root(), "main.mjs", entry);
+        config.css.css_modules_exclude.push(".css/".into());
+        let error = format!("{:#}", session.build(&config).err().unwrap());
+        assert!(error.contains("css_modules_exclude"), "{error}");
+    }
+}
+
+#[test]
 fn css_modules_composition_resolves_before_pruning_under_both_loaders() {
     let dir = TmpDir::new();
     let source = r#"
@@ -7216,7 +7336,7 @@ fn esm_environment_probes_reject_real_mixed_wrapper_operations() {
 }
 
 #[test]
-fn esm_javascript_package_format_diagnostic_is_actionable_and_recoverable() {
+fn esm_javascript_syntax_is_cached_without_package_module_declarations() {
     let dir = TmpDir::new();
     write(
         dir.root(),
@@ -7234,13 +7354,15 @@ fn esm_javascript_package_format_diagnostic_is_actionable_and_recoverable() {
         "export const value = 42;",
     );
     let mut session = BuildSession::new(dir.root()).unwrap();
-    let error = format!("{:#}", session.build(&options()).err().unwrap());
-    assert!(error.contains("index.js"), "{error}");
-    assert!(
-        error.contains("missing required \"type\":\"module\""),
-        "{error}"
-    );
-    assert!(error.contains("use .mjs instead of .js"), "{error}");
+    let cold = session.build(&options()).unwrap();
+    assert_eq!(observe(&cold.product.artifacts), b"42\n");
+    assert_eq!(session.build(&options()).unwrap().counters.source_parses, 0);
+    let cached = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&options())
+        .unwrap();
+    assert_eq!(cached.counters.source_parses, 0);
+    assert_eq!(cached.product.artifacts, cold.product.artifacts);
     write(
         dir.root(),
         "node_modules/compiled/package.json",
@@ -7260,6 +7382,27 @@ fn esm_javascript_package_format_diagnostic_is_actionable_and_recoverable() {
         dir.root().join("node_modules/compiled/index.mjs"),
     )
     .unwrap();
+    assert_eq!(
+        observe(&session.build(&options()).unwrap().product.artifacts),
+        b"42\n"
+    );
+    write(
+        dir.root(),
+        "node_modules/compiled/package.json",
+        r#"{"name":"compiled","main":"index.cjs"}"#,
+    );
+    write(
+        dir.root(),
+        "node_modules/compiled/index.cjs",
+        "export const value = 42;",
+    );
+    let error = format!("{:#}", session.build(&options()).err().unwrap());
+    assert!(error.contains("explicit .cjs"), "{error}");
+    write(
+        dir.root(),
+        "node_modules/compiled/index.cjs",
+        "exports.value = 42;",
+    );
     assert_eq!(
         observe(&session.build(&options()).unwrap().product.artifacts),
         b"42\n"

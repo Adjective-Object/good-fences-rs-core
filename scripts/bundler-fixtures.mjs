@@ -193,7 +193,7 @@ function validateFixtureConfig(config) {
     }
   }
   if (Object.hasOwn(config, 'css')) {
-    object(config.css, [], 'fixtureConfig.css', ['load', 'css_modules']);
+    object(config.css, [], 'fixtureConfig.css', ['load', 'css_modules', 'css_modules_exclude']);
     if (Object.hasOwn(config.css, 'load')) {
       check(['caller-loaded', 'auto-mount'].includes(config.css.load), 'invalid css.load');
     }
@@ -202,6 +202,12 @@ function validateFixtureConfig(config) {
       check(typeof selection === 'boolean' || selection === 'everything'
         || (typeof selection === 'string' && /^ext:(?:\.[A-Za-z0-9_-]+)+$/u.test(selection)),
       'invalid css.css_modules');
+    }
+    if (Object.hasOwn(config.css, 'css_modules_exclude')) {
+      check(Array.isArray(config.css.css_modules_exclude)
+        && config.css.css_modules_exclude.every((suffix) =>
+          typeof suffix === 'string' && /^(?:\.[A-Za-z0-9_-]+)+$/u.test(suffix)),
+      'invalid css.css_modules_exclude: expected an array of dotted suffixes');
     }
   }
 }

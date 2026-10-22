@@ -33,7 +33,7 @@ pub(super) fn enqueue(
         .into_iter()
         .filter(|path| scheduled.insert(path.clone()))
         .filter(|path| {
-            if crate::resource::kind(path, &options.css.css_modules)
+            if crate::resource::kind(path, &options.css)
                 == crate::resource::ResourceKind::Script
             {
                 true
@@ -64,7 +64,7 @@ pub(super) fn read(
     let input = tracing::info_span!("prepare.read_bytes")
         .in_scope(|| fs::read(path))
         .wrap_err_with(|| format!("source {}", path.display()))?;
-    if crate::resource::kind(path, &options.css.css_modules)
+    if crate::resource::kind(path, &options.css)
         != crate::resource::ResourceKind::Script
     {
         return Ok(Prepared::Resource { input, format });
@@ -151,7 +151,7 @@ pub(super) fn load(
         previous.filter(|s| {
             s.input == input
                 && s.text == text
-                && s.record.config() == config
+                && config.accepts(s.record.config())
                 && s.record.matches_prepared_declarations(declarations)
         })
     });

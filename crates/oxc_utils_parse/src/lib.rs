@@ -14,10 +14,23 @@ pub enum ModuleFormat {
     CommonJs,
 }
 
+/// Infer language and explicit module modes, including prefixed JSX extensions.
+pub fn bundler_source_type(path: &std::path::Path) -> eyre::Result<SourceType> {
+    Ok(
+        match path.extension().and_then(|extension| extension.to_str()) {
+            Some("mjsx") => SourceType::jsx().with_module(true),
+            Some("mtsx") => SourceType::tsx().with_module(true),
+            Some("cjsx") => SourceType::jsx().with_commonjs(true),
+            Some("ctsx") => SourceType::tsx().with_commonjs(true),
+            _ => SourceType::from_path(path)?,
+        },
+    )
+}
+
 /// Parse using extension-sensitive language modes and an explicit package policy.
 ///
-/// `.mjs`/`.mts` and `.cjs`/`.cts` override the package format. Other supported
-/// extensions use it without content-based module detection. This checks parser
+/// Explicit module extensions override the package fallback. Static ESM syntax
+/// disambiguates `.js`/`.jsx`/`.ts`/`.tsx` CommonJS-default inputs. This checks parser
 /// diagnostics only; consumers must also check semantic-builder diagnostics.
 pub fn parse_bundler_file<'a>(
     allocator: &'a Allocator,
@@ -25,8 +38,9 @@ pub fn parse_bundler_file<'a>(
     path: &std::path::Path,
     package_format: ModuleFormat,
 ) -> eyre::Result<ParserReturn<'a>> {
-    let mut source_type = SourceType::from_path(path)
+    let mut source_type = bundler_source_type(path)
         .wrap_err_with(|| format!("{}: unsupported source extension", path.display()))?;
+    let detect_esm = source_type.is_unambiguous() && package_format == ModuleFormat::CommonJs;
     if source_type.is_unambiguous() {
         source_type = match package_format {
             ModuleFormat::Esm => source_type.with_module(true),
@@ -34,25 +48,31 @@ pub fn parse_bundler_file<'a>(
         };
     }
     let parsed = Parser::new(allocator, source, source_type).parse();
-    if source_type.is_commonjs() && path.extension().is_some_and(|ext| ext == "js") {
-        use oxc_ast::ast::Statement;
+    if source_type.is_commonjs()
+        && path
+            .extension()
+            .is_some_and(|extension| extension == "cjs" || extension == "cjsx")
+        && parsed.module_record.has_module_syntax
+    {
         use oxc_span::GetSpan;
-        if let Some(declaration) = parsed.program.body.iter().find(|statement| {
-            matches!(
-                statement,
-                Statement::ImportDeclaration(_)
-                    | Statement::ExportNamedDeclaration(_)
-                    | Statement::ExportDefaultDeclaration(_)
-                    | Statement::ExportAllDeclaration(_)
-            )
-        }) {
-            let span = declaration.span();
-            eyre::bail!(
-                "{}: mixed CommonJS/ESM syntax at bytes {}..{}: this ESM .js input's package is missing required \"type\":\"module\" in package.json (or explicitly selects CommonJS); add \"type\":\"module\" or use .mjs instead of .js",
-                path.display(), span.start, span.end
-            );
-        }
+        let span = parsed
+            .program
+            .body
+            .iter()
+            .find(|statement| statement.as_module_declaration().is_some())
+            .map_or(parsed.program.span, GetSpan::span);
+        eyre::bail!(
+            "{}: mixed CommonJS/ESM syntax at bytes {}..{}: ESM syntax is not allowed in an explicit .cjs/.cjsx input; use an ESM or ambiguous extension",
+            path.display(), span.start, span.end
+        );
     }
+    // Reparse detected modules in ESM mode to enforce strict/module grammar;
+    // the CommonJS probe preserves wrapper returns for actual CommonJS inputs.
+    let parsed = if detect_esm && parsed.module_record.has_module_syntax {
+        Parser::new(allocator, source, source_type.with_module(true)).parse()
+    } else {
+        parsed
+    };
     ensure!(
         !parsed.panicked && parsed.errors.is_empty(),
         "{}: parser diagnostics (panicked={}): {:?}",
@@ -171,6 +191,34 @@ mod tests {
                 Some(ModuleFormat::Esm),
             ),
             (
+                "file.mjsx",
+                "const value = <div />;",
+                false,
+                true,
+                Some(ModuleFormat::Esm),
+            ),
+            (
+                "file.mtsx",
+                "const value: unknown = <div />;",
+                true,
+                true,
+                Some(ModuleFormat::Esm),
+            ),
+            (
+                "file.cjsx",
+                "module.exports = <div />; return;",
+                false,
+                true,
+                Some(ModuleFormat::CommonJs),
+            ),
+            (
+                "file.ctsx",
+                "const value: unknown = <div />; return;",
+                true,
+                true,
+                Some(ModuleFormat::CommonJs),
+            ),
+            (
                 "file.cjs",
                 "module.exports = 1; return;",
                 false,
@@ -203,55 +251,71 @@ mod tests {
     }
 
     #[test]
-    fn esm_javascript_requires_explicit_package_format() {
+    fn esm_syntax_overrides_the_commonjs_package_fallback() {
         for source in [
             "export const value = 1;",
             "export default 1;",
             "export * from './dep.js';",
             "import './dep.js';",
+            "const url = import.meta.url;",
+        ] {
+            for extension in ["js", "jsx", "ts", "tsx"] {
+                let allocator = Allocator::default();
+                let parsed = parse_bundler_file(
+                    &allocator,
+                    source,
+                    Path::new(&format!("compiled.{extension}")),
+                    ModuleFormat::CommonJs,
+                )
+                .unwrap();
+                assert!(
+                    parsed.program.source_type.is_module(),
+                    "{extension}: {source}"
+                );
+            }
+        }
+        for source in [
+            "import('./dep.js');",
+            "module.exports = 'export default 1'; return;",
+            "/* import './dep.js' */ exports.value = 1;",
         ] {
             let allocator = Allocator::default();
-            let error = parse_bundler_file(
+            let parsed = parse_bundler_file(
                 &allocator,
                 source,
-                Path::new("compiled.js"),
+                Path::new("common.js"),
                 ModuleFormat::CommonJs,
             )
-            .err()
-            .unwrap()
-            .to_string();
-            assert!(
-                error.contains("compiled.js") && error.contains("bytes "),
-                "{error}"
-            );
-            assert!(
-                error.contains("missing required \"type\":\"module\""),
-                "{error}"
-            );
-            assert!(error.contains("use .mjs instead of .js"), "{error}");
-            assert!(parse_bundler_file(
-                &allocator,
-                source,
-                Path::new("compiled.js"),
-                ModuleFormat::Esm,
-            )
-            .is_ok());
-            assert!(parse_bundler_file(
-                &allocator,
-                source,
-                Path::new("compiled.mjs"),
-                ModuleFormat::CommonJs,
-            )
-            .is_ok());
+            .unwrap();
+            assert!(parsed.program.source_type.is_commonjs(), "{source}");
         }
-        let allocator = Allocator::default();
-        assert!(parse_bundler_file(
-            &allocator,
-            "import('./dep.js');",
-            Path::new("dynamic.js"),
-            ModuleFormat::CommonJs,
-        )
-        .is_ok());
+        for source in ["export {}; return;", "export const await = 1;"] {
+            let allocator = Allocator::default();
+            assert!(
+                parse_bundler_file(
+                    &allocator,
+                    source,
+                    Path::new("invalid.js"),
+                    ModuleFormat::CommonJs,
+                )
+                .is_err(),
+                "{source}"
+            );
+        }
+        for source in [
+            "export const value = 1;",
+            "import './dep.js';",
+            "import.meta.url;",
+        ] {
+            for path in ["explicit.cjs", "explicit.cjsx"] {
+                let allocator = Allocator::default();
+                let error =
+                    parse_bundler_file(&allocator, source, Path::new(path), ModuleFormat::Esm)
+                        .err()
+                        .unwrap();
+                assert!(error.to_string().contains("explicit .cjs"), "{error}");
+            }
+        }
     }
 
     #[test]

@@ -8,6 +8,7 @@ struct ParserConfig {
   jsx:bool;
   definition:bool;
   commonjs:bool;
+  detect_esm:bool;
 }
 
 // No sentinel: byte offset/ID zero is a real identity.

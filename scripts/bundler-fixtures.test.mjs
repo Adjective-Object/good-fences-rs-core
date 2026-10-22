@@ -293,6 +293,8 @@ for (const [name, mutate, expected] of [
   ['null fixture config', (m) => { m.fixtureConfig = null; }, /must be an object/u],
   ['invalid loader', (m) => { m.fixtureConfig = { css: { load: 'custom' } }; }, /invalid css.load/u],
   ['invalid module suffix', (m) => { m.fixtureConfig = { css: { css_modules: 'ext:../css' } }; }, /invalid css.css_modules/u],
+  ['invalid module exclusions', (m) => { m.fixtureConfig = { css: { css_modules_exclude: '.global.css' } }; }, /invalid css.css_modules_exclude/u],
+  ['invalid excluded suffix', (m) => { m.fixtureConfig = { css: { css_modules_exclude: ['.global.css', '../css'] } }; }, /invalid css.css_modules_exclude/u],
   ['oversized fixture config', (m) => { m.fixtureConfig = { output: { base_url: 'x'.repeat(16384) } }; }, /exceeds 16 KiB/u],
   ['observer traversal', (m) => { m.cssObservation = '../observe.mjs'; }, /relative path/u],
   ['nested observer', (m) => { m.cssObservation = 'nested/observe.mjs'; }, /sibling .mjs/u],
@@ -396,6 +398,17 @@ test('async synthesis output contracts validate inputs and retain build/backend/
     assert.equal(run()[0].stage, 'backend');
     writeFileSync(driver, '#!/bin/sh\nexit 1\n');
     assert.equal(run()[0].stage, 'build');
+  });
+});
+
+test('CSS module filename exclusions accept dotted global suffixes', () => {
+  withCorpus(({ root }) => {
+    const css = {
+      css_modules: 'everything',
+      css_modules_exclude: ['.global.css', '.global.scss', '.global.sass'],
+    };
+    addCase(root, 'example', { fixtureConfig: { css } });
+    assert.deepEqual(discoverCases(root)[0].manifest.fixtureConfig.css, css);
   });
 });
 

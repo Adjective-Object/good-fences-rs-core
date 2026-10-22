@@ -58,6 +58,10 @@ to reconstruct split declarations. Keep destructuring and CJS bodies indivisible
 modes; validate parser and semantic diagnostics before extraction. It returns
 owned records or an error, never a skipped/partial executable program. Keep the
 legacy unused-tracker adapter separate. TS/JSX parsing is not transformation.
+Static ESM syntax disambiguates CommonJS-default .js/.jsx/.ts/.tsx only;
+explicit m/c extensions (including JSX variants) retain their format.
+Seal the effective mode together with the detection policy in provenance;
+warm consumers reuse that decision, never rescan source for module syntax.
 
 `ParsedModule::facts` is the occurrence-preserving bundler IR; legacy
 `RawModuleDeps` remains a lossy compatibility adapter. Binding IDs are first

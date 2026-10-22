@@ -7,6 +7,8 @@ invalidate filesystem/configuration changes through `mark_dirty_root`.
 Run `cargo test -p import_resolver`; filesystem tests use managed directories.
 Default extension probing also accepts `.jsonc`, after the existing extensions;
 explicit `.jsonc` requests resolve normally. Package metadata remains strict JSON.
+Explicit `.mjsx`/`.cjsx` requests also probe `.mtsx`/`.ctsx` sources respectively,
+just as `.mjs`/`.cjs` probe `.mts`/`.cts`; default extension order is unchanged.
 
 `structural::StructuralResolver` implements `DependencyResolver` with explicit
 import/require conditions and separate caches. Package-target cache keys include
