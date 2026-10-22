@@ -11,7 +11,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 16/extractor 22); parse fingerprints include both active
+`.seg.fb` records (schema 16/extractor 23); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -114,6 +114,14 @@ routes and no namespace/unknown/CommonJS surface or possible namespace `then`.
 Every runtime reference to a module binding must be a recognized wrapper's module
 argument. An exported module, escape, direct operation, unsupported selector or
 unknown wrapper rejects that entire instance, not only the offending use.
+Selectors constructed inside their own module initializer (including its option
+closures) also leave the entire instance original. Graphs using external-native
+linking retain original instances: that separate clause-preserving emission mode
+does not yet support lazy lexical reconstruction.
+Nested statement-value initializers lacking exact result-binding boundary
+evidence (for example sequences or annotated TS declarations) also retain the
+original instance rather than guessing its liveness. Required-value conditional
+uses keep their original construction sites.
 
 Options must be absent or have checked source-local plain literal-property
 evidence. Initializer/prototype keys, computed/spread/accessor/method properties
@@ -134,7 +142,9 @@ unused; residual argument effects and all genuine constructor/getter/additional
 argument dependencies remain. Invocation summaries do not make enclosing
 statements pure. Nested local initializer results with reads outside their
 construction are conservatively live even without a segment value demand;
-getter-parameter reads alone never make a discarded selector live.
+the actual initialized result binding comes from checked AST declaration evidence.
+Captured reads count regardless of textual order; unrelated locals and getter
+parameters never make a discarded selector live.
 Symbol definitions and execution accesses exclude the removed
 module binding; scheduling consumes only the proven invocation contributions.
 Original options are retained once through a `PreservedSlot`
@@ -171,15 +181,32 @@ Eligible selectors declared in one source can therefore belong to separate
 consumer owners, with independent implementation owners and ordinary shared
 helper/effect masks. Conservative constraints may still prevent relocation.
 
-**Native emission of a certified transformation currently returns an explicit
-error** requiring phase 6. It does not silently emit the original broad demand
-or an incomplete replacement. Remaining work is typed post-placement
-`Connections` reconstruction: synthesized
-module instances keyed by source chunkgroup × original module identity ×
-destination projection, callbacks against selected projections, and selector
-module-argument rewrites. The original options slot must supply one preserved
-value, not duplicated expressions. Unconfigured and unsupported-instance builds
-retain their existing native emission behavior.
+Native emission now consumes those typed placement requests in `Connections`.
+Synthesized instances are keyed by **final source chunkgroup × original module
+identity × destination projection**. Compatible selectors in one group share
+their destination's exact selected-export projection; different source groups,
+original modules or destinations have independent loaded/warming state. A
+projection evaluates the original barrel and reexports only demanded selected
+native bindings, never the original broad namespace.
+
+Each instance uses a collision-safe owner-local binding initialized at the
+retained selector's original module-argument slot. Nested/conditional selectors
+therefore do not run wrappers eagerly. Only that argument is rewritten: wrapper
+class, getter expression/name, extra arguments, methods, caches, errors, retries
+and metrics remain the registered library's actual code. Unused constructions
+discard their consumed module/getter inputs but preserve genuine extra-argument
+evaluation in order.
+
+The original options slot initializes one immutable generated binding at its
+original scheduled phase, even when all selectors are unused. Cross-owner
+consumers receive real native read-only imports of that value, not copies of the
+expression; private transport names never enter public namespace projections.
+Source initialization/throw checks still validate the final reconstructed graph.
+No global table, synthetic library runtime, source loading or reparse is used.
+Use `link::esm_with_options` with the same registrations as partitioning; plain
+`esm`/`esm_with_execution` require the default empty configuration.
+`deferred_esm` declines certified lazy plans rather than partially reconstructing
+them. Unconfigured and unsupported-instance builds retain original behavior.
 Configuration-only changes invalidate derived output, reuse source facts and
 participate in no-op detection; registration ordering/duplicates are immaterial.
 

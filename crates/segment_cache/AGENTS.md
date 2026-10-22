@@ -22,7 +22,7 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 16/extractor 22 retains typed nested module buffers and wire seals,
+- Schema 16/extractor 23 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
   Shared `PreparedDeclarations`
@@ -50,6 +50,8 @@
   boundaries and excludes initializer/prototype keys without reparsing values.
   Result-binding evidence links the exact initialized identifier and complete
   declarator to its construction, including parenthesized initializer boundaries.
+  Annotated TS declarators omit this optional evidence; do not reject otherwise
+  valid cached syntax or infer initializer boundaries from type tokens.
 - Sidecars use requested lexical source paths; unique sibling staging plus
   closed tempfile paths and std atomic rename, never unlink-before-rename. Last publisher wins;
   recheck source before publish/return. Cache failures are reported nonfatally,

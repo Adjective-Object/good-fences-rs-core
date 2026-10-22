@@ -449,9 +449,7 @@ Keep constructor/wrapper/getter dependencies.
 Only live selector values activate independent selected-export roots, carrying
 original-barrel evaluation, to a nested/dead fixed point. Lazy activation origins
 identify declaration/candidate/selector; their source_edge is original-import
-provenance, not a fabricated or retained dependency. Configured certified emission
-errors until phase-6 post-placement wiring exists; never emit broad
-or hollow replacements. Stamp graph revision, effect policy and canonical runtime
+provenance, not a fabricated or retained dependency. Stamp graph revision, effect policy and canonical runtime
 configuration; configuration-only edits reuse source extraction.
 Registered allocation values are not unconditional ModuleEffect demands.
 Keep residual argument/forced effects and original initialization/throw phases;
@@ -461,6 +459,17 @@ including generated module-constructor reads at selectors, never removed binding
 `link::native_placement` exposes immutable graph/plan-local owners, schedules,
 cut bindings and LazyWiring inputs for later Connections synthesis. Options name
 one original PreservedOptionsValue owner/span, never copied expressions.
+Connections groups lazy wiring by final source owner/original module/destination
+projection and synthesizes only real registered classes plus selected native ESM
+projections with original barrel evaluation. Owner-local instance bindings initialize
+at original selector module-argument slots, never eager wrapper execution.
+Options initialize once through their original cached slot/phase and cross owners
+through real read-only native imports; exclude transport names from public surfaces.
+Elided wrappers consume module/getter reads but retain genuine extra arguments.
+Lazy activation origins never populate source-import occurrence rewrite maps.
+Selectors inside their own module initializer and external-native clause mode
+remain whole-instance fallbacks. Default low-level emission has no registrations;
+configured plans require esm_with_options. Deferred islands decline lazy plans.
 
 `partition` and public builds use precise planning; `partition_conservative`
 is the explicit namespace reference. Per-requested-name `AsyncExport` roots

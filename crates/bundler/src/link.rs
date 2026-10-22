@@ -213,7 +213,8 @@ pub struct PreservedOptionsValue {
 
 /// Solve native segment placement under checked transformed obligations without
 /// emitting code. Results are local to this graph/plan generation; no optional
-/// source-island activation is inferred. Lazy emission still requires synthesis.
+/// source-island activation is inferred. Connections consumes these same inputs
+/// when emitting certified lazy wiring.
 pub fn native_placement(
     graph: &SourceGraph,
     plan: &ChunkPlan,
@@ -250,6 +251,10 @@ pub fn esm(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Artifacts> {
+    ensure!(
+        plan.lazy_modules.is_current(graph, policy, &[]),
+        "lazy runtime configuration requires esm_with_options"
+    );
     esm_plan(graph, plan, policy, sources)?.render()
 }
 
@@ -300,12 +305,11 @@ pub fn deferred_esm(
     policy: &EffectPolicy,
     sources: &BTreeMap<PathBuf, String>,
 ) -> eyre::Result<Option<DeferredEsm>> {
-    ensure!(
-        plan.lazy_modules.modules().is_empty(),
-        "certified lazy-module emission requires post-placement lazy wiring (phase 6)"
-    );
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
+    if !plan.lazy_modules.modules().is_empty() {
+        return Ok(None);
+    }
     let relocations = BTreeMap::new();
     let modules = load_modules(graph, plan, sources, &relocations)?;
     let symbols = crate::symbols::Symbols::link(graph, plan)?;
@@ -333,6 +337,10 @@ pub fn esm_with_execution(
     sources: &BTreeMap<PathBuf, String>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts> {
+    ensure!(
+        plan.lazy_modules.is_current(graph, policy, &[]),
+        "lazy runtime configuration requires esm_with_options"
+    );
     esm_plan_configured(
         graph,
         plan,
@@ -427,10 +435,6 @@ pub(crate) fn esm_plan_configured(
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let _span = tracing::info_span!("build.link").entered();
-    ensure!(
-        plan.lazy_modules.modules().is_empty(),
-        "certified lazy-module emission requires post-placement lazy wiring (phase 6)"
-    );
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = load_modules(graph, plan, sources, relocations)?;

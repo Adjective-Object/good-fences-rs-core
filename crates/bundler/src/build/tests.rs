@@ -98,7 +98,7 @@ fn lazy_certification_configuration_invalidates_output_not_source_facts() {
 }
 
 #[test]
-fn lazy_certified_public_build_fails_explicitly_until_native_wiring_exists() {
+fn lazy_certified_public_build_reuses_extraction_and_invalidates_output() {
     use crate::lazy_modules::{ConstructorExport, LazyRuntime};
     let dir = TmpDir::new();
     write(
@@ -131,11 +131,20 @@ fn lazy_certified_public_build_fails_explicitly_until_native_wiring_exists() {
         import: export("Read"),
         action: export("Action"),
     });
-    let error = session
-        .build(&options)
-        .err()
-        .expect("no fake transformed output");
-    assert!(format!("{error:#}").contains("post-placement lazy wiring"));
+    let enabled = session.build(&options).unwrap();
+    assert_eq!(enabled.counters.source_parses, 0);
+    assert_ne!(
+        enabled.product.artifacts.files,
+        disabled.product.artifacts.files
+    );
+    assert_ne!(
+        enabled.product.fingerprints.output,
+        disabled.product.fingerprints.output
+    );
+    let mut cached = BuildSession::new(dir.root()).unwrap();
+    let hit = cached.build(&options).unwrap();
+    assert_eq!(hit.counters.source_parses, 0);
+    assert_eq!(hit.product.artifacts.files, enabled.product.artifacts.files);
     options.output.lazy_runtimes.clear();
     let restored = session.build(&options).unwrap();
     assert_eq!(

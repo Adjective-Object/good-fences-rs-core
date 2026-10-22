@@ -200,6 +200,30 @@ fn lazy_candidates_default_parameters_fall_back_on_fresh_and_cached_paths() {
 }
 
 #[test]
+fn lazy_typed_result_declarations_omit_optional_boundary_evidence_without_reparsing() {
+    let source = "const mod = new M(() => import('./child.mjs'));
+        (() => { const selected: Wrapper = new R(mod, ns => ns.first); return selected; })();";
+    let original = record(source, "lazy.ts", ModuleFormat::Esm);
+    let selector = original
+        .module()
+        .facts()
+        .emission()
+        .lazy_selectors()
+        .get(0)
+        .unwrap();
+    assert!(selector.result_binding().is_none());
+    assert!(selector.result_declaration().is_none());
+    let parses = ast_segmenter::module_parse_count();
+    let cached =
+        CacheRecord::decode(&original.encode(source).unwrap(), source, original.config()).unwrap();
+    assert_eq!(
+        cached.to_parsed(source).unwrap().facts().emission(),
+        original.module().facts().emission()
+    );
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+}
+
+#[test]
 fn lazy_candidates_reject_resealed_unsupported_arrow_shapes() {
     use ast_segmenter::views::CalleeShape;
     use serde_json::json;

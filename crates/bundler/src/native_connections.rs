@@ -145,6 +145,18 @@ pub(super) struct NativeRequest {
     pub whole: bool,
 }
 
+pub(super) struct LazyInstance {
+    pub name: String,
+    pub constructor: String,
+    pub projection: PathBuf,
+    pub options: Option<String>,
+}
+
+pub(super) struct OptionsConnection {
+    pub name: String,
+    pub value: PreservedOptionsValue,
+}
+
 pub(super) struct Connections {
     pub names: BTreeMap<Owner, HashMap<crate::symbols::Symbol, String>>,
     pub bindings: BTreeMap<Owner, Vec<BindingConnection>>,
@@ -156,6 +168,9 @@ pub(super) struct Connections {
     pub async_facades: BTreeMap<AsyncSiteId, PathBuf>,
     pub native_exports: BTreeMap<SegmentKey, Code>,
     pub native_requests: HashMap<(u32, ast_segmenter::owned::DependencyId), NativeRequest>,
+    pub lazy: BTreeMap<Owner, Vec<LazyInstance>>,
+    pub lazy_selectors: BTreeMap<(u32, u32), String>,
+    pub lazy_options: BTreeMap<SegmentKey, OptionsConnection>,
     addresses: HashMap<ExportIdentity, String>,
     demanded: BTreeMap<Owner, Vec<ExportIdentity>>,
 }
@@ -196,6 +211,9 @@ impl Connections {
             async_facades: BTreeMap::new(),
             native_exports: BTreeMap::new(),
             native_requests: HashMap::new(),
+            lazy: BTreeMap::new(),
+            lazy_selectors: BTreeMap::new(),
+            lazy_options: BTreeMap::new(),
             addresses: HashMap::new(),
             demanded: BTreeMap::new(),
         };
@@ -252,12 +270,14 @@ impl Connections {
             }
         }
         result.plan_async_projections(graph, plan, symbols, prepared, placement, cjs)?;
+        let lazy_wiring = placement.lazy_requests(graph, plan)?;
+        result.plan_lazy(graph, plan, prepared, placement, &lazy_wiring)?;
         // Unknown native export-star/name validation is not a canonical lexical
         // link. Placement keeps these jobs intact; cached native recipes retain
         // their typed external requests and original linking clauses.
         if modules.keys().any(|&file| has_externals(graph, file)) {
             result.plan_pruned_exports(graph, modules, symbols, prepared, placement, cjs)?;
-            result.plan_native_requests(graph, modules, symbols, placement, cjs)?;
+            result.plan_native_requests(graph, modules, symbols, placement, cjs, plan)?;
             return Ok(result);
         }
         let defaults = Values::new(prepared);
@@ -351,16 +371,26 @@ impl Connections {
         }
         for &file in surfaces {
             let owner = Owner::Evaluation(seams[&file]);
-            let private = result
-                .demanded
-                .get(&owner)
-                .into_iter()
-                .flatten()
-                .any(|identity| {
-                    !symbols.exports[&file]
-                        .values()
-                        .any(|linked| &linked.identity == identity)
-                });
+            let private_options = result.lazy_options.values().any(|options| {
+                options.value.owner == owner
+                    && result.lazy.iter().any(|(&source, instances)| {
+                        source != owner
+                            && instances
+                                .iter()
+                                .any(|instance| instance.options.as_ref() == Some(&options.name))
+                    })
+            });
+            let private = private_options
+                || result
+                    .demanded
+                    .get(&owner)
+                    .into_iter()
+                    .flatten()
+                    .any(|identity| {
+                        !symbols.exports[&file]
+                            .values()
+                            .any(|linked| &linked.identity == identity)
+                    });
             if !private || cjs.contains(file) {
                 continue;
             }
@@ -530,8 +560,198 @@ impl Connections {
             output.default_export = exported.contains("default");
             result.exports.insert(owner, output);
         }
-        result.plan_native_requests(graph, modules, symbols, placement, cjs)?;
+        result.plan_native_requests(graph, modules, symbols, placement, cjs, plan)?;
+        let mut imported_options = BTreeSet::new();
+        let mut exported_options = BTreeSet::new();
+        for wiring in &lazy_wiring {
+            let Some(options) = &wiring.options else {
+                continue;
+            };
+            if options.owner == wiring.source
+                || !imported_options.insert((wiring.source, options.segment))
+            {
+                continue;
+            }
+            let name = &result.lazy_options[&options.segment].name;
+            if exported_options.insert(options.segment) {
+                result
+                    .exports
+                    .entry(options.owner)
+                    .or_default()
+                    .push_str(&format!("export {{{name}}};\n"));
+            }
+            result.imports.entry(wiring.source).or_default().push(
+                Code::request(options.owner.path(graph), RequestKind::Import)
+                    .surrounded(format!("import {{{name}}} from "), ";\n"),
+            );
+        }
         Ok(result)
+    }
+
+    fn plan_lazy(
+        &mut self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+        prepared: &PreparedValues<'_>,
+        placement: &Placement,
+        wiring: &[LazyWiring],
+    ) -> eyre::Result<()> {
+        let mut groups: BTreeMap<_, Vec<&LazyWiring>> = BTreeMap::new();
+        for wiring in wiring {
+            groups
+                .entry((
+                    wiring.source,
+                    wiring.declaration,
+                    wiring.module_candidate,
+                    wiring.destination,
+                ))
+                .or_default()
+                .push(wiring);
+        }
+        let mut occupied = OccupiedNames::new(prepared);
+        let exported: BTreeSet<_> = prepared
+            .symbols
+            .exports
+            .values()
+            .flat_map(|exports| exports.keys().map(String::as_str))
+            .collect();
+        let mut allocate = |mut name: String| {
+            while exported.contains(name.as_str()) || !occupied.insert(name.clone()) {
+                name.push('_');
+            }
+            name
+        };
+        let defaults = Values::new(prepared);
+        for module in plan.lazy_modules.modules() {
+            if let (Some(&owner), Some(slot)) =
+                (placement.owners.get(&module.owner), &module.options)
+            {
+                self.lazy_options.insert(
+                    module.owner,
+                    OptionsConnection {
+                        name: allocate(format!(
+                            "__gf_lazy_options_{}_{}",
+                            digest(
+                                graph
+                                    .file_path(module.owner.file_id)
+                                    .unwrap()
+                                    .to_str()
+                                    .unwrap()
+                            ),
+                            module.owner.segment_idx
+                        )),
+                        value: PreservedOptionsValue {
+                            segment: module.owner,
+                            owner,
+                            span: slot.span,
+                        },
+                    },
+                );
+            }
+        }
+        for ((source, declaration, candidate, destination), wirings) in groups {
+            let module = plan
+                .lazy_modules
+                .modules()
+                .iter()
+                .find(|m| m.owner == declaration && m.candidate == candidate)
+                .ok_or_eyre("missing certified lazy wiring module")?;
+            let first = wirings[0];
+            let constructor = self.bindings[&source]
+                .iter()
+                .find(|binding| binding.symbol == first.constructor_symbol)
+                .map(|binding| binding.alias.clone())
+                .or_else(|| {
+                    let identity = prepared
+                        .symbols
+                        .imports
+                        .get(&first.constructor_symbol)
+                        .map(|linked| linked.identity.clone())
+                        .unwrap_or_else(|| {
+                            ExportIdentity::Binding(
+                                first.constructor_symbol.0,
+                                first.constructor_symbol.1,
+                            )
+                        });
+                    match identity {
+                        ExportIdentity::Binding(file, binding) => {
+                            self.names[&source].get(&(file, binding)).cloned()
+                        }
+                        _ => defaults.name(&identity).map(str::to_owned),
+                    }
+                })
+                .ok_or_eyre("missing local lazy constructor connection")?;
+            let options = if let Some(value) = &first.options {
+                Some(
+                    self.lazy_options
+                        .get(&value.segment)
+                        .ok_or_eyre("missing preserved lazy options connection")?
+                        .name
+                        .clone(),
+                )
+            } else {
+                None
+            };
+            let identity = digest(&format!(
+                "{:?}\0{}\0{}\0{}\0{:?}",
+                source.path(graph),
+                graph.file_path(declaration.file_id).unwrap().display(),
+                declaration.segment_idx,
+                candidate,
+                destination.path(graph)
+            ));
+            let name = allocate(format!("__gf_lazy_{identity}"));
+            let route = PathBuf::from(format!("native/lazy-{identity}.mjs"));
+            let mut projection =
+                Code::evaluation(self.namespaces[&first.evaluation_target].clone());
+            let mut properties = BTreeSet::new();
+            for wiring in wirings {
+                let selector = module
+                    .selectors
+                    .iter()
+                    .find(|s| s.candidate == wiring.selector)
+                    .ok_or_eyre("missing certified lazy wiring selector")?;
+                if properties.insert(selector.property.clone()) {
+                    self.demand(
+                        graph,
+                        prepared.symbols,
+                        &defaults,
+                        wiring.destination,
+                        &wiring.selected,
+                    )?;
+                    projection.push(
+                        Code::request(wiring.destination.path(graph), RequestKind::ReExport)
+                            .surrounded(
+                                format!(
+                                    "export {{{} as {}}} from ",
+                                    quote(self.address(&wiring.selected)?),
+                                    quote(&selector.property)
+                                ),
+                                ";\n",
+                            ),
+                    );
+                    projection.default_export |= selector.property == "default";
+                }
+                let site = AsyncSiteId {
+                    module: graph.file_path(selector.owner.file_id).unwrap().to_owned(),
+                    offset: selector.construction.start,
+                    candidate: None,
+                };
+                self.async_facades.insert(site, route.clone());
+                self.lazy_selectors.insert(
+                    (selector.owner.file_id, selector.module_reference),
+                    name.clone(),
+                );
+            }
+            self.projections.insert(route.clone(), projection);
+            self.lazy.entry(source).or_default().push(LazyInstance {
+                name,
+                constructor,
+                projection: route,
+                options,
+            });
+        }
+        Ok(())
     }
 
     fn plan_native_requests(
@@ -541,6 +761,7 @@ impl Connections {
         symbols: &Symbols,
         placement: &Placement,
         cjs: &commonjs::CommonJs,
+        plan: &ChunkPlan,
     ) -> eyre::Result<()> {
         for (&file, module) in modules {
             if cjs.contains(file) {
@@ -553,6 +774,11 @@ impl Connections {
                 .iter()
                 .filter(|d| !d.type_only() && d.pattern().is_none())
             {
+                if plan.lazy_modules.modules().iter().any(|module| {
+                    module.owner.file_id == file && module.dependency == dependency.id()
+                }) {
+                    continue;
+                }
                 let index = module
                     .parsed
                     .segments()
@@ -665,6 +891,9 @@ impl Connections {
     ) -> eyre::Result<()> {
         let defaults = Values::new(prepared);
         for (site, activation) in &plan.async_activations {
+            if matches!(activation.origin, crate::chunks::AsyncOrigin::Lazy { .. }) {
+                continue;
+            }
             let GraphNode::Module(target) = graph.edges()[activation.source_edge].to else {
                 continue;
             };

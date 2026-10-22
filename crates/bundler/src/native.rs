@@ -872,6 +872,8 @@ struct Values<'s> {
     contexts: HashMap<(u32, ast_segmenter::owned::DependencyId), crate::context::Dispatch>,
     native_defaults: BTreeSet<u32>,
     generated: BTreeMap<(u32, u32), Code>,
+    lazy_options: BTreeMap<SegmentKey, (u32, String)>,
+    lazy_removed: BTreeMap<SegmentKey, Vec<u32>>,
 }
 
 impl<'s> Values<'s> {
@@ -887,6 +889,8 @@ impl<'s> Values<'s> {
             contexts: HashMap::new(),
             native_defaults: BTreeSet::new(),
             generated: BTreeMap::new(),
+            lazy_options: BTreeMap::new(),
+            lazy_removed: BTreeMap::new(),
         }
     }
 
@@ -1042,8 +1046,23 @@ fn reconstruct(
         recipes.get(&key).copied().unwrap_or_default(),
     );
     renderer.relocate_urls(module.relocations)?;
+    let options_slot = values
+        .lazy_options
+        .get(&key)
+        .map(|(candidate, _)| {
+            facts
+                .emission()
+                .lazy_modules()
+                .get(*candidate as usize)
+                .and_then(|module| module.options())
+                .ok_or_eyre("missing original preserved lazy options slot")
+        })
+        .transpose()?;
     for (operation_index, operation) in recipe.operations().iter().enumerate() {
         let span = operation.kind().span(facts, recipe);
+        if options_slot.is_some_and(|slot| !contains(slot.span(), span)) {
+            continue;
+        }
         let replacement = match &operation.kind() {
             OperationKind::Binding {
                 binding, shorthand, ..
@@ -1152,6 +1171,32 @@ fn reconstruct(
         if let Some(replacement) = replacement {
             renderer.replace(operation_index as u32, replacement);
         }
+    }
+    for candidate in values.lazy_removed.get(&key).into_iter().flatten() {
+        let selector = facts
+            .emission()
+            .lazy_selectors()
+            .get(*candidate as usize)
+            .ok_or_eyre("missing elided lazy selector")?;
+        let operation = recipe.operations().iter().position(|operation| {
+            matches!(operation.kind(), OperationKind::Invocation { invocation, .. }
+                if facts.invocations().get(invocation as usize).unwrap().span() == selector.construction())
+        }).ok_or_eyre("missing elided lazy selector operation")?;
+        let mut residual = Code::from("(");
+        for argument in selector.arguments().iter().skip(2) {
+            residual.push(renderer.slot(argument)?.surrounded("(", "),"));
+        }
+        residual.push_str("void 0)");
+        renderer.replace(operation as u32, residual);
+    }
+    if let Some((_, name)) = values.lazy_options.get(&key) {
+        let slot = options_slot.ok_or_eyre("missing preserved lazy options slot")?;
+        return Ok(Some((
+            hoisted,
+            renderer
+                .slot(slot)?
+                .surrounded(format!("const {name} = ("), ");\n"),
+        )));
     }
     for (operation_index, operation) in recipe.operations().iter().enumerate().rev() {
         let OperationKind::Export { form, .. } = &operation.kind() else {

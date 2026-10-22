@@ -18,7 +18,7 @@ module body and ordered statement ranges, not lossy legacy dependency/name sets.
 `CacheRecord` and `CachedModule` have private storage. Consumers and validators
 use borrowed accessors such as `record.module().facts()` and
 `record.module().segments()`; no mutable view of sealed records is exposed.
-Production loading/publication uses typed FlatBuffers, schema 16/extractor 22.
+Production loading/publication uses typed FlatBuffers, schema 16/extractor 23.
 Facts expose Copy/value-iterator APIs over immutable verified byte owners.
 `validate_parsed(source, parsed)` shares the source-local semantic checks with
 the production codec and accepts `ParsedModule::from_wire` without decoding a fact
@@ -101,6 +101,10 @@ getters retain ordinary references; options remain one original source slot.
 Schema 15 adds optional complete plain-options property evidence. Extractor 21
 omits that evidence for JSX and TypeScript type/generic values unsupported by
 the borrowed boundary proof, preserving ordinary candidates and all source facts.
+Schema 16 adds exact initialized-result binding/declarator links. Extractor 23
+omits optional result-boundary evidence for annotated TS declarators rather than
+misinterpreting type tokens. Nested result liveness remains a derived linker
+decision, never a cached retention conclusion.
 Borrowed key/value and punctuation checks exclude initializer/prototype keys,
 computed/spread/accessor/method forms and incomplete property lists without
 AST parsing. Unknown options, escaped keys, parenthesized objects and regexp/division

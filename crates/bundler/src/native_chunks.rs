@@ -543,6 +543,14 @@ fn emit_inner(
         };
         changed.insert(owners[&consumer.file_id]);
     }
+    for (&key, &owner) in &placement.owners {
+        if plan.lazy_modules.affects(key) {
+            changed.insert(owners[&key.file_id]);
+            if let segments::Owner::Evaluation(file) = owner {
+                changed.insert(file);
+            }
+        }
+    }
     if activations.is_some() {
         changed.extend(jobs.iter().copied());
     }
@@ -937,9 +945,10 @@ pub(super) fn selected_activation(
 ) -> bool {
     plan.precise_dynamic_imports
         && plan.async_activations.get(site).is_some_and(|activation| {
-            graph
-                .dynamic_import_demand(activation.source_edge)
-                .is_some_and(|demand| demand.bindings.is_some())
+            matches!(activation.origin, crate::chunks::AsyncOrigin::Lazy { .. })
+                || graph
+                    .dynamic_import_demand(activation.source_edge)
+                    .is_some_and(|demand| demand.bindings.is_some())
         })
 }
 

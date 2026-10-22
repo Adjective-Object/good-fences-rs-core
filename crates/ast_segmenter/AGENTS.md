@@ -144,3 +144,4 @@ evidence; ordinary candidates, references, dependencies and argument slots survi
 No lazy recognition, transformed obligations or reconstruction plans enter caches.
 Lazy selectors retain optional AST-linked result binding/declarator evidence;
 captured result reads are independent of textual order or unrelated local reads.
+Annotated TS result declarators omit optional evidence outside its boundary proof.

@@ -10,6 +10,581 @@ const RUNTIME: &str = "export class ModuleCtor { constructor(load, options) { th
     export class ImportCtor { constructor(module, get, shouldGovern) { this.module = module; this.get = get; this.shouldGovern = shouldGovern; } }
     export class ActionCtor { constructor(module, get, options) { this.module = module; this.get = get; this.options = options; } }";
 
+// Authored test contract; deliberately retains real wrapper behavior.
+const BEHAVIOR_RUNTIME: &str = "
+export class ModuleCtor {
+    constructor(load, options) { this.load = load; this.options = options; this.loaded = false; }
+    getValue() {
+        if (!this.pending) this.pending = this.load().then(ns => {
+            this.loaded = true;
+            if (this.options?.initializer) this.options.initializer(ns);
+            if (this.options?.onLoad) this.options.onLoad();
+            return ns;
+        }).catch(error => { this.pending = undefined; throw error; });
+        return this.pending;
+    }
+}
+export class ImportCtor {
+    constructor(module, getter, govern, extra) {
+        this.module = module; this.getter = getter; this.govern = govern;
+        this.extra = extra; this.calls = 0;
+    }
+    async getValue() {
+        this.calls++;
+        if (this.govern) this.govern();
+        return this.getter(await this.module.getValue());
+    }
+}
+export class ActionCtor {
+    constructor(module, getter, options) {
+        this.module = module; this.getter = getter; this.options = options; this.calls = 0;
+    }
+    async invoke(...args) {
+        this.calls++;
+        const action = this.getter(await this.module.getValue());
+        return action(...args);
+    }
+}";
+
+fn emit_lazy(
+    input: &BTreeMap<PathBuf, String>,
+    entries: &[(&str, bool)],
+    wire: bool,
+) -> (SourceGraph, ChunkPlan, Artifacts) {
+    let graph = graph_with_storage(input, wire, ModuleFormat::Esm, wire);
+    let options = OutputOptions {
+        lazy_runtimes: vec![runtime()],
+        ..Default::default()
+    };
+    let roots: Vec<_> = entries
+        .iter()
+        .map(|(path, namespace)| {
+            let file = graph.file_id(Path::new(path)).unwrap();
+            RootSeed {
+                id: RootId::Entry((*path).into()),
+                evaluation_roots: vec![file],
+                binding_roots: if *namespace {
+                    vec![GraphNode::Module(file)]
+                } else {
+                    vec![]
+                },
+            }
+        })
+        .collect();
+    let plan =
+        crate::chunks::partition_with_options(&graph, &roots, &EffectPolicy::default(), &options)
+            .unwrap();
+    let parses = ast_segmenter::module_parse_count();
+    let emitted =
+        esm_with_options(&graph, &plan, &EffectPolicy::default(), input, &options).unwrap();
+    assert_eq!(ast_segmenter::module_parse_count(), parses);
+    (graph, plan, emitted)
+}
+
+fn observe_lazy(mut emitted: Artifacts, observer: &str) {
+    let mut script = "import assert from 'node:assert/strict'; globalThis.trace = [];\n".to_owned();
+    for (index, (entry, path)) in emitted.entries.iter().enumerate() {
+        script.push_str(&format!(
+            "const load{index} = () => import({}); // {entry}\n",
+            quote(&format!("./{}", path.to_string_lossy().replace('\\', "/")))
+        ));
+    }
+    script.push_str(observer);
+    emitted.files.insert("observe.mjs".into(), script);
+    let result = node(&emitted.files, Path::new("observe.mjs"));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn lazy_emission_relocated_wrappers_options_and_split_loaded_state() {
+    let mut input = input(
+        "
+        const captured = 'capture';
+        function optionEffect() { trace.push('options'); return captured; }
+        trace.push('before');
+        const mod = new M(() => import('./target.mjs'), {
+            label: optionEffect(), onLoad: () => trace.push(captured)
+        });
+        export const a = new R(mod, ns => ns.first, () => trace.push('govern'), 'read-extra');
+        export const b = new A(mod, ns => ns.second, {tag: 'action-extra'});
+        const dead = new R(mod, ns => ns.unused);",
+    );
+    let selectors = input.remove(Path::new("entry.mjs")).unwrap();
+    input.insert("selectors.mjs".into(), selectors);
+    input.insert(
+        "entry.mjs".into(),
+        "import {a} from './selectors.mjs'; globalThis.a = a;".into(),
+    );
+    input.insert(
+        "other.mjs".into(),
+        "import {b} from './selectors.mjs'; globalThis.b = b;".into(),
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    input.insert(
+        "target.mjs".into(),
+        "import './effects.mjs'; export {first, second, unused} from './leaf.mjs';".into(),
+    );
+    input.insert("effects.mjs".into(), "trace.push('barrel');".into());
+    input.insert("leaf.mjs".into(), "
+        function shared() { return 4; }
+        export function first() { return shared(); }
+        export function second(value) { globalThis.attempts = (globalThis.attempts || 0) + 1; if (globalThis.attempts === 1) throw Error('retry'); return shared() + value; }
+        export function unused() { return 'UNUSED_LAZY_IMPLEMENTATION'; }".into());
+    for wire in [false, true] {
+        let (graph, plan, emitted) =
+            emit_lazy(&input, &[("entry.mjs", false), ("other.mjs", false)], wire);
+        let owner = |path, text| {
+            &emitted.members[&crate::chunks::node_id(
+                &graph,
+                GraphNode::Segment(segment(&graph, &input, path, text)),
+            )
+            .unwrap()]
+        };
+        assert_ne!(
+            owner("leaf.mjs", "function first"),
+            owner("leaf.mjs", "function second")
+        );
+        let code = emitted.files.values().cloned().collect::<String>();
+        assert!(!code.contains("UNUSED_LAZY_IMPLEMENTATION"));
+        assert!(!code.contains("const mod"));
+        assert_eq!(plan.async_activations.len(), 2);
+        observe_lazy(
+            emitted,
+            "
+            await load0(); await load1();
+            assert.deepEqual(trace, ['before','options']);
+            assert.notEqual(a.module, b.module);
+            assert.equal(a.module.options, b.module.options);
+            assert.equal(a.module.options.label, 'capture');
+            assert.equal(a.extra, 'read-extra');
+            assert.equal(b.options.tag, 'action-extra');
+            assert.equal(a.module.loaded, false);
+            assert.equal(b.module.loaded, false);
+            assert.equal(a.getter.name, '');
+            const first = await a.getValue();
+            assert.equal(first(), 4);
+            assert.equal(a.calls, 1);
+            assert.equal(a.module.loaded, true);
+            assert.equal(b.module.loaded, false);
+            assert.deepEqual(Object.keys(await a.module.getValue()), ['first']);
+            await assert.rejects(b.invoke(3), /retry/);
+            assert.equal(await b.invoke(3), 7);
+            assert.equal(b.calls, 2);
+            assert.equal(b.module.loaded, true);
+            assert.deepEqual(trace, ['before','options','govern','barrel','capture','capture']);
+        ",
+        );
+    }
+}
+
+#[test]
+fn lazy_emission_transports_one_options_binding_to_distinct_selector_owners() {
+    let mut input = input(
+        "
+        const captured = {label: 'shared-options'};
+        const mod = new M(() => import('./target.mjs'), {captured});
+        export const a = new R(mod, ns => ns.first);
+        export const b = new A(mod, ns => ns.second);",
+    );
+    let selectors = input.remove(Path::new("entry.mjs")).unwrap();
+    input.insert("selectors.mjs".into(), selectors);
+    input.insert(
+        "entry.mjs".into(),
+        "import {a} from './selectors.mjs'; globalThis.a = a;".into(),
+    );
+    input.insert(
+        "other.mjs".into(),
+        "import {b} from './selectors.mjs'; globalThis.b = b;".into(),
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    let mut previous = None;
+    for wire in [false, true] {
+        let (graph, _, emitted) =
+            emit_lazy(&input, &[("entry.mjs", false), ("other.mjs", false)], wire);
+        if let Some(previous) = previous.replace(emitted.files.clone()) {
+            assert_eq!(previous, emitted.files);
+        }
+        let owner = |text| {
+            &emitted.members[&crate::chunks::node_id(
+                &graph,
+                GraphNode::Segment(segment(&graph, &input, "selectors.mjs", text)),
+            )
+            .unwrap()]
+        };
+        assert_ne!(owner("const a"), owner("const b"));
+        let option_owner = owner("const mod");
+        assert!(option_owner != owner("const a") || option_owner != owner("const b"));
+        let code = emitted.files.values().cloned().collect::<String>();
+        assert_eq!(code.matches("shared-options").count(), 1);
+        assert!(!code.contains("const mod"));
+        observe_lazy(
+            emitted,
+            "
+            await load0(); await load1();
+            assert.equal(a.module.options, b.module.options);
+            assert.equal(a.module.options.captured.label, 'shared-options');
+            assert.notEqual(a.module, b.module);
+            assert.equal((await a.getValue())(), 1);
+            assert.equal(b.module.loaded, false);
+        ",
+        );
+    }
+    let (_, _, emitted) = emit_lazy(
+        &input,
+        &[
+            ("entry.mjs", false),
+            ("other.mjs", false),
+            ("selectors.mjs", true),
+        ],
+        true,
+    );
+    observe_lazy(
+        emitted,
+        "
+        await load0(); await load1();
+        assert.deepEqual(Object.keys(await load2()), ['a','b']);
+        assert.equal(a.module.options, b.module.options);
+    ",
+    );
+}
+
+#[test]
+fn lazy_certification_rejects_selector_construction_inside_its_module_initializer() {
+    for options in [
+        "{value: new R(mod, ns => ns.first)}",
+        "{later: () => new R(mod, ns => ns.first)}",
+    ] {
+        let input = input(&format!("const mod = new M(() => import('./target.mjs'), {options}); export const a = new R(mod, ns => ns.first);"));
+        for wire in [false, true] {
+            let graph = graph_with_storage(&input, wire, ModuleFormat::Esm, wire);
+            assert!(certify(&graph, &EffectPolicy::default(), &[runtime()])
+                .unwrap()
+                .modules()
+                .is_empty());
+        }
+    }
+}
+
+#[test]
+fn lazy_nested_compound_initializers_without_exact_result_evidence_stay_original() {
+    let input = input("
+        const mod = new M(() => import('./target.mjs'));
+        (() => { const selected = (trace.push('sequence'), new R(mod, ns => ns.first)); globalThis.selected = selected; })();");
+    for wire in [false, true] {
+        let graph = graph_with_storage(&input, wire, ModuleFormat::Esm, wire);
+        assert!(certify(&graph, &EffectPolicy::default(), &[runtime()])
+            .unwrap()
+            .modules()
+            .is_empty());
+    }
+}
+
+#[test]
+fn lazy_exported_function_demand_does_not_keep_unused_nested_local_selectors() {
+    let mut input = input(
+        "
+        const mod = new M(() => import('./target.mjs'));
+        export function make() {
+            const dead = new R(mod, ns => ns.second, trace.push('extra'));
+            return new R(mod, ns => ns.first);
+        }",
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    input.insert("leaf.mjs".into(), "export function first() { return 1; } export function second() { return 'DEAD_EXPORTED_FUNCTION_LOCAL'; }".into());
+    for wire in [false, true] {
+        let (_, plan, emitted) = emit_lazy(&input, &[("entry.mjs", true)], wire);
+        assert_eq!(plan.async_activations.len(), 1);
+        assert!(!emitted
+            .files
+            .values()
+            .any(|code| code.contains("DEAD_EXPORTED_FUNCTION_LOCAL")));
+        observe_lazy(
+            emitted,
+            "
+            const {make} = await load0();
+            assert.deepEqual(trace, []);
+            const selected = make();
+            assert.deepEqual(trace, ['extra']);
+            assert.equal((await selected.getValue())(), 1);
+        ",
+        );
+    }
+}
+
+#[test]
+fn lazy_external_native_linking_retains_the_whole_original_instance() {
+    let mut input = input("import 'node:assert/strict'; const mod = new M(() => import('./target.mjs')); export const a = new R(mod, ns => ns.first);");
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    let graph = SourceGraph::from_owned(input.iter().map(|(path, source)| {
+        let parsed =
+            parse_module(&logger::StdioLogger::new(), source, path, ModuleFormat::Esm).unwrap();
+        let resolutions = parsed
+            .facts()
+            .dependencies()
+            .iter()
+            .map(|dependency| {
+                (
+                    dependency.id(),
+                    if dependency.specifier() == "node:assert/strict" {
+                        DependencyTarget::External(dependency.specifier().into())
+                    } else {
+                        DependencyTarget::File(normalize(
+                            &path.parent().unwrap().join(dependency.specifier()),
+                        ))
+                    },
+                )
+            })
+            .collect();
+        OwnedSourceFileInput::from_parsed(path.clone(), parsed, resolutions)
+    }));
+    let options = OutputOptions {
+        lazy_runtimes: vec![runtime()],
+        ..Default::default()
+    };
+    let plan = crate::chunks::partition_with_options(
+        &graph,
+        &roots(&graph),
+        &EffectPolicy::default(),
+        &options,
+    )
+    .unwrap();
+    assert!(plan.lazy_modules.modules().is_empty());
+    let emitted =
+        esm_with_options(&graph, &plan, &EffectPolicy::default(), &input, &options).unwrap();
+    observe_lazy(emitted, "const {a} = await load0(); assert.deepEqual(Object.keys(await a.module.getValue()), ['first','second']);");
+}
+
+#[test]
+fn lazy_emission_shares_only_matching_owner_module_and_destination_with_collisions() {
+    let mut input = input(
+        "
+        const __gf_lazy_0 = 'collision';
+        const ModuleAlias = M; const ReadAlias = R;
+        const mod = new ModuleAlias(() => import('./target.mjs'));
+        const other = new M(() => import('./target.mjs'));
+        export const a = new ReadAlias(mod, ns => ns.first);
+        export const b = new R(mod, ns => ns.first);
+        export const c = new A(mod, ns => ns.second);
+        export const d = new R(other, ns => ns.first);
+        export const collision = __gf_lazy_0;",
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    let (_, _, initial) = emit_lazy(&input, &[("entry.mjs", true)], false);
+    let generated = initial
+        .files
+        .values()
+        .find_map(|source| {
+            source
+                .split_once("var __gf_lazy_")
+                .map(|(_, rest)| format!("__gf_lazy_{}", rest.split_once(';').unwrap().0))
+        })
+        .unwrap();
+    *input.get_mut(Path::new("entry.mjs")).unwrap() =
+        input[Path::new("entry.mjs")].replace("__gf_lazy_0", &generated);
+    for wire in [false, true] {
+        let (_, plan, emitted) = emit_lazy(&input, &[("entry.mjs", true)], wire);
+        assert_eq!(plan.lazy_modules.modules().len(), 2);
+        observe_lazy(
+            emitted,
+            "
+            const {a,b,c,d,collision} = await load0();
+            assert.equal(collision, 'collision');
+            assert.equal(a.module, b.module);
+            assert.notEqual(a.module, c.module);
+            assert.notEqual(a.module, d.module);
+            assert.equal((await b.getValue())(), 1);
+            assert.equal(a.module.loaded, true);
+            assert.equal(c.module.loaded, false);
+            assert.equal(d.module.loaded, false);
+            assert.deepEqual(Object.keys(await a.module.getValue()), ['first']);
+        ",
+        );
+    }
+}
+
+#[test]
+fn lazy_emission_nested_captures_preceding_initializers_prune_unrelated_local_reads() {
+    let mut input = input("
+        const mod = new M(() => import('./target.mjs'));
+        (() => { globalThis.getSelected = () => selected; const selected = new R(mod, ns => ns.first); })();
+        (() => { const token = 1; const dead = new R(mod, ns => ns.second, trace.push('dead-extra')); globalThis.token = token; })();");
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    input.insert("leaf.mjs".into(), "export function first() { return 'retained'; } export function second() { return 'DEAD_NESTED_IMPLEMENTATION'; }".into());
+    for wire in [false, true] {
+        let (_, plan, emitted) = emit_lazy(&input, &[("entry.mjs", false)], wire);
+        assert_eq!(plan.async_activations.len(), 1);
+        assert!(
+            !emitted
+                .files
+                .values()
+                .any(|code| code.contains("DEAD_NESTED_IMPLEMENTATION")
+                    || code.contains("ns.second")),
+            "{:#?}",
+            emitted.files
+        );
+        observe_lazy(
+            emitted,
+            "
+            await load0();
+            assert.equal(token, 1);
+            assert.deepEqual(trace, ['dead-extra']);
+            const selected = getSelected();
+            assert.equal(selected.module.loaded, false);
+            assert.equal((await selected.getValue())(), 'retained');
+        ",
+        );
+    }
+}
+
+#[test]
+fn lazy_emission_nested_conditional_wrappers_keep_construction_and_options_timing() {
+    let mut input = input("
+        trace.push('before');
+        const captured = 'captured';
+        function option() { trace.push(captured); return captured; }
+        const mod = new M(() => import('./target.mjs'), {name: option()});
+        trace.push('after');
+        export function make(flag) { return flag ? new R(mod, ns => ns.first, undefined, extra()) : undefined; }
+        function extra() { trace.push('extra'); return 9; }");
+    input.insert(
+        "runtime.mjs".into(),
+        BEHAVIOR_RUNTIME.replace(
+            "this.extra = extra;",
+            "trace.push('read:new'); this.extra = extra;",
+        ),
+    );
+    for wire in [false, true] {
+        let (_, _, emitted) = emit_lazy(&input, &[("entry.mjs", true)], wire);
+        observe_lazy(
+            emitted,
+            "
+            const {make} = await load0();
+            assert.deepEqual(trace, ['before','captured','after']);
+            assert.equal(make(false), undefined);
+            assert.deepEqual(trace, ['before','captured','after']);
+            const value = make(true);
+            assert.equal(value.extra, 9);
+            assert.deepEqual(trace, ['before','captured','after','extra','read:new']);
+            assert.equal(value.module.options.name, 'captured');
+            assert.equal((await value.getValue())(), 1);
+        ",
+        );
+    }
+}
+
+#[test]
+fn lazy_emission_keeps_original_barrel_tla_effects_and_cached_failure() {
+    let mut input = input(
+        "
+        const mod = new M(() => import('./target.mjs'));
+        export const a = new R(mod, ns => ns.first);
+        export const b = new R(mod, ns => ns.second);",
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    input.insert(
+        "target.mjs".into(),
+        "
+        trace.push('start'); await Promise.resolve(); trace.push('done');
+        if (globalThis.fail) throw globalThis.failure;
+        export {first,second} from './leaf.mjs';"
+            .into(),
+    );
+    for wire in [false, true] {
+        let (_, _, emitted) = emit_lazy(&input, &[("entry.mjs", true)], wire);
+        observe_lazy(
+            emitted.clone(),
+            "
+            const {a,b} = await load0();
+            assert.deepEqual(trace, []);
+            assert.equal(a.module, b.module);
+            const result = a.getValue();
+            assert.equal(a.module.loaded, false);
+            assert.equal((await result)(), 1);
+            assert.equal((await b.getValue())(), 2);
+            assert.deepEqual(Object.keys(await a.module.getValue()), ['first','second']);
+            assert.deepEqual(trace, ['start','done']);
+        ",
+        );
+        observe_lazy(
+            emitted,
+            "
+            globalThis.fail = true; globalThis.failure = {message: 'barrel failure'};
+            const {a,b} = await load0();
+            for (const selector of [a,a,b]) {
+                await assert.rejects(selector.getValue(), error => error === failure);
+                assert.equal(selector.module.loaded, false);
+            }
+            assert.deepEqual(trace, ['start','done']);
+            assert.equal(a.calls, 2);
+        ",
+        );
+    }
+}
+
+#[test]
+fn lazy_emission_tla_selector_source_and_options_only_residual_use_checked_recipes() {
+    for body in [
+        "await Promise.resolve();
+        const mod = new M(() => import('./target.mjs'));
+        (() => { globalThis.selected = new R(mod, ns => ns.first); })();",
+        "await Promise.resolve();
+        function option() { trace.push('option-only'); return 1; }
+        const mod = new M(() => import('./target.mjs'), {name: option()});
+        const dead = new R(mod, ns => ns.second);",
+    ] {
+        let mut input = input(body);
+        input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+        for wire in [false, true] {
+            let (_, plan, emitted) = emit_lazy(&input, &[("entry.mjs", false)], wire);
+            assert!(!emitted
+                .files
+                .values()
+                .any(|code| code.contains("const mod")));
+            if plan.async_activations.is_empty() {
+                observe_lazy(emitted, "await load0(); assert.deepEqual(trace, ['option-only']); assert.equal(globalThis.barrelEffect, undefined);");
+            } else {
+                observe_lazy(emitted, "await load0(); assert.equal(selected.module.loaded, false); assert.equal((await selected.getValue())(), 1);");
+            }
+        }
+    }
+}
+
+#[test]
+fn lazy_emission_mixed_initializer_escape_and_shadow_instances_stay_original() {
+    let mut input = input("
+        const broad = new M(() => import('./target.mjs'), {initializer: () => trace.push('initializer')});
+        export const original = new R(broad, ns => ns.first);
+        globalThis.escape = broad;
+        const mod = new M(() => import('./target.mjs'));
+        export const selected = new R(mod, ns => ns.first);
+        export function shadow(M, R) { const mod = new M(() => import('./target.mjs')); return new R(mod, ns => ns.first); }");
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    for wire in [false, true] {
+        let (_, plan, emitted) = emit_lazy(&input, &[("entry.mjs", true)], wire);
+        assert_eq!(plan.lazy_modules.modules().len(), 1);
+        observe_lazy(
+            emitted,
+            "
+            const {original,selected,shadow} = await load0();
+            assert.equal(original.module, escape);
+            assert.notEqual(selected.module, escape);
+            assert.equal((await original.getValue())(), 1);
+            assert.deepEqual(Object.keys(await escape.getValue()), ['first','second']);
+            assert.deepEqual(trace, ['initializer']);
+            class M { constructor(load) { this.load = load; } }
+            class R { constructor(mod, get) { this.mod = mod; this.get = get; } }
+            const value = shadow(M,R);
+            assert.equal(value.mod instanceof M, true);
+            assert.equal(value.get(await value.mod.load())(), 1);
+        ",
+        );
+    }
+}
+
 #[test]
 fn lazy_certification_accepts_registered_immutable_default_constructor_expressions() {
     let mut input = input("const mod = new M(() => import('./target.mjs')); export const a = new R(mod, ns => ns.first);");
@@ -126,6 +701,7 @@ fn lazy_native_placement_separates_selectors_and_their_selected_implementations(
     );
     input.insert("leaf.mjs".into(),
         "function shared() { return 1; } export function first() { return shared(); } export function second() { return shared() + 1; }".into());
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
     for wire in [false, true] {
         let graph = graph_with_storage(&input, wire, ModuleFormat::Esm, wire);
         let options = OutputOptions {
@@ -245,13 +821,34 @@ fn lazy_native_placement_separates_selectors_and_their_selected_implementations(
                 RootId::Entry("other.mjs".into())
             ])
         );
-        assert!(format!(
-            "{:#}",
-            esm_with_options(&graph, &plan, &EffectPolicy::default(), &input, &options)
-                .err()
-                .unwrap()
-        )
-        .contains("post-placement lazy wiring"));
+        let emitted =
+            esm_with_options(&graph, &plan, &EffectPolicy::default(), &input, &options).unwrap();
+        let owner = |key: source_graph::SegmentKey| {
+            &emitted.members[&crate::chunks::node_id(&graph, GraphNode::Segment(key)).unwrap()]
+        };
+        assert_ne!(owner(a), owner(b));
+        assert_ne!(owner(first), owner(second));
+        let shared = segment(&graph, &input, "leaf.mjs", "function shared");
+        let effects = segment(&graph, &input, "effects.mjs", "barrelEffect");
+        assert_ne!(owner(shared), owner(first));
+        assert_ne!(owner(shared), owner(second));
+        assert_ne!(owner(effects), owner(first));
+        assert_ne!(owner(effects), owner(second));
+        assert!(!emitted.members.contains_key(
+            &crate::chunks::node_id(&graph, GraphNode::Segment(module.owner)).unwrap()
+        ));
+        observe_lazy(
+            emitted,
+            "
+            await load0(); await load1();
+            assert.notEqual(a.module, b.module);
+            assert.equal(globalThis.barrelEffect, undefined);
+            assert.equal((await a.getValue())(), 1);
+            assert.equal(globalThis.barrelEffect, true);
+            assert.equal(b.module.loaded, false);
+            assert.equal(await b.invoke(), 2);
+        ",
+        );
     }
 }
 
@@ -898,10 +1495,11 @@ fn lazy_certification_uses_canonical_aliased_barrel_identities_for_overlays() {
         assert_eq!(module.selectors[0].arguments[2].invocations.len(), 1);
         assert_eq!(module.selectors[1].arguments[2].invocations.len(), 1);
         esm(&graph, &disabled, &policy, &input).unwrap();
-        let error = esm_with_options(&graph, &plan, &policy, &input, &options).unwrap_err();
-        assert!(error.to_string().contains("post-placement lazy wiring"));
+        esm_with_options(&graph, &plan, &policy, &input, &options).unwrap();
         assert!(esm(&graph, &plan, &policy, &input).is_err());
-        assert!(deferred_esm(&graph, &plan, &policy, &input).is_err());
+        assert!(deferred_esm(&graph, &plan, &policy, &input)
+            .unwrap()
+            .is_none());
         assert!(
             esm_with_options(&graph, &plan, &policy, &input, &OutputOptions::default()).is_err()
         );

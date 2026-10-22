@@ -28,11 +28,11 @@ impl Owner {
 }
 
 impl Placement {
-    pub(super) fn lazy_wiring(
+    pub(super) fn lazy_requests(
         &self,
         graph: &SourceGraph,
         plan: &ChunkPlan,
-    ) -> eyre::Result<NativePlacement> {
+    ) -> eyre::Result<Vec<LazyWiring>> {
         let mut lazy = Vec::new();
         for activation in plan.async_activations.values() {
             let crate::chunks::AsyncOrigin::Lazy {
@@ -87,6 +87,15 @@ impl Placement {
                 }),
             });
         }
+        Ok(lazy)
+    }
+
+    pub(super) fn lazy_wiring(
+        &self,
+        graph: &SourceGraph,
+        plan: &ChunkPlan,
+    ) -> eyre::Result<NativePlacement> {
+        let lazy = self.lazy_requests(graph, plan)?;
         let bindings = self
             .names
             .iter()
@@ -551,6 +560,14 @@ impl Placement {
         // order can be broken, never a mandatory relationship.
         for constraint in &plan.retention.execution.constraints {
             if constraint.kind != ConstraintKind::EffectOrder {
+                // Preserved options have a real native binding dependency at
+                // each live selector. That cut discharges this exact source
+                // phase without forcing all selectors into the options owner.
+                if constraint.kind == ConstraintKind::AbruptCompletion
+                    && preserved_options_phase(plan, constraint.before, constraint.after)
+                {
+                    continue;
+                }
                 if constraint.kind == ConstraintKind::AbruptCompletion
                     && prefixes.contains(&constraint.before)
                     && !prefixes.contains(&constraint.after)
@@ -1018,7 +1035,9 @@ impl Placement {
             if constraint.kind != ConstraintKind::EffectOrder {
                 if owners[&constraint.before] != owners[&constraint.after] {
                     eyre::ensure!(
-                        prefixes.contains(&constraint.before)
+                        (constraint.kind == ConstraintKind::AbruptCompletion
+                            && preserved_options_phase(plan, constraint.before, constraint.after))
+                            || prefixes.contains(&constraint.before)
                             && matches!(owners[&constraint.before], Owner::Bindings(_))
                             && owners[&constraint.after]
                                 == Owner::Evaluation(constraint.after.file_id),
@@ -1396,6 +1415,22 @@ fn lazy_value_segments(plan: &ChunkPlan) -> BTreeSet<SegmentKey> {
         .collect()
 }
 
+fn preserved_options_phase(plan: &ChunkPlan, before: SegmentKey, after: SegmentKey) -> bool {
+    plan.lazy_modules.modules().iter().any(|module| {
+        module.owner == before
+            && module.options.is_some()
+            && module
+                .selectors
+                .iter()
+                .any(|selector| selector.owner == after)
+    }) && plan
+        .retention
+        .effects
+        .iter()
+        .find(|effect| effect.key == after)
+        .is_some_and(|effect| !plan.lazy_modules.residual_effectful(after, &effect.summary))
+}
+
 /// Compare initialization visibility at every native body event, independently
 /// for each entrance. Pure initializers may commute only between those events:
 /// a throw must expose exactly the same initialized lexical bindings.
@@ -1622,19 +1657,20 @@ fn activation_safe(
             // Certified value allocations are no longer unconditional source
             // events. Compare this entrance's transformed binding projection,
             // while retaining every original observable/throwing phase.
+            let relevant = |key: &SegmentKey| {
+                plan.lazy_modules.modules().is_empty()
+                    || !lexical.contains(key)
+                    || plan.node_roots[&NodeId::Segment {
+                        module: graph.file_path(key.file_id).unwrap().to_owned(),
+                        index: key.segment_idx,
+                    }]
+                        .contains(root)
+            };
             let before = projection(
                 completion(entrances.clone(), &native)
                     .into_iter()
                     .flat_map(|file| native_events.get(&file).into_iter().flatten().copied())
-                    .filter(|key| {
-                        plan.lazy_modules.modules().is_empty()
-                            || !lexical.contains(key)
-                            || plan.node_roots[&NodeId::Segment {
-                                module: graph.file_path(key.file_id).unwrap().to_owned(),
-                                index: key.segment_idx,
-                            }]
-                                .contains(root)
-                    })
+                    .filter(relevant)
                     .collect(),
             );
             let after = if let Some((dependencies, schedules, routes)) = &reconstructed {
@@ -1651,6 +1687,7 @@ fn activation_safe(
                                 .into_iter()
                                 .flat_map(|schedule| schedule.iter().copied())
                         })
+                        .filter(relevant)
                         .collect(),
                 )
             } else {
@@ -1664,6 +1701,7 @@ fn activation_safe(
                     )
                     .into_iter()
                     .flat_map(|owner| placement.schedule(owner).iter().copied())
+                    .filter(relevant)
                     .collect(),
                 )
             };
@@ -1975,7 +2013,12 @@ pub(super) fn emit(
         .map(|(&f, route)| (f, Code::request(route.clone(), RequestKind::DynamicImport)))
         .collect();
     for (site, route) in &connections.async_facades {
-        if selected_activation(graph, plan, site) {
+        if selected_activation(graph, plan, site)
+            && matches!(
+                plan.async_activations[site].origin,
+                crate::chunks::AsyncOrigin::Import
+            )
+        {
             values.dynamic_sites.insert(
                 (
                     graph.file_id(&site.module).unwrap(),
@@ -2079,6 +2122,57 @@ pub(super) fn emit(
     }
     for binding in connections.bindings.get(&root).into_iter().flatten() {
         values.imports.insert(binding.symbol, binding.alias.clone());
+    }
+    for (&key, options) in &connections.lazy_options {
+        if options.value.owner == root {
+            let module = plan
+                .lazy_modules
+                .modules()
+                .iter()
+                .find(|m| m.owner == key)
+                .ok_or_eyre("missing preserved lazy options module")?;
+            values
+                .lazy_options
+                .insert(key, (module.candidate, options.name.clone()));
+        }
+    }
+    for module in plan.lazy_modules.modules() {
+        for selector in &module.selectors {
+            if live.contains(&selector.owner)
+                && recipes.get(&selector.owner).is_some_and(|rewrites| {
+                    rewrites
+                        .iter()
+                        .any(|rewrite| rewrite.invocation == selector.construction)
+                })
+            {
+                values
+                    .lazy_removed
+                    .entry(selector.owner)
+                    .or_default()
+                    .push(selector.candidate);
+            }
+        }
+    }
+    for instance in connections.lazy.get(&root).into_iter().flatten() {
+        output.push_str(&format!("var {};\n", instance.name));
+        let mut expression = Code::from(format!(
+            "({} ??= new {}(() => import(",
+            instance.name, instance.constructor
+        ));
+        expression.push(Code::request(
+            instance.projection.clone(),
+            RequestKind::DynamicImport,
+        ));
+        expression.push_str(")");
+        if let Some(options) = &instance.options {
+            expression.push_str(&format!(", {options}"));
+        }
+        expression.push_str("))");
+        for (&reference, name) in &connections.lazy_selectors {
+            if name == &instance.name {
+                values.generated.insert(reference, expression.clone());
+            }
+        }
     }
     let mut imported = BTreeSet::new();
     let mut occupied: BTreeSet<_> = values

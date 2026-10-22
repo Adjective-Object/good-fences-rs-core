@@ -41,7 +41,7 @@ pub fn configuration_fingerprint(runtimes: &[LazyRuntime]) -> [u8; 32] {
     let mut canonical = runtimes.to_vec();
     canonical.sort();
     canonical.dedup();
-    Sha256::digest(format!("lazy-runtime-contract-v1\0{canonical:?}").as_bytes()).into()
+    Sha256::digest(format!("lazy-runtime-wiring-v2\0{canonical:?}").as_bytes()).into()
 }
 
 /// Original recipe coordinates and complete genuine input dependencies. Effects
@@ -66,9 +66,11 @@ pub struct CertifiedSelector {
     /// Determined from canonical identities, never the cached spelling hint.
     pub kind: LazyWrapperKind,
     pub value_use: ast_segmenter::invocation::ValueUse,
-    /// Nested locals have no separate segment value demand. A read outside the
-    /// construction protects their actual initializer's result, including
-    /// captures whose source precedes the initializer.
+    /// A nested initializer's value demand belongs to this binding, not to the
+    /// enclosing function/statement's independently demanded value.
+    pub nested_result: Option<BindingId>,
+    /// Reads of the exact nested result binding protect its initializer,
+    /// including captures whose source precedes the initializer.
     pub nested_result_read: bool,
     pub module_reference: u32,
     pub property: String,
@@ -82,7 +84,11 @@ impl CertifiedSelector {
         match self.value_use {
             ast_segmenter::invocation::ValueUse::Required => true,
             ast_segmenter::invocation::ValueUse::StatementValue => {
-                statement_value || self.nested_result_read
+                if self.nested_result.is_some() {
+                    self.nested_result_read
+                } else {
+                    statement_value
+                }
             }
             ast_segmenter::invocation::ValueUse::Discarded => false,
         }
@@ -452,6 +458,9 @@ fn eligible(
                 s.module_reference() == reference as u32 && s.module_binding() == module.binding()
             })?;
         let identity = constructor(graph, file, candidate.constructor())?;
+        if contains(module.construction(), candidate.construction()) {
+            return None;
+        }
         let kind = if identity == runtime[1] {
             LazyWrapperKind::LazyImport
         } else if identity == runtime[2] {
@@ -463,7 +472,11 @@ fn eligible(
             .invocations()
             .iter()
             .find(|i| i.span() == candidate.construction() && i.construct())?;
-        if call.arguments().iter().any(|a| a.spread()) {
+        if call.arguments().iter().any(|a| a.spread())
+            || (call.value_use() == ast_segmenter::invocation::ValueUse::StatementValue
+                && call.deferred().is_some()
+                && candidate.result_binding().is_none())
+        {
             return None;
         }
         let selected = graph
@@ -483,6 +496,12 @@ fn eligible(
         }) {
             return None;
         }
+        let nested_result = candidate.result_binding().filter(|result| {
+            facts
+                .bindings()
+                .iter()
+                .any(|binding| binding.id() == *result && !binding.top_level())
+        });
         selectors.push(CertifiedSelector {
             candidate: candidate_index as u32,
             owner: SegmentKey::new(file, candidate.segment()),
@@ -491,16 +510,13 @@ fn eligible(
             constructor: identity,
             kind,
             value_use: call.value_use(),
-            nested_result_read: candidate.result_binding().is_some_and(|result| {
-                facts
-                    .bindings()
-                    .iter()
-                    .any(|binding| binding.id() == result && !binding.top_level())
-                    && facts.references().iter().any(|reference| {
-                        !reference.type_only()
-                            && reference.read()
-                            && reference.binding() == Some(result)
-                    })
+            nested_result,
+            nested_result_read: nested_result.is_some_and(|result| {
+                facts.references().iter().any(|reference| {
+                    !reference.type_only()
+                        && reference.read()
+                        && reference.binding() == Some(result)
+                })
             }),
             module_reference: reference as u32,
             property: candidate.property().to_owned(),
@@ -547,6 +563,21 @@ pub fn certify(
         configuration_fingerprint: configuration_fingerprint(runtimes),
         modules: Vec::new(),
     };
+    // External-native linking keeps original clauses and source-module jobs.
+    // It does not yet admit the lexical reconstruction needed for lazy wiring.
+    if graph.module_ids().any(|file| {
+        graph.file_facts(file).is_some_and(|facts| {
+            facts.dependencies().iter().any(|dependency| {
+                !dependency.type_only()
+                    && matches!(
+                        graph.dependency_target(file, dependency.id()),
+                        Some(DependencyTarget::External(_))
+                    )
+            })
+        })
+    }) {
+        return Ok(result);
+    }
     let registered: Vec<_> = runtimes
         .iter()
         .filter_map(|r| {

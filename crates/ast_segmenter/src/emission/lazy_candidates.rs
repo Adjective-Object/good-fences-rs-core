@@ -204,9 +204,11 @@ impl<'a> Visit<'a> for Candidates<'_> {
             if let Some(Expression::NewExpression(new)) =
                 declaration.init.as_ref().map(unparenthesized)
             {
-                if let Some(binding) = self.binding(id.span) {
-                    self.initializers
-                        .push((new.span, binding, declaration.span));
+                if declaration.type_annotation.is_none() {
+                    if let Some(binding) = self.binding(id.span) {
+                        self.initializers
+                            .push((new.span, binding, declaration.span));
+                    }
                 }
                 let shape = || {
                     let binding = self.binding(id.span)?;
