@@ -2155,9 +2155,14 @@ pub(super) fn emit(
     }
     for instance in connections.lazy.get(&root).into_iter().flatten() {
         output.push_str(&format!("var {};\n", instance.name));
+        // Read in the owner scope, but at the original allocation time.
+        output.push_str(&format!(
+            "function {}() {{ return {}; }}\n",
+            instance.constructor_read, instance.constructor
+        ));
         let mut expression = Code::from(format!(
-            "({} ??= new {}(() => import(",
-            instance.name, instance.constructor
+            "({} ??= new ({}())(() => import(",
+            instance.name, instance.constructor_read
         ));
         expression.push(Code::request(
             instance.projection.clone(),

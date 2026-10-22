@@ -463,6 +463,8 @@ Connections groups lazy wiring by final source owner/original module/destination
 projection and synthesizes only real registered classes plus selected native ESM
 projections with original barrel evaluation. Owner-local instance bindings initialize
 at original selector module-argument slots, never eager wrapper execution.
+Read constructors through collision-safe owner-scope readers at allocation time;
+same-file nested parameters must never capture injected constructor reads.
 Options initialize once through their original cached slot/phase and cross owners
 through real read-only native imports; exclude transport names from public surfaces.
 Elided wrappers consume module/getter reads but retain genuine extra arguments.

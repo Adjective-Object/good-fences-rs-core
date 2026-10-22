@@ -191,7 +191,10 @@ native bindings, never the original broad namespace.
 
 Each instance uses a collision-safe owner-local binding initialized at the
 retained selector's original module-argument slot. Nested/conditional selectors
-therefore do not run wrappers eagerly. Only that argument is rewritten: wrapper
+therefore do not run wrappers eagerly. A collision-safe owner-scope constructor
+reader prevents nested parameters from capturing injected reads, without
+snapshotting the constructor or moving its initialization/read time.
+Only that argument is rewritten: wrapper
 class, getter expression/name, extra arguments, methods, caches, errors, retries
 and metrics remain the registered library's actual code. Unused constructions
 discard their consumed module/getter inputs but preserve genuine extra-argument

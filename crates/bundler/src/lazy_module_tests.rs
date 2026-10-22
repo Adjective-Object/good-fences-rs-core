@@ -100,6 +100,65 @@ fn observe_lazy(mut emitted: Artifacts, observer: &str) {
 }
 
 #[test]
+fn lazy_emission_injected_reads_avoid_nested_constructor_and_transport_captures() {
+    let mut input = input(
+        "
+        const Ctor = M;
+        const captured = 'original-options';
+        const mod = new Ctor(() => import('./target.mjs'), {label: captured});
+        export function make(Ctor, transport, reader, extra) {
+            return new R(mod, ns => ns.first, () => trace.push(Ctor), extra);
+        }",
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    let (_, _, initial) = emit_lazy(&input, &[("entry.mjs", true)], false);
+    let code = initial.files.values().cloned().collect::<String>();
+    let options = code
+        .split_once("var __gf_lazy_options_")
+        .or_else(|| code.split_once("const __gf_lazy_options_"))
+        .map(|(_, rest)| {
+            format!(
+                "__gf_lazy_options_{}",
+                rest.split([' ', '=', ';']).next().unwrap()
+            )
+        })
+        .unwrap();
+    let reader = code
+        .split_once("function __gf_lazy_constructor_")
+        .map(|(_, rest)| format!("__gf_lazy_constructor_{}", rest.split('(').next().unwrap()))
+        .unwrap();
+    *input.get_mut(Path::new("entry.mjs")).unwrap() =
+        input[Path::new("entry.mjs")].replace("transport, reader", &format!("{options}, {reader}"));
+    for wire in [false, true] {
+        let (graph, plan, emitted) = emit_lazy(&input, &[("entry.mjs", true)], wire);
+        assert_eq!(plan.lazy_modules.modules().len(), 1);
+        let owner = |text| {
+            &emitted.members[&crate::chunks::node_id(
+                &graph,
+                GraphNode::Segment(segment(&graph, &input, "entry.mjs", text)),
+            )
+            .unwrap()]
+        };
+        assert_eq!(owner("const Ctor"), owner("function make"));
+        assert!(!emitted
+            .files
+            .values()
+            .any(|text| text.contains("const mod")));
+        observe_lazy(
+            emitted,
+            "
+            const {make} = await load0();
+            const selected = make(undefined, 'wrong-options', undefined, 'genuine-extra');
+            assert.equal(selected.module.options.label, 'original-options');
+            assert.equal(selected.extra, 'genuine-extra');
+            assert.equal((await selected.getValue())(), 1);
+            assert.deepEqual(trace, [undefined]);
+        ",
+        );
+    }
+}
+
+#[test]
 fn lazy_emission_relocated_wrappers_options_and_split_loaded_state() {
     let mut input = input(
         "

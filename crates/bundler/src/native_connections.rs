@@ -148,6 +148,7 @@ pub(super) struct NativeRequest {
 pub(super) struct LazyInstance {
     pub name: String,
     pub constructor: String,
+    pub constructor_read: String,
     pub projection: PathBuf,
     pub options: Option<String>,
 }
@@ -701,6 +702,7 @@ impl Connections {
                 destination.path(graph)
             ));
             let name = allocate(format!("__gf_lazy_{identity}"));
+            let constructor_read = allocate(format!("__gf_lazy_constructor_{identity}"));
             let route = PathBuf::from(format!("native/lazy-{identity}.mjs"));
             let mut projection =
                 Code::evaluation(self.namespaces[&first.evaluation_target].clone());
@@ -747,6 +749,7 @@ impl Connections {
             self.lazy.entry(source).or_default().push(LazyInstance {
                 name,
                 constructor,
+                constructor_read,
                 projection: route,
                 options,
             });
