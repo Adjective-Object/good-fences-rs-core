@@ -18,6 +18,7 @@ pub(crate) fn is_sass(path: &Path) -> bool {
 
 pub(crate) struct Compiled {
     pub css: String,
+    pub source_map: Option<cache_flatbuffers::WireSourceMap>,
     pub inputs: BTreeMap<PathBuf, Vec<u8>>,
     pub warnings: Vec<String>,
 }
@@ -280,6 +281,7 @@ pub(crate) fn compile(
     inventory: &crate::build::Inventory,
     resolver: &impl DependencyResolver,
     aliases: &BTreeSet<String>,
+    source_maps: bool,
 ) -> eyre::Result<Compiled> {
     let importer = ResolverImporter {
         entry: path,
@@ -301,15 +303,90 @@ pub(crate) fn compile(
         .with_warn_handler(Rc::new(move |event| {
             diagnostics.borrow_mut().push(event.formatted.to_owned());
         }));
-    let css = sasso::compile(
-        std::str::from_utf8(input)
-            .wrap_err_with(|| format!("{}: Sass is not UTF-8", path.display()))?,
-        &options,
-    )
-    .map_err(|error| eyre::eyre!("{}: Sass compilation failed: {error}", path.display()))?;
+    let input = std::str::from_utf8(input)
+        .wrap_err_with(|| format!("{}: Sass is not UTF-8", path.display()))?;
+    let (css, source_map) = if source_maps {
+        let result = sasso::compile_with_source_map(
+            input,
+            &options.with_source_map_include_sources(true),
+        )
+        .map_err(|error| eyre::eyre!("{}: Sass compilation failed: {error}", path.display()))?;
+        let source_map = checked_map(path, &result.source_map, &importer.inputs.borrow())?;
+        (result.css, Some(source_map))
+    } else {
+        let css = sasso::compile(input, &options)
+            .map_err(|error| eyre::eyre!("{}: Sass compilation failed: {error}", path.display()))?;
+        (css, None)
+    };
     Ok(Compiled {
         css,
+        source_map,
         inputs: importer.inputs.into_inner(),
         warnings: warnings.take(),
     })
+}
+
+fn checked_map(
+    path: &Path,
+    map: &sasso::SourceMap,
+    inputs: &BTreeMap<PathBuf, Vec<u8>>,
+) -> eyre::Result<cache_flatbuffers::WireSourceMap> {
+    use cache_flatbuffers::{wire, MapData, MapSource, WireSourceMap};
+
+    let json = map.to_json();
+    let decoded = oxc_sourcemap::SourceMap::from_json_string(&json)?;
+    let location = url::Url::from_file_path(path)
+        .map_err(|()| eyre::eyre!("invalid Sass source map path: {}", path.display()))?;
+    let urls = decoded
+        .get_sources()
+        .map(|source| {
+            let source = Path::new(source.as_ref());
+            ensure!(
+                inputs.contains_key(source),
+                "Sass source map references unchecked input: {}",
+                source.display()
+            );
+            url::Url::from_file_path(source)
+                .map(String::from)
+                .map_err(|()| eyre::eyre!("invalid Sass source map input: {}", source.display()))
+        })
+        .collect::<eyre::Result<Vec<_>>>()?;
+    let sources = decoded
+        .get_sources()
+        .enumerate()
+        .map(|(index, source)| {
+            Ok(MapSource {
+                original: source,
+                url: &urls[index],
+                content: Some(std::str::from_utf8(&inputs[Path::new(source.as_ref())])?),
+            })
+        })
+        .collect::<eyre::Result<Vec<_>>>()?;
+    let names = decoded.get_names().map(AsRef::as_ref).collect::<Vec<_>>();
+    let tokens = decoded
+        .get_tokens()
+        .map(|token| {
+            wire::MapToken::new(
+                token.get_dst_line(),
+                token.get_dst_col(),
+                token.get_src_line(),
+                token.get_src_col(),
+                token.get_source_id().map_or(-1, |id| id as i32),
+                token.get_name_id().map_or(-1, |id| id as i32),
+            )
+        })
+        .collect::<Vec<_>>();
+    WireSourceMap::encode(
+        path.to_str()
+            .ok_or_else(|| eyre::eyre!("Sass path is not UTF-8"))?,
+        json.as_bytes(),
+        MapData {
+            location: location.as_str(),
+            file: decoded.get_file().map(AsRef::as_ref),
+            source_root: None,
+            sources: &sources,
+            names: &names,
+            tokens: &tokens,
+        },
+    )
 }

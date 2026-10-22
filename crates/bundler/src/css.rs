@@ -4,6 +4,7 @@ use std::{
     fs,
     ops::Range,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use cssparser::{BasicParseErrorKind, ParseError, Parser, ParserInput, Token};
@@ -31,6 +32,8 @@ pub(crate) struct Styles<'a> {
     inventory: &'a crate::build::Inventory,
     inputs: BTreeMap<PathBuf, Vec<u8>>,
     texts: BTreeMap<PathBuf, String>,
+    sources: BTreeMap<PathBuf, Arc<crate::sourcemap::Source>>,
+    source_maps: bool,
     sass_inputs: BTreeMap<PathBuf, Vec<u8>>,
     sass_dependencies: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
     warnings: BTreeSet<String>,
@@ -51,12 +54,15 @@ impl<'a> Styles<'a> {
         public_base: &'a crate::output_url::PublicBase,
         selection: &'a crate::build::CssModules,
         resolver_options: &import_resolver::node_resolver::caching::NodeModulesResolverOptions,
+        source_maps: bool,
     ) -> Self {
         Self {
             root,
             inventory,
             inputs: BTreeMap::new(),
             texts: BTreeMap::new(),
+            sources: BTreeMap::new(),
+            source_maps,
             sass_inputs: BTreeMap::new(),
             sass_dependencies: BTreeMap::new(),
             warnings: BTreeSet::new(),
@@ -100,6 +106,7 @@ impl<'a> Styles<'a> {
             if self.requests.contains_key(&path) {
                 continue;
             }
+            let mut upstream = None;
             let text = if crate::sass::is_sass(&path) {
                 let compiled = crate::sass::compile(
                     &path,
@@ -107,7 +114,9 @@ impl<'a> Styles<'a> {
                     self.inventory,
                     sass_resolver,
                     &self.sass_aliases,
+                    self.source_maps,
                 )?;
+                upstream = compiled.source_map;
                 self.sass_dependencies
                     .insert(path.clone(), compiled.inputs.keys().cloned().collect());
                 for (dependency, bytes) in compiled.inputs {
@@ -128,6 +137,12 @@ impl<'a> Styles<'a> {
                     .wrap_err_with(|| format!("{}: CSS is not UTF-8", path.display()))?
                     .to_owned()
             };
+            if self.source_maps {
+                self.sources.insert(
+                    path.clone(),
+                    crate::sourcemap::Source::with_upstream(&path, &text, upstream)?,
+                );
+            }
             self.texts.insert(path.clone(), text);
             let text = &self.texts[&path];
             let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
@@ -378,6 +393,11 @@ impl<'a> Styles<'a> {
     fn output_path(&self, path: &Path) -> PathBuf {
         let mut digest = Sha256::new();
         digest.update(b"css-resource-v1\0");
+        digest.update([u8::from(self.source_maps)]);
+        if self.source_maps {
+            digest.update(include_str!("sourcemap.rs"));
+            digest.update(include_str!("css.rs"));
+        }
         let root = self
             .inventory
             .relative(self.root, path)
@@ -397,6 +417,11 @@ impl<'a> Styles<'a> {
             digest.update(relative);
             digest.update((input.len() as u64).to_le_bytes());
             digest.update(input);
+            if style && self.source_maps {
+                let source = path.as_os_str().as_encoded_bytes();
+                digest.update((source.len() as u64).to_le_bytes());
+                digest.update(source);
+            }
             if style && self.names.contains_key(&path) {
                 digest.update(self.transform_identity);
                 for (request, target) in &self.compositions[&path] {
@@ -421,6 +446,11 @@ impl<'a> Styles<'a> {
                     digest.update(sasso::VERSION);
                     digest.update(include_str!("sass.rs"));
                     for dependency in dependencies {
+                        if self.source_maps {
+                            let source = dependency.as_os_str().as_encoded_bytes();
+                            digest.update((source.len() as u64).to_le_bytes());
+                            digest.update(source);
+                        }
                         let relative = self
                             .inventory
                             .relative(self.root, dependency)
@@ -438,7 +468,7 @@ impl<'a> Styles<'a> {
         PathBuf::from(format!("assets/{:x}.css", digest.finalize()))
     }
 
-    fn render(&self, path: &Path) -> eyre::Result<Vec<u8>> {
+    fn render(&self, path: &Path) -> eyre::Result<(Vec<u8>, Option<Vec<u8>>)> {
         let text = &self.texts[path];
         let stylesheet = self.output_path(path);
         let mut edits = self
@@ -469,7 +499,41 @@ impl<'a> Styles<'a> {
                 replacement,
             });
         }
-        Ok(crate::css_syntax::apply_edits(text, edits)?.into_bytes())
+        if !self.source_maps {
+            return Ok((
+                crate::css_syntax::apply_edits(text, edits)?.into_bytes(),
+                None,
+            ));
+        }
+        // Retain the same overlap and UTF-8 validation as the unmapped pipeline.
+        crate::css_syntax::apply_edits(text, edits.clone())?;
+        edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
+        let source = &self.sources[path];
+        let mut writer = crate::sourcemap::Writer::new(true);
+        let mut offset = 0;
+        for edit in edits {
+            writer.source(
+                source,
+                oxc_span::Span::new(offset as u32, edit.span.start as u32),
+            );
+            writer.replacement(&edit.replacement, source, edit.span.start as u32);
+            offset = edit.span.end;
+        }
+        writer.source(
+            source,
+            oxc_span::Span::new(offset as u32, text.len() as u32),
+        );
+        let (mut css, map) = writer.finish(&stylesheet);
+        let map_path = crate::sourcemap::path(&stylesheet);
+        let map_url = crate::assembly::relative_request(&stylesheet, &map_path, true)
+            .ok_or_else(|| eyre::eyre!("invalid stylesheet source map path"))?;
+        css.push_str("\n/*# sourceMappingURL=");
+        css.push_str(&map_url);
+        css.push_str(" */\n");
+        Ok((
+            css.into_bytes(),
+            map.map(|map| map.to_json_string().into_bytes()),
+        ))
     }
 
     pub(crate) fn emit<C>(&self, root: &Path, artifacts: &mut Artifacts<C>) -> eyre::Result<()> {
@@ -478,7 +542,14 @@ impl<'a> Styles<'a> {
             .insert(root.to_owned(), self.output_path(root));
         for (path, style) in self.closure(root) {
             let (output, bytes) = if style {
-                (self.output_path(&path), self.render(&path)?)
+                let output = self.output_path(&path);
+                let (bytes, map) = self.render(&path)?;
+                if let Some(map) = map {
+                    artifacts
+                        .resources
+                        .insert(crate::sourcemap::path(&output), map);
+                }
+                (output, bytes)
             } else {
                 (
                     resource::asset_path(&path, &self.inputs[&path]),

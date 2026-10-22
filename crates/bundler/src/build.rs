@@ -286,6 +286,7 @@ impl BuildSession {
             &public_base,
             &options.css.css_modules,
             &options.resolver,
+            options.output.source_maps,
         );
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();

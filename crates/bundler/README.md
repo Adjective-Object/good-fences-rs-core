@@ -17,8 +17,9 @@ but never loaded as current facts or deleted by the migration.
 
 ### Upstream JavaScript source maps
 
-`BuildOptions.output.source_maps` enables external `.map` artifacts and
-composition with each script's last parser-identified `sourceMappingURL` comment.
+`BuildOptions.output.source_maps` defaults to `false`. Enabling it emits external
+JavaScript and stylesheet maps (see Sass inputs below), with JavaScript
+composition using each script's last parser-identified `sourceMappingURL` comment.
 Inline JSON data URLs (base64 or percent-encoded) and linked local maps are
 supported; linked files must resolve inside the canonical build root. Remote
 links, missing files, malformed maps and unsupported encodings are errors, not
@@ -29,7 +30,8 @@ Original names and nullable `sourcesContent` survive composition. `sourceRoot`
 and source paths resolve from the linked map location (or script location for
 inline maps), producing absolute source URLs in merged output. Sparse/unmapped
 upstream segments and generated wrappers remain unmapped. Only JavaScript
-script inputs are composed; prepared resource wrappers have no original spans.
+script inputs consume these upstream directives; prepared resource wrappers
+have no original spans.
 
 Parsed upstream metadata uses a separately checksummed, typed FlatBuffer at
 `<script>.upstream.seg.fb`. It binds exact script/map bytes and map location;
@@ -689,7 +691,25 @@ including when the generated JavaScript mapping stays unchanged. All original
 inputs are rechecked before success; compiler diagnostics join build warnings and
 errors retain source locations. Plain CSS `@import` remains a separate resource,
 not a Sass module. Relative emitted CSS URLs resolve against the entry stylesheet,
-as in Sass without source-map URL rebasing.
+without rebasing them to the originating Sass partial's directory.
+
+With `output.source_maps: true`, both plain CSS and compiled Sass resources have
+external sibling `.css.map` artifacts and CSS `/*# sourceMappingURL=... */`
+footers with relative, URL-escaped map paths. Each map's `file` names the final
+stylesheet. Sasso's native compiler mappings retain checked original source
+file URLs and `sourcesContent`, including imported/forwarded partials supplying
+variable values and mixins. CSS Modules selector/keyframe/composition edits and
+CSS URL/import rewrites compose into that map against the final emitted bytes;
+compiler-supplied mapping granularity is preserved, not invented. Synthetic
+JavaScript stylesheet loaders are not attributed to Sass/CSS source bytes.
+Maps are published as resources alongside their stylesheets.
+
+Disabled maps perform no Sass compiler mapping work and emit neither stylesheet
+maps nor added map footers. Map settings and mapping-only dependency edits
+participate in immutable stylesheet identities, so routes, public hrefs and CSS
+imports consistently follow the new artifact. Original JavaScript stays warm
+when toggling maps; a changed synthesized href loader can require reparsing
+that generated module. Unchanged generated module text reuses its normal cache.
 
 Sasso is a v0.x implementation with documented upstream conformance gaps, not an
 unconditional Dart Sass parity guarantee. Compilation failures are returned, never

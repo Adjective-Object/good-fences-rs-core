@@ -123,6 +123,14 @@ custom suffixes, public bases and aliases; aliases forward the same native job.
 Compile Sass through Sasso before CSS parsing/scoping. The importer uses checked
 inventory identities and resolver package/alias policy; retain/recheck transitive
 original Sass bytes separately from compiled CSS and include them in resource keys.
+`output.source_maps` covers CSS/Sass resources, not their synthetic JS loaders.
+Enable Sasso native maps only on demand; normalize checked original source URLs
+and retain contents in typed borrowed upstream records. Compose selector,
+keyframe, composes and URL/import edits through the shared provenance writer.
+Publish sibling .css.map resources with relative escaped CSS map footers and
+final stylesheet filenames. Include mapping-sensitive inputs/settings in immutable
+resource identities; toggles reuse original JS facts, while changed generated href
+loaders may reparse. Preserve compiler granularity; never invent original spans.
 Extract CSS with parser-backed URL spans; preserve separate imports, conditions,
 layers and cycles. Closure hashes include transitive original CSS/asset bytes;
 recheck every input. Stylesheets maps CSS roots only; caller-loaded styles remain

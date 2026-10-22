@@ -437,6 +437,7 @@ pub(crate) fn esm_plan_prepared(
 /// Explicit callers must exclude
 /// escaped/reflective namespace observations; namespaces here support live reads
 /// and identity only. Unsupported reconstruction returns native output.
+#[cfg(test)]
 pub(crate) fn esm_plan_activated(
     graph: &SourceGraph,
     plan: &ChunkPlan,

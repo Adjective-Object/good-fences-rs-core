@@ -166,7 +166,7 @@ This does not change the
 tracker/CLI's Node requirements.
 P1 provides checked owned parse facts; P2 adds the opt-in
 [`segment_cache` library](crates/segment_cache/README.md) with typed FlatBuffers
-(schema 13/extractor 16), immutable byte-backed warm facts and atomic `.seg.fb`
+(schema 17/extractor 24), immutable byte-backed warm facts and atomic `.seg.fb`
 source-adjacent sidecars. Legacy `.seg.cbor` files miss/rebuild without deletion.
 Existing tracker behavior is unchanged.
 

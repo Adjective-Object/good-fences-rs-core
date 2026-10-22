@@ -274,3 +274,219 @@ fn sass_rechecks_transitive_original_bytes_before_returning() {
         "{error}"
     );
 }
+
+fn stylesheet_map(result: &BuildResult, source: &Path) -> oxc_sourcemap::SourceMap {
+    let output = &result.product.artifacts.stylesheets[&source.canonicalize().unwrap()];
+    let map = &result.product.artifacts.resources[&crate::sourcemap::path(output)];
+    let map =
+        oxc_sourcemap::SourceMap::from_json_string(std::str::from_utf8(map).unwrap()).unwrap();
+    assert_eq!(
+        map.get_file().unwrap().as_ref(),
+        output.file_name().unwrap().to_str().unwrap()
+    );
+    let footer =
+        crate::assembly::relative_request(output, &crate::sourcemap::path(output), true).unwrap();
+    assert!(css(result, source).ends_with(&format!("/*# sourceMappingURL={footer} */\n")));
+    map
+}
+
+fn stylesheet_origin(
+    result: &BuildResult,
+    stylesheet: &Path,
+    output_needle: &str,
+    original: &Path,
+    line: u32,
+    column: u32,
+) {
+    let text = css(result, stylesheet);
+    let offset = text
+        .find(output_needle)
+        .unwrap_or_else(|| panic!("{output_needle}: {text}"));
+    let prefix = &text[..offset];
+    let generated_line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let generated_column = prefix.rsplit('\n').next().unwrap().encode_utf16().count() as u32;
+    let map = stylesheet_map(result, stylesheet);
+    let table = map.generate_lookup_table();
+    let token = map
+        .lookup_source_view_token(&table, generated_line, generated_column)
+        .unwrap();
+    assert_eq!(
+        token.get_source().unwrap().as_ref(),
+        url::Url::from_file_path(original.canonicalize().unwrap())
+            .unwrap()
+            .as_str(),
+        "{output_needle}"
+    );
+    assert_eq!(
+        (token.get_src_line(), token.get_src_col()),
+        (line, column),
+        "{output_needle}"
+    );
+    assert_eq!(
+        token.get_source_content().unwrap().as_ref(),
+        fs::read_to_string(original).unwrap()
+    );
+}
+
+#[test]
+fn sass_source_maps_compose_scoping_urls_imports_values_and_forwarded_mixins() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './reset.css'; export {button} from './style.module.scss';",
+    );
+    write(
+                dir.root(),
+                "style.module.scss",
+                "@use './palette';\r\n@import './reset.css';\r\n.button { composes: base from './base.module.css';\r\n  @include palette.sized;\r\n  color: palette.$color;\r\n  background: url('./icon.svg');\r\n  animation: spin 1s;\r\n}\r\n@keyframes spin { to { opacity: 0; } }\r\n",
+            );
+    write(dir.root(), "_palette.scss", "@forward './colors';");
+    write(
+        dir.root(),
+        "_colors.scss",
+        "$color: red;\n@mixin sized {\n  padding: 6px;\n}\n",
+    );
+    write(dir.root(), "reset.css", "/* 😀é */ body { margin: 0 }\r\n");
+    write(dir.root(), "base.module.css", ".base { display: block; }");
+    write(dir.root(), "icon.svg", "<svg/>");
+    let mut config = options();
+    config.output.source_maps = true;
+    config.css.css_modules = CssModules::Enabled;
+    let result = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    let style = dir.root().join("style.module.scss");
+    stylesheet_origin(
+        &result,
+        &style,
+        "padding:",
+        &dir.root().join("_colors.scss"),
+        2,
+        2,
+    );
+    stylesheet_origin(
+        &result,
+        &style,
+        "red",
+        &dir.root().join("_colors.scss"),
+        0,
+        8,
+    );
+    stylesheet_origin(&result, &style, "background:", &style, 5, 2);
+    stylesheet_origin(&result, &style, "animation:", &style, 6, 2);
+    // Both the replaced selector and the path-changing URL retain their Sass origin.
+    stylesheet_origin(&result, &style, "._", &style, 2, 0);
+    let text = css(&result, &style);
+    assert!(!text.contains("composes:"));
+    assert_eq!(stylesheet_map(&result, &style).get_names().count(), 0);
+    let keyframe = &text[text.find("@keyframes ").unwrap() + "@keyframes ".len()..];
+    let keyframe = keyframe.split_whitespace().next().unwrap();
+    stylesheet_origin(&result, &style, keyframe, &style, 6, 2);
+    stylesheet_origin(
+        &result,
+        &style,
+        &format!("@keyframes {keyframe}"),
+        &style,
+        8,
+        0,
+    );
+    let url = &text[text.find("url(").unwrap()..];
+    let url = &url[..url.find(')').unwrap() + 1];
+    stylesheet_origin(&result, &style, url, &style, 5, 2);
+    stylesheet_origin(
+        &result,
+        &dir.root().join("reset.css"),
+        "margin:",
+        &dir.root().join("reset.css"),
+        0,
+        17,
+    );
+    assert_eq!(result.product.artifacts.resources.len(), 7);
+    for (_, map) in result
+        .product
+        .artifacts
+        .files
+        .iter()
+        .filter(|(path, _)| path.extension().is_some_and(|extension| extension == "map"))
+    {
+        let map = oxc_sourcemap::SourceMap::from_json_string(map).unwrap();
+        assert!(map
+            .get_sources()
+            .all(|source| !source.ends_with(".scss") && !source.ends_with(".css")));
+    }
+}
+
+#[test]
+fn sass_source_maps_toggle_warm_disk_invalidate_mapping_only_edits_and_publish() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "export {item} from './style.module.sass';",
+    );
+    write(
+        dir.root(),
+        "style.module.sass",
+        "@use './variables'\n.item\n  color: variables.$color\n",
+    );
+    write(dir.root(), "_variables.sass", "$color: red\n");
+    let style = dir.root().join("style.module.sass");
+    let variables = dir.root().join("_variables.sass");
+    let mut config = options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let off = session.build(&config).unwrap();
+    assert!(!css(&off, &style).contains("sourceMappingURL"));
+    assert_eq!(off.product.artifacts.resources.len(), 1);
+    config.output.source_maps = true;
+    let on = session.build(&config).unwrap();
+    assert_eq!(on.counters.source_parses, 0);
+    assert_ne!(
+        off.product.artifacts.stylesheets,
+        on.product.artifacts.stylesheets
+    );
+    stylesheet_origin(&on, &style, "red", &variables, 0, 8);
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&on.product, &noop.product));
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(on.product.artifacts, disk.product.artifacts);
+    write(
+        dir.root(),
+        "_variables.sass",
+        "// mapping-only edit\n$color: red\n",
+    );
+    let changed = session.build(&config).unwrap();
+    assert_eq!(changed.counters.source_parses, 0);
+    assert_ne!(
+        on.product.artifacts.stylesheets,
+        changed.product.artifacts.stylesheets
+    );
+    assert!(changed.invalidated.contains(&style));
+    assert!(changed.invalidated.contains(&dir.root().join("main.mjs")));
+    stylesheet_origin(&changed, &style, "red", &variables, 1, 8);
+    let css_body = |result: &BuildResult| {
+        css(result, &style)
+            .split("\n/*#")
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(css_body(&on), css_body(&changed));
+    let output = dir.root().join(".bundler-published");
+    let (published_build, published) = session
+        .build_and_publish(&config, &output, &crate::publish::Cancellation::default())
+        .unwrap();
+    for (path, bytes) in published_build.product.artifacts.file_bytes() {
+        assert_eq!(fs::read(published.directory.join(path)).unwrap(), bytes);
+    }
+    config.output.source_maps = false;
+    let off_again = session.build(&config).unwrap();
+    assert_eq!(off_again.counters.source_parses, 0);
+    assert_eq!(off_again.product.artifacts.resources.len(), 1);
+    assert!(!css(&off_again, &style).contains("sourceMappingURL"));
+}
