@@ -1,5 +1,10 @@
 # Linearization fixes and client-web exercise
 
+Historical investigation from `fix-linearization-client-web`, including staged
+JavaScript inputs and earlier module-format policy. For the current native
+TypeScript/source-map exercise and integration results, see
+`NOTES.client-web-source-maps.md`.
+
 ## Scope and checkpoints
 
 - Started 2026-10-21 on `fix-linearization-client-web`, based on

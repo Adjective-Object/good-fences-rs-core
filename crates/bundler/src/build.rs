@@ -301,6 +301,8 @@ impl BuildSession {
         );
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
+        let resolution_fingerprint_span =
+            tracing::info_span!("build.resolution_fingerprint").entered();
         let resolution_key = Fingerprint::of(
             format!(
                 "resolution-v1:{inventory:?}:{:?}:{aliases:?}:{:?}:{:?}:{:?}:{}:{:?}",
@@ -313,6 +315,7 @@ impl BuildSession {
             )
             .as_bytes(),
         );
+        drop(resolution_fingerprint_span);
         let resolution_changed = self.resolution_key != Some(resolution_key);
         if resolution_changed {
             self.resolutions.clear();
@@ -493,6 +496,12 @@ impl BuildSession {
                             continue;
                         }
                         counters.resolutions += 1;
+                        let _dependency_span = tracing::info_span!(
+                            "resolve.dependency",
+                            context = dependency.pattern().is_some(),
+                            require = dependency.kind() == DependencyKind::Require
+                        )
+                        .entered();
                         let mode = if dependency.kind() == DependencyKind::Require {
                             ResolutionMode::Require
                         } else {
@@ -593,6 +602,7 @@ impl BuildSession {
             // of worker-read bytes. Scripts above replenish without wave barriers.
             jobs = Vec::new();
             while let Some(path) = resources.pop_first() {
+                let _resource_span = tracing::info_span!("prepare.resource").entered();
                 let (discovered, failed) = integrate(read(path));
                 if failed {
                     break 'frontier;

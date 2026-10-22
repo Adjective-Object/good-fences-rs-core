@@ -1,9 +1,11 @@
 # Source-maps branch against client-web
 
 **Current status:** the module-format and global-style compatibility changes are
-implemented, but the full application still fails during preparation. Release
-hits a UTF-8 comment-slicing panic; debug hits an upstream Oxc pure-comment
-assertion first. Neither source-map setting publishes an application generation.
+implemented, and branch integration fixes the UTF-8 comment-slicing panic.
+The integrated four-entry release retry exceeded a 600-second bound without
+publishing output or reporting a diagnostic. The upstream Oxc debug pure-comment
+assertion remains unresolved. No successful full-application generation or
+browser/runtime pass has been established.
 
 ## Scope
 
@@ -268,7 +270,7 @@ panic diagnostic does not identify its input file. Bounded probes of the four
 entry packages did not reproduce it; ordinary pure-comment controls also pass.
 The triggering transitive input has not been localized.
 
-### Full-workload release retries
+### Full-workload release retries before branch integration
 
 The rebuilt release driver gets past the original format diagnostics, but both
 four-entry attempts fail before publication at
@@ -285,15 +287,123 @@ even when the comment has nothing to do with unused-export annotations.
 
 A source-free reproduction is an `entry.mjs` whose first line is `// ` followed
 by seven U+2500 characters, then `export const value = 1;` on the next line.
-Both debug and release drivers reproduce the UTF-8 panic on this input. This
+Before integration, both debug and release drivers reproduce the UTF-8 panic on this input. This
 does not involve an ambiguous extension, package-format adaptation, proprietary
 source, source maps or the upstream pure-comment assertion.
 
-These two preparation panics are the next confirmed adoption blockers.
-The Unicode prefix check needs UTF-8-safe matching; the Oxc assertion needs
-separate diagnosis. No full-graph link, published app maps, browser rendering,
+These were the two confirmed preparation blockers at this checkpoint.
+Branch integration below fixes the Unicode prefix check; the Oxc assertion
+still needs separate diagnosis. No full-graph link, published app maps, browser rendering,
 authenticated startup or app-runtime pass is claimed. The successful bounded
 controls above do not establish those outcomes.
+
+## Branch integration follow-up
+
+Imported all four missing `fix-linearization-client-web` commits, preserving
+their authorship and recording original commit IDs. The code fix `cd935c8`
+is now `9a1adc5`: comment annotation matching uses a checked UTF-8 prefix
+instead of slicing through a character. The imported
+`NOTES.fix-linearization-and-document-client-web.md` describes the older staged
+input exercise, not a successful run of the current native TypeScript pipeline.
+
+The `segment-aware` CSS changes were already represented:
+`f70e2e1` / `6e1c7d9`, `39e2614` / `f9046a4`, `c3e78f4` / `8f1509e`,
+and `443fdd2` / `0ade73d`. The first three pairs are patch-identical;
+the last differs in pre-existing CLI context and historical fixture counts,
+not missing CSS behavior. Replaying it would not add functionality.
+The newer source-map, module-format, CSS default-export and exclusion behavior
+is retained.
+
+Integration checks:
+
+- All **878 Rust library tests across eight crates** pass, including the new
+  Unicode regression, plus the required spot-check.
+- The exact source-free Unicode control above now builds with both debug and
+  release drivers, with maps enabled and disabled. All four native outputs
+  export `value = 1`; mapped outputs retain the exact Unicode source content,
+  and unmapped outputs emit no maps.
+- Original debounce/error-codes runtime and source-map controls, five native
+  CSS/Sass contracts and the linked global-style exclusion control still pass.
+- A saved pre-integration release driver still reproduces the Unicode panic.
+  Comparing it with the integrated debug driver gives matching **72 native
+  fixture passes / 93 emitted executions**, without legacy passes.
+- The full fixture command is **not clean**: its extra diagnostic check still
+  expects TypeScript to fail, although native TypeScript is supported. Both
+  drivers fail that same stale assertion. An initial corpus run also failed
+  the unbundled `native-async-cycles` source observation: concurrent cyclic
+  imports occasionally log `unreachable a`. Later comparisons passed that
+  case, but the source-side nondeterminism remains a real fixture issue,
+  not a bundled-output pass or an integration regression.
+
+The integrated release driver was also retried against the original four-entry
+client workload with maps enabled, the same CSS exclusions and disabled caches.
+It exceeded the **600-second bound** (600.179 s including timeout handling),
+was terminated by the timeout, produced no stderr and published no generation.
+The earlier UTF-8 panic was not observed before that bound, but an untraced
+timeout does not identify the active stage or prove preparation completed.
+This is neither a full-app pass nor evidence of a newly introduced performance
+regression. Maps-disabled and full-app debug runs were not repeated after
+integration; their earlier results remain historical.
+
+## Measured client profile
+
+Recorded the same four-entry release workload, maps enabled, caches disabled,
+with detailed application spans and a PID-filtered samply recording. The build
+was bounded at 480 s; timeout handling completed at 481.164 s with no generation
+and no diagnostic. The Chrome trace is intentionally incomplete at termination;
+aggregate exclusive durations account for open spans through that bound.
+The samply recording attached later and covers approximately 285 s, not the
+entire build. Its sampled CPU costs must not be added to phase wall times.
+
+Before starting source workers, eager inventory consumed **315.106 s** for
+**831,139 canonical files / 93,210 canonical directories**, encountering
+927,560 directory entries:
+
+| Inventory work | Exclusive wall time |
+| --- | ---: |
+| Entry processing, including canonicalization, metadata and JSON hashing | 238.764 s |
+| Collecting config ancestors into a path-keyed BTreeSet | 39.528 s |
+| Directory enumeration | 19.315 s |
+| Existing/missing package and tsconfig probes | 10.300 s |
+| Cross-tree scope validation | 3.921 s |
+
+Formatting/hashing the full debug representation of that inventory for the
+resolution fingerprint adds **7.021 s**. Preparation begins at about 322.4 s.
+At the bound it has run for 158.758 s, including **147.103 s across 90,586
+dependency-resolution attempts** on the coordinator. Nested context candidate
+enumeration accounts for 5.577 s of that resolution time. The graph, linking,
+emission and final recheck phases have not been reached.
+
+Full local PDB symbolication, including inline frames, identifies these costs:
+
+- The resolver's package-context loading path consumes **52.068 sampled CPU s**,
+  with **51.358 CPU s** under `serde_json::from_reader` and **50.674 CPU s**
+  through `std::io::Bytes<std::fs::File>`. At
+  `crates/packagejson/src/packagejson.rs:142`, the reader receives an unbuffered
+  `File`; repeated tiny reads incur kernel-call overhead even with warm disk
+  caches. This is a concrete buffering opportunity, not evidence that JSON
+  parsing itself requires a minute.
+- The captured part of inventory accounts for **97.318 sampled CPU s**.
+  Path component iteration/comparison and BTreeSet searches dominate the
+  ancestor-collection stacks. The loop currently revisits every file's entire
+  ancestry even when those directories are already known.
+- Resolver canonicalization and file/directory probing remain substantial;
+  `CachingNodeModulesResolver::wrap` alone includes **18.947 sampled CPU s**.
+  The four extraction workers each accumulate only about **27 CPU s** during
+  the preparation interval while the coordinator performs serial resolution.
+
+Prioritize buffering package JSON reads, deduplicating ancestor traversal,
+and replacing the inventory debug-string fingerprint with a structural key.
+Then reduce redundant metadata/canonicalization using the checked inventory
+without weakening junction handling or invalidation. These are proposed
+optimizations; this change adds observability and does not implement them.
+The observed delay is already explained before source-map emission or linking.
+
+Use the captured `symbolized.json.gz` with the matching local PDB directory
+when loading samply. The original automatic symbol sidecar contained fallback
+`fun_*` names; supplying `--symbol-dir` resolves actual Rust names and lines.
+Samply 0.13.1 ignores `--duration` for Windows PID attachment and requires
+Ctrl+C to finish recording. No profile or symbols were uploaded.
 
 ## Local evidence
 
@@ -337,3 +447,25 @@ Artifacts are under the local Copilot session's `files` directory:
   output directories and disabled persistent caches.
 - `unicode-comment-control.json`: source-free UTF-8 prefix-slicing reproduction
   in both profiles; temporary input/output directories were cleaned up.
+- `integration-rust-tests.log`, `integration-debug-build.log`,
+  `integration-release-build.log`: integrated suites and rebuilt drivers.
+- `verify-integrated-unicode.mjs`, `integration-unicode-results.json`: fixed
+  Unicode control in both profiles and source-map settings.
+- `integration-fixtures.log`: initial full-command failures, including the
+  source-side async-cycle nondeterminism.
+- `compare-integration-fixtures.mjs`, `integration-fixture-comparison.json`:
+  exact baseline/integrated fixture outcome comparison and the unchanged
+  stale TypeScript diagnostic check.
+- `exercise-integrated-client-release.mjs`,
+  `integration-client-release-results.json` and matching stdout/stderr:
+  the bounded, maps-enabled four-entry release retry after integration.
+- `client-profile-1792689011203`: full bounded Chrome trace, process result,
+  samply recording, full-PDB symbol resolutions and analysis summaries. These
+  are local artifacts, not committed inputs or published application output.
+- `profile-client-build.ps1`, `summarize-client-trace.mjs`,
+  `resolve-samply-symbols.mjs`, `analyze-samply.mjs`: local recording and analysis
+  helpers; trace aggregation uses exclusive per-thread time.
+- `profile-trace-tests.log`, `profile-example-tests.log`,
+  `profile-inventory-tests.log`, `profile-spot-check.log`: tracing privacy,
+  balanced spans, unchanged output/cache behavior, inventory contracts and
+  required spot-check results.

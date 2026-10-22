@@ -37,6 +37,12 @@ impl Inventory {
         importer: &Path,
         dependency: ast_segmenter::views::Dependency<'_>,
     ) -> (BTreeSet<PathBuf>, usize) {
+        let _span = tracing::info_span!(
+            "inventory.context_candidates",
+            files = self.files.len(),
+            directories = self.directories.len()
+        )
+        .entered();
         struct Walk<'a> {
             inventory: &'a Inventory,
             root: &'a Path,
@@ -139,6 +145,7 @@ fn excluded(path: &Path) -> bool {
 /// Only directory edges reachable from the input root are traversed. Ancestor
 /// config probes match resolver ancestry but never enumerate ancestor trees.
 pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
+    let _span = tracing::info_span!("build.inventory").entered();
     fn visit(
         root: &Path,
         scope: &Path,
@@ -151,16 +158,22 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
         if out.directories.contains_key(canonical) {
             return Ok(());
         }
+        let _span = tracing::info_span!("inventory.directory").entered();
         out.directories
             .insert(canonical.to_owned(), BTreeMap::new());
         #[cfg(test)]
         {
             out.directory_reads += 1;
         }
-        let mut entries = fs::read_dir(canonical)
-            .wrap_err_with(|| format!("inventory directory {}", dir.display()))?
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut entries = tracing::info_span!("inventory.read_directory").in_scope(|| {
+            fs::read_dir(canonical)
+                .wrap_err_with(|| format!("inventory directory {}", dir.display()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(eyre::Report::from)
+        })?;
         entries.sort_by_key(|entry| entry.file_name());
+        let _entries_span =
+            tracing::info_span!("inventory.entries", entries = entries.len()).entered();
         for entry in entries {
             let path = dir.join(entry.file_name());
             if excluded(&path) {
@@ -244,6 +257,12 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
     )?;
     // A later link can expose the containing tree of an earlier alias. Validate
     // every edge against the outermost known scope, independent of visit order.
+    let validation_span = tracing::info_span!(
+        "inventory.validate_scopes",
+        directories = result.directories.len(),
+        files = result.files.len()
+    )
+    .entered();
     for (directory, entries) in &result.directories {
         for (name, target) in entries {
             if let Some(scope) = target
@@ -264,6 +283,9 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
             }
         }
     }
+    drop(validation_span);
+    let ancestors_span =
+        tracing::info_span!("inventory.config_ancestors", files = result.files.len()).entered();
     let mut ancestors = BTreeSet::new();
     for file in result.files.keys() {
         for directory in file.parent().into_iter().flat_map(Path::ancestors) {
@@ -273,6 +295,9 @@ pub(super) fn inventory(root: &Path) -> eyre::Result<Inventory> {
             }
         }
     }
+    drop(ancestors_span);
+    let _probes_span =
+        tracing::info_span!("inventory.config_probes", directories = ancestors.len()).entered();
     for directory in ancestors {
         for name in ["package.json", "tsconfig.json"] {
             let path = directory.join(name);

@@ -569,6 +569,13 @@ the existing build-result JSON (errors remain on stderr).
 No administrator privileges, UAC elevation, global subscriber, or OS profiler
 are needed: these are application spans written to a normal user-owned file.
 
+Inventory spans separate directory enumeration, entry processing, scope
+validation, ancestor collection and package/config probes. Nested directory
+durations overlap: use exclusive time when aggregating them. Resolution-key
+fingerprinting, per-request static/context resolution, package-format probing,
+TypeScript/JSX compilation and serial resource preparation are separate spans.
+Inventory sizes and request-kind flags are recorded without paths or specifiers.
+
 The destination's parent must exist. Files are opened with `create_new`, never
 truncated. Keep traces outside the build root and output tree, or use a
 root-level `.bundler-trace-*` filename (excluded from source inventory).

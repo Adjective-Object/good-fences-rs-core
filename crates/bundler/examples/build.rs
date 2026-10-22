@@ -453,7 +453,7 @@ mod tests {
         let root = dir.root();
         std::fs::write(
             root.join("entry.mjs"),
-            "export const value = 'PRIVATE_SOURCE_LITERAL';",
+            "import './other.mjs'; export const value = 'PRIVATE_SOURCE_LITERAL';",
         )
         .unwrap();
         std::fs::write(root.join("other.mjs"), "export const other = 2;").unwrap();
@@ -476,12 +476,21 @@ mod tests {
         for name in [
             "build.declarations",
             "build.inventory",
+            "inventory.directory",
+            "inventory.read_directory",
+            "inventory.entries",
+            "inventory.validate_scopes",
+            "inventory.config_ancestors",
+            "inventory.config_probes",
+            "build.resolution_fingerprint",
+            "prepare.package_format",
             "prepare.read_bytes",
             "cache.extract",
             "cache.validate",
             "cache.encode",
             "cache.publish",
             "build.resolve",
+            "resolve.dependency",
             "build.plan",
             "emit.planning",
             "emit.owner",
