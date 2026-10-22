@@ -23,6 +23,7 @@ mod output_url;
 pub mod policy;
 pub mod publish;
 mod resource;
+mod sass;
 pub mod rewrite;
 mod symbols;
 

@@ -30,6 +30,11 @@ pub(crate) struct Styles<'a> {
     root: &'a Path,
     inventory: &'a crate::build::Inventory,
     inputs: BTreeMap<PathBuf, Vec<u8>>,
+    texts: BTreeMap<PathBuf, String>,
+    sass_inputs: BTreeMap<PathBuf, Vec<u8>>,
+    sass_dependencies: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    warnings: BTreeSet<String>,
+    sass_aliases: BTreeSet<String>,
     requests: BTreeMap<PathBuf, Vec<Request>>,
     compositions: BTreeMap<PathBuf, Vec<(crate::css_syntax::Name, PathBuf)>>,
     public_base: &'a crate::output_url::PublicBase,
@@ -45,11 +50,17 @@ impl<'a> Styles<'a> {
         inventory: &'a crate::build::Inventory,
         public_base: &'a crate::output_url::PublicBase,
         selection: &'a crate::build::CssModules,
+        resolver_options: &import_resolver::node_resolver::caching::NodeModulesResolverOptions,
     ) -> Self {
         Self {
             root,
             inventory,
             inputs: BTreeMap::new(),
+            texts: BTreeMap::new(),
+            sass_inputs: BTreeMap::new(),
+            sass_dependencies: BTreeMap::new(),
+            warnings: BTreeSet::new(),
+            sass_aliases: resolver_options.alias.keys().cloned().collect(),
             requests: BTreeMap::new(),
             compositions: BTreeMap::new(),
             public_base,
@@ -73,6 +84,7 @@ impl<'a> Styles<'a> {
         path: &Path,
         input: &[u8],
         resolver: &impl DependencyResolver,
+        sass_resolver: &impl DependencyResolver,
     ) -> eyre::Result<()> {
         if let Some(previous) = self.inputs.get(path) {
             ensure!(
@@ -88,8 +100,36 @@ impl<'a> Styles<'a> {
             if self.requests.contains_key(&path) {
                 continue;
             }
-            let text = std::str::from_utf8(&self.inputs[&path])
-                .wrap_err_with(|| format!("{}: CSS is not UTF-8", path.display()))?;
+            let text = if crate::sass::is_sass(&path) {
+                let compiled = crate::sass::compile(
+                    &path,
+                    &self.inputs[&path],
+                    self.inventory,
+                    sass_resolver,
+                    &self.sass_aliases,
+                )?;
+                self.sass_dependencies
+                    .insert(path.clone(), compiled.inputs.keys().cloned().collect());
+                for (dependency, bytes) in compiled.inputs {
+                    if let Some(previous) = self.sass_inputs.get(&dependency) {
+                        ensure!(
+                            previous == &bytes,
+                            "Sass dependency changed during build: {}",
+                            dependency.display()
+                        );
+                    } else {
+                        self.sass_inputs.insert(dependency, bytes);
+                    }
+                }
+                self.warnings.extend(compiled.warnings);
+                compiled.css
+            } else {
+                std::str::from_utf8(&self.inputs[&path])
+                    .wrap_err_with(|| format!("{}: CSS is not UTF-8", path.display()))?
+                    .to_owned()
+            };
+            self.texts.insert(path.clone(), text);
+            let text = &self.texts[&path];
             let urls = urls(text).wrap_err_with(|| format!("{}: invalid CSS", path.display()))?;
             let mut compositions = Vec::new();
             if matches!(
@@ -237,7 +277,7 @@ impl<'a> Styles<'a> {
                     resource::stylesheet_kind(path, self.selection),
                     resource::ResourceKind::Stylesheet { module: true }
                 ) {
-                    let text = std::str::from_utf8(&self.inputs[path])?;
+                    let text = &self.texts[path];
                     let identity = self.root.join(self.inventory.relative(self.root, path));
                     let mut names = self.name_registry.prepare_linked(self.root, &identity, text, &|request, name| {
                         let target = &self.compositions[path].iter()
@@ -338,14 +378,16 @@ impl<'a> Styles<'a> {
     fn output_path(&self, path: &Path) -> PathBuf {
         let mut digest = Sha256::new();
         digest.update(b"css-resource-v1\0");
-        let root = self.inventory
+        let root = self
+            .inventory
             .relative(self.root, path)
             .as_os_str()
             .as_encoded_bytes();
         digest.update((root.len() as u64).to_le_bytes());
         digest.update(root);
         for (path, style) in self.closure(path) {
-            let relative = self.inventory
+            let relative = self
+                .inventory
                 .relative(self.root, &path)
                 .as_os_str()
                 .as_encoded_bytes();
@@ -358,7 +400,8 @@ impl<'a> Styles<'a> {
             if style && self.names.contains_key(&path) {
                 digest.update(self.transform_identity);
                 for (request, target) in &self.compositions[&path] {
-                    let target = self.inventory
+                    let target = self
+                        .inventory
                         .relative(self.root, target)
                         .as_os_str()
                         .as_encoded_bytes();
@@ -369,12 +412,34 @@ impl<'a> Styles<'a> {
                     digest.update(target);
                 }
             }
+            if style {
+                if let Some(dependencies) = self.sass_dependencies.get(&path) {
+                    let text = self.texts[&path].as_bytes();
+                    digest.update((text.len() as u64).to_le_bytes());
+                    digest.update(text);
+                    digest.update(b"sasso\0");
+                    digest.update(sasso::VERSION);
+                    digest.update(include_str!("sass.rs"));
+                    for dependency in dependencies {
+                        let relative = self
+                            .inventory
+                            .relative(self.root, dependency)
+                            .as_os_str()
+                            .as_encoded_bytes();
+                        let bytes = &self.sass_inputs[dependency];
+                        digest.update((relative.len() as u64).to_le_bytes());
+                        digest.update(relative);
+                        digest.update((bytes.len() as u64).to_le_bytes());
+                        digest.update(bytes);
+                    }
+                }
+            }
         }
         PathBuf::from(format!("assets/{:x}.css", digest.finalize()))
     }
 
     fn render(&self, path: &Path) -> eyre::Result<Vec<u8>> {
-        let text = std::str::from_utf8(&self.inputs[path])?;
+        let text = &self.texts[path];
         let stylesheet = self.output_path(path);
         let mut edits = self
             .names
@@ -426,7 +491,7 @@ impl<'a> Styles<'a> {
     }
 
     pub(crate) fn recheck(&self) -> eyre::Result<()> {
-        for (path, input) in &self.inputs {
+        for (path, input) in self.inputs.iter().chain(&self.sass_inputs) {
             ensure!(
                 fs::read(path)? == *input,
                 "CSS dependency changed during build: {}",
@@ -434,6 +499,10 @@ impl<'a> Styles<'a> {
             );
         }
         Ok(())
+    }
+
+    pub(crate) fn warnings(&self) -> impl Iterator<Item = &String> {
+        self.warnings.iter()
     }
 }
 

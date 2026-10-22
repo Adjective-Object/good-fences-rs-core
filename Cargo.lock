@@ -229,6 +229,7 @@ dependencies = [
  "oxc_parser",
  "oxc_semantic",
  "oxc_span",
+ "sasso",
  "segment_cache",
  "serde",
  "serde_json",
@@ -2288,6 +2289,12 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "sasso"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4de32df330f2607c02458791223064ee98752e719e6f85804953229533c32448"
 
 [[package]]
 name = "schemars"

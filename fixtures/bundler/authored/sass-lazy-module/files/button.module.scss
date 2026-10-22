@@ -1,0 +1,12 @@
+@use './palette';
+@mixin space($size) {
+  padding: $size * 2;
+}
+.button {
+  @include space(3px);
+  color: palette.$color;
+  background: url('./icon.svg');
+  &:hover {
+    color: blue;
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "authored/sass-lazy-module",
+  "moduleType": "module",
+  "entryPoints": ["entry.js"],
+  "fixtureConfig": {
+    "target": "browser",
+    "css": {"load": "auto-mount", "css_modules": true}
+  },
+  "cssObservation": "observe.mjs",
+  "expectations": {"stdout": ["native Sass deferred mappings and resources"], "backend": "native"},
+  "goals": ["Compile Sass modules and indented partials before scoping; preserve deferred once-only loading, mapping/CSS agreement, and asset URL publication."]
+}

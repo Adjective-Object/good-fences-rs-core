@@ -15,6 +15,7 @@ use bundler::{
 #[derive(serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct FixtureConfig {
+    target: FixtureTarget,
     workers: std::num::NonZeroUsize,
     output: FixtureOutput,
     css: FixtureCss,
@@ -26,6 +27,7 @@ struct FixtureConfig {
 impl Default for FixtureConfig {
     fn default() -> Self {
         Self {
+            target: FixtureTarget::default(),
             workers: std::num::NonZeroUsize::MIN,
             output: FixtureOutput::default(),
             css: FixtureCss::default(),
@@ -33,6 +35,14 @@ impl Default for FixtureConfig {
             cache: FixtureCache::default(),
         }
     }
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FixtureTarget {
+    #[default]
+    Node,
+    Browser,
 }
 
 #[derive(serde::Deserialize)]
@@ -269,6 +279,13 @@ fn build(
             .read_to_end(&mut bytes)?;
         eyre::ensure!(bytes.len() <= 16 * 1024, "fixture config exceeds 16 KiB");
         let config: FixtureConfig = serde_json::from_slice(&bytes)?;
+        options.resolver =
+            import_resolver::node_resolver::caching::NodeModulesResolverOptions::default_for_env(
+                match config.target {
+                    FixtureTarget::Node => import_resolver::resolve::TargetEnv::Node,
+                    FixtureTarget::Browser => import_resolver::resolve::TargetEnv::Browser,
+                },
+            );
         let canonical_root = root.canonicalize()?;
         eyre::ensure!(
             config.output.lazy_runtimes.len() <= 16,

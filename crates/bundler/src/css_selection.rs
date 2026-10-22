@@ -76,8 +76,21 @@ impl CssModules {
     pub(crate) fn matches(&self, path: &Path) -> bool {
         let suffix = match self {
             Self::Disabled => return false,
-            Self::Everything => return path.extension().is_some_and(|ext| ext == "css"),
-            Self::Enabled => ".module.css",
+            Self::Everything => {
+                return path
+                    .extension()
+                    .is_some_and(|ext| matches!(ext.to_str(), Some("css" | "scss" | "sass")));
+            }
+            Self::Enabled => {
+                return path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        [".module.css", ".module.scss", ".module.sass"]
+                            .iter()
+                            .any(|suffix| name.ends_with(suffix))
+                    });
+            }
             Self::Extension(suffix) => suffix,
         };
         path.file_name()
@@ -138,6 +151,19 @@ mod tests {
             kind(Path::new("x.module.css"), &CssModules::Disabled),
             ResourceKind::Stylesheet { module: false }
         );
+        for suffix in ["scss", "sass"] {
+            let path = format!("x.module.{suffix}");
+            assert_eq!(
+                kind(Path::new(&path), &CssModules::Disabled),
+                ResourceKind::Stylesheet { module: false }
+            );
+            for selection in [CssModules::Enabled, CssModules::Everything] {
+                assert_eq!(
+                    kind(Path::new(&path), &selection),
+                    ResourceKind::Stylesheet { module: true }
+                );
+            }
+        }
         assert_eq!(
             kind(Path::new("x.css"), &custom),
             ResourceKind::Stylesheet { module: false }

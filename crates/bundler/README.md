@@ -644,11 +644,37 @@ All these input bytes are rechecked before accepting a build.
 These resource identities independently invalidate output reuse, including
 CSS-only edits that leave caller-loaded module mappings unchanged.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
-memory/FlatBuffers cache. There is no Sass compilation, CSS concatenation or minification.
+memory/FlatBuffers cache. There is no CSS concatenation or minification.
+
+#### Sass inputs
+
+`.scss` and indented `.sass` files compile natively with pinned **Sasso 0.21.0**
+before CSS Modules, URL extraction and loading-wrapper generation. JavaScript can
+import them directly; no Sass executable or external preprocessing is required.
+`@use`, `@forward` and Sass `@import` load through a bounded importer: relative
+partials, directory indexes and import-only `.import.scss`/`.import.sass` files
+follow Sass precedence and ambiguous matches fail. Exact resolver aliases take
+precedence. Bare package requests (also `~package/path`) use the normal module
+resolver with `sass`/`style` export conditions and stylesheet extensions; package
+exports remain authoritative. No implicit load paths, Node polyfills or external
+Sass modules are supplied.
+
+Original transitive Sass bytes are tracked separately from compiled CSS. Their
+edits, additions/deletions and resolution changes invalidate stylesheet identities,
+including when the generated JavaScript mapping stays unchanged. All original
+inputs are rechecked before success; compiler diagnostics join build warnings and
+errors retain source locations. Plain CSS `@import` remains a separate resource,
+not a Sass module. Relative emitted CSS URLs resolve against the entry stylesheet,
+as in Sass without source-map URL rebasing.
+
+Sasso is a v0.x implementation with documented upstream conformance gaps, not an
+unconditional Dart Sass parity guarantee. Compilation failures are returned, never
+replaced with raw Sass or empty CSS.
 
 `BuildOptions.css.css_modules` (`CssModules`) accepts `false` (default/`Disabled`),
-`true` (`Enabled`, selecting `.module.css`), `"everything"` (`Everything`, all CSS
-inputs), or `"ext:.any.custom.extension"` (`Extension` with the dotted suffix).
+`true` (`Enabled`, selecting `.module.css`, `.module.scss` and `.module.sass`),
+`"everything"` (`Everything`, all CSS/Sass inputs), or
+`"ext:.any.custom.extension"` (`Extension` with the dotted suffix).
 Suffixes consist of nonempty dot-separated ASCII letters/digits/underscore/hyphen
 components; empty suffixes, separators, whitespace and URL syntax are rejected
 before graph loading, including programmatically constructed invalid options.
@@ -1224,6 +1250,7 @@ shipped defaults); unknown fields, including nested fields, are errors:
 
 ```json
 {
+  "target": "node",
   "output": {"base_url": "./"},
   "css": {"load": "caller-loaded", "css_modules": false},
   "resolveConditions": []
@@ -1232,13 +1259,17 @@ shipped defaults); unknown fields, including nested fields, are errors:
 
 This is a small fixture driver, not a general BuildOptions configuration API.
 No configuration is discovered implicitly; entry selection remains positional.
-`css_modules` accepts `false`, `true` (`.module.css`), `"everything"` (known CSS
+`target` accepts `"node"` or `"browser"` and selects the corresponding resolver
+conditions and host contracts before adding `resolveConditions`. The driver
+consumes already-transpiled JavaScript; it does not compile TypeScript or JSX.
+Sass stylesheets compile through the native resource pipeline.
+`css_modules` accepts `false`, `true` (`.module.css`/`.module.scss`/`.module.sass`), `"everything"` (known CSS/Sass
 inputs only) or `"ext:.custom.suffix"`; `load` accepts `"caller-loaded"` or
 `"auto-mount"`, independently of selection. Export-name conversion is fixed
 camelCase, not configurable. Invalid bases/suffixes, collisions, illegal or cyclic
 composition and unsupported/recovered module syntax return errors, never partial
-transform success. ICSS `:import`/`:export`, `@value` and preprocessor compilation
-are unsupported; see the full CSS contract above for selector/value boundaries.
+transform success. ICSS `:import`/`:export` and `@value` are unsupported; preprocessors
+other than Sass are unsupported. See the full CSS contract above for selector/value boundaries.
 
 Caller-loaded users must serve owned resources under the configured base and
 load/order their stylesheets. Auto-mount users must provide a usable document/head

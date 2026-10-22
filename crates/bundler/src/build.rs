@@ -280,6 +280,7 @@ impl BuildSession {
             &inventory,
             &public_base,
             &options.css.css_modules,
+            &options.resolver,
         );
         let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
         aliases.sort();
@@ -304,6 +305,15 @@ impl BuildSession {
         }
         let external_sources = inventory.has_external_sources(&self.root);
         let resolver = resolver::BuildResolver::new(&self.root, options, external_sources);
+        let mut sass_options = options.clone();
+        sass_options.resolver = resolver::BuildResolver::options(options);
+        sass_options.resolver.extensions = vec!["scss".into(), "sass".into(), "css".into()];
+        sass_options
+            .resolver
+            .export_conditions
+            .extend(["sass".into(), "style".into()]);
+        let sass_resolver =
+            resolver::BuildResolver::new(&self.root, &sass_options, external_sources);
         let mut queue = VecDeque::new();
         let mut entries = BTreeMap::new();
         for (name, entry) in &options.entries {
@@ -357,9 +367,11 @@ impl BuildSession {
             let mut discovered = BTreeSet::new();
             let result = (|| -> eyre::Result<()> {
                 let kind = crate::resource::kind(&path, &options.css.css_modules);
-                if matches!(kind, crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset)
-                    || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
-                        && options.css.load == CssLoad::CallerLoaded)
+                if matches!(
+                    kind,
+                    crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset
+                ) || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
+                    && options.css.load == CssLoad::CallerLoaded)
                 {
                     require_defaults.insert(path.clone());
                 }
@@ -373,7 +385,7 @@ impl BuildSession {
                     prepare::Prepared::Resource { input, format } => {
                         let prepared_css =
                             if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
-                                styles.discover(&path, &input, &resolver)?;
+                                styles.discover(&path, &input, &resolver, &sass_resolver)?;
                                 Some(options.css.load.strategy().generate_module(
                                     &crate::css_loading::CssModuleInput {
                                         stylesheet: &path,
@@ -442,7 +454,9 @@ impl BuildSession {
                     .or_else(|| previous.get(&path))
                     .expect("loaded source");
                 let resolution_span = tracing::info_span!("build.resolve").entered();
-                let resolved = if let Some(cached) = self.resolutions.get(&path).filter(|_| !external_sources) {
+                let resolved = if let Some(cached) =
+                    self.resolutions.get(&path).filter(|_| !external_sources)
+                {
                     cached.clone()
                 } else {
                     let mut resolved = HashMap::new();
@@ -563,6 +577,7 @@ impl BuildSession {
             }
         }
         drop(preparation_span);
+        warnings.extend(styles.warnings().cloned());
         self.sources.extend(loaded_sources);
         // CSS closure identity can change while its generated module stays equal.
         for path in sources.keys() {
@@ -694,6 +709,7 @@ impl BuildSession {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &self.sources, &inventory)?;
                 resolver.recheck(&self.root, options)?;
+                sass_resolver.recheck(&self.root, &sass_options)?;
                 styles.recheck()?;
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
@@ -729,8 +745,9 @@ impl BuildSession {
                 }
             })
             .collect();
-        let plan = tracing::info_span!("build.plan").in_scope(||
-            chunks::partition_with_options(&graph, &roots, &options.effects, &options.output))?;
+        let plan = tracing::info_span!("build.plan").in_scope(|| {
+            chunks::partition_with_options(&graph, &roots, &options.effects, &options.output)
+        })?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let mut artifacts = link::esm_plan_configured(
             &graph,
@@ -763,6 +780,7 @@ impl BuildSession {
         Self::recheck(&self.root, &self.sources, &inventory)?;
         resolver.recheck(&self.root, options)?;
         styles.recheck()?;
+        sass_resolver.recheck(&self.root, &sass_options)?;
         counters.emissions = 1;
         counters.record_parses(before_parses);
         let generation = match &self.last {

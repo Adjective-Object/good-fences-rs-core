@@ -112,6 +112,9 @@ file_bytes includes text and resources; publication ownership/hash/
 cleanup cover both. Resource paths never become executable module routes.
 Stylesheet routes remain input-root → owned output-relative .css paths under
 custom suffixes, public bases and aliases; aliases forward the same native job.
+Compile Sass through Sasso before CSS parsing/scoping. The importer uses checked
+inventory identities and resolver package/alias policy; retain/recheck transitive
+original Sass bytes separately from compiled CSS and include them in resource keys.
 Extract CSS with parser-backed URL spans; preserve separate imports, conditions,
 layers and cycles. Closure hashes include transitive original CSS/asset bytes;
 recheck every input. Stylesheets maps CSS roots only; caller-loaded styles remain

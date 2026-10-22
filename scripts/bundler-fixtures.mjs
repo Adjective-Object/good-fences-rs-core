@@ -148,8 +148,11 @@ function validateCase(root, directory) {
 }
 
 function validateFixtureConfig(config) {
-  object(config, [], 'fixtureConfig', ['output', 'css', 'resolveConditions', 'workers', 'cache']);
+  object(config, [], 'fixtureConfig', ['target', 'output', 'css', 'resolveConditions', 'workers', 'cache']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
+  if (Object.hasOwn(config, 'target')) {
+    check(['node', 'browser'].includes(config.target), 'invalid fixture target');
+  }
   if (Object.hasOwn(config, 'cache')) {
     check(['read-write', 'disabled'].includes(config.cache), 'invalid fixture cache mode');
   }

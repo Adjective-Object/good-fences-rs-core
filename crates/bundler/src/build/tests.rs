@@ -3,6 +3,7 @@ use crate::chunks::NodeId;
 use test_tmpdir::TmpDir;
 
 mod browser;
+mod sass;
 
 #[cfg(any(unix, windows))]
 mod linked_inventory;

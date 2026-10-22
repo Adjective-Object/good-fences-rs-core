@@ -275,6 +275,7 @@ for (const [name, mutate, expected] of [
   ['nonstring error code', (m) => { m.expectations.errors = { 'entry.js': { name: 'Error', code: 1 } }; }, /nonempty text/u],
   ['unstable error message', (m) => { m.expectations.errors = { 'entry.js': { name: 'Error', message: 'path' } }; }, /exactly/u],
   ['unknown fixture option', (m) => { m.fixtureConfig = { externals: ['node:fs'] }; }, /exactly/u],
+  ['invalid fixture target', (m) => { m.fixtureConfig = { target: 'worker' }; }, /invalid fixture target/u],
   ...[0, -1, 1.5, 65, '2', null].map(workers =>
     [`invalid workers ${JSON.stringify(workers)}`, (m) => { m.fixtureConfig = { workers }; }, /workers must/u]),
   ['non-array conditions', (m) => { m.fixtureConfig = { resolveConditions: 'source' }; }, /must be an array/u],

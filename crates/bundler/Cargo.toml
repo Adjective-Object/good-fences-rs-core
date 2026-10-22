@@ -8,6 +8,7 @@ description = "Owned graph retention, exact chunk planning and native ESM emissi
 
 [dependencies]
 cssparser = "0.35"
+sasso = { version = "=0.21.0", default-features = false }
 oxc-css-parser = { git = "https://github.com/oxc-project/oxc-css-parser", rev = "6e1604ddd0ad0d08279aac4a2910ff8ca585f7c6" }
 ecco = { path = "../ecco" }
 ast-segmenter = { path = "../ast_segmenter" }

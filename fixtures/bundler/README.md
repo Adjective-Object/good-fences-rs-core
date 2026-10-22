@@ -73,10 +73,10 @@ TTY output colors `PASS` green, `FAIL` red, and `backend=legacy` red even on
 passing cases. `FORCE_COLOR=1` enables color in redirected output; `NO_COLOR`
 disables it (taking precedence). Structured API results remain uncolored.
 
-The corpus contains **69 cases / 89 entry executions**: six esbuild cases,
-six rspack cases and fifty-seven authored cases. Four authored CSS cases and
-seven generated-async cases use output observations; the 58 ordinary JS cases /
-78 executions remain differential.
+The corpus contains **72 cases / 93 entry executions**: six esbuild cases,
+six rspack cases and sixty authored cases. Five authored CSS/Sass cases and
+seven generated-async cases use output observations; the 60 ordinary JS cases /
+81 executions remain differential.
 The upstream cases cover
 shared entrypoint identity, static/dynamic imports, CJS default/named interop
 and cycles, ESM live bindings, re-export cycles, and evaluation order.
@@ -88,6 +88,8 @@ jobs, cached rejection/TDZ, dynamic exported-then assimilation, and native CJS
 ambient activation/identity, path-wrapper redeclarations, late interop after
 public built-in mutation, failure retry and mixed-cycle error contracts,
 and independent demands on shared segments with live state and inferred names.
+The native Sass contract checks SCSS plus indented partial compilation, scoped
+mapping/CSS agreement, deferred once-only mounting and published asset URLs.
 Four flattening regressions additionally defend shared-group body
 retention, outside-job return paths, redirected-barrel ordering, and
 entrance-dependent source SCC evaluation.

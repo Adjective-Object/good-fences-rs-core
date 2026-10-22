@@ -14,7 +14,11 @@ pub(crate) enum ResourceKind {
 }
 
 pub(crate) fn kind(path: &Path, selection: &crate::build::CssModules) -> ResourceKind {
-    if selection.matches(path) || path.extension().is_some_and(|extension| extension == "css") {
+    if selection.matches(path)
+        || path
+            .extension()
+            .is_some_and(|extension| matches!(extension.to_str(), Some("css" | "scss" | "sass")))
+    {
         return stylesheet_kind(path, selection);
     }
     match path.extension().and_then(|extension| extension.to_str()) {
@@ -109,7 +113,9 @@ pub(crate) fn prepare(
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let normalized;
-    let jsonc = path.extension().is_some_and(|extension| extension == "jsonc");
+    let jsonc = path
+        .extension()
+        .is_some_and(|extension| extension == "jsonc");
     let text = if jsonc {
         normalized = normalize_jsonc(text)
             .wrap_err_with(|| format!("{}: invalid JSONC module", path.display()))?;

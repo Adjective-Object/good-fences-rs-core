@@ -11,7 +11,7 @@ pub(super) struct BuildResolver {
 }
 
 impl BuildResolver {
-    fn options(options: &BuildOptions) -> NodeModulesResolverOptions {
+    pub(super) fn options(options: &BuildOptions) -> NodeModulesResolverOptions {
         let mut resolver = options.resolver.clone();
         // A target-only switch follows host defaults; nondefault condition sets
         // are explicit caller policy and remain untouched.
