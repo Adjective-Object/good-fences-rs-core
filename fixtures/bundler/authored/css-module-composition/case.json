@@ -5,5 +5,5 @@
   "fixtureConfig": {"css": {"css_modules": "everything"}},
   "cssObservation": "observe.mjs",
   "expectations": {"stdout": ["composition order and deduplication"], "backend": "native"},
-  "goals": ["Resolve local forward references, explicit global tokens and cross-file composition using original selector names under caller-loaded CSS."]
+  "goals": ["Resolve local forward references, explicit global tokens and cross-file composition using original selector names under caller-loaded CSS; default maps share the named bindings' composed tokens."]
 }

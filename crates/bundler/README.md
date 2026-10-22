@@ -762,7 +762,15 @@ input path and decoded selector name, never checkout paths, CSS contents or
 discovery order. An equal class/ID name in one file shares a value; distinct file
 paths have distinct identities. Detected scoped-name collisions fail explicitly.
 
-Mappings are separate pure native ESM named bindings, not a default object.
+Mappings are separate pure native ESM named bindings, with a default object
+whose own properties contain the same mapping values using the same normalized
+names. The default object is shared across static/dynamic imports and supported
+require namespaces; requiring a module still returns its namespace, not just
+the mapping object.
+It is empty when there are no exported locals; explicit globals and animation
+names do not become mapping properties. A local whose normalized name is
+`default` is available as `styles.default` on the default-imported object, not
+as a separate named export conflicting with that object.
 JS export names always use lower camelCase, recognizing hyphen/underscore
 separators, lower-to-upper transitions and acronym word boundaries
 (`my-class-name` → `myClassName`, `XMLHttp` → `xmlHttp`).
@@ -773,8 +781,10 @@ names are errors. For example `.my-class-name, #my-class-name` exports
 `myClassName` with the same scoped string for both selectors.
 Named/namespace imports, dynamic imports and CJS require-of-ESM expose those
 bindings; a deferred import/require still defers auto-mount activation.
-Unused JS bindings can be pruned independently without deleting stylesheet rules
-or the extracted CSS resource. Both loaders use identical mappings and CSS bytes;
+When the default object is unused, it and unused named bindings can be pruned
+independently; demanding the complete object retains its mapping values.
+This never deletes stylesheet rules or the extracted CSS resource.
+Both loaders use identical mappings and CSS bytes;
 auto-mount retains its DOM effects but does not add a URL default to modules.
 Selection is independent of `css.load`. Disabled selection preserves ordinary
 global CSS, including `.module.css` filenames.

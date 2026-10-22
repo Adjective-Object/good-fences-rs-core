@@ -41,7 +41,7 @@ impl CssLoadingStrategy for CallerLoaded {
         if input.is_module {
             return Ok(PreparedCssModule {
                 source: evaluation_imports(input.evaluation_dependencies)?
-                    + &named_exports(input.name_mappings)?,
+                    + &mapping_exports(input.name_mappings)?,
                 parser_path: input.stylesheet.with_extension("css.mjs"),
                 package: ModuleFormat::Esm,
                 relocations: Vec::new(),
@@ -91,7 +91,7 @@ impl CssLoadingStrategy for AutoMount {
             ".href;\nconst link = document.createElement(\"link\");\nlink.rel = \"stylesheet\";\nlink.href = href;\ndocument.head.appendChild(link);\n",
         );
         if input.is_module {
-            source.push_str(&named_exports(input.name_mappings)?);
+            source.push_str(&mapping_exports(input.name_mappings)?);
         } else {
             source.push_str("export {href as default};\n");
         }
@@ -115,9 +115,12 @@ fn evaluation_imports(dependencies: &[&str]) -> eyre::Result<String> {
     Ok(source)
 }
 
-fn named_exports(mappings: &BTreeMap<String, String>) -> eyre::Result<String> {
+fn mapping_exports(mappings: &BTreeMap<String, String>) -> eyre::Result<String> {
     let mut source = String::new();
     for (index, (name, value)) in mappings.iter().enumerate() {
+        if name == "default" {
+            continue;
+        }
         // Private bindings avoid keywords and loader locals; string aliases also
         // represent decoded CSS names outside JavaScript IdentifierName syntax.
         source.push_str(&format!(
@@ -126,6 +129,16 @@ fn named_exports(mappings: &BTreeMap<String, String>) -> eyre::Result<String> {
             serde_json::to_string(name)?,
         ));
     }
+    // Pure construction keeps literal-key maps prunable without binding-read barriers.
+    source.push_str("const __css_default = /*#__PURE__*/ (() => ({\n");
+    for (name, value) in mappings {
+        source.push_str(&format!(
+            "[{}]: {},\n",
+            serde_json::to_string(name)?,
+            serde_json::to_string(value)?,
+        ));
+    }
+    source.push_str("}))();\nexport {__css_default as default};\n");
     Ok(source)
 }
 
@@ -155,18 +168,18 @@ mod tests {
                 .unwrap()
         );
         input.is_module = true;
-        assert!(CallerLoaded
-            .generate_module(&input)
-            .unwrap()
-            .source
-            .is_empty());
+        assert_eq!(
+            CallerLoaded.generate_module(&input).unwrap().source,
+            "const __css_default = /*#__PURE__*/ (() => ({\n}))();\nexport {__css_default as default};\n"
+        );
         let mappings = BTreeMap::from([("button".into(), "_scoped".into())]);
         input.name_mappings = &mappings;
         let prepared = CallerLoaded.generate_module(&input).unwrap();
         assert_eq!(prepared.package, ModuleFormat::Esm);
         assert_eq!(
             prepared.source,
-            "const __css_0 = \"_scoped\";\nexport {__css_0 as \"button\"};\n"
+            "const __css_0 = \"_scoped\";\nexport {__css_0 as \"button\"};\n\
+             const __css_default = /*#__PURE__*/ (() => ({\n[\"button\"]: \"_scoped\",\n}))();\nexport {__css_default as default};\n"
         );
         input.is_module = false;
         assert!(CallerLoaded.generate_module(&input).is_err());

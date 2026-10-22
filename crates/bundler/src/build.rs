@@ -355,7 +355,7 @@ impl BuildSession {
         let mut loaded_sources = BTreeMap::new();
         let previous = &self.sources;
         let mut relocations = BTreeMap::new();
-        let mut require_defaults = BTreeSet::new();
+        let mut require_resources = BTreeMap::new();
         let mut changed = BTreeSet::new();
         let mut errors = BTreeMap::new();
         let root = &self.root;
@@ -388,7 +388,12 @@ impl BuildSession {
                 ) || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
                     && options.css.load == CssLoad::CallerLoaded)
                 {
-                    require_defaults.insert(path.clone());
+                    require_resources.insert(path.clone(), crate::resource::RequireValue::Default);
+                } else if kind == (crate::resource::ResourceKind::Stylesheet { module: true })
+                    && options.css.load == CssLoad::CallerLoaded
+                {
+                    require_resources
+                        .insert(path.clone(), crate::resource::RequireValue::Namespace);
                 }
                 let wrapper_format = match options.resolver.target_env {
                     TargetEnv::Browser => ModuleFormat::Esm,
@@ -866,7 +871,7 @@ impl BuildSession {
             &sources,
             &relocations,
             options.resolver.target_env == TargetEnv::Browser,
-            &require_defaults,
+            &require_resources,
             &BTreeMap::new(),
             options.output.min_chunk_bytes,
             &mappings,

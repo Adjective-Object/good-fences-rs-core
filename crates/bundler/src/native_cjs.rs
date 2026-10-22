@@ -33,7 +33,7 @@ impl CommonJs {
         plan: &ChunkPlan,
         modules: &BTreeMap<u32, Module<'_>>,
         browser: bool,
-        require_defaults: &BTreeSet<PathBuf>,
+        require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
     ) -> eyre::Result<Self> {
         let occupied: BTreeSet<_> = modules
             .values()
@@ -243,12 +243,12 @@ impl CommonJs {
                         let original = graph.file_path(target).unwrap();
                         let name = format!("{prefix}esm_{}", digest(original.to_str().unwrap()));
                         let facts = &modules[&target].parsed.facts();
-                        let default_resource = require_defaults.contains(original);
-                        if default_resource {
+                        let resource = require_resources.get(original);
+                        if resource == Some(&crate::resource::RequireValue::Default) {
                             result.require_defaults.insert(target);
                         }
                         if facts.dependencies().iter().all(|d| d.type_only())
-                            && (default_resource
+                            && (resource.is_some()
                                 || facts
                                     .effects()
                                     .iter()

@@ -38,7 +38,7 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     symbols: &Symbols,
     browser: bool,
-    require_defaults: &BTreeSet<PathBuf>,
+    require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
     placements: &BTreeMap<u32, u32>,
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
@@ -53,7 +53,7 @@ pub(super) fn emit(
             manifest,
             &prepared,
             browser,
-            require_defaults,
+            require_resources,
             placements,
             min_chunk_bytes,
             execution,
@@ -76,7 +76,7 @@ pub(super) fn emit(
             manifest,
             &prepared,
             browser,
-            require_defaults,
+            require_resources,
             &placements,
             min_chunk_bytes,
             execution,
@@ -90,7 +90,7 @@ pub(super) fn emit(
             manifest,
             &prepared,
             browser,
-            require_defaults,
+            require_resources,
             &BTreeMap::new(),
             min_chunk_bytes,
             execution,
@@ -103,7 +103,7 @@ pub(super) fn emit(
         manifest,
         &prepared,
         browser,
-        require_defaults,
+        require_resources,
         execution,
     )
 }
@@ -115,7 +115,7 @@ fn ordinary(
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
     browser: bool,
-    require_defaults: &BTreeSet<PathBuf>,
+    require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     if let Some(output) = tracing::info_span!("emit.single")
@@ -130,7 +130,7 @@ fn ordinary(
         manifest,
         prepared,
         browser,
-        require_defaults,
+        require_resources,
         execution,
     )
 }

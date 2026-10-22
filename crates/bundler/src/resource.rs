@@ -13,6 +13,13 @@ pub(crate) enum ResourceKind {
     Asset,
 }
 
+/// Require surfaces of pure prepared resources, not arbitrary source modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RequireValue {
+    Default,
+    Namespace,
+}
+
 pub(crate) fn kind(path: &Path, selection: &crate::build::CssModules) -> ResourceKind {
     if selection.matches(path)
         || path

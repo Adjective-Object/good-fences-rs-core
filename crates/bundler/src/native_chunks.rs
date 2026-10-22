@@ -46,7 +46,7 @@ pub(super) fn placement(
         manifest,
         prepared,
         false,
-        &BTreeSet::new(),
+        &BTreeMap::new(),
         None,
         min_chunk_bytes,
         Default::default(),
@@ -66,7 +66,7 @@ pub(super) fn emit(
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
     browser: bool,
-    require_defaults: &BTreeSet<PathBuf>,
+    require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     emit_inner(
@@ -76,7 +76,7 @@ pub(super) fn emit(
         manifest,
         prepared,
         browser,
-        require_defaults,
+        require_resources,
         None,
         0,
         execution,
@@ -92,7 +92,7 @@ pub(super) fn emit_activated(
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
     browser: bool,
-    require_defaults: &BTreeSet<PathBuf>,
+    require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
     placements: &BTreeMap<u32, u32>,
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
@@ -106,7 +106,7 @@ pub(super) fn emit_activated(
             manifest,
             prepared,
             browser,
-            require_defaults,
+            require_resources,
             None,
             min_chunk_bytes,
             execution,
@@ -122,7 +122,7 @@ pub(super) fn emit_activated(
             manifest,
             prepared,
             browser,
-            require_defaults,
+            require_resources,
             execution,
         );
     };
@@ -133,7 +133,7 @@ pub(super) fn emit_activated(
         manifest,
         prepared,
         browser,
-        require_defaults,
+        require_resources,
         Some(&activations),
         min_chunk_bytes,
         execution,
@@ -149,7 +149,7 @@ fn emit_inner(
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
     browser: bool,
-    require_defaults: &BTreeSet<PathBuf>,
+    require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
     activations: Option<&Activations>,
     min_chunk_bytes: usize,
     execution: crate::execution::ExecutionOptions,
@@ -197,7 +197,7 @@ fn emit_inner(
     }
     let native_seams = modules.keys().any(|&file| has_externals(graph, file));
     let async_modules = super::super::async_modules(graph, modules)?;
-    let mut cjs = commonjs::CommonJs::new(graph, plan, modules, browser, require_defaults)?;
+    let mut cjs = commonjs::CommonJs::new(graph, plan, modules, browser, require_resources)?;
     let asynchronous: BTreeSet<_> = async_modules
         .iter()
         .map(|p| graph.file_id(p).unwrap())
@@ -384,7 +384,7 @@ fn emit_inner(
                     manifest,
                     prepared,
                     browser,
-                    require_defaults,
+                    require_resources,
                     execution,
                 )
                 .map(Planned::Artifacts);
@@ -445,7 +445,7 @@ fn emit_inner(
                         manifest,
                         prepared,
                         browser,
-                        require_defaults,
+                        require_resources,
                         execution,
                     )
                     .map(Planned::Artifacts);
@@ -518,7 +518,7 @@ fn emit_inner(
                 manifest,
                 prepared,
                 browser,
-                require_defaults,
+                require_resources,
                 execution,
             )
             .map(Planned::Artifacts);

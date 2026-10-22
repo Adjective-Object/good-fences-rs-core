@@ -121,20 +121,22 @@ An isolated root with real linked Sass dependencies successfully compiles
 Native Sass, package conditions and linked input trees work here; external Sass
 preprocessing is no longer a prerequisite.
 
-However, uniformly selecting all `.scss` inputs as CSS Modules reproduces:
+At the initial revision, uniformly selecting all `.scss` inputs as CSS Modules
+reproduced:
 
 ```text
 missing Value export "default"
 ```
 
-This comes from `owa-global-styles`'s existing TS entry reexporting the default
+This came from `owa-global-styles`'s existing TS entry reexporting the default
 of `globalstyles.global.scss`. The diagnostic copy has only its package format
 adapted; its source and stylesheet bytes are unchanged. Repeating with
 `css.css_modules: false` successfully publishes that same package.
 
 Do not count the all-SCSS configuration failure as a Sass compiler or map bug.
-This particular `.global.scss` needs the global loader rather than the
-named-bindings-only CSS Modules surface. A full application adapter must
+The frontend follow-up below removes that missing-default-export failure.
+It does not restore this stylesheet's intended global selector names when
+module scoping is enabled. A full application adapter must
 distinguish ordinary scoped styles, global styles and vendor exclusions instead
 of applying one suffix selection indiscriminately. The bounded driver does not
 reproduce Ori's per-file plugin rules.
@@ -161,6 +163,22 @@ not evidence of missing native Sass package resolution.
 Existing workspace junctions and ordinary inherited/commented tsconfigs did
 not cause the historical inventory/tsconfig rejection. Do not carry those old
 limitations forward from the earlier perf-optim investigation.
+
+## CSS Modules default-map follow-up
+
+The synthetic frontend now exports a default mapping object alongside individual
+names under both CSS loaders. It uses the same normalized keys and composed
+tokens. Named-only imports discard the unused object without discarding CSS or
+auto-mount effects.
+
+With the updated debug driver, the same copied global-styles entry and original
+maps-enabled all-SCSS diagnostic configuration now publish through the native
+backend. Importing that output with a recording document stub returns
+`globalStyles` as an object with 17 string mappings and mounts one stylesheet;
+a CSS source map is emitted. The missing-default link failure is fixed.
+This is not real-browser rendering verification, and indiscriminate module
+scoping still changes intended global selectors. The original module-format
+blockers remain; no new full-application pass is claimed.
 
 ## Remaining application coverage
 
@@ -193,4 +211,8 @@ Artifacts are under the local Copilot session's `files` directory:
 - Per-probe `.stdout`/`.stderr`, published generations and copied inputs stay
   local because maps and diagnostics can contain client source.
 - `source-maps-spot-check.log`: required spot-check passes, including all 80
-  ast-segmenter tests and the workspace check. No Rust code was changed.
+  ast-segmenter tests and the workspace check for the initial documentation-only
+  investigation.
+- `verify-css-defaults.mjs`, `css-default-verification.json`,
+  `global-styles-default-map.stdout`/`.stderr`: default-map follow-up, five
+  passing native CSS/Sass fixtures and copied global-styles runtime observations.

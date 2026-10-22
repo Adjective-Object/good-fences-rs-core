@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 export async function observe({ entries, entry, directory, resources }) {
   const mapping = await import(pathToFileURL(entries[entry]));
+  assert.deepEqual(mapping.default, { button: mapping.button, localBase: mapping.localBase });
   const tokens = mapping.button.split(' ');
   assert.match(tokens[0], /^_[A-Za-z0-9_-]{10}$/u);
   assert.deepEqual(tokens.slice(1), [mapping.localBase, mapping.baseName, 'external-token']);

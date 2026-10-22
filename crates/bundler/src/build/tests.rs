@@ -1334,10 +1334,13 @@ fn css_modules_custom_suffix_reaches_entries_imports_contexts_and_css_closures()
             if main.is_empty() {
                 let output = built.product.artifacts.entries["main"].to_str().unwrap();
                 assert_eq!(
-                    observe_named(&built.product.artifacts, &format!(
-                        "{CSS_DOM_RECORDER}\nconst ns = await import('./{output}'); assert.deepEqual(Object.keys(ns), ['class']); assert.equal(links.length, {}); console.log('custom');",
-                        usize::from(load == CssLoad::AutoMount),
-                    )),
+                    observe_named(
+                        &built.product.artifacts,
+                        &format!(
+                            "{CSS_DOM_RECORDER}\nconst ns = await import('./{output}'); assert.deepEqual(Object.keys(ns), ['class', 'default']); assert.equal(ns.default.class, ns.class); assert.equal(links.length, {}); console.log('custom');",
+                            usize::from(load == CssLoad::AutoMount),
+                        )
+                    ),
                     b"custom\n",
                 );
             }
@@ -1400,10 +1403,15 @@ fn css_modules_animations_are_file_local_without_extra_exports_under_both_loader
             global.as_bytes()
         );
         assert_eq!(
-            observe_named(&built.product.artifacts, &format!(
-                "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns.a), ['spin']); assert.deepEqual(Object.keys(ns.b), ['spin']); assert.equal(ns.a.spin, {:?}); assert.equal(ns.b.spin, {:?}); assert.equal(links.length, {}); console.log('animations');",
-                classes[0], classes[1], if load == CssLoad::AutoMount { 3 } else { 0 },
-            )),
+            observe_named(
+                &built.product.artifacts,
+                &format!(
+                    "{CSS_DOM_RECORDER}\nconst ns = await import('./main.mjs'); assert.deepEqual(Object.keys(ns.a), ['default', 'spin']); assert.deepEqual(Object.keys(ns.b), ['default', 'spin']); assert.deepEqual(ns.a.default, {{spin: ns.a.spin}}); assert.deepEqual(ns.b.default, {{spin: ns.b.spin}}); assert.equal(ns.a.spin, {:?}); assert.equal(ns.b.spin, {:?}); assert.equal(links.length, {}); console.log('animations');",
+                    classes[0],
+                    classes[1],
+                    if load == CssLoad::AutoMount { 3 } else { 0 },
+                )
+            ),
             b"animations\n",
         );
         assert!(Rc::ptr_eq(
@@ -1726,16 +1734,22 @@ fn css_modules_native_named_namespace_dynamic_and_require_surfaces_under_both_lo
     write(
         dir.root(),
         "style.module.css",
-        r".my-class-name, #my-class-name, .class, .\31 23, .a\+b, .你好 { color: red }",
+        r".my-class-name, #my-class-name, .class, .default, .\31 23, .a\+b, .你好 { color: red }",
+    );
+    write(
+        dir.root(),
+        "empty.module.css",
+        ":global(.theme) { color: blue }",
     );
     write(
         dir.root(),
         "main.mjs",
         r#"
-import { myClassName, class as keyword, "123" as numeric, "a+b" as punctuation, 你好 as unicode } from './style.module.css';
+import classMap, { myClassName, class as keyword, "123" as numeric, "a+b" as punctuation, 你好 as unicode } from './style.module.css';
 import * as styles from './style.module.css';
 import load from './load.cjs';
-export {myClassName, keyword, numeric, punctuation, unicode, styles, load};
+export {default as empty} from './empty.module.css';
+export {classMap, myClassName, keyword, numeric, punctuation, unicode, styles, load};
 export const dynamic = () => import('./style.module.css');
 "#,
     );
@@ -1746,7 +1760,12 @@ export const dynamic = () => import('./style.module.css');
     );
     let mut config = options();
     config.css.css_modules = CssModules::Enabled;
-    for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+    for (target, load) in [
+        (TargetEnv::Node, CssLoad::CallerLoaded),
+        (TargetEnv::Node, CssLoad::AutoMount),
+        (TargetEnv::Browser, CssLoad::CallerLoaded),
+    ] {
+        config.resolver.target_env = target;
         config.css.load = load;
         let mut session = BuildSession::new(dir.root()).unwrap();
         let cold = session.build(&config).unwrap();
@@ -1766,7 +1785,10 @@ export const dynamic = () => import('./style.module.css');
             r#"{CSS_DOM_RECORDER}
 const main = await import('./main.mjs');
 const ns = main.styles;
-assert.deepEqual(Object.keys(ns).sort(), ['123', 'a+b', 'class', 'myClassName', '你好'].sort());
+assert.deepEqual(Object.keys(ns).sort(), ['123', 'a+b', 'class', 'default', 'myClassName', '你好'].sort());
+assert.strictEqual(ns.default, main.classMap);
+assert.deepEqual(Object.keys(ns.default).sort(), Object.keys(ns).sort());
+assert.deepEqual(main.empty, {{}});
 assert.equal(ns.myClassName, main.myClassName);
 assert.equal(ns.class, main.keyword);
 assert.equal(ns['123'], main.numeric);
@@ -1774,17 +1796,24 @@ assert.equal(ns['a+b'], main.punctuation);
 assert.equal(ns.你好, main.unicode);
 assert.strictEqual(await main.dynamic(), ns);
 const required = main.load();
-assert.deepEqual(Object.keys(required).sort(), Object.keys(ns).sort());
+const requireKeys = Object.keys(ns);
+if ({node}) {{
+  assert.equal(required.__esModule, true);
+  requireKeys.push('__esModule');
+}}
+assert.deepEqual(Object.keys(required).sort(), requireKeys.sort());
 for (const key of Object.keys(ns)) {{
   assert.equal(required[key], ns[key]);
-  assert.match(ns[key], /^_[A-Za-z0-9_-]{{10}}$/);
-  assert.ok({css:?}.includes(ns[key]));
+  assert.match(ns.default[key], /^_[A-Za-z0-9_-]{{10}}$/);
+  assert.ok({css:?}.includes(ns.default[key]));
+  if (key !== 'default') assert.equal(ns.default[key], ns[key]);
 }}
 assert.ok({css:?}.startsWith('.' + ns.myClassName + ', #' + ns.myClassName));
 assert.equal(links.length, {mounts});
 console.log('module surfaces');
 "#,
-            mounts = usize::from(load == CssLoad::AutoMount)
+            node = target == TargetEnv::Node,
+            mounts = if load == CssLoad::AutoMount { 2 } else { 0 }
         );
         assert_eq!(
             observe_named(&cold.product.artifacts, &check),
@@ -1823,6 +1852,12 @@ fn css_modules_prune_bindings_not_stylesheets_and_keep_loader_effects() {
             .files
             .values()
             .any(|text| text.contains(&mappings["used"])));
+        assert!(built
+            .product
+            .artifacts
+            .files
+            .values()
+            .all(|text| !text.contains("__css_default")));
         for name in ["unused", "class", "123"] {
             assert!(
                 built
@@ -3023,8 +3058,10 @@ fn css_modules_custom_suffix_aliases_keep_owned_paths_and_mount_once_for_each_ba
                         r#"{CSS_DOM_RECORDER}
 const alias = await import('./deep/alias/styles.mjs');
 const canonical = await import('./source/style.module.mjs');
-assert.deepEqual(Object.keys(alias), ['buttonLabel']);
-assert.deepEqual(Object.keys(canonical), ['buttonLabel']);
+assert.deepEqual(Object.keys(alias), ['buttonLabel', 'default']);
+assert.deepEqual(Object.keys(canonical), ['buttonLabel', 'default']);
+assert.strictEqual(alias.default, canonical.default);
+assert.equal(canonical.default.buttonLabel, canonical.buttonLabel);
 assert.equal(alias.buttonLabel, canonical.buttonLabel);
 assert.match(canonical.buttonLabel, /^_[A-Za-z0-9_-]{{10}}$/);
 assert.strictEqual(await import('./deep/alias/styles.mjs'), alias);
@@ -3257,7 +3294,8 @@ for (const [entries, expected] of generations) {{
     assert.strictEqual(main.load, alias.load);
     assert.strictEqual(main.requireStyle, alias.requireStyle);
     const required = main.requireStyle();
-    assert.deepEqual(Object.keys(required), ['requiredName']);
+    assert.deepEqual(Object.keys(required), ['__esModule', 'default', 'requiredName']);
+    assert.equal(required.default.requiredName, required.requiredName);
     assert.strictEqual(main.requireStyle(), required);
     assert.equal(links.length, start + 2);
     const lazy = await alias.load();
@@ -5058,7 +5096,7 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         &sources,
         &BTreeMap::new(),
         options.resolver.target_env == TargetEnv::Browser,
-        &BTreeSet::new(),
+        &BTreeMap::new(),
         &BTreeMap::new(),
         options.output.min_chunk_bytes,
         &BTreeMap::new(),
@@ -6831,13 +6869,11 @@ fn unused_esm_environment_probes_preserve_effects_with_ecco_refinement() {
                 format!("[\"loaded\",[\"{name}\",\"abs\"]]"),
             ),
         ] {
-            let check = |entry: &str| {
-                format!(
-                    "const log = []; {host}
+            let check = |entry: &str| format!(
+                "const log = []; {host}
                  const result = await import('./{entry}').then(() => 'loaded', error => error.name);
                  console.log(JSON.stringify([result, log]));"
-                )
-            };
+            );
             write(dir.root(), "check.mjs", &check("main.mjs"));
             let original = observe_entry(&dir.root().join("check.mjs"));
             assert_eq!(String::from_utf8_lossy(&original).trim(), expected);
@@ -6898,11 +6934,13 @@ fn unused_esm_environment_probe_calls_preserve_deferred_reads() {
                     format!("[\"loaded\",[\"{name}\"]]"),
                 ),
             ] {
-                let check = |entry: &str| format!(
+                let check = |entry: &str| {
+                    format!(
                     "const log = []; {host}
                      const result = await import('./{entry}').then(() => 'loaded', error => error.name);
                      console.log(JSON.stringify([result, log]));"
-                );
+                )
+                };
                 write(dir.root(), "check.mjs", &check("main.mjs"));
                 let original = observe_entry(&dir.root().join("check.mjs"));
                 assert_eq!(String::from_utf8_lossy(&original).trim(), expected);

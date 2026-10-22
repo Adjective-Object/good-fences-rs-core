@@ -41,6 +41,8 @@ lexical initializers/read-only live getters. Reject shared effectful jobs,
 dependent ESM and async boundaries, never eagerly shift their effects.
 JSON/asset/caller-loaded global CSS requires unwrap prepared default values,
 selected by the build's resource policy, never inferred from source extensions.
+Caller-loaded CSS Modules carry pure-resource namespace require metadata; retain
+the namespace surface and shared default map, never unwrap it or mount styles.
 Browser CJS entries use ESM
 snapshot facades; wrapper path parameters are availability URLs.
 Default condition lists follow target switches; custom lists stay caller policy.
@@ -190,9 +192,14 @@ Explicit local(name)/global(name), optionally colon-prefixed, require one ident;
 reject nested/ambiguous module-only values. Reparse colon escapes only through
 same-length Oxc parse views and retain original-byte checked edits.
 ICSS :import/:export and @value remain unsupported.
-Keep each mapping a pure native ESM binding with safe private names/string aliases,
-never a default object. Export aliases are nonexecuting connectors even while
-prepared DOM operations stay conservative. Global CSS continues using cssparser
+Keep each mapping a pure native ESM binding with safe private names/string aliases.
+Generate a shared default object from the same mapping values with computed
+normalized property keys. Mark its literal-only construction pure and use literal
+values, not eager/deferred binding-read barriers.
+Reserve the default export for that object, retaining a local
+named default only as its property. Unused objects/names remain independently
+prunable; never drop stylesheet rules. Export aliases are nonexecuting connectors
+even while prepared DOM operations stay conservative. Global CSS uses cssparser
 URL tokenization; URL/selector edits share one checked original-byte pipeline.
 Closure resource names include transform identity for selected stylesheets,
 including transitive CSS imports; loaders never affect scoped name identity.
