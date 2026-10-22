@@ -10,6 +10,12 @@ the context cache. Only content-dependent reads (such as manifests) seal bytes;
 ordinary file probes record kinds, canonical identities and intermediate links,
 without directory enumeration.
 
+Persisted consumers can use `PathInput::checked_from_parts` to reconstruct one
+observation only after fresh filesystem validation, including supplied identity,
+links and exact content seals. It does not manufacture an unchecked proof from
+arbitrary disk fields. Consumers retain their borrowed wire owner, not a decoded
+tree of reconstructed observations.
+
 Custom readers override `read_context_data_with_inputs` to describe their actual
 reads; legacy readers and prepopulated values remain usable but cannot
 authorize tracked hits. Windows identities use metadata-only directory/file

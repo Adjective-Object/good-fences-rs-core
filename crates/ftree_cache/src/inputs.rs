@@ -66,6 +66,29 @@ fn identity(path: &Path, metadata: &fs::Metadata) -> io::Result<(u64, u64)> {
 }
 
 impl PathInput {
+    /// Reconstruct persisted observations only after checking them against fresh
+    /// filesystem reads. This is not an unchecked provenance/content seal.
+    pub fn checked_from_parts(
+        path: PathBuf,
+        kind: InputKind,
+        canonical: Option<PathBuf>,
+        identity: Option<(u64, u64)>,
+        links: Vec<(PathBuf, PathBuf)>,
+        content: Option<[u8; 32]>,
+    ) -> eyre::Result<Self> {
+        eyre::ensure!(path.is_absolute(), "resolution input path is not absolute");
+        let input = Self {
+            path,
+            kind,
+            canonical,
+            identity,
+            links,
+            content,
+        };
+        input.validate()?;
+        Ok(input)
+    }
+
     pub fn capture(path: &Path) -> eyre::Result<Self> {
         let path = std::path::absolute(path)?;
         let mut links = Vec::new();
@@ -234,5 +257,44 @@ impl InputObserver {
                 path.is_file()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_parts_require_fresh_positive_negative_and_content_validation() {
+        let dir = test_tmpdir::test_tmpdir! { "manifest" => "{}" };
+        let path = dir.root().join("manifest");
+        let mut original = PathInput::capture(&path).unwrap();
+        original.seal_content(b"{}");
+        let reconstruct = |input: &PathInput| {
+            PathInput::checked_from_parts(
+                input.path.clone(),
+                input.kind,
+                input.canonical.clone(),
+                input.identity,
+                input.links.clone(),
+                input.content,
+            )
+        };
+        assert_eq!(reconstruct(&original).unwrap(), original);
+        let mut forged = original.clone();
+        forged.content = Some([0; 32]);
+        assert!(reconstruct(&forged).is_err());
+        forged = original.clone();
+        forged.identity = Some((0, 0));
+        assert!(reconstruct(&forged).is_err());
+        forged = original.clone();
+        forged.path = PathBuf::from("manifest");
+        assert!(reconstruct(&forged).is_err());
+        let missing = PathInput::capture(&dir.root().join("missing")).unwrap();
+        reconstruct(&missing).unwrap();
+        fs::write(missing.path(), "").unwrap();
+        assert!(reconstruct(&missing).is_err());
+        fs::write(path, "{\"changed\":true}").unwrap();
+        assert!(reconstruct(&original).is_err());
     }
 }

@@ -35,6 +35,7 @@ cache_flatbuffers = { path = "../cache_flatbuffers" }
 base64 = "0.22"
 percent-encoding = "2"
 import_resolver = { path = "../import_resolver" }
+ftree_cache = { path = "../ftree_cache" }
 serde.workspace = true
 tempfile = "3.27.0"
 url = "2"

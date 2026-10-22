@@ -25,6 +25,8 @@ mod output_url;
 pub mod policy;
 pub mod publish;
 mod resource;
+#[cfg(test)]
+mod resolution_cache;
 pub mod rewrite;
 mod sass;
 mod sourcemap;

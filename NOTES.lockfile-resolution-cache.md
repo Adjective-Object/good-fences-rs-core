@@ -94,8 +94,9 @@ Never modify the dirty perf-optim worktree, afix, or the client-web migration.
 ## Progress
 
 Stage 1 and the three concrete review corrections were independently approved,
-spot-checked and committed as `6aeec15`. Stage 2 is
-implemented below; stages 3–6 remain pending. The adapter remains test-gated and
+spot-checked and committed as `6aeec15`. Stage 2 was independently reviewed,
+spot-checked and committed as `cf3bc83`. Stage 3 is implemented below;
+stages 4–6 remain pending. The adapter remains test-gated and
 does not change live resolution.
 
 - Preserve Berry raw locators/workspaces and deterministic SCC/named-edge hashes.
@@ -115,8 +116,8 @@ does not change live resolution.
 
 ### Stage 2 — scoped resolver input tracking
 
-Implementation and focused Windows validation are complete; independent review
-and coordinator spot-check/commit remain pending. No stage 3–6 integration,
+Implementation, independent review and coordinator spot-check are complete,
+committed as `cf3bc83`. No stage 3–6 integration,
 inventory/key changes or source-cache schema changes are included.
 
 - Added explicit request-owned `InputObserver`/`InputProof` capture at existing
@@ -159,3 +160,79 @@ Validation (from the explicit source-maps worktree; TEMP/TMP set to the ignored
 - Changed Rust files formatted with the pinned `rustfmt`; `git diff --check`
   passed. The pre-existing ftree_cache lifetime-syntax warning remains.
 - Full spot-check deliberately not run by the implementation agent.
+
+### Stage 3 — independent package-local FlatBuffer storage
+
+Implemented on the clean `source-maps` checkout at `cf3bc83`; independent review
+and coordinator spot-check/commit remain pending. No resolver integration,
+inventory removal or production source schema/extractor change is included.
+
+- Authoritative `flatbuffers/resolution.fbs` defines independently versioned
+  schema 1 (`GFRS`): typed import/require requests and file/external targets,
+  package-instance/dependency/policy SHA-256 keys, anchored portable paths,
+  ordered positive/negative probes, identity/content seals and link metadata.
+  Pinned local flatc 25.2.10 generates `resolution_generated.rs` exactly.
+  `generate-cache-flatbuffers.ps1 -Schema Resolution` leaves source bindings
+  untouched; source schema 18/extractor 25 remain unchanged.
+- `cache_flatbuffers::resolution::WireResolution` privately retains shared
+  immutable bytes. Size-prefixed framing/checksum, independent version and all
+  fingerprints, bounded verification (16 MiB, depth 16, 262144 tables), unknown
+  discriminants, portable paths, proof shape and strictly ordered/unique request
+  keys are checked through borrowed tables. Construction-only object APIs never
+  become warm-load adapters.
+- `PathInput::checked_from_parts` reconstructs only after fresh validation of
+  supplied kind/canonical/identity/links/content against the filesystem. The
+  bundler adapter reconstructs and discards one observation at a time, retaining
+  no decoded proof tree. Empty proven footprints are valid for policy-only
+  explicit externals; file targets require a positive canonical file proof.
+- Private/test-gated `bundler::resolution_cache` supplies `Roots`,
+  `CheckedResolution::{encode,requests,find,file_target,revalidate}` and
+  `Store::{new,load,save}`. Stage 4 must remove the module test gate, derive a
+  complete resolver/platform/policy key and check lockfile eligibility; no new
+  lockfile authority is implied. File construction inputs are canonical targets,
+  package-relative importers and original Stage 2 proofs, not restatted seals.
+- Each package stores one complete aggregate per policy in reserved
+  `.bundler-resolution-v1-<policy-sha256>.fb`. Updates replace that aggregate;
+  preserve desired other requests explicitly. Different policies have different
+  files. Existing cache modes/status/miss/write diagnostics are reused. Atomic
+  same-directory tempfile write/flush/sync/rename never unlinks an old destination
+  on failure. Windows reader contention can deny rename; failure is explicit and
+  leaves old complete bytes. This is best-effort caching, not a build error.
+- Runtime anchors distinguish package/project/cwd lexical, canonical and native
+  Windows spellings; root retargeting is checked too. The cwd anchor is necessary:
+  real Stage 2 bare-package resolution probes cwd-relative candidates even when
+  cwd lies outside the project. Project-ancestor anchors cover Node lookup
+  candidates/directories and ancestor `package.json`, without persisting machine
+  roots. Internal Windows junctions roundtrip. Arbitrary external/cross-volume
+  observations, unsafe/non-UTF8 names, absolute filesystem request spellings and
+  unproven inputs are explicit construction failures: Stage 4 must skip
+  persistence without dropping any footprint. UNC spelling is modeled, but no
+  network-UNC filesystem test was available. Unix relative-symlink branches are
+  present but not executed on Windows.
+- Checked owners describe validation-time state. Stage 4 must revalidate them
+  before reuse/build success, including no-op paths, and surface cache misses/
+  failed-write diagnostics while continuing ordinary resolution. Saved identity
+  changes on reinstall miss conservatively. Concurrent aggregate writers are
+  last-successful-rename wins; there is no cross-process merge.
+
+Stage 3 validation (Windows; managed test directories under ignored
+`target\test-temp`, TEMP/TMP explicitly set there):
+
+- `cargo test -p cache_flatbuffers -p ftree_cache`: **20 + 3 passed**;
+  doctests passed. Six independent resolution-wire tests cover borrowing/shared
+  ownership, positive/negative proof roundtrips, corruption/truncation/structure,
+  fingerprint/version mismatches, all unknown discriminants, unsafe paths and
+  duplicate/unordered requests, and verifier-table-budget exhaustion.
+- `cargo test -p bundler resolution_cache --lib`: **10 passed**. Coverage includes
+  actual Stage 2 package/empty-external footprints, scoped content/negative
+  invalidation, modes/policy isolation, diagnosed corruption/publication errors,
+  concurrent atomic replacement, project relocation/reinstall identity, internal
+  Windows junction retargets and canonical-only package-anchor retargets.
+- `cargo check -p bundler --lib`: **passed**.
+- `cargo clippy -p cache_flatbuffers --all-targets -- -D warnings`: **passed**.
+- `cargo test -p ftree_cache --features deadlock_ref`: **3 passed**, doctests
+  passed. Pinned compiler regeneration reproduced byte-identical resolution
+  bindings; all existing source schemas/bindings were confirmed unchanged.
+- Changed handwritten Rust formatted; `git diff --check` passed.
+- Full spot-check, independent review and commits belong to the coordinator.
+  The pre-existing ftree_cache lifetime-syntax warning remains.

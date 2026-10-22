@@ -1,5 +1,10 @@
 # cache_flatbuffers
 
+- Independent `resolution.fbs` schema 1 owns verified borrowed `GFRS` records.
+  Package/dependency/policy identities and typed scoped proofs do not change
+  source schema/extractor versions. Consumers freshly validate filesystem proofs
+  before checked reuse; generated object APIs remain construction-only.
+
 - This is the production `.seg.fb` backend (schema 18/extractor 25).
   `segment_cache` adds source-local semantic validation before exposing records.
 - Parser config seals effective format and syntax-detection policy. Requested

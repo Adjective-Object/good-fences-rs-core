@@ -1,5 +1,12 @@
 # bundler
 
+Resolution-cache stage-three storage is private/test-gated until integration.
+Use independent verified `GFRS` bytes and fresh scoped proof validation before
+checked owners; never unpack on hits. Package-local `.bundler-resolution-v1-*`
+files aggregate one complete policy's requests, with best-effort atomic sibling
+publication and explicit cache diagnostics. Other policies have distinct files.
+Unencodable external footprints skip persistence, never weaken their proofs.
+
 Lockfile identities are expected installs, never Node resolution authority.
 The stage-one test-gated adapter pins registry aube-lockfile 2.8.1, uses upstream
 project lockfile selection without eager workspace manifest filling, and retains

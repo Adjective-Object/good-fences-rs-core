@@ -1448,6 +1448,42 @@ to additionally execute the emitted graph over local HTTP in a real headless
 browser, without downloading a browser or using host CommonJS globals. This
 checks execution, not rendering/readiness.
 
+## Package-local resolution storage groundwork (stage 3)
+
+The private, currently test-gated `resolution_cache` backend is ready for later
+resolver integration; it does not remove inventory or change live resolution.
+`Roots::new` supplies runtime package/project anchors. `CheckedResolution::encode`
+accepts complete per-policy request aggregates with original Stage 2 `InputProof`s,
+canonical file targets or explicit externals, and package/dependency/policy hashes.
+`Store::load` checks independent typed FlatBuffer schema 1, then freshly validates
+borrowed proofs before constructing a checked immutable owner. `find` borrows
+requests; `file_target` reconstructs an anchored path; `revalidate` must run again
+before authorizing build success. No JSON parsing or object-tree unpacking occurs.
+
+Package roots contain `.bundler-resolution-v1-<policy-sha256>.fb`; policies do
+not overwrite one another. Saving replaces that policy's **complete aggregate**,
+not a single-entry merge; callers must preserve other requests when updating it.
+`segment_cache::CacheMode` controls reads/writes. Existing `CacheStatus`,
+`MissReason` and `CacheWrite` types report disabled/missing/invalid/read failures
+and best-effort publication failures explicitly. Sibling tempfile write/flush/
+sync/atomic rename never deletes the old record on failure. Windows may deny a
+rename while readers hold the destination; this is a diagnosed write failure.
+
+Portable project/package/working-directory anchors distinguish lexical/canonical
+and native Windows root spelling,
+including local UNC roots; no absolute root strings are persisted. Scoped
+project-ancestor anchors cover Node candidates and ancestor `package.json` probes.
+Local links inside these anchors retain relative/absolute target form and are
+revalidated, including anchor-root retargeting. The working-directory anchor
+preserves Stage 2's actual cwd-relative bare-name candidate probes. Arbitrary
+external/cross-volume footprints, unsafe/non-UTF8 names,
+absolute filesystem request spellings or unproven inputs cannot be persisted;
+stage 4 must conservatively resolve them normally. Reinstallation identity
+changes miss even when bytes match. Lockfile losslessness/eligibility and policy
+key construction remain stage 4 responsibilities, not authority conferred here.
+
+Focused validation: `cargo test -p bundler resolution_cache --lib`.
+
 ## Lockfile identity groundwork
 
 The internal `lockfile` adapter is currently **test-gated groundwork**, not a

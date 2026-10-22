@@ -13,6 +13,19 @@
 mod cache_generated;
 pub use cache_generated::source_cache as wire;
 
+#[rustfmt::skip]
+#[expect(
+    unused_imports,
+    mismatched_lifetime_syntaxes,
+    clippy::extra_unused_lifetimes,
+    clippy::derivable_impls,
+    clippy::missing_safety_doc,
+    reason = "unmodified flatc 25.2.10 output"
+)]
+mod resolution_generated;
+pub use resolution_generated::resolution_cache as resolution_wire;
+pub mod resolution;
+
 mod source_map;
 mod verify;
 pub use source_map::{MapData, MapSource, WireSourceMap};

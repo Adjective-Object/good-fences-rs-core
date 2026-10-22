@@ -432,6 +432,7 @@ dependencies = [
  "cssparser",
  "ecco",
  "eyre",
+ "ftree_cache",
  "import_resolver",
  "insta",
  "logger",

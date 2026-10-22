@@ -1,0 +1,45 @@
+namespace resolution_cache;
+
+// Independent of source extraction schema/extractor identities.
+struct Digest { bytes:[ubyte:32]; }
+struct Identity { volume:ulong; file:ulong; }
+enum Mode:ubyte { Import, Require }
+enum Anchor:ubyte {
+  Project, Package, CanonicalProject, CanonicalPackage, NativeProject, NativePackage,
+  WorkingDirectory, CanonicalWorkingDirectory, NativeWorkingDirectory
+}
+enum Kind:ubyte { Missing, File, Directory, Other }
+enum TargetKind:ubyte { File, External }
+
+// Project ancestors support scoped Node lookup probes without machine paths.
+table Locator { anchor:Anchor; parents:ushort; path:string (required); }
+table Link {
+  path:Locator (required);
+  target:Locator (required);
+  relative:string;
+}
+table Input {
+  path:Locator (required);
+  kind:Kind;
+  canonical:Locator;
+  identity:Identity;
+  content:Digest;
+  links:[Link] (required);
+}
+table Target { kind:TargetKind; file:Locator; external:string; }
+table Request {
+  mode:Mode;
+  importer:string (required);
+  specifier:string (required);
+  target:Target (required);
+  inputs:[Input] (required);
+}
+table Resolution {
+  schema:uint;
+  policy:Digest (required);
+  instance:Digest (required);
+  dependencies:Digest (required);
+  requests:[Request] (required);
+}
+root_type Resolution;
+file_identifier "GFRS";

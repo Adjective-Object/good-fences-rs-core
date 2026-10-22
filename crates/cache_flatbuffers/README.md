@@ -107,6 +107,20 @@ instructions directly, while mutable interpreter state may allocate.
 The `CallInstruction.pure` field represents the invocation annotation override,
 not construction; its schema name now matches the existing interpreter meaning.
 
+## Independent resolution records
+
+`resolution.fbs` defines schema **1** (`GFRS`), independent of source schema
+18/extractor 25. `resolution::WireResolution` retains private `Arc<[u8]>` bytes.
+Size/checksum/framing, bounded verification, all discriminants, portable anchors,
+proof shape and strict request ordering/uniqueness are checked before exposure.
+Import/require requests bind package-instance, named-dependency and policy hashes
+to typed file/external targets and ordered positive/negative filesystem proofs.
+Paths use runtime package/project/working-directory anchors; explicit ancestor
+anchors cover Node lookup
+directories and ancestor manifests, never arbitrary external machine paths.
+Filesystem validation remains the consuming backend's separate checked gate.
+Generated object APIs are cold construction only; warm views never unpack.
+
 ## Regeneration
 
 Compiler **flatc 25.2.10**, runtime **flatbuffers = "=25.2.10"**.
@@ -121,7 +135,9 @@ $env:FLATC = 'C:\path\to\flatbuffers-tools\flatc.exe'
 .\scripts\generate-cache-flatbuffers.ps1
 ```
 
-The script checks the exact compiler version and executes:
+The script checks the exact compiler version and generates both independent
+bindings. Use `-Schema Source` or `-Schema Resolution` to generate only one.
+The source invocation remains:
 
 ```text
 flatc --rust --gen-all --gen-object-api -o crates\cache_flatbuffers\src flatbuffers\cache.fbs
