@@ -90,9 +90,12 @@ module, import wrapper and action wrapper. Module paths must be graph identities
 canonical absolute source paths in `BuildSession`, or the exact paths supplied
 to a low-level graph. There are no builtin package/path or identifier-name rules.
 Import aliases, reexports and simple immutable const aliases resolve to canonical
-linked bindings or immutable default-value expressions. Homonyms, shadows,
-mutable/reassigned constructor variables and registrations assigning conflicting
-roles to one canonical constructor are not authorization.
+linked bindings or immutable default-value expressions. Source homonyms and
+shadows are not authorization. Mutable/reassigned registered constructor variables and registrations assigning
+conflicting roles to one canonical constructor are explicit configuration errors.
+Missing modules/exports and noncanonical graph identities also fail explicitly,
+including in external-native fallback mode; unsupported source instances still
+fall back unchanged.
 
 Registration explicitly trusts the library contract for
 `LazyModule(callback, options)` and `LazyImport`/`LazyAction(module, getter, ...args)`:
@@ -212,6 +215,20 @@ Use `link::esm_with_options` with the same registrations as partitioning; plain
 them. Unconfigured and unsupported-instance builds retain original behavior.
 Configuration-only changes invalidate derived output, reuse source facts and
 participate in no-op detection; registration ordering/duplicates are immaterial.
+
+The bounded public example accepts `fixtureConfig.output.lazy_runtimes` as a list
+of at most 16 `{module, import, action}` objects, each role an exact
+`{module: "root-relative.mjs", export: "Name"}`. Paths must be portable relative
+files, canonicalized inside the build root; names are nonempty/control-free and
+at most 256 UTF-8 bytes. Unknown fields are errors; the whole fixture config is
+bounded to 16 KiB. `fixtureConfig.cache` is only `"read-write"` (default) or
+`"disabled"`. This is not general `BuildOptions` deserialization.
+Authored `lazy-selectors-placement` and `lazy-runtime-contract` fixtures exercise
+the public source/output pipeline. Physical tests use declaration counts,
+`segmentMembers` owners/exact roots and native edges at byte targets 0/10000,
+plus disabled/cold/warm equivalence. Real source-phase constraints, including
+local constructor-alias initialization, can still prevent otherwise desired
+selector relocation.
 
 ### Native connections
 

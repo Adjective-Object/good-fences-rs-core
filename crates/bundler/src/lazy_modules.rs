@@ -563,6 +563,36 @@ pub fn certify(
         configuration_fingerprint: configuration_fingerprint(runtimes),
         modules: Vec::new(),
     };
+    let registered: Vec<_> = runtimes
+        .iter()
+        .map(|runtime| {
+            let resolve = |export: &ConstructorExport| {
+                registered(graph, export).ok_or_else(|| {
+                    eyre::eyre!(
+                        "invalid lazy runtime constructor identity: {} export {:?}",
+                        export.module.display(),
+                        export.export
+                    )
+                })
+            };
+            Ok([
+                resolve(&runtime.module)?,
+                resolve(&runtime.import)?,
+                resolve(&runtime.action)?,
+            ])
+        })
+        .collect::<eyre::Result<_>>()?;
+    for runtime in &registered {
+        eyre::ensure!(
+            !registered.iter().any(|other| {
+                (0..3).any(|role| {
+                    (0..3)
+                        .any(|other_role| role != other_role && runtime[role] == other[other_role])
+                })
+            }),
+            "conflicting lazy runtime constructor roles"
+        );
+    }
     // External-native linking keeps original clauses and source-module jobs.
     // It does not yet admit the lexical reconstruction needed for lazy wiring.
     if graph.module_ids().any(|file| {
@@ -578,31 +608,7 @@ pub fn certify(
     }) {
         return Ok(result);
     }
-    let registered: Vec<_> = runtimes
-        .iter()
-        .filter_map(|r| {
-            let identities = [
-                registered(graph, &r.module)?,
-                registered(graph, &r.import)?,
-                registered(graph, &r.action)?,
-            ];
-            (identities[0] != identities[1]
-                && identities[0] != identities[2]
-                && identities[1] != identities[2])
-                .then_some(identities)
-        })
-        .collect();
-    let trusted: Vec<_> = registered
-        .iter()
-        .filter(|runtime| {
-            !registered.iter().any(|other| {
-                (0..3).any(|role| {
-                    (0..3)
-                        .any(|other_role| role != other_role && runtime[role] == other[other_role])
-                })
-            })
-        })
-        .collect();
+    let trusted = registered;
     if trusted.is_empty() {
         return Ok(result);
     }

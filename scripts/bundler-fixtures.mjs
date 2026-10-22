@@ -148,8 +148,11 @@ function validateCase(root, directory) {
 }
 
 function validateFixtureConfig(config) {
-  object(config, [], 'fixtureConfig', ['output', 'css', 'resolveConditions', 'workers']);
+  object(config, [], 'fixtureConfig', ['output', 'css', 'resolveConditions', 'workers', 'cache']);
   check(Buffer.byteLength(JSON.stringify(config)) <= 16 * 1024, 'fixtureConfig exceeds 16 KiB');
+  if (Object.hasOwn(config, 'cache')) {
+    check(['read-write', 'disabled'].includes(config.cache), 'invalid fixture cache mode');
+  }
   if (Object.hasOwn(config, 'workers')) {
     check(Number.isInteger(config.workers) && config.workers >= 1 && config.workers <= 64,
       'workers must be an integer between 1 and 64');
@@ -160,7 +163,22 @@ function validateFixtureConfig(config) {
       'resolveConditions cannot override request-mode conditions import or require');
   }
   if (Object.hasOwn(config, 'output')) {
-    object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes', 'synthesize_async_boundaries']);
+    object(config.output, [], 'fixtureConfig.output', ['base_url', 'min_chunk_bytes', 'synthesize_async_boundaries', 'lazy_runtimes']);
+    if (Object.hasOwn(config.output, 'lazy_runtimes')) {
+      check(Array.isArray(config.output.lazy_runtimes) && config.output.lazy_runtimes.length <= 16,
+        'output.lazy_runtimes must contain at most 16 registrations');
+      for (const runtime of config.output.lazy_runtimes) {
+        object(runtime, ['module', 'import', 'action'], 'lazy runtime');
+        for (const identity of Object.values(runtime)) {
+          object(identity, ['module', 'export'], 'lazy constructor identity');
+          relativePath(identity.module, 'lazy runtime module');
+          text(identity.export, 'lazy runtime export');
+          check(identity.export.trim().length > 0 && Buffer.byteLength(identity.export) <= 256
+            && !/[\u0000-\u001f\u007f-\u009f]/u.test(identity.export),
+          'invalid lazy runtime export');
+        }
+      }
+    }
     if (Object.hasOwn(config.output, 'base_url')) text(config.output.base_url, 'output.base_url');
     if (Object.hasOwn(config.output, 'min_chunk_bytes')) {
       check(Number.isSafeInteger(config.output.min_chunk_bytes) && config.output.min_chunk_bytes >= 0,

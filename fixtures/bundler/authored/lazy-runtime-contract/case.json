@@ -1,0 +1,30 @@
+{
+  "id": "authored/lazy-runtime-contract",
+  "moduleType": "module",
+  "entryPoints": ["entry.mjs"],
+  "fixtureConfig": {
+    "output": {
+      "lazy_runtimes": [{
+        "module": {"module": "runtime-barrel.mjs", "export": "Module"},
+        "import": {"module": "runtime-barrel.mjs", "export": "Read"},
+        "action": {"module": "runtime-barrel.mjs", "export": "Action"}
+      }]
+    }
+  },
+  "expectations": {
+    "stdout": [
+      "before options",
+      "reads 4 true 1 genuine",
+      "action 7 1 action-extra",
+      "fallback 10 20 30",
+      "trace options,nested,certified,govern,govern,initialized,initializer:11,escaped,untrusted"
+    ],
+    "backend": "native"
+  },
+  "goals": [
+    "Authored, explicitly trusted constructors keep real selection caches, governance, getter identity, extra arguments and action execute semantics.",
+    "Matching source-owner and destination selectors share an instance, while constructor-alias spelling cannot be captured by nested parameters.",
+    "Mixed initializer, escaped and uncertified constructor instances remain original broad native imports.",
+    "The default configuration remains unregistered; this fixture opts in only to exact canonical identities through a reexport barrel."
+  ]
+}

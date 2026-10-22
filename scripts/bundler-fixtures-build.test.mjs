@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { buildProject, execute, managed, observeEntries, runBundlerCases, runFixtures } from './bundler-fixtures.mjs';
 
@@ -62,7 +62,9 @@ function withAuthoredBuild(name, min_chunk_bytes, callback) {
     cpSync(path.join(fixture, 'files'), root, { recursive: true });
     const sourceEntries = Object.fromEntries(manifest.entryPoints.map(entry => [entry, path.join(root, entry)]));
     const baseline = observeEntries(manifest, sourceEntries, root);
-    const build = buildProject(driver, root, manifest.entryPoints, 30000, { output: { min_chunk_bytes } });
+    const config = {...manifest.fixtureConfig,
+      output: {...manifest.fixtureConfig?.output, min_chunk_bytes}};
+    const build = buildProject(driver, root, manifest.entryPoints, 30000, config);
     assert.equal(build.backend, 'native');
     assert.deepEqual(observeEntries(manifest, build.entries, build.directory), baseline);
     const artifacts = new Map(readdirSync(build.directory, { recursive: true })
@@ -78,9 +80,180 @@ function withAuthoredBuild(name, min_chunk_bytes, callback) {
         `${symbol}'s declaration must agree with its exact public segment owner`);
       return artifact;
     };
-    callback({ build, artifacts, members, owner });
+    callback({ build, artifacts, members, owner, root, manifest, config });
   });
 }
+
+function observeLazy(build, script) {
+  const entries = Object.fromEntries(Object.entries(build.entries)
+    .map(([name, filename]) => [name, pathToFileURL(filename).href]));
+  const result = execute(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    const entries = ${JSON.stringify(entries)};
+    ${script}
+  `], build.directory, 30000);
+  assert.equal(result.status, 0, result.stderr);
+}
+
+for (const min_chunk_bytes of [0, 10000]) {
+  test(`registered lazy selectors have independent physical owners and exact masks at ${min_chunk_bytes}`, () => {
+    withAuthoredBuild('lazy-selectors-placement', min_chunk_bytes,
+      ({build, artifacts, members, owner, root, manifest, config}) => {
+        assert(build.sourceParses > 0, 'cold public build extracts fresh owned facts');
+        assert.equal(build.diskHits, 0);
+        const selectorOwner = (name, index) => {
+          const declarations = [...artifacts].filter(([, text]) =>
+            new RegExp(`\\bconst\\s+${name}\\s*=`, 'u').test(text));
+          assert.equal(declarations.length, 1, `${name} has exactly one emitted declaration`);
+          assert.equal(members('selectors.mjs').find(member => member.segment === index)?.artifact,
+            declarations[0][0], 'actual declaration agrees with public segment ownership');
+          return declarations[0][0];
+        };
+        const a = selectorOwner('a', 5), b = selectorOwner('b', 6);
+        assert.notEqual(a, b, 'selector declarations, not just root IDs, relocate independently');
+        const first = owner('first', 1), second = owner('second', 2);
+        const shared = owner('sharedHelper', 0);
+        assert.notEqual(first, second, 'selected implementations have distinct physical owners');
+        const mask = (source, segment) => members(source).find(member => member.segment === segment)?.roots;
+        const firstMask = mask('leaf.mjs', 1), secondMask = mask('leaf.mjs', 2);
+        assert.equal(firstMask.length, 1);
+        assert.equal(secondMask.length, 1);
+        assert.equal(firstMask[0].name, 'first');
+        assert.equal(secondMask[0].name, 'second');
+        assert.equal(path.basename(firstMask[0].module), 'selectors.mjs');
+        assert.notEqual(firstMask[0].offset, secondMask[0].offset);
+        const union = [...firstMask, ...secondMask].sort((x,y) => x.offset-y.offset);
+        assert.deepEqual(mask('leaf.mjs', 0), union, 'shared helper has exactly the union mask');
+        assert.deepEqual(mask('barrel.mjs', 2), union, 'barrel evaluation has exactly the union mask');
+        assert.deepEqual(mask('selectors.mjs', 5), [{entry: 'entry-a.mjs'}]);
+        assert.deepEqual(mask('selectors.mjs', 6), [{entry: 'entry-b.mjs'}]);
+        assert.deepEqual(members('leaf.mjs').map(member => member.segment), [0,1,2]);
+        assert(!members('selectors.mjs').some(member => member.segment === 7), 'unused selector is pruned');
+        const all = [...artifacts.values()].join('\n');
+        assert.doesNotMatch(all, /\boriginalModule\b|\bunusedSelector\b|UNUSED_LAZY_IMPLEMENTATION/u);
+        assert.equal([...artifacts.values()].filter(text => text.includes("trace.push('barrel')")).length, 1);
+        const closures = [a,b].map(artifact => nativeClosure(artifacts, [artifact]));
+        for (const closure of closures) {
+          for (const deferred of [first,second,shared]) assert(!closure.has(deferred),
+            'static selector availability cannot eagerly load implementations');
+        }
+        const projections = [...artifacts].filter(([, text]) =>
+          /^export\s+\{[^;\n]*\bas\s+["']?(?:first|second)["']?\s*\}\s+from\s+/mu.test(text));
+        assert.equal(projections.length, 2, 'each destination has one exact selected projection');
+        const routes = new Map();
+        for (const [artifact, text] of projections) {
+          const selection = /as\s+["']?(first|second)["']?\s*\}/u.exec(text)[1];
+          routes.set(selection, artifact);
+          assert(!text.includes('export *'), 'no broad original namespace');
+          const closure = nativeClosure(artifacts, [artifact]);
+          assert(closure.has(selection === 'first' ? first : second));
+          assert(!closure.has(selection === 'first' ? second : first));
+          assert(closure.has(shared));
+          const effects = members('barrel.mjs').find(member => member.segment === 2).artifact;
+          assert(closure.has(effects), 'both selected native closures preserve original barrel evaluation');
+        }
+        for (const [sourceOwner, selected] of [[a, 'first'], [b, 'second']]) {
+          const loads = [...artifacts.get(sourceOwner).matchAll(/\bimport\(["']([^"']+)["']\)/gu)]
+            .map(([, request]) => path.posix.join(path.posix.dirname(sourceOwner), request));
+          assert.deepEqual(loads, [routes.get(selected)],
+            'each actual selector owner imports only its own selected projection, not the broad source module');
+        }
+        const observation = `
+          await import(entries['entry-a.mjs']);
+          await import(entries['entry-b.mjs']);
+          const {lazyA:a, lazyB:b, lazyTrace:trace} = globalThis;
+          assert.deepEqual(trace, []);
+          assert.notEqual(a.module, b.module);
+          assert.equal(a.module.options, b.module.options);
+          assert.equal(a.module.options.label, 'captured');
+          assert.equal(a.extra, 'read-extra');
+          assert.equal(b.options.tag, 'action-extra');
+          assert.equal(a.getter.name, '');
+          assert.equal(b.getter.name, '');
+          assert.equal(a.module.loaded, false);
+          assert.equal(b.module.loaded, false);
+          const value = await a.getValue();
+          assert.equal(value(), 4);
+          assert.equal(await a.getValue(), value);
+          assert.equal(a.selections, 1);
+          assert.equal(a.module.loaded, true);
+          assert.equal(b.module.loaded, false, 'loading a intentionally does not warm b');
+          assert.deepEqual(Object.keys(await a.module.getValue()), ['first']);
+          assert.equal(await b.execute(3), 7);
+          assert.equal(await b.execute(5), 9);
+          assert.equal(b.calls, 2);
+          assert.deepEqual(Object.keys(await b.module.getValue()), ['second']);
+          assert.deepEqual(trace, ['govern','barrel','captured','govern','captured']);
+        `;
+        observeLazy(build, observation);
+        const coldFiles = [...artifacts];
+        const warm = buildProject(driver, root, manifest.entryPoints, 30000, config);
+        assert.equal(warm.sourceParses, 0);
+        assert(warm.diskHits > 0, 'warm run must exercise borrowed wire facts');
+        const disabled = buildProject(driver, root, manifest.entryPoints, 30000, {...config, cache: 'disabled'});
+        assert(disabled.sourceParses > 0);
+        assert.equal(disabled.diskHits, 0);
+        for (const result of [warm, disabled]) {
+          assert.deepEqual(result.segmentMembers, build.segmentMembers);
+          for (const [artifact, source] of coldFiles) {
+            assert.equal(readFileSync(path.join(result.directory, artifact), 'utf8'), source);
+          }
+          observeLazy(result, observation);
+        }
+      });
+  });
+}
+
+test('registered runtime preserves wrapper behavior, matching-instance sharing and whole-instance fallbacks', () => {
+  withAuthoredBuild('lazy-runtime-contract', 0, ({build, artifacts, members, root, manifest}) => {
+    const all = [...artifacts.values()].join('\n');
+    assert.doesNotMatch(all, /\b(?:originalModule|nestedModule)\b|UNUSED_CERTIFIED_IMPLEMENTATION/u);
+    assert.match(all, /ESCAPED_BROAD_NAMESPACE/u);
+    assert.match(all, /UNTRUSTED_BROAD_NAMESPACE/u);
+    assert.deepEqual(members('certified.mjs').map(member => member.segment), [0,1,2,3]);
+    for (const source of ['initialized.mjs', 'escaped.mjs', 'untrusted.mjs']) {
+      assert.deepEqual(members(source).map(member => member.segment), [0,1,2,3],
+        `${source} must keep its broad native namespace`);
+    }
+    observeLazy(build, `
+      const {a,same,b,make,fallback,escapedRead,untrustedRead} = await import(entries['entry.mjs']);
+      assert.equal(a.module, same.module, 'compatible same-owner/destination selectors share one instance');
+      const nested = make(undefined, 'genuine-extra');
+      assert.notEqual(nested.module, a.module, 'different original modules never share instances');
+      assert.equal(nested.extra, 'genuine-extra');
+      assert.equal(nested.module.options.label, 'original-options');
+      assert.equal((await nested.getValue())(), 4);
+      assert.notEqual(a.module, b.module);
+      assert.deepEqual(Object.keys(await a.module.getValue()), ['first']);
+      assert.deepEqual(Object.keys(await b.module.getValue()), ['second']);
+      for (const wrapper of [fallback, escapedRead, untrustedRead]) {
+        assert.deepEqual(Object.keys(await wrapper.module.getValue()), ['extra','value']);
+      }
+    `);
+    const unregistered = buildProject(driver, root, manifest.entryPoints, 30000, {});
+    assert.deepEqual(observeEntries(manifest, unregistered.entries, unregistered.directory),
+      observeEntries(manifest, build.entries, build.directory));
+    const original = readdirSync(unregistered.directory, {recursive: true})
+      .filter(file => /\.(?:mjs|cjs|js)$/u.test(file))
+      .map(file => readFileSync(path.join(unregistered.directory, file), 'utf8')).join('\n');
+    assert.match(original, /\boriginalModule\b/u);
+    assert.match(original, /UNUSED_CERTIFIED_IMPLEMENTATION/u);
+    observeLazy(unregistered, `
+      const {a,same,b} = await import(entries['entry.mjs']);
+      assert.equal(a.module, same.module);
+      assert.equal(a.module, b.module, 'default public builds do not authorize splitting');
+      assert.deepEqual(Object.keys(await a.module.getValue()), ['first','second','unused']);
+    `);
+    const registered = manifest.fixtureConfig.output.lazy_runtimes[0];
+    for (const [registration, error] of [
+      [{...registered, import: registered.module}, /conflicting lazy runtime constructor roles/u],
+      [{...registered, action: {...registered.action, export: 'Missing'}}, /invalid lazy runtime constructor identity/u],
+    ]) {
+      assert.throws(() => buildProject(driver, root, manifest.entryPoints, 30000,
+        {output: {lazy_runtimes: [registration]}}), error);
+    }
+  });
+});
 
 // Follow native edges, not hashes, chunk counts or generated filename families.
 function nativeClosure(artifacts, starts) {
@@ -375,6 +548,27 @@ test('driver rejects unknown, malformed and oversized config before publication'
       '{"resolveConditions":"source"}', '{"resolveConditions":[1]}',
       '{"resolveConditions":[" "]}',
       '{"resolveConditions":["import"]}', '{"resolveConditions":["require"]}',
+      '{"cache":"read-only"}',
+      '{"output":{"lazy_runtimes":{}}}',
+      '{"output":{"lazy_runtimes":[{}]}}',
+      JSON.stringify({output: {lazy_runtimes: Array(17).fill({
+        module: {module: 'entry.js', export: 'Missing'},
+        import: {module: 'entry.js', export: 'Missing'},
+        action: {module: 'entry.js', export: 'Missing'},
+      })}}),
+      ...[
+        {module: '../entry.js', export: 'Missing'},
+        {module: './entry.js', export: 'Missing'},
+        {module: 'C:\\entry.js', export: 'Missing'},
+        {module: 'entry.js', export: ''},
+        {module: 'entry.js', export: 'x'.repeat(257)},
+        {module: 'entry.js', export: 'bad\nname'},
+        {module: 'entry.js', export: 'Missing', extra: true},
+        {module: 'missing.mjs', export: 'Missing'},
+        {module: 'entry.js', export: 'Missing'},
+      ].map(identity => JSON.stringify({output: {lazy_runtimes: [{
+        module: identity, import: identity, action: identity,
+      }]}})),
       ...[0, -1, 1.5, 65, '2', null].map(workers => JSON.stringify({ workers })),
       JSON.stringify({ output: { base_url: 'x'.repeat(16384) } }),
     ]) {

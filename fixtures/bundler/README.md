@@ -274,6 +274,55 @@ declaration; missing-property demands retain only their evaluation segment.
 The existing native then-assimilation, TLA and cached-failure corpus contracts
 remain in force; these four cases do not replace them.
 
+### Registered lazy-runtime contracts
+
+`lazy-selectors-placement` and `lazy-runtime-contract` contain small authored
+runtime contracts, not copied application implementations. They explicitly opt
+in to removable/synthesizable module allocation and **per-split** loaded state:
+loading selector `a` does not warm `b` when their destinations differ. Matching
+source-owner/original-module/destination projections share one real instance.
+There is no global runtime layer.
+
+The bounded example driver accepts this exact optional shape:
+
+```json
+{"fixtureConfig":{"output":{"lazy_runtimes":[{
+  "module":{"module":"runtime-barrel.mjs","export":"Module"},
+  "import":{"module":"runtime-barrel.mjs","export":"Read"},
+  "action":{"module":"runtime-barrel.mjs","export":"Action"}
+}]}}}
+```
+
+The default is an empty registration list. At most 16 registrations are accepted;
+each requires exactly these three roles and each identity exactly `module` and
+`export`. Module paths are portable root-relative files (no absolute, dot/parent,
+backslash, empty component or drive/stream paths), canonicalized inside the
+fixture root. Export names are nonempty, control-free UTF-8 strings, at most 256
+bytes. The public linker resolves aliases/reexports to immutable canonical
+identities; missing/invalid identities or conflicting constructor roles are
+explicit build errors, not silent authorization failures. Unsupported *instances*
+still fall back unchanged. No arbitrary `BuildOptions` deserialization is exposed.
+
+The build tests check actual emitted selector declarations against public
+`segmentMembers` at chunk-byte targets 0 and 10000, independently from their
+selected implementation owners. Segment diagnostics include exact `roots`
+(`{entry}` or `{module,offset,name}` for selected demands). Tests follow real native
+edges to prove exclusive implementations, union helper/barrel masks, cold source
+initialization, once-only shared effects, unused-selector pruning and absence of
+the old broad namespace/allocation. Runtime checks cover options identity and
+captures, governance/selection caching, genuine getters and extra arguments,
+action execution, nested constructor-parameter capture and mixed initializer,
+escape and untrusted-constructor fallbacks.
+
+`fixtureConfig.cache` accepts only `"read-write"` (default) or `"disabled"`.
+The placement test compares disabled, cold and warm artifacts/owners, confirms
+warm disk hits and zero extraction, and executes the native result. Source/output
+differentials retain all ordinary observations; output-only loaded-state checks
+assert the explicit split-specific contract rather than original module warming.
+Constructor-alias initialization and other conservative source-phase constraints
+can prevent relocation; the eligible placement case has direct imported
+constructors, while the runtime case independently covers immutable local aliases.
+
 ### CSS output contracts and explicit options
 
 Additional package conditions use `"fixtureConfig":{"resolveConditions":["source"]}`.
@@ -286,7 +335,7 @@ the Rust resolver options); tsconfig files, including JSONC extends/references,
 are no longer interpreted or validated for resolution. TS compilation remains external.
 
 `fixtureConfig` exposes only the example driver's output/CSS options, bounded
-worker count and additional explicit export conditions; it does not
+worker count, cache mode and additional explicit export conditions; it does not
 configure external dependencies, effects, entry renames or custom plugins:
 
 ```json
@@ -300,7 +349,8 @@ configure external dependencies, effects, entry renames or custom plugins:
 }
 ```
 
-All config objects/fields are optional; the shipped defaults are base `"./"`,
+Top-level config/output/CSS toggles are optional; registered runtime identities
+require the exact fields above. The shipped defaults are base `"./"`,
 chunk target `0` (disabled), load `"caller-loaded"` and modules `false`.
 `min_chunk_bytes` must be a nonnegative safe integer; it is also available for
 ordinary JS differential fixtures.

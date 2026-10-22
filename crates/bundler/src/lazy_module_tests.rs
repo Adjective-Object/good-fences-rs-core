@@ -100,6 +100,39 @@ fn observe_lazy(mut emitted: Artifacts, observer: &str) {
 }
 
 #[test]
+fn lazy_default_low_level_keeps_original_allocation_namespace_and_loaded_state() {
+    let mut input = input(
+        "
+        const originalModule = new M(() => import('./target.mjs'));
+        export const a = new R(originalModule, ns => ns.first);
+        export const b = new R(originalModule, ns => ns.second);",
+    );
+    input.insert("runtime.mjs".into(), BEHAVIOR_RUNTIME.into());
+    for wire in [false, true] {
+        let graph = graph_with_storage(&input, wire, ModuleFormat::Esm, wire);
+        let policy = EffectPolicy::default();
+        let plan = crate::chunks::partition(&graph, &roots(&graph), &policy).unwrap();
+        assert!(plan.lazy_modules.modules().is_empty());
+        let emitted = esm(&graph, &plan, &policy, &input).unwrap();
+        assert!(emitted
+            .files
+            .values()
+            .any(|code| code.contains("originalModule")));
+        observe_lazy(
+            emitted,
+            "
+            const {a,b} = await load0();
+            assert.equal(a.module, b.module);
+            assert.equal(b.module.loaded, false);
+            assert.equal((await a.getValue())(), 1);
+            assert.equal(b.module.loaded, true);
+            assert.deepEqual(Object.keys(await a.module.getValue()), ['first','second']);
+        ",
+        );
+    }
+}
+
+#[test]
 fn lazy_emission_injected_reads_avoid_nested_constructor_and_transport_captures() {
     let mut input = input(
         "
@@ -415,6 +448,17 @@ fn lazy_external_native_linking_retains_the_whole_original_instance() {
     let emitted =
         esm_with_options(&graph, &plan, &EffectPolicy::default(), &input, &options).unwrap();
     observe_lazy(emitted, "const {a} = await load0(); assert.deepEqual(Object.keys(await a.module.getValue()), ['first','second']);");
+    let mut invalid = options;
+    invalid.lazy_runtimes[0].module.export = "Missing".into();
+    assert!(crate::chunks::partition_with_options(
+        &graph,
+        &roots(&graph),
+        &EffectPolicy::default(),
+        &invalid,
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("invalid lazy runtime constructor identity"));
 }
 
 #[test]
@@ -1787,10 +1831,16 @@ fn lazy_certification_rejects_homonyms_shadows_and_mutable_constructor_identitie
         (RUNTIME.to_owned(), "let mod = new M(() => import('./target.mjs')); mod = other; export const a = new R(mod, ns => ns.first);"),
     ] {
         let mut input = input(body);
+        let invalid_registration = runtime_source != RUNTIME;
         input.insert("runtime.mjs".into(), runtime_source);
         for wire in [false, true] {
             let graph = graph_with_storage(&input, false, ModuleFormat::Esm, wire);
-            assert!(certify(&graph, &EffectPolicy::default(), &[runtime()]).unwrap().modules().is_empty(), "{body}");
+            let checked = certify(&graph, &EffectPolicy::default(), &[runtime()]);
+            if invalid_registration {
+                assert!(checked.unwrap_err().to_string().contains("invalid lazy runtime constructor identity"));
+            } else {
+                assert!(checked.unwrap().modules().is_empty(), "{body}");
+            }
         }
     }
 }
@@ -1817,9 +1867,9 @@ fn lazy_certification_rejects_unsafe_target_surfaces_and_wrong_registrations() {
     let mut unregistered = runtime();
     unregistered.module.module = "unrelated.mjs".into();
     assert!(certify(&graph, &EffectPolicy::default(), &[unregistered])
-        .unwrap()
-        .modules()
-        .is_empty());
+        .unwrap_err()
+        .to_string()
+        .contains("invalid lazy runtime constructor identity"));
     let mut conflicting = runtime();
     std::mem::swap(&mut conflicting.import, &mut conflicting.action);
     for registrations in [
@@ -1827,8 +1877,8 @@ fn lazy_certification_rejects_unsafe_target_surfaces_and_wrong_registrations() {
         vec![conflicting, runtime()],
     ] {
         assert!(certify(&graph, &EffectPolicy::default(), &registrations)
-            .unwrap()
-            .modules()
-            .is_empty());
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting lazy runtime constructor roles"));
     }
 }

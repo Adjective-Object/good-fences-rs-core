@@ -1,0 +1,24 @@
+{
+  "id": "authored/lazy-selectors-placement",
+  "moduleType": "module",
+  "entryPoints": ["entry-a.mjs", "entry-b.mjs"],
+  "fixtureConfig": {
+    "output": {
+      "lazy_runtimes": [{
+        "module": {"module": "runtime-barrel.mjs", "export": "Module"},
+        "import": {"module": "runtime-barrel.mjs", "export": "Read"},
+        "action": {"module": "runtime-barrel.mjs", "export": "Action"}
+      }]
+    }
+  },
+  "expectations": {
+    "stdout": ["a-ready 0", "b-ready 0"],
+    "backend": "native"
+  },
+  "goals": [
+    "Authored runtime contract explicitly authorizes splitting allocation and per-destination loaded state; no copied application runtime.",
+    "Selectors from one declaration file relocate independently to distinct consumer owners, with distinct implementation owners at both byte targets.",
+    "Prune the unused selector, original module allocation and broad namespace; preserve shared helper and barrel evaluation union masks.",
+    "Evaluate and transport options once, preserve genuine getter/governance/extra/action arguments, and keep source initialization lazy."
+  ]
+}

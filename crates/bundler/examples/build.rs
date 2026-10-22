@@ -8,6 +8,7 @@ use tracing_subscriber::prelude::*;
 
 use bundler::{
     build::{BuildOptions, BuildSession, CssLoad, CssModules, Entry, OutputOptions},
+    lazy_modules::{ConstructorExport, LazyRuntime},
     publish::Cancellation,
 };
 
@@ -19,6 +20,7 @@ struct FixtureConfig {
     css: FixtureCss,
     #[serde(rename = "resolveConditions")]
     resolve_conditions: Vec<String>,
+    cache: FixtureCache,
 }
 
 impl Default for FixtureConfig {
@@ -28,6 +30,7 @@ impl Default for FixtureConfig {
             output: FixtureOutput::default(),
             css: FixtureCss::default(),
             resolve_conditions: Vec::new(),
+            cache: FixtureCache::default(),
         }
     }
 }
@@ -38,6 +41,7 @@ struct FixtureOutput {
     base_url: String,
     min_chunk_bytes: usize,
     synthesize_async_boundaries: bool,
+    lazy_runtimes: Vec<FixtureLazyRuntime>,
 }
 
 impl Default for FixtureOutput {
@@ -46,7 +50,60 @@ impl Default for FixtureOutput {
             base_url: OutputOptions::default().base_url,
             min_chunk_bytes: 0,
             synthesize_async_boundaries: false,
+            lazy_runtimes: Vec::new(),
         }
+    }
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FixtureCache {
+    #[default]
+    ReadWrite,
+    Disabled,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FixtureLazyRuntime {
+    module: FixtureConstructor,
+    import: FixtureConstructor,
+    action: FixtureConstructor,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FixtureConstructor {
+    module: String,
+    export: String,
+}
+
+impl FixtureConstructor {
+    fn resolve(self, root: &Path) -> eyre::Result<ConstructorExport> {
+        eyre::ensure!(
+            !self.module.is_empty()
+                && !self.module.contains(['\\', ':', '\0'])
+                && self
+                    .module
+                    .split('/')
+                    .all(|part| !matches!(part, "" | "." | "..")),
+            "lazy runtime module must be a portable root-relative file"
+        );
+        eyre::ensure!(
+            !self.export.trim().is_empty()
+                && self.export.len() <= 256
+                && !self.export.chars().any(char::is_control),
+            "lazy runtime export must be a nonempty name of at most 256 bytes"
+        );
+        let module = root.join(self.module).canonicalize()?;
+        eyre::ensure!(
+            module.starts_with(root) && module.is_file(),
+            "lazy runtime module must resolve to a file inside the fixture root"
+        );
+        Ok(ConstructorExport {
+            module,
+            export: self.export,
+        })
     }
 }
 
@@ -212,6 +269,22 @@ fn build(
             .read_to_end(&mut bytes)?;
         eyre::ensure!(bytes.len() <= 16 * 1024, "fixture config exceeds 16 KiB");
         let config: FixtureConfig = serde_json::from_slice(&bytes)?;
+        let canonical_root = root.canonicalize()?;
+        eyre::ensure!(
+            config.output.lazy_runtimes.len() <= 16,
+            "at most 16 lazy runtimes"
+        );
+        for runtime in config.output.lazy_runtimes {
+            options.output.lazy_runtimes.push(LazyRuntime {
+                module: runtime.module.resolve(&canonical_root)?,
+                import: runtime.import.resolve(&canonical_root)?,
+                action: runtime.action.resolve(&canonical_root)?,
+            });
+        }
+        options.cache = match config.cache {
+            FixtureCache::ReadWrite => segment_cache::CacheMode::ReadWrite,
+            FixtureCache::Disabled => segment_cache::CacheMode::Disabled,
+        };
         eyre::ensure!(
             config.workers.get() <= 64,
             "workers must be between 1 and 64"
@@ -292,7 +365,17 @@ fn build(
             }).collect::<Vec<_>>(),
             "segmentMembers": build.product.artifacts.members.iter().filter_map(|(node, artifact)| {
                 let bundler::chunks::NodeId::Segment {module, index} = node else { return None; };
-                Some(serde_json::json!({"source": module, "segment": index, "artifact": artifact}))
+                let roots = build.product.plan.node_roots.get(node).into_iter().flatten().map(|root| {
+                    use bundler::chunks::RootId;
+                    match root {
+                        RootId::Entry(entry) => serde_json::json!({"entry": entry}),
+                        RootId::Async(site) => serde_json::json!({"module": site.module, "offset": site.offset}),
+                        RootId::AsyncExport {site, name} => serde_json::json!({
+                            "module": site.module, "offset": site.offset, "name": name
+                        }),
+                    }
+                }).collect::<Vec<_>>();
+                Some(serde_json::json!({"source": module, "segment": index, "artifact": artifact, "roots": roots}))
             }).collect::<Vec<_>>(),
         })
     )?;

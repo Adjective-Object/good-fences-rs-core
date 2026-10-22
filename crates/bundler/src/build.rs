@@ -91,7 +91,7 @@ pub struct OutputOptions {
     /// Introduce suspension/load failures at supported private async-body references.
     pub synthesize_async_boundaries: bool,
     /// Exact runtime identities authorizing lazy graph overlays; empty disables them.
-    /// Certified native emission is gated until post-placement wiring is available.
+    /// Invalid identities or conflicting constructor roles are configuration errors.
     pub lazy_runtimes: Vec<crate::lazy_modules::LazyRuntime>,
 }
 

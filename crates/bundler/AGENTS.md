@@ -435,7 +435,16 @@ identity. Check both graph revision and policy before reusing derived plans.
 Lazy certification is disabled unless OutputOptions.lazy_runtimes explicitly
 registers exact module/export constructor identities and authorizes split-specific
 warming plus removable/synthesizable module allocation. Resolve immutable aliases
-and reexports, never wrapper spelling hints. Certify every module-binding reference
+and reexports, never wrapper spelling hints. Invalid registered identities and
+conflicting roles are explicit errors even in external-native fallback mode.
+The bounded fixture driver accepts output.lazy_runtimes (max 16 exact
+module/import/action objects, each {module,export}); canonicalize portable
+root-relative files inside the root, reject unknown fields/invalid identities.
+Names are nonempty/control-free, max 256 UTF-8 bytes; all config max 16 KiB.
+Fixture cache is read-write/default or disabled, not arbitrary BuildOptions.
+Assert emitted selector declarations against segmentMembers and exact roots/native
+edges at 0/10000 bytes; never substitute deferred root IDs for physical ownership.
+Certify every module-binding reference
 before retention; any escape/unknown wrapper/direct operation rejects the instance.
 Initializer-free literal options require checked cached structural evidence.
 Certification preserves original slots/effect/capture provenance, library wrappers,
