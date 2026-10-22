@@ -19,6 +19,29 @@ enum Proof {
 }
 
 impl Proof {
+    fn file_routes(&self, target: &Path) -> eyre::Result<Vec<PathBuf>> {
+        match self {
+            Self::Fresh(inputs) => Ok(inputs
+                .inputs()
+                .iter()
+                .filter_map(|input| {
+                    if !matches!(input.kind(), InputKind::File | InputKind::Directory) {
+                        return None;
+                    }
+                    let relative = target.strip_prefix(input.canonical()?).ok()?;
+                    Some(if relative.as_os_str().is_empty() {
+                        input.path().into()
+                    } else {
+                        input.path().join(relative)
+                    })
+                })
+                .collect()),
+            Self::Disk(record, (mode, importer, specifier)) => {
+                record.file_routes(wire::Mode(*mode), importer, specifier, target)
+            }
+        }
+    }
+
     fn validate(&self) -> eyre::Result<()> {
         match self {
             Self::Fresh(inputs) => inputs.validate(),
@@ -26,6 +49,101 @@ impl Proof {
                 record.revalidate_request(wire::Mode(*mode), importer, specifier)
             }
         }
+    }
+}
+
+pub(super) struct Admitting<'a> {
+    resolver: BuildResolver,
+    inventory: &'a Inventory,
+}
+
+impl std::ops::Deref for Admitting<'_> {
+    type Target = BuildResolver;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resolver
+    }
+}
+
+impl DependencyResolver for Admitting<'_> {
+    fn resolve_dependency(
+        &self,
+        base: &Path,
+        specifier: &str,
+        mode: ResolutionMode,
+    ) -> eyre::Result<ResolvedDependency> {
+        let target = self.resolver.resolve_dependency(base, specifier, mode)?;
+        if let ResolvedDependency::File(path) = &target {
+            let mode_id = if mode == ResolutionMode::Import { 0 } else { 1 };
+            let package = self.resolver.package(base)?;
+            let key = self.resolver.packages.borrow()[&package].key;
+            let memo_key = (
+                key.policy,
+                key.instance,
+                key.dependencies,
+                base.into(),
+                mode_id,
+                specifier.into(),
+            );
+            let proof = self
+                .resolver
+                .used
+                .borrow()
+                .get(&memo_key)
+                .map(|memo| memo.proof.clone())
+                .expect("resolved request proof");
+            let mut routes = proof.file_routes(path)?;
+            // A package resolved from a canonical linked importer can also have
+            // a named project installation. Check that exact package edge only;
+            // never search node_modules or authorize an unlinked ancestor tree.
+            let options = &self.resolver.inner_options;
+            let request = options
+                .alias
+                .get(specifier)
+                .map(String::as_str)
+                .unwrap_or(specifier);
+            if !request.starts_with(['.', '/', '\\']) && !Path::new(request).is_absolute() {
+                let mut parts = request.split('/');
+                if let Some(first) = parts.next() {
+                    let name = if first.starts_with('@') {
+                        parts.next().map(|second| format!("{first}/{second}"))
+                    } else {
+                        Some(first.to_owned())
+                    };
+                    if let Some(name) = name {
+                        let alias = self.resolver.root.join("node_modules").join(name);
+                        if let Ok(canonical) = alias.canonicalize() {
+                            if let Ok(relative) = path.strip_prefix(canonical) {
+                                routes.push(if relative.as_os_str().is_empty() {
+                                    alias
+                                } else {
+                                    alias.join(relative)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            routes.sort();
+            routes.dedup();
+            // Prefer named routes; a canonical-only observation is not itself
+            // authority to read outside the checked input trees.
+            let mut admitted = self.inventory.contains(path);
+            for route in routes {
+                if self.inventory.can_admit(&route) {
+                    ensure!(
+                        self.inventory.admit(&route).wrap_err_with(|| format!(
+                            "{}: resolving {specifier:?}",
+                            base.display()
+                        ))? == *path,
+                        "resolved route changed"
+                    );
+                    admitted = true;
+                }
+            }
+            ensure!(admitted, "{}: resolving {specifier:?}: source outside reachable build inventory (or reserved/excluded): {}", base.display(), path.display());
+        }
+        Ok(target)
     }
 }
 
@@ -134,6 +252,7 @@ struct Package {
 pub(super) struct BuildResolver {
     root: PathBuf,
     inner: StructuralResolver,
+    inner_options: NodeModulesResolverOptions,
     policy: [u8; 32],
     mode: CacheMode,
     lockfile: Rc<Lockfile>,
@@ -149,6 +268,13 @@ pub(super) struct BuildResolver {
 }
 
 impl BuildResolver {
+    pub(super) fn admitting(self, inventory: &Inventory) -> Admitting<'_> {
+        Admitting {
+            resolver: self,
+            inventory,
+        }
+    }
+
     pub(super) fn options(options: &BuildOptions) -> NodeModulesResolverOptions {
         let mut resolver = options.resolver.clone();
         if [TargetEnv::Node, TargetEnv::Browser]
@@ -222,6 +348,7 @@ impl BuildResolver {
                 Self::options(options),
                 options.externals.clone(),
             ),
+            inner_options: Self::options(options),
             policy: Self::policy(options),
             mode: options.cache,
             lockfile,

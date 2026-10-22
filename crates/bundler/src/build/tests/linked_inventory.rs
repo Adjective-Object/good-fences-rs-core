@@ -1,4 +1,6 @@
 use super::*;
+// Exhaustive graph/security reference tests remain, alongside demand-build tests.
+use super::super::reference_inventory as inventory;
 
 fn directory_link(target: &Path, alias: &Path) {
     fs::create_dir_all(alias.parent().unwrap()).unwrap();
@@ -36,6 +38,422 @@ fn linked_options() -> BuildOptions {
 }
 
 #[test]
+fn literal_build_never_enumerates_large_unused_or_broken_node_modules() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    write(&root, "main.mjs", "export {value} from './value.mjs';");
+    write(&root, "value.mjs", "export const value = 1;");
+    for directory in 0..128 {
+        for file in 0..32 {
+            write(
+                &root,
+                &format!("node_modules/unused/{directory}/{file}.json"),
+                "not json",
+            );
+        }
+    }
+    let missing = dir.root().join("missing");
+    fs::create_dir(&missing).unwrap();
+    let broken = root.join("node_modules/unused/broken");
+    directory_link(&missing, &broken);
+    fs::remove_dir(missing).unwrap();
+    let mut session = BuildSession::new(&root).unwrap();
+    let first = session.build(&linked_options()).unwrap();
+    assert_eq!(first.counters.inventory_directory_reads, 0);
+    let observer = observe_preparation(|path| {
+        if path.file_name().is_some_and(|name| name == "main.mjs") {
+            fs::write(
+                path.parent().unwrap().join("node_modules/unused/0/0.json"),
+                "changed",
+            )
+            .unwrap();
+            fs::write(
+                path.parent().unwrap().join("tsconfig.json"),
+                "invalid unused config",
+            )
+            .unwrap();
+        }
+    });
+    let noop = session.build(&linked_options()).unwrap();
+    drop(observer);
+    assert_eq!(noop.counters.inventory_directory_reads, 0);
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    let disk = BuildSession::new(&root)
+        .unwrap()
+        .build(&linked_options())
+        .unwrap();
+    assert_eq!(disk.counters.inventory_directory_reads, 0);
+    assert_eq!(disk.counters.source_parses, 0);
+    remove_directory_link(&broken);
+}
+
+#[test]
+fn demand_admission_rechecks_links_and_discovered_reserved_scopes_in_either_order() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("target/packages/package");
+    write(&root, "main.mjs", "");
+    write(&package, "value.mjs", "");
+    directory_link(&package, &root.join("package"));
+    for name in ["target", ".git", ".bundler-out"] {
+        let target = package.join(name).join("nested");
+        write(&target, "value.mjs", "");
+        directory_link(&target, &root.join("bypass"));
+        for reverse in [false, true] {
+            let inventory = Inventory::new(&root.canonicalize().unwrap());
+            let paths = [
+                root.join("package/value.mjs"),
+                root.join("bypass/value.mjs"),
+            ];
+            let (first, second) = if reverse {
+                (&paths[1], &paths[0])
+            } else {
+                (&paths[0], &paths[1])
+            };
+            inventory.admit(first).unwrap();
+            let error = format!("{:#}", inventory.admit(second).unwrap_err());
+            assert!(error.contains("reserved/excluded"), "{error}");
+        }
+        remove_directory_link(&root.join("bypass"));
+    }
+    let inventory = Inventory::new(&root.canonicalize().unwrap());
+    inventory.admit(&root.join("package/value.mjs")).unwrap();
+    inventory.recheck().unwrap();
+    remove_directory_link(&root.join("package"));
+    fs::create_dir(root.join("package")).unwrap();
+    write(&root, "package/value.mjs", "");
+    assert!(inventory.recheck().is_err());
+}
+
+#[test]
+fn context_scans_only_matching_scopes_and_rechecks_additions_before_noop() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import './z.css'; export const load = n => import(`./pages/${n}.mjs`);",
+    );
+    write(dir.root(), "pages/one.mjs", "export default 1;");
+    write(dir.root(), "z.css", "body {}");
+    write(dir.root(), "unrelated/invalid.json", "not json");
+    let missing = dir.root().join("missing");
+    fs::create_dir(&missing).unwrap();
+    directory_link(&missing, &dir.root().join("unrelated/broken"));
+    fs::remove_dir(&missing).unwrap();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let config = linked_options();
+    let first = session.build(&config).unwrap();
+    assert_eq!(first.counters.inventory_directory_reads, 4); // root/pages, initial/final
+    write(dir.root(), "unrelated/new.mjs", "export {};");
+    write(dir.root(), "pages/nonmatching.txt", "ignored");
+    let unchanged = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &unchanged.product));
+    let new_file = dir.root().join("pages/two.mjs");
+    let observer = observe_preparation(move |path| {
+        if path.file_name().is_some_and(|name| name == "z.css") {
+            fs::write(&new_file, "export default 2;").unwrap();
+        }
+    });
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    drop(observer);
+    assert!(
+        error.contains("context candidates changed during build"),
+        "{error}"
+    );
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &first.product));
+    let added = session.build(&config).unwrap();
+    assert!(!Rc::ptr_eq(&first.product, &added.product));
+    assert!(
+        added
+            .product
+            .graph
+            .file_id(&dir.root().join("pages/two.mjs"))
+            .is_some()
+    );
+    fs::remove_file(dir.root().join("pages/one.mjs")).unwrap();
+    let removed = fresh_parity(&mut session, &config);
+    assert!(
+        removed
+            .product
+            .graph
+            .file_id(&dir.root().join("pages/one.mjs"))
+            .is_none()
+    );
+    remove_directory_link(&dir.root().join("unrelated/broken"));
+}
+
+#[test]
+fn contexts_settle_late_checked_link_scopes_before_graph_construction() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("workspace/package");
+    let sibling = dir.root().join("workspace/sibling");
+    write(
+        &root,
+        "main.mjs",
+        "export {load} from './linked/index.mjs'; import './z.module.css';",
+    );
+    write(
+        &package,
+        "index.mjs",
+        "export const load = n => import(`../sibling/${n}.mjs`);",
+    );
+    write(&sibling, "one.mjs", "export default 1;");
+    write(&sibling, "base.module.css", ".base {}");
+    write(
+        &root,
+        "z.module.css",
+        ".local { composes: base from './styles/base.module.css'; }",
+    );
+    directory_link(&package, &root.join("linked"));
+    directory_link(&sibling, &root.join("styles"));
+    let mut config = linked_options();
+    config.css.css_modules = CssModules::Enabled;
+    let mut session = BuildSession::new(&root).unwrap();
+    let first = fresh_parity(&mut session, &config);
+    assert!(
+        first
+            .product
+            .graph
+            .file_id(&sibling.join("one.mjs"))
+            .is_some()
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert!(noop.invalidated.is_empty());
+    remove_directory_link(&root.join("linked"));
+    remove_directory_link(&root.join("styles"));
+}
+
+#[test]
+fn reviewed_css_wrappers_use_final_checked_aliases_in_either_discovery_order() {
+    for package_name in ["a-package", "z-package"] {
+        for load in [CssLoad::CallerLoaded, CssLoad::AutoMount] {
+            let dir = TmpDir::new();
+            let root = dir.root().join("project");
+            let package = dir.root().join(package_name);
+            write(
+                &root,
+                "main.mjs",
+                "export {default} from './z/style.css'; import './late.css';",
+            );
+            write(&root, "late.css", "@import './a/style.css';");
+            write(&package, "style.css", "body { color: red; }");
+            directory_link(&package, &root.join("z"));
+            directory_link(&package, &root.join("a"));
+            let mut config = linked_options();
+            config.css.load = load;
+            config.output.base_url = "https://cdn.example.test/".into();
+            let mut session = BuildSession::new(&root).unwrap();
+            let built = fresh_parity(&mut session, &config);
+            let artifacts = &built.product.artifacts;
+            let stylesheet = &artifacts.stylesheets[&package.join("style.css")];
+            assert!(artifacts.resources.contains_key(stylesheet));
+            let late = &artifacts.stylesheets[&root.join("late.css")];
+            let late_css = std::str::from_utf8(&artifacts.resources[late]).unwrap();
+            assert!(
+                late_css.contains(stylesheet.file_name().unwrap().to_str().unwrap()),
+                "{late_css}"
+            );
+            let expected = format!(
+                "https://cdn.example.test/{}",
+                stylesheet.to_string_lossy().replace('\\', "/")
+            );
+            assert_eq!(
+                observe_named(artifacts, &format!(
+                    "{CSS_DOM_RECORDER}
+                     const main = await import('./main.mjs');
+                     assert.equal(main.default, {});
+                     assert.equal(links.length, {});
+                     for (const link of links) {{
+                         assert.ok(existsSync(new URL('.' + new URL(link.href).pathname, import.meta.url)));
+                     }}
+                     if (links.length) assert.ok(links.some(link => link.href === main.default));",
+                    serde_json::to_string(&expected).unwrap(),
+                    if load == CssLoad::AutoMount { 2 } else { 0 },
+                )),
+                b""
+            );
+            let noop = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&built.product, &noop.product));
+            assert!(noop.invalidated.is_empty());
+            remove_directory_link(&root.join("z"));
+            remove_directory_link(&root.join("a"));
+        }
+    }
+}
+
+#[test]
+fn reviewed_upstream_maps_settle_linked_contexts_and_still_reject_real_additions() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("workspace/package");
+    let sibling = dir.root().join("workspace/sibling");
+    let extra = dir.root().join("workspace/extra");
+    write(
+        &root,
+        "main.mjs",
+        "export {load,extra} from './linked/index.mjs';\n//# sourceMappingURL=./maps/index.map",
+    );
+    write(
+        &package,
+        "index.mjs",
+        "export const load = name => import(`../sibling/${name}.mjs`);
+         export const extra = name => import(`../extra/${name}.mjs`);",
+    );
+    write(
+        &sibling,
+        "one.mjs",
+        "export default 1;\n//# sourceMappingURL=next/index.map",
+    );
+    write(
+        &extra,
+        "two.mjs",
+        "export default 2;\n//# sourceMappingURL=two.map",
+    );
+    for (directory, name) in [
+        (&sibling, "index.map"),
+        (&extra, "index.map"),
+        (&extra, "two.map"),
+    ] {
+        write(
+            directory,
+            name,
+            r#"{"version":3,"sources":[],"names":[],"mappings":""}"#,
+        );
+    }
+    directory_link(&package, &root.join("linked"));
+    directory_link(&sibling, &root.join("maps"));
+    directory_link(&extra, &sibling.join("next"));
+    let mut config = linked_options();
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(&root).unwrap();
+    let first = fresh_parity(&mut session, &config);
+    assert_eq!(session.upstreams.len(), 3);
+    assert_eq!(
+        observe_named(
+            &first.product.artifacts,
+            "import assert from 'node:assert/strict'; import {load,extra} from './main.mjs'; assert.equal((await load('one')).default, 1); assert.equal((await extra('two')).default, 2);"
+        ),
+        b""
+    );
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    assert!(noop.invalidated.is_empty());
+    let new_file = sibling.join("two.mjs");
+    let observer = observe_preparation(move |path| {
+        if path.file_name().is_some_and(|name| name == "one.mjs") {
+            fs::write(&new_file, "export default 2;").unwrap();
+        }
+    });
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    drop(observer);
+    assert!(
+        error.contains("context candidates changed during build"),
+        "{error}"
+    );
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &first.product));
+    let added = fresh_parity(&mut session, &config);
+    assert_eq!(
+        observe_named(
+            &added.product.artifacts,
+            "import assert from 'node:assert/strict'; import {load} from './main.mjs'; assert.equal((await load('two')).default, 2);"
+        ),
+        b""
+    );
+    remove_directory_link(&sibling.join("next"));
+    remove_directory_link(&root.join("linked"));
+    remove_directory_link(&root.join("maps"));
+}
+
+#[test]
+fn file_link_authorizes_only_its_target_not_external_siblings_or_maps() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("package");
+    write(&root, "main.mjs", "export {value} from './linked.mjs';");
+    write(&package, "value.mjs", "export const value = 1;");
+    write(&package, "sibling.mjs", "export const value = 2;");
+    write(
+        &package,
+        "value.mjs.map",
+        r#"{"version":3,"sources":[],"names":[],"mappings":""}"#,
+    );
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(package.join("value.mjs"), root.join("linked.mjs")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(package.join("value.mjs"), root.join("linked.mjs")).unwrap();
+    let mut session = BuildSession::new(&root).unwrap();
+    let mut config = linked_options();
+    let first = session.build(&config).unwrap();
+    write(
+        &package,
+        "value.mjs",
+        "export {value} from './sibling.mjs';",
+    );
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(
+        error.contains("outside reachable build inventory"),
+        "{error}"
+    );
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &first.product));
+    write(
+        &package,
+        "value.mjs",
+        "export const value = 1;\n//# sourceMappingURL=value.mjs.map",
+    );
+    config.output.source_maps = true;
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    assert!(error.contains("source map outside build root"), "{error}");
+}
+
+#[test]
+fn entry_package_format_observations_reject_final_manifest_mutations_without_requests() {
+    let dir = TmpDir::new();
+    write(dir.root(), "package.json", r#"{"type":"module"}"#);
+    write(dir.root(), "main.js", "export const value = 1;");
+    let mut config = linked_options();
+    config.entries.get_mut("main").unwrap().path = "main.js".into();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let first = session.build(&config).unwrap();
+    let observer = observe_preparation(|path| {
+        fs::write(
+            path.parent().unwrap().join("package.json"),
+            r#"{"type":"commonjs"}"#,
+        )
+        .unwrap();
+    });
+    let error = format!("{:#}", session.build(&config).err().unwrap());
+    drop(observer);
+    assert!(
+        error.contains("resolution input changed") && error.contains("package.json"),
+        "{error}"
+    );
+    assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &first.product));
+}
+
+#[cfg(windows)]
+#[test]
+fn absolute_entries_keep_case_insensitive_host_identity_without_external_authority() {
+    let dir = TmpDir::new();
+    write(dir.root(), "main.mjs", "export const value = 1;");
+    let mut config = linked_options();
+    config.entries.get_mut("main").unwrap().path =
+        PathBuf::from(dir.root().join("main.mjs").to_string_lossy().to_lowercase());
+    let built = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert!(
+        built
+            .product
+            .graph
+            .file_id(&dir.root().join("main.mjs"))
+            .is_some()
+    );
+}
+
+#[test]
 fn persistent_resolution_requests_with_external_links_keep_fresh_scoped_fallbacks() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
@@ -54,10 +472,11 @@ fn persistent_resolution_requests_with_external_links_keep_fresh_scoped_fallback
     let warm = BuildSession::new(&root).unwrap().build(&config).unwrap();
     assert_eq!(warm.product.artifacts, first.product.artifacts);
     assert!(warm.counters.resolutions < first.counters.resolutions);
-    assert!(warm
-        .warnings
-        .iter()
-        .any(|w| w.contains("uncacheable external path")));
+    assert!(
+        warm.warnings
+            .iter()
+            .any(|w| w.contains("uncacheable external path"))
+    );
     write(&package, "other.mjs", "export const value = 2;");
     write(
         &package,
@@ -108,7 +527,11 @@ fn source_maps_in_checked_external_packages_reuse_borrowed_sidecars() {
 #[test]
 fn directory_symlink_inside_root_and_self_cycle_are_supported() {
     let dir = TmpDir::new();
-    write(dir.root(), "main.mjs", "import {value as a} from './real/value.mjs'; import {value as b} from './alias/value.mjs'; console.log(a === b);");
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value as a} from './real/value.mjs'; import {value as b} from './alias/value.mjs'; console.log(a === b);",
+    );
     write(dir.root(), "real/value.mjs", "export const value = {};");
     let link = |target: &Path, alias: &Path| {
         #[cfg(unix)]
@@ -161,16 +584,20 @@ fn aliases_and_directory_cycles_share_one_canonical_module() {
     let mut session = BuildSession::new(&root).unwrap();
     let built = fresh_parity(&mut session, &linked_options());
     assert_eq!(session.sources.len(), 2);
-    assert!(built
-        .product
-        .graph
-        .file_id(&package.join("index.js"))
-        .is_some());
-    assert!(built
-        .product
-        .graph
-        .file_id(&root.join("node_modules/a/index.js"))
-        .is_none());
+    assert!(
+        built
+            .product
+            .graph
+            .file_id(&package.join("index.js"))
+            .is_some()
+    );
+    assert!(
+        built
+            .product
+            .graph
+            .file_id(&root.join("node_modules/a/index.js"))
+            .is_none()
+    );
     assert_eq!(observe(&built.product.artifacts), b"true\n");
     assert!(Rc::ptr_eq(
         &built.product,
@@ -279,18 +706,22 @@ fn retarget_source_metadata_and_membership_edits_invalidate() {
     let before = inventory(&root).unwrap();
     remove_directory_link(&alias);
     directory_link(&dir.root().join("two"), &alias);
-    assert!(BuildSession::recheck(&root, &session.sources, &before).is_err());
+    assert!(before.recheck(&root).is_err());
     let second = fresh_parity(&mut session, &config);
     assert_ne!(
         first.product.fingerprints.resolution,
         second.product.fingerprints.resolution
     );
-    assert!(session
-        .sources
-        .contains_key(&dir.root().join("two/index.js")));
-    assert!(!session
-        .sources
-        .contains_key(&dir.root().join("one/index.js")));
+    assert!(
+        session
+            .sources
+            .contains_key(&dir.root().join("two/index.js"))
+    );
+    assert!(
+        !session
+            .sources
+            .contains_key(&dir.root().join("one/index.js"))
+    );
     assert_eq!(observe(&second.product.artifacts), b"2\n");
     write(dir.root(), "two/index.js", "export default 4;");
     let edited = fresh_parity(&mut session, &config);
@@ -349,9 +780,11 @@ fn external_ancestor_configs_are_tracked_but_conditions_remain_explicit() {
     let mut config = linked_options();
     let mut session = BuildSession::new(&root).unwrap();
     let default = fresh_parity(&mut session, &config);
-    assert!(session
-        .sources
-        .contains_key(&package.join("node_modules/dep/default.mjs")));
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("node_modules/dep/default.mjs"))
+    );
     write(
         dir.root(),
         "workspace/tsconfig.json",
@@ -363,14 +796,18 @@ fn external_ancestor_configs_are_tracked_but_conditions_remain_explicit() {
         compiler_only.product.fingerprints.resolution
     );
     assert!(Rc::ptr_eq(&default.product, &compiler_only.product));
-    assert!(session
-        .sources
-        .contains_key(&package.join("node_modules/dep/default.mjs")));
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("node_modules/dep/default.mjs"))
+    );
     config.resolver.export_conditions.push("source".into());
     fresh_parity(&mut session, &config);
-    assert!(session
-        .sources
-        .contains_key(&package.join("node_modules/dep/source.mjs")));
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("node_modules/dep/source.mjs"))
+    );
     let before = inventory(&root).unwrap();
     write(dir.root(), "workspace/unrelated/new.mjs", "");
     assert_eq!(before, inventory(&root).unwrap());
@@ -379,15 +816,17 @@ fn external_ancestor_configs_are_tracked_but_conditions_remain_explicit() {
         "workspace/tsconfig.json",
         r#"{"compilerOptions":{}}"#,
     );
-    assert!(BuildSession::recheck(&root, &session.sources, &before).is_err());
+    assert!(before.recheck(&root).is_err());
     config
         .resolver
         .export_conditions
         .retain(|condition| condition != "source");
     fresh_parity(&mut session, &config);
-    assert!(session
-        .sources
-        .contains_key(&package.join("node_modules/dep/default.mjs")));
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("node_modules/dep/default.mjs"))
+    );
     remove_directory_link(&root.join("node_modules/pkg"));
 }
 
@@ -451,19 +890,25 @@ fn contexts_include_linked_directory_aliases_and_new_members() {
     let mut session = BuildSession::new(&root).unwrap();
     let config = linked_options();
     fresh_parity(&mut session, &config);
-    assert!(session
-        .sources
-        .contains_key(&package.join("actual/one.mjs")));
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("actual/one.mjs"))
+    );
     write(&package, "actual/two.mjs", "export default 2;");
     fresh_parity(&mut session, &config);
-    assert!(session
-        .sources
-        .contains_key(&package.join("actual/two.mjs")));
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("actual/two.mjs"))
+    );
     fs::remove_file(package.join("actual/one.mjs")).unwrap();
     fresh_parity(&mut session, &config);
-    assert!(!session
-        .sources
-        .contains_key(&package.join("actual/one.mjs")));
+    assert!(
+        !session
+            .sources
+            .contains_key(&package.join("actual/one.mjs"))
+    );
     remove_directory_link(&package.join("pages"));
     remove_directory_link(&root.join("node_modules/pkg"));
 }
@@ -529,6 +974,20 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
             ),
         ])
     );
+    write(
+        root,
+        "main.mjs",
+        &format!("export const load = n => import(`{prefix}${{n}}/one.mjs`);"),
+    );
+    let demanded = BuildSession::new(root).unwrap().build(&config).unwrap();
+    assert_eq!(demanded.counters.inventory_directory_reads, 42);
+    assert!(
+        demanded
+            .product
+            .graph
+            .file_id(&directories[20].join("one.mjs"))
+            .is_some()
+    );
     directory_link(root, &directories[20].join("cycle"));
     let cycled = inventory::inventory(root).unwrap();
     assert_ne!(inventory, cycled);
@@ -550,6 +1009,13 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
         resolved.is_empty(),
         "physical projections must not reopen root cycles"
     );
+    write(
+        &directories[20],
+        "one.mjs",
+        "export const load = n => import(`./cycle/${n}.mjs`);",
+    );
+    let demanded_cycle = BuildSession::new(root).unwrap().build(&config).unwrap();
+    assert_eq!(demanded_cycle.product.graph.file_count(), 2);
     remove_directory_link(&directories[20].join("cycle"));
     for pair in directories.windows(2) {
         for alias in ["a", "b"] {
@@ -678,7 +1144,11 @@ fn linked_entry_requires_explicit_safe_output_name() {
 fn file_symlinks_share_identity_and_track_config_targets() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
-    write(&root, "main.mjs", "import {value as a} from './value.mjs'; import {value as b} from './alias.mjs'; console.log(a === b);");
+    write(
+        &root,
+        "main.mjs",
+        "import {value as a} from './value.mjs'; import {value as b} from './alias.mjs'; console.log(a === b);",
+    );
     write(&root, "value.mjs", "export const value = {};");
     write(dir.root(), "config.json", r#"{"compilerOptions":{}}"#);
     let link = |target: &Path, alias: &Path| {
@@ -699,7 +1169,7 @@ fn file_symlinks_share_identity_and_track_config_targets() {
         "config.json",
         r#"{"compilerOptions":{"customConditions":["source"]}}"#,
     );
-    assert!(BuildSession::recheck(&root, &session.sources, &before).is_err());
+    assert!(before.recheck(&root).is_err());
     let second = fresh_parity(&mut session, &linked_options());
     assert_eq!(
         first.product.fingerprints.resolution,
@@ -759,7 +1229,12 @@ fn linked_css_compositions_and_urls_use_bounded_canonical_inputs() {
     write(
         &root,
         "main.mjs",
-        "export {button} from 'pkg/button.module.css';",
+        "export {button} from 'pkg/button.module.css'; import './more.css';",
+    );
+    write(
+        &root,
+        "more.css",
+        ".shared { background: url('../package/pixel.bin'); }",
     );
     write(&package, "package.json", r#"{"exports":"./index.mjs"}"#);
     write(
@@ -774,31 +1249,39 @@ fn linked_css_compositions_and_urls_use_bounded_canonical_inputs() {
     config.css.css_modules = CssModules::Enabled;
     let mut session = BuildSession::new(&root).unwrap();
     let first = fresh_parity(&mut session, &config);
-    assert!(first
-        .product
-        .artifacts
-        .stylesheets
-        .contains_key(&package.join("button.module.css")));
-    assert!(session
-        .sources
-        .contains_key(&package.join("base.module.css")));
-    assert!(first
-        .product
-        .artifacts
-        .resources
-        .values()
-        .any(|bytes| bytes == b"pixel"));
+    assert!(
+        first
+            .product
+            .artifacts
+            .stylesheets
+            .contains_key(&package.join("button.module.css"))
+    );
+    assert!(
+        session
+            .sources
+            .contains_key(&package.join("base.module.css"))
+    );
+    assert!(
+        first
+            .product
+            .artifacts
+            .resources
+            .values()
+            .any(|bytes| bytes == b"pixel")
+    );
     write(&package, "pixel.bin", "edited");
     let changed = fresh_parity(&mut session, &config);
     assert_ne!(
         first.product.fingerprints.output,
         changed.product.fingerprints.output
     );
-    assert!(changed
-        .product
-        .artifacts
-        .resources
-        .values()
-        .any(|bytes| bytes == b"edited"));
+    assert!(
+        changed
+            .product
+            .artifacts
+            .resources
+            .values()
+            .any(|bytes| bytes == b"edited")
+    );
     remove_directory_link(&root.join("node_modules/pkg"));
 }

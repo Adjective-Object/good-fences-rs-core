@@ -411,6 +411,39 @@ impl CheckedResolution {
         )
     }
 
+    /// Project only positive lexical routes from the borrowed request. No proof
+    /// tree is unpacked, and validation remains the original owner's authority.
+    pub(crate) fn file_routes(
+        &self,
+        mode: wire::Mode,
+        importer: &str,
+        specifier: &str,
+        target: &Path,
+    ) -> Result<Vec<PathBuf>> {
+        let request = self
+            .find(mode, importer, specifier)
+            .ok_or_eyre("missing request")?;
+        let mut routes = Vec::new();
+        for input in request.inputs() {
+            if !matches!(input.kind(), wire::Kind::File | wire::Kind::Directory) {
+                continue;
+            }
+            let Some(canonical) = input.canonical() else {
+                continue;
+            };
+            let canonical = self.roots.decode(canonical)?;
+            if let Ok(relative) = target.strip_prefix(&canonical) {
+                let path = self.roots.decode(input.path())?;
+                routes.push(if relative.as_os_str().is_empty() {
+                    path
+                } else {
+                    path.join(relative)
+                });
+            }
+        }
+        Ok(routes)
+    }
+
     pub(crate) fn aggregate(roots: Roots, key: Key, records: &[Self]) -> Result<Self> {
         let mut requests = std::collections::BTreeMap::new();
         for record in records {

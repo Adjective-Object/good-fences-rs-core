@@ -475,13 +475,8 @@ mod tests {
         let cold_events = complete_trace(&root.join(".bundler-trace-cold.json"));
         for name in [
             "build.declarations",
-            "build.inventory",
-            "inventory.directory",
-            "inventory.read_directory",
-            "inventory.entries",
-            "inventory.validate_scopes",
-            "inventory.config_ancestors",
-            "inventory.config_probes",
+            "inventory.admit",
+            "inventory.recheck",
             "build.resolution_fingerprint",
             "prepare.package_format",
             "prepare.read_bytes",
@@ -502,6 +497,16 @@ mod tests {
         ] {
             assert!(
                 cold_events.iter().any(|event| event["name"] == name),
+                "{name}"
+            );
+        }
+        for name in [
+            "build.inventory",
+            "inventory.read_directory",
+            "inventory.config_probes",
+        ] {
+            assert!(
+                !cold_events.iter().any(|event| event["name"] == name),
                 "{name}"
             );
         }

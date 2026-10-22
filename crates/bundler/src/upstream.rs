@@ -125,9 +125,12 @@ fn load_inner(
         let path = url
             .to_file_path()
             .map_err(|()| eyre::eyre!("unsupported source map file URL"))?;
-        let canonical = path
-            .canonicalize()
-            .wrap_err_with(|| format!("source map {}", path.display()))?;
+        let canonical = inventory.admit(&path).wrap_err_with(|| {
+            format!(
+                "source map outside build root or checked linked inventory: {}",
+                path.display()
+            )
+        })?;
         ensure!(
             inventory.contains(&canonical),
             "source map outside build root or checked linked inventory: {}",

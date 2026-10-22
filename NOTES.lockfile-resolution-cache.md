@@ -96,9 +96,9 @@ Never modify the dirty perf-optim worktree, afix, or the client-web migration.
 Stage 1 and the three concrete review corrections were independently approved,
 spot-checked and committed as `6aeec15`. Stage 2 was independently reviewed,
 spot-checked and committed as `cf3bc83`. Stage 3 is completed as `6463c3e`.
-Stage 4 production integration is implemented in the current uncommitted diff;
-independent review and coordinator spot-check remain pending. Stages 5–6 remain
-pending; eager inventory removal is deliberately not part of stage 4.
+Stage 4 production integration was reviewed, spot-checked and committed as
+`1d66bfd`. Stage 5 demand admission is implemented in the current uncommitted
+diff; coordinator review/spot-check remain pending. Stage 6 remains pending.
 
 - Preserve Berry raw locators/workspaces and deterministic SCC/named-edge hashes.
 - Mark every npm/shrinkwrap and Classic Yarn record incomplete because normalized
@@ -240,10 +240,10 @@ Stage 3 validation (Windows; managed test directories under ignored
 
 ### Stage 4 — production request-cache integration
 
-Implemented only in the explicit clean `source-maps` worktree at `6463c3e`;
-no commits or delegation by the implementer. Independent review and coordinator
-spot-check/commit remain pending. Stage 5 inventory removal and stage 6 adoption/
-performance work are deliberately untouched.
+Implemented only in the explicit clean `source-maps` worktree at `6463c3e`,
+then reviewed, spot-checked and committed as `1d66bfd`. No commits or delegation
+by the implementer. Stage 5 inventory removal and stage 6 adoption/performance
+work were deliberately untouched in that commit.
 
 - Production `BuildResolver` now serves actual script/context/CSS/Sass requests
   through package-local stores and within-build request/package memoization.
@@ -318,3 +318,118 @@ Stage 4 validation (Windows, managed tests under ignored `target\test-temp`):
   `target\stage4-lib-tests-final.log` and `target\stage4-check.log`.
 - Full spot-check and independent review belong to the coordinator; neither was
   run/launched here, and no commit was made.
+
+### Stage 5 — demand-driven input admission
+
+Implemented only in the explicit clean `source-maps` worktree at `1d66bfd`.
+No commits, delegation, branch-pointer changes or edits to perf-optim/client/afix.
+Coordinator review/spot-check remain pending; stage 6 adoption/benchmark work is
+deliberately not claimed.
+
+- Removed both production eager inventory calls, including the final whole-tree
+  comparison. Literal builds do not enumerate directories, hash arbitrary
+  JSON/JSONC, probe tsconfig ancestry or scan unvisited node_modules. Entry and
+  positive resolved lexical routes admit canonical sources before dispatch.
+  Fresh proofs and borrowed `GFRS` requests expose only positive route
+  projections; original proof owners still authorize resolution reuse/rechecks.
+- One shared inventory keeps read-only membership, compact checked link/tree
+  relationships, named aliases and original identity observations. A mutex
+  accommodates existing Styles borrows and worker-local package-format seals;
+  no global file set is cloned. Only consulted package-format manifests/misses
+  and local Sass candidate probes are added to final validation. Source/resource/
+  map byte rechecks and original resolver proofs remain intact.
+- Directory links authorize their checked trees; file links authorize only
+  their targets. A canonical external path alone is not authorization. An actual
+  bare request can check its exact named project node_modules installation edge,
+  preserving linked external-ancestor resolution without allowing a new unlinked
+  nearer ancestor package. Arbitrary external relative source/map jumps remain
+  rejected. Alternate Windows/native path spellings retain checked provenance.
+- Exclusions apply to the input root and checked linked trees, not unrelated
+  absolute ancestors. New outer-tree admissions revalidate earlier targets and
+  scopes in either order. Unvisited links are intentionally not authorization,
+  exclusion or CSS-naming authority: external entries should provide a lexical
+  checked route and safe explicit output name. External CSS names use sorted
+  checked in-root routes; canonical in-root naming/output checks are unchanged.
+- Actual finite contexts alone enumerate prefix-compatible scopes, share
+  canonical directory listings, expand named aliases and cut active cycles
+  through the checked reachability graph. Already admitted exact files and
+  physical projections are available without enumerating external ancestors.
+  Later literal/resource admissions and context jobs settle to a fixed point
+  before comparing context edges/building the graph, preserving no-op identity
+  and empty invalidations independently of worker completion order.
+- Final context checks enumerate only those scopes and compare matching
+  named/canonical candidates, catching additions/removals without invalidation
+  from nonmatching files or unrelated trees. Borrowed source-record owners retain
+  pattern facts; no cache tree is unpacked. The exhaustive eager graph inventory
+  is now a test-only reference oracle; its diamond/cycle/security tests remain.
+- CSS URL closures, compositions, Sass partials and local maps explicitly admit
+  before reading. File-link sibling/map rejection, canonical deduplication,
+  reserved destinations, external entry safety and package-type changes remain
+  covered. Trace contracts now require admission/recheck spans and forbid
+  directory/global-config spans for literal builds.
+
+Stage 5 validation (Windows; project-local Node **22.15.0**, TEMP/TMP under
+`target\test-temp`, no dependency/tooling changes):
+
+- `cargo test -p bundler --lib --quiet`: **584 passed, 2 ignored** (final full
+  suite 131.98 seconds). The existing actual-project lockfile probe and subprocess
+  helper remain ignored; enabled separate-process coverage still runs its helper.
+- `cargo test -p bundler --example build --quiet`: **3 passed**, including local
+  trace success/error flushing and the updated intentional literal-span contract.
+- `cargo check --workspace --quiet`: **passed**. Existing ftree_cache lifetime
+  and unused_finder dead-code warnings remain.
+- Measurable ordinary-build regression: **4,096 unused invalid JSON files** in
+  128 node_modules subdirectories plus a dangling junction; cold, no-op and new
+  session/disk builds each report **zero inventory directory reads**, including
+  final validation. Mid-build unused JSON/tsconfig edits retain the no-op product.
+- The 20-level diamond production context reads **21 canonical directories
+  initially + 21 at final check**, not exponentially many aliases. A root cycle
+  remains cut. Separate regressions cover bounded unrelated broken trees,
+  nonmatching additions, matching additions during no-op final validation,
+  subsequent graph additions/removals, late linked-scope discovery, file-only
+  boundaries, entry-only manifest mutation and Windows case identity.
+- Clippy was run without promoting pre-existing workspace/bundler findings to
+  errors; no findings remain in the new inventory/route projection code. Its
+  diagnostics are retained in `target\stage5-clippy.log`. Handwritten
+  Rust was formatted and `git diff --check` passed. Coordinator spot-check and
+  independent review are still required; no real-client workload/performance
+  claim is substituted for stage 6.
+
+#### Stage 5 review corrections — checked aliases and map-admitted contexts
+
+Both reported medium issues were reproduced against the uncommitted stage 5
+diff before fixing them (`target\stage5-review-before.log`): a generated CSS
+default URL differed from the actual emitted stylesheet, and an unchanged
+map-linked context failed final candidate validation.
+
+- CSS discovery now queues composition evaluation inputs without preparing JS
+  wrappers. After all script/resource/map admissions and context jobs settle,
+  finalize scoped names and prepare wrappers/URL relocations exactly once from
+  the final checked aliases. This also stabilizes dependent closure hashes and
+  composed mappings, without transient re-preparation invalidating no-op builds.
+  No additional alias authority, external scanning or CSS identity-policy change.
+- Upstream maps load with each prepared script rather than after discovery.
+  Their checked linked scopes participate in the same context fixed point;
+  newly exposed scripts prepare their own maps before discovery can settle.
+  Final fresh candidate checks are unchanged, not relaxed.
+- Added two focused runtime regressions. CSS covers caller-loaded default URLs
+  and auto-mount relocations, actual artifact existence, the CSS @import route,
+  both canonical discovery orders, fresh/cache parity and no-op identity.
+  Maps cover the project/linked + project/maps case, a context candidate whose
+  map admits another linked scope/candidate (including its own map), runtime
+  imports, cache/no-op parity, and rejection of a genuine mid-build addition
+  followed by a successful rebuilt runtime context.
+
+Correction validation uses the same project-local Node **22.15.0** and managed
+`target\test-temp` root:
+
+- `cargo test -p bundler --lib reviewed_ --quiet`: **2 passed**.
+- `cargo test -p bundler --lib --quiet`: **586 passed, 2 ignored** on the final
+  correction tree (134.49 seconds).
+- `cargo test -p bundler --example build --quiet`: **3 passed**.
+- Handwritten Rust formatted; formatter check and `git diff --check` passed.
+- Logs: `target\stage5-review-focused.log`, `target\stage5-review-trace.log`,
+  and `target\stage5-review-lib.log`. Existing ftree_cache lifetime warning
+  remains. An overlapping Windows test relink hit LNK1104 while the earlier full
+  test executable was running; sequential reruns passed, with no tooling changes.
+- No commit/delegation or stage 6 work; coordinator spot-check remains pending.

@@ -10,6 +10,59 @@ use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDe
 
 use crate::assembly::{self, Code};
 
+fn candidate_requests(
+    importer: &Path,
+    target: &Path,
+    dependency: Dependency<'_>,
+    extensions: &[String],
+) -> Vec<String> {
+    let Some(request) = assembly::relative_request(importer, target, false) else {
+        return Vec::new();
+    };
+    let mut requests = Vec::new();
+    if dependency.kind() == DependencyKind::DynamicImport {
+        if let Some(encoded) = assembly::relative_request(importer, target, true) {
+            if dependency.matches_specifier(&encoded) {
+                requests.push(encoded);
+            }
+        }
+        if request.contains(['#', '?', '%']) {
+            return requests;
+        }
+    }
+    if dependency.matches_specifier(&request) {
+        requests.push(request.clone());
+    }
+    if dependency.kind() == DependencyKind::Require {
+        for extension in extensions {
+            if let Some(stem) =
+                request.strip_suffix(&format!(".{}", extension.trim_start_matches('.')))
+            {
+                if dependency.matches_specifier(stem) {
+                    requests.push(stem.to_owned());
+                }
+                if let Some(directory) = stem.strip_suffix("/index") {
+                    for alias in [directory.to_owned(), format!("{directory}/")] {
+                        if dependency.matches_specifier(&alias) {
+                            requests.push(alias);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    requests
+}
+
+pub(crate) fn matches_candidate(
+    importer: &Path,
+    target: &Path,
+    dependency: Dependency<'_>,
+    extensions: &[String],
+) -> bool {
+    !candidate_requests(importer, target, dependency, extensions).is_empty()
+}
+
 pub(crate) fn resolve(
     root: &Path,
     importer: &Path,
@@ -28,36 +81,13 @@ pub(crate) fn resolve(
         let Some(request) = assembly::relative_request(importer, &target, false) else {
             continue;
         };
-        if dependency.kind() == DependencyKind::DynamicImport {
-            let encoded = assembly::relative_request(importer, &target, true)
-                .expect("the unencoded relative request exists");
-            if dependency.matches_specifier(&encoded) {
-                requests.insert(encoded, request.clone());
-            }
-            if request.contains(['#', '?', '%']) {
-                continue;
-            }
-        }
-        if dependency.matches_specifier(&request) {
-            requests.insert(request.clone(), request.clone());
-        }
-        if dependency.kind() == DependencyKind::Require {
-            for extension in extensions {
-                if let Some(stem) =
-                    request.strip_suffix(&format!(".{}", extension.trim_start_matches('.')))
-                {
-                    if dependency.matches_specifier(stem) {
-                        requests.insert(stem.to_owned(), stem.to_owned());
-                    }
-                    if let Some(directory) = stem.strip_suffix("/index") {
-                        for alias in [directory.to_owned(), format!("{directory}/")] {
-                            if dependency.matches_specifier(&alias) {
-                                requests.insert(alias.clone(), alias);
-                            }
-                        }
-                    }
-                }
-            }
+        for key in candidate_requests(importer, &target, dependency, extensions) {
+            let resolved_request = if dependency.kind() == DependencyKind::Require {
+                key.clone()
+            } else {
+                request.clone()
+            };
+            requests.insert(key, resolved_request);
         }
     }
     requests

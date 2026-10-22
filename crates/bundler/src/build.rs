@@ -8,9 +8,9 @@ use std::{
 };
 
 use ast_segmenter::{
-    fingerprint::Fingerprint, owned::DependencyKind, ModuleFormat, PreparedDeclarations,
+    ModuleFormat, PreparedDeclarations, fingerprint::Fingerprint, owned::DependencyKind,
 };
-use eyre::{ensure, WrapErr};
+use eyre::{WrapErr, ensure};
 use import_resolver::{
     node_resolver::caching::NodeModulesResolverOptions,
     resolve::TargetEnv,
@@ -139,6 +139,8 @@ pub struct Fingerprints {
 
 #[derive(Debug, Default, Clone)]
 pub struct Counters {
+    #[cfg(test)]
+    inventory_directory_reads: usize,
     /// Actual source extraction cache misses (emission checks are separate).
     pub source_parses: usize,
     /// Actual declaration serializations/hashes, including worker-local calls.
@@ -294,7 +296,7 @@ impl BuildSession {
             .clone();
         let declarations_key = declarations.fingerprint();
         drop(declaration_span);
-        let inventory = inventory(&self.root)?;
+        let inventory = Inventory::new(&self.root);
         let mut styles = crate::css::Styles::new(
             &self.root,
             &inventory,
@@ -313,7 +315,8 @@ impl BuildSession {
             options,
             lockfile.clone(),
             self.resolution_memory.clone(),
-        );
+        )
+        .admitting(&inventory);
         let mut sass_options = options.clone();
         sass_options.resolver = resolver::BuildResolver::options(options);
         sass_options.resolver.extensions = vec!["scss".into(), "sass".into(), "css".into()];
@@ -326,15 +329,14 @@ impl BuildSession {
             &sass_options,
             lockfile,
             self.resolution_memory.clone(),
-        );
+        )
+        .admitting(&inventory);
         let mut queue = VecDeque::new();
         let mut entries = BTreeMap::new();
         for (name, entry) in &options.entries {
             ensure!(!name.is_empty(), "empty entry name");
-            let path = self
-                .root
-                .join(&entry.path)
-                .canonicalize()
+            let path = inventory
+                .admit(&self.root.join(&entry.path))
                 .wrap_err_with(|| format!("entry {}: {}", name, entry.path.display()))?;
             ensure!(
                 inventory.contains(&path),
@@ -348,7 +350,7 @@ impl BuildSession {
         let mut resources = BTreeSet::new();
         let initial: BTreeSet<_> = queue.into_iter().collect();
         let mut jobs = prepare::enqueue(initial, &mut scheduled, &mut resources, options);
-        let mut inputs = Vec::new();
+        let mut inputs: Vec<OwnedSourceFileInput> = Vec::new();
         let mut sources = BTreeMap::new();
         let mut loaded_sources = BTreeMap::new();
         let previous = &self.sources;
@@ -356,12 +358,14 @@ impl BuildSession {
         let mut require_resources = BTreeMap::new();
         let mut changed = BTreeSet::new();
         let mut errors = BTreeMap::new();
-        let root = &self.root;
+        let mut previous_contexts = BTreeMap::new();
+        let mut upstreams = BTreeMap::new();
+        let mut deferred_styles = BTreeMap::new();
+        let mut prepare_styles = false;
         #[cfg(test)]
         let observer = prepare::AFTER_PREPARE.with(|observer| observer.borrow().clone());
         let read = |path: PathBuf| {
             let result = prepare::read(
-                root,
                 &path,
                 &inventory,
                 previous.get(&path),
@@ -375,156 +379,243 @@ impl BuildSession {
             }
             (path, result)
         };
-        let mut integrate = |(path, prepared): (PathBuf, eyre::Result<prepare::Prepared>)| {
-            let _span = tracing::info_span!("build.integrate").entered();
-            let mut discovered = BTreeSet::new();
-            let result = (|| -> eyre::Result<()> {
-                let kind = crate::resource::kind(&path, &options.css);
-                if matches!(
-                    kind,
-                    crate::resource::ResourceKind::Json | crate::resource::ResourceKind::Asset
-                ) || (kind == crate::resource::ResourceKind::Stylesheet { module: false }
-                    && options.css.load == CssLoad::CallerLoaded)
-                {
-                    require_resources.insert(path.clone(), crate::resource::RequireValue::Default);
-                } else if kind == (crate::resource::ResourceKind::Stylesheet { module: true })
-                    && options.css.load == CssLoad::CallerLoaded
-                {
-                    require_resources
-                        .insert(path.clone(), crate::resource::RequireValue::Namespace);
-                }
-                let wrapper_format = match options.resolver.target_env {
-                    TargetEnv::Browser => ModuleFormat::Esm,
-                    TargetEnv::Node => ModuleFormat::CommonJs,
-                };
-                let mut css_identity = None;
-                let loaded = match prepared? {
-                    prepare::Prepared::Script(loaded) => loaded,
-                    prepare::Prepared::Resource { input, format } => {
-                        let prepared_css =
-                            if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
-                                styles.discover(&path, &input, &resolver, &sass_resolver)?;
-                                Some(options.css.load.strategy().generate_module(
-                                    &crate::css_loading::CssModuleInput {
-                                        stylesheet: &path,
-                                        public_url: &styles.public_url(&path)?,
-                                        name_mappings:
-                                            styles.name_mappings(&path).unwrap_or(&BTreeMap::new()),
-                                        is_module: styles.name_mappings(&path).is_some(),
-                                        evaluation_dependencies:
-                                            &styles.evaluation_dependencies(&path),
-                                        wrapper_format,
-                                    },
-                                )?)
-                            } else {
-                                None
-                            };
-                        css_identity =
-                            matches!(kind, crate::resource::ResourceKind::Stylesheet { .. })
+        let preparation_span = tracing::info_span!("build.prepare").entered();
+        loop {
+            let mut integrate =
+                |(path, prepared): (PathBuf, eyre::Result<prepare::Prepared>),
+                 deferred_styles: &mut BTreeMap<PathBuf, prepare::Prepared>| {
+                    let _span = tracing::info_span!("build.integrate").entered();
+                    let mut discovered = BTreeSet::new();
+                    let result = (|| -> eyre::Result<()> {
+                        let kind = crate::resource::kind(&path, &options.css);
+                        if matches!(
+                            kind,
+                            crate::resource::ResourceKind::Json
+                                | crate::resource::ResourceKind::Asset
+                        ) || (kind
+                            == crate::resource::ResourceKind::Stylesheet { module: false }
+                            && options.css.load == CssLoad::CallerLoaded)
+                        {
+                            require_resources
+                                .insert(path.clone(), crate::resource::RequireValue::Default);
+                        } else if kind
+                            == (crate::resource::ResourceKind::Stylesheet { module: true })
+                            && options.css.load == CssLoad::CallerLoaded
+                        {
+                            require_resources
+                                .insert(path.clone(), crate::resource::RequireValue::Namespace);
+                        }
+                        let wrapper_format = match options.resolver.target_env {
+                            TargetEnv::Browser => ModuleFormat::Esm,
+                            TargetEnv::Node => ModuleFormat::CommonJs,
+                        };
+                        let mut css_identity = None;
+                        let loaded = match prepared? {
+                            prepare::Prepared::Script(loaded) => loaded,
+                            prepare::Prepared::Resource { input, format } => {
+                                let prepared_css = if matches!(
+                                    kind,
+                                    crate::resource::ResourceKind::Stylesheet { .. }
+                                ) {
+                                    if !prepare_styles {
+                                        styles.discover(
+                                            &path,
+                                            &input,
+                                            &resolver,
+                                            &sass_resolver,
+                                        )?;
+                                        discovered.extend(styles.evaluation_paths(&path).cloned());
+                                        deferred_styles.insert(
+                                            path.clone(),
+                                            prepare::Prepared::Resource { input, format },
+                                        );
+                                        return Ok(());
+                                    }
+                                    Some(
+                                        options.css.load.strategy().generate_module(
+                                            &crate::css_loading::CssModuleInput {
+                                                stylesheet: &path,
+                                                public_url: &styles.public_url(&path)?,
+                                                name_mappings: styles
+                                                    .name_mappings(&path)
+                                                    .unwrap_or(&BTreeMap::new()),
+                                                is_module: styles.name_mappings(&path).is_some(),
+                                                evaluation_dependencies: &styles
+                                                    .evaluation_dependencies(&path),
+                                                wrapper_format,
+                                            },
+                                        )?,
+                                    )
+                                } else {
+                                    None
+                                };
+                                css_identity = matches!(
+                                    kind,
+                                    crate::resource::ResourceKind::Stylesheet { .. }
+                                )
                                 .then(|| styles.identity(&path));
-                        let parser_path = prepared_css.as_ref().map_or_else(
-                            || crate::resource::parser_path(&path, wrapper_format),
-                            |prepared| prepared.parser_path.clone(),
-                        );
-                        let parser_package = prepared_css
-                            .as_ref()
-                            .map_or(format, |prepared| prepared.package);
-                        let text = if let Some(prepared) = prepared_css {
-                            relocations.insert(path.clone(), prepared.relocations);
-                            prepared.source
-                        } else {
-                            crate::resource::prepare(&path, &input, &public_base, wrapper_format)?
+                                let parser_path = prepared_css.as_ref().map_or_else(
+                                    || crate::resource::parser_path(&path, wrapper_format),
+                                    |prepared| prepared.parser_path.clone(),
+                                );
+                                let parser_package = prepared_css
+                                    .as_ref()
+                                    .map_or(format, |prepared| prepared.package);
+                                let text = if let Some(prepared) = prepared_css {
+                                    relocations.insert(path.clone(), prepared.relocations);
+                                    prepared.source
+                                } else {
+                                    crate::resource::prepare(
+                                        &path,
+                                        &input,
+                                        &public_base,
+                                        wrapper_format,
+                                    )?
+                                };
+                                prepare::load(
+                                    &path,
+                                    input,
+                                    text,
+                                    &parser_path,
+                                    parser_package,
+                                    previous.get(&path),
+                                    options.cache,
+                                    &declarations,
+                                )?
+                            }
                         };
-                        prepare::load(
-                            &path,
-                            input,
-                            text,
-                            &parser_path,
-                            parser_package,
-                            previous.get(&path),
-                            options.cache,
-                            &declarations,
-                        )?
-                    }
-                };
-                if previous
-                    .get(&path)
-                    .is_some_and(|source| source.css_identity != css_identity)
-                {
-                    changed.insert(path.clone());
-                }
-                match loaded.status {
-                    None => counters.memory_hits += 1,
-                    Some(CacheStatus::Hit) => counters.disk_hits += 1,
-                    Some(CacheStatus::Miss(_)) => counters.source_parses += 1,
-                }
-                if let Some(warning) = loaded.warning {
-                    warnings.push(warning);
-                }
-                if let Some(mut source) = loaded.source {
-                    changed.insert(path.clone());
-                    source.css_identity = css_identity.clone();
-                    loaded_sources.insert(path.clone(), source);
-                }
-                if let Some(transpiled) = loaded.transpiled {
-                    let source = loaded_sources.entry(path.clone()).or_insert_with(|| {
-                        previous.get(&path).expect("reused prepared source").clone()
-                    });
-                    source.transpiled = Some(transpiled);
-                }
-                let source = loaded_sources
-                    .get(&path)
-                    .or_else(|| previous.get(&path))
-                    .expect("loaded source");
-                let resolution_span = tracing::info_span!("build.resolve").entered();
-                let resolved = {
-                    let mut resolved = HashMap::new();
-                    for dependency in source.record.module().facts().dependencies() {
-                        if dependency.type_only() {
-                            continue;
+                        if previous
+                            .get(&path)
+                            .is_some_and(|source| source.css_identity != css_identity)
+                        {
+                            changed.insert(path.clone());
                         }
-                        let _dependency_span = tracing::info_span!(
-                            "resolve.dependency",
-                            context = dependency.pattern().is_some(),
-                            require = dependency.kind() == DependencyKind::Require
-                        )
-                        .entered();
-                        let mode = if dependency.kind() == DependencyKind::Require {
-                            ResolutionMode::Require
-                        } else {
-                            ResolutionMode::Import
-                        };
-                        if dependency.pattern().is_some() {
-                            let candidates = crate::context::resolve(
-                                &self.root,
+                        match loaded.status {
+                            None => counters.memory_hits += 1,
+                            Some(CacheStatus::Hit) => counters.disk_hits += 1,
+                            Some(CacheStatus::Miss(_)) => counters.source_parses += 1,
+                        }
+                        if let Some(warning) = loaded.warning {
+                            warnings.push(warning);
+                        }
+                        if let Some(mut source) = loaded.source {
+                            changed.insert(path.clone());
+                            source.css_identity = css_identity.clone();
+                            loaded_sources.insert(path.clone(), source);
+                        }
+                        if let Some(transpiled) = loaded.transpiled {
+                            let source = loaded_sources.entry(path.clone()).or_insert_with(|| {
+                                previous.get(&path).expect("reused prepared source").clone()
+                            });
+                            source.transpiled = Some(transpiled);
+                        }
+                        let source = loaded_sources
+                            .get(&path)
+                            .or_else(|| previous.get(&path))
+                            .expect("loaded source");
+                        if options.output.source_maps
+                            && kind == crate::resource::ResourceKind::Script
+                        {
+                            let (text, hint) = if let Some(transpiled) = &source.transpiled {
+                                (
+                                    std::str::from_utf8(&source.input)?,
+                                    transpiled.source_map_hint,
+                                )
+                            } else {
+                                (
+                                    source.text.as_str(),
+                                    source.record.module().facts().emission().source_map(),
+                                )
+                            };
+                            let (upstream, warning) = crate::upstream::load(
+                                &inventory,
                                 &path,
-                                dependency,
-                                inventory.candidates(&self.root, &path, dependency),
-                                &options.resolver.extensions,
-                                &resolver,
-                            )
-                            .wrap_err_with(|| {
-                                format!(
-                                    "{}: context at bytes {}..{}",
-                                    path.display(),
-                                    dependency.span().start,
-                                    dependency.span().end
-                                )
-                            })?;
-                            resolved.insert(dependency.id(), DependencyTarget::Context(candidates));
-                            continue;
+                                text,
+                                hint,
+                                options.cache,
+                                self.upstreams.get(&path),
+                            )?;
+                            if let Some(warning) = warning {
+                                warnings.push(warning);
+                            }
+                            if let Some(upstream) = upstream {
+                                if self.upstreams.get(&path) != Some(&upstream) {
+                                    changed.insert(path.clone());
+                                }
+                                upstreams.insert(path.clone(), upstream);
+                            } else if self.upstreams.contains_key(&path) {
+                                changed.insert(path.clone());
+                            }
                         }
-                        let target = resolver
-                            .resolve_dependency(&path, &dependency.specifier(), mode)
-                            .wrap_err_with(|| {
-                                format!(
-                                    "{}: bytes {}..{}",
-                                    path.display(),
-                                    dependency.span().start,
-                                    dependency.span().end
+                        let has_context = source
+                            .record
+                            .module()
+                            .facts()
+                            .dependencies()
+                            .iter()
+                            .any(|dependency| dependency.pattern().is_some());
+                        if has_context {
+                            previous_contexts
+                                .entry(path.clone())
+                                .or_insert_with(|| self.resolutions.get(&path).cloned());
+                        }
+                        let resolution_span = tracing::info_span!("build.resolve").entered();
+                        let resolved = {
+                            let mut resolved = HashMap::new();
+                            for dependency in source.record.module().facts().dependencies() {
+                                if dependency.type_only() {
+                                    continue;
+                                }
+                                let _dependency_span = tracing::info_span!(
+                                    "resolve.dependency",
+                                    context = dependency.pattern().is_some(),
+                                    require = dependency.kind() == DependencyKind::Require
                                 )
-                            })?;
-                        resolved.insert(
+                                .entered();
+                                let mode = if dependency.kind() == DependencyKind::Require {
+                                    ResolutionMode::Require
+                                } else {
+                                    ResolutionMode::Import
+                                };
+                                if dependency.pattern().is_some() {
+                                    let candidates = crate::context::resolve(
+                                        &self.root,
+                                        &path,
+                                        dependency,
+                                        inventory.candidates(
+                                            &path,
+                                            &source.record,
+                                            dependency,
+                                            &options.resolver.extensions,
+                                        )?,
+                                        &options.resolver.extensions,
+                                        &resolver,
+                                    )
+                                    .wrap_err_with(|| {
+                                        format!(
+                                            "{}: context at bytes {}..{}",
+                                            path.display(),
+                                            dependency.span().start,
+                                            dependency.span().end
+                                        )
+                                    })?;
+                                    resolved.insert(
+                                        dependency.id(),
+                                        DependencyTarget::Context(candidates),
+                                    );
+                                    continue;
+                                }
+                                let target = resolver
+                                    .resolve_dependency(&path, &dependency.specifier(), mode)
+                                    .wrap_err_with(|| {
+                                        format!(
+                                            "{}: bytes {}..{}",
+                                            path.display(),
+                                            dependency.span().start,
+                                            dependency.span().end
+                                        )
+                                    })?;
+                                resolved.insert(
                             dependency.id(),
                             match target {
                                 ResolvedDependency::File(target) => {
@@ -538,72 +629,123 @@ impl BuildSession {
                                 }
                             },
                         );
+                            }
+                            if !has_context && self.resolutions.get(&path) != Some(&resolved) {
+                                changed.insert(path.clone());
+                            }
+                            self.resolutions.insert(path.clone(), resolved.clone());
+                            resolved
+                        };
+                        drop(resolution_span);
+                        for target in resolved.values() {
+                            if let DependencyTarget::File(path) = target {
+                                discovered.insert(path.clone());
+                            } else if let DependencyTarget::Context(candidates) = target {
+                                discovered.extend(candidates.values().cloned());
+                            }
+                        }
+                        let graph_input = if kind == crate::resource::ResourceKind::Script
+                            && source.transpiled.is_none()
+                        {
+                            OwnedSourceFileInput::from_parsed
+                        } else {
+                            OwnedSourceFileInput::from_prepared_resource
+                        };
+                        inputs.push(graph_input(
+                            path.clone(),
+                            loaded.parsed,
+                            resolved.into_iter().collect(),
+                        ));
+                        sources.insert(path.clone(), source.text.clone());
+                        Ok(())
+                    })();
+                    let failed = result.is_err();
+                    if let Err(error) = result {
+                        errors.insert(path, error);
                     }
-                    if self.resolutions.get(&path) != Some(&resolved) {
-                        changed.insert(path.clone());
-                    }
-                    self.resolutions.insert(path.clone(), resolved.clone());
-                    resolved
+                    (discovered, failed)
                 };
-                drop(resolution_span);
-                for target in resolved.values() {
-                    if let DependencyTarget::File(path) = target {
-                        discovered.insert(path.clone());
-                    } else if let DependencyTarget::Context(candidates) = target {
-                        discovered.extend(candidates.values().cloned());
+            'frontier: loop {
+                let result = options.execution.replenish(jobs, &read, |result| {
+                    let (discovered, _) = integrate(result, &mut deferred_styles);
+                    prepare::enqueue(discovered, &mut scheduled, &mut resources, options)
+                });
+                if let Err(error) = result {
+                    self.resolutions.clear();
+                    self.pending_invalidated.extend(changed);
+                    return Err(error);
+                }
+                // Resource discovery stays canonical/serial; CSS wrappers wait
+                // for settled routes. Scripts replenish without wave barriers.
+                jobs = Vec::new();
+                while let Some(path) = resources.pop_first() {
+                    let _resource_span = tracing::info_span!("prepare.resource").entered();
+                    let prepared = match deferred_styles.remove(&path) {
+                        Some(prepared) => (path, Ok(prepared)),
+                        None => read(path),
+                    };
+                    let (discovered, failed) = integrate(prepared, &mut deferred_styles);
+                    if failed {
+                        break 'frontier;
+                    }
+                    jobs = prepare::enqueue(discovered, &mut scheduled, &mut resources, options);
+                    if !jobs.is_empty() {
+                        break;
                     }
                 }
-                let graph_input = if kind == crate::resource::ResourceKind::Script
-                    && source.transpiled.is_none()
-                {
-                    OwnedSourceFileInput::from_parsed
-                } else {
-                    OwnedSourceFileInput::from_prepared_resource
-                };
-                inputs.push(graph_input(
-                    path.clone(),
-                    loaded.parsed,
-                    resolved.into_iter().collect(),
-                ));
-                sources.insert(path.clone(), source.text.clone());
-                Ok(())
-            })();
-            let failed = result.is_err();
-            if let Err(error) = result {
-                errors.insert(path, error);
-            }
-            (discovered, failed)
-        };
-        let preparation_span = tracing::info_span!("build.prepare").entered();
-        'frontier: loop {
-            let result = options.execution.replenish(jobs, &read, |result| {
-                let (discovered, _) = integrate(result);
-                prepare::enqueue(discovered, &mut scheduled, &mut resources, options)
-            });
-            if let Err(error) = result {
-                self.resolutions.clear();
-                self.pending_invalidated.extend(changed);
-                return Err(error);
-            }
-            // Stateful resources have a canonical serial frontier, not a buffer
-            // of worker-read bytes. Scripts above replenish without wave barriers.
-            jobs = Vec::new();
-            while let Some(path) = resources.pop_first() {
-                let _resource_span = tracing::info_span!("prepare.resource").entered();
-                let (discovered, failed) = integrate(read(path));
-                if failed {
-                    break 'frontier;
-                }
-                jobs = prepare::enqueue(discovered, &mut scheduled, &mut resources, options);
-                if !jobs.is_empty() {
+                if jobs.is_empty() {
                     break;
                 }
             }
-            if jobs.is_empty() {
+            if !errors.is_empty() {
                 break;
             }
+            let expanded = match inventory.expand_contexts(&resolver) {
+                Ok(expanded) => expanded,
+                Err(error) => {
+                    self.resolutions.clear();
+                    self.pending_invalidated.extend(changed);
+                    return Err(error);
+                }
+            };
+            if expanded.is_empty() {
+                if !deferred_styles.is_empty() {
+                    // All checked routes (including maps and composition jobs)
+                    // must settle before CSS names, URLs or relocations capture them.
+                    if let Err(error) = styles.finish_discovery() {
+                        self.resolutions.clear();
+                        self.pending_invalidated.extend(changed);
+                        return Err(error);
+                    }
+                    prepare_styles = true;
+                    resources.extend(deferred_styles.keys().cloned());
+                    continue;
+                }
+                break;
+            }
+            let mut discovered = BTreeSet::new();
+            for (path, dependency, candidates) in expanded {
+                discovered.extend(candidates.values().cloned());
+                let target = DependencyTarget::Context(candidates);
+                self.resolutions
+                    .get_mut(&path)
+                    .expect("context source")
+                    .insert(dependency, target.clone());
+                inputs
+                    .iter_mut()
+                    .find(|input| input.path == path)
+                    .expect("context source")
+                    .resolutions
+                    .insert(dependency, target);
+            }
+            jobs = prepare::enqueue(discovered, &mut scheduled, &mut resources, options);
         }
         drop(preparation_span);
+        for (path, before) in previous_contexts {
+            if self.resolutions.get(&path) != before.as_ref() {
+                changed.insert(path);
+            }
+        }
         warnings.extend(styles.warnings().cloned());
         self.sources.extend(loaded_sources);
         // CSS closure identity can change while its generated module stays equal.
@@ -621,45 +763,6 @@ impl BuildSession {
         self.pending_invalidated.extend(changed);
         if let Some((_, error)) = errors.into_iter().next() {
             return Err(error);
-        }
-        let mut upstreams = BTreeMap::new();
-        if options.output.source_maps {
-            for path in sources.keys().filter(|path| {
-                crate::resource::kind(path, &options.css)
-                    == crate::resource::ResourceKind::Script
-            }) {
-                let source = &self.sources[path];
-                let (text, hint) = if let Some(transpiled) = &source.transpiled {
-                    (
-                        std::str::from_utf8(&source.input)?,
-                        transpiled.source_map_hint,
-                    )
-                } else {
-                    (
-                        source.text.as_str(),
-                        source.record.module().facts().emission().source_map(),
-                    )
-                };
-                let (upstream, warning) = crate::upstream::load(
-                    &inventory,
-                    path,
-                    text,
-                    hint,
-                    options.cache,
-                    self.upstreams.get(path),
-                )?;
-                if let Some(warning) = warning {
-                    warnings.push(warning);
-                }
-                if let Some(upstream) = upstream {
-                    if self.upstreams.get(path) != Some(&upstream) {
-                        self.pending_invalidated.insert(path.clone());
-                    }
-                    upstreams.insert(path.clone(), upstream);
-                } else if self.upstreams.contains_key(path) {
-                    self.pending_invalidated.insert(path.clone());
-                }
-            }
         }
         self.upstreams = upstreams;
         warnings.sort();
@@ -788,7 +891,11 @@ impl BuildSession {
         drop(fingerprint_span);
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
-                Self::recheck(&self.root, &self.sources, &inventory)?;
+                Self::recheck(&self.sources, &inventory)?;
+                #[cfg(test)]
+                {
+                    counters.inventory_directory_reads = inventory.directory_reads();
+                }
                 resolver.recheck()?;
                 sass_resolver.recheck()?;
                 styles.recheck()?;
@@ -896,7 +1003,11 @@ impl BuildSession {
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
         let artifacts = artifacts.render_to_with_maps(&destinations, options.output.source_maps)?;
         drop(finalize_span);
-        Self::recheck(&self.root, &self.sources, &inventory)?;
+        Self::recheck(&self.sources, &inventory)?;
+        #[cfg(test)]
+        {
+            counters.inventory_directory_reads = inventory.directory_reads();
+        }
         resolver.recheck()?;
         styles.recheck()?;
         sass_resolver.recheck()?;
@@ -937,11 +1048,7 @@ impl BuildSession {
         })
     }
 
-    fn recheck(
-        root: &Path,
-        sources: &BTreeMap<PathBuf, Source>,
-        before: &Inventory,
-    ) -> eyre::Result<()> {
+    fn recheck(sources: &BTreeMap<PathBuf, Source>, before: &Inventory) -> eyre::Result<()> {
         let _span = tracing::info_span!("build.recheck", sources = sources.len()).entered();
         for (path, source) in sources {
             ensure!(
@@ -950,10 +1057,7 @@ impl BuildSession {
                 path.display()
             );
         }
-        ensure!(
-            inventory(root)? == *before,
-            "resolution inputs changed during build"
-        );
+        before.recheck()?;
         Ok(())
     }
 
@@ -995,35 +1099,13 @@ impl BuildSession {
     }
 }
 
-fn package_format(root: &Path, source: &Path) -> eyre::Result<ModuleFormat> {
-    for directory in source.parent().into_iter().flat_map(Path::ancestors) {
-        let package = directory.join("package.json");
-        match fs::read(&package) {
-            Ok(bytes) => {
-                let json: serde_json::Value = serde_json::from_slice(&bytes)
-                    .wrap_err_with(|| package.display().to_string())?;
-                return match json.get("type").and_then(|v| v.as_str()) {
-                    Some("module") => Ok(ModuleFormat::Esm),
-                    Some("commonjs") | None => Ok(ModuleFormat::CommonJs),
-                    Some(other) => {
-                        eyre::bail!("{}: unsupported package type {other}", package.display())
-                    }
-                };
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-        if directory == root {
-            break;
-        }
-    }
-    Ok(ModuleFormat::CommonJs)
-}
-
 mod inventory;
+#[cfg(test)]
+mod reference_inventory;
 mod resolver;
-use inventory::inventory;
 pub(crate) use inventory::Inventory;
+#[cfg(test)]
+use reference_inventory::inventory;
 
 #[cfg(test)]
 mod tests;

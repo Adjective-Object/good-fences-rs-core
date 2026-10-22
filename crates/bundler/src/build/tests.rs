@@ -690,12 +690,9 @@ fn parallel_preparation_rechecks_source_and_inventory_before_noop_return() {
         let observer = observe_preparation(|path| {
             fs::write(path.parent().unwrap().join("added.mjs"), "export {};").unwrap();
         });
-        assert!(session.build(&config).is_err());
+        let unaffected = session.build(&config).unwrap();
         drop(observer);
-        assert!(Rc::ptr_eq(
-            session.last.as_ref().unwrap(),
-            &repaired.product
-        ));
+        assert!(Rc::ptr_eq(&unaffected.product, &repaired.product));
         fs::remove_file(dir.root().join("added.mjs")).unwrap();
         let noop = session.build(&config).unwrap();
         assert!(Rc::ptr_eq(&noop.product, &repaired.product));
@@ -6991,11 +6988,13 @@ fn unused_esm_environment_probes_preserve_effects_with_ecco_refinement() {
                 format!("[\"loaded\",[\"{name}\",\"abs\"]]"),
             ),
         ] {
-            let check = |entry: &str| format!(
-                "const log = []; {host}
+            let check = |entry: &str| {
+                format!(
+                    "const log = []; {host}
                  const result = await import('./{entry}').then(() => 'loaded', error => error.name);
                  console.log(JSON.stringify([result, log]));"
-            );
+                )
+            };
             write(dir.root(), "check.mjs", &check("main.mjs"));
             let original = observe_entry(&dir.root().join("check.mjs"));
             assert_eq!(String::from_utf8_lossy(&original).trim(), expected);

@@ -77,7 +77,7 @@ Default condition lists follow target switches; custom lists stay caller policy.
 Keep conservative initializer/effect ordering and add-only forced-effect rules.
 TDZ-error preservation is waived; other binding and write restrictions remain.
 BuildSession is the public orchestration boundary: reuse source-local cache facts,
-separate layer fingerprints, inventory config/add/delete changes, and derive
+separate layer fingerprints, consulted-input/context candidate changes, and derive
 affected users from the existing reverse index. Never return old success on error.
 Entry IDs are logical labels. Entry.output_name optionally overrides the
 source-relative output path; include it in output invalidation, not root identity.
@@ -95,31 +95,44 @@ debug validates final executable files once, release never does, no-op does neit
 Reuse hash-checked cache records
 in session emission; public low-level link::esm shares its parse-free
 source/config/facts provenance checker. Analysis-only graph inputs cannot emit.
-Input inventory follows reachable symlinks/junctions, including external packages,
-with canonical source identity. Scan each canonical directory once and retain
-named directory edges, not exponentially many paths through alias diamonds.
-Admit only inventoried sources; never enumerate unrelated ancestor trees.
+Input inventory admits checked lexical routes on demand, preserving canonical
+identity. Literal builds never enumerate directories or hash unused JSON/configs.
+Admit entries/resolved files before worker dispatch and resources before reads;
+contains is read-only. A shared mutex seals worker package-format observations,
+not a cloned global file set. Directory links authorize trees; file links only
+their targets. Borrow positive lexical routes directly from fresh/wire proofs.
+Canonical external paths alone are not authority; bare packages may check their
+exact named project installation edge, never search ancestor/sibling trees.
 Scope reserved-directory exclusions to input/linked tree roots, never unrelated
 absolute ancestors; validate canonical destinations against all discovered roots
-after traversal so cross-tree aliases cannot bypass exclusions in either order.
-Track canonical targets, membership, JSON bytes and existing/missing ancestor
-package/tsconfig probes for invalidation and success rechecks.
+after each admission and at return so checked cross-tree aliases cannot bypass
+exclusions in either order. Unvisited links are not scopes or naming authority.
+Track admitted identities/routes and consulted package-format/Sass candidate
+probes. Never probe/hash tsconfig or arbitrary JSON for inventory.
 Every build resolves its actual dependency facts through scoped request proofs;
 negative ancestry probes detect node_modules shadowing without broad scans.
-The stage-four eager inventory and final inventory comparison still exist for
-membership/contexts; removing those walks belongs only to stage five.
-Contexts expand prefix-compatible finite non-cyclic alias paths on demand,
+Only finite contexts enumerate prefix-compatible scopes; cache canonical
+directory listings and retain borrowed source owners for final match-set checks.
+Load upstream maps with each prepared script, including newly exposed context
+jobs, so map-admitted linked projections participate in discovery's fixed point.
+Settle all admissions/context jobs before comparing source edges or building
+the graph; never depend on completion order.
+Nonmatching additions never invalidate success. The eager graph inventory is
+test-only reference coverage, never production admission or final validation.
+Contexts expand prefix-compatible finite non-cyclic checked alias paths,
 including physical ancestor projections; omit cross-volume relative candidates
 without losing same-volume lexical aliases.
-External CSS identities use the first sorted in-root alias; in-root identities
+External CSS identities use the first sorted checked in-root route; in-root identities
 remain canonical/root-relative. External entries require explicit safe output
 names; input links never relax publication/output path checks.
+Discover CSS/composition evaluation jobs before finalizing CSS Modules names,
+closure URLs and wrapper relocations, after all checked routes have settled.
 Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
 Never discover/parse/validate tsconfig for resolution, including extends/references.
 Use explicit BuildOptions.resolver.export_conditions; never ingest
 customConditions/customSourceConditions or rewrite paths/baseUrl.
-Inventory may hash compiler config bytes without interpreting them.
+Compiler configs are not inventory inputs.
 Publish immutable generations through one atomic ownership pointer; OS locking
 rejects competing publishers and spans the whole build_and_publish operation.
 Explicitly unlock before closing descriptors, including unwind; forked child

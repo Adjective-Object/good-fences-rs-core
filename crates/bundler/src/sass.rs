@@ -104,7 +104,12 @@ fn candidates(request: &str, from_import: bool) -> Vec<Vec<String>> {
 
 impl<R: DependencyResolver> ResolverImporter<'_, R> {
     fn checked(&self, path: PathBuf) -> eyre::Result<PathBuf> {
-        let path = path.canonicalize()?;
+        let path = self.inventory.admit(&path).wrap_err_with(|| {
+            format!(
+                "Sass dependency outside bounded source inventory: {}",
+                path.display()
+            )
+        })?;
         ensure!(
             self.inventory.contains(&path),
             "Sass dependency outside bounded source inventory: {}",
@@ -170,17 +175,8 @@ impl<R: DependencyResolver> ResolverImporter<'_, R> {
                         .map_err(|()| {
                             eyre::eyre!("Sass import is not a local file: {candidate:?}")
                         })?;
-                    match fs::metadata(&path) {
-                        Ok(metadata) if metadata.is_file() => {
-                            paths.insert(self.checked(path)?);
-                        }
-                        Ok(_) => {}
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                            ) => {}
-                        Err(error) => return Err(error.into()),
+                    if self.inventory.probe_file(&path)? {
+                        paths.insert(self.checked(path)?);
                     }
                 }
                 if let Some(path) = self.unique(paths, request)? {

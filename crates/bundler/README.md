@@ -49,8 +49,10 @@ derived graph-edge state only. Graph/output fingerprints depend on actual source
 dependency facts, resolved edges and resolver policy: unrelated JSON/config or
 disconnected Berry lockfile edits do not change no-op product generations.
 
-Stage four deliberately retains eager inventory and its final membership/context
-check; demand-driven inventory removal is stage five. Source extraction policy
+Input admission is demand-driven: literal-entry builds never enumerate the
+project/node_modules tree, hash unrelated JSON/configs or rescan it at return.
+Only actual finite contexts enumerate prefix-compatible directory scopes; their
+matching candidates are checked again before success. Source extraction policy
 and source schema/extractor versions are unchanged.
 
 ### Upstream JavaScript source maps
@@ -607,12 +609,13 @@ the existing build-result JSON (errors remain on stderr).
 No administrator privileges, UAC elevation, global subscriber, or OS profiler
 are needed: these are application spans written to a normal user-owned file.
 
-Inventory spans separate directory enumeration, entry processing, scope
-validation, ancestor collection and package/config probes. Nested directory
-durations overlap: use exclusive time when aggregating them. Resolution-key
+Inventory spans separate checked admission, bounded context enumeration and
+final consulted-input rechecks. Literal builds have no directory-enumeration or
+global config-probe spans. Nested durations overlap: use exclusive time when
+aggregating them. Resolution-key
 fingerprinting, per-request static/context resolution, package-format probing,
 TypeScript/JSX compilation and serial resource preparation are separate spans.
-Inventory sizes and request-kind flags are recorded without paths or specifiers.
+Request-kind flags are recorded without paths or specifiers.
 
 The destination's parent must exist. Files are opened with `create_new`, never
 truncated. Keep traces outside the build root and output tree, or use a
@@ -745,6 +748,9 @@ binary bytes invalidate parent stylesheet URLs, even through CSS import cycles.
 All these input bytes are rechecked before accepting a build.
 These resource identities independently invalidate output reuse, including
 CSS-only edits that leave caller-loaded module mappings unchanged.
+CSS discovery and composition evaluation jobs settle before scoped names,
+closure URLs and wrapper relocations are finalized, so later checked aliases
+cannot leave wrappers pointing at nonexistent artifacts.
 CSS is tokenized on each build; generated JavaScript wrappers reuse the normal
 memory/FlatBuffers cache. There is no CSS concatenation or minification.
 
@@ -1489,7 +1495,8 @@ checks execution, not rendering/readiness.
 ## Package-local resolution storage
 
 The private `resolution_cache` backend supplies production `BuildResolver`
-requests without changing installed-tree resolution or removing inventory.
+requests without changing installed-tree resolution. Checked positive lexical
+routes feed demand admission, not arbitrary external canonical-path authority.
 `Roots::new` supplies runtime package/project anchors. `CheckedResolution::encode`
 accepts complete per-policy request aggregates with original Stage 2 `InputProof`s,
 canonical file targets or explicit externals, and package/dependency/policy hashes.
@@ -1601,35 +1608,47 @@ let artifacts = &result.product.artifacts;
 # Ok::<(), eyre::Report>(())
 ```
 
-The canonical project root seeds a bounded reachable input inventory. File and
-directory symlinks and Windows junctions may reach packages outside that root;
-unlinked external sources are still rejected. Aliases share one canonical module
-identity. Inventory scans each canonical directory once and stores alias edges
-compactly, even through directory diamonds. Relative contexts expand only
-prefix-compatible finite non-cyclic alias paths on demand. Canonical candidates
-on another Windows volume/share are skipped, retaining usable lexical aliases.
-Dangling links and unreadable targets
-are errors, not silently omitted inputs. External entries require an explicit
-safe `output_name`; links never authorize output paths outside owned output.
-External CSS identity paths use the first sorted in-root alias, while in-root
-CSS identities remain canonical/root-relative.
+The canonical project root seeds checked demand admission, not a tree walk.
+Entries, resolved literal files, CSS/Sass closures and local source maps are
+admitted before their bytes are consumed. Membership checks are read-only.
+File/directory symlinks and Windows junctions may reach external inputs through
+checked lexical routes; a file link authorizes only that file, a directory link
+its tree. Canonical paths alone never authorize unlinked external reads. A bare
+package resolved from a linked importer may use its exact checked project
+`node_modules/<name>` installation edge; no ancestor/sibling tree is enumerated.
+Contexts can also use physical projections inside already checked linked trees,
+but never discover arbitrary external trees just because a relative pattern
+points there. Upstream maps load alongside each prepared script, including new
+context candidates; their checked linked scopes join discovery. Settle later
+literal/resource/map admissions and their context jobs to a fixed point before
+comparing graph edges, independently of worker completion
+order. Provide a lexical linked entry rather than an unproven absolute
+external entry.
+
+Aliases share one canonical module identity. Only finite contexts enumerate
+prefix-compatible scopes, caching each canonical directory listing once per
+build and cutting active directory cycles. There is no whole-project fallback
+for literal imports. Context checks compare matching named/canonical candidates,
+so additions/removals are visible without invalidation from nonmatching files.
+Canonical candidates on another Windows volume/share are skipped, retaining
+usable lexical aliases. Dangling links/unreadable targets are errors when
+actually demanded, not when hidden in unused node_modules subtrees.
+External entries require an explicit safe `output_name`; links never authorize
+output paths outside owned output. External CSS identity paths use the first
+sorted checked in-root route; in-root identities stay canonical/root-relative.
 Nearest canonical package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
 supported package forms, including bare-string root exports and wildcard access
 to arbitrary package files. Export maps still enforce private subpaths.
-Inventory still records JSON/JSONC bytes and file names for membership/context
-checks, but no longer authorizes or globally invalidates cached resolution.
 Actual requests retain positive/negative probes for package trees, link retargets,
-priority candidates and deleted targets. Canonical ancestor
-`package.json`/`tsconfig.json` probes (including missing files and linked config
-targets) are tracked without enumerating ancestor directories or unrelated
-sibling trees. Sources and inventory are rechecked before returning success,
-including no-op builds. Consulted request proofs are revalidated before success,
-detecting ancestor `node_modules`
-shadowing without adding unrelated trees to the inventory.
-This inventory hashes config
-bytes but never interprets `tsconfig.json`: JSONC comments/trailing commas,
-`extends` and `references` no longer block unrelated builds. Compiler configs
+priority candidates and deleted targets. Package-format selection seals only
+consulted canonical ancestor `package.json` observations, including misses and
+linked targets. Sass additionally retains its actual local candidate probes.
+Sources, admitted identities/routes, consulted manifests, context matches and
+request proofs are rechecked before success, including no-op builds, without
+global final scans. Unused JSON and compiler configs are never hashed or probed.
+`tsconfig.json`, JSONC comments/trailing commas, `extends` and `references` do not
+block unrelated builds. Compiler configs
 cannot select package branches or create runtime `baseUrl`/`paths` aliases.
 Explicit JSONC resource imports still use the JSONC resource pipeline; removing
 compiler-config ingestion does not loosen strict JSON/package metadata parsing.
@@ -1654,13 +1673,13 @@ Use package exports or relative requests instead of compiler aliases.
 TS/JSX precompilation runs before extraction; existing browser and linked-package
 resolution is unchanged.
 `.git`, `target`, sidecars and
-reserved `.bundler-*` publication directories are excluded. Keep unrelated large
-trees outside the project root; this is measured coarse inventory, not a watcher.
+reserved `.bundler-*` publication directories are excluded.
 Source entries/dependencies inside excluded directories are rejected.
-Exclusions are scoped to the input root and each linked external tree, not their
-unrelated absolute ancestors. After discovering all linked trees, canonical
-destinations are checked against every containing tree root, so aliases cannot
-bypass reserved subdirectories even when the containing tree is discovered later.
+Exclusions are scoped to the input root and each checked linked external tree,
+not their unrelated absolute ancestors. Every newly admitted tree revalidates
+already admitted destinations against its boundary, so a checked outer tree
+cannot reveal a reserved-descendant bypass in either admission order. Unvisited
+links do not participate in authorization, naming or exclusion scopes.
 
 Source bytes and effective parser config key in-memory and disk parse reuse.
 `Fingerprints` independently identifies parse, resolution, effects, entry roots,
@@ -1690,7 +1709,7 @@ later-layer speedup is claimed.
 `build` returns `eyre::Result`; failed parsing/resolution/linking/rechecks never
 return the prior success. The session retains its last successful product for
 later valid builds, not as an error fallback. Cache-write failures are explicit
-`warnings`. Sources and config inventory are rechecked before success, not
+`warnings`. Sources and consulted inputs are rechecked before success, not
 locked against noncooperating editors. A session has one mutable owner and its
 shared products use `Rc` (not cross-thread sharing).
 Each changed successful snapshot has a monotonic session-local

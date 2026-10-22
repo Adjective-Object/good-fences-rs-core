@@ -8,7 +8,7 @@ use std::{
 };
 
 use cssparser::{BasicParseErrorKind, ParseError, Parser, ParserInput, Token};
-use eyre::{ensure, WrapErr};
+use eyre::{WrapErr, ensure};
 use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDependency};
 use sha2::{Digest, Sha256};
 
@@ -172,7 +172,9 @@ impl<'a> Styles<'a> {
                     );
                     let resolved = resolver
                         .resolve_dependency(&path, &request.decoded, ResolutionMode::Import)
-                        .wrap_err_with(context)?;
+                        .wrap_err_with(|| {
+                            format!("{}: missing or outside bounded source inventory", context())
+                        })?;
                     let ResolvedDependency::File(target) = resolved else {
                         eyre::bail!(
                             "{}: composition target must be a local CSS module",
@@ -229,11 +231,10 @@ impl<'a> Styles<'a> {
                     "{}: nonportable CSS URL",
                     path.display()
                 );
-                let target = path
-                    .parent()
-                    .expect("CSS parent")
-                    .join(relative)
-                    .canonicalize()
+                let route = path.parent().expect("CSS parent").join(relative);
+                let target = self
+                    .inventory
+                    .admit(&route)
                     .wrap_err_with(|| format!("{}: CSS URL {:?}", path.display(), url.value))?;
                 ensure!(
                     self.inventory.contains(&target),
@@ -255,11 +256,10 @@ impl<'a> Styles<'a> {
             }
             self.requests.insert(path, requests);
         }
-        self.solve_compositions()?;
         Ok(())
     }
 
-    fn solve_compositions(&mut self) -> eyre::Result<()> {
+    pub(crate) fn finish_discovery(&mut self) -> eyre::Result<()> {
         for root in self.compositions.keys() {
             if self.names.contains_key(root) {
                 continue;
@@ -350,6 +350,10 @@ impl<'a> Styles<'a> {
             .collect()
     }
 
+    pub(crate) fn evaluation_paths(&self, path: &Path) -> impl Iterator<Item = &PathBuf> {
+        self.compositions[path].iter().map(|(_, target)| target)
+    }
+
     pub(crate) fn identity(&self, path: &Path) -> PathBuf {
         self.output_path(path)
     }
@@ -398,19 +402,13 @@ impl<'a> Styles<'a> {
             digest.update(include_str!("sourcemap.rs"));
             digest.update(include_str!("css.rs"));
         }
-        let root = self
-            .inventory
-            .relative(self.root, path)
-            .as_os_str()
-            .as_encoded_bytes();
+        let root_path = self.inventory.relative(self.root, path);
+        let root = root_path.as_os_str().as_encoded_bytes();
         digest.update((root.len() as u64).to_le_bytes());
         digest.update(root);
         for (path, style) in self.closure(path) {
-            let relative = self
-                .inventory
-                .relative(self.root, &path)
-                .as_os_str()
-                .as_encoded_bytes();
+            let relative_path = self.inventory.relative(self.root, &path);
+            let relative = relative_path.as_os_str().as_encoded_bytes();
             let input = &self.inputs[&path];
             digest.update([u8::from(style)]);
             digest.update((relative.len() as u64).to_le_bytes());
@@ -425,11 +423,8 @@ impl<'a> Styles<'a> {
             if style && self.names.contains_key(&path) {
                 digest.update(self.transform_identity);
                 for (request, target) in &self.compositions[&path] {
-                    let target = self
-                        .inventory
-                        .relative(self.root, target)
-                        .as_os_str()
-                        .as_encoded_bytes();
+                    let target_path = self.inventory.relative(self.root, target);
+                    let target = target_path.as_os_str().as_encoded_bytes();
                     digest.update(b"composition\0");
                     digest.update((request.decoded.len() as u64).to_le_bytes());
                     digest.update(request.decoded.as_bytes());
@@ -451,11 +446,8 @@ impl<'a> Styles<'a> {
                             digest.update((source.len() as u64).to_le_bytes());
                             digest.update(source);
                         }
-                        let relative = self
-                            .inventory
-                            .relative(self.root, dependency)
-                            .as_os_str()
-                            .as_encoded_bytes();
+                        let relative_path = self.inventory.relative(self.root, dependency);
+                        let relative = relative_path.as_os_str().as_encoded_bytes();
                         let bytes = &self.sass_inputs[dependency];
                         digest.update((relative.len() as u64).to_le_bytes());
                         digest.update(relative);

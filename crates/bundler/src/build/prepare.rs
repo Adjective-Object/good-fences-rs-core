@@ -33,9 +33,7 @@ pub(super) fn enqueue(
         .into_iter()
         .filter(|path| scheduled.insert(path.clone()))
         .filter(|path| {
-            if crate::resource::kind(path, &options.css)
-                == crate::resource::ResourceKind::Script
-            {
+            if crate::resource::kind(path, &options.css) == crate::resource::ResourceKind::Script {
                 true
             } else {
                 resources.insert(path.clone());
@@ -46,7 +44,6 @@ pub(super) fn enqueue(
 }
 
 pub(super) fn read(
-    root: &Path,
     path: &Path,
     inventory: &Inventory,
     previous: Option<&Source>,
@@ -60,14 +57,12 @@ pub(super) fn read(
         "source outside reachable build inventory (or reserved/excluded): {}",
         path.display()
     );
-    let format =
-        tracing::info_span!("prepare.package_format").in_scope(|| package_format(root, path))?;
+    let format = tracing::info_span!("prepare.package_format")
+        .in_scope(|| inventory.package_format(path))?;
     let input = tracing::info_span!("prepare.read_bytes")
         .in_scope(|| fs::read(path))
         .wrap_err_with(|| format!("source {}", path.display()))?;
-    if crate::resource::kind(path, &options.css)
-        != crate::resource::ResourceKind::Script
-    {
+    if crate::resource::kind(path, &options.css) != crate::resource::ResourceKind::Script {
         return Ok(Prepared::Resource { input, format });
     }
     if crate::transpile::required(path) {
@@ -101,8 +96,8 @@ pub(super) fn read(
         }
         let source = std::str::from_utf8(&input)
             .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;
-        let compiled = tracing::info_span!("prepare.transpile", bytes = input.len())
-            .in_scope(|| {
+        let compiled =
+            tracing::info_span!("prepare.transpile", bytes = input.len()).in_scope(|| {
                 crate::transpile::compile(path, source, format, options.output.source_maps)
             })?;
         let mut loaded = load(
