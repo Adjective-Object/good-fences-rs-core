@@ -1,5 +1,10 @@
 # Source-maps branch against client-web
 
+**Current status:** the module-format and global-style compatibility changes are
+implemented, but the full application still fails during preparation. Release
+hits a UTF-8 comment-slicing panic; debug hits an upstream Oxc pure-comment
+assertion first. Neither source-map setting publishes an application generation.
+
 ## Scope
 
 Local exercise on 2026-10-21:
@@ -12,11 +17,11 @@ Local exercise on 2026-10-21:
   Use the actual source tree, browser resolution, `source`/`fluentIconFont`/`style`
   conditions, four workers and source maps. Disable persistent caches so this
   exercise does not write sidecars into client-web.
-- Client inputs are unchanged, including the pre-existing tracked modification.
+- In this initial exercise, client inputs were unchanged, including the pre-existing tracked modification.
   No proprietary source, source-containing maps, generated output or logs are
   committed or uploaded. Diagnostic copies and full logs remain local.
 
-**The unmodified application does not bundle yet.** There is no successful full
+**Initial result: the unmodified application did not bundle.** There is no successful full
 mail output, browser execution, app startup measurement or full-app source-map
 verification. Successful smaller controls below are not application passes.
 
@@ -54,7 +59,7 @@ $entries = @(
 Repeat with `output.source_maps: false` and a separate output directory to
 distinguish input/format failures from map generation.
 
-## Confirmed blockers
+## Initial confirmed blockers
 
 ### ESM JavaScript in packages without a module type
 
@@ -177,22 +182,118 @@ backend. Importing that output with a recording document stub returns
 `globalStyles` as an object with 17 string mappings and mounts one stylesheet;
 a CSS source map is emitted. The missing-default link failure is fixed.
 This is not real-browser rendering verification, and indiscriminate module
-scoping still changes intended global selectors. The original module-format
-blockers remain; no new full-application pass is claimed.
+scoping still changes intended global selectors. At this follow-up, the original
+module-format blockers remained; no full-application pass was claimed.
 
-## Remaining application coverage
+## Application coverage after the initial exercise
 
-The format blockers prevent exercising the complete dependency graph. Ori's
+The initial format blockers prevented exercising the complete dependency graph. Ori's
 build constants, localization/loader plugins, worker packaging, lazy-module
 configuration, CSS loading/rendering and authenticated app startup have not
 been validated. Their existence is not evidence of additional reproduced
 bundler failures. Do not claim the app will run merely after the two format
 gates are removed.
 
-Before a further app attempt: settle the source/vendor module-format policy,
-configure mixed global/module styles, then rerun all four entries and inspect
-the next actual failures. Avoid transpiling or flattening the dependency tree
-into an approximate application graph and calling that an unmodified app pass.
+The next step was to settle the source/vendor module-format policy, configure
+mixed global/module styles, then rerun all four entries and inspect actual
+failures. Avoid transpiling or flattening the dependency tree into an approximate
+application graph and calling that an unmodified app pass.
+
+## Adoption compatibility follow-up
+
+Bundler compatibility changes are in `8e08615`; the client migration remains in
+its separate checkout:
+
+- `client-web/scripts/setWorkspaceModuleTypes.mjs` adds `"type":"module"` to
+  tracked workspace manifests, preserving explicit types, formatting, root
+  tooling and dependencies. It updated **3211** manifests; its tests and
+  idempotent `--check` pass, as do client-web's ESLint and oxlint under Node 24.
+  The migration is staged separately in client-web. Its existing pre-commit
+  hook rejects the configured Git email, so no client commit was created and
+  neither the hook nor Git identity was changed. Unrelated client changes remain
+  untouched.
+- Static import/export syntax or `import.meta` disambiguates CommonJS-default
+  `.js`/`.jsx`/`.ts`/`.tsx` inputs at parse time; dynamic import alone does not.
+  Explicit `.mjs`/`.mts`/`.mjsx`/`.mtsx` remain ESM and
+  `.cjs`/`.cts`/`.cjsx`/`.ctsx` remain CommonJS. Runtime ESM syntax in explicit
+  CommonJS inputs is an error, not a classification override. Type-only imports
+  in `.cts`/`.ctsx` remain erasable. Schema 18/extractor 25 stores
+  the effective format and detection policy; warm hits reuse borrowed records
+  without repeating syntax detection.
+- `BuildOptions.css.css_modules_exclude` accepts dotted filename suffixes,
+  overriding module scoping without changing stylesheet classification. It
+  applies to entries, CSS import closures and composition targets. The app
+  retry uses:
+
+  ```json
+  {
+    "load": "auto-mount",
+    "css_modules": "ext:.scss",
+    "css_modules_exclude": [".global.css", ".global.scss", ".global.sass"]
+  }
+  ```
+
+The **original**, uncopied `owa-debounce` and `owa-error-codes` packages now
+publish native output with maps enabled and disabled. Debounce retains only the
+last call, and its map sends `clearTimeout` to original line 7, UTF-16 column 8.
+Error-codes produces 28 JavaScript maps and 29 runtime exports. All embedded
+source contents match original files; neither maps-disabled control emits maps.
+No package-format adaptation is needed beyond the requested workspace migration.
+
+The bounded linked global-styles control also passes with `.global.scss`
+excluded: existing global class/ID selectors remain unchanged, literal exported
+class strings still agree, one link mounts with a recording document stub and
+a stylesheet map is emitted. Its default is the existing **global stylesheet
+URL**, not the CSS Modules mapping object. This is not real-browser rendering.
+
+Affected Rust suites pass (721 tests across six crates), along with the required
+spot-check and 15 focused final precompiler tests. Four CSS metadata tests and
+five real-driver native CSS/Sass fixtures pass, including the extended global
+suffix fixture. The full JavaScript harness unit suite is Windows-blocked by
+its existing direct execution of fake `.mjs` drivers (`spawnSync ... EFTYPE`);
+the real `.exe` driver does not have that launch limitation.
+
+### Full-workload debug retries
+
+Both four-entry debug attempts fail before publishing, with the same upstream
+Oxc assertion at `oxc_parser/src/lexer/trivia_builder.rs:62`:
+`assertion failed: comment.is_pure()`. The bundler then reports
+`module preparation worker exited prematurely`. Maps enabled took 422.067 s;
+maps disabled took 367.007 s. These are failed, cache-disabled command wall
+times, not throughput or a controlled comparison with the earlier release runs.
+
+The assertion is a `debug_assert!` in pure-comment retagging. It must not be
+reported as a map-only failure or a proven release-build blocker. The current
+panic diagnostic does not identify its input file. Bounded probes of the four
+entry packages did not reproduce it; ordinary pure-comment controls also pass.
+The triggering transitive input has not been localized.
+
+### Full-workload release retries
+
+The rebuilt release driver gets past the original format diagnostics, but both
+four-entry attempts fail before publication at
+`crates\ast_segmenter\src\raw_module_deps.rs:41`:
+`end byte index 20 is not a char boundary`. Maps enabled took 363.957 s;
+maps disabled took 352.090 s. Both exit 1 through
+`module preparation worker exited prematurely`, with no application generation.
+These failed command wall times are not build-throughput measurements.
+
+The root cause is `SymbolTags::from_comments_parent`: it trims a leading line
+comment and slices its first 20 bytes to compare the ASCII
+`@ALLOW-UNUSED-EXPORT` marker. A multibyte character crossing that offset panics
+even when the comment has nothing to do with unused-export annotations.
+
+A source-free reproduction is an `entry.mjs` whose first line is `// ` followed
+by seven U+2500 characters, then `export const value = 1;` on the next line.
+Both debug and release drivers reproduce the UTF-8 panic on this input. This
+does not involve an ambiguous extension, package-format adaptation, proprietary
+source, source maps or the upstream pure-comment assertion.
+
+These two preparation panics are the next confirmed adoption blockers.
+The Unicode prefix check needs UTF-8-safe matching; the Oxc assertion needs
+separate diagnosis. No full-graph link, published app maps, browser rendering,
+authenticated startup or app-runtime pass is claimed. The successful bounded
+controls above do not establish those outcomes.
 
 ## Local evidence
 
@@ -216,3 +317,23 @@ Artifacts are under the local Copilot session's `files` directory:
 - `verify-css-defaults.mjs`, `css-default-verification.json`,
   `global-styles-default-map.stdout`/`.stderr`: default-map follow-up, five
   passing native CSS/Sass fixtures and copied global-styles runtime observations.
+- `verify-original-workspaces.mjs`,
+  `original-workspace-adoption-verification.json`: original workspace builds,
+  runtime checks and exact source-map observations after the metadata migration.
+- `verify-css-exclusions.mjs`, `css-exclusion-verification.json`: five native
+  fixtures and the linked global-styles suffix-exclusion control.
+- `adoption-rust-tests-2.log`, `adoption-final-checks.log`,
+  `adoption-transpile-final.log`: affected Rust suites, corrected explicit-CJS
+  diagnostic regression, required spot-check and rebuilt debug example.
+- `client-module-lint-node24.log`, `client-module-oxlint.log`: client lint
+  outcomes; root tooling remains unchanged despite Node's typeless-root warning.
+- `exercise-client-adoption.mjs`, `client-adoption-results.json`: original
+  four-entry debug retries with maps enabled/disabled and no published output.
+- `adoption-debug-isolated-results.json`, `pure-comment-controls.json`: bounded
+  entry probes and synthetic controls; neither localizes the full-graph panic.
+- `adoption-release-build.log`, `client-adoption-release-results.json`: rebuilt
+  release driver and the original maps-enabled/disabled four-entry failures.
+  `exercise-client-adoption.mjs release` reproduces this profile with separate
+  output directories and disabled persistent caches.
+- `unicode-comment-control.json`: source-free UTF-8 prefix-slicing reproduction
+  in both profiles; temporary input/output directories were cleaned up.
