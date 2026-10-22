@@ -399,6 +399,16 @@ without weakening junction handling or invalidation. These are proposed
 optimizations; this change adds observability and does not implement them.
 The observed delay is already explained before source-map emission or linking.
 
+The existing `afix` library at `crates/common/iowalk` is a candidate for the
+bounded read pipeline: it has pooled buffers, pre-read interception and native
+Windows IoRing with a synchronous fallback. Its current public discovery API
+returns tagged files, not the canonical directory/junction/alias graph required
+by bundler inventory, so it is not a drop-in replacement. Parsing its supplied
+package bytes would avoid reopening manifests through the unbuffered reader.
+It currently inherits afix workspace helpers and Linux libxev/Zig dependencies;
+choosing a pinned afix dependency versus extraction/vendor packaging remains
+open. No afix files or cross-repository dependencies were changed.
+
 Use the captured `symbolized.json.gz` with the matching local PDB directory
 when loading samply. The original automatic symbol sidecar contained fallback
 `fun_*` names; supplying `--symbol-dir` resolves actual Rust names and lines.
