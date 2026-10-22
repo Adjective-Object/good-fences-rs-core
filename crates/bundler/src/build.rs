@@ -187,11 +187,20 @@ pub struct BuildResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Clone)]
 struct Source {
     css_identity: Option<PathBuf>,
     input: Vec<u8>,
     text: String,
     record: CacheRecord,
+    transpiled: Option<Transpiled>,
+}
+
+#[derive(Clone)]
+struct Transpiled {
+    config: ParserConfig,
+    source_map: Option<cache_flatbuffers::WireSourceMap>,
+    source_map_hint: Option<oxc_span::Span>,
 }
 
 /// One caller owns a session (`&mut self`); independent sessions share sidecars
@@ -455,6 +464,12 @@ impl BuildSession {
                     self.resolutions.remove(&path);
                     loaded_sources.insert(path.clone(), source);
                 }
+                if let Some(transpiled) = loaded.transpiled {
+                    let source = loaded_sources.entry(path.clone()).or_insert_with(|| {
+                        previous.get(&path).expect("reused prepared source").clone()
+                    });
+                    source.transpiled = Some(transpiled);
+                }
                 let source = loaded_sources
                     .get(&path)
                     .or_else(|| previous.get(&path))
@@ -535,7 +550,9 @@ impl BuildSession {
                         discovered.extend(candidates.values().cloned());
                     }
                 }
-                let graph_input = if kind == crate::resource::ResourceKind::Script {
+                let graph_input = if kind == crate::resource::ResourceKind::Script
+                    && source.transpiled.is_none()
+                {
                     OwnedSourceFileInput::from_parsed
                 } else {
                     OwnedSourceFileInput::from_prepared_resource
@@ -611,11 +628,22 @@ impl BuildSession {
                     == crate::resource::ResourceKind::Script
             }) {
                 let source = &self.sources[path];
+                let (text, hint) = if let Some(transpiled) = &source.transpiled {
+                    (
+                        std::str::from_utf8(&source.input)?,
+                        transpiled.source_map_hint,
+                    )
+                } else {
+                    (
+                        source.text.as_str(),
+                        source.record.module().facts().emission().source_map(),
+                    )
+                };
                 let (upstream, warning) = crate::upstream::load(
                     &inventory,
                     path,
-                    &source.text,
-                    source.record.module().facts().emission().source_map(),
+                    text,
+                    hint,
                     options.cache,
                     self.upstreams.get(path),
                 )?;
@@ -715,6 +743,7 @@ impl BuildSession {
                 include_str!("emit.rs"),
                 include_str!("sourcemap.rs"),
                 include_str!("upstream.rs"),
+                include_str!("transpile.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
                 include_str!("chunks.rs"),
@@ -729,7 +758,7 @@ impl BuildSession {
         );
         fingerprints.output = Fingerprint::of(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
@@ -743,6 +772,15 @@ impl BuildSession {
                     .iter()
                     .map(|(path, upstream)| (path, hash(upstream.map().bytes())))
                     .collect::<Vec<_>>(),
+                options.output.source_maps.then(|| self
+                    .sources
+                    .iter()
+                    .filter_map(|(path, source)| source
+                        .transpiled
+                        .as_ref()
+                        .and_then(|transpiled| transpiled.source_map.as_ref())
+                        .map(|map| (path, hash(map.bytes()))))
+                    .collect::<Vec<_>>()),
             )
             .as_bytes(),
         );
@@ -802,12 +840,21 @@ impl BuildSession {
                         == crate::resource::ResourceKind::Script
             })
             .map(|(path, text)| {
-                crate::sourcemap::Source::with_upstream(
+                let compiler_map = self.sources[path]
+                    .transpiled
+                    .as_ref()
+                    .and_then(|transpiled| transpiled.source_map.clone());
+                crate::sourcemap::Source::with_maps(
                     path,
                     text,
-                    self.upstreams
-                        .get(path)
-                        .map(|upstream| upstream.map().clone()),
+                    compiler_map
+                        .into_iter()
+                        .chain(
+                            self.upstreams
+                                .get(path)
+                                .map(|upstream| upstream.map().clone()),
+                        )
+                        .collect(),
                 )
                 .map(|source| (path.clone(), source))
             })

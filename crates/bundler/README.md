@@ -11,7 +11,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 16/extractor 23); parse fingerprints include both active
+`.seg.fb` records (schema 17/extractor 24); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -21,7 +21,8 @@ but never loaded as current facts or deleted by the migration.
 JavaScript and stylesheet maps (see Sass inputs below), with JavaScript
 composition using each script's last parser-identified `sourceMappingURL` comment.
 Inline JSON data URLs (base64 or percent-encoded) and linked local maps are
-supported; linked files must resolve inside the canonical build root. Remote
+supported; linked files must belong to the checked canonical inventory, including
+explicit linked trees. Remote
 links, missing files, malformed maps and unsupported encodings are errors, not
 fallbacks. No original source or network URL is fetched. Disabled maps discover
 directive spans during extraction but do not load or validate map contents.
@@ -38,8 +39,34 @@ Parsed upstream metadata uses a separately checksummed, typed FlatBuffer at
 verified cache hits read borrowed tables without parsing JSON or unpacking
 records. Linked map bytes are rechecked on every build and before no-op returns.
 Maps-only edits invalidate output and reverse users, not JavaScript extraction.
-Enabling/disabling maps is likewise an output-only change. These sidecars do not
-change the separate production AST cache's CBOR lifecycle.
+Enabling/disabling maps is likewise an output-only change. These sidecars are
+separate from the production AST cache's typed FlatBuffer records.
+
+### TypeScript and JSX inputs
+
+`BuildSession` precompiles `.ts`, `.mts`, `.cts`, `.tsx` and `.jsx` inputs with the
+pinned Oxc transformer/code generator before extraction and dependency resolution.
+Type-only dependencies disappear before resolution; runtime TypeScript constructs
+and JSX become JavaScript. Declaration files are not executable inputs.
+The generated parser mode preserves the input's module format, including
+CommonJS `.cts` inputs. Default entry names use JavaScript `.mjs`/`.cjs` extensions.
+As with JavaScript, ambiguous extensions follow the package module format.
+The pinned transformer does not convert ESM imports/exports to CommonJS; use
+`.mts` or `"type":"module"` for ESM, and CommonJS syntax for CommonJS inputs.
+
+JSX uses the automatic production runtime with the default `react` import source;
+its injected runtime requests resolve through the ordinary checked package graph.
+No runtime package is bundled implicitly, no tsconfig is discovered, and no type
+checking or compatibility-target downleveling is performed.
+
+With `output.source_maps: true`, Oxc compiler maps travel alongside the prepared
+JavaScript and compose through any source map referenced by the original input.
+Output maps retain original TypeScript/JSX URLs, contents and UTF-16 coordinates,
+not generated JavaScript coordinates. Disabled maps skip compiler-map generation.
+Warm builds reuse prepared JavaScript; enabling maps may rerun compilation but
+does not reextract unchanged generated JavaScript. Type-only edits still refresh
+map contents/positions even when generated JavaScript is unchanged.
+Low-level emission APIs continue to accept only already-prepared JavaScript.
 
 The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
@@ -1305,7 +1332,7 @@ This is a small fixture driver, not a general BuildOptions configuration API.
 No configuration is discovered implicitly; entry selection remains positional.
 `target` accepts `"node"` or `"browser"` and selects the corresponding resolver
 conditions and host contracts before adding `resolveConditions`. The driver
-consumes already-transpiled JavaScript; it does not compile TypeScript or JSX.
+uses the same TypeScript/JSX precompilation pipeline as `BuildSession`.
 Sass stylesheets compile through the native resource pipeline.
 `css_modules` accepts `false`, `true` (`.module.css`/`.module.scss`/`.module.sass`), `"everything"` (known CSS/Sass
 inputs only) or `"ext:.custom.suffix"`; `load` accepts `"caller-loaded"` or
@@ -1455,7 +1482,7 @@ Node itself does not read this custom field: the fixture harness translates it
 to explicit `--conditions=source` arguments for source/output observations.
 Other Node launchers must supply equivalent flags themselves.
 Use package exports or relative requests instead of compiler aliases.
-TS/JSX precompilation remains external; existing browser and linked-package
+TS/JSX precompilation runs before extraction; existing browser and linked-package
 resolution is unchanged.
 `.git`, `target`, sidecars and
 reserved `.bundler-*` publication directories are excluded. Keep unrelated large
@@ -1655,7 +1682,7 @@ No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
 
 **Limits:** Linux was executed; Windows atomic replacement/OS locks rely on
 standard-library/tempfile contracts but were not runtime-tested. No
-standalone single-file output, TS/JSX lowering, assets/native addons, executable
+standalone single-file output, assets/native addons, executable
 externals or import.meta. Optional JavaScript source maps are described above.
 The exact root sets are the existing
 conservative retention contract, not a whole-program minimality claim. CJS bridge
@@ -1804,14 +1831,15 @@ Unedited comments, directives and hashbangs remain byte-for-byte unchanged.
 At OXC revision `87f065ebf7cde21d1229322f4c7ee58baca5648e`,
 `Codegen::build(&Program)` prints a whole arena-owned AST and its options document
 only partial leading-comment preservation. Source edits fit our owned occurrence
-spans without reconstructing/rebinding an AST. We therefore use edits, not the
-printer/transformer. Low-level `emit::single_module`, `link::esm` and `BuildSession`
+spans without reconstructing/rebinding an AST. After optional TypeScript/JSX
+precompilation, linking therefore uses edits, not the printer/transformer.
+Low-level `emit::single_module`, `link::esm` and `BuildSession`
 share source/configuration/facts provenance verification without reparsing.
 Structured fragments preserve original occurrence identities through pruning and
 destination selection. Debug builds parse/semantically check final output once;
 release builds rely on always-on provenance, edit, identifier and target checks.
-Output is JavaScript ESM/CJS only: no TypeScript or JSX
-lowering. The emitter must reject those language modes. Optional BuildSession
+Output is JavaScript ESM/CJS only. The emitter rejects raw TypeScript/JSX;
+`BuildSession` lowers those inputs before extraction. Optional BuildSession
 source maps preserve copied-source/renamed-identifier origins through assembly
 and compose upstream mappings after final artifact destination selection.
 Cached segment recipes remove stale in-segment `sourceMappingURL`/`sourceURL` directives; emission
@@ -1932,7 +1960,7 @@ Node exits 13 for unsettled TLA; the runtime adds no timers or cycle breaker.
 | Synchronous require of sync ESM | Native namespace and evaluating-cycle errors |
 | Require of async ESM (including static transitive dependencies) | Source diagnostic before emission |
 | CJS top-level await / for-await | Parse diagnostic; opaque bodies stay synchronous |
-| Unconstrained/bare nonliteral imports/requires, options/attributes, assets, import.meta, TS/JSX lowering | Explicit unsupported gate; no silent omission |
+| Unconstrained/bare nonliteral imports/requires, options/attributes, assets, import.meta | Explicit unsupported gate; no silent omission |
 
 The unified public-build Node runner compares all 37 portable cases (52 entry executions)
 against native baselines **and** fixture stdout contracts. Independent tests cover

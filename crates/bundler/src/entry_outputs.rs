@@ -39,6 +39,7 @@ pub(super) fn apply(
         if entry.output_name.is_none()
             && (crate::resource::kind(&entry.path, &options.css.css_modules)
                 != crate::resource::ResourceKind::Script
+                || crate::transpile::required(&entry.path)
                 || (!commonjs && requested.extension().is_some_and(|ext| ext == "cjs")))
         {
             requested.set_extension(if commonjs { "cjs" } else { "mjs" });

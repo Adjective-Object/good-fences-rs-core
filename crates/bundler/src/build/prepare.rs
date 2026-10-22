@@ -20,6 +20,7 @@ pub(super) struct Loaded {
     pub parsed: ast_segmenter::ParsedModule,
     pub status: Option<CacheStatus>,
     pub warning: Option<String>,
+    pub transpiled: Option<Transpiled>,
 }
 
 pub(super) fn enqueue(
@@ -68,6 +69,55 @@ pub(super) fn read(
     {
         return Ok(Prepared::Resource { input, format });
     }
+    if crate::transpile::required(path) {
+        let config = ParserConfig::for_path(path, format)?;
+        if let Some(previous) = previous.filter(|previous| {
+            previous.input == input
+                && previous.transpiled.as_ref().is_some_and(|transpiled| {
+                    transpiled.config == config
+                        && (!options.output.source_maps || transpiled.source_map.is_some())
+                })
+        }) {
+            let parser_path = path.with_extension(if previous.record.config().commonjs() {
+                "cjs"
+            } else {
+                "mjs"
+            });
+            let mut loaded = load(
+                path,
+                input,
+                previous.text.clone(),
+                &parser_path,
+                format,
+                Some(previous),
+                options.cache,
+                declarations,
+            )?;
+            if loaded.source.is_some() {
+                loaded.transpiled = previous.transpiled.clone();
+            }
+            return Ok(Prepared::Script(loaded));
+        }
+        let source = std::str::from_utf8(&input)
+            .wrap_err_with(|| format!("{}: source is not UTF-8", path.display()))?;
+        let compiled = crate::transpile::compile(path, source, format, options.output.source_maps)?;
+        let mut loaded = load(
+            path,
+            input,
+            compiled.source,
+            &compiled.parser_path,
+            format,
+            previous,
+            options.cache,
+            declarations,
+        )?;
+        loaded.transpiled = Some(Transpiled {
+            config,
+            source_map: compiled.source_map,
+            source_map_hint: compiled.source_map_hint,
+        });
+        return Ok(Prepared::Script(loaded));
+    }
     let wrapper_format = match options.resolver.target_env {
         TargetEnv::Browser => ModuleFormat::Esm,
         TargetEnv::Node => ModuleFormat::CommonJs,
@@ -111,6 +161,7 @@ pub(super) fn load(
             parsed: source.record.to_parsed(&source.text)?,
             status: None,
             warning: None,
+            transpiled: None,
         });
     }
     let loaded = segment_cache::load_prepared_with_declarations(
@@ -137,8 +188,10 @@ pub(super) fn load(
             input,
             text: loaded.source,
             record: loaded.record,
+            transpiled: None,
         }),
         status: Some(loaded.status),
         warning,
+        transpiled: None,
     })
 }

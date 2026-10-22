@@ -11,6 +11,12 @@ Local map targets must belong to the checked canonical inventory, including
 explicit linked trees; never read arbitrary external map files.
 Keep immutable AST/Ecco owners alive through graph and worker reads; never
 unpack cached facts for linking, validation, execution constraints or recipes.
+Precompile TS/TSX/JSX with pinned Oxc before extraction/resolution. Preserve
+original file identity and checked generated-JS provenance; low-level emission
+still rejects raw typed/JSX modes. Automatic JSX runtime requests use normal
+resolution, never implicit packages or tsconfig discovery. Carry optional compiler
+maps beside prepared source, then compose original-input upstream maps. Include
+compiler-map identity in output keys even when generated JS is unchanged.
 Solve cached Ecco precursors on the complete checked graph, using canonical export
 identities; never cache solved effects. Share a solve across async partition rounds.
 Declaration structs key source metadata, memory reuse and parse fingerprints.
@@ -216,7 +222,7 @@ Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
 artifacts once after naming; release never parses output. Keep identifier,
 provenance, target and edit checks always on; strip hints through cached operations.
 Never apply overlapping recipe edits independently. Keep native ESM
-live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering.
+live bindings/TDZ; no snapshot alias exports. Lower TS/JSX only before extraction.
 Instantiate cached operation parents/source slots with original binding/request
 IDs; replacing parents own nested rewrites, never reconnect generated text.
 Materialize complete recipe MultiSpans, not just segment ownership ranges.

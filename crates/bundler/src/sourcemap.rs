@@ -10,7 +10,7 @@ pub(crate) struct Source {
     url: String,
     text: Arc<str>,
     checkpoints: Vec<(usize, Position)>,
-    upstream: Option<WireSourceMap>,
+    upstream: Vec<WireSourceMap>,
 }
 
 impl Source {
@@ -23,6 +23,14 @@ impl Source {
         path: &Path,
         text: &str,
         upstream: Option<WireSourceMap>,
+    ) -> eyre::Result<Arc<Self>> {
+        Self::with_maps(path, text, upstream.into_iter().collect())
+    }
+
+    pub(crate) fn with_maps(
+        path: &Path,
+        text: &str,
+        upstream: Vec<WireSourceMap>,
     ) -> eyre::Result<Arc<Self>> {
         let url = url::Url::from_file_path(path).map_err(|()| {
             eyre::eyre!(
@@ -127,34 +135,37 @@ impl Writer {
                 let newline = matches!(ch, '\r' | '\n' | '\u{2028}' | '\u{2029}');
                 if !newline && (exact || needs_mapping) {
                     let mapped = origin.and_then(|(source, _, _, name)| {
-                        if let Some(upstream) = &source.upstream {
-                            let token = upstream.lookup(original.line, original.column)?;
+                        let mut mapped = (
+                            source.url.as_str(),
+                            Some(source.text.as_ref()),
+                            original.line,
+                            original.column,
+                            name,
+                        );
+                        for upstream in &source.upstream {
+                            if mapped.0 != source.url {
+                                break;
+                            }
+                            let token = upstream.lookup(mapped.2, mapped.3)?;
                             if token.source() < 0 {
                                 return None;
                             }
                             let root = upstream.root();
                             let input = root.sources().get(token.source() as usize);
                             let name = if token.name() < 0 {
-                                name
+                                mapped.4
                             } else {
                                 Some(root.names().get(token.name() as usize))
                             };
-                            Some((
+                            mapped = (
                                 input.url(),
                                 input.content(),
                                 token.original_line(),
                                 token.original_column(),
                                 name,
-                            ))
-                        } else {
-                            Some((
-                                source.url.as_str(),
-                                Some(source.text.as_ref()),
-                                original.line,
-                                original.column,
-                                name,
-                            ))
+                            );
                         }
+                        Some(mapped)
                     });
                     let source_id = mapped.map(|(url, content, _, _, _)| {
                         let stored = self.contents.entry(url.to_owned()).or_default();

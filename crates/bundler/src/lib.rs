@@ -27,6 +27,7 @@ pub mod rewrite;
 mod sass;
 mod sourcemap;
 mod symbols;
+mod transpile;
 mod upstream;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};

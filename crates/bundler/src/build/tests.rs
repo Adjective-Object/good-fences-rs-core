@@ -7,6 +7,7 @@ mod source_maps;
 
 mod browser;
 mod sass;
+mod transpile;
 
 #[cfg(any(unix, windows))]
 mod linked_inventory;
