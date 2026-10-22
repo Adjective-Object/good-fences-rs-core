@@ -1,5 +1,17 @@
 # bundler
 
+Lockfile identities are expected installs, never Node resolution authority.
+The stage-one test-gated adapter pins registry aube-lockfile 2.8.1, uses upstream
+project lockfile selection without eager workspace manifest filling, and retains
+Berry raw locators/workspace blocks that upstream normalization merges or drops.
+Npm/shrinkwrap and Classic Yarn records are always incomplete: normalization
+drops declarations and npm install-path instances. Hash their entire raw lockfile
+(and Classic root manifest) into identities until lossless overlays exist.
+Peer constraints resolve only through explicit selected dependency providers.
+Hash named edges over the SCC condensation DAG; never cut cycle back-edges.
+Mutable closures and unresolved edges require later request-scoped validation;
+lockfile identity alone cannot authorize persistent resolution reuse.
+
 Consume owned-or-wire syntax views and checked shared graph edges, never UsedTag.
 Upstream maps are output-only inputs: extraction seals the last real directive
 span; enabled planning loads bounded inline/local maps into verified typed

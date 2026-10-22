@@ -1448,6 +1448,66 @@ to additionally execute the emitted graph over local HTTP in a real headless
 browser, without downloading a browser or using host CommonJS globals. This
 checks execution, not rendering/readiness.
 
+## Lockfile identity groundwork
+
+The internal `lockfile` adapter is currently **test-gated groundwork**, not a
+public API or a change to `BuildSession` resolution, inventory or persistent
+caching. It reads the explicitly chosen canonical project root using upstream
+lockfile precedence/selection, returning no graph when no selected lockfile
+exists. Format readers avoid upstream's eager local-package manifest filling.
+Classic Yarn reads only the root manifest for its direct dependencies; other
+workspace/package manifests are left for later on-demand validation.
+
+The dependency is the exact published MIT `aube-lockfile = "=2.8.1"`, with no
+sibling paths, vendoring or moving Git reference. The upstream release reference
+is `a022c6790282f51c1dc84e0309192db480b6df43`; the published crate's
+`.cargo_vcs_info.json` records source commit
+`963d9b8202ced528d5eb3f72254b896ecf9d10f9`. These are distinct provenance facts,
+not an assertion that the registry archive was built at the release reference.
+Its Rust 1.91/edition-2024 minimum fits this crate's newer toolchain. Its settings
+dependency uses TOML 1 and requires modern Serde: the obsolete SWC-era
+`serde <1.0.219` workspace cap was replaced by `serde >=1.0.225, <2`
+(SWC is no longer in the workspace dependency graph).
+
+Fingerprints preserve package/source/integrity/peer/patch identities, dependency
+names and edge roles. SCC condensation hashing propagates any cycle-member edit
+to all affected ancestors without invalidating disconnected packages for
+lossless adapters.
+Berry additionally retains raw resolved locators, checksums, workspace importer
+blocks and named descriptors: upstream's installation-oriented normalization
+otherwise merges same-version patches, skips workspace/builtin-patch blocks and
+drops unmatched dependencies. Unmatched edges remain represented and mark their
+closures incomplete; local/workspace/patch inputs mark closures mutable.
+Npm (including shrinkwrap) and Classic Yarn normalization is lossy: unresolved
+required/importer declarations are dropped, Classic optional dependencies are
+ignored, and npm installations with the same name/version collapse across install
+paths, losing context and possibly integrity. **Every package and importer from
+these adapters is marked incomplete**, even an apparent leaf. Each identity
+includes the entire raw lockfile hash and, for Classic, the root manifest hash,
+so edits to dropped declarations or discarded instances remain visible. This
+deliberately sacrifices unrelated-package isolation for those formats; it is not
+a lossless install-path overlay or installed-tree validation.
+Peer declarations without an explicit selected dependency/optional provider
+remain incomplete constraints, not
+guessed same-name package edges; Yarn's installed virtual peer context is not
+invented from its non-virtual lockfile locators. Catalog/transparent-workspace
+requests without exact locked descriptors likewise remain explicit incomplete
+edges rather than being inferred from all workspace manifests.
+Neither flag authorizes reuse without later filesystem/manifest validation.
+Lockfile entries describe expected installations, not actual Node lookup results.
+
+Focused checks:
+
+```text
+cargo check -p bundler --lib
+cargo test -p bundler --lib lockfile::tests
+```
+
+The ignored `lockfile::tests::actual_project_lockfile` probe accepts
+`BUNDLER_LOCKFILE_PROJECT` and reads a local Yarn Berry lockfile without writing
+project files or embedding its contents in fixtures. Run it with
+`cargo test -p bundler --lib lockfile::tests::actual_project_lockfile -- --ignored --nocapture`.
+
 ## Public build session
 
 `build::{BuildSession, BuildOptions, Entry}` joins the existing source cache,
