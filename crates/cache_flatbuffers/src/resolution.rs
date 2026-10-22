@@ -207,6 +207,105 @@ pub struct WireResolution {
 }
 
 impl WireResolution {
+    /// Rebuild an aggregate directly from verified borrowed tables. No owned
+    /// proof tree is reconstructed when preserving requests from an older file.
+    pub fn aggregate(key: Key, requests: &[wire::Request<'_>]) -> Result<Self> {
+        use flatbuffers::{FlatBufferBuilder, WIPOffset};
+        fn locator<'a>(
+            builder: &mut FlatBufferBuilder<'a>,
+            value: wire::Locator<'_>,
+        ) -> WIPOffset<wire::Locator<'a>> {
+            let path = builder.create_string(value.path());
+            wire::Locator::create(
+                builder,
+                &wire::LocatorArgs {
+                    anchor: value.anchor(),
+                    parents: value.parents(),
+                    path: Some(path),
+                },
+            )
+        }
+        let mut builder = FlatBufferBuilder::new();
+        let mut entries = Vec::new();
+        for request in requests {
+            let mut inputs = Vec::new();
+            for input in request.inputs() {
+                let path = locator(&mut builder, input.path());
+                let canonical = input.canonical().map(|p| locator(&mut builder, p));
+                let mut links = Vec::new();
+                for link in input.links() {
+                    let path = locator(&mut builder, link.path());
+                    let target = locator(&mut builder, link.target());
+                    let relative = link.relative().map(|s| builder.create_string(s));
+                    links.push(wire::Link::create(
+                        &mut builder,
+                        &wire::LinkArgs {
+                            path: Some(path),
+                            target: Some(target),
+                            relative,
+                        },
+                    ));
+                }
+                let links = builder.create_vector(&links);
+                inputs.push(wire::Input::create(
+                    &mut builder,
+                    &wire::InputArgs {
+                        path: Some(path),
+                        kind: input.kind(),
+                        canonical,
+                        identity: input.identity(),
+                        content: input.content(),
+                        links: Some(links),
+                    },
+                ));
+            }
+            let inputs = builder.create_vector(&inputs);
+            let file = request.target().file().map(|p| locator(&mut builder, p));
+            let external = request
+                .target()
+                .external()
+                .map(|s| builder.create_string(s));
+            let target = wire::Target::create(
+                &mut builder,
+                &wire::TargetArgs {
+                    kind: request.target().kind(),
+                    file,
+                    external,
+                },
+            );
+            let importer = builder.create_string(request.importer());
+            let specifier = builder.create_string(request.specifier());
+            entries.push(wire::Request::create(
+                &mut builder,
+                &wire::RequestArgs {
+                    mode: request.mode(),
+                    importer: Some(importer),
+                    specifier: Some(specifier),
+                    target: Some(target),
+                    inputs: Some(inputs),
+                },
+            ));
+        }
+        let requests = builder.create_vector(&entries);
+        let policy = wire::Digest::new(&key.policy);
+        let instance = wire::Digest::new(&key.instance);
+        let dependencies = wire::Digest::new(&key.dependencies);
+        let root = wire::Resolution::create(
+            &mut builder,
+            &wire::ResolutionArgs {
+                schema: SCHEMA_VERSION,
+                policy: Some(&policy),
+                instance: Some(&instance),
+                dependencies: Some(&dependencies),
+                requests: Some(requests),
+            },
+        );
+        builder.finish_size_prefixed(root, Some("GFRS"));
+        let mut bytes = builder.finished_data().to_vec();
+        bytes.extend_from_slice(&Sha256::digest(builder.finished_data()));
+        Self::new(bytes.into(), key)
+    }
+
     /// Construction-only object API. Warm readers never unpack.
     pub fn encode(data: &wire::ResolutionT, key: Key) -> Result<Self> {
         let mut builder = flatbuffers::FlatBufferBuilder::new();

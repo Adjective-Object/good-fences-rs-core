@@ -145,7 +145,11 @@ pub struct Counters {
     pub declaration_fingerprints: usize,
     pub memory_hits: usize,
     pub disk_hits: usize,
+    /// Actual scoped StructuralResolver calls, excluding proven request hits.
     pub resolutions: usize,
+    /// Literal/context/resource requests authorized by scoped original proofs.
+    pub resolution_cache_hits: usize,
+    pub resolution_cache_misses: usize,
     pub emissions: usize,
     /// Source re-extraction outside cache misses; emission must leave this zero.
     pub source_reparses: usize,
@@ -212,7 +216,7 @@ pub struct BuildSession {
     sources: BTreeMap<PathBuf, Source>,
     upstreams: BTreeMap<PathBuf, crate::upstream::Upstream>,
     resolutions: BTreeMap<PathBuf, HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>>,
-    resolution_key: Option<Fingerprint>,
+    resolution_memory: resolver::Memory,
     declarations: Option<(
         ecco::DeclarationConfig,
         ecco::Environment,
@@ -236,7 +240,7 @@ impl BuildSession {
             sources: BTreeMap::new(),
             upstreams: BTreeMap::new(),
             resolutions: BTreeMap::new(),
-            resolution_key: None,
+            resolution_memory: resolver::Memory::default(),
             declarations: None,
             pending_invalidated: BTreeSet::new(),
             last: None,
@@ -299,32 +303,17 @@ impl BuildSession {
             &options.resolver,
             options.output.source_maps,
         );
-        let mut aliases: Vec<_> = options.resolver.alias.iter().collect();
-        aliases.sort();
         let resolution_fingerprint_span =
             tracing::info_span!("build.resolution_fingerprint").entered();
-        let resolution_key = Fingerprint::of(
-            format!(
-                "resolution-v1:{inventory:?}:{:?}:{aliases:?}:{:?}:{:?}:{:?}:{}:{:?}",
-                options.resolver.target_env,
-                options.resolver.extensions,
-                options.resolver.export_conditions,
-                options.externals,
-                options.resolver.ignore_node_modules,
-                options.resolver.preserve_symlinks
-            )
-            .as_bytes(),
-        );
+        let resolution_key = resolver::BuildResolver::policy(options);
         drop(resolution_fingerprint_span);
-        let resolution_changed = self.resolution_key != Some(resolution_key);
-        if resolution_changed {
-            self.resolutions.clear();
-            self.pending_invalidated
-                .extend(self.sources.keys().cloned());
-            self.resolution_key = Some(resolution_key);
-        }
-        let external_sources = inventory.has_external_sources(&self.root);
-        let resolver = resolver::BuildResolver::new(&self.root, options, external_sources);
+        let lockfile = resolver::Lockfile::read(&self.root, &mut warnings)?;
+        let resolver = resolver::BuildResolver::new(
+            &self.root,
+            options,
+            lockfile.clone(),
+            self.resolution_memory.clone(),
+        );
         let mut sass_options = options.clone();
         sass_options.resolver = resolver::BuildResolver::options(options);
         sass_options.resolver.extensions = vec!["scss".into(), "sass".into(), "css".into()];
@@ -332,8 +321,12 @@ impl BuildSession {
             .resolver
             .export_conditions
             .extend(["sass".into(), "style".into()]);
-        let sass_resolver =
-            resolver::BuildResolver::new(&self.root, &sass_options, external_sources);
+        let sass_resolver = resolver::BuildResolver::new(
+            &self.root,
+            &sass_options,
+            lockfile,
+            self.resolution_memory.clone(),
+        );
         let mut queue = VecDeque::new();
         let mut entries = BTreeMap::new();
         for (name, entry) in &options.entries {
@@ -471,7 +464,6 @@ impl BuildSession {
                 if let Some(mut source) = loaded.source {
                     changed.insert(path.clone());
                     source.css_identity = css_identity.clone();
-                    self.resolutions.remove(&path);
                     loaded_sources.insert(path.clone(), source);
                 }
                 if let Some(transpiled) = loaded.transpiled {
@@ -485,17 +477,12 @@ impl BuildSession {
                     .or_else(|| previous.get(&path))
                     .expect("loaded source");
                 let resolution_span = tracing::info_span!("build.resolve").entered();
-                let resolved = if let Some(cached) =
-                    self.resolutions.get(&path).filter(|_| !external_sources)
-                {
-                    cached.clone()
-                } else {
+                let resolved = {
                     let mut resolved = HashMap::new();
                     for dependency in source.record.module().facts().dependencies() {
                         if dependency.type_only() {
                             continue;
                         }
-                        counters.resolutions += 1;
                         let _dependency_span = tracing::info_span!(
                             "resolve.dependency",
                             context = dependency.pattern().is_some(),
@@ -630,9 +617,6 @@ impl BuildSession {
                     .expect("loaded source")
                     .css_identity = Some(styles.identity(path));
             }
-        }
-        if resolution_changed {
-            changed.extend(self.sources.keys().cloned());
         }
         self.pending_invalidated.extend(changed);
         if let Some((_, error)) = errors.into_iter().next() {
@@ -805,12 +789,19 @@ impl BuildSession {
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
                 Self::recheck(&self.root, &self.sources, &inventory)?;
-                resolver.recheck(&self.root, options)?;
-                sass_resolver.recheck(&self.root, &sass_options)?;
+                resolver.recheck()?;
+                sass_resolver.recheck()?;
                 styles.recheck()?;
                 for upstream in self.upstreams.values() {
                     upstream.recheck()?;
                 }
+                resolver.finish(&mut counters, &mut warnings);
+                sass_resolver.finish(&mut counters, &mut warnings);
+                resolver.recheck()?;
+                sass_resolver.recheck()?;
+                self.resolution_memory
+                    .retain_used(&resolver, &sass_resolver);
+                warnings.sort();
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
                 warnings.extend(last.plan.retention.warnings.iter().cloned());
@@ -906,12 +897,19 @@ impl BuildSession {
         let artifacts = artifacts.render_to_with_maps(&destinations, options.output.source_maps)?;
         drop(finalize_span);
         Self::recheck(&self.root, &self.sources, &inventory)?;
-        resolver.recheck(&self.root, options)?;
+        resolver.recheck()?;
         styles.recheck()?;
-        sass_resolver.recheck(&self.root, &sass_options)?;
+        sass_resolver.recheck()?;
         for upstream in self.upstreams.values() {
             upstream.recheck()?;
         }
+        resolver.finish(&mut counters, &mut warnings);
+        sass_resolver.finish(&mut counters, &mut warnings);
+        resolver.recheck()?;
+        sass_resolver.recheck()?;
+        self.resolution_memory
+            .retain_used(&resolver, &sass_resolver);
+        warnings.sort();
         counters.emissions = 1;
         counters.record_parses(before_parses);
         let generation = match &self.last {

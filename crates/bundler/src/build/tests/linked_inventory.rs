@@ -36,6 +36,40 @@ fn linked_options() -> BuildOptions {
 }
 
 #[test]
+fn persistent_resolution_requests_with_external_links_keep_fresh_scoped_fallbacks() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("package");
+    write(&root, "main.mjs", "export {value} from 'pkg';");
+    write(
+        &package,
+        "package.json",
+        r#"{"name":"pkg","exports":"./index.mjs"}"#,
+    );
+    write(&package, "index.mjs", "export {value} from './value.mjs';");
+    write(&package, "value.mjs", "export const value = 1;");
+    directory_link(&package, &root.join("node_modules/pkg"));
+    let config = linked_options();
+    let first = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    let warm = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    assert_eq!(warm.product.artifacts, first.product.artifacts);
+    assert!(warm.counters.resolutions < first.counters.resolutions);
+    assert!(warm
+        .warnings
+        .iter()
+        .any(|w| w.contains("uncacheable external path")));
+    write(&package, "other.mjs", "export const value = 2;");
+    write(
+        &package,
+        "package.json",
+        r#"{"name":"pkg","exports":"./other.mjs"}"#,
+    );
+    let changed = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    assert_ne!(changed.product.artifacts, warm.product.artifacts);
+    remove_directory_link(&root.join("node_modules/pkg"));
+}
+
+#[test]
 fn source_maps_in_checked_external_packages_reuse_borrowed_sidecars() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
@@ -270,10 +304,11 @@ fn retarget_source_metadata_and_membership_edits_invalidate() {
     assert_eq!(observe(&metadata.product.artifacts), b"3\n");
     write(dir.root(), "two/new.mjs", "");
     let added = fresh_parity(&mut session, &config);
-    assert_ne!(
+    assert_eq!(
         metadata.product.fingerprints.resolution,
         added.product.fingerprints.resolution
     );
+    assert!(Rc::ptr_eq(&metadata.product, &added.product));
     fs::remove_file(dir.root().join("two/new.mjs")).unwrap();
     let removed = fresh_parity(&mut session, &config);
     assert_eq!(
@@ -323,10 +358,11 @@ fn external_ancestor_configs_are_tracked_but_conditions_remain_explicit() {
         r#"{"compilerOptions":{"customConditions":["source"]}}"#,
     );
     let compiler_only = fresh_parity(&mut session, &config);
-    assert_ne!(
+    assert_eq!(
         default.product.fingerprints.resolution,
         compiler_only.product.fingerprints.resolution
     );
+    assert!(Rc::ptr_eq(&default.product, &compiler_only.product));
     assert!(session
         .sources
         .contains_key(&package.join("node_modules/dep/default.mjs")));
@@ -371,7 +407,12 @@ fn unenumerated_ancestor_package_shadowing_never_reuses_stale_success() {
     let config = linked_options();
     let mut session = BuildSession::new(&root).unwrap();
     let first = fresh_parity(&mut session, &config);
-    let checked = resolver::BuildResolver::new(&root, &config, true);
+    let checked = resolver::BuildResolver::new(
+        &root,
+        &config,
+        resolver::Lockfile::read(&root, &mut Vec::new()).unwrap(),
+        resolver::Memory::default(),
+    );
     checked
         .resolve_dependency(&package.join("index.mjs"), "dep", ResolutionMode::Import)
         .unwrap();
@@ -381,7 +422,7 @@ fn unenumerated_ancestor_package_shadowing_never_reuses_stale_success() {
     write(&shadow, "index.mjs", "export default 2;");
     // No broad sibling-tree inventory was introduced just to detect this probe.
     assert_eq!(before, inventory(&root).unwrap());
-    assert!(checked.recheck(&root, &config).is_err());
+    assert!(checked.recheck().is_err());
     let error = format!("{:#}", session.build(&config).err().unwrap());
     assert!(
         error.contains("outside reachable build inventory"),
@@ -460,7 +501,12 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     // Nineteen fixed edges and only the final diamond are expanded.
     assert_eq!(visits, 22);
     let config = linked_options();
-    let resolver = resolver::BuildResolver::new(root, &config, true);
+    let resolver = resolver::BuildResolver::new(
+        root,
+        &config,
+        resolver::Lockfile::read(root, &mut Vec::new()).unwrap(),
+        resolver::Memory::default(),
+    );
     let resolved = crate::context::resolve(
         root,
         &importer,
@@ -655,10 +701,11 @@ fn file_symlinks_share_identity_and_track_config_targets() {
     );
     assert!(BuildSession::recheck(&root, &session.sources, &before).is_err());
     let second = fresh_parity(&mut session, &linked_options());
-    assert_ne!(
+    assert_eq!(
         first.product.fingerprints.resolution,
         second.product.fingerprints.resolution
     );
+    assert!(Rc::ptr_eq(&first.product, &second.product));
     write(dir.root(), "other-config.json", r#"{"compilerOptions":{}}"#);
     fs::remove_file(root.join("tsconfig.json")).unwrap();
     link(
@@ -666,10 +713,11 @@ fn file_symlinks_share_identity_and_track_config_targets() {
         &root.join("tsconfig.json"),
     );
     let retargeted = fresh_parity(&mut session, &linked_options());
-    assert_ne!(
+    assert_eq!(
         second.product.fingerprints.resolution,
         retargeted.product.fingerprints.resolution
     );
+    assert!(Rc::ptr_eq(&second.product, &retargeted.product));
     fs::remove_file(root.join("value.mjs")).unwrap();
     let error = format!("{:#}", inventory(&root).err().unwrap());
     assert!(error.contains("alias.mjs"), "{error}");

@@ -6,6 +6,7 @@ use std::{
 
 use aube_lockfile::{LocalSource, LockedPackage, LockfileGraph, LockfileKind};
 use eyre::{ensure, Context, OptionExt};
+use ftree_cache::inputs::PathInput;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -26,6 +27,7 @@ pub(crate) struct ProjectLockfile {
     pub(crate) kind: LockfileKind,
     packages: BTreeMap<String, PackageFingerprint>,
     importers: BTreeMap<String, PackageFingerprint>,
+    inputs: Vec<PathInput>,
 }
 
 impl ProjectLockfile {
@@ -39,6 +41,10 @@ impl ProjectLockfile {
         let project = project.canonicalize()?;
         let (_, path) = aube_lockfile::active_lockfile_path_selecting(&project, selected);
         let Some(path) = path else { return Ok(None) };
+        let mut input = PathInput::capture(&path)?;
+        let raw = std::fs::read(&path)?;
+        input.seal_content(&raw);
+        let mut inputs = vec![input];
         let kind = aube_lockfile::detect_existing_lockfile_kind_selecting(&project, selected)
             .ok_or_eyre("selected lockfile has no recognized format")?;
         let mut manifest_bytes = None;
@@ -50,6 +56,9 @@ impl ProjectLockfile {
                 // Classic Yarn needs only the root manifest to identify direct deps.
                 let manifest = if kind == LockfileKind::Yarn {
                     let bytes = std::fs::read(project.join("package.json"))?;
+                    let mut input = PathInput::capture(&project.join("package.json"))?;
+                    input.seal_content(&bytes);
+                    inputs.push(input);
                     let manifest = serde_json::from_slice(&bytes)?;
                     manifest_bytes = Some(bytes);
                     manifest
@@ -63,7 +72,7 @@ impl ProjectLockfile {
             // aube 2.8.1 intentionally skips workspace/builtin-patch blocks and
             // merges same-version locators. Retain these identities and edges
             // from the already validated Berry document, not installed manifests.
-            berry_nodes(&std::fs::read_to_string(&path)?)?
+            berry_nodes(std::str::from_utf8(&raw)?)?
         } else {
             normalized_nodes(&graph)?
         };
@@ -75,7 +84,7 @@ impl ProjectLockfile {
             // and merges npm install paths. Until a lossless overlay exists,
             // no normalized record from these adapters is eligible as complete.
             // Retain even discarded declarations/instances in a coarse identity.
-            let raw: Hash = Sha256::digest(std::fs::read(&path)?).into();
+            let raw: Hash = Sha256::digest(&raw).into();
             let manifest: Option<Hash> = manifest_bytes.map(|bytes| Sha256::digest(bytes).into());
             for node in nodes.values_mut() {
                 node.identity = json!(["lossy-adapter-v1", node.identity, raw, manifest]);
@@ -95,12 +104,50 @@ impl ProjectLockfile {
                 }
             }
         }
+        // Format parsers may reopen the file. Seal the bytes surrounding that
+        // parse, rather than attributing a later read to the parsed graph.
+        for input in &inputs {
+            input.validate()?;
+        }
         Ok(Some(Self {
             path: path.canonicalize()?,
             kind,
             packages,
             importers,
+            inputs,
         }))
+    }
+
+    pub(crate) fn recheck(&self) -> eyre::Result<()> {
+        for input in &self.inputs {
+            input.validate()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn physical_package(
+        &self,
+        project: &Path,
+        package: &Path,
+        manifest: &Value,
+    ) -> Option<&PackageFingerprint> {
+        if let Ok(relative) = package.strip_prefix(project) {
+            let relative = relative
+                .components()
+                .map(|p| p.as_os_str().to_str())
+                .collect::<Option<Vec<_>>>()?
+                .join("/");
+            if let Some(record) = self.importer(if relative.is_empty() { "." } else { &relative }) {
+                return Some(record);
+            }
+        }
+        // Only explicit installed locators can select peer/patch instances.
+        // Name/version similarity is not evidence of a selected peer provider.
+        manifest
+            .get("_locator")
+            .or_else(|| manifest.get("_resolution"))
+            .and_then(Value::as_str)
+            .and_then(|locator| self.package(locator))
     }
 
     pub(crate) fn package(&self, locator: &str) -> Option<&PackageFingerprint> {

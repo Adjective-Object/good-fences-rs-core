@@ -1,14 +1,16 @@
 # bundler
 
-Resolution-cache stage-three storage is private/test-gated until integration.
-Use independent verified `GFRS` bytes and fresh scoped proof validation before
-checked owners; never unpack on hits. Package-local `.bundler-resolution-v1-*`
-files aggregate one complete policy's requests, with best-effort atomic sibling
-publication and explicit cache diagnostics. Other policies have distinct files.
-Unencodable external footprints skip persistence, never weaken their proofs.
+Production resolution uses per-package `GFRS` requests, never the derived source
+edge map or whole-inventory hashes as reuse authority. Key effective resolver/
+platform policy separately from package identity, own manifest bytes and named
+locked child hashes. Revalidate original fresh or borrowed disk proofs before
+hits and successful/no-op returns. Preserve other valid requests in complete
+atomic policy aggregates; never unpack hit trees. Unencodable external footprints
+stay fresh/scoped and diagnosed. Disabled caches do not read/write sidecars.
+Final input checks precede best-effort resolution-cache publication.
 
 Lockfile identities are expected installs, never Node resolution authority.
-The stage-one test-gated adapter pins registry aube-lockfile 2.8.1, uses upstream
+The production adapter pins registry aube-lockfile 2.8.1, uses upstream
 project lockfile selection without eager workspace manifest filling, and retains
 Berry raw locators/workspace blocks that upstream normalization merges or drops.
 Npm/shrinkwrap and Classic Yarn records are always incomplete: normalization
@@ -17,7 +19,11 @@ drops declarations and npm install-path instances. Hash their entire raw lockfil
 Peer constraints resolve only through explicit selected dependency providers.
 Hash named edges over the SCC condensation DAG; never cut cycle back-edges.
 Mutable closures and unresolved edges require later request-scoped validation;
-lockfile identity alone cannot authorize persistent resolution reuse.
+lockfile identity alone cannot authorize persistent resolution reuse. Parse once
+per build, share across script/Sass policies, and recheck selected path and bytes
+surrounding the parse. Map canonical workspace roots and explicit installed
+locators; absent Berry install locators use mutable manifest/physical-instance
+identity and complete actual-request proofs, never guessed peer providers.
 
 Consume owned-or-wire syntax views and checked shared graph edges, never UsedTag.
 Upstream maps are output-only inputs: extraction seals the last real directive
@@ -98,8 +104,10 @@ absolute ancestors; validate canonical destinations against all discovered roots
 after traversal so cross-tree aliases cannot bypass exclusions in either order.
 Track canonical targets, membership, JSON bytes and existing/missing ancestor
 package/tsconfig probes for invalidation and success rechecks.
-External inventories refresh resolution each build and replay actual requests
-before success; this detects ancestor node_modules shadowing without broad scans.
+Every build resolves its actual dependency facts through scoped request proofs;
+negative ancestry probes detect node_modules shadowing without broad scans.
+The stage-four eager inventory and final inventory comparison still exist for
+membership/contexts; removing those walks belongs only to stage five.
 Contexts expand prefix-compatible finite non-cyclic alias paths on demand,
 including physical ancestor projections; omit cross-volume relative candidates
 without losing same-volume lexical aliases.

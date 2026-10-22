@@ -4,6 +4,8 @@
   Package/dependency/policy identities and typed scoped proofs do not change
   source schema/extractor versions. Consumers freshly validate filesystem proofs
   before checked reuse; generated object APIs remain construction-only.
+  Aggregate updates copy verified borrowed request tables directly into a new
+  builder, preserving untouched requests without unpacking input/proof trees.
 
 - This is the production `.seg.fb` backend (schema 18/extractor 25).
   `segment_cache` adds source-local semantic validation before exposing records.

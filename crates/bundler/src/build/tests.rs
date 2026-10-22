@@ -6,6 +6,7 @@ use test_tmpdir::TmpDir;
 mod source_maps;
 
 mod browser;
+mod resolution_cache;
 mod sass;
 mod transpile;
 
@@ -6859,7 +6860,8 @@ fn tsconfig_is_inventory_only_and_cannot_change_export_conditions() {
         let rebuilt = parity(&mut session, &options);
         assert_eq!(rebuilt.product.artifacts, valid.product.artifacts, "{json}");
         assert_eq!(rebuilt.counters.source_parses, 0);
-        assert!(rebuilt.counters.resolutions > 0);
+        assert_eq!(rebuilt.counters.resolutions, 0);
+        assert!(Rc::ptr_eq(&rebuilt.product, &valid.product));
         assert_eq!(session.build(&options).unwrap().counters.resolutions, 0);
     }
 

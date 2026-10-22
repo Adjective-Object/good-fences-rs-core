@@ -12,10 +12,6 @@ pub(crate) struct Inventory {
 }
 
 impl Inventory {
-    pub(crate) fn has_external_sources(&self, root: &Path) -> bool {
-        self.files.keys().any(|path| !path.starts_with(root))
-    }
-
     pub(crate) fn contains(&self, path: &Path) -> bool {
         self.files.contains_key(path)
     }

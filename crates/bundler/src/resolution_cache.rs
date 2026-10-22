@@ -1,4 +1,4 @@
-//! Stage-three storage backend; intentionally not connected to BuildResolver yet.
+//! Package-local storage and borrowed request validation for production resolution.
 use std::{
     fs::File,
     io::{Read, Write},
@@ -371,25 +371,62 @@ impl CheckedResolution {
     fn validate(wire: &WireResolution, roots: &Roots) -> Result<()> {
         roots.validate()?;
         for request in wire.root().requests() {
-            let importer = roots.package.join(from_portable(request.importer()));
-            ensure!(importer.is_file(), "resolution importer no longer exists");
-            for input in request.inputs() {
-                validate_input(roots, input)?;
-            }
-            if let Some(target) = request.target().file() {
-                let target = roots.decode(target)?;
-                ensure!(
-                    request.inputs().iter().any(|input| {
-                        input.kind() == wire::Kind::File
-                            && input
-                                .canonical()
-                                .is_some_and(|p| roots.decode(p).is_ok_and(|p| p == target))
-                    }),
-                    "resolution file target lacks a positive canonical proof"
+            Self::validate_request(roots, request)?;
+        }
+        Ok(())
+    }
+
+    fn validate_request(roots: &Roots, request: wire::Request<'_>) -> Result<()> {
+        let importer = roots.package.join(from_portable(request.importer()));
+        ensure!(importer.is_file(), "resolution importer no longer exists");
+        for input in request.inputs() {
+            validate_input(roots, input)?;
+        }
+        if let Some(target) = request.target().file() {
+            let target = roots.decode(target)?;
+            ensure!(
+                request.inputs().iter().any(|input| {
+                    input.kind() == wire::Kind::File
+                        && input
+                            .canonical()
+                            .is_some_and(|p| roots.decode(p).is_ok_and(|p| p == target))
+                }),
+                "resolution file target lacks a positive canonical proof"
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn revalidate_request(
+        &self,
+        mode: wire::Mode,
+        importer: &str,
+        specifier: &str,
+    ) -> Result<()> {
+        self.roots.validate()?;
+        Self::validate_request(
+            &self.roots,
+            self.find(mode, importer, specifier)
+                .ok_or_eyre("missing resolution request")?,
+        )
+    }
+
+    pub(crate) fn aggregate(roots: Roots, key: Key, records: &[Self]) -> Result<Self> {
+        let mut requests = std::collections::BTreeMap::new();
+        for record in records {
+            ensure!(roots == record.roots, "resolution merge roots mismatch");
+            WireResolution::new(record.wire.bytes().into(), key)?;
+            for request in record.requests() {
+                requests.insert(
+                    (request.mode().0, request.importer(), request.specifier()),
+                    request,
                 );
             }
         }
-        Ok(())
+        Self::check(
+            WireResolution::aggregate(key, &requests.into_values().collect::<Vec<_>>())?,
+            roots,
+        )
     }
 
     pub(crate) fn revalidate(&self) -> Result<()> {
@@ -462,7 +499,17 @@ impl Store {
             .join(format!(".bundler-resolution-v{SCHEMA_VERSION}-{policy}.fb"))
     }
 
+    #[cfg(test)]
     pub(crate) fn load(&self) -> Load {
+        self.load_inner(false)
+    }
+
+    /// A stale request must not evict independent, still-proven requests.
+    pub(crate) fn load_scoped(&self) -> Load {
+        self.load_inner(true)
+    }
+
+    fn load_inner(&self, scoped: bool) -> Load {
         let miss = |reason| Load {
             record: None,
             status: CacheStatus::Miss(reason),
@@ -484,9 +531,26 @@ impl Store {
         {
             return miss(MissReason::ReadFailure(error.to_string()));
         }
-        match WireResolution::new(bytes.into(), self.key)
-            .and_then(|wire| CheckedResolution::check(wire, self.roots.clone()))
-        {
+        match WireResolution::new(bytes.into(), self.key).and_then(|wire| {
+            if !scoped {
+                return CheckedResolution::check(wire, self.roots.clone());
+            }
+            self.roots.validate()?;
+            let requests: Vec<_> = wire
+                .root()
+                .requests()
+                .iter()
+                .filter(|r| CheckedResolution::validate_request(&self.roots, *r).is_ok())
+                .collect();
+            if requests.len() == wire.root().requests().len() {
+                return Ok(CheckedResolution {
+                    wire,
+                    roots: self.roots.clone(),
+                });
+            }
+            let wire = WireResolution::aggregate(self.key, &requests)?;
+            CheckedResolution::check(wire, self.roots.clone())
+        }) {
             Ok(record) => Load {
                 record: Some(record),
                 status: CacheStatus::Hit,

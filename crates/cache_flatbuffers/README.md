@@ -5,6 +5,9 @@
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
 facts. Encoders and generated object APIs are construction-only.
+Independent resolution aggregates can be rebuilt directly from verified borrowed
+request tables; preserving existing requests never reconstructs an owned proof
+tree. The bundler revalidates filesystem semantics before reuse/publication.
 
 ## Schema coverage
 

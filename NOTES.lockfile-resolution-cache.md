@@ -95,9 +95,10 @@ Never modify the dirty perf-optim worktree, afix, or the client-web migration.
 
 Stage 1 and the three concrete review corrections were independently approved,
 spot-checked and committed as `6aeec15`. Stage 2 was independently reviewed,
-spot-checked and committed as `cf3bc83`. Stage 3 is implemented below;
-stages 4–6 remain pending. The adapter remains test-gated and
-does not change live resolution.
+spot-checked and committed as `cf3bc83`. Stage 3 is completed as `6463c3e`.
+Stage 4 production integration is implemented in the current uncommitted diff;
+independent review and coordinator spot-check remain pending. Stages 5–6 remain
+pending; eager inventory removal is deliberately not part of stage 4.
 
 - Preserve Berry raw locators/workspaces and deterministic SCC/named-edge hashes.
 - Mark every npm/shrinkwrap and Classic Yarn record incomplete because normalized
@@ -163,8 +164,8 @@ Validation (from the explicit source-maps worktree; TEMP/TMP set to the ignored
 
 ### Stage 3 — independent package-local FlatBuffer storage
 
-Implemented on the clean `source-maps` checkout at `cf3bc83`; independent review
-and coordinator spot-check/commit remain pending. No resolver integration,
+Completed and committed as `6463c3e` after implementation on the clean
+`source-maps` checkout at `cf3bc83`. That stage included no resolver integration,
 inventory removal or production source schema/extractor change is included.
 
 - Authoritative `flatbuffers/resolution.fbs` defines independently versioned
@@ -236,3 +237,84 @@ Stage 3 validation (Windows; managed test directories under ignored
 - Changed handwritten Rust formatted; `git diff --check` passed.
 - Full spot-check, independent review and commits belong to the coordinator.
   The pre-existing ftree_cache lifetime-syntax warning remains.
+
+### Stage 4 — production request-cache integration
+
+Implemented only in the explicit clean `source-maps` worktree at `6463c3e`;
+no commits or delegation by the implementer. Independent review and coordinator
+spot-check/commit remain pending. Stage 5 inventory removal and stage 6 adoption/
+performance work are deliberately untouched.
+
+- Production `BuildResolver` now serves actual script/context/CSS/Sass requests
+  through package-local stores and within-build request/package memoization.
+  Session memo entries retain shared original fresh proofs or borrowed checked
+  disk owners and are pruned to requests used by a successful build. The derived
+  `BuildSession.resolutions` map remains for actual edges/reverse invalidations,
+  never as reuse authority. No whole-inventory Debug formatting/hash or global
+  source-resolution clear on unrelated JSON/config changes remains.
+- Effective target/extensions/conditions/aliases/externals/symlink/lookup policy,
+  platform and a once-hashed resolver implementation form the small policy key.
+  Canonical on-demand package ancestry supplies physical-instance identity and
+  exact own mutable manifest bytes. Mapped workspace/explicit installed locators
+  add named lockfile child fingerprints. No peer provider or installed locator
+  is guessed: Berry installs without locators, incomplete graphs and missing
+  lockfiles remain cacheable through conservative manifest identity plus the
+  complete original actual-request proof. Unreadable/unparseable lockfiles are
+  diagnosed and likewise fall back without changing installed-tree resolution.
+- One `ProjectLockfile` parse is shared by ordinary/Sass policies per build.
+  Original selected lockfile and Classic manifest bytes surround parser reads
+  and are sealed/rechecked, including fallback/no-op paths and final return.
+  npm/Classic retain stage one's documented coarse raw hashes.
+- Disk reads keep verified immutable owners and validate original borrowed
+  observations directly, never unpack `InputProof` or request trees. Stale
+  requests are filtered without evicting independent valid requests. Cold
+  aggregate publication copies borrowed tables directly and preserves other
+  compatible requests; encoding failures skip only the unportable request.
+  Aggregate construction is linear in retained requests, not repeated merging
+  of a growing tree. Unchanged valid aggregates are not rewritten on no-op.
+- All consulted package and request proofs are checked before successful/no-op
+  return, including after best-effort cache flush. Final source/inventory/resource
+  checks precede flush. Disabled cache performs no sidecar reads/writes;
+  read-only/corrupt/unwritable and unencodable external footprints preserve
+  resolution with explicit diagnostics. Extraction policy/schema are unchanged.
+- Output/graph reuse keys now depend on actual source dependency facts, actual
+  resolved edges and resolver policy, not arbitrary inventory JSON. Updated
+  linked-inventory and tsconfig regressions require identical no-op generations
+  for unused member/config edits, while retaining their existing mid-build
+  inventory mutation checks. Eager initial/final inventory walks still exist
+  for membership/contexts; there is no demand-driven inventory claim.
+- `Counters.resolutions` counts actual scoped structural resolver calls;
+  `resolution_cache_hits`/`resolution_cache_misses` expose proven request reuse.
+  Twelve new enabled public-build regressions cover separate sessions/processes,
+  complete/incomplete/absent graph mappings, installed locators, dependency/
+  mutable manifest/policy edits, nearer-priority shadows, request base and mode,
+  unrelated JSON/disconnected Berry nodes, aggregate preservation, external
+  links/fallbacks, unreadable lockfiles, corrupt/read-only/disabled/unwritable
+  caches and final proof/lockfile mutation failures. A subprocess helper is intentionally ignored
+  except when explicitly invoked by its parent regression.
+
+Stage 4 validation (Windows, managed tests under ignored `target\test-temp`):
+
+- Final `cargo test -p bundler -p cache_flatbuffers --lib --quiet`:
+  **bundler 577 passed, 2 ignored; cache_flatbuffers 20 passed**. This includes
+  all linked-inventory, context, CSS/Sass, source-map and extraction regressions.
+  The two ignores are the existing actual-project parser probe and the new
+  subprocess helper (which the enabled separate-process regression does run).
+- `cargo check -p bundler --all-targets`: **passed**.
+- `cargo clippy -p cache_flatbuffers --all-targets -- -D warnings`: **passed**.
+  Strict bundler all-target clippy remains blocked by pre-existing findings
+  (prepare/execution type complexity, large enum variants, argument counts and
+  existing needless borrows); no findings were reported in the new resolver,
+  lockfile/storage integration or wire aggregate code. Its log is
+  `target\stage4-clippy.log`; the existing ftree_cache lifetime warning remains.
+- New handwritten Rust formatted with the pinned formatter; unrelated existing
+  formatting left alone. `git diff --check` passed.
+- System Node 22.8 lacks required native require/condition behavior. A local
+  Node 24.13 probe hit Windows extended-path `EISDIR` failures. Final full tests
+  passed with project-local Node **22.15.0** prepended to PATH:
+  `target\npm-cache\_npx\165bf73430067a31\node_modules\node\bin`.
+  TEMP/TMP were explicitly set to `target\test-temp`. No dependency manifests
+  changed for these validation tools. Final suite/check logs are
+  `target\stage4-lib-tests-final.log` and `target\stage4-check.log`.
+- Full spot-check and independent review belong to the coordinator; neither was
+  run/launched here, and no commit was made.

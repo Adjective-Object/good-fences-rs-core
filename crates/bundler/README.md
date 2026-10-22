@@ -15,6 +15,44 @@ trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
+### Package-local resolution caches
+
+Production `BuildSession` resolves actual literal/context/resource requests through
+independent `.bundler-resolution-v1-<policy-sha256>.fb` package sidecars. The policy
+key covers effective resolver options, externals, platform and implementation,
+not inventory contents. Package keys include physical instance, original mutable
+manifest bytes and mapped lockfile named dependency fingerprints. Importer paths,
+request spelling and import/require mode remain separate request identities.
+
+The pinned `aube-lockfile` 2.8.1 graph is parsed once per build and shared by script
+and Sass policies; selection and source bytes are checked around parsing and at
+return. Canonical workspace paths and explicit installed locators map to graph
+records. Berry installations without locators, incomplete graphs, missing or
+unreadable/unparseable lockfiles remain correct through conservative
+manifest/physical identities and full actual-request proofs. No peer provider is inferred and the
+lockfile never changes installed-tree resolution. Npm/shrinkwrap and Classic
+retain stage one's documented coarse raw-lockfile hashes.
+
+Disk hits validate borrowed original positive/negative probes directly, without
+unpacking proof trees. Fresh resolutions retain their original proofs too.
+Both paths are rechecked before success, including no-op returns. A nearer file,
+changed package export or link target cannot authorize stale reuse. Unportable
+external footprints fall back to fresh scoped resolution with a diagnostic.
+Cache corruption/read/write failures are nonfatal and explicit; read-only mode
+does not publish and disabled mode does not read/write these files.
+
+Writes preserve other still-valid requests in one complete atomic policy
+aggregate, after final build checks. `Counters.resolutions` measures actual scoped
+resolver calls; `resolution_cache_hits`/`resolution_cache_misses` expose request
+reuse separately from extraction hits. The session's source-resolution map is
+derived graph-edge state only. Graph/output fingerprints depend on actual source
+dependency facts, resolved edges and resolver policy: unrelated JSON/config or
+disconnected Berry lockfile edits do not change no-op product generations.
+
+Stage four deliberately retains eager inventory and its final membership/context
+check; demand-driven inventory removal is stage five. Source extraction policy
+and source schema/extractor versions are unchanged.
+
 ### Upstream JavaScript source maps
 
 `BuildOptions.output.source_maps` defaults to `false`. Enabling it emits external
@@ -1448,21 +1486,23 @@ to additionally execute the emitted graph over local HTTP in a real headless
 browser, without downloading a browser or using host CommonJS globals. This
 checks execution, not rendering/readiness.
 
-## Package-local resolution storage groundwork (stage 3)
+## Package-local resolution storage
 
-The private, currently test-gated `resolution_cache` backend is ready for later
-resolver integration; it does not remove inventory or change live resolution.
+The private `resolution_cache` backend supplies production `BuildResolver`
+requests without changing installed-tree resolution or removing inventory.
 `Roots::new` supplies runtime package/project anchors. `CheckedResolution::encode`
 accepts complete per-policy request aggregates with original Stage 2 `InputProof`s,
 canonical file targets or explicit externals, and package/dependency/policy hashes.
-`Store::load` checks independent typed FlatBuffer schema 1, then freshly validates
+`Store::load_scoped` checks independent typed FlatBuffer schema 1, then freshly validates
 borrowed proofs before constructing a checked immutable owner. `find` borrows
-requests; `file_target` reconstructs an anchored path; `revalidate` must run again
-before authorizing build success. No JSON parsing or object-tree unpacking occurs.
+requests; stale requests are discarded without evicting other valid requests.
+`file_target` reconstructs an anchored path; consulted requests are revalidated
+before build success. No JSON parsing or object-tree unpacking occurs on hits.
 
 Package roots contain `.bundler-resolution-v1-<policy-sha256>.fb`; policies do
 not overwrite one another. Saving replaces that policy's **complete aggregate**,
-not a single-entry merge; callers must preserve other requests when updating it.
+not a single-entry overwrite. The resolver aggregates new requests with other
+verified compatible requests directly through borrowed wire tables.
 `segment_cache::CacheMode` controls reads/writes. Existing `CacheStatus`,
 `MissReason` and `CacheWrite` types report disabled/missing/invalid/read failures
 and best-effort publication failures explicitly. Sibling tempfile write/flush/
@@ -1478,21 +1518,21 @@ revalidated, including anchor-root retargeting. The working-directory anchor
 preserves Stage 2's actual cwd-relative bare-name candidate probes. Arbitrary
 external/cross-volume footprints, unsafe/non-UTF8 names,
 absolute filesystem request spellings or unproven inputs cannot be persisted;
-stage 4 must conservatively resolve them normally. Reinstallation identity
-changes miss even when bytes match. Lockfile losslessness/eligibility and policy
-key construction remain stage 4 responsibilities, not authority conferred here.
+the resolver conservatively resolves them normally. Reinstallation identity
+changes miss even when bytes match. Lockfile fingerprints and policy keys
+supplement original actual-request proofs; they never replace filesystem checks.
 
 Focused validation: `cargo test -p bundler resolution_cache --lib`.
 
-## Lockfile identity groundwork
+## Lockfile identities
 
-The internal `lockfile` adapter is currently **test-gated groundwork**, not a
-public API or a change to `BuildSession` resolution, inventory or persistent
-caching. It reads the explicitly chosen canonical project root using upstream
+The internal `lockfile` adapter supplies production cache identities, not a
+public API or authority over `BuildSession` resolution results.
+It reads the explicitly chosen canonical project root using upstream
 lockfile precedence/selection, returning no graph when no selected lockfile
 exists. Format readers avoid upstream's eager local-package manifest filling.
 Classic Yarn reads only the root manifest for its direct dependencies; other
-workspace/package manifests are left for later on-demand validation.
+workspace/package manifests are read and sealed on demand by `BuildResolver`.
 
 The dependency is the exact published MIT `aube-lockfile = "=2.8.1"`, with no
 sibling paths, vendoring or moving Git reference. The upstream release reference
@@ -1529,7 +1569,7 @@ guessed same-name package edges; Yarn's installed virtual peer context is not
 invented from its non-virtual lockfile locators. Catalog/transparent-workspace
 requests without exact locked descriptors likewise remain explicit incomplete
 edges rather than being inferred from all workspace manifests.
-Neither flag authorizes reuse without later filesystem/manifest validation.
+Neither flag authorizes reuse without fresh filesystem/manifest validation.
 Lockfile entries describe expected installations, not actual Node lookup results.
 
 Focused checks:
@@ -1577,14 +1617,15 @@ Nearest canonical package metadata determines `.js`
 format; explicit extensions override it. Resolution uses the existing resolver's
 supported package forms, including bare-string root exports and wildcard access
 to arbitrary package files. Export maps still enforce private subpaths.
-JSON/JSONC bytes and all file names
-in the reachable inventory conservatively invalidate resolution, including linked
-package trees, link retargets, new files and deleted targets. Canonical ancestor
+Inventory still records JSON/JSONC bytes and file names for membership/context
+checks, but no longer authorizes or globally invalidates cached resolution.
+Actual requests retain positive/negative probes for package trees, link retargets,
+priority candidates and deleted targets. Canonical ancestor
 `package.json`/`tsconfig.json` probes (including missing files and linked config
 targets) are tracked without enumerating ancestor directories or unrelated
 sibling trees. Sources and inventory are rechecked before returning success,
-including no-op builds. Builds with external inputs refresh resolution and replay
-actual resolver requests before success, detecting ancestor `node_modules`
+including no-op builds. Consulted request proofs are revalidated before success,
+detecting ancestor `node_modules`
 shadowing without adding unrelated trees to the inventory.
 This inventory hashes config
 bytes but never interprets `tsconfig.json`: JSONC comments/trailing commas,
@@ -1635,12 +1676,14 @@ The session reports actual extraction misses, memory/disk hits, dependency
 resolution calls, linker calls and generated-output/recipe parse calls separately.
 It passes hash-checked existing owned cache facts/ranges into the same linker,
 not a competing IR/pipeline; unchanged sources are **not re-extracted** for
-emission. Policy-only changes perform **zero source parsing/resolution**.
+emission. Effect-policy-only changes perform **zero source parsing/resolution**;
+resolver-policy changes retain extraction facts but miss incompatible requests.
 Generated output is still parsed/semantically validated after transforms.
 No-op builds reuse the successful product and perform zero JavaScript parsing,
 dependency resolution or emission. Changed/deleted modules'
-transitive prior users come from the shared reverse index. Resolution changes
-conservatively invalidate all prior modules. Derived graph/effects/partition/
+transitive prior users come from the shared reverse index. Actual edge changes
+invalidate their source and prior reverse users, not every inventoried source.
+Derived graph/effects/partition/
 emission currently rebuild wholesale on any changed key; no fine-grained
 later-layer speedup is claimed.
 
