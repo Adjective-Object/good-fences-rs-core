@@ -5344,12 +5344,19 @@ fn tla_cycles_preserve_hoisting_suspension_order_and_tdz_errors() {
 
 #[test]
 fn tla_rejection_is_shared_and_propagates_through_static_cycles() {
+    // Concurrent cycle entrances may execute a's body before b rejects.
     let output = compare(&sources(&[
         ("entry.mjs", "Promise.allSettled([import('./a.mjs'), import('./b.mjs'), import('./a.mjs')]).then(async results => { console.log(results.every(r => r.status === 'rejected'), results[0].reason === results[1].reason, results[0].reason === results[2].reason, results[0].reason.message, globalThis.attempt); try { await import('./a.mjs'); } catch(e) { console.log(e === results[0].reason); } });"),
-        ("a.mjs", "import './b.mjs'; console.log('unreachable a'); export const value = 1;"),
+        ("a.mjs", "import './b.mjs'; export const value = 1;"),
         ("b.mjs", "import './a.mjs'; globalThis.attempt = (globalThis.attempt || 0) + 1; await Promise.reject(Error('async failure')); console.log('unreachable b');"),
     ]), "entry.mjs");
     assert_eq!(output.backend, Backend::Native);
+    let bundled = node(&output.files, &output.entries["entry.mjs"]);
+    assert!(bundled.status.success(), "{bundled:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&bundled.stdout).replace("\r\n", "\n"),
+        "true true true async failure 1\ntrue\n"
+    );
 }
 
 #[test]
