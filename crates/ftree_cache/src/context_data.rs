@@ -1,3 +1,4 @@
+use crate::inputs::{InputObserver, InputProof, PathInput};
 use anyhow::{anyhow, Context, Error, Result};
 use dashmap::DashMap;
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -14,6 +15,20 @@ use deadlock_ref::prelude::*;
 pub trait ContextData<TArgs: Copy = ()>: Sized {
     /// Creates a new ContextData from a filepath
     fn read_context_data(args: TArgs, path: &Path) -> Result<Option<Self>, Error>;
+
+    /// Override to describe the exact inputs consumed by this reader.
+    /// Legacy readers remain usable but cannot authorize tracked cache hits.
+    fn read_context_data_with_inputs(
+        args: TArgs,
+        path: &Path,
+        observer: &InputObserver,
+    ) -> Result<Option<Self>, Error> {
+        observer.error(format!(
+            "context reader has no input provenance: {}",
+            path.display()
+        ));
+        Self::read_context_data(args, path)
+    }
 }
 
 impl ContextData for () {
@@ -34,6 +49,25 @@ impl ContextData for () {
                 ))
             }
         }
+    }
+
+    fn read_context_data_with_inputs(
+        _: (),
+        path: &Path,
+        observer: &InputObserver,
+    ) -> Result<Option<Self>, Error> {
+        let input = PathInput::capture(path);
+        let value = Self::read_context_data((), path);
+        match input {
+            Ok(input) => {
+                if let Err(error) = input.validate() {
+                    observer.error(error);
+                }
+                observer.record(input);
+            }
+            Err(error) => observer.error(error),
+        }
+        value
     }
 }
 
@@ -67,6 +101,20 @@ where
             inner,
             cached: RwLock::new(TCached::default()),
         }))
+    }
+
+    fn read_context_data_with_inputs(
+        args: TArgs,
+        path: &Path,
+        observer: &InputObserver,
+    ) -> Result<Option<Self>, Error> {
+        Ok(
+            TVal::read_context_data_with_inputs(args, path, observer)?.map(|inner| Self {
+                _phantom_targs: Default::default(),
+                inner,
+                cached: RwLock::new(TCached::default()),
+            }),
+        )
     }
 }
 
@@ -188,6 +236,7 @@ pub struct FileContextCache<
     ///
     /// If there is no entry, the directory has not been probed yet
     cache: DashMap<PathBuf, Option<T>>,
+    inputs: DashMap<PathBuf, InputProof>,
     args: TArgs,
 }
 
@@ -207,6 +256,7 @@ impl<T: ContextData<()>, const CONTEXT_FNAME: &'static str> FileContextCache<T, 
     pub fn new() -> Self {
         Self {
             cache: DashMap::new(),
+            inputs: DashMap::new(),
             args: (),
         }
     }
@@ -227,6 +277,9 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
 
     /// Prepopulates a sub-path of the cache with a given value
     pub fn prepopulate(&self, path: &Path, data: impl Into<T>) {
+        let observer = InputObserver::default();
+        observer.error("prepopulated context has no filesystem provenance");
+        self.inputs.insert(path.to_owned(), observer.proof());
         self.cache.insert(path.to_owned(), Some(data.into()));
     }
 
@@ -240,6 +293,15 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         &'a self,
         root_dir: &Path,
         base: &'base_path Path,
+    ) -> Result<Option<(&'base_path Path, CtxOptRef<'a, T>)>, Error> {
+        self.probe_path_with_inputs(root_dir, base, None)
+    }
+
+    pub fn probe_path_with_inputs<'a, 'base_path>(
+        &'a self,
+        root_dir: &Path,
+        base: &'base_path Path,
+        observer: Option<&InputObserver>,
     ) -> Result<Option<(&'base_path Path, CtxOptRef<'a, T>)>, Error> {
         if !root_dir.is_absolute() {
             return Err(anyhow!(
@@ -256,7 +318,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
                 Some(p) => p,
             };
 
-            let probe_result = self.check_dir(head_path)?;
+            let probe_result = self.check_dir_with_inputs(head_path, observer)?;
             if let Ok(res) = probe_result.try_map(|x| x.as_ref()) {
                 return Ok(Some((head_path, res)));
             }
@@ -285,11 +347,30 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         ProbePathIterator::new(self, root_dir, base)
     }
 
+    pub fn probe_path_iter_with_inputs<'context_cache, 'root_dir, 'base_path>(
+        &'context_cache self,
+        root_dir: &'root_dir Path,
+        base: &'base_path Path,
+        observer: &InputObserver,
+    ) -> ProbePathIterator<'context_cache, 'root_dir, 'base_path, T, CONTEXT_FNAME, TArgs> {
+        let mut iter = ProbePathIterator::new(self, root_dir, base);
+        iter.observer = Some(observer.clone());
+        iter
+    }
+
     // checks an individual directory for the configured context file
     //
     // First, checks the cache. If no entry is found, checks the real
     // filesystem for the configured context file and caches the result.
     pub fn check_dir<'a>(&'a self, base: &Path) -> Result<CtxRef<'a, Option<T>>, Error> {
+        self.check_dir_with_inputs(base, None)
+    }
+
+    pub fn check_dir_with_inputs<'a>(
+        &'a self,
+        base: &Path,
+        observer: Option<&InputObserver>,
+    ) -> Result<CtxRef<'a, Option<T>>, Error> {
         tracing::debug!("{} check_dir! {}", CONTEXT_FNAME, base.display());
         let mk_ref = || -> Result<dashmap::mapref::one::Ref<'a, PathBuf, Option<T>>, Error> {
             let res =
@@ -301,9 +382,16 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
                             CONTEXT_FNAME,
                             base.display()
                         );
-                        let x = self.check_dir_os_fs(base).with_context(|| {
-                            format!("Failed while checking {:?} for {}", base, CONTEXT_FNAME)
-                        })?;
+                        let x = self
+                            .check_dir_os_fs(base)
+                            .with_context(|| {
+                                format!("Failed while checking {:?} for {}", base, CONTEXT_FNAME)
+                            })
+                            .inspect_err(|error| {
+                                if let Some(observer) = observer {
+                                    observer.error(format!("{error:#}"));
+                                }
+                            })?;
                         tracing::debug!(
                             "{} check_dir! - populated! - {}",
                             CONTEXT_FNAME,
@@ -312,6 +400,13 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
                         Ok(x)
                     })?;
             // downgrade mutable ref to non-mutable ref
+            if let Some(observer) = observer {
+                if let Some(proof) = self.inputs.get(base) {
+                    observer.replay(&proof);
+                } else {
+                    observer.error("cached context has no filesystem provenance");
+                }
+            }
             Ok(res.downgrade())
         };
 
@@ -324,8 +419,12 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     fn check_dir_os_fs(&self, base: &Path) -> Result<Option<T>, Error> {
         // probe the real FS for the configured context file
         let context_file_path = base.to_owned().join(CONTEXT_FNAME);
-        let result = T::read_context_data(self.args, &context_file_path)
+        let observer = InputObserver::default();
+        let result = T::read_context_data_with_inputs(self.args, &context_file_path, &observer)
             .with_context(|| "in read_context_data");
+        if result.is_ok() {
+            self.inputs.insert(base.to_owned(), observer.proof());
+        }
         debug!(
             "Checking {}/{}: {}",
             base.to_string_lossy(),
@@ -343,6 +442,7 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     /// Clears the cache for all paths under a subdirectory, recursively.
     pub fn mark_dirty_root(&self, path: &Path) {
         self.cache.retain(|key, _| !key.starts_with(path));
+        self.inputs.retain(|key, _| !key.starts_with(path));
     }
 }
 
@@ -361,6 +461,7 @@ pub struct ProbePathIterator<
     cache: &'context_cache FileContextCache<TContext, CONTEXT_FNAME, TArgs>,
     root_dir: &'root_dir Path,
     head: Option<&'base_path Path>,
+    observer: Option<InputObserver>,
 }
 impl<
         'context_cache,
@@ -385,6 +486,7 @@ where
             cache: iter,
             root_dir,
             head: Some(base),
+            observer: None,
         }
     }
 }
@@ -404,12 +506,15 @@ where
                     debug!("path probe walked up to fs root");
                     return None;
                 }
+
                 Some(p) => p,
             };
             self.i += 1;
             self.head = head_path.parent();
 
-            let check_result = self.cache.check_dir(head_path);
+            let check_result = self
+                .cache
+                .check_dir_with_inputs(head_path, self.observer.as_ref());
 
             debug!(
                 "Probe path: {}/{} -> {}",

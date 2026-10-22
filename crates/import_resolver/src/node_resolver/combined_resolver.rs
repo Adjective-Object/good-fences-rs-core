@@ -57,6 +57,24 @@ impl PathResolver for CombinedResolver<'_> {
     }
 }
 
+impl CombinedResolver<'_> {
+    pub(crate) fn resolve_with_inputs(
+        &self,
+        base: &Path,
+        specifier: &str,
+        observer: ftree_cache::inputs::InputObserver,
+    ) -> anyhow::Result<Resolution> {
+        CachingNodeModulesResolver::new(
+            self.root_dir,
+            &self.caches.package_json_cache,
+            &self.caches.node_modules_cache,
+            self.options.clone(),
+        )
+        .with_observer(observer)
+        .resolve(base, specifier)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

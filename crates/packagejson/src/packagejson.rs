@@ -129,7 +129,7 @@ impl ContextData for PackageJson {
         _: (),
         path: &std::path::Path,
     ) -> anyhow::Result<Option<Self>, anyhow::Error> {
-        let file = match std::fs::File::open(path) {
+        let bytes = match std::fs::read(path) {
             Ok(f) => f,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -139,9 +139,46 @@ impl ContextData for PackageJson {
                 return Err(e.into());
             }
         };
-        serde_json::from_reader(file)
+        serde_json::from_slice(&bytes)
             .map(Some)
             .map_err(|e| e.into())
+    }
+
+    fn read_context_data_with_inputs(
+        _: (),
+        path: &std::path::Path,
+        observer: &ftree_cache::inputs::InputObserver,
+    ) -> anyhow::Result<Option<Self>> {
+        use ftree_cache::inputs::PathInput;
+        let mut input = match PathInput::capture(path) {
+            Ok(input) => input,
+            Err(error) => {
+                observer.error(error);
+                return Self::read_context_data((), path);
+            }
+        };
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Err(error) = input.validate() {
+                    observer.error(error);
+                }
+                observer.record(input);
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        match PathInput::capture(path) {
+            Ok(after) if after == input => {}
+            Ok(_) => observer.error(format!(
+                "manifest identity changed while reading {}",
+                path.display()
+            )),
+            Err(error) => observer.error(error),
+        }
+        input.seal_content(&bytes);
+        observer.record(input);
+        serde_json::from_slice(&bytes).map(Some).map_err(Into::into)
     }
 }
 

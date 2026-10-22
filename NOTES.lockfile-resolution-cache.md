@@ -93,9 +93,10 @@ Never modify the dirty perf-optim worktree, afix, or the client-web migration.
 
 ## Progress
 
-Stage 1 implementation and the three concrete review corrections are applied;
-independent re-review and coordinator spot-check remain pending. Stages 2–6 are
-pending. The adapter remains test-gated and does not change live resolution.
+Stage 1 and the three concrete review corrections were independently approved,
+spot-checked and committed as `6aeec15`. Stage 2 is
+implemented below; stages 3–6 remain pending. The adapter remains test-gated and
+does not change live resolution.
 
 - Preserve Berry raw locators/workspaces and deterministic SCC/named-edge hashes.
 - Mark every npm/shrinkwrap and Classic Yarn record incomplete because normalized
@@ -111,3 +112,50 @@ pending. The adapter remains test-gated and does not change live resolution.
   and exact peers with disconnected nodes (including explicit-provider success).
   The actual-project ignored probe was not rerun for these narrow corrections.
   Existing unrelated `ftree_cache` lifetime warning remains.
+
+### Stage 2 — scoped resolver input tracking
+
+Implementation and focused Windows validation are complete; independent review
+and coordinator spot-check/commit remain pending. No stage 3–6 integration,
+inventory/key changes or source-cache schema changes are included.
+
+- Added explicit request-owned `InputObserver`/`InputProof` capture at existing
+  resolver/context reads. Ordered probes include actual priority candidates,
+  positive/negative ancestor node_modules/package contexts, canonical and file
+  identities, and intermediate symlink/junction targets. No directory enumeration
+  or hidden thread-local/global collector is used.
+- `StructuralResolver::resolve_dependency_with_inputs` returns the unchanged
+  dependency plus original proofs. Callers must key request mode/policy/revision
+  and call `inputs.validate()` before authorizing reuse or success. Validation
+  reads the filesystem directly, never intra-build caches. Old
+  `DependencyResolver` behavior and independent import/require caches remain.
+- Context positives/misses, derived browser probes and positive/negative package
+  target caches retain original provenance, including values first populated by
+  legacy calls. Prepopulated and unknown legacy context readers are explicitly
+  unproven; they cannot authorize tracked hits. Masked probe IO errors are retained
+  as proof errors, rather than silently authorizing a fallback.
+- Manifests parse buffered raw bytes via `serde_json::from_slice`; SHA-256 seals
+  exactly those parsed bytes. Ordinary candidates seal kind/identity/links only,
+  leaving source-content validation to extraction.
+- Added seven cross-platform resolver regressions covering higher-priority
+  extension creation (and source-byte independence), cached positive/manifest
+  provenance, cached target and ancestor misses/nearer shadows, independent modes,
+  cached browser probes/manifest edits, package-scope misses, and intermediate
+  junction/symlink retargeting under both identity policies. Both Windows junction
+  policies ran successfully. Two context-cache tests cover negative provenance,
+  invalidation and deliberately unproven readers/prepopulation. An additional
+  Unix-only symlink-loop IO/fallback regression is present but not run on Windows.
+- Created `ftree_cache/README.md` before editing that package; updated affected
+  READMEs and concise AGENTS contracts.
+
+Validation (from the explicit source-maps worktree; TEMP/TMP set to the ignored
+`target\test-temp` managed-test root):
+
+- `cargo test -p import_resolver -p packagejson -p ftree_cache -p packagejson_exports`:
+  **37 passed** (19/4/2/12), all doctests passed.
+- `cargo test -p ftree_cache -p import_resolver --features ftree_cache/deadlock_ref`:
+  **21 passed** (2/19), all doctests passed.
+- `cargo check -p bundler --lib`: **passed**.
+- Changed Rust files formatted with the pinned `rustfmt`; `git diff --check`
+  passed. The pre-existing ftree_cache lifetime-syntax warning remains.
+- Full spot-check deliberately not run by the implementation agent.

@@ -9,11 +9,16 @@ crate-type = ["lib"]
 
 [dependencies]
 anyhow = { workspace = true }
+eyre.workspace = true
+sha2 = "0.10"
 parking_lot.workspace = true
 dashmap = "6.0.1"
 tracing = "0.1.40"
 hashbrown = "0.14.5"
 deadlock_ref = { path = "../deadlock_ref", optional = true }
+
+[dev-dependencies]
+test_tmpdir = { path = "../test_tmpdir" }
 
 [features]
 default = []

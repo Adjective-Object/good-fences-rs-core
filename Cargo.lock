@@ -1188,8 +1188,11 @@ dependencies = [
  "anyhow",
  "dashmap",
  "deadlock_ref",
+ "eyre",
  "hashbrown 0.14.5",
  "parking_lot",
+ "sha2 0.10.9",
+ "test_tmpdir",
  "tracing",
 ]
 

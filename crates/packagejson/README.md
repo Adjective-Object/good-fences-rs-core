@@ -10,3 +10,9 @@ to Node's root-only shorthand. Explicit export maps remain encapsulated;
 unmatched or private subpaths do not gain a filesystem fallback.
 
 Run `cargo test -p packagejson`.
+
+Filesystem reads parse raw buffered bytes with `serde_json::from_slice`, never
+byte-at-a-time `from_reader(File)`. The context-cache provenance hook seals
+exactly those parsed bytes and records original path/link identity, including
+missing manifests. Cached consumers must retain that seal, not hash a newer
+manifest while reusing older parsed metadata.

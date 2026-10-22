@@ -10,6 +10,8 @@ use crate::{
     },
     resolve::{PathResolver, TargetEnv, NODE_BUILTINS},
 };
+use ftree_cache::inputs::InputObserver;
+pub use ftree_cache::inputs::{InputKind, InputProof, PathInput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionMode {
@@ -21,6 +23,14 @@ pub enum ResolutionMode {
 pub enum ResolvedDependency {
     File(PathBuf),
     External(String),
+}
+
+/// A resolution and the original filesystem observations behind it.
+/// Consumers must freshly validate `inputs` before authorizing reuse or success.
+#[derive(Debug, Clone)]
+pub struct TrackedDependency {
+    pub dependency: ResolvedDependency,
+    pub inputs: InputProof,
 }
 
 pub trait DependencyResolver {
@@ -74,14 +84,31 @@ impl StructuralResolver {
         self.externals = externals;
         self.invalidate();
     }
-}
 
-impl DependencyResolver for StructuralResolver {
-    fn resolve_dependency(
+    pub fn resolve_dependency_with_inputs(
         &self,
         base: &Path,
         specifier: &str,
         mode: ResolutionMode,
+    ) -> eyre::Result<TrackedDependency> {
+        let observer = InputObserver::default();
+        let dependency = self.resolve_inner(base, specifier, mode, Some(&observer))?;
+        let inputs = observer.proof();
+        inputs.check_errors().map_err(|error| {
+            eyre::eyre!(
+                "{mode:?} resolving {specifier:?} from {}: {error:#}",
+                base.display()
+            )
+        })?;
+        Ok(TrackedDependency { dependency, inputs })
+    }
+
+    fn resolve_inner(
+        &self,
+        base: &Path,
+        specifier: &str,
+        mode: ResolutionMode,
+        observer: Option<&InputObserver>,
     ) -> eyre::Result<ResolvedDependency> {
         // Check the same one-step exact replacement used by the file resolver.
         let replacement = self.options.alias.get(specifier);
@@ -118,18 +145,23 @@ impl DependencyResolver for StructuralResolver {
             ResolutionMode::Import => &self.import_cache,
             ResolutionMode::Require => &self.require_cache,
         };
-        let result = cache
-            .resolver(&self.root, options)
-            .resolve(base, specifier)
-            .map_err(|error| {
-                eyre::eyre!(
-                    "{:?} resolving {specifier:?} from {}: {error:#}",
-                    mode,
-                    base.display()
-                )
-            })?;
+        let resolver = cache.resolver(&self.root, options);
+        let result = match observer {
+            Some(observer) => resolver.resolve_with_inputs(base, specifier, observer.clone()),
+            None => resolver.resolve(base, specifier),
+        }
+        .map_err(|error| {
+            eyre::eyre!(
+                "{:?} resolving {specifier:?} from {}: {error:#}",
+                mode,
+                base.display()
+            )
+        })?;
         eyre::ensure!(
-            result.path.is_file(),
+            observer.map_or_else(
+                || result.path.is_file(),
+                |observer| observer.is_file(&result.path)
+            ),
             "{mode:?} resolving {specifier:?} from {}: resolved target is not a file: {}",
             base.display(),
             result.path.display()
@@ -145,9 +177,325 @@ impl DependencyResolver for StructuralResolver {
     }
 }
 
+impl DependencyResolver for StructuralResolver {
+    fn resolve_dependency(
+        &self,
+        base: &Path,
+        specifier: &str,
+        mode: ResolutionMode,
+    ) -> eyre::Result<ResolvedDependency> {
+        self.resolve_inner(base, specifier, mode, None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tracked(
+        resolver: &StructuralResolver,
+        base: &Path,
+        request: &str,
+        mode: ResolutionMode,
+    ) -> TrackedDependency {
+        let result = resolver
+            .resolve_dependency_with_inputs(base, request, mode)
+            .unwrap();
+        result.inputs.validate().unwrap();
+        result
+    }
+
+    #[test]
+    fn tracked_extension_priority_and_source_contents_are_distinct_inputs() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "value.ts" => "export const value = 1;"
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let result = tracked(
+            &resolver,
+            &dir.root().join("entry.mjs"),
+            "./value",
+            ResolutionMode::Import,
+        );
+        assert_eq!(
+            result.dependency,
+            ResolvedDependency::File(dir.root().join("value.ts"))
+        );
+        let candidates: Vec<_> = result
+            .inputs
+            .inputs()
+            .iter()
+            .filter(|input| input.path().file_stem().is_some_and(|stem| stem == "value"))
+            .map(|input| (input.path().file_name().unwrap().to_owned(), input.kind()))
+            .collect();
+        assert_eq!(candidates[0], ("value.js".into(), InputKind::Missing));
+        assert_eq!(candidates[1], ("value".into(), InputKind::Missing));
+        assert_eq!(candidates[2], ("value.ts".into(), InputKind::File));
+        std::fs::write(dir.root().join("value.ts"), "different source bytes").unwrap();
+        result.inputs.validate().unwrap();
+        std::fs::write(dir.root().join("value.js"), "").unwrap();
+        assert!(result.inputs.validate().is_err());
+        assert_eq!(
+            resolver
+                .resolve_dependency(
+                    &dir.root().join("entry.mjs"),
+                    "./value",
+                    ResolutionMode::Import
+                )
+                .unwrap(),
+            ResolvedDependency::File(dir.root().join("value.js"))
+        );
+        assert!(resolver
+            .resolve_dependency_with_inputs(
+                &dir.root().join("entry.mjs"),
+                "./absent",
+                ResolutionMode::Import
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn tracked_cached_positive_retains_original_manifest_bytes() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":"./old.mjs"}"#,
+            "node_modules/pkg/old.mjs" => "",
+            "node_modules/pkg/new.mjs" => ""
+        };
+        let mut resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let base = dir.root().join("entry.mjs");
+        // A legacy call also seals the provenance of the shared cache's values.
+        let original = resolver
+            .resolve_dependency(&base, "pkg", ResolutionMode::Import)
+            .unwrap();
+        let first = tracked(&resolver, &base, "pkg", ResolutionMode::Import);
+        std::fs::write(
+            dir.root().join("node_modules/pkg/package.json"),
+            r#"{"exports":"./new.mjs"}"#,
+        )
+        .unwrap();
+        let cached = resolver
+            .resolve_dependency_with_inputs(&base, "pkg", ResolutionMode::Import)
+            .unwrap();
+        assert_eq!(cached.dependency, original);
+        assert_eq!(cached.inputs, first.inputs);
+        assert!(cached.inputs.validate().is_err());
+        resolver.invalidate();
+        assert_eq!(
+            tracked(&resolver, &base, "pkg", ResolutionMode::Import).dependency,
+            ResolvedDependency::File(dir.root().join("node_modules/pkg/new.mjs"))
+        );
+    }
+
+    #[test]
+    fn tracked_ancestor_misses_and_cached_negative_detect_nearer_packages() {
+        for present_node_modules in [false, true] {
+            let dir = test_tmpdir::test_tmpdir! {
+                "nested/entry.mjs" => "",
+                "node_modules/pkg/index.js" => ""
+            };
+            if present_node_modules {
+                std::fs::create_dir(dir.root().join("nested/node_modules")).unwrap();
+            }
+            let resolver = StructuralResolver::new(
+                dir.root().into(),
+                NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+                BTreeSet::new(),
+            );
+            let base = dir.root().join("nested/entry.mjs");
+            let result = tracked(&resolver, &base, "pkg", ResolutionMode::Import);
+            // Cache hits must retain both ancestor context misses and target misses.
+            let cached = tracked(&resolver, &base, "pkg", ResolutionMode::Import);
+            assert_eq!(result.inputs, cached.inputs);
+            std::fs::create_dir_all(dir.root().join("nested/node_modules/pkg")).unwrap();
+            std::fs::write(dir.root().join("nested/node_modules/pkg/index.js"), "").unwrap();
+            assert!(cached.inputs.validate().is_err());
+            let after = resolver
+                .resolve_dependency_with_inputs(&base, "pkg", ResolutionMode::Import)
+                .unwrap();
+            assert!(after.inputs.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn tracked_manifest_cache_and_request_modes_keep_original_provenance() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":{".":{"import":"./import.mjs","require":"./require.cjs"},"./other":"./import.mjs"}}"#,
+            "node_modules/pkg/import.mjs" => "",
+            "node_modules/pkg/require.cjs" => ""
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let base = dir.root().join("entry.mjs");
+        for (mode, path) in [
+            (ResolutionMode::Import, "import.mjs"),
+            (ResolutionMode::Require, "require.cjs"),
+        ] {
+            let result = tracked(&resolver, &base, "pkg", mode);
+            assert_eq!(
+                result.dependency,
+                ResolvedDependency::File(dir.root().join("node_modules/pkg").join(path))
+            );
+        }
+        std::fs::write(
+            dir.root().join("node_modules/pkg/package.json"),
+            r#"{"exports":{".":"./require.cjs","./other":"./require.cjs"}}"#,
+        )
+        .unwrap();
+        // A different uncached request still uses the old cached manifest.
+        let result = resolver
+            .resolve_dependency_with_inputs(&base, "pkg/other", ResolutionMode::Import)
+            .unwrap();
+        assert_eq!(
+            result.dependency,
+            ResolvedDependency::File(dir.root().join("node_modules/pkg/import.mjs"))
+        );
+        assert!(result.inputs.validate().is_err());
+    }
+
+    #[test]
+    fn tracked_browser_rewrite_cache_retains_candidate_and_manifest_inputs() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "package.json" => r#"{"browser":{"./optional.js":"./browser.mjs"}}"#,
+            "value.mjs" => "",
+            "other.mjs" => "",
+            "browser.mjs" => ""
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Browser),
+            BTreeSet::new(),
+        );
+        let base = dir.root().join("entry.mjs");
+        let first = tracked(&resolver, &base, "./value.mjs", ResolutionMode::Import);
+        std::fs::write(dir.root().join("optional.js"), "").unwrap();
+        assert!(first.inputs.validate().is_err());
+        let derived_hit = resolver
+            .resolve_dependency_with_inputs(&base, "./other.mjs", ResolutionMode::Import)
+            .unwrap();
+        assert!(derived_hit.inputs.validate().is_err());
+        std::fs::remove_file(dir.root().join("optional.js")).unwrap();
+        derived_hit.inputs.validate().unwrap();
+        std::fs::write(
+            dir.root().join("package.json"),
+            r#"{"browser":{"./value.mjs":"./browser.mjs"}}"#,
+        )
+        .unwrap();
+        assert!(derived_hit.inputs.validate().is_err());
+    }
+
+    #[test]
+    fn tracked_browser_scope_misses_detect_a_nearer_manifest() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "package.json" => "{}",
+            "nested/entry.mjs" => "",
+            "nested/value.mjs" => ""
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Browser),
+            BTreeSet::new(),
+        );
+        let result = tracked(
+            &resolver,
+            &dir.root().join("nested/entry.mjs"),
+            "./value.mjs",
+            ResolutionMode::Import,
+        );
+        std::fs::write(dir.root().join("nested/package.json"), "{}").unwrap();
+        assert!(result.inputs.validate().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tracked_api_does_not_hide_probe_io_errors_behind_a_successful_fallback() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "value.ts" => ""
+        };
+        std::os::unix::fs::symlink("value.js", dir.root().join("value.js")).unwrap();
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let base = dir.root().join("entry.mjs");
+        assert!(resolver
+            .resolve_dependency(&base, "./value", ResolutionMode::Import)
+            .is_ok());
+        let error = resolver
+            .resolve_dependency_with_inputs(&base, "./value", ResolutionMode::Import)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("unproven resolution inputs"));
+        std::fs::remove_file(dir.root().join("value.js")).unwrap();
+    }
+
+    #[cfg(any(unix, windows))]
+    fn link_directory(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn tracked_intermediate_link_retarget_is_visible_under_both_path_policies() {
+        for preserve in [false, true] {
+            let dir = test_tmpdir::test_tmpdir! {
+                "entry.mjs" => "",
+                "first/deep/value.mjs" => "",
+                "second/deep/value.mjs" => ""
+            };
+            let link = dir.root().join("linked");
+            link_directory(&dir.root().join("first"), &link);
+            let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+            options.preserve_symlinks = preserve;
+            let resolver = StructuralResolver::new(dir.root().into(), options, BTreeSet::new());
+            let result = tracked(
+                &resolver,
+                &dir.root().join("entry.mjs"),
+                "./linked/deep/value.mjs",
+                ResolutionMode::Import,
+            );
+            #[cfg(windows)]
+            std::fs::remove_dir(&link).unwrap();
+            #[cfg(unix)]
+            std::fs::remove_file(&link).unwrap();
+            link_directory(&dir.root().join("second"), &link);
+            assert!(result.inputs.validate().is_err());
+            #[cfg(windows)]
+            std::fs::remove_dir(&link).unwrap();
+            #[cfg(unix)]
+            std::fs::remove_file(&link).unwrap();
+        }
+    }
 
     #[test]
     fn explicit_builtin_aliases_are_exact_single_step_checked_files() {
@@ -167,7 +515,9 @@ mod tests {
             options
                 .alias
                 .insert("./stub.cjs".into(), "./missing.cjs".into());
-            options.alias.insert("missing".into(), "./missing.cjs".into());
+            options
+                .alias
+                .insert("missing".into(), "./missing.cjs".into());
             options.alias.insert("cycle-a".into(), "cycle-b".into());
             options.alias.insert("cycle-b".into(), "cycle-a".into());
             options.alias.insert("self".into(), "self".into());

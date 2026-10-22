@@ -58,3 +58,11 @@ An existing exports map forbids filesystem fallback for unmatched/private paths.
 Bare-string exports normalize to root plus "./*":"./*" for arbitrary package
 files (intentional Node deviation); explicit maps keep encapsulation. Reject
 request subpaths that traverse outside the package root.
+
+Scoped resolution proofs use explicit request-owned observers at actual reads.
+Cache metadata, browser-derived probes and positive/negative package targets
+with their original provenance; never restat an old value to invent its inputs.
+Tracked calls reject masked IO errors. Consumers key request mode/policy and
+freshly validate the returned proof before reuse/success, then invalidate on
+change. Ordinary candidates seal kind/identity/links, not source bytes; only
+content-dependent manifests seal bytes. Do not enumerate directory inventories.

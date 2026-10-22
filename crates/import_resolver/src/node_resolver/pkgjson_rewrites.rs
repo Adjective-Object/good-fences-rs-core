@@ -4,6 +4,7 @@
 //! See https://github.com/swc-project/swc/blob/f988b66e1fd921266a8abf6fe9bb997b6878e949/crates/swc_ecma_loader/src/resolvers/node.rs
 
 use super::caching::CachingNodeModulesResolver;
+use ahashmap::{AHashMap, AHashSet};
 use anyhow::Result;
 use packagejson::{Browser, PackageJson, StringOrBool};
 use packagejson_exports::PackageExportRewriteData;
@@ -12,7 +13,6 @@ use std::{
     env::current_dir,
     path::{Component, Path, PathBuf},
 };
-use ahashmap::{AHashMap, AHashSet};
 
 // Used to override imports into a package when targeting a Browser environment.
 #[derive(Debug, Default)]
@@ -101,6 +101,7 @@ impl BrowserCache {
 // requests for files within the package.
 #[derive(Debug, Default)]
 pub struct PackageJsonRewriteData {
+    pub(crate) inputs: ftree_cache::inputs::InputProof,
     // Browser rewrites to use for cjs requires
     pub browser_cache: Option<BrowserCache>,
     // map of paths to rewrite
@@ -119,6 +120,7 @@ impl PackageJsonRewriteData {
         // the package json file
         pkgjson: &PackageJson,
     ) -> Result<Self> {
+        let input_start = resolver.observer.position();
         let browser_cache = if let Some(browser) = &pkgjson.browser {
             BrowserCache::create(resolver, pkg_dir, browser)?
         } else {
@@ -132,6 +134,7 @@ impl PackageJsonRewriteData {
         };
 
         Ok(Self {
+            inputs: resolver.observer.since(input_start),
             browser_cache,
             exports: exports_rewrite,
         })

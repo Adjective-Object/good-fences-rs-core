@@ -69,3 +69,23 @@ Call `invalidate` after filesystem/package edits, additions or removals;
 `set_policy` invalidates automatically. Invalidation intentionally replaces both
 cache trees, including misses/package ancestry. `revision` tracks these policy/
 filesystem epochs. This correctness-first API does not promise minimal relinking.
+
+## Scoped filesystem proofs
+
+`StructuralResolver::resolve_dependency_with_inputs` returns a `TrackedDependency`
+with the unchanged resolution and an ordered `InputProof`. It uses the same
+resolver and intra-build caches as `DependencyResolver`, not a second resolver.
+Call `inputs.validate()` before trusting reuse or publishing success; capture
+alone is not fresh validation, and old cached results intentionally retain their
+original observations. Invalidate and resolve again after validation fails.
+Request mode, resolver policy and its revision remain the caller's cache key.
+
+Proofs include consulted positive/negative file candidates, ancestor
+`node_modules` and browser package-scope misses, exact manifest byte seals,
+canonical/file identities and intermediate symlink/junction targets. Cached
+package metadata, browser rewrites and successful/failed package-target lookups
+replay the observations that produced them, even if first populated by a legacy
+call. Source contents are not hashed for resolution. No directories are
+enumerated, and validation bypasses all context/target caches. Tracked calls
+surface probe IO errors even where legacy boolean/fallback resolution masks
+them. Failed requests are not exposed as reusable persisted records.
