@@ -84,24 +84,41 @@ impl Artifacts<crate::assembly::Code> {
         self,
         destinations: &BTreeMap<PathBuf, PathBuf>,
     ) -> eyre::Result<Artifacts> {
+        self.render_to_with_maps(destinations, false)
+    }
+
+    pub(crate) fn render_to_with_maps(
+        self,
+        destinations: &BTreeMap<PathBuf, PathBuf>,
+        source_maps: bool,
+    ) -> eyre::Result<Artifacts> {
         let _span = tracing::info_span!("build.render", artifacts = self.files.len()).entered();
-        let files = self
-            .files
-            .iter()
-            .map(|(path, code)| {
-                let destination = destinations
-                    .get(path)
-                    .ok_or_eyre("missing artifact destination")?;
-                let source = code.render(path, destination, destinations)?;
-                if destination
-                    .extension()
-                    .is_some_and(|ext| matches!(ext.to_str(), Some("mjs" | "cjs" | "js")))
-                {
-                    crate::rewrite::validate(destination, &source)?;
-                }
-                Ok((destination.clone(), source))
-            })
-            .collect::<eyre::Result<_>>()?;
+        let mut files = BTreeMap::new();
+        for (path, code) in &self.files {
+            let destination = destinations
+                .get(path)
+                .ok_or_eyre("missing artifact destination")?;
+            let executable = crate::sourcemap::executable(destination);
+            let (mut source, map) =
+                code.render_with_map(path, destination, destinations, source_maps && executable)?;
+            if let Some(map) = map {
+                let map_path = crate::sourcemap::path(destination);
+                let request = crate::assembly::relative_request(destination, &map_path, true)
+                    .ok_or_eyre("source map destination cannot form a relative request")?;
+                source.push_str(&format!("\n//# sourceMappingURL={request}\n"));
+                ensure!(
+                    files.insert(map_path, map.to_json_string()).is_none(),
+                    "source map artifact collision"
+                );
+            }
+            if executable {
+                crate::rewrite::validate(destination, &source)?;
+            }
+            ensure!(
+                files.insert(destination.clone(), source).is_none(),
+                "output artifact collision"
+            );
+        }
         Ok(Artifacts {
             backend: self.backend,
             files,
@@ -134,8 +151,10 @@ impl Artifacts {
     }
 }
 
-struct Module<'a> {
+pub(crate) struct Module<'a> {
+    path: &'a std::path::Path,
     source: &'a str,
+    mapping: Option<std::sync::Arc<crate::sourcemap::Source>>,
     parsed: ParsedModule,
     surface: BTreeSet<String>,
     relocations: &'a [crate::css_loading::UrlRelocation],
@@ -244,6 +263,21 @@ pub fn native_placement(
     )
 }
 
+impl<'a> Module<'a> {
+    pub(crate) fn source(&self) -> &'a str {
+        self.source
+    }
+    pub(crate) fn facts(&self) -> ast_segmenter::views::ModuleFacts<'_> {
+        self.parsed.facts()
+    }
+    pub(crate) fn mapping(&self) -> Option<&std::sync::Arc<crate::sourcemap::Source>> {
+        self.mapping.as_ref()
+    }
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self.path
+    }
+}
+
 /// Emit native chunks.
 pub fn esm(
     graph: &SourceGraph,
@@ -292,6 +326,7 @@ pub fn esm_with_options(
         &BTreeSet::new(),
         &BTreeMap::new(),
         options.min_chunk_bytes,
+        &BTreeMap::new(),
         Default::default(),
     )?
     .render()
@@ -351,6 +386,7 @@ pub fn esm_with_execution(
         &BTreeSet::new(),
         &BTreeMap::new(),
         0,
+        &BTreeMap::new(),
         execution,
     )?
     .render()
@@ -392,6 +428,7 @@ pub(crate) fn esm_plan_prepared(
         require_defaults,
         &BTreeMap::new(),
         0,
+        &BTreeMap::new(),
         Default::default(),
     )
 }
@@ -418,6 +455,7 @@ pub(crate) fn esm_plan_activated(
         &BTreeSet::new(),
         placements,
         0,
+        &BTreeMap::new(),
         Default::default(),
     )
 }
@@ -432,12 +470,16 @@ pub(crate) fn esm_plan_configured(
     require_defaults: &BTreeSet<PathBuf>,
     placements: &BTreeMap<u32, u32>,
     min_chunk_bytes: usize,
+    mappings: &BTreeMap<PathBuf, std::sync::Arc<crate::sourcemap::Source>>,
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<crate::assembly::Code>> {
     let _span = tracing::info_span!("build.link").entered();
     let manifest = diagnostic_manifest(graph, plan, policy)?;
     graph.validate_links()?;
     let mut modules = load_modules(graph, plan, sources, relocations)?;
+    for module in modules.values_mut() {
+        module.mapping = mappings.get(module.path).cloned();
+    }
     let symbols = crate::symbols::Symbols::link(graph, plan)?;
     for (&file, module) in &mut modules {
         module.surface = symbols.exports[&file].keys().cloned().collect();
@@ -457,7 +499,7 @@ pub(crate) fn esm_plan_configured(
 }
 
 fn load_modules<'a>(
-    graph: &SourceGraph,
+    graph: &'a SourceGraph,
     plan: &ChunkPlan,
     sources: &'a BTreeMap<PathBuf, String>,
     relocations: &'a BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
@@ -474,7 +516,9 @@ fn load_modules<'a>(
         modules.insert(
             file,
             Module {
+                path,
                 source,
+                mapping: None,
                 parsed,
                 surface: BTreeSet::new(),
                 relocations: relocations.get(path).map(Vec::as_slice).unwrap_or_default(),

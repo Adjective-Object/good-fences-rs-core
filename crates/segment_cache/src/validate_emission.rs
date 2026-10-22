@@ -34,6 +34,16 @@ fn within(source: &str, outer: Span, inner: Span) -> eyre::Result<()> {
 pub(crate) fn validate(module: &ModuleView<'_>, source: &str) -> eyre::Result<()> {
     let facts = module.facts();
     let emission = &facts.emission();
+    if let Some(directive) = emission.source_map() {
+        span(source, directive)?;
+        ensure!(
+            ast_segmenter::emission::source_mapping_url(
+                &source[directive.start as usize..directive.end as usize]
+            )
+            .is_some(),
+            "invalid source map directive"
+        );
+    }
     execution(module, source)?;
     ensure!(
         emission.segments().len() == module.segments().len(),

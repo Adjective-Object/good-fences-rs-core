@@ -21,10 +21,14 @@ oxc_ast.workspace = true
 oxc_ast_visit.workspace = true
 oxc_parser.workspace = true
 oxc_semantic.workspace = true
+oxc_sourcemap = "6.1.1"
 logger = { path = "../logger" }
 serde_json.workspace = true
 sha2 = "0.10.9"
 segment_cache = { path = "../segment_cache" }
+cache_flatbuffers = { path = "../cache_flatbuffers" }
+base64 = "0.22"
+percent-encoding = "2"
 import_resolver = { path = "../import_resolver" }
 serde.workspace = true
 tempfile = "3.27.0"

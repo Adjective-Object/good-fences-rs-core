@@ -93,6 +93,8 @@ pub struct OutputOptions {
     /// Exact runtime identities authorizing lazy graph overlays; empty disables them.
     /// Invalid identities or conflicting constructor roles are configuration errors.
     pub lazy_runtimes: Vec<crate::lazy_modules::LazyRuntime>,
+    /// Emit external JavaScript source maps with embedded original source text.
+    pub source_maps: bool,
 }
 
 impl Default for OutputOptions {
@@ -102,6 +104,7 @@ impl Default for OutputOptions {
             min_chunk_bytes: 0,
             synthesize_async_boundaries: false,
             lazy_runtimes: Vec::new(),
+            source_maps: false,
         }
     }
 }
@@ -196,6 +199,7 @@ struct Source {
 pub struct BuildSession {
     root: PathBuf,
     sources: BTreeMap<PathBuf, Source>,
+    upstreams: BTreeMap<PathBuf, crate::upstream::Upstream>,
     resolutions: BTreeMap<PathBuf, HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>>,
     resolution_key: Option<Fingerprint>,
     declarations: Option<(
@@ -219,6 +223,7 @@ impl BuildSession {
         Ok(Self {
             root,
             sources: BTreeMap::new(),
+            upstreams: BTreeMap::new(),
             resolutions: BTreeMap::new(),
             resolution_key: None,
             declarations: None,
@@ -598,6 +603,35 @@ impl BuildSession {
         if let Some((_, error)) = errors.into_iter().next() {
             return Err(error);
         }
+        let mut upstreams = BTreeMap::new();
+        if options.output.source_maps {
+            for path in sources.keys().filter(|path| {
+                crate::resource::kind(path, &options.css.css_modules)
+                    == crate::resource::ResourceKind::Script
+            }) {
+                let source = &self.sources[path];
+                let (upstream, warning) = crate::upstream::load(
+                    &inventory,
+                    path,
+                    &source.text,
+                    source.record.module().facts().emission().source_map(),
+                    options.cache,
+                    self.upstreams.get(path),
+                )?;
+                if let Some(warning) = warning {
+                    warnings.push(warning);
+                }
+                if let Some(upstream) = upstream {
+                    if self.upstreams.get(path) != Some(&upstream) {
+                        self.pending_invalidated.insert(path.clone());
+                    }
+                    upstreams.insert(path.clone(), upstream);
+                } else if self.upstreams.contains_key(path) {
+                    self.pending_invalidated.insert(path.clone());
+                }
+            }
+        }
+        self.upstreams = upstreams;
         warnings.sort();
         for path in self.sources.keys() {
             if !sources.contains_key(path) {
@@ -678,6 +712,8 @@ impl BuildSession {
                 include_str!("css_names.rs"),
                 include_str!("output_url.rs"),
                 include_str!("emit.rs"),
+                include_str!("sourcemap.rs"),
+                include_str!("upstream.rs"),
                 include_str!("rewrite.rs"),
                 include_str!("lib.rs"),
                 include_str!("chunks.rs"),
@@ -692,7 +728,7 @@ impl BuildSession {
         );
         fingerprints.output = Fingerprint::of(
             format!(
-                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}",
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
@@ -701,6 +737,11 @@ impl BuildSession {
                 options.output.min_chunk_bytes,
                 options.output.synthesize_async_boundaries,
                 crate::lazy_modules::configuration_fingerprint(&options.output.lazy_runtimes),
+                options.output.source_maps,
+                self.upstreams
+                    .iter()
+                    .map(|(path, upstream)| (path, hash(upstream.map().bytes())))
+                    .collect::<Vec<_>>(),
             )
             .as_bytes(),
         );
@@ -711,6 +752,9 @@ impl BuildSession {
                 resolver.recheck(&self.root, options)?;
                 sass_resolver.recheck(&self.root, &sass_options)?;
                 styles.recheck()?;
+                for upstream in self.upstreams.values() {
+                    upstream.recheck()?;
+                }
                 counters.record_parses(before_parses);
                 counters.elapsed = start.elapsed();
                 warnings.extend(last.plan.retention.warnings.iter().cloned());
@@ -749,6 +793,24 @@ impl BuildSession {
             chunks::partition_with_options(&graph, &roots, &options.effects, &options.output)
         })?;
         warnings.extend(plan.retention.warnings.iter().cloned());
+        let mappings = sources
+            .iter()
+            .filter(|(path, _)| {
+                options.output.source_maps
+                    && crate::resource::kind(path, &options.css.css_modules)
+                        == crate::resource::ResourceKind::Script
+            })
+            .map(|(path, text)| {
+                crate::sourcemap::Source::with_upstream(
+                    path,
+                    text,
+                    self.upstreams
+                        .get(path)
+                        .map(|upstream| upstream.map().clone()),
+                )
+                .map(|source| (path.clone(), source))
+            })
+            .collect::<eyre::Result<BTreeMap<_, _>>>()?;
         let mut artifacts = link::esm_plan_configured(
             &graph,
             &plan,
@@ -759,6 +821,7 @@ impl BuildSession {
             &require_defaults,
             &BTreeMap::new(),
             options.output.min_chunk_bytes,
+            &mappings,
             options.execution,
         )?;
         let finalize_span = tracing::info_span!("build.finalize").entered();
@@ -775,12 +838,15 @@ impl BuildSession {
             }
         }
         let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
-        let artifacts = artifacts.render_to(&destinations)?;
+        let artifacts = artifacts.render_to_with_maps(&destinations, options.output.source_maps)?;
         drop(finalize_span);
         Self::recheck(&self.root, &self.sources, &inventory)?;
         resolver.recheck(&self.root, options)?;
         styles.recheck()?;
         sass_resolver.recheck(&self.root, &sass_options)?;
+        for upstream in self.upstreams.values() {
+            upstream.recheck()?;
+        }
         counters.emissions = 1;
         counters.record_parses(before_parses);
         let generation = match &self.last {

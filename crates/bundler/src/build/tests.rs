@@ -2,6 +2,9 @@ use super::*;
 use crate::chunks::NodeId;
 use test_tmpdir::TmpDir;
 
+#[path = "source_maps_tests.rs"]
+mod source_maps;
+
 mod browser;
 mod sass;
 
@@ -5057,6 +5060,7 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         &BTreeSet::new(),
         &BTreeMap::new(),
         options.output.min_chunk_bytes,
+        &BTreeMap::new(),
         options.execution,
     )
     .unwrap();

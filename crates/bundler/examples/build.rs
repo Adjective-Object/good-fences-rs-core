@@ -52,6 +52,7 @@ struct FixtureOutput {
     min_chunk_bytes: usize,
     synthesize_async_boundaries: bool,
     lazy_runtimes: Vec<FixtureLazyRuntime>,
+    source_maps: bool,
 }
 
 impl Default for FixtureOutput {
@@ -61,6 +62,7 @@ impl Default for FixtureOutput {
             min_chunk_bytes: 0,
             synthesize_async_boundaries: false,
             lazy_runtimes: Vec::new(),
+            source_maps: false,
         }
     }
 }
@@ -328,6 +330,7 @@ fn build(
         options.output.base_url = config.output.base_url;
         options.output.min_chunk_bytes = config.output.min_chunk_bytes;
         options.output.synthesize_async_boundaries = config.output.synthesize_async_boundaries;
+        options.output.source_maps = config.output.source_maps;
         options.css.load = config.css.load;
         options.css.css_modules = config.css.css_modules;
     }

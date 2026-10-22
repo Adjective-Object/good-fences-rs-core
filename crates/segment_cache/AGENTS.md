@@ -22,9 +22,12 @@
   parser identity, UTF-8 ranges, local IDs, links and order on both boundaries.
 - Preserve sealed extraction provenance on both boundaries and in `to_parsed`;
   never bless unrelated parsed facts by hashing separately supplied source text.
-- Schema 16/extractor 23 retains typed nested module buffers and wire seals,
+- Schema 17/extractor 24 retains typed nested module buffers and wire seals,
   including dynamic namespace observations, deferred recipes, async references
   and lazy construction candidates with original argument slots.
+- The last parser-identified source-map directive span is extraction evidence;
+  validate its UTF-8 range and directive syntax without reparsing. Actual maps
+  are output-only bundler inputs independent of JS extraction.
   Shared `PreparedDeclarations`
   avoids per-file serialization; source/checksum/provenance remain SHA-256.
 - Reference `async_deferred` is required syntax evidence covered by provenance,

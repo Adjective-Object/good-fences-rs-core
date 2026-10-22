@@ -165,6 +165,10 @@ pub(crate) fn extract(
     }
     let (dynamic_namespaces, uses_this) = dynamic_namespace::extract(program, facts);
     let mut result = EmissionFacts::new(
+        program.comments.iter().rev().find_map(|comment| {
+            let text = &program.source_text[comment.span.start as usize..comment.span.end as usize];
+            source_mapping_url(text).map(|_| comment.span)
+        }),
         crate::execution::extract(program, facts),
         Default::default(),
         facts
@@ -391,6 +395,19 @@ pub(crate) fn extract(
         result.set_lazy_candidates(modules, selectors);
     }
     result
+}
+
+/// Extract a directive only from a parser-identified complete comment.
+pub fn source_mapping_url(comment: &str) -> Option<&str> {
+    let body = comment.strip_prefix("//").or_else(|| {
+        comment
+            .strip_prefix("/*")
+            .and_then(|body| body.strip_suffix("*/"))
+    })?;
+    let body = body.strip_prefix('#').or_else(|| body.strip_prefix('@'))?;
+    body.trim_start()
+        .strip_prefix("sourceMappingURL=")
+        .map(str::trim)
 }
 
 fn source_operations(

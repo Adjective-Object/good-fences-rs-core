@@ -107,6 +107,9 @@ discard an unused invocation; input effects and optional guards must survive.
 `facts.emission` owns segment-indexed recipes and placement/name constraints.
 Deferred alternatives own only syntax shape and initializer source slots; keep
 activation policy and generated names derived in the bundler.
+Its optional source_map span identifies the last parser-identified directive,
+including trailing comments. Persist the span even with output maps disabled;
+never load map files or persist resolved upstream inputs during JS extraction.
 `facts.ecco` owns lazy ESM extraction from the same AST with unique segment
 root ownership; CJS stays `None`. Effective `ecco_declarations_hash` is a sealed
 configuration input in both formats, never graph conclusions. Share immutable

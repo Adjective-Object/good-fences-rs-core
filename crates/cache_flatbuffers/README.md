@@ -1,6 +1,6 @@
 # Typed source-cache FlatBuffers
 
-**Production source-cache backend: schema 16/extractor 23, `.seg.fb`.**
+**Production source-cache backend: schema 17/extractor 24, `.seg.fb`.**
 `segment_cache` reads these immutable buffers through AST/Ecco views and runs
 full semantic validation before exposing checked records. Byte-backed parsed
 modules feed graph linking, effect solving and native emission without unpacking
@@ -62,7 +62,7 @@ while graph ranges and derived analysis/emission plans are explicitly owned.
 AST and bundler differential tests cover complete record equality, byte borrowing,
 owner lifetime, execution/recipe validation, ESM/CJS outputs and parallel emission.
 
-Schema 16/extractor 23 are active production identities, included in bundler
+Schema 17/extractor 24 are active production identities, included in bundler
 source-parse fingerprints. Atomic sibling publication uses `.seg.fb.stage-*`;
 inventory ignores current and legacy `.seg.cbor` artifacts, without deleting them.
 Old formats miss/rebuild. This crate's handwritten wire path does not use Serde.
@@ -80,6 +80,16 @@ object without initializer/prototype properties, never effect-free values.
 Unknown options have no structural proof; linking/certification remains derived.
 Selectors also retain optional AST-proven initialized-result binding and complete
 declarator evidence, checked before borrowed consumers inspect captured reads.
+
+## Production upstream-map metadata
+
+`WireSourceMap` stores typed tokens, original/resolved source URLs, nullable
+contents, names, file and sourceRoot in verified `GFUM` FlatBuffers with SHA-256
+integrity. Script bytes, input bytes and map location are sealed independently
+of AST extraction. Bounded structural and borrowed semantic checks reject invalid
+ordering and indices before construction. Warm `.upstream.seg.fb` readers retain
+immutable bytes and use same-line greatest-lower-bound lookup without JSON/DTO
+unpacking, preserving explicit unmapped boundaries.
 
 Ecco's precursor substage is usable independently: `WireEcco` bounds and
 structurally verifies a standalone typed `ParsedFile`, then owns its immutable

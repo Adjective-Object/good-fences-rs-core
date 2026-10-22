@@ -15,6 +15,30 @@ trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
+### Upstream JavaScript source maps
+
+`BuildOptions.output.source_maps` enables external `.map` artifacts and
+composition with each script's last parser-identified `sourceMappingURL` comment.
+Inline JSON data URLs (base64 or percent-encoded) and linked local maps are
+supported; linked files must resolve inside the canonical build root. Remote
+links, missing files, malformed maps and unsupported encodings are errors, not
+fallbacks. No original source or network URL is fetched. Disabled maps discover
+directive spans during extraction but do not load or validate map contents.
+
+Original names and nullable `sourcesContent` survive composition. `sourceRoot`
+and source paths resolve from the linked map location (or script location for
+inline maps), producing absolute source URLs in merged output. Sparse/unmapped
+upstream segments and generated wrappers remain unmapped. Only JavaScript
+script inputs are composed; prepared resource wrappers have no original spans.
+
+Parsed upstream metadata uses a separately checksummed, typed FlatBuffer at
+`<script>.upstream.seg.fb`. It binds exact script/map bytes and map location;
+verified cache hits read borrowed tables without parsing JSON or unpacking
+records. Linked map bytes are rechecked on every build and before no-op returns.
+Maps-only edits invalidate output and reverse users, not JavaScript extraction.
+Enabling/disabling maps is likewise an output-only change. These sidecars do not
+change the separate production AST cache's CBOR lifecycle.
+
 The symbol linker uses scope-hoisted direct ESM bindings and native
 imports/exports only across actual output chunks. Root sets remain reachability
 analysis, not mandatory physical partitions. Public entry/export boundaries
@@ -1612,7 +1636,8 @@ No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
 **Limits:** Linux was executed; Windows atomic replacement/OS locks rely on
 standard-library/tempfile contracts but were not runtime-tested. No
 standalone single-file output, TS/JSX lowering, assets/native addons, executable
-externals, import.meta or source maps. The exact root sets are the existing
+externals or import.meta. Optional JavaScript source maps are described above.
+The exact root sets are the existing
 conservative retention contract, not a whole-program minimality claim. CJS bridge
 semantics intentionally differ from native namespace exotica as documented below.
 Old-reader quiescence is mandatory before pruning immutable prior generations;
@@ -1766,8 +1791,9 @@ Structured fragments preserve original occurrence identities through pruning and
 destination selection. Debug builds parse/semantically check final output once;
 release builds rely on always-on provenance, edit, identifier and target checks.
 Output is JavaScript ESM/CJS only: no TypeScript or JSX
-lowering. The emitter must reject those language modes. No source maps are
-generated or advertised; generated offsets are not original-source positions.
+lowering. The emitter must reject those language modes. Optional BuildSession
+source maps preserve copied-source/renamed-identifier origins through assembly
+and compose upstream mappings after final artifact destination selection.
 Cached segment recipes remove stale in-segment `sourceMappingURL`/`sourceURL` directives; emission
 does not mistake matching string literals or ordinary comments for directives.
 Diagnostics for rejected edits refer to original source bytes.

@@ -724,9 +724,8 @@ fn emit_inner(
                         imports.push(exports.clone());
                         continue;
                     }
-                    let mut renderer = crate::emit::CachedRenderer::new(
-                        module.source,
-                        *facts,
+                    let mut renderer = crate::emit::CachedRenderer::for_module(
+                        module,
                         recipe,
                         recipes.get(&key).copied().unwrap_or_default(),
                     );

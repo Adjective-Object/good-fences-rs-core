@@ -244,6 +244,7 @@ impl Fresh {
 /// own their children; source slots carry the precomputed child roots.
 pub(crate) struct CachedRenderer<'a> {
     source: &'a str,
+    mapping: Option<&'a std::sync::Arc<crate::sourcemap::Source>>,
     facts: ast_segmenter::views::ModuleFacts<'a>,
     recipe: ast_segmenter::views::SegmentRecipe<'a>,
     rewrites: &'a [crate::effects::InvocationRewrite],
@@ -262,6 +263,7 @@ impl<'a> CachedRenderer<'a> {
     ) -> Self {
         Self {
             source,
+            mapping: None,
             facts,
             recipe,
             rewrites,
@@ -270,6 +272,48 @@ impl<'a> CachedRenderer<'a> {
             contexts: Default::default(),
             fresh: Fresh::new(facts),
         }
+    }
+
+    pub(crate) fn for_module(
+        module: &'a crate::link::Module<'_>,
+        recipe: ast_segmenter::views::SegmentRecipe<'a>,
+        rewrites: &'a [crate::effects::InvocationRewrite],
+    ) -> Self {
+        debug_assert!(module.mapping().is_none() || module.path().is_absolute());
+        let mut renderer = Self::new(module.source(), module.facts(), recipe, rewrites);
+        renderer.mapping = module.mapping();
+        renderer
+    }
+
+    pub(crate) fn renamed(
+        &self,
+        span: Span,
+        name: &str,
+        shorthand: ast_segmenter::emission::Shorthand,
+    ) -> eyre::Result<Code> {
+        use ast_segmenter::emission::Shorthand;
+        let Some(mapping) = self.mapping else {
+            return Ok(
+                crate::rewrite::shorthand_replacement(self.source, span, name, shorthand)?.into(),
+            );
+        };
+        let original = self
+            .source
+            .get(span.start as usize..span.end as usize)
+            .ok_or_eyre("invalid UTF-8 identifier span")?;
+        let mut output = match shorthand {
+            Shorthand::None => Code::default(),
+            Shorthand::Property => {
+                let mut key = assembly::apply_source_range(self.source, span, &[], Some(mapping))?;
+                key.push_str(": ");
+                key
+            }
+            Shorthand::Proto => Code::from("[\"__proto__\"]: "),
+        };
+        let mut identifier = Code::from(name);
+        identifier.name_origin(mapping, span.start, original);
+        output.push(identifier);
+        Ok(output)
     }
 
     pub(crate) fn replace(&mut self, operation: u32, replacement: Code) {
@@ -420,7 +464,7 @@ impl<'a> CachedRenderer<'a> {
                 replacement: self.operation(index)?,
             });
         }
-        assembly::apply_range(self.source, range, &edits)
+        assembly::apply_source_range(self.source, range, &edits, self.mapping)
     }
 
     fn operation(&mut self, index: u32) -> eyre::Result<Code> {

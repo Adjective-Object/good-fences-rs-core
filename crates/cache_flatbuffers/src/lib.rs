@@ -13,7 +13,9 @@
 mod cache_generated;
 pub use cache_generated::source_cache as wire;
 
+mod source_map;
 mod verify;
+pub use source_map::{MapData, MapSource, WireSourceMap};
 
 use std::{ops::Range, sync::Arc};
 
@@ -21,8 +23,8 @@ use eyre::{ensure, Result};
 use sha2::{Digest, Sha256};
 
 pub const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
-pub const SCHEMA_VERSION: u32 = 16;
-pub const EXTRACTOR_VERSION: u32 = 23;
+pub const SCHEMA_VERSION: u32 = 17;
+pub const EXTRACTOR_VERSION: u32 = 24;
 pub const MODULE_IDENTIFIER: &str = "GFSM";
 const CHECKSUM_BYTES: usize = 32;
 

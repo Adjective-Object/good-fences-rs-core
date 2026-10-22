@@ -36,6 +36,42 @@ fn linked_options() -> BuildOptions {
 }
 
 #[test]
+fn source_maps_in_checked_external_packages_reuse_borrowed_sidecars() {
+    let dir = TmpDir::new();
+    let root = dir.root().join("project");
+    let package = dir.root().join("package");
+    write(
+        &root,
+        "main.mjs",
+        "import {value} from './linked/value.mjs'; console.log(value);",
+    );
+    write(
+        &package,
+        "value.mjs",
+        "export const value = 1;\n//# sourceMappingURL=value.mjs.map",
+    );
+    write(
+        &package,
+        "value.mjs.map",
+        r#"{"version":3,"sources":["original.ts"],"sourcesContent":["export const value = 1;"],"names":[],"mappings":"AAAA"}"#,
+    );
+    directory_link(&package, &root.join("linked"));
+    let mut config = linked_options();
+    config.output.source_maps = true;
+    let mut session = BuildSession::new(&root).unwrap();
+    let first = session.build(&config).unwrap();
+    assert!(first.product.artifacts.files.iter().any(|(path, text)| {
+        path.extension().is_some_and(|extension| extension == "map") && text.contains("original.ts")
+    }));
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&first.product, &noop.product));
+    let disk = BuildSession::new(&root).unwrap().build(&config).unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.product.artifacts, first.product.artifacts);
+    remove_directory_link(&root.join("linked"));
+}
+
+#[test]
 fn directory_symlink_inside_root_and_self_cycle_are_supported() {
     let dir = TmpDir::new();
     write(dir.root(), "main.mjs", "import {value as a} from './real/value.mjs'; import {value as b} from './alias/value.mjs'; console.log(a === b);");

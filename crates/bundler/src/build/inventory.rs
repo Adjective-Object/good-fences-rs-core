@@ -132,6 +132,7 @@ fn excluded(path: &Path) -> bool {
             || name == "target"
             || name.to_string_lossy().starts_with(".bundler-")
             || segment_cache::is_cache_artifact(path)
+            || crate::upstream::is_cache_artifact(path)
     })
 }
 

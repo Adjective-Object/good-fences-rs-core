@@ -90,6 +90,18 @@ pub(super) fn apply(
         }
     }
     let project = |path: &PathBuf| renames.get(path).cloned().unwrap_or_else(|| path.clone());
+    let map_paths: Vec<_> = if options.output.source_maps {
+        artifacts
+            .files
+            .keys()
+            .map(&project)
+            .chain(aliases.iter().map(|(alias, _, _, _)| alias.clone()))
+            .filter(|path| crate::sourcemap::executable(path))
+            .map(|path| crate::sourcemap::path(&path))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut destinations = BTreeSet::new();
     let mut portable_destinations = BTreeSet::new();
     for path in artifacts
@@ -97,6 +109,7 @@ pub(super) fn apply(
         .keys()
         .map(&project)
         .chain(artifacts.resources.keys().cloned())
+        .chain(map_paths)
         .chain(
             aliases
                 .iter()

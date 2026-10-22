@@ -106,6 +106,7 @@ ModuleFacts {
     ],
     invocations: [],
     emission: EmissionFacts {
+        source_map: None,
         execution: ExecutionFacts {
             contexts: [
                 ExecutionContext {

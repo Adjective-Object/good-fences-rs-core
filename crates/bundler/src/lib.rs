@@ -23,9 +23,11 @@ mod output_url;
 pub mod policy;
 pub mod publish;
 mod resource;
-mod sass;
 pub mod rewrite;
+mod sass;
+mod sourcemap;
 mod symbols;
+mod upstream;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 

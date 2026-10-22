@@ -4899,6 +4899,294 @@ impl HazardsT {
   }
 }
 
+// struct MapToken, aligned to 4
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct MapToken(pub [u8; 24]);
+impl Default for MapToken {
+  fn default() -> Self {
+    Self([0; 24])
+  }
+}
+impl core::fmt::Debug for MapToken {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    f.debug_struct("MapToken")
+      .field("generated_line", &self.generated_line())
+      .field("generated_column", &self.generated_column())
+      .field("original_line", &self.original_line())
+      .field("original_column", &self.original_column())
+      .field("source", &self.source())
+      .field("name", &self.name())
+      .finish()
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for MapToken {}
+impl<'a> flatbuffers::Follow<'a> for MapToken {
+  type Inner = &'a MapToken;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    <&'a MapToken>::follow(buf, loc)
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a MapToken {
+  type Inner = &'a MapToken;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    flatbuffers::follow_cast_ref::<MapToken>(buf, loc)
+  }
+}
+impl<'b> flatbuffers::Push for MapToken {
+    type Output = MapToken;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src = ::core::slice::from_raw_parts(self as *const MapToken as *const u8, <Self as flatbuffers::Push>::size());
+        dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(4)
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for MapToken {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.in_buffer::<Self>(pos)
+  }
+}
+
+impl<'a> MapToken {
+  #[allow(clippy::too_many_arguments)]
+  pub fn new(
+    generated_line: u32,
+    generated_column: u32,
+    original_line: u32,
+    original_column: u32,
+    source: i32,
+    name: i32,
+  ) -> Self {
+    let mut s = Self([0; 24]);
+    s.set_generated_line(generated_line);
+    s.set_generated_column(generated_column);
+    s.set_original_line(original_line);
+    s.set_original_column(original_column);
+    s.set_source(source);
+    s.set_name(name);
+    s
+  }
+
+  pub fn generated_line(&self) -> u32 {
+    let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[0..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_generated_line(&mut self, x: u32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[0..].as_mut_ptr(),
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn generated_column(&self) -> u32 {
+    let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[4..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_generated_column(&mut self, x: u32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[4..].as_mut_ptr(),
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn original_line(&self) -> u32 {
+    let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[8..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_original_line(&mut self, x: u32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[8..].as_mut_ptr(),
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn original_column(&self) -> u32 {
+    let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[12..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_original_column(&mut self, x: u32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[12..].as_mut_ptr(),
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn source(&self) -> i32 {
+    let mut mem = core::mem::MaybeUninit::<<i32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[16..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<i32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_source(&mut self, x: i32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[16..].as_mut_ptr(),
+        core::mem::size_of::<<i32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn name(&self) -> i32 {
+    let mut mem = core::mem::MaybeUninit::<<i32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[20..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<i32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_name(&mut self, x: i32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[20..].as_mut_ptr(),
+        core::mem::size_of::<<i32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn unpack(&self) -> MapTokenT {
+    MapTokenT {
+      generated_line: self.generated_line(),
+      generated_column: self.generated_column(),
+      original_line: self.original_line(),
+      original_column: self.original_column(),
+      source: self.source(),
+      name: self.name(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MapTokenT {
+  pub generated_line: u32,
+  pub generated_column: u32,
+  pub original_line: u32,
+  pub original_column: u32,
+  pub source: i32,
+  pub name: i32,
+}
+impl MapTokenT {
+  pub fn pack(&self) -> MapToken {
+    MapToken::new(
+      self.generated_line,
+      self.generated_column,
+      self.original_line,
+      self.original_column,
+      self.source,
+      self.name,
+    )
+  }
+}
+
 pub enum OptionalIndexOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -24267,14 +24555,15 @@ impl<'a> flatbuffers::Follow<'a> for EmissionFacts<'a> {
 }
 
 impl<'a> EmissionFacts<'a> {
-  pub const VT_EXECUTION: flatbuffers::VOffsetT = 4;
-  pub const VT_SEGMENTS: flatbuffers::VOffsetT = 6;
-  pub const VT_NESTED_BINDINGS: flatbuffers::VOffsetT = 8;
-  pub const VT_FREE_REFERENCES: flatbuffers::VOffsetT = 10;
-  pub const VT_DYNAMIC_NAMESPACES: flatbuffers::VOffsetT = 12;
-  pub const VT_USES_THIS: flatbuffers::VOffsetT = 14;
-  pub const VT_LAZY_MODULES: flatbuffers::VOffsetT = 16;
-  pub const VT_LAZY_SELECTORS: flatbuffers::VOffsetT = 18;
+  pub const VT_SOURCE_MAP: flatbuffers::VOffsetT = 4;
+  pub const VT_EXECUTION: flatbuffers::VOffsetT = 6;
+  pub const VT_SEGMENTS: flatbuffers::VOffsetT = 8;
+  pub const VT_NESTED_BINDINGS: flatbuffers::VOffsetT = 10;
+  pub const VT_FREE_REFERENCES: flatbuffers::VOffsetT = 12;
+  pub const VT_DYNAMIC_NAMESPACES: flatbuffers::VOffsetT = 14;
+  pub const VT_USES_THIS: flatbuffers::VOffsetT = 16;
+  pub const VT_LAZY_MODULES: flatbuffers::VOffsetT = 18;
+  pub const VT_LAZY_SELECTORS: flatbuffers::VOffsetT = 20;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -24293,11 +24582,15 @@ impl<'a> EmissionFacts<'a> {
     if let Some(x) = args.nested_bindings { builder.add_nested_bindings(x); }
     if let Some(x) = args.segments { builder.add_segments(x); }
     if let Some(x) = args.execution { builder.add_execution(x); }
+    if let Some(x) = args.source_map { builder.add_source_map(x); }
     builder.add_uses_this(args.uses_this);
     builder.finish()
   }
 
   pub fn unpack(&self) -> EmissionFactsT {
+    let source_map = self.source_map().map(|x| {
+      x.unpack()
+    });
     let execution = {
       let x = self.execution();
       Box::new(x.unpack())
@@ -24328,6 +24621,7 @@ impl<'a> EmissionFacts<'a> {
       x.iter().map(|t| t.unpack()).collect()
     };
     EmissionFactsT {
+      source_map,
       execution,
       segments,
       nested_bindings,
@@ -24339,6 +24633,13 @@ impl<'a> EmissionFacts<'a> {
     }
   }
 
+  #[inline]
+  pub fn source_map(&self) -> Option<&'a Span> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Span>(EmissionFacts::VT_SOURCE_MAP, None)}
+  }
   #[inline]
   pub fn execution(&self) -> ExecutionFacts<'a> {
     // Safety:
@@ -24404,6 +24705,7 @@ impl flatbuffers::Verifiable for EmissionFacts<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
+     .visit_field::<Span>("source_map", Self::VT_SOURCE_MAP, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<ExecutionFacts>>("execution", Self::VT_EXECUTION, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SegmentRecipe>>>>("segments", Self::VT_SEGMENTS, true)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("nested_bindings", Self::VT_NESTED_BINDINGS, true)?
@@ -24417,6 +24719,7 @@ impl flatbuffers::Verifiable for EmissionFacts<'_> {
   }
 }
 pub struct EmissionFactsArgs<'a> {
+    pub source_map: Option<&'a Span>,
     pub execution: Option<flatbuffers::WIPOffset<ExecutionFacts<'a>>>,
     pub segments: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SegmentRecipe<'a>>>>>,
     pub nested_bindings: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
@@ -24430,6 +24733,7 @@ impl<'a> Default for EmissionFactsArgs<'a> {
   #[inline]
   fn default() -> Self {
     EmissionFactsArgs {
+      source_map: None,
       execution: None, // required field
       segments: None, // required field
       nested_bindings: None, // required field
@@ -24447,6 +24751,10 @@ pub struct EmissionFactsBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EmissionFactsBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_source_map(&mut self, source_map: &Span) {
+    self.fbb_.push_slot_always::<&Span>(EmissionFacts::VT_SOURCE_MAP, source_map);
+  }
   #[inline]
   pub fn add_execution(&mut self, execution: flatbuffers::WIPOffset<ExecutionFacts<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<ExecutionFacts>>(EmissionFacts::VT_EXECUTION, execution);
@@ -24504,6 +24812,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EmissionFactsBuilder<'a, 'b, A>
 impl core::fmt::Debug for EmissionFacts<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("EmissionFacts");
+      ds.field("source_map", &self.source_map());
       ds.field("execution", &self.execution());
       ds.field("segments", &self.segments());
       ds.field("nested_bindings", &self.nested_bindings());
@@ -24518,6 +24827,7 @@ impl core::fmt::Debug for EmissionFacts<'_> {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmissionFactsT {
+  pub source_map: Option<SpanT>,
   pub execution: Box<ExecutionFactsT>,
   pub segments: Vec<SegmentRecipeT>,
   pub nested_bindings: Vec<u32>,
@@ -24530,6 +24840,7 @@ pub struct EmissionFactsT {
 impl Default for EmissionFactsT {
   fn default() -> Self {
     Self {
+      source_map: None,
       execution: Default::default(),
       segments: Default::default(),
       nested_bindings: Default::default(),
@@ -24546,6 +24857,8 @@ impl EmissionFactsT {
     &self,
     _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
   ) -> flatbuffers::WIPOffset<EmissionFacts<'b>> {
+    let source_map_tmp = self.source_map.as_ref().map(|x| x.pack());
+    let source_map = source_map_tmp.as_ref();
     let execution = Some({
       let x = &self.execution;
       x.pack(_fbb)
@@ -24576,6 +24889,7 @@ impl EmissionFactsT {
       let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
     });
     EmissionFacts::create(_fbb, &EmissionFactsArgs{
+      source_map,
       execution,
       segments,
       nested_bindings,
@@ -26112,6 +26426,575 @@ impl CacheRecordT {
     })
   }
 }
+pub enum MapSourceOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct MapSource<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for MapSource<'a> {
+  type Inner = MapSource<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> MapSource<'a> {
+  pub const VT_ORIGINAL: flatbuffers::VOffsetT = 4;
+  pub const VT_URL: flatbuffers::VOffsetT = 6;
+  pub const VT_CONTENT: flatbuffers::VOffsetT = 8;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    MapSource { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args MapSourceArgs<'args>
+  ) -> flatbuffers::WIPOffset<MapSource<'bldr>> {
+    let mut builder = MapSourceBuilder::new(_fbb);
+    if let Some(x) = args.content { builder.add_content(x); }
+    if let Some(x) = args.url { builder.add_url(x); }
+    if let Some(x) = args.original { builder.add_original(x); }
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> MapSourceT {
+    let original = {
+      let x = self.original();
+      x.to_string()
+    };
+    let url = {
+      let x = self.url();
+      x.to_string()
+    };
+    let content = self.content().map(|x| {
+      x.to_string()
+    });
+    MapSourceT {
+      original,
+      url,
+      content,
+    }
+  }
+
+  #[inline]
+  pub fn original(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(MapSource::VT_ORIGINAL, None).unwrap()}
+  }
+  #[inline]
+  pub fn url(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(MapSource::VT_URL, None).unwrap()}
+  }
+  #[inline]
+  pub fn content(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(MapSource::VT_CONTENT, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for MapSource<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("original", Self::VT_ORIGINAL, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("url", Self::VT_URL, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("content", Self::VT_CONTENT, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct MapSourceArgs<'a> {
+    pub original: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub url: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub content: Option<flatbuffers::WIPOffset<&'a str>>,
+}
+impl<'a> Default for MapSourceArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    MapSourceArgs {
+      original: None, // required field
+      url: None, // required field
+      content: None,
+    }
+  }
+}
+
+pub struct MapSourceBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> MapSourceBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_original(&mut self, original: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(MapSource::VT_ORIGINAL, original);
+  }
+  #[inline]
+  pub fn add_url(&mut self, url: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(MapSource::VT_URL, url);
+  }
+  #[inline]
+  pub fn add_content(&mut self, content: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(MapSource::VT_CONTENT, content);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> MapSourceBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    MapSourceBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<MapSource<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, MapSource::VT_ORIGINAL,"original");
+    self.fbb_.required(o, MapSource::VT_URL,"url");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for MapSource<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("MapSource");
+      ds.field("original", &self.original());
+      ds.field("url", &self.url());
+      ds.field("content", &self.content());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapSourceT {
+  pub original: String,
+  pub url: String,
+  pub content: Option<String>,
+}
+impl Default for MapSourceT {
+  fn default() -> Self {
+    Self {
+      original: "".to_string(),
+      url: "".to_string(),
+      content: None,
+    }
+  }
+}
+impl MapSourceT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<MapSource<'b>> {
+    let original = Some({
+      let x = &self.original;
+      _fbb.create_string(x)
+    });
+    let url = Some({
+      let x = &self.url;
+      _fbb.create_string(x)
+    });
+    let content = self.content.as_ref().map(|x|{
+      _fbb.create_string(x)
+    });
+    MapSource::create(_fbb, &MapSourceArgs{
+      original,
+      url,
+      content,
+    })
+  }
+}
+pub enum UpstreamMapOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct UpstreamMap<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for UpstreamMap<'a> {
+  type Inner = UpstreamMap<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> UpstreamMap<'a> {
+  pub const VT_SCHEMA: flatbuffers::VOffsetT = 4;
+  pub const VT_EXTRACTOR: flatbuffers::VOffsetT = 6;
+  pub const VT_SOURCE_HASH: flatbuffers::VOffsetT = 8;
+  pub const VT_INPUT_HASH: flatbuffers::VOffsetT = 10;
+  pub const VT_LOCATION: flatbuffers::VOffsetT = 12;
+  pub const VT_FILE: flatbuffers::VOffsetT = 14;
+  pub const VT_SOURCE_ROOT: flatbuffers::VOffsetT = 16;
+  pub const VT_SOURCES: flatbuffers::VOffsetT = 18;
+  pub const VT_NAMES: flatbuffers::VOffsetT = 20;
+  pub const VT_TOKENS: flatbuffers::VOffsetT = 22;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    UpstreamMap { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args UpstreamMapArgs<'args>
+  ) -> flatbuffers::WIPOffset<UpstreamMap<'bldr>> {
+    let mut builder = UpstreamMapBuilder::new(_fbb);
+    if let Some(x) = args.tokens { builder.add_tokens(x); }
+    if let Some(x) = args.names { builder.add_names(x); }
+    if let Some(x) = args.sources { builder.add_sources(x); }
+    if let Some(x) = args.source_root { builder.add_source_root(x); }
+    if let Some(x) = args.file { builder.add_file(x); }
+    if let Some(x) = args.location { builder.add_location(x); }
+    if let Some(x) = args.input_hash { builder.add_input_hash(x); }
+    if let Some(x) = args.source_hash { builder.add_source_hash(x); }
+    builder.add_extractor(args.extractor);
+    builder.add_schema(args.schema);
+    builder.finish()
+  }
+
+  pub fn unpack(&self) -> UpstreamMapT {
+    let schema = self.schema();
+    let extractor = self.extractor();
+    let source_hash = {
+      let x = self.source_hash();
+      x.unpack()
+    };
+    let input_hash = {
+      let x = self.input_hash();
+      x.unpack()
+    };
+    let location = {
+      let x = self.location();
+      x.to_string()
+    };
+    let file = self.file().map(|x| {
+      x.to_string()
+    });
+    let source_root = self.source_root().map(|x| {
+      x.to_string()
+    });
+    let sources = {
+      let x = self.sources();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    let names = {
+      let x = self.names();
+      x.iter().map(|s| s.to_string()).collect()
+    };
+    let tokens = {
+      let x = self.tokens();
+      x.iter().map(|t| t.unpack()).collect()
+    };
+    UpstreamMapT {
+      schema,
+      extractor,
+      source_hash,
+      input_hash,
+      location,
+      file,
+      source_root,
+      sources,
+      names,
+      tokens,
+    }
+  }
+
+  #[inline]
+  pub fn schema(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(UpstreamMap::VT_SCHEMA, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn extractor(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(UpstreamMap::VT_EXTRACTOR, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn source_hash(&self) -> &'a Sha256 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Sha256>(UpstreamMap::VT_SOURCE_HASH, None).unwrap()}
+  }
+  #[inline]
+  pub fn input_hash(&self) -> &'a Sha256 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Sha256>(UpstreamMap::VT_INPUT_HASH, None).unwrap()}
+  }
+  #[inline]
+  pub fn location(&self) -> &'a str {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(UpstreamMap::VT_LOCATION, None).unwrap()}
+  }
+  #[inline]
+  pub fn file(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(UpstreamMap::VT_FILE, None)}
+  }
+  #[inline]
+  pub fn source_root(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(UpstreamMap::VT_SOURCE_ROOT, None)}
+  }
+  #[inline]
+  pub fn sources(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<MapSource<'a>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<MapSource>>>>(UpstreamMap::VT_SOURCES, None).unwrap()}
+  }
+  #[inline]
+  pub fn names(&self) -> flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>(UpstreamMap::VT_NAMES, None).unwrap()}
+  }
+  #[inline]
+  pub fn tokens(&self) -> flatbuffers::Vector<'a, MapToken> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, MapToken>>>(UpstreamMap::VT_TOKENS, None).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for UpstreamMap<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("schema", Self::VT_SCHEMA, false)?
+     .visit_field::<u32>("extractor", Self::VT_EXTRACTOR, false)?
+     .visit_field::<Sha256>("source_hash", Self::VT_SOURCE_HASH, true)?
+     .visit_field::<Sha256>("input_hash", Self::VT_INPUT_HASH, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("location", Self::VT_LOCATION, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("file", Self::VT_FILE, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("source_root", Self::VT_SOURCE_ROOT, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<MapSource>>>>("sources", Self::VT_SOURCES, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>>>("names", Self::VT_NAMES, true)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, MapToken>>>("tokens", Self::VT_TOKENS, true)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct UpstreamMapArgs<'a> {
+    pub schema: u32,
+    pub extractor: u32,
+    pub source_hash: Option<&'a Sha256>,
+    pub input_hash: Option<&'a Sha256>,
+    pub location: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub file: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub source_root: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub sources: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<MapSource<'a>>>>>,
+    pub names: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>,
+    pub tokens: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, MapToken>>>,
+}
+impl<'a> Default for UpstreamMapArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    UpstreamMapArgs {
+      schema: 0,
+      extractor: 0,
+      source_hash: None, // required field
+      input_hash: None, // required field
+      location: None, // required field
+      file: None,
+      source_root: None,
+      sources: None, // required field
+      names: None, // required field
+      tokens: None, // required field
+    }
+  }
+}
+
+pub struct UpstreamMapBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> UpstreamMapBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_schema(&mut self, schema: u32) {
+    self.fbb_.push_slot::<u32>(UpstreamMap::VT_SCHEMA, schema, 0);
+  }
+  #[inline]
+  pub fn add_extractor(&mut self, extractor: u32) {
+    self.fbb_.push_slot::<u32>(UpstreamMap::VT_EXTRACTOR, extractor, 0);
+  }
+  #[inline]
+  pub fn add_source_hash(&mut self, source_hash: &Sha256) {
+    self.fbb_.push_slot_always::<&Sha256>(UpstreamMap::VT_SOURCE_HASH, source_hash);
+  }
+  #[inline]
+  pub fn add_input_hash(&mut self, input_hash: &Sha256) {
+    self.fbb_.push_slot_always::<&Sha256>(UpstreamMap::VT_INPUT_HASH, input_hash);
+  }
+  #[inline]
+  pub fn add_location(&mut self, location: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(UpstreamMap::VT_LOCATION, location);
+  }
+  #[inline]
+  pub fn add_file(&mut self, file: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(UpstreamMap::VT_FILE, file);
+  }
+  #[inline]
+  pub fn add_source_root(&mut self, source_root: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(UpstreamMap::VT_SOURCE_ROOT, source_root);
+  }
+  #[inline]
+  pub fn add_sources(&mut self, sources: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<MapSource<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(UpstreamMap::VT_SOURCES, sources);
+  }
+  #[inline]
+  pub fn add_names(&mut self, names: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(UpstreamMap::VT_NAMES, names);
+  }
+  #[inline]
+  pub fn add_tokens(&mut self, tokens: flatbuffers::WIPOffset<flatbuffers::Vector<'b , MapToken>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(UpstreamMap::VT_TOKENS, tokens);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> UpstreamMapBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    UpstreamMapBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<UpstreamMap<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    self.fbb_.required(o, UpstreamMap::VT_SOURCE_HASH,"source_hash");
+    self.fbb_.required(o, UpstreamMap::VT_INPUT_HASH,"input_hash");
+    self.fbb_.required(o, UpstreamMap::VT_LOCATION,"location");
+    self.fbb_.required(o, UpstreamMap::VT_SOURCES,"sources");
+    self.fbb_.required(o, UpstreamMap::VT_NAMES,"names");
+    self.fbb_.required(o, UpstreamMap::VT_TOKENS,"tokens");
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for UpstreamMap<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("UpstreamMap");
+      ds.field("schema", &self.schema());
+      ds.field("extractor", &self.extractor());
+      ds.field("source_hash", &self.source_hash());
+      ds.field("input_hash", &self.input_hash());
+      ds.field("location", &self.location());
+      ds.field("file", &self.file());
+      ds.field("source_root", &self.source_root());
+      ds.field("sources", &self.sources());
+      ds.field("names", &self.names());
+      ds.field("tokens", &self.tokens());
+      ds.finish()
+  }
+}
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpstreamMapT {
+  pub schema: u32,
+  pub extractor: u32,
+  pub source_hash: Sha256T,
+  pub input_hash: Sha256T,
+  pub location: String,
+  pub file: Option<String>,
+  pub source_root: Option<String>,
+  pub sources: Vec<MapSourceT>,
+  pub names: Vec<String>,
+  pub tokens: Vec<MapTokenT>,
+}
+impl Default for UpstreamMapT {
+  fn default() -> Self {
+    Self {
+      schema: 0,
+      extractor: 0,
+      source_hash: Default::default(),
+      input_hash: Default::default(),
+      location: "".to_string(),
+      file: None,
+      source_root: None,
+      sources: Default::default(),
+      names: Default::default(),
+      tokens: Default::default(),
+    }
+  }
+}
+impl UpstreamMapT {
+  pub fn pack<'b, A: flatbuffers::Allocator + 'b>(
+    &self,
+    _fbb: &mut flatbuffers::FlatBufferBuilder<'b, A>
+  ) -> flatbuffers::WIPOffset<UpstreamMap<'b>> {
+    let schema = self.schema;
+    let extractor = self.extractor;
+    let source_hash_tmp = Some(self.source_hash.pack());
+    let source_hash = source_hash_tmp.as_ref();
+    let input_hash_tmp = Some(self.input_hash.pack());
+    let input_hash = input_hash_tmp.as_ref();
+    let location = Some({
+      let x = &self.location;
+      _fbb.create_string(x)
+    });
+    let file = self.file.as_ref().map(|x|{
+      _fbb.create_string(x)
+    });
+    let source_root = self.source_root.as_ref().map(|x|{
+      _fbb.create_string(x)
+    });
+    let sources = Some({
+      let x = &self.sources;
+      let w: Vec<_> = x.iter().map(|t| t.pack(_fbb)).collect();_fbb.create_vector(&w)
+    });
+    let names = Some({
+      let x = &self.names;
+      let w: Vec<_> = x.iter().map(|s| _fbb.create_string(s)).collect();_fbb.create_vector(&w)
+    });
+    let tokens = Some({
+      let x = &self.tokens;
+      let w: Vec<_> = x.iter().map(|t| t.pack()).collect();_fbb.create_vector(&w)
+    });
+    UpstreamMap::create(_fbb, &UpstreamMapArgs{
+      schema,
+      extractor,
+      source_hash,
+      input_hash,
+      location,
+      file,
+      source_root,
+      sources,
+      names,
+      tokens,
+    })
+  }
+}
 #[inline]
 /// Verifies that a buffer of bytes contains a `CacheRecord`
 /// and returns it.
@@ -26198,4 +27081,3 @@ pub fn finish_size_prefixed_cache_record_buffer<'a, 'b, A: flatbuffers::Allocato
   fbb.finish_size_prefixed(root, Some(CACHE_RECORD_IDENTIFIER));
 }
 }  // pub mod source_cache
-

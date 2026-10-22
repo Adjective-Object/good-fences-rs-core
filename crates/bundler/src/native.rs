@@ -4,7 +4,6 @@ use source_graph::ExportIdentity;
 use std::collections::{HashMap, HashSet};
 
 use crate::assembly::{Code, Edit};
-use crate::rewrite;
 use crate::symbols::Symbols;
 
 #[path = "native_chunks.rs"]
@@ -1039,9 +1038,8 @@ fn reconstruct(
     let mut output = Code::default();
     let index = key.segment_idx as usize;
     let recipe = facts.emission().segments().get(index).unwrap();
-    let mut renderer = crate::emit::CachedRenderer::new(
-        module.source,
-        facts,
+    let mut renderer = crate::emit::CachedRenderer::for_module(
+        module,
         recipe,
         recipes.get(&key).copied().unwrap_or_default(),
     );
@@ -1068,16 +1066,15 @@ fn reconstruct(
                 binding, shorthand, ..
             } => targets
                 .get(&binding)
-                .map(|name| rewrite::shorthand_replacement(module.source, span, name, *shorthand))
-                .transpose()?
-                .map(Code::from),
+                .map(|name| renderer.renamed(span, name, *shorthand))
+                .transpose()?,
             OperationKind::Reference {
                 reference,
                 shorthand,
             } => {
                 if let Some(expression) = values.generated.get(&(file, *reference)) {
                     let prefix =
-                        rewrite::shorthand_replacement(module.source, span, "", *shorthand)?;
+                        crate::rewrite::shorthand_replacement(module.source, span, "", *shorthand)?;
                     Some(expression.clone().surrounded(prefix, ""))
                 } else {
                     facts
@@ -1086,11 +1083,8 @@ fn reconstruct(
                         .unwrap()
                         .binding()
                         .and_then(|id| targets.get(&id))
-                        .map(|name| {
-                            rewrite::shorthand_replacement(module.source, span, name, *shorthand)
-                        })
+                        .map(|name| renderer.renamed(span, name, *shorthand))
                         .transpose()?
-                        .map(Code::from)
                 }
             }
             OperationKind::Namespace { usage } => {

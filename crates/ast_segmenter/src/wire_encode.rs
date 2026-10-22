@@ -427,6 +427,10 @@ fn recipe(v: &em::SegmentRecipe) -> w::SegmentRecipeT {
 }
 fn emission(v: &em::EmissionFacts) -> w::EmissionFactsT {
     table!(EmissionFactsT {
+        source_map: v.source_map().map(|s| w::SpanT {
+            start: s.start,
+            end: s.end
+        }),
         execution: Box::new(execution(v.execution())),
         segments: v.segments().iter().map(recipe).collect(),
         nested_bindings: ids(v.nested_bindings()),

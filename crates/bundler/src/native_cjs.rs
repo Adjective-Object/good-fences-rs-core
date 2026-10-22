@@ -618,9 +618,8 @@ impl CommonJs {
         let mut availability_imports = BTreeSet::new();
         for &(file, value) in factories {
             let module = &modules[&file];
-            let mut renderer = crate::emit::CachedRenderer::new(
-                module.source,
-                module.parsed.facts(),
+            let mut renderer = crate::emit::CachedRenderer::for_module(
+                module,
                 module.parsed.facts().emission().segments().get(0).unwrap(),
                 &[],
             );

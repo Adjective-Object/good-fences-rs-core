@@ -1193,6 +1193,12 @@ impl<'a> SegmentRecipe<'a> {
     sequence!(operations, Operation<'a>);
 }
 impl<'a> EmissionFacts<'a> {
+    pub fn source_map(self) -> Option<Span> {
+        match self {
+            Self::Owned(value) => value.source_map(),
+            Self::Wire(value) => value.source_map().map(|s| Span::new(s.start(), s.end())),
+        }
+    }
     nested!(execution, ExecutionFacts);
     sequence!(segments, SegmentRecipe<'a>);
     sequence!(nested_bindings, o::BindingId);
@@ -1395,6 +1401,7 @@ equal_view!(
 );
 equal_view!(
     EmissionFacts,
+    source_map,
     execution,
     segments,
     nested_bindings,

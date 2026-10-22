@@ -2,6 +2,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use eyre::{ensure, OptionExt};
@@ -18,6 +19,8 @@ pub(crate) enum RequestKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Part {
     Text(String),
+    Source(Arc<crate::sourcemap::Source>, Span),
+    Named(String, Arc<crate::sourcemap::Source>, u32, String),
     Request(PathBuf, RequestKind),
     External(String, RequestKind),
     Evaluation(PathBuf),
@@ -238,6 +241,17 @@ impl Code {
                 *text = text[end..].to_owned();
             }
         }
+        if let Some(Part::Source(source, span)) = self.parts.first_mut() {
+            let text = source.slice(*span);
+            if text.starts_with("#!") {
+                let end = text.find('\n').map_or(text.len(), |index| index + 1);
+                prefix.parts.push(Part::Source(
+                    source.clone(),
+                    Span::new(span.start, span.start + end as u32),
+                ));
+                span.start += end as u32;
+            }
+        }
         prefix.push(header);
         prefix.push(std::mem::take(self));
         *self = prefix;
@@ -276,15 +290,35 @@ impl Code {
         destination: &Path,
         destinations: &BTreeMap<PathBuf, PathBuf>,
     ) -> eyre::Result<String> {
-        let mut output = String::new();
+        Ok(self
+            .render_with_map(original, destination, destinations, false)?
+            .0)
+    }
+
+    pub(crate) fn render_with_map(
+        &self,
+        original: &Path,
+        destination: &Path,
+        destinations: &BTreeMap<PathBuf, PathBuf>,
+        source_maps: bool,
+    ) -> eyre::Result<(String, Option<oxc_sourcemap::SourceMap>)> {
+        let mut output = crate::sourcemap::Writer::new(source_maps);
         for part in &self.parts {
             let (target, url, evaluation) = match part {
                 Part::Text(text) => {
-                    output.push_str(text);
+                    output.generated(text);
+                    continue;
+                }
+                Part::Source(source, span) => {
+                    output.source(source, *span);
+                    continue;
+                }
+                Part::Named(text, source, offset, name) => {
+                    output.named(text, source, *offset, name);
                     continue;
                 }
                 Part::External(specifier, _) => {
-                    output.push_str(&serde_json::to_string(specifier)?);
+                    output.generated(&serde_json::to_string(specifier)?);
                     continue;
                 }
                 Part::BuildRootUrl(public_url) => {
@@ -298,7 +332,7 @@ impl Code {
                     } else {
                         "../".repeat(depth)
                     };
-                    output.push_str(&format!(
+                    output.generated(&format!(
                         "new URL({}, new URL({}, import.meta.url))",
                         serde_json::to_string(public_url)?,
                         serde_json::to_string(&root)?
@@ -320,14 +354,32 @@ impl Code {
                     .ok_or_eyre("artifact destinations cannot form a relative request")?,
             )?;
             if evaluation {
-                output.push_str("import ");
-                output.push_str(&request);
-                output.push_str(";\n");
+                output.generated("import ");
+                output.generated(&request);
+                output.generated(";\n");
             } else {
-                output.push_str(&request);
+                output.generated(&request);
             }
         }
-        Ok(output)
+        Ok(output.finish(destination))
+    }
+
+    pub(crate) fn name_origin(
+        &mut self,
+        source: &Arc<crate::sourcemap::Source>,
+        offset: u32,
+        name: &str,
+    ) {
+        for part in &mut self.parts {
+            if let Part::Text(text) = part {
+                *part = Part::Named(
+                    std::mem::take(text),
+                    source.clone(),
+                    offset,
+                    name.to_owned(),
+                );
+            }
+        }
     }
 }
 
@@ -355,17 +407,47 @@ pub(crate) struct Edit {
 }
 
 pub(crate) fn apply(source: &str, edits: &[Edit]) -> eyre::Result<Code> {
+    apply_source_range(source, Span::new(0, source.len() as u32), edits, None)
+}
+
+#[cfg(test)]
+pub(crate) fn apply_range(source: &str, range: Span, edits: &[Edit]) -> eyre::Result<Code> {
+    apply_source_range(source, range, edits, None)
+}
+
+pub(crate) fn apply_source_range(
+    source: &str,
+    range: Span,
+    edits: &[Edit],
+    mapping: Option<&Arc<crate::sourcemap::Source>>,
+) -> eyre::Result<Code> {
+    let text = source
+        .get(range.start as usize..range.end as usize)
+        .ok_or_eyre("invalid UTF-8 source slot")?;
     let mut edits: Vec<_> = edits.iter().collect();
     edits.sort_by_key(|e| (e.span.start, e.span.end));
-    let mut end = 0;
+    let mut end = range.start as usize;
     let mut previous = None;
     let mut output = Code::default();
+    let copied = |output: &mut Code, start: usize, end: usize| {
+        if start < end {
+            if let Some(mapping) = mapping {
+                output.parts.push(Part::Source(
+                    mapping.clone(),
+                    Span::new(start as u32, end as u32),
+                ));
+            } else {
+                output.push_str(&source[start..end]);
+            }
+        }
+    };
     for edit in edits {
         let start = edit.span.start as usize;
         let next = edit.span.end as usize;
         ensure!(
             start <= next
-                && next <= source.len()
+                && start >= range.start as usize
+                && next <= range.end as usize
                 && source.is_char_boundary(start)
                 && source.is_char_boundary(next),
             "invalid UTF-8 edit range {start}..{next}"
@@ -374,33 +456,13 @@ pub(crate) fn apply(source: &str, edits: &[Edit]) -> eyre::Result<Code> {
             start >= end && previous != Some(start),
             "overlapping edits at bytes {start}..{next}"
         );
-        output.push_str(&source[end..start]);
+        copied(&mut output, end, start);
         output.push(edit.replacement.clone());
         end = next;
         previous = Some(start);
     }
-    output.push_str(source.get(end..).ok_or_eyre("invalid final edit range")?);
+    copied(&mut output, end, range.start as usize + text.len());
     Ok(output)
-}
-
-pub(crate) fn apply_range(source: &str, range: Span, edits: &[Edit]) -> eyre::Result<Code> {
-    let text = source
-        .get(range.start as usize..range.end as usize)
-        .ok_or_eyre("invalid UTF-8 source slot")?;
-    let edits = edits
-        .iter()
-        .map(|edit| {
-            ensure!(
-                range.start <= edit.span.start && edit.span.end <= range.end,
-                "edit outside original source slot"
-            );
-            Ok(Edit {
-                span: Span::new(edit.span.start - range.start, edit.span.end - range.start),
-                replacement: edit.replacement.clone(),
-            })
-        })
-        .collect::<eyre::Result<Vec<_>>>()?;
-    apply(text, &edits)
 }
 
 pub(crate) fn relative_request(importer: &Path, target: &Path, url: bool) -> Option<String> {
@@ -455,6 +517,55 @@ pub(crate) fn relative_request(importer: &Path, target: &Path, url: bool) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_hashbang_and_late_request_lengths_preserve_following_source_positions() {
+        let text = "#!/usr/bin/env node\nconst before=import('./dep.mjs'); console.log('AFTER');";
+        let source = crate::sourcemap::Source::new(
+            &std::env::current_dir().unwrap().join("input.mjs"),
+            text,
+        )
+        .unwrap();
+        let start = text.find("'./dep.mjs'").unwrap() as u32;
+        let mut code = apply_source_range(
+            text,
+            Span::new(0, text.len() as u32),
+            &[Edit {
+                span: Span::new(start, start + "'./dep.mjs'".len() as u32),
+                replacement: Code::request("dep.mjs".into(), RequestKind::DynamicImport),
+            }],
+            Some(&source),
+        )
+        .unwrap();
+        code.prepend_after_hashbang("const helper = 1;\n".into());
+        let destinations = BTreeMap::from([("dep.mjs".into(), "some/longer/renamed #.mjs".into())]);
+        let (output, map) = code
+            .render_with_map(
+                Path::new("entry.mjs"),
+                Path::new("deep/start.mjs"),
+                &destinations,
+                true,
+            )
+            .unwrap();
+        assert!(output.starts_with("#!/usr/bin/env node\nconst helper = 1;\n"));
+        let output_line = output.lines().nth(2).unwrap();
+        assert!(output_line.contains("../some/longer/renamed%20%23.mjs"));
+        let map = map.unwrap();
+        let lookup = map.generate_lookup_table();
+        let token = map
+            .lookup_source_view_token(&lookup, 2, output_line.find("'AFTER'").unwrap() as u32)
+            .unwrap();
+        assert_eq!(token.get_src_line(), 1);
+        assert_eq!(
+            token.get_src_col(),
+            text.lines().nth(1).unwrap().find("'AFTER'").unwrap() as u32
+        );
+        assert!(map
+            .lookup_source_view_token(&lookup, 1, 0)
+            .unwrap()
+            .get_source()
+            .is_none());
+    }
 
     #[test]
     fn requests_follow_destinations_without_rewriting_source_lookalikes() {

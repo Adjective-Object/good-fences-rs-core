@@ -1,6 +1,14 @@
 # bundler
 
 Consume owned-or-wire syntax views and checked shared graph edges, never UsedTag.
+Upstream maps are output-only inputs: extraction seals the last real directive
+span; enabled planning loads bounded inline/local maps into verified typed
+`.upstream.seg.fb` records. Recheck linked bytes on no-op/return, invalidate map
+owners/reverse users without JS extraction, and compose through borrowed tokens.
+Resolve sourceRoot at map location; never fetch sources/network links or replace
+unmapped upstream segments with compiled-source mappings.
+Local map targets must belong to the checked canonical inventory, including
+explicit linked trees; never read arbitrary external map files.
 Keep immutable AST/Ecco owners alive through graph and worker reads; never
 unpack cached facts for linking, validation, execution constraints or recipes.
 Solve cached Ecco precursors on the complete checked graph, using canonical export
@@ -200,7 +208,7 @@ Rewrites use checked original UTF-8 byte spans. Debug-validate final executable
 artifacts once after naming; release never parses output. Keep identifier,
 provenance, target and edit checks always on; strip hints through cached operations.
 Never apply overlapping recipe edits independently. Keep native ESM
-live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering or source maps.
+live bindings/TDZ; no snapshot alias exports. No TS/JSX lowering.
 Instantiate cached operation parents/source slots with original binding/request
 IDs; replacing parents own nested rewrites, never reconnect generated text.
 Materialize complete recipe MultiSpans, not just segment ownership ranges.

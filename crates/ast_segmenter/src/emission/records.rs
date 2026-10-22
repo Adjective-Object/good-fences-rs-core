@@ -239,6 +239,8 @@ pub enum DeferredForm {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmissionFacts {
+    #[serde(with = "crate::owned::span_serde::optional")]
+    source_map: Option<Span>,
     execution: crate::execution::ExecutionFacts,
     /// Same indices as `ParsedModule::segments`; CommonJS has one opaque recipe.
     segments: Vec<SegmentRecipe>,
@@ -252,6 +254,7 @@ pub struct EmissionFacts {
 
 impl EmissionFacts {
     pub(crate) fn new(
+        source_map: Option<Span>,
         execution: crate::execution::ExecutionFacts,
         segments: Vec<SegmentRecipe>,
         nested_bindings: Vec<BindingId>,
@@ -260,6 +263,7 @@ impl EmissionFacts {
         uses_this: bool,
     ) -> Self {
         Self {
+            source_map,
             execution,
             segments,
             nested_bindings,
@@ -292,6 +296,9 @@ impl EmissionFacts {
     }
     pub fn uses_this(&self) -> bool {
         self.uses_this
+    }
+    pub fn source_map(&self) -> Option<Span> {
+        self.source_map
     }
     pub fn execution(&self) -> &crate::execution::ExecutionFacts {
         &self.execution

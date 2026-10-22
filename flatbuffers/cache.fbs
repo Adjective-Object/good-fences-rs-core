@@ -18,6 +18,33 @@ table CacheRecord {
   module:[ubyte] (required, nested_flatbuffer: "CachedModule");
   provenance:SourceProvenance (required);
 }
+
+table MapSource {
+  original:string (required);
+  url:string (required);
+  content:string;
+}
+struct MapToken {
+  generated_line:uint;
+  generated_column:uint;
+  original_line:uint;
+  original_column:uint;
+  source:int;
+  name:int;
+}
+// Separately sealed output-only metadata; changes never invalidate JS extraction.
+table UpstreamMap {
+  schema:uint;
+  extractor:uint;
+  source_hash:Sha256 (required);
+  input_hash:Sha256 (required);
+  location:string (required);
+  file:string;
+  source_root:string;
+  sources:[MapSource] (required);
+  names:[string] (required);
+  tokens:[MapToken] (required);
+}
 root_type CacheRecord;
 file_identifier "GFSC";
 file_extension "seg.fb";

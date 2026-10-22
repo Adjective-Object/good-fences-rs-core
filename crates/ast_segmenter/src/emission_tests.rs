@@ -753,3 +753,25 @@ fn hints_and_opaque_cjs_keep_only_source_local_request_slots() {
             | crate::views::OperationKind::SourceHint { .. }
     )));
 }
+#[test]
+fn source_map_discovery_uses_last_real_comment_including_trailing_comments() {
+    let source = "//# sourceMappingURL=first.map\nexport const text = `//# sourceMappingURL=fake.map`;\n/*@ sourceMappingURL=final.map */";
+    let facts = parse(source);
+    let span = facts.emission().source_map().unwrap();
+    assert_eq!(
+        source_mapping_url(&source[span.start as usize..span.end as usize]),
+        Some("final.map")
+    );
+    assert!(
+        parse("export const text = '//# sourceMappingURL=fake.map';")
+            .emission()
+            .source_map()
+            .is_none()
+    );
+    assert!(
+        parse("// sourceMappingURL=ordinary.map\nexport const text = 1;")
+            .emission()
+            .source_map()
+            .is_none()
+    );
+}

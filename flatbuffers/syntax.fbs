@@ -192,6 +192,7 @@ table SegmentRecipe {
   deferred:DeferredForm (required);
 }
 table EmissionFacts {
+  source_map:Span;
   execution:ExecutionFacts (required);
   segments:[SegmentRecipe] (required);
   nested_bindings:[uint] (required);

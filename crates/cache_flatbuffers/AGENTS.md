@@ -1,7 +1,10 @@
 # cache_flatbuffers
 
-- This is the production `.seg.fb` backend (schema 16/extractor 23).
+- This is the production `.seg.fb` backend (schema 17/extractor 24).
   `segment_cache` adds source-local semantic validation before exposing records.
+- Upstream maps use verified typed `WireSourceMap` bytes in `.upstream.seg.fb`,
+  with script/input/location seals, bounded verification and borrowed token/index
+  validation. Preserve null contents and unmapped tokens; never unpack on hits.
 - `flatbuffers/*.fbs` is authoritative. Keep `cache_generated.rs` byte-for-byte
   compiler output; regenerate using pinned flatc 25.2.10, matching the runtime.
   Only this generated module has narrowly scoped generated-code lint expectations.

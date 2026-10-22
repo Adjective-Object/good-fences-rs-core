@@ -90,6 +90,9 @@ this owner and the shared semantic gate. Owned extraction provenance also hashes
 the typed module, not CBOR; warm provenance checks reuse the verified immutable
 owner and check exact table/range identity without rescanning its tree.
 `to_flatbuffer` on a wire module returns its already checked bytes.
+`facts.emission().source_map()` borrows the last parser-identified
+`sourceMappingURL` comment span, including trailing comments. Only source-local
+evidence is sealed; map loading, resolution and output policy belong to bundler.
 Serde remains for debug/test projections and the independent once-per-configuration
 declaration fingerprint (CBOR for compatibility), never per-file wire loading.
 
