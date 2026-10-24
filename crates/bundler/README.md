@@ -76,6 +76,13 @@ derived graph-edge state only. Graph/output fingerprints depend on actual source
 dependency facts, resolved edges and resolver policy: unrelated JSON/config or
 disconnected Berry lockfile edits do not change no-op product generations.
 
+Each current build has one shared row per resolver request, carrying its original
+memo and demand state. Package publication indexes share those rows rather than
+copying request keys or proofs. Only validated demanded requests are promoted to
+session memory; they remain reusable after failed builds, while speculative tails
+are discarded even on early errors. Retained requests revalidate their original
+fresh or borrowed disk proofs on first use in each filesystem epoch.
+
 Inventory admission, manifest reads and script/Sass resolution share one
 build-scoped filesystem snapshot, including speculative workers' reads.
 Speculative inventories still retain private observations/admission state; only
@@ -1808,7 +1815,16 @@ From the repository root (Node 22, tested v22.22.2; repository Rust toolchain):
 ./scripts/bundler-release-check
 mkdir -p target/p1-test-tmp
 TMPDIR="$PWD/target/p1-test-tmp" cargo bench -p bundler --bench incremental
+cargo bench -p bundler --bench cleanup
 ```
+
+The cleanup benchmark uses managed temporary 130-module projects with one and
+four workers. It reports Rust allocation/deallocation counts and bytes alongside
+cold/no-op builds, failed attempts, error destruction, session destruction with
+and without a surviving product, and final product destruction. Failed-attempt
+timings include preparation, not just cleanup. Assertions cover no-op product
+identity and product usability after session destruction; these small fixtures
+do not predict teardown timings for a large application.
 
 The release script tests bundler/parser/resolver/cache/shared graphs/tracker/
 good-fences compatibility, builds the public driver, runs both harness regression

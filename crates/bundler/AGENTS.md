@@ -30,6 +30,11 @@ Hot proof/path/manifest lookups retain original observations without recapture.
 Validate persisted observations on first epoch use, and use new snapshots for
 final/no-op checks. Publication may reuse its validated boundary snapshot;
 post-publication checks must start fresh. Keep speculative inventories private.
+Current-build resolution requests own one stable shared row with demand state;
+publication indexes reference rows, not copied keys/memos. Only validated demanded
+requests enter retained session memory, including useful requests before failure.
+Speculative requests never escape through memory. Release request/package map
+guards before proof validation, filesystem IO or publication.
 Trace numeric resolver counts on returned errors as well as success; distinguish
 resolution proof hits from extraction hits and never record request/path data.
 

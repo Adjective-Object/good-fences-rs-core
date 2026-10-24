@@ -53,3 +53,7 @@ test_tmpdir = { path = "../test_tmpdir" }
 [[bench]]
 name = "incremental"
 harness = false
+
+[[bench]]
+name = "cleanup"
+harness = false

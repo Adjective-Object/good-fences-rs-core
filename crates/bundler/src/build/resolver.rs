@@ -1,6 +1,6 @@
 use parking_lot::RwLock;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -13,7 +13,6 @@ use crate::{
     resolution_cache::{CheckedResolution, Request, Roots, Store, Target},
 };
 
-type RequestKey = (u8, String, String);
 type MemoKey = ([u8; 32], [u8; 32], [u8; 32], PathBuf, u8, String);
 
 #[cfg(test)]
@@ -22,16 +21,21 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-#[derive(Clone)]
 enum Proof {
     Fresh(InputProof),
-    Disk(Arc<CheckedResolution>, RequestKey),
+    Disk(Arc<CheckedResolution>, String),
 }
 
-impl Proof {
+struct Memo {
+    key: Arc<MemoKey>,
+    target: ResolvedDependency,
+    proof: Proof,
+}
+
+impl Memo {
     fn file_routes(&self, target: &Path) -> eyre::Result<Vec<PathBuf>> {
-        match self {
-            Self::Fresh(inputs) => Ok(inputs
+        match &self.proof {
+            Proof::Fresh(inputs) => Ok(inputs
                 .inputs()
                 .iter()
                 .filter_map(|input| {
@@ -46,18 +50,21 @@ impl Proof {
                     })
                 })
                 .collect()),
-            Self::Disk(record, (mode, importer, specifier)) => {
-                record.file_routes(wire::Mode(*mode), importer, specifier, target)
+            Proof::Disk(record, importer) => {
+                record.file_routes(wire::Mode(self.key.4), importer, &self.key.5, target)
             }
         }
     }
 
     fn validate_in(&self, snapshot: &InputSnapshot) -> eyre::Result<()> {
-        match self {
-            Self::Fresh(inputs) => inputs.validate_in(snapshot),
-            Self::Disk(record, (mode, importer, specifier)) => {
-                record.revalidate_request_in(wire::Mode(*mode), importer, specifier, snapshot)
-            }
+        match &self.proof {
+            Proof::Fresh(inputs) => inputs.validate_in(snapshot),
+            Proof::Disk(record, importer) => record.revalidate_request_in(
+                wire::Mode(self.key.4),
+                importer,
+                &self.key.5,
+                snapshot,
+            ),
         }
     }
 }
@@ -82,29 +89,11 @@ impl DependencyResolver for Admitting<'_> {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<ResolvedDependency> {
-        self.resolver.validate_speculation(base, specifier, mode)?;
-        let target = self.resolver.resolve_dependency(base, specifier, mode)?;
-        self.resolver.mark_demanded(base, specifier, mode)?;
+        let request = self.resolver.resolve_request(base, specifier, mode)?;
+        self.resolver.demand(&request)?;
+        let target = request.memo.target.clone();
         if let ResolvedDependency::File(path) = &target {
-            let mode_id = if mode == ResolutionMode::Import { 0 } else { 1 };
-            let package = self.resolver.package(base)?;
-            let key = self.resolver.packages.read()[&package].key;
-            let memo_key = (
-                key.policy,
-                key.instance,
-                key.dependencies,
-                base.into(),
-                mode_id,
-                specifier.into(),
-            );
-            let proof = self
-                .resolver
-                .used
-                .read()
-                .get(&memo_key)
-                .map(|memo| memo.proof.clone())
-                .expect("resolved request proof");
-            let mut routes = proof.file_routes(path)?;
+            let mut routes = request.memo.file_routes(path)?;
             // A package resolved from a canonical linked importer can also have
             // a named project installation. Check that exact package edge only;
             // never search node_modules or authorize an unlinked ancestor tree.
@@ -161,23 +150,25 @@ impl DependencyResolver for Admitting<'_> {
     }
 }
 
-#[derive(Clone)]
-struct Memo {
-    target: ResolvedDependency,
-    proof: Arc<Proof>,
+struct CurrentRequest {
+    memo: Arc<Memo>,
+    demanded: AtomicBool,
     cache_hit: bool,
 }
 
 #[derive(Clone, Default)]
-pub(super) struct Memory(Arc<RwLock<BTreeMap<MemoKey, Memo>>>);
+pub(super) struct Memory(Arc<RwLock<BTreeMap<Arc<MemoKey>, Arc<Memo>>>>);
 
 impl Memory {
     pub(super) fn retain_used(&self, script: &BuildResolver, sass: &BuildResolver) {
-        let script = script.used.read();
-        let sass = sass.used.read();
-        self.0
-            .write()
-            .retain(|key, _| script.contains_key(key) || sass.contains_key(key));
+        let script = script.requests.read();
+        let sass = sass.requests.read();
+        self.0.write().retain(|key, _| {
+            [script.get(key), sass.get(key)]
+                .into_iter()
+                .flatten()
+                .any(|request| request.demanded.load(Ordering::Relaxed))
+        });
     }
 }
 
@@ -259,12 +250,12 @@ impl Lockfile {
     }
 }
 
+#[derive(Clone)]
 struct Package {
     roots: Roots,
     key: Key,
-    store: Store,
     loaded: Option<Arc<CheckedResolution>>,
-    fresh: BTreeMap<RequestKey, Memo>,
+    fresh: Vec<Arc<CurrentRequest>>,
 }
 
 /// The source-edge map is derived state, never a resolution authority. Each
@@ -279,8 +270,7 @@ pub(super) struct BuildResolver {
     mode: CacheMode,
     lockfile: Arc<Lockfile>,
     memory: Memory,
-    used: RwLock<BTreeMap<MemoKey, Memo>>,
-    demanded: RwLock<BTreeSet<MemoKey>>,
+    requests: RwLock<BTreeMap<Arc<MemoKey>, Arc<CurrentRequest>>>,
     packages: RwLock<BTreeMap<PathBuf, Package>>,
     bases: RwLock<BTreeMap<PathBuf, PathBuf>>,
     package_inputs: RwLock<Vec<PathInput>>,
@@ -292,34 +282,25 @@ pub(super) struct BuildResolver {
 }
 
 impl BuildResolver {
-    fn validate_speculation(
-        &self,
-        base: &Path,
-        specifier: &str,
-        mode: ResolutionMode,
-    ) -> eyre::Result<()> {
-        let package = self.package(base)?;
-        let key = self.packages.read()[&package].key;
-        let request = (
-            key.policy,
-            key.instance,
-            key.dependencies,
-            base.into(),
-            if mode == ResolutionMode::Import { 0 } else { 1 },
-            specifier.into(),
-        );
-        if !self.demanded.read().contains(&request) {
-            let memo = self.used.read().get(&request).cloned();
-            if let Some(memo) = memo {
-                memo.proof
-                    .validate_in(self.inner.snapshot())
-                    .wrap_err_with(|| {
-                        format!(
-                            "revalidating speculative resolution of {specifier:?} from {}",
-                            base.display()
-                        )
-                    })?;
-            }
+    fn demand(&self, request: &CurrentRequest) -> eyre::Result<()> {
+        if !request.demanded.load(Ordering::Relaxed) {
+            request
+                .memo
+                .validate_in(self.inner.snapshot())
+                .wrap_err_with(|| {
+                    format!(
+                        "revalidating speculative resolution of {:?} from {}",
+                        request.memo.key.5,
+                        request.memo.key.3.display()
+                    )
+                })?;
+            // Precise requests remain useful after failure, but speculative
+            // requests must never escape this build through retained memory.
+            self.memory
+                .0
+                .write()
+                .insert(request.memo.key.clone(), request.memo.clone());
+            request.demanded.store(true, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -338,39 +319,15 @@ impl BuildResolver {
         }
     }
 
-    fn mark_demanded(
-        &self,
-        base: &Path,
-        specifier: &str,
-        mode: ResolutionMode,
-    ) -> eyre::Result<()> {
-        let package = self.package(base)?;
-        let key = self.packages.read()[&package].key;
-        self.demanded.write().insert((
-            key.policy,
-            key.instance,
-            key.dependencies,
-            base.into(),
-            if mode == ResolutionMode::Import { 0 } else { 1 },
-            specifier.into(),
-        ));
-        Ok(())
-    }
-
     pub(super) fn retain_precise(&self) {
-        let mut used = self.used.write();
-        let demanded = self.demanded.read();
-        used.retain(|key, _| demanded.contains(key));
-        let proofs: BTreeSet<_> = used
-            .values()
-            .map(|memo| Arc::as_ptr(&memo.proof) as usize)
-            .collect();
+        let mut requests = self.requests.write();
+        requests.retain(|_, request| request.demanded.load(Ordering::Relaxed));
         let bases = self.bases.read();
-        let packages: BTreeSet<_> = used
+        let packages: BTreeSet<_> = requests
             .keys()
             .filter_map(|key| bases.get(key.3.parent()?).cloned())
             .collect();
-        let ancestry: BTreeSet<_> = used
+        let ancestry: BTreeSet<_> = requests
             .keys()
             .flat_map(|key| {
                 key.3
@@ -383,7 +340,7 @@ impl BuildResolver {
         self.packages.write().retain(|path, package| {
             package
                 .fresh
-                .retain(|_, memo| proofs.contains(&(Arc::as_ptr(&memo.proof) as usize)));
+                .retain(|request| request.demanded.load(Ordering::Relaxed));
             packages.contains(path)
         });
         self.package_inputs.write().retain(|input| {
@@ -486,8 +443,7 @@ impl BuildResolver {
             mode: options.cache,
             lockfile,
             memory,
-            used: RwLock::new(BTreeMap::new()),
-            demanded: RwLock::new(BTreeSet::new()),
+            requests: RwLock::new(BTreeMap::new()),
             packages: RwLock::new(BTreeMap::new()),
             bases: RwLock::new(BTreeMap::new()),
             package_inputs: RwLock::new(Vec::new()),
@@ -591,9 +547,8 @@ impl BuildResolver {
                 .or_insert_with(|| Package {
                     roots,
                     key,
-                    store,
                     loaded: load.record.map(Arc::new),
-                    fresh: BTreeMap::new(),
+                    fresh: Vec::new(),
                 });
         }
         self.bases.write().insert(directory.into(), package.clone());
@@ -601,19 +556,21 @@ impl BuildResolver {
     }
 
     pub(super) fn recheck(&self) -> eyre::Result<()> {
+        let requests: Vec<_> = self.requests.read().values().cloned().collect();
         let _span = tracing::info_span!(
             "resolve.recheck",
             packages = self.packages.read().len(),
-            requests = self.used.read().len()
+            requests = requests.len()
         )
         .entered();
         self.lockfile.recheck()?;
         let snapshot = InputSnapshot::default();
-        for input in self.package_inputs.read().iter() {
+        let inputs = self.package_inputs.read().clone();
+        for input in &inputs {
             snapshot.validate(input)?;
         }
-        for memo in self.used.read().values() {
-            memo.proof.validate_in(&snapshot)?;
+        for request in requests {
+            request.memo.validate_in(&snapshot)?;
         }
         *self.last_validation.write() = Some(snapshot);
         Ok(())
@@ -621,11 +578,19 @@ impl BuildResolver {
 
     /// Called only after all build inputs have passed final validation.
     pub(super) fn finish(&self, counters: &mut Counters, warnings: &mut Vec<String>) {
-        let used = self.used.read();
-        let hits = used.values().filter(|memo| memo.cache_hit).count();
-        counters.resolutions += used.len() - hits;
+        let requests = self.requests.read();
+        let demanded = requests
+            .values()
+            .filter(|request| request.demanded.load(Ordering::Relaxed))
+            .count();
+        let hits = requests
+            .values()
+            .filter(|request| request.demanded.load(Ordering::Relaxed) && request.cache_hit)
+            .count();
+        drop(requests);
+        counters.resolutions += demanded - hits;
         counters.resolution_cache_hits += hits;
-        counters.resolution_cache_misses += used.len() - hits;
+        counters.resolution_cache_misses += demanded - hits;
         warnings.extend(
             self.warnings
                 .read()
@@ -636,15 +601,32 @@ impl BuildResolver {
             return;
         }
         let snapshot = self.last_validation.read().clone().unwrap_or_default();
-        for (path, package) in self.packages.read().iter() {
-            if package.fresh.is_empty() {
-                continue;
-            }
+        let packages: Vec<_> = self
+            .packages
+            .read()
+            .iter()
+            .filter(|(_, package)| !package.fresh.is_empty())
+            .map(|(path, package)| (path.clone(), package.clone()))
+            .collect();
+        for (path, package) in packages {
             let mut records: Vec<_> = package.loaded.iter().map(|r| r.as_ref().clone()).collect();
-            for ((mode, importer, specifier), memo) in &package.fresh {
-                let Proof::Fresh(inputs) = memo.proof.as_ref() else {
+            for request in &package.fresh {
+                if !request.demanded.load(Ordering::Relaxed) {
+                    continue;
+                }
+                let memo = &request.memo;
+                let Proof::Fresh(inputs) = &memo.proof else {
                     continue;
                 };
+                let importer = memo
+                    .key
+                    .3
+                    .strip_prefix(&path)
+                    .expect("request package")
+                    .components()
+                    .map(|component| component.as_os_str().to_str().expect("cacheable importer"))
+                    .collect::<Vec<_>>()
+                    .join("/");
                 let target = match &memo.target {
                     ResolvedDependency::File(path) => Target::File(path),
                     ResolvedDependency::External(name) => Target::External(name),
@@ -653,9 +635,9 @@ impl BuildResolver {
                     package.roots.clone(),
                     package.key,
                     &[Request {
-                        mode: wire::Mode(*mode),
-                        importer,
-                        specifier,
+                        mode: wire::Mode(memo.key.4),
+                        importer: &importer,
+                        specifier: &memo.key.5,
                         target,
                         inputs,
                     }],
@@ -679,7 +661,8 @@ impl BuildResolver {
                 &snapshot,
             ) {
                 Ok(record) => {
-                    if let CacheWrite::Failed(error) = package.store.save_in(&record, &snapshot) {
+                    let store = Store::new(package.roots.clone(), package.key, self.mode);
+                    if let CacheWrite::Failed(error) = store.save_in(&record, &snapshot) {
                         warnings.push(format!(
                             "{}: resolution cache write failed: {error}",
                             path.display()
@@ -709,13 +692,13 @@ impl Drop for BuildResolver {
     }
 }
 
-impl DependencyResolver for BuildResolver {
-    fn resolve_dependency(
+impl BuildResolver {
+    fn resolve_request(
         &self,
         base: &Path,
         specifier: &str,
         mode: ResolutionMode,
-    ) -> eyre::Result<ResolvedDependency> {
+    ) -> eyre::Result<Arc<CurrentRequest>> {
         let _span = tracing::info_span!("resolve.request").entered();
         #[cfg(test)]
         if let Some(observer) = &self.observer {
@@ -731,7 +714,6 @@ impl DependencyResolver for BuildResolver {
             .map(|parts| parts.join("/"));
         let cacheable = importer.is_some();
         let importer = importer.unwrap_or_default();
-        let request_key = (mode_id, importer, specifier.to_owned());
         let key = self.packages.read()[&package_path].key;
         let memo_key = (
             key.policy,
@@ -741,18 +723,22 @@ impl DependencyResolver for BuildResolver {
             mode_id,
             specifier.into(),
         );
-        if let Some(memo) = self.used.read().get(&memo_key) {
-            return Ok(memo.target.clone());
+        if let Some(request) = self.requests.read().get(&memo_key) {
+            return Ok(request.clone());
         }
         let memory = self.memory.0.read().get(&memo_key).cloned();
-        let mut memo = memory.filter(|memo| memo.proof.validate_in(self.inner.snapshot()).is_ok());
+        let mut memo = memory.filter(|memo| memo.validate_in(self.inner.snapshot()).is_ok());
+        let memo_key = match &memo {
+            Some(memo) => memo.key.clone(),
+            None => Arc::new(memo_key),
+        };
         if memo.is_none() && cacheable {
             let loaded = self.packages.read()[&package_path].loaded.clone();
             if let Some(record) = loaded {
-                if let Some(request) = record.find(wire::Mode(mode_id), &request_key.1, specifier) {
+                if let Some(request) = record.find(wire::Mode(mode_id), &importer, specifier) {
                     record.revalidate_request_in(
                         wire::Mode(mode_id),
-                        &request_key.1,
+                        &importer,
                         specifier,
                         self.inner.snapshot(),
                     )?;
@@ -760,22 +746,22 @@ impl DependencyResolver for BuildResolver {
                         Some(name) => ResolvedDependency::External(name.into()),
                         None => ResolvedDependency::File(
                             record
-                                .file_target(wire::Mode(mode_id), &request_key.1, specifier)?
+                                .file_target(wire::Mode(mode_id), &importer, specifier)?
                                 .expect("checked file target"),
                         ),
                     };
-                    memo = Some(Memo {
+                    memo = Some(Arc::new(Memo {
+                        key: memo_key.clone(),
                         target,
-                        proof: Arc::new(Proof::Disk(record, request_key.clone())),
-                        cache_hit: true,
-                    });
+                        proof: Proof::Disk(record, importer.clone()),
+                    }));
                 }
             }
         }
+        let cache_hit = memo.is_some();
         let memo = match memo {
-            Some(mut memo) => {
+            Some(memo) => {
                 self.hits.fetch_add(1, Ordering::Relaxed);
-                memo.cache_hit = true;
                 memo
             }
             None => {
@@ -785,11 +771,11 @@ impl DependencyResolver for BuildResolver {
                     .inner
                     .resolve_dependency_with_inputs(base, specifier, mode)?;
                 tracked.inputs.validate_in(self.inner.snapshot())?;
-                Memo {
+                Arc::new(Memo {
+                    key: memo_key,
                     target: tracked.dependency,
-                    proof: Arc::new(Proof::Fresh(tracked.inputs)),
-                    cache_hit: false,
-                }
+                    proof: Proof::Fresh(tracked.inputs),
+                })
             }
         };
         if (self.hits.load(Ordering::Relaxed) + self.misses.load(Ordering::Relaxed))
@@ -804,19 +790,50 @@ impl DependencyResolver for BuildResolver {
             )
             .entered();
         }
-        if cacheable && matches!(memo.proof.as_ref(), Proof::Fresh(_)) {
+        let mut inserted = false;
+        let request = self
+            .requests
+            .write()
+            .entry(memo.key.clone())
+            .or_insert_with(|| {
+                inserted = true;
+                Arc::new(CurrentRequest {
+                    memo,
+                    demanded: AtomicBool::new(false),
+                    cache_hit,
+                })
+            })
+            .clone();
+        if inserted && cacheable && matches!(request.memo.proof, Proof::Fresh(_)) {
             let mut packages = self.packages.write();
             let package = packages.get_mut(&package_path).expect("package");
             if package.loaded.as_ref().is_none_or(|record| {
                 record
-                    .find(wire::Mode(mode_id), &request_key.1, specifier)
+                    .find(wire::Mode(mode_id), &importer, specifier)
                     .is_none()
             }) {
-                package.fresh.insert(request_key, memo.clone());
+                package.fresh.push(request.clone());
             }
         }
-        self.used.write().insert(memo_key.clone(), memo.clone());
-        self.memory.0.write().insert(memo_key, memo.clone());
-        Ok(memo.target)
+        Ok(request)
     }
 }
+
+impl DependencyResolver for BuildResolver {
+    fn resolve_dependency(
+        &self,
+        base: &Path,
+        specifier: &str,
+        mode: ResolutionMode,
+    ) -> eyre::Result<ResolvedDependency> {
+        Ok(self
+            .resolve_request(base, specifier, mode)?
+            .memo
+            .target
+            .clone())
+    }
+}
+
+#[cfg(test)]
+#[path = "resolver_tests.rs"]
+mod tests;
