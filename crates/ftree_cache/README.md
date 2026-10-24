@@ -34,6 +34,15 @@ observations against that epoch without unpacking a proof tree.
 After filesystem changes, invalidate or replace both the snapshot and the
 context cache together.
 
+`PathInput` clones share their immutable original observation record and
+link-prefix slice rather than duplicating native paths and link buffers.
+Content seals remain independent scalar values on each handle. Immutable
+`InputProof` arrays are shared across clones; mutable request collectors
+still snapshot/replay observations in their original order. Retained proofs
+keep only consulted records alive, not the filesystem snapshot, cached file
+contents or unrelated speculative observations. All owners remain reclaimable
+through ordinary reference-counted cleanup.
+
 Context values and proofs are published together through per-key cells.
 Returned handles own an `Arc`, not a DashMap shard lock; initializers run outside
 shard locks, and unrelated contexts can initialize concurrently. Invalidation

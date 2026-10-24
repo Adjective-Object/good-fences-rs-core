@@ -20,14 +20,33 @@ pub enum InputKind {
     Other,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PathInput {
+    observation: Arc<PathObservation>,
+    content: Option<[u8; 32]>,
+}
+
+impl std::fmt::Debug for PathInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PathInput")
+            .field("path", &self.path())
+            .field("kind", &self.kind())
+            .field("canonical", &self.canonical())
+            .field("identity", &self.identity())
+            .field("links", &self.links())
+            .field("content", &self.content)
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PathObservation {
     path: PathBuf,
     kind: InputKind,
     canonical: Option<PathBuf>,
     identity: Option<(u64, u64)>,
-    links: Vec<(PathBuf, PathBuf)>,
-    content: Option<[u8; 32]>,
+    links: Arc<[(PathBuf, PathBuf)]>,
 }
 
 fn absent(error: &io::Error) -> bool {
@@ -83,11 +102,13 @@ impl PathInput {
     ) -> eyre::Result<Self> {
         eyre::ensure!(path.is_absolute(), "resolution input path is not absolute");
         let input = Self {
-            path,
-            kind,
-            canonical,
-            identity,
-            links,
+            observation: Arc::new(PathObservation {
+                path,
+                kind,
+                canonical,
+                identity,
+                links: links.into(),
+            }),
             content,
         };
         input.validate()?;
@@ -117,10 +138,10 @@ impl PathInput {
                 }
             }
         }
-        Self::capture_with_links(path, links)
+        Self::capture_with_links(path, links.into())
     }
 
-    fn capture_with_links(path: PathBuf, links: Vec<(PathBuf, PathBuf)>) -> eyre::Result<Self> {
+    fn capture_with_links(path: PathBuf, links: Arc<[(PathBuf, PathBuf)]>) -> eyre::Result<Self> {
         let (kind, canonical, identity) = match fs::metadata(&path) {
             Ok(metadata) => (
                 if metadata.is_file() {
@@ -144,33 +165,35 @@ impl PathInput {
             }
         };
         Ok(Self {
-            path,
-            kind,
-            canonical,
-            identity,
-            links,
+            observation: Arc::new(PathObservation {
+                path,
+                kind,
+                canonical,
+                identity,
+                links,
+            }),
             content: None,
         })
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.observation.path
     }
 
     pub fn kind(&self) -> InputKind {
-        self.kind
+        self.observation.kind
     }
 
     pub fn canonical(&self) -> Option<&Path> {
-        self.canonical.as_deref()
+        self.observation.canonical.as_deref()
     }
 
     pub fn identity(&self) -> Option<(u64, u64)> {
-        self.identity
+        self.observation.identity
     }
 
     pub fn links(&self) -> &[(PathBuf, PathBuf)] {
-        &self.links
+        &self.observation.links
     }
 
     pub fn content_seal(&self) -> Option<&[u8; 32]> {
@@ -183,26 +206,26 @@ impl PathInput {
     }
 
     pub fn validate(&self) -> eyre::Result<()> {
-        let mut fresh = Self::capture(&self.path)
-            .wrap_err_with(|| format!("revalidating observed input {}", self.path.display()))?;
-        if self.content.is_some() && fresh.kind == InputKind::File {
+        let mut fresh = Self::capture(self.path())
+            .wrap_err_with(|| format!("revalidating observed input {}", self.path().display()))?;
+        if self.content.is_some() && fresh.kind() == InputKind::File {
             fresh.seal_content(
-                &fs::read(&self.path)
-                    .wrap_err_with(|| format!("reading sealed input {}", self.path.display()))?,
+                &fs::read(self.path())
+                    .wrap_err_with(|| format!("reading sealed input {}", self.path().display()))?,
             );
-            let mut after = Self::capture(&self.path)
-                .wrap_err_with(|| format!("rechecking sealed input {}", self.path.display()))?;
+            let mut after = Self::capture(self.path())
+                .wrap_err_with(|| format!("rechecking sealed input {}", self.path().display()))?;
             after.content = fresh.content;
             eyre::ensure!(
                 fresh == after,
                 "resolution input changed while validating: {}",
-                self.path.display()
+                self.path().display()
             );
         }
         eyre::ensure!(
             self == &fresh,
             "resolution input changed: {}",
-            self.path.display()
+            self.path().display()
         );
         Ok(())
     }
@@ -218,11 +241,13 @@ impl PathInput {
     ) -> eyre::Result<Self> {
         eyre::ensure!(path.is_absolute(), "resolution input path is not absolute");
         let input = Self {
-            path,
-            kind,
-            canonical,
-            identity,
-            links,
+            observation: Arc::new(PathObservation {
+                path,
+                kind,
+                canonical,
+                identity,
+                links: links.into(),
+            }),
             content,
         };
         snapshot.validate(&input)?;
@@ -233,8 +258,8 @@ impl PathInput {
 /// Ordered observations, including cached observations at their point of use.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InputProof {
-    inputs: Vec<PathInput>,
-    errors: Vec<String>,
+    inputs: Arc<[PathInput]>,
+    errors: Arc<[String]>,
 }
 
 impl InputProof {
@@ -244,7 +269,7 @@ impl InputProof {
 
     pub fn validate(&self) -> eyre::Result<()> {
         self.check_errors()?;
-        for input in &self.inputs {
+        for input in self.inputs.iter() {
             input.validate()?;
         }
         Ok(())
@@ -252,7 +277,7 @@ impl InputProof {
 
     pub fn validate_in(&self, snapshot: &InputSnapshot) -> eyre::Result<()> {
         self.check_errors()?;
-        for input in &self.inputs {
+        for input in self.inputs.iter() {
             snapshot.validate(input)?;
         }
         Ok(())
@@ -271,8 +296,14 @@ impl InputProof {
 /// Request-owned, explicit collector. Clones share only this request's capture.
 #[derive(Clone, Debug, Default)]
 pub struct InputObserver {
-    proof: Arc<Mutex<InputProof>>,
+    proof: Arc<Mutex<Capture>>,
     snapshot: Option<InputSnapshot>,
+}
+
+#[derive(Debug, Default)]
+struct Capture {
+    inputs: Vec<PathInput>,
+    errors: Vec<String>,
 }
 
 impl InputObserver {
@@ -321,7 +352,11 @@ impl InputObserver {
     }
 
     pub fn proof(&self) -> InputProof {
-        self.proof.lock().clone()
+        let capture = self.proof.lock();
+        InputProof {
+            inputs: capture.inputs.clone().into(),
+            errors: capture.errors.clone().into(),
+        }
     }
 
     pub fn position(&self) -> (usize, usize) {
@@ -332,8 +367,8 @@ impl InputObserver {
     pub fn since(&self, position: (usize, usize)) -> InputProof {
         let capture = self.proof.lock();
         InputProof {
-            inputs: capture.inputs[position.0..].to_vec(),
-            errors: capture.errors[position.1..].to_vec(),
+            inputs: capture.inputs[position.0..].into(),
+            errors: capture.errors[position.1..].into(),
         }
     }
 
@@ -365,11 +400,11 @@ mod tests {
         original.seal_content(b"{}");
         let reconstruct = |input: &PathInput| {
             PathInput::checked_from_parts(
-                input.path.clone(),
-                input.kind,
-                input.canonical.clone(),
-                input.identity,
-                input.links.clone(),
+                input.path().into(),
+                input.kind(),
+                input.canonical().map(Path::to_owned),
+                input.identity(),
+                input.links().to_vec(),
                 input.content,
             )
         };
@@ -378,10 +413,10 @@ mod tests {
         forged.content = Some([0; 32]);
         assert!(reconstruct(&forged).is_err());
         forged = original.clone();
-        forged.identity = Some((0, 0));
+        Arc::make_mut(&mut forged.observation).identity = Some((0, 0));
         assert!(reconstruct(&forged).is_err());
         forged = original.clone();
-        forged.path = PathBuf::from("manifest");
+        Arc::make_mut(&mut forged.observation).path = PathBuf::from("manifest");
         assert!(reconstruct(&forged).is_err());
         let missing = PathInput::capture(&dir.root().join("missing")).unwrap();
         reconstruct(&missing).unwrap();

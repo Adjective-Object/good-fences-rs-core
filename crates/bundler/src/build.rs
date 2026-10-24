@@ -30,6 +30,7 @@ mod discovery;
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
 mod prepare;
+mod scratch;
 
 pub use crate::css_selection::CssModules;
 
@@ -338,11 +339,14 @@ impl BuildSession {
         drop(resolution_fingerprint_span);
         tracing::info!(target: "bundler::progress", "Loading resolver and lockfile");
         let lockfile = resolver::Lockfile::read(&self.root, &mut warnings, options.execution)?;
+        let herd = bumpalo_herd::Herd::new();
+        let scratch = scratch::Scratch::new(&herd);
         let resolver = resolver::BuildResolver::new(
             &self.root,
             options,
             lockfile.clone(),
             self.resolution_memory.clone(),
+            &scratch,
         )
         .admitting(&inventory);
         let mut sass_options = options.clone();
@@ -357,6 +361,7 @@ impl BuildSession {
             &sass_options,
             lockfile,
             self.resolution_memory.clone(),
+            &scratch,
         )
         .admitting(&inventory);
         let mut queue = VecDeque::new();

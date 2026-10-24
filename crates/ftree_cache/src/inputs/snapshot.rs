@@ -24,7 +24,7 @@ impl Error for SharedError {
 }
 
 type Cell<T> = Arc<OnceLock<Result<T, SharedError>>>;
-type Links = Arc<Vec<(PathBuf, PathBuf)>>;
+type Links = Arc<[(PathBuf, PathBuf)]>;
 type Contents = (PathInput, Option<Arc<[u8]>>);
 
 #[derive(Debug, Default)]
@@ -70,9 +70,9 @@ impl InputSnapshot {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     let target = fs::read_link(path)
                         .wrap_err_with(|| format!("reading input link {}", path.display()))?;
-                    let mut links = parent.as_ref().clone();
+                    let mut links = parent.to_vec();
                     links.push((path.into(), target));
-                    Ok(Arc::new(links))
+                    Ok(links.into())
                 }
 
                 Ok(_) => Ok(parent),
@@ -92,7 +92,7 @@ impl InputSnapshot {
             self.0
                 .captures
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            PathInput::capture_with_links(path.clone(), links.as_ref().clone())
+            PathInput::capture_with_links(path.clone(), links)
         })
     }
 
@@ -102,7 +102,7 @@ impl InputSnapshot {
             .wrap_err_with(|| format!("resolving content input path {}", path.display()))?;
         initialize(cell(&self.0.contents, &path), || {
             let mut input = self.capture(&path)?;
-            if input.kind == InputKind::Missing {
+            if input.kind() == InputKind::Missing {
                 return Ok((input, None));
             }
             #[cfg(test)]
@@ -216,5 +216,67 @@ mod tests {
             assert!(format!("{error:#}").contains("reading content input"));
         }
         assert_eq!(snapshot.0.content_reads.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn retained_original_observations_share_storage_without_retaining_the_epoch() {
+        let dir = test_tmpdir::test_tmpdir! { "manifest" => "{}" };
+        let path = dir.root().join("manifest");
+        let missing = dir.root().join("missing");
+        let snapshot = InputSnapshot::default();
+        let epoch = Arc::downgrade(&snapshot.0);
+        let original = snapshot.capture(&path).unwrap();
+        let observation = Arc::downgrade(&original.observation);
+        let observer = InputObserver::with_snapshot(snapshot.clone());
+        observer.read(&path).unwrap();
+        observer.is_file(&missing);
+        let proof = observer.proof();
+        assert!(Arc::ptr_eq(
+            &original.observation,
+            &proof.inputs()[0].observation
+        ));
+        assert!(Arc::ptr_eq(
+            &original.observation.links,
+            &proof.inputs()[1].observation.links
+        ));
+        let cloned = proof.clone();
+        assert!(Arc::ptr_eq(&proof.inputs, &cloned.inputs));
+        let fork = observer.fork();
+        fork.replay(&proof);
+        let replayed = fork.since((0, 0));
+        assert!(Arc::ptr_eq(
+            &original.observation,
+            &replayed.inputs()[0].observation
+        ));
+        drop((observer, fork, snapshot, original));
+        assert!(epoch.upgrade().is_none());
+        proof.validate().unwrap();
+        fs::write(&missing, "").unwrap();
+        assert!(proof.validate().is_err());
+        fs::remove_file(&missing).unwrap();
+        fs::write(&path, "{\"changed\":true}").unwrap();
+        assert!(proof.validate().is_err());
+        drop((proof, cloned, replayed));
+        assert!(observation.upgrade().is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn shared_original_link_observations_still_reject_retargeting() {
+        let dir = test_tmpdir::test_tmpdir! { "one/entry" => "", "two/entry" => "" };
+        let link = dir.root().join("link");
+        std::os::unix::fs::symlink(dir.root().join("one"), &link).unwrap();
+        let snapshot = InputSnapshot::default();
+        let first = snapshot.capture(&link.join("entry")).unwrap();
+        let sibling = snapshot.capture(&link.join("missing")).unwrap();
+        assert!(Arc::ptr_eq(
+            &first.observation.links,
+            &sibling.observation.links
+        ));
+        drop(snapshot);
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(dir.root().join("two"), &link).unwrap();
+        assert!(first.validate().is_err());
+        assert!(sibling.validate().is_err());
     }
 }

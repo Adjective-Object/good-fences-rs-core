@@ -83,6 +83,15 @@ session memory; they remain reusable after failed builds, while speculative tail
 are discarded even on early errors. Retained requests revalidate their original
 fresh or borrowed disk proofs on first use in each filesystem epoch.
 
+Attempt-local request keys, native path/request/target payloads and drop-free
+rows use a lexical scratch arena. Each participating worker acquires one
+`bumpalo-herd` Member through attempt-local thread storage, not per allocation.
+Native path units round-trip without Unicode conversion. Proof/Arc owners,
+locks, errors and map buckets retain normal RAII cleanup. Precise promotion
+copies only demanded key/target payloads into independently owned session
+memory and shares the original compact proofs. Neither retained caches nor
+returned products pin the scratch arena or its filesystem epoch.
+
 Inventory admission, manifest reads and script/Sass resolution share one
 build-scoped filesystem snapshot, including speculative workers' reads.
 Speculative inventories still retain private observations/admission state; only
@@ -1825,6 +1834,13 @@ and without a surviving product, and final product destruction. Failed-attempt
 timings include preparation, not just cleanup. Assertions cover no-op product
 identity and product usability after session destruction; these small fixtures
 do not predict teardown timings for a large application.
+
+Compared with request-table-only baseline `16f5a50`, three alternating release
+runs of this fixture reduced one-worker no-op allocations from about 78,239 to
+68,702 (12.2%). Session destruction with a surviving product performed 25,792
+deallocations instead of 26,978 (4.4% fewer); failed-session destruction performed
+23,558 instead of 23,958 (1.7% fewer). Final product destruction remained at 8,692.
+Wall-clock timings were variable; no large-application cleanup speedup is claimed.
 
 The release script tests bundler/parser/resolver/cache/shared graphs/tracker/
 good-fences compatibility, builds the public driver, runs both harness regression

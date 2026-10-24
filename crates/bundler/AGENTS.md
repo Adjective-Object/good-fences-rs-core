@@ -35,6 +35,12 @@ publication indexes reference rows, not copied keys/memos. Only validated demand
 requests enter retained session memory, including useful requests before failure.
 Speculative requests never escape through memory. Release request/package map
 guards before proof validation, filesystem IO or publication.
+Attempt-local request keys, native path/request/target payloads and Copy rows
+borrow one lexical scratch herd. Per-attempt thread-local Members acquire once
+per participating worker; no per-allocation herd lock or global TLS owner.
+Only Copy payloads enter bump storage; Arc/proof/lock/error owners stay RAII.
+Promote demanded keys/targets to independent retained owners, sharing original
+compact proofs; never let retained memory or products borrow scratch.
 Trace numeric resolver counts on returned errors as well as success; distinguish
 resolution proof hits from extraction hits and never record request/path data.
 

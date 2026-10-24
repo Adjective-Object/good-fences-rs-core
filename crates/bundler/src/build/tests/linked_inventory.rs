@@ -893,11 +893,14 @@ fn unenumerated_ancestor_package_shadowing_never_reuses_stale_success() {
     let config = linked_options();
     let mut session = BuildSession::new(&root).unwrap();
     let first = fresh_parity(&mut session, &config);
+    let herd = bumpalo_herd::Herd::new();
+    let scratch = scratch::Scratch::new(&herd);
     let checked = resolver::BuildResolver::new(
         &root,
         &config,
         resolver::Lockfile::read(&root, &mut Vec::new(), config.execution).unwrap(),
         resolver::Memory::default(),
+        &scratch,
     );
     checked
         .resolve_dependency(&package.join("index.mjs"), "dep", ResolutionMode::Import)
@@ -993,11 +996,14 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     // Nineteen fixed edges and only the final diamond are expanded.
     assert_eq!(visits, 22);
     let config = linked_options();
+    let herd = bumpalo_herd::Herd::new();
+    let scratch = scratch::Scratch::new(&herd);
     let resolver = resolver::BuildResolver::new(
         root,
         &config,
         resolver::Lockfile::read(root, &mut Vec::new(), config.execution).unwrap(),
         resolver::Memory::default(),
+        &scratch,
     );
     let resolved = crate::context::resolve(
         root,
