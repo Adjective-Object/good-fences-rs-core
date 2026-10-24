@@ -198,13 +198,18 @@ pub struct BuildResult {
     pub warnings: Vec<String>,
 }
 
-#[derive(Clone)]
 struct Source {
     css_identity: Option<PathBuf>,
     input: Vec<u8>,
     text: String,
     record: CacheRecord,
     transpiled: Option<Transpiled>,
+}
+
+impl link::SourceTexts for BTreeMap<PathBuf, Source> {
+    fn text(&self, path: &Path) -> Option<&str> {
+        self.get(path).map(|source| source.text.as_str())
+    }
 }
 
 #[derive(Clone)]
@@ -392,9 +397,9 @@ impl BuildSession {
                 .filter(|path| !scheduled.contains(path))
                 .map(prepare::Job::Speculate),
         );
-        let mut inputs: Vec<OwnedSourceFileInput> = Vec::new();
-        let mut sources = BTreeMap::new();
+        let mut prepared_paths = BTreeSet::new();
         let mut loaded_sources = BTreeMap::new();
+        let mut loaded_transpiled = BTreeMap::new();
         let previous = &self.sources;
         let mut relocations = BTreeMap::new();
         let mut require_resources = BTreeMap::new();
@@ -622,10 +627,7 @@ impl BuildSession {
                             loaded_sources.insert(path.clone(), source);
                         }
                         if let Some(transpiled) = loaded.transpiled {
-                            let source = loaded_sources.entry(path.clone()).or_insert_with(|| {
-                                previous.get(&path).expect("reused prepared source").clone()
-                            });
-                            source.transpiled = Some(transpiled);
+                            loaded_transpiled.insert(path.clone(), transpiled);
                         }
                         let source = loaded_sources
                             .get(&path)
@@ -634,7 +636,9 @@ impl BuildSession {
                         if options.output.source_maps
                             && kind == crate::resource::ResourceKind::Script
                         {
-                            let (text, hint) = if let Some(transpiled) = &source.transpiled {
+                            let transpiled =
+                                loaded_transpiled.get(&path).or(source.transpiled.as_ref());
+                            let (text, hint) = if let Some(transpiled) = transpiled {
                                 (
                                     std::str::from_utf8(&source.input)?,
                                     transpiled.source_map_hint,
@@ -680,7 +684,6 @@ impl BuildSession {
                         if !has_context && self.resolutions.get(&path) != Some(&resolved) {
                             changed.insert(path.clone());
                         }
-                        self.resolutions.insert(path.clone(), resolved.clone());
                         for target in resolved.values() {
                             if let DependencyTarget::File(path) = target {
                                 discovered.insert(path.clone());
@@ -688,19 +691,8 @@ impl BuildSession {
                                 discovered.extend(candidates.values().cloned());
                             }
                         }
-                        let graph_input = if kind == crate::resource::ResourceKind::Script
-                            && source.transpiled.is_none()
-                        {
-                            OwnedSourceFileInput::from_parsed
-                        } else {
-                            OwnedSourceFileInput::from_prepared_resource
-                        };
-                        inputs.push(graph_input(
-                            path.clone(),
-                            loaded.parsed,
-                            resolved.into_iter().collect(),
-                        ));
-                        sources.insert(path.clone(), source.text.clone());
+                        self.resolutions.insert(path.clone(), resolved);
+                        prepared_paths.insert(path.clone());
                         Ok(())
                     })();
                     let failed = result.is_err();
@@ -713,7 +705,7 @@ impl BuildSession {
                     if last_progress.elapsed() >= Duration::from_secs(1) {
                         tracing::info!(
                             target: "bundler::progress",
-                            modules = inputs.len(),
+                            modules = prepared_paths.len(),
                             source_parses = counters.source_parses,
                             memory_hits = counters.memory_hits,
                             disk_hits = counters.disk_hits,
@@ -840,12 +832,6 @@ impl BuildSession {
                 self.resolutions
                     .get_mut(&path)
                     .expect("context source")
-                    .insert(dependency, target.clone());
-                inputs
-                    .iter_mut()
-                    .find(|input| input.path == path)
-                    .expect("context source")
-                    .resolutions
                     .insert(dependency, target);
             }
             jobs = prepare::enqueue(
@@ -865,8 +851,14 @@ impl BuildSession {
         }
         warnings.extend(styles.warnings().cloned());
         self.sources.extend(loaded_sources);
+        for (path, transpiled) in loaded_transpiled {
+            self.sources
+                .get_mut(&path)
+                .expect("loaded prepared source")
+                .transpiled = Some(transpiled);
+        }
         // CSS closure identity can change while its generated module stays equal.
-        for path in sources.keys() {
+        for path in &prepared_paths {
             if matches!(
                 crate::resource::kind(path, &options.css),
                 crate::resource::ResourceKind::Stylesheet { .. }
@@ -883,7 +875,7 @@ impl BuildSession {
         }
         tracing::info!(
             target: "bundler::progress",
-            modules = inputs.len(),
+            modules = prepared_paths.len(),
             source_parses = counters.source_parses,
             speculative_parses = counters.speculative_parses,
             memory_hits = counters.memory_hits,
@@ -893,14 +885,14 @@ impl BuildSession {
         self.upstreams = upstreams;
         warnings.sort();
         for path in self.sources.keys() {
-            if !sources.contains_key(path) {
+            if !prepared_paths.contains(path) {
                 self.pending_invalidated.insert(path.clone());
             }
         }
         let invalidated = self.reverse_users(self.pending_invalidated.clone());
-        self.sources.retain(|path, _| sources.contains_key(path));
+        self.sources.retain(|path, _| prepared_paths.contains(path));
         self.resolutions
-            .retain(|path, _| sources.contains_key(path));
+            .retain(|path, _| prepared_paths.contains(path));
         resolver.retain_precise();
         sass_resolver.retain_precise();
         tracing::info!(target: "bundler::progress", "Checking build fingerprints");
@@ -1065,11 +1057,36 @@ impl BuildSession {
         // optimize only after benchmarks justify a finer later-layer worklist.
         tracing::info!(
             target: "bundler::progress",
-            modules = inputs.len(),
+            modules = prepared_paths.len(),
             "Constructing and validating source graph"
         );
-        let graph_span = tracing::info_span!("build.graph", modules = inputs.len()).entered();
-        inputs.sort_by(|a, b| a.path.cmp(&b.path));
+        let graph_span =
+            tracing::info_span!("build.graph", modules = prepared_paths.len()).entered();
+        let inputs = self
+            .sources
+            .iter()
+            .map(|(path, source)| {
+                let parsed = source.record.to_parsed(&source.text).wrap_err_with(|| {
+                    format!("borrowing prepared graph facts for {}", path.display())
+                })?;
+                let graph_input = if crate::resource::kind(path, &options.css)
+                    == crate::resource::ResourceKind::Script
+                    && source.transpiled.is_none()
+                {
+                    OwnedSourceFileInput::from_parsed
+                } else {
+                    OwnedSourceFileInput::from_prepared_resource
+                };
+                Ok(graph_input(
+                    path.clone(),
+                    parsed,
+                    self.resolutions[path]
+                        .iter()
+                        .map(|(id, target)| (*id, target.clone()))
+                        .collect(),
+                ))
+            })
+            .collect::<eyre::Result<Vec<_>>>()?;
         let graph = SourceGraph::from_owned(inputs);
         graph
             .validate_links()
@@ -1097,21 +1114,22 @@ impl BuildSession {
             })
             .wrap_err("planning retained modules and chunks")?;
         warnings.extend(plan.retention.warnings.iter().cloned());
-        let mappings = sources
+        let mappings = self
+            .sources
             .iter()
             .filter(|(path, _)| {
                 options.output.source_maps
                     && crate::resource::kind(path, &options.css)
                         == crate::resource::ResourceKind::Script
             })
-            .map(|(path, text)| {
-                let compiler_map = self.sources[path]
+            .map(|(path, source)| {
+                let compiler_map = source
                     .transpiled
                     .as_ref()
                     .and_then(|transpiled| transpiled.source_map.clone());
                 crate::sourcemap::Source::with_maps(
                     path,
-                    text,
+                    &source.text,
                     compiler_map
                         .into_iter()
                         .chain(
@@ -1129,7 +1147,7 @@ impl BuildSession {
             &graph,
             &plan,
             &options.effects,
-            &sources,
+            &self.sources,
             &relocations,
             options.resolver.target_env == TargetEnv::Browser,
             &require_resources,

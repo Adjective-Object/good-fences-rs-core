@@ -461,11 +461,21 @@ pub(crate) fn esm_plan_activated(
     )
 }
 
+pub(crate) trait SourceTexts {
+    fn text(&self, path: &std::path::Path) -> Option<&str>;
+}
+
+impl SourceTexts for BTreeMap<PathBuf, String> {
+    fn text(&self, path: &std::path::Path) -> Option<&str> {
+        self.get(path).map(String::as_str)
+    }
+}
+
 pub(crate) fn esm_plan_configured(
     graph: &SourceGraph,
     plan: &ChunkPlan,
     policy: &EffectPolicy,
-    sources: &BTreeMap<PathBuf, String>,
+    sources: &dyn SourceTexts,
     relocations: &BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
     browser: bool,
     require_resources: &BTreeMap<PathBuf, crate::resource::RequireValue>,
@@ -502,14 +512,14 @@ pub(crate) fn esm_plan_configured(
 fn load_modules<'a>(
     graph: &'a SourceGraph,
     plan: &ChunkPlan,
-    sources: &'a BTreeMap<PathBuf, String>,
+    sources: &'a dyn SourceTexts,
     relocations: &'a BTreeMap<PathBuf, Vec<crate::css_loading::UrlRelocation>>,
 ) -> eyre::Result<BTreeMap<u32, Module<'a>>> {
     let mut modules = BTreeMap::new();
     for &file in &plan.retention.modules {
         let path = graph.file_path(file).ok_or_eyre("missing linked module")?;
         let source = sources
-            .get(path)
+            .text(path)
             .ok_or_else(|| eyre::eyre!("{}: missing linked source text", path.display()))?;
         let parsed = crate::emit::checked_source(graph, file, source)?;
         path.to_str()

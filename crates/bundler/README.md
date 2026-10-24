@@ -27,6 +27,13 @@ trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
+Preparation stages only source identities and settled resolutions, not owning
+graph inputs or a second source-text map. New products construct graph inputs
+once from checked session records after the no-op check; linking borrows the
+settled source owners. Failed attempts retain useful prepared sources without
+replacing the last product. Returned products own their graph records independently
+of the session; no-op builds retain the existing product.
+
 ### Package-local resolution caches
 
 Production `BuildSession` resolves actual literal/context/resource requests through

@@ -6,10 +6,10 @@ use test_tmpdir::TmpDir;
 mod source_maps;
 
 mod browser;
+mod discovery;
 mod resolution_cache;
 mod sass;
 mod transpile;
-mod discovery;
 
 #[cfg(any(unix, windows))]
 mod linked_inventory;
@@ -271,6 +271,143 @@ fn tracing_preserves_noop_product_and_counters() {
     assert_eq!(traced.counters.source_reparses, 0);
     assert_eq!(traced.counters.fragment_reparses, 0);
     assert_eq!(traced.counters.final_validations, 0);
+}
+
+#[test]
+fn graph_inputs_are_materialized_only_for_new_successful_products() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tracing_subscriber::prelude::*;
+
+    struct Materializations(Arc<AtomicUsize>);
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Materializations {
+        fn on_new_span(
+            &self,
+            attributes: &tracing::span::Attributes<'_>,
+            _: &tracing::span::Id,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if attributes.metadata().name() == "cache.to_parsed" {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    for workers in [1, 4] {
+        let dir = TmpDir::new();
+        write(
+            dir.root(),
+            "main.mjs",
+            "import './a.mjs'; import './z.mjs';",
+        );
+        write(dir.root(), "a.mjs", "console.log(1);");
+        write(dir.root(), "z.mjs", "console.log(2);");
+        let mut config = options();
+        config.execution =
+            crate::execution::ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+        let count = Arc::new(AtomicUsize::new(0));
+        let dispatch = tracing::Dispatch::new(
+            tracing_subscriber::registry().with(Materializations(count.clone())),
+        );
+        tracing::dispatcher::with_default(&dispatch, || {
+            let mut session = BuildSession::new(dir.root()).unwrap();
+            let cold = session.build(&config).unwrap();
+            assert_eq!(count.swap(0, Ordering::Relaxed), 3);
+            let noop = session.build(&config).unwrap();
+            assert!(Rc::ptr_eq(&cold.product, &noop.product));
+            assert_eq!(count.swap(0, Ordering::Relaxed), 0);
+
+            write(dir.root(), "a.mjs", "console.log(3);");
+            write(dir.root(), "z.mjs", "export const broken = ;");
+            assert!(session.build(&config).is_err());
+            assert_eq!(count.swap(0, Ordering::Relaxed), 0);
+            assert!(Rc::ptr_eq(session.last.as_ref().unwrap(), &cold.product));
+            assert_eq!(
+                session.sources[&dir.root().join("a.mjs")].text,
+                "console.log(3);"
+            );
+
+            write(dir.root(), "z.mjs", "console.log(2);");
+            let repaired = session.build(&config).unwrap();
+            assert_eq!(count.load(Ordering::Relaxed), 3);
+            assert_eq!(repaired.counters.source_parses, 0);
+            assert!(repaired.invalidated.contains(&dir.root().join("a.mjs")));
+        });
+    }
+}
+
+#[test]
+fn settled_graph_owns_resource_transpiler_and_context_provenance_after_session_drop() {
+    let dir = TmpDir::new();
+    write(
+        dir.root(),
+        "main.mjs",
+        "import {value} from './typed.ts'; import data from './data.json'; \
+         export const answer = value + data.amount; \
+         export function load(name) { return import(`./parts/${name}.ts`); }",
+    );
+    write(dir.root(), "typed.ts", "export const value: number = 40;");
+    write(dir.root(), "data.json", r#"{"amount":2}"#);
+    write(
+        dir.root(),
+        "parts/one.ts",
+        "export const label: string = 'one';",
+    );
+    let mut config = options();
+    let mut session = BuildSession::new(dir.root()).unwrap();
+    let cold = session.build(&config).unwrap();
+    config.output.source_maps = true;
+    let mapped = session.build(&config).unwrap();
+    assert_eq!(mapped.counters.source_parses, 0);
+    assert!(!Rc::ptr_eq(&cold.product, &mapped.product));
+    let noop = session.build(&config).unwrap();
+    assert!(Rc::ptr_eq(&mapped.product, &noop.product));
+    let texts: BTreeMap<_, _> = session
+        .sources
+        .iter()
+        .map(|(path, source)| (path.clone(), source.text.clone()))
+        .collect();
+    let disk = BuildSession::new(dir.root())
+        .unwrap()
+        .build(&config)
+        .unwrap();
+    assert_eq!(disk.counters.source_parses, 0);
+    assert_eq!(disk.product.artifacts, mapped.product.artifacts);
+    drop(session);
+
+    for product in [&cold.product, &mapped.product, &disk.product] {
+        let graph = &product.graph;
+        graph.validate_links().unwrap();
+        for file in graph.module_ids() {
+            let path = graph.file_path(file).unwrap();
+            crate::emit::checked_source(graph, file, &texts[path]).unwrap();
+            assert_eq!(
+                graph.file_prepared_resource(file).is_some(),
+                path.extension()
+                    .is_some_and(|extension| extension == "ts" || extension == "json")
+            );
+        }
+        let main = graph.file_id(&dir.root().join("main.mjs")).unwrap();
+        let dependency = graph
+            .file_facts(main)
+            .unwrap()
+            .dependencies()
+            .iter()
+            .find(|dependency| dependency.pattern().is_some())
+            .unwrap()
+            .id();
+        let Some(DependencyTarget::Context(candidates)) = graph.dependency_target(main, dependency)
+        else {
+            panic!("missing settled context");
+        };
+        assert_eq!(
+            candidates.values().collect::<Vec<_>>(),
+            [&dir.root().join("parts/one.ts")]
+        );
+        assert!(product.plan.is_current(graph, &config.effects));
+    }
 }
 
 #[test]
@@ -5200,7 +5337,7 @@ fn parity(session: &mut BuildSession, options: &BuildOptions) -> BuildResult {
         observe(&full.product.artifacts)
     );
     let graph = &incremental.product.graph;
-    let sources = graph
+    let sources: BTreeMap<_, _> = graph
         .module_ids()
         .map(|file| {
             let path = graph.file_path(file).unwrap().to_owned();

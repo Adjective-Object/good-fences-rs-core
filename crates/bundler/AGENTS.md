@@ -157,6 +157,9 @@ Discover CSS/composition evaluation jobs before finalizing CSS Modules names,
 closure URLs and wrapper relocations, after all checked routes have settled.
 Product generations are session-local immutable snapshots; never transfer
 graph-local handles/plans between products. No-op retains the same generation.
+Stage source identities/resolutions, never owning graph inputs or copied source
+text. Materialize graph inputs once after success/no-op checks from settled checked
+records; link through borrowed source lookup. Products retain independent owners.
 Never discover/parse/validate tsconfig for resolution, including extends/references.
 Use explicit BuildOptions.resolver.export_conditions; never ingest
 customConditions/customSourceConditions or rewrite paths/baseUrl.

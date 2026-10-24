@@ -173,7 +173,6 @@ pub(super) fn resolve(
 
 pub(super) struct Loaded {
     pub source: Option<Source>,
-    pub parsed: ast_segmenter::ParsedModule,
     pub status: Option<CacheStatus>,
     pub warning: Option<String>,
     pub transpiled: Option<Transpiled>,
@@ -316,12 +315,9 @@ pub(super) fn load(
                 && s.record.matches_prepared_declarations(declarations)
         })
     });
-    if let Some(source) = previous {
+    if previous.is_some() {
         return Ok(Loaded {
             source: None,
-            parsed: source.record.to_parsed(&source.text).wrap_err_with(|| {
-                format!("borrowing in-memory source facts for {}", path.display())
-            })?,
             status: None,
             warning: None,
             transpiled: None,
@@ -346,10 +342,6 @@ pub(super) fn load(
         None
     };
     Ok(Loaded {
-        parsed: loaded
-            .record
-            .to_parsed(&loaded.source)
-            .wrap_err_with(|| format!("borrowing loaded source facts for {}", path.display()))?,
         source: Some(Source {
             css_identity: None,
             input,
