@@ -301,7 +301,7 @@ impl Code {
         destination: &Path,
         destinations: &BTreeMap<PathBuf, PathBuf>,
         source_maps: bool,
-    ) -> eyre::Result<(String, Option<oxc_sourcemap::SourceMap>)> {
+    ) -> eyre::Result<(String, Option<oxc_sourcemap::SourceMap<'static>>)> {
         let mut output = crate::sourcemap::Writer::new(source_maps);
         for part in &self.parts {
             let (target, url, evaluation) = match part {

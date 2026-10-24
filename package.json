@@ -43,8 +43,8 @@
     "build:debug": "napi build --cargo-name napi_root --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
-    "test:bundler-fixtures": "cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs",
-    "test:bundler-browser": "cargo build -p bundler --example build && node scripts/bundler-browser.mjs",
+    "test:bundler-fixtures": "cargo build -p bundler-cli && node scripts/bundler-fixtures.mjs",
+    "test:bundler-browser": "cargo build -p bundler-cli && node scripts/bundler-browser.mjs",
     "version": "napi version"
   },
   "dependencies": {

@@ -128,6 +128,10 @@ execution constraints or relocation decisions are persisted.
 
 ## Sidecar IO
 
+Source/extraction failures retain operation/path context and underlying error
+chains. Nonfatal cache read/write diagnostics include the sidecar operation/path;
+cache failures still never authorize stale source facts.
+
 `load_prepared(logger, path, PreparedSource, mode, declarations)` supports resource
 loaders. `PreparedSource` separates exact original input bytes from generated
 JavaScript text and its parser path/format. Sidecars remain next to the original

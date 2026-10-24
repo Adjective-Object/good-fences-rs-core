@@ -116,7 +116,7 @@ pub(crate) fn extract(program: &Program<'_>, semantic: &Semantic<'_>) -> eyre::R
             program
                 .directives
                 .iter()
-                .map(|d| Directive::new(d.expression.value.to_string(), d.span))
+                .map(|d| Directive::new(d.expression.value.display().to_string(), d.span))
                 .collect(),
             program
                 .hashbang
@@ -199,28 +199,34 @@ struct Extractor<'s, 'a> {
 
 impl Extractor<'_, '_> {
     fn context_dependency(&mut self, kind: DependencyKind, span: Span, source: &Expression<'_>) {
-        fn pieces(source: &Expression<'_>, parts: &mut Vec<String>) {
+        fn pieces(source: &Expression<'_>, parts: &mut Vec<String>) -> Option<()> {
             match source.get_inner_expression() {
-                Expression::StringLiteral(s) => parts.last_mut().unwrap().push_str(&s.value),
+                Expression::StringLiteral(s) => {
+                    parts.last_mut().unwrap().push_str(s.value.as_str()?)
+                }
                 Expression::TemplateLiteral(t) => {
                     for (index, quasi) in t.quasis.iter().enumerate() {
                         if index > 0 {
                             parts.push(String::new());
                         }
                         if let Some(cooked) = &quasi.value.cooked {
-                            parts.last_mut().unwrap().push_str(cooked);
+                            parts.last_mut().unwrap().push_str(cooked.as_str()?);
                         }
                     }
                 }
                 Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
-                    pieces(&b.left, parts);
-                    pieces(&b.right, parts);
+                    pieces(&b.left, parts)?;
+                    pieces(&b.right, parts)?;
                 }
                 _ => parts.push(String::new()),
             }
+            Some(())
         }
         let mut pattern = vec![String::new()];
-        pieces(source, &mut pattern);
+        if pieces(source, &mut pattern).is_none() {
+            self.reject(span, "module request contains a lone UTF-16 surrogate");
+            return;
+        }
         if !pattern[0].starts_with("./") && !pattern[0].starts_with("../") {
             self.reject(
                 span,
@@ -264,11 +270,18 @@ impl Extractor<'_, '_> {
         type_only: bool,
     ) -> DependencyId {
         let id = DependencyId(span.start);
+        let Some(request) = source.value.as_str() else {
+            self.reject(
+                source.span,
+                "module request contains a lone UTF-16 surrogate",
+            );
+            return id;
+        };
         self.facts.dependencies_mut().push(Dependency::new(
             id,
             kind,
             span,
-            source.value.to_string(),
+            request.to_owned(),
             None,
             source.span,
             type_only,
@@ -386,21 +399,8 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     }
 
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
-        let dependency = decl.source.as_ref().map(|source| {
-            self.dependency(
-                DependencyKind::ReExport,
-                decl.span,
-                source,
-                decl.export_kind.is_type(),
-            )
-        });
         for specifier in &decl.specifiers {
-            let value = if let Some(dependency) = dependency {
-                ExportValue::ReExport {
-                    dependency,
-                    imported: ImportedName::Name(specifier.local.name().to_string()),
-                }
-            } else if let Some(binding) = self.root_binding(&specifier.local.name()) {
+            let value = if let Some(binding) = self.root_binding(&specifier.local.name()) {
                 ExportValue::Binding(binding)
             } else {
                 self.reject(specifier.span, "unresolved local export");
@@ -420,19 +420,41 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                 decl.export_kind.is_type() || specifier.export_kind.is_type() || local_type_only,
             ));
         }
-        let previous = self.exported_declaration;
-        self.exported_declaration = decl.declaration.as_ref().map(|d| {
-            (
-                d.span(),
-                decl.export_kind.is_type()
-                    || matches!(
-                        d,
-                        Declaration::TSInterfaceDeclaration(_)
-                            | Declaration::TSTypeAliasDeclaration(_)
-                    ),
-            )
-        });
         walk::walk_export_named_declaration(self, decl);
+    }
+
+    fn visit_export_from_declaration(&mut self, decl: &ExportFromDeclaration<'a>) {
+        let dependency = self.dependency(
+            DependencyKind::ReExport,
+            decl.span,
+            &decl.source,
+            decl.export_kind.is_type(),
+        );
+        for specifier in &decl.specifiers {
+            self.facts.exports_mut().push(Export::new(
+                Some(specifier.exported.name().to_string()),
+                ExportValue::ReExport {
+                    dependency,
+                    imported: ImportedName::Name(specifier.local.name().to_string()),
+                },
+                specifier.span,
+                Some(specifier.exported.span()),
+                decl.export_kind.is_type() || specifier.export_kind.is_type(),
+            ));
+        }
+        walk::walk_export_from_declaration(self, decl);
+    }
+
+    fn visit_export_declaration(&mut self, decl: &ExportDeclaration<'a>) {
+        let previous = self.exported_declaration;
+        self.exported_declaration = Some((
+            decl.declaration.span(),
+            matches!(
+                decl.declaration,
+                Declaration::TSInterfaceDeclaration(_) | Declaration::TSTypeAliasDeclaration(_)
+            ),
+        ));
+        walk::walk_export_declaration(self, decl);
         self.exported_declaration = previous;
     }
 
@@ -559,6 +581,12 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         let previous = std::mem::replace(&mut self.async_deferred, self.function_body_async);
         walk::walk_function_body(self, body);
+        self.async_deferred = previous;
+    }
+
+    fn visit_arrow_function_body(&mut self, body: &ArrowFunctionBody<'a>) {
+        let previous = std::mem::replace(&mut self.async_deferred, self.function_body_async);
+        walk::walk_arrow_function_body(self, body);
         self.async_deferred = previous;
     }
 

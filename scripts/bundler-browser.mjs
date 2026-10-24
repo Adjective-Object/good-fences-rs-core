@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const corpus = path.join(root, 'fixtures', 'bundler-apps', 'todomvc');
-const driver = path.join(root, 'target', 'debug', 'examples', `build${process.platform === 'win32' ? '.exe' : ''}`);
+const driver = path.join(root, 'target', 'debug', `bundler-cli${process.platform === 'win32' ? '.exe' : ''}`);
 const browser = process.env.AGENT_BROWSER_BIN || 'agent-browser';
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
 const errorCapture = `window.__bundlerBrowserErrors = [];

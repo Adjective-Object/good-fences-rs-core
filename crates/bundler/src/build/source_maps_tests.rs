@@ -1,12 +1,17 @@
 use super::*;
 use oxc_sourcemap::SourceMap;
 
-fn maps(artifacts: &link::Artifacts) -> Vec<(PathBuf, SourceMap)> {
+fn maps(artifacts: &link::Artifacts) -> Vec<(PathBuf, SourceMap<'static>)> {
     artifacts
         .files
         .iter()
         .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "map"))
-        .map(|(path, text)| (path.clone(), SourceMap::from_json_string(text).unwrap()))
+        .map(|(path, text)| {
+            (
+                path.clone(),
+                SourceMap::from_json_string(text).unwrap().into_owned(),
+            )
+        })
         .collect()
 }
 
@@ -42,16 +47,13 @@ fn assert_origin(artifacts: &link::Artifacts, original: &Path, source: &str, nee
             let Some(token) = map.lookup_source_view_token(&table, line, column) else {
                 continue;
             };
-            if token
-                .get_source()
-                .is_some_and(|value| value.as_ref() == url)
-            {
+            if token.get_source().is_some_and(|value| value == url) {
                 assert_eq!(
                     (token.get_src_line(), token.get_src_col()),
                     expected,
                     "{needle}: {map_path:?}"
                 );
-                assert_eq!(token.get_source_content().unwrap().as_ref(), source);
+                assert_eq!(token.get_source_content().unwrap(), source);
                 found = true;
             }
         }
@@ -95,7 +97,7 @@ fn source_maps_follow_multispans_nested_rewrites_renames_cjs_and_async_chunks() 
         {
             let source = token.get_source_content().unwrap();
             let name = token.get_name().unwrap();
-            assert!(source.contains(name.as_ref()));
+            assert!(source.contains(name));
         }
     }
     let mut parallel = config.clone();
@@ -128,11 +130,10 @@ fn source_maps_preserve_original_names_when_scope_hoisting_renames_bindings() {
     for (path, map) in maps(&result.product.artifacts) {
         let js = path.to_str().unwrap().strip_suffix(".map").unwrap();
         let output = &result.product.artifacts.files[Path::new(js)];
-        for token in map.get_source_view_tokens().filter(|token| {
-            token
-                .get_name()
-                .is_some_and(|name| name.as_ref() == "value")
-        }) {
+        for token in map
+            .get_source_view_tokens()
+            .filter(|token| token.get_name().is_some_and(|name| name == "value"))
+        {
             let source = token.get_source_content().unwrap();
             assert_eq!(token.get_src_line(), 0);
             assert_eq!(token.get_src_col(), source.find("value").unwrap() as u32);
@@ -238,7 +239,7 @@ fn upstream_json(original: &str, content: Option<&str>, line: u32) -> String {
     json.to_string()
 }
 
-fn mapped_token(artifacts: &link::Artifacts, needle: &str) -> (SourceMap, u32, u32) {
+fn mapped_token(artifacts: &link::Artifacts, needle: &str) -> (SourceMap<'static>, u32, u32) {
     for (map_path, map) in maps(artifacts) {
         let js = PathBuf::from(map_path.to_string_lossy().strip_suffix(".map").unwrap());
         if let Some(offset) = artifacts.files[&js].find(needle) {
@@ -278,7 +279,7 @@ fn upstream_source_maps_compose_inline_base64_and_percent_data_with_names_and_nu
         let table = map.generate_lookup_table();
         let token = map.lookup_source_view_token(&table, line, col).unwrap();
         assert_eq!((token.get_src_line(), token.get_src_col()), (4, 2));
-        assert_eq!(token.get_name().unwrap().as_ref(), "originalValue");
+        assert_eq!(token.get_name().unwrap(), "originalValue");
         let url = url::Url::from_file_path(
             dir.root()
                 .parent()
@@ -287,7 +288,7 @@ fn upstream_source_maps_compose_inline_base64_and_percent_data_with_names_and_nu
                 .join("input.ts"),
         )
         .unwrap();
-        assert_eq!(token.get_source().unwrap().as_ref(), url.as_str());
+        assert_eq!(token.get_source().unwrap(), url.as_str());
         assert_eq!(
             token.get_source_content().map(AsRef::as_ref),
             (!base64).then_some("original TypeScript")
@@ -328,7 +329,7 @@ fn upstream_source_maps_preserve_scheme_roots_and_prefix_leading_slash_sources()
         let (map, line, column) = mapped_token(&result.product.artifacts, "'ROOTED'");
         let lookup = map.generate_lookup_table();
         let token = map.lookup_source_view_token(&lookup, line, column).unwrap();
-        assert_eq!(token.get_source().unwrap().as_ref(), expected);
+        assert_eq!(token.get_source().unwrap(), expected);
     }
 }
 
@@ -364,7 +365,7 @@ fn upstream_source_maps_linked_map_edits_invalidate_warm_and_disk_outputs_withou
     let table = map.generate_lookup_table();
     let token = map.lookup_source_view_token(&table, line, col).unwrap();
     let url = url::Url::from_file_path(dir.root().join("original/input.ts")).unwrap();
-    assert_eq!(token.get_source().unwrap().as_ref(), url.as_str());
+    assert_eq!(token.get_source().unwrap(), url.as_str());
     write(
         dir.root(),
         "maps/main.map",
@@ -420,12 +421,11 @@ fn upstream_source_maps_linked_map_edits_invalidate_warm_and_disk_outputs_withou
     assert_eq!(edited_on_disk.counters.disk_hits, 1);
     assert_ne!(edited.product.artifacts, edited_on_disk.product.artifacts);
     fs::remove_file(dir.root().join("maps/main.map")).unwrap();
-    assert!(session
-        .build(&config)
-        .err()
-        .unwrap()
-        .to_string()
-        .contains("upstream source map"));
+    let error = session.build(&config).err().unwrap();
+    assert!(
+        format!("{error:#}").contains("upstream source map"),
+        "{error:?}"
+    );
 }
 
 #[test]

@@ -27,7 +27,6 @@ pub(crate) fn extract(
         source: program.source_text,
         invocations: Vec::new(),
         value_use: ValueUse::Required,
-        implicit_return: None,
     };
     if program.source_type.is_commonjs() {
         visitor.add(
@@ -58,7 +57,6 @@ struct Effects<'f> {
     source: &'f str,
     invocations: Vec<Invocation>,
     value_use: ValueUse,
-    implicit_return: Option<Span>,
 }
 
 impl Effects<'_> {
@@ -221,6 +219,8 @@ impl<'a> Visit<'a> for Effects<'_> {
             | Statement::ClassDeclaration(_)
             | Statement::ImportDeclaration(_)
             | Statement::ExportNamedDeclaration(_)
+            | Statement::ExportDeclaration(_)
+            | Statement::ExportFromDeclaration(_)
             | Statement::ExportDefaultDeclaration(_)
             | Statement::ExportAllDeclaration(_)
             | Statement::TSTypeAliasDeclaration(_)
@@ -231,12 +231,7 @@ impl<'a> Visit<'a> for Effects<'_> {
     }
 
     fn visit_expression_statement(&mut self, statement: &ExpressionStatement<'a>) {
-        let usage = if self.implicit_return == Some(statement.span) {
-            ValueUse::Required
-        } else {
-            ValueUse::Discarded
-        };
-        let previous = std::mem::replace(&mut self.value_use, usage);
+        let previous = std::mem::replace(&mut self.value_use, ValueUse::Discarded);
         self.visit_expression(&statement.expression);
         self.value_use = previous;
     }
@@ -285,14 +280,7 @@ impl<'a> Visit<'a> for Effects<'_> {
     fn visit_arrow_function_expression(&mut self, function: &ArrowFunctionExpression<'a>) {
         let previous = self.deferred.replace(function.span);
         let usage = std::mem::replace(&mut self.value_use, ValueUse::Required);
-        let implicit_return = self.implicit_return;
-        self.implicit_return = if function.expression {
-            function.body.statements.first().map(GetSpan::span)
-        } else {
-            None
-        };
         walk::walk_arrow_function_expression(self, function);
-        self.implicit_return = implicit_return;
         self.value_use = usage;
         self.deferred = previous;
     }
@@ -321,8 +309,8 @@ impl<'a> Visit<'a> for Effects<'_> {
         if class.declare {
             return;
         }
-        if let Some(super_class) = &class.super_class {
-            self.add(super_class.span(), EffectReason::ClassHeritage);
+        if let Some(heritage) = &class.heritage {
+            self.add(heritage.expression.span(), EffectReason::ClassHeritage);
         }
         let previous = std::mem::replace(&mut self.value_use, ValueUse::Required);
         walk::walk_class(self, class);

@@ -186,6 +186,11 @@ fn reverse_match_star_pattern(star_pattern: &str, path: &str) -> bool {
 }
 
 fn matches_exported_path(pattern: &str, target: &ExportedPath, path: &str) -> bool {
+    if let ExportedPath::Conditional(conditions) = target {
+        return conditions
+            .iter()
+            .any(|(_, target)| matches_exported_path(pattern, target, path));
+    }
     let ExportedPath::Exported(target) = target else {
         return false;
     };
@@ -196,6 +201,30 @@ fn matches_exported_path(pattern: &str, target: &ExportedPath, path: &str) -> bo
     } else {
         path == target
     }
+}
+
+fn select_condition<'a, TStr: Into<&'a str>>(
+    conditions: &'a [(String, ExportedPath)],
+    active: impl Clone + IntoIterator<Item = TStr>,
+) -> Option<(&'a str, &'a ExportedPath)> {
+    for (condition, target) in conditions {
+        if condition != "default"
+            && !active
+                .clone()
+                .into_iter()
+                .any(|active| active.into() == condition)
+        {
+            continue;
+        }
+        if let ExportedPath::Conditional(nested) = target {
+            if let Some((_, target)) = select_condition(nested, active.clone()) {
+                return Some((condition, target));
+            }
+        } else {
+            return Some((condition, target));
+        }
+    }
+    None
 }
 
 impl PackageExportRewriteData {
@@ -252,13 +281,8 @@ impl PackageExportRewriteData {
         let Some((pattern, conditions)) = selected else {
             return Ok(None);
         };
-        let Some((condition, target)) = conditions.iter().find(|(condition, _)| {
-            condition == "default"
-                || requested_export_conditions
-                    .clone()
-                    .into_iter()
-                    .any(|active| active.into() == condition)
-        }) else {
+        let Some((condition, target)) = select_condition(conditions, requested_export_conditions)
+        else {
             return Ok(None);
         };
         let rewritten = target.as_ref().map_export(|target| {
@@ -272,10 +296,7 @@ impl PackageExportRewriteData {
                 target
             }
         });
-        Ok(Some(MatchedExport::with_kind(
-            rewritten,
-            condition.as_str().into(),
-        )))
+        Ok(Some(MatchedExport::with_kind(rewritten, condition.into())))
     }
 
     /// Checks if a given package-relative path is exported or not.
@@ -356,6 +377,86 @@ mod test {
     use super::*;
     use std::collections::{hash_map::HashMap, BTreeMap};
     use test_tmpdir::map2;
+
+    #[test]
+    fn nested_conditions_select_runtime_leaves_before_applying_patterns() {
+        let package: packagejson::PackageJson = serde_json::from_str(
+            r#"{
+            "exports": {
+                ".": {
+                    "fluentIconFont": {"import":{"types":"./fonts.d.ts","default":"./fonts.js"}},
+                    "default": {
+                        "import":{"types":"./index.d.ts","default":"./index.js"},
+                        "require":{"types":"./index.d.cts","default":"./index.cjs"}
+                    }
+                },
+                "./svg/*": {
+                    "import":{"types":"./atoms/*.d.ts","default":"./atoms/*.js"},
+                    "require":{"types":"./atoms/*.d.cts","default":"./atoms/*.cjs"}
+                }
+            }
+        }"#,
+        )
+        .unwrap();
+        let rewrites =
+            PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+        for (request, conditions, expected) in [
+            (".", vec!["import"], "./index.js"),
+            (".", vec!["require"], "./index.cjs"),
+            (".", vec!["import", "fluentIconFont"], "./fonts.js"),
+            (".", vec!["types", "import"], "./index.d.ts"),
+            ("./svg/icon", vec!["import"], "./atoms/icon.js"),
+            ("./svg/icon", vec!["require"], "./atoms/icon.cjs"),
+        ] {
+            let mut out = String::new();
+            let matched = rewrites
+                .rewrite_relative_export(request, conditions, &mut out)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                matched.rewritten_export,
+                ExportedPathRef::Exported(expected)
+            );
+        }
+        assert!(rewrites.is_exported("./atoms/icon.js"));
+        assert_eq!(
+            rewrites.get_exported_conditions("./atoms/icon.js"),
+            vec!["import"]
+        );
+    }
+
+    #[test]
+    fn nested_conditions_preserve_order_parent_fallback_and_private_blocks() {
+        for (branches, expected) in [
+            (
+                r#"{"node":{"browser":"./wrong.js"},"default":"./fallback.js"}"#,
+                Some(ExportedPathRef::Exported("./fallback.js")),
+            ),
+            (
+                r#"{"node":{"default":"./first.js","import":"./later.js"},"default":"./fallback.js"}"#,
+                Some(ExportedPathRef::Exported("./first.js")),
+            ),
+            (
+                r#"{"node":{"import":null},"default":"./fallback.js"}"#,
+                Some(ExportedPathRef::Private),
+            ),
+            (r#"{"node":{"browser":"./wrong.js"}}"#, None),
+            (
+                r#"{"node":{"import":{"browser":"./wrong.js"},"default":"./nested.js"},"default":"./fallback.js"}"#,
+                Some(ExportedPathRef::Exported("./nested.js")),
+            ),
+        ] {
+            let package: packagejson::PackageJson =
+                serde_json::from_str(&format!(r#"{{"exports":{branches}}}"#)).unwrap();
+            let rewrites =
+                PackageExportRewriteData::try_from(package.exports.as_ref().unwrap()).unwrap();
+            let mut out = String::new();
+            let result = rewrites
+                .rewrite_relative_export(".", ["import", "node"], &mut out)
+                .unwrap();
+            assert_eq!(result.map(|result| result.rewritten_export), expected);
+        }
+    }
 
     #[test]
     fn string_roots_expose_package_files_and_explicit_maps_keep_encapsulation() {

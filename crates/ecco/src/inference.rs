@@ -16,7 +16,7 @@ struct Function<'s, 'a> {
     params: &'s FormalParameters<'a>,
     body: Option<&'s FunctionBody<'a>>,
     arrow: bool,
-    expression: bool,
+    expression: Option<&'s Expression<'a>>,
     unsupported: bool,
 }
 
@@ -42,13 +42,9 @@ pub(crate) fn infer_contracts<'a>(
         match statement {
             Statement::FunctionDeclaration(node) => collect_function(node, &mut functions),
             Statement::VariableDeclaration(node) => collect_variables(node, &mut functions),
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::FunctionDeclaration(node)) => {
-                    collect_function(node, &mut functions)
-                }
-                Some(Declaration::VariableDeclaration(node)) => {
-                    collect_variables(node, &mut functions)
-                }
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::FunctionDeclaration(node) => collect_function(node, &mut functions),
+                Declaration::VariableDeclaration(node) => collect_variables(node, &mut functions),
                 _ => {}
             },
             Statement::ExportDefaultDeclaration(export) => {
@@ -58,6 +54,9 @@ pub(crate) fn infer_contracts<'a>(
                 }
             }
             Statement::ImportDeclaration(import) if !import.import_kind.is_type() => {
+                let Some(module) = import.source.value.as_str() else {
+                    continue;
+                };
                 for specifier in import.specifiers.iter().flatten() {
                     let path = match specifier {
                         ImportDeclarationSpecifier::ImportSpecifier(node)
@@ -77,7 +76,7 @@ pub(crate) fn infer_contracts<'a>(
                         imports.insert(
                             symbol,
                             Binding::Module {
-                                module: import.source.value.to_string(),
+                                module: module.to_owned(),
                                 path,
                             },
                         );
@@ -131,6 +130,9 @@ pub(crate) fn infer_contracts<'a>(
         };
         if let Some(body) = function.body {
             dependencies.visit_function_body(body);
+        }
+        if let Some(expression) = function.expression {
+            dependencies.visit_expression(expression);
         }
         ensure!(
             !dependencies.missing,
@@ -205,15 +207,12 @@ pub(crate) fn infer_contracts<'a>(
         }
         analyzer.opaque |= function.params.rest.is_some();
         if !analyzer.opaque {
-            if let Some(body) = function.body {
-                if function.expression {
-                    if let Some(Statement::ExpressionStatement(statement)) = body.statements.first()
-                    {
-                        let value = analyzer.expression(&statement.expression);
-                        analyzer.effects.push(value.effects);
-                        analyzer.returns.push(value.value);
-                    }
-                } else if !analyzer.statements(&body.statements) {
+            if let Some(expression) = function.expression {
+                let value = analyzer.expression(expression);
+                analyzer.effects.push(value.effects);
+                analyzer.returns.push(value.value);
+            } else if let Some(body) = function.body {
+                if !analyzer.statements(&body.statements) {
                     analyzer.returns.push(Value::void());
                 }
             }
@@ -278,7 +277,7 @@ fn collect_function<'s, 'a>(
                 params: &node.params,
                 body: node.body.as_deref(),
                 arrow: false,
-                expression: false,
+                expression: None,
                 unsupported: node.r#async || node.generator || node.body.is_none(),
             });
         }
@@ -309,16 +308,16 @@ fn collect_variables<'s, 'a>(
                 params: &node.params,
                 body: node.body.as_deref(),
                 arrow: false,
-                expression: false,
+                expression: None,
                 unsupported: node.r#async || node.generator || node.body.is_none(),
             },
             Expression::ArrowFunctionExpression(node) => Function {
                 symbol,
                 name: identifier.name.to_string(),
                 params: &node.params,
-                body: Some(&node.body),
+                body: node.body.as_function_body(),
                 arrow: true,
-                expression: node.expression,
+                expression: node.get_expression(),
                 unsupported: node.r#async,
             },
             _ => continue,
@@ -600,7 +599,7 @@ impl<'a> Analyzer<'_, 'a> {
                 let object = self.expression(&member.object);
                 let key = self.expression(&member.expression);
                 let property = match member.expression.get_inner_expression() {
-                    Expression::StringLiteral(node) => Some(node.value.as_str()),
+                    Expression::StringLiteral(node) => node.value.as_str(),
                     _ => None,
                 };
                 self.member(object, property, Some(key))
@@ -620,7 +619,7 @@ impl<'a> Analyzer<'_, 'a> {
                         let receiver = object.value.clone();
                         let key = self.expression(&member.expression);
                         let property = match member.expression.get_inner_expression() {
-                            Expression::StringLiteral(node) => Some(node.value.as_str()),
+                            Expression::StringLiteral(node) => node.value.as_str(),
                             _ => None,
                         };
                         (self.member(object, property, Some(key)), receiver)

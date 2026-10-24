@@ -88,6 +88,53 @@ fn literal_build_never_enumerates_large_unused_or_broken_node_modules() {
 }
 
 #[test]
+fn eager_local_walk_uses_selected_peer_and_runtime_links_without_walking_installations() {
+    let dir = TmpDir::new();
+    let root = dir.root();
+    write(
+        root,
+        "package.json",
+        r#"{
+        "dependencies":{"dep":"*"},
+        "peerDependencies":{"@scope/peer":"*","missing":"*"},
+        "devDependencies":{"dev":"*"}
+    }"#,
+    );
+    write(root, "main.mjs", "");
+    for name in ["dep", "peer", "dev", "unselected"] {
+        write(root, &format!("packages/{name}/package.json"), "{}");
+        write(root, &format!("packages/{name}/source.mjs"), "");
+    }
+    write(root, "node_modules/registry/package.json", "{}");
+    write(root, "node_modules/registry/never.mjs", "");
+    fs::create_dir_all(root.join("node_modules/@scope")).unwrap();
+    for (name, package) in [("dep", "dep"), ("@scope/peer", "peer"), ("dev", "dev")] {
+        directory_link(
+            &root.join("packages").join(package),
+            &root.join("node_modules").join(name),
+        );
+    }
+    let found = crate::build::discovery::candidates(
+        root,
+        std::iter::once(root.join("main.mjs")),
+        &options(),
+    )
+    .unwrap();
+    let expected: BTreeSet<_> = [
+        "main.mjs",
+        "packages/dep/source.mjs",
+        "packages/peer/source.mjs",
+    ]
+    .into_iter()
+    .map(|path| root.join(path).canonicalize().unwrap())
+    .collect();
+    assert_eq!(found, expected);
+    for name in ["dep", "@scope/peer", "dev"] {
+        remove_directory_link(&root.join("node_modules").join(name));
+    }
+}
+
+#[test]
 fn demand_admission_rechecks_links_and_discovered_reserved_scopes_in_either_order() {
     let dir = TmpDir::new();
     let root = dir.root().join("project");
@@ -849,7 +896,7 @@ fn unenumerated_ancestor_package_shadowing_never_reuses_stale_success() {
     let checked = resolver::BuildResolver::new(
         &root,
         &config,
-        resolver::Lockfile::read(&root, &mut Vec::new()).unwrap(),
+        resolver::Lockfile::read(&root, &mut Vec::new(), config.execution).unwrap(),
         resolver::Memory::default(),
     );
     checked
@@ -949,7 +996,7 @@ fn diamond_inventory_scans_canonical_directories_once_and_expands_only_context_p
     let resolver = resolver::BuildResolver::new(
         root,
         &config,
-        resolver::Lockfile::read(root, &mut Vec::new()).unwrap(),
+        resolver::Lockfile::read(root, &mut Vec::new(), config.execution).unwrap(),
         resolver::Memory::default(),
     );
     let resolved = crate::context::resolve(

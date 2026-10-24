@@ -2,16 +2,50 @@
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn worker_panic(payload: Box<dyn std::any::Any + Send>) -> eyre::Report {
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("non-string panic payload");
+    eyre::eyre!("{message}")
+}
+
 #[cfg(test)]
 thread_local! {
     pub(crate) static JOB_OBSERVER: std::cell::RefCell<Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-/// Shared execution configuration for sequential preparation and emission stages.
+/// Shared execution limits for fingerprinting, preparation and emission stages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionOptions {
     workers: NonZeroUsize,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum WorkStage {
+    Discovery,
+    Preparation,
+    Lockfile,
+}
+
+impl WorkStage {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Discovery => "package discovery",
+            Self::Preparation => "module preparation",
+            Self::Lockfile => "lockfile fingerprint",
+        }
+    }
+
+    fn span(self, parent: &tracing::Span, worker_id: usize) -> tracing::Span {
+        match self {
+            Self::Discovery => tracing::info_span!(parent: parent, "discovery.package", worker_id),
+            Self::Preparation => tracing::info_span!(parent: parent, "prepare.job", worker_id),
+            Self::Lockfile => tracing::info_span!(parent: parent, "lockfile.member", worker_id),
+        }
+    }
 }
 
 impl Default for ExecutionOptions {
@@ -22,7 +56,7 @@ impl Default for ExecutionOptions {
 
 impl ExecutionOptions {
     /// At most this many workers run at once, further limited by the job count.
-    /// One runs inline, without spawning threads.
+    /// Fingerprinting and emission may run inline with one worker.
     pub const fn new(workers: NonZeroUsize) -> Self {
         Self { workers }
     }
@@ -34,19 +68,55 @@ impl ExecutionOptions {
     /// Only paths/jobs wait in the queue. At most `workers` jobs (including
     /// completed results) are outstanding; each completion immediately replenishes
     /// the frontier. Integration runs exclusively on the calling thread.
+    #[cfg(test)]
     pub(crate) fn replenish<J: Send, R: Send>(
         self,
         jobs: impl IntoIterator<Item = J>,
         work: impl Fn(J) -> R + Sync,
         mut integrate: impl FnMut(R) -> Vec<J>,
     ) -> eyre::Result<()> {
+        self.replenish_stage(WorkStage::Preparation, jobs, work, |result| {
+            Ok(integrate(result))
+        })
+    }
+
+    pub(crate) fn replenish_stage<J: Send, R: Send>(
+        self,
+        stage: WorkStage,
+        jobs: impl IntoIterator<Item = J>,
+        work: impl Fn(J) -> R + Sync,
+        mut integrate: impl FnMut(R) -> eyre::Result<Vec<J>>,
+    ) -> eyre::Result<()> {
+        self.replenish_prioritized(
+            stage,
+            jobs,
+            work,
+            |result| integrate(result).map(|jobs| (jobs, false)),
+            |_| false,
+        )
+    }
+
+    pub(crate) fn replenish_prioritized<J: Send, R: Send>(
+        self,
+        stage: WorkStage,
+        jobs: impl IntoIterator<Item = J>,
+        work: impl Fn(J) -> R + Sync,
+        mut integrate: impl FnMut(R) -> eyre::Result<(Vec<J>, bool)>,
+        speculative: impl Fn(&J) -> bool,
+    ) -> eyre::Result<()> {
         use std::sync::{mpsc, Mutex};
-        let mut pending: std::collections::VecDeque<_> = jobs.into_iter().collect();
-        if self.workers.get() == 1 {
+        let (mut eager, mut pending): (std::collections::VecDeque<_>, _) =
+            jobs.into_iter().partition(&speculative);
+        if self.workers.get() == 1 && matches!(stage, WorkStage::Lockfile) {
             while let Some(job) = pending.pop_front() {
-                let result =
-                    tracing::info_span!("prepare.job", worker_id = 0).in_scope(|| work(job));
-                pending.extend(integrate(result));
+                let result = stage
+                    .span(&tracing::Span::current(), 0)
+                    .in_scope(|| work(job));
+                for job in integrate(result)?.0 {
+                    if !speculative(&job) {
+                        pending.push_back(job);
+                    }
+                }
             }
             return Ok(());
         }
@@ -54,7 +124,7 @@ impl ExecutionOptions {
             return Ok(());
         }
         enum Event<R> {
-            Completed(R),
+            Completed(R, bool),
             Exited,
         }
         // An exit notification also runs during unwinding: a lost job cannot
@@ -88,9 +158,9 @@ impl ExecutionOptions {
                     loop {
                         let job = jobs_rx.lock().expect("job queue poisoned").recv();
                         let Ok(job) = job else { break };
-                        let result = tracing::info_span!(parent: &parent, "prepare.job", worker_id)
-                            .in_scope(|| work(job));
-                        if results_tx.send(Event::Completed(result)).is_err() {
+                        let (job, eager) = job;
+                        let result = stage.span(&parent, worker_id).in_scope(|| work(job));
+                        if results_tx.send(Event::Completed(result, eager)).is_err() {
                             break;
                         }
                     }
@@ -98,34 +168,58 @@ impl ExecutionOptions {
                 }) {
                     Ok(handle) => handles.push(handle),
                     Err(spawn_error) => {
-                        error = Some(eyre::Report::from(spawn_error));
+                        error = Some(
+                            eyre::Report::from(spawn_error)
+                                .wrap_err(format!("spawning {} worker", stage.name())),
+                        );
                         break;
                     }
                 }
             }
             drop(results_tx);
             let mut outstanding = 0;
+            let mut precise = 0;
+            let mut waiting = false;
             while error.is_none() {
                 while outstanding < workers {
-                    let Some(job) = pending.pop_front() else {
+                    let next = pending.pop_front().map(|job| (job, false)).or_else(|| {
+                        (precise > 0 || waiting)
+                            .then(|| eager.pop_front().map(|job| (job, true)))
+                            .flatten()
+                    });
+                    let Some((job, is_eager)) = next else {
                         break;
                     };
-                    if jobs_tx.send(job).is_err() {
-                        error = Some(eyre::eyre!("module preparation workers disconnected"));
+                    if jobs_tx.send((job, is_eager)).is_err() {
+                        error = Some(eyre::eyre!("{} workers disconnected", stage.name()));
                         break;
                     }
                     outstanding += 1;
+                    precise += usize::from(!is_eager);
                 }
                 if error.is_some() || outstanding == 0 {
                     break;
                 }
                 match results_rx.recv() {
-                    Ok(Event::Completed(result)) => {
+                    Ok(Event::Completed(result, is_eager)) => {
                         outstanding -= 1;
-                        pending.extend(integrate(result));
+                        precise -= usize::from(!is_eager);
+                        match integrate(result) {
+                            Ok((jobs, required)) => {
+                                waiting = required;
+                                for job in jobs {
+                                    if speculative(&job) {
+                                        eager.push_front(job);
+                                    } else {
+                                        pending.push_back(job);
+                                    }
+                                }
+                            }
+                            Err(integration_error) => error = Some(integration_error),
+                        }
                     }
                     Ok(Event::Exited) | Err(_) => {
-                        error = Some(eyre::eyre!("module preparation worker exited prematurely"));
+                        error = Some(eyre::eyre!("{} worker exited prematurely", stage.name()));
                     }
                 }
             }
@@ -134,9 +228,12 @@ impl ExecutionOptions {
             for handle in handles {
                 match handle.join() {
                     Ok(counts) => crate::rewrite::record_worker_parses(counts),
-                    Err(_) => {
-                        error.get_or_insert_with(|| {
-                            eyre::eyre!("module preparation worker panicked")
+                    Err(payload) => {
+                        let panic = worker_panic(payload)
+                            .wrap_err(format!("{} worker panicked", stage.name()));
+                        error = Some(match error.take() {
+                            Some(error) => error.wrap_err(format!("{panic:#}")),
+                            None => panic,
                         });
                     }
                 }
@@ -144,6 +241,34 @@ impl ExecutionOptions {
             match error {
                 Some(error) => Err(error),
                 None => Ok(()),
+            }
+        })
+    }
+
+    pub(crate) fn resolve<R: Send>(
+        self,
+        work: impl FnOnce() -> eyre::Result<R> + Send,
+    ) -> eyre::Result<R> {
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let parent = tracing::Span::current();
+        std::thread::scope(|scope| {
+            let worker = std::thread::Builder::new()
+                .spawn_scoped(scope, move || {
+                    let _dispatch = tracing::dispatcher::set_default(&dispatch);
+                    let _span = tracing::info_span!(parent: &parent, "resolve.worker").entered();
+                    let before = crate::rewrite::parse_counts();
+                    let result = work();
+                    (result, crate::rewrite::parse_counts().difference(before))
+                })
+                .map_err(|error| {
+                    eyre::Report::from(error).wrap_err("spawning resolution worker")
+                })?;
+            match worker.join() {
+                Ok((result, counts)) => {
+                    crate::rewrite::record_worker_parses(counts);
+                    result
+                }
+                Err(payload) => Err(worker_panic(payload).wrap_err("resolution worker panicked")),
             }
         })
     }
@@ -199,7 +324,10 @@ impl ExecutionOptions {
                 match spawned {
                     Ok(handle) => handles.push(handle),
                     Err(spawn_error) => {
-                        error = Some(eyre::Report::from(spawn_error));
+                        error = Some(
+                            eyre::Report::from(spawn_error)
+                                .wrap_err("spawning output emission worker"),
+                        );
                         break;
                     }
                 }
@@ -211,8 +339,10 @@ impl ExecutionOptions {
                         crate::rewrite::record_worker_parses(counts);
                         results.append(&mut output);
                     }
-                    Err(_) => {
-                        error.get_or_insert_with(|| eyre::eyre!("output emission worker panicked"));
+                    Err(payload) => {
+                        error.get_or_insert_with(|| {
+                            worker_panic(payload).wrap_err("output emission worker panicked")
+                        });
                     }
                 }
             }
@@ -232,7 +362,56 @@ mod tests {
     use std::sync::Barrier;
 
     #[test]
-    fn tracing_propagates_local_dispatch_and_parent_to_both_worker_stages() {
+    fn precise_frontier_overtakes_speculation_and_does_not_drain_the_eager_tail() {
+        let execution = ExecutionOptions::new(NonZeroUsize::new(2).unwrap());
+        let rendezvous = Barrier::new(2);
+        let (release, wait) = std::sync::mpsc::channel();
+        let wait = std::sync::Mutex::new(wait);
+        let completed = std::sync::Mutex::new(Vec::new());
+        let jobs = (0..100).map(|id| (true, id)).chain([(false, 0)]);
+        execution
+            .replenish_prioritized(
+                WorkStage::Preparation,
+                jobs,
+                |(eager, id)| {
+                    match (eager, id) {
+                        (false, 0) => {
+                            rendezvous.wait();
+                        }
+                        (true, 0) => {
+                            rendezvous.wait();
+                            wait.lock()
+                                .unwrap()
+                                .recv_timeout(std::time::Duration::from_secs(10))
+                                .expect("precise child must overtake pending speculative jobs");
+                        }
+                        (false, 1) => {}
+                        _ => panic!("unneeded speculation must not delay the precise frontier"),
+                    }
+                    (eager, id)
+                },
+                |job| {
+                    completed.lock().unwrap().push(job);
+                    let jobs = match job {
+                        (false, 0) => vec![(false, 1)],
+                        (false, 1) => {
+                            release.send(()).unwrap();
+                            vec![]
+                        }
+                        _ => vec![],
+                    };
+                    Ok((jobs, false))
+                },
+                |job| job.0,
+            )
+            .unwrap();
+        let mut completed = completed.into_inner().unwrap();
+        completed.sort();
+        assert_eq!(completed, [(false, 0), (false, 1), (true, 0)]);
+    }
+
+    #[test]
+    fn tracing_propagates_local_dispatch_and_parent_to_all_worker_stages() {
         use std::sync::{Arc, Mutex};
         use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
 
@@ -269,11 +448,19 @@ mod tests {
                         .replenish(0..workers, |_| work(), |_| vec![])
                         .unwrap();
                     execution
+                        .replenish_stage(
+                            WorkStage::Lockfile,
+                            0..workers,
+                            |_| work(),
+                            |_| Ok(vec![]),
+                        )
+                        .unwrap();
+                    execution
                         .map(&(0..workers).collect::<Vec<_>>(), |_| work())
                         .unwrap();
                 });
                 let records = observed.0.lock().unwrap();
-                for stage in ["prepare.job", "emit.owner"] {
+                for stage in ["prepare.job", "lockfile.member", "emit.owner"] {
                     let jobs: Vec<_> = records
                         .iter()
                         .filter(|(name, _, _)| *name == stage)
@@ -362,14 +549,63 @@ mod tests {
             },
             |_| vec![],
         );
-        assert!(result.is_err());
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(
+            error.contains("module preparation worker panicked"),
+            "{error}"
+        );
+        assert!(error.contains("expected preparation failure"), "{error}");
         // More surviving idle workers than panicked jobs must also terminate.
         let result = ExecutionOptions::new(NonZeroUsize::new(4).unwrap()).replenish(
             [0],
-            |_| panic!("single preparation failure"),
+            |_| std::panic::panic_any(String::from("single preparation failure")),
             |(): ()| vec![],
         );
-        assert!(result.is_err());
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(error.contains("single preparation failure"), "{error}");
+    }
+
+    #[test]
+    fn fingerprint_frontier_joins_workers_on_integration_error_and_panic() {
+        use std::sync::atomic::AtomicBool;
+        let joined = AtomicBool::new(false);
+        let barrier = Barrier::new(2);
+        let error = ExecutionOptions::new(NonZeroUsize::new(2).unwrap())
+            .replenish_stage(
+                WorkStage::Lockfile,
+                [0, 1],
+                |job| {
+                    barrier.wait();
+                    if job == 1 {
+                        joined.store(true, Ordering::SeqCst);
+                    }
+                    job
+                },
+                |_| Err(eyre::eyre!("expected fingerprint integration failure")),
+            )
+            .unwrap_err();
+        assert!(joined.load(Ordering::SeqCst));
+        assert!(
+            format!("{error:#}").contains("expected fingerprint integration failure"),
+            "{error:#}"
+        );
+        let error = ExecutionOptions::new(NonZeroUsize::new(2).unwrap())
+            .replenish_stage(
+                WorkStage::Lockfile,
+                [0],
+                |_| panic!("expected fingerprint worker failure"),
+                |(): ()| Ok(vec![]),
+            )
+            .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("lockfile fingerprint worker panicked"),
+            "{error}"
+        );
+        assert!(
+            error.contains("expected fingerprint worker failure"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -482,7 +718,9 @@ mod tests {
             )
             .unwrap();
         });
-        assert!(result.unwrap_err().to_string().contains("worker panicked"));
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(error.contains("output emission worker panicked"), "{error}");
+        assert!(error.contains("expected worker panic"), "{error}");
         assert_eq!(crate::rewrite::parse_counts().difference(before).source, 1);
     }
 }

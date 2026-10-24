@@ -183,9 +183,9 @@ fn normalize_jsonc(text: &str) -> eyre::Result<String> {
         .with_config(TokensParserConfig)
         .parse();
     eyre::ensure!(
-        parsed.errors.is_empty() && !parsed.panicked,
+        parsed.diagnostics.is_empty() && !parsed.fatal_error,
         "JSONC syntax errors: {:?}",
-        parsed.errors
+        parsed.diagnostics
     );
     let mut normalized = source.as_bytes().to_vec();
     for comment in &parsed.program.comments {

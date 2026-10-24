@@ -61,7 +61,9 @@ impl VariableScope {
     }
 
     /// Returns escaped names and whether all their references are type-only.
-    pub fn get_escaped_symbols_with_type_only(&self) -> impl Iterator<Item = (&CompactString, bool)> {
+    pub fn get_escaped_symbols_with_type_only(
+        &self,
+    ) -> impl Iterator<Item = (&CompactString, bool)> {
         self.escaped_symbols
             .iter()
             .map(|(name, type_only)| (name, *type_only))

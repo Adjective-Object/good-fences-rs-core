@@ -68,11 +68,7 @@ impl<T: ToString + AsRef<str>> From<T> for ExportedSymbol {
 }
 impl ExportedSymbol {
     pub fn from_module_export_name(name: &ModuleExportName) -> Self {
-        match name {
-            ModuleExportName::IdentifierName(ident) => Self::from(ident.name.as_str()),
-            ModuleExportName::IdentifierReference(ident) => Self::from(ident.name.as_str()),
-            ModuleExportName::StringLiteral(str) => Self::from(str.value.as_ref()),
-        }
+        Self::from(name.name().as_str())
     }
 }
 

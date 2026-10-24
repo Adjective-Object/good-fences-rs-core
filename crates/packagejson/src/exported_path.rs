@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer};
 pub enum ExportedPath {
     Exported(String),
     Private,
+    Conditional(Vec<(String, ExportedPath)>),
     // fallback option, see https://github.com/serde-rs/serde/issues/2057#issuecomment-879440712
     //
     // Some packages use non-standard extensions to the "exports" field
@@ -20,14 +21,25 @@ impl ExportedPath {
         match self {
             ExportedPath::Exported(s) => ExportedPathRef::Exported(s),
             ExportedPath::Private => ExportedPathRef::Private,
+            ExportedPath::Conditional(conditions) => ExportedPathRef::Conditional(conditions),
             ExportedPath::Unrecognized => ExportedPathRef::Unrecognized,
         }
     }
 
-    pub fn map_export(&self, f: impl FnOnce(&str) -> String) -> Self {
+    pub fn map_export(&self, f: impl Fn(&str) -> String) -> Self {
+        self.map_export_with(&f)
+    }
+
+    fn map_export_with(&self, f: &impl Fn(&str) -> String) -> Self {
         match self {
             ExportedPath::Exported(s) => ExportedPath::Exported(f(s)),
             ExportedPath::Private => ExportedPath::Private,
+            ExportedPath::Conditional(conditions) => ExportedPath::Conditional(
+                conditions
+                    .iter()
+                    .map(|(key, target)| (key.clone(), target.map_export_with(f)))
+                    .collect(),
+            ),
             ExportedPath::Unrecognized => ExportedPath::Unrecognized,
         }
     }
@@ -53,6 +65,7 @@ impl PartialEq for ExportedPath {
         match (self, other) {
             (ExportedPath::Exported(a), ExportedPath::Exported(b)) => a == b,
             (ExportedPath::Private, ExportedPath::Private) => true,
+            (ExportedPath::Conditional(a), ExportedPath::Conditional(b)) => a == b,
             (ExportedPath::Unrecognized, ExportedPath::Unrecognized) => true,
             _ => false,
         }
@@ -64,6 +77,7 @@ impl PartialEq for ExportedPath {
 pub enum ExportedPathRef<'a> {
     Exported(&'a str),
     Private,
+    Conditional(&'a [(String, ExportedPath)]),
     // fallback option, see https://github.com/serde-rs/serde/issues/2057#issuecomment-879440712
     //
     // Some packages use non-standard extensions to the "exports" field
@@ -75,10 +89,14 @@ pub enum ExportedPathRef<'a> {
 }
 
 impl<'a> ExportedPathRef<'a> {
-    pub fn map_export<'b>(self, f: impl FnOnce(&'a str) -> &'b str) -> ExportedPathRef<'b> {
+    pub fn map_export<'b>(self, f: impl FnOnce(&'a str) -> &'b str) -> ExportedPathRef<'b>
+    where
+        'a: 'b,
+    {
         match self {
             ExportedPathRef::Exported(s) => ExportedPathRef::Exported(f(s)),
             ExportedPathRef::Private => ExportedPathRef::Private,
+            ExportedPathRef::Conditional(conditions) => ExportedPathRef::Conditional(conditions),
             ExportedPathRef::Unrecognized => ExportedPathRef::Unrecognized,
         }
     }
@@ -104,6 +122,7 @@ impl PartialEq for ExportedPathRef<'_> {
         match (self, other) {
             (ExportedPathRef::Exported(a), ExportedPathRef::Exported(b)) => a == b,
             (ExportedPathRef::Private, ExportedPathRef::Private) => true,
+            (ExportedPathRef::Conditional(a), ExportedPathRef::Conditional(b)) => a == b,
             _ => false,
         }
     }
@@ -283,18 +302,22 @@ impl<'de> serde::de::Visitor<'de> for ExportedPathVisitor {
         Ok(ExportedPath::Unrecognized)
     }
 
-    fn visit_seq<A>(self, _seq: A) -> Result<Self::Value, A::Error>
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::SeqAccess<'de>,
     {
+        while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
         Ok(ExportedPath::Unrecognized)
     }
 
-    fn visit_map<A>(self, _map: A) -> Result<Self::Value, A::Error>
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
-        Ok(ExportedPath::Unrecognized)
+        crate::packagejson::deserialize_conditions(serde::de::value::MapAccessDeserializer::new(
+            map,
+        ))
+        .map(ExportedPath::Conditional)
     }
 
     fn visit_enum<A>(self, _data: A) -> Result<Self::Value, A::Error>
@@ -333,7 +356,7 @@ mod test {
 
     #[test]
     fn test_deserialize_unrecognized() {
-        let p: ExportedPath = serde_json::from_str("{}").unwrap();
+        let p: ExportedPath = serde_json::from_str(r#"[{"unsupported":"./target.js"}]"#).unwrap();
         assert_eq!(p, ExportedPath::Unrecognized);
     }
 }

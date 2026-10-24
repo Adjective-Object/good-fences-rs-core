@@ -2,6 +2,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use aube_lockfile::{LocalSource, LockedPackage, LockfileGraph, LockfileKind};
@@ -9,6 +10,8 @@ use eyre::{ensure, Context, OptionExt};
 use ftree_cache::inputs::PathInput;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+
+use crate::execution::{ExecutionOptions, WorkStage};
 
 type Hash = [u8; 32];
 
@@ -31,12 +34,21 @@ pub(crate) struct ProjectLockfile {
 }
 
 impl ProjectLockfile {
-    /// `project` is the chosen lockfile root, not an arbitrary importing directory.
-    /// Upstream selects precedence/branch lockfiles. Format readers deliberately
-    /// bypass its `fill_local_package_versions` eager workspace manifest reads.
+    #[cfg(test)]
     pub(crate) fn read(
         project: &Path,
         selected: Option<LockfileKind>,
+    ) -> eyre::Result<Option<Self>> {
+        Self::read_with_execution(project, selected, ExecutionOptions::default())
+    }
+
+    /// `project` is the chosen lockfile root, not an arbitrary importing directory.
+    /// Upstream selects precedence/branch lockfiles. Format readers deliberately
+    /// bypass its `fill_local_package_versions` eager workspace manifest reads.
+    pub(crate) fn read_with_execution(
+        project: &Path,
+        selected: Option<LockfileKind>,
+        execution: ExecutionOptions,
     ) -> eyre::Result<Option<Self>> {
         let project = project.canonicalize()?;
         let (_, path) = aube_lockfile::active_lockfile_path_selecting(&project, selected);
@@ -48,6 +60,8 @@ impl ProjectLockfile {
         let kind = aube_lockfile::detect_existing_lockfile_kind_selecting(&project, selected)
             .ok_or_eyre("selected lockfile has no recognized format")?;
         let mut manifest_bytes = None;
+        tracing::info!(target: "bundler::progress", "Parsing project lockfile");
+        let parse_span = tracing::info_span!("lockfile.parse", bytes = raw.len()).entered();
         let graph = match kind {
             LockfileKind::Aube | LockfileKind::Pnpm => aube_lockfile::pnpm::parse(&path)?,
             LockfileKind::Npm | LockfileKind::NpmShrinkwrap => aube_lockfile::npm::parse(&path)?,
@@ -68,6 +82,8 @@ impl ProjectLockfile {
                 aube_lockfile::yarn::parse(&path, &manifest)?
             }
         };
+        drop(parse_span);
+        let normalize_span = tracing::info_span!("lockfile.normalize").entered();
         let mut nodes = if kind == LockfileKind::YarnBerry {
             // aube 2.8.1 intentionally skips workspace/builtin-patch blocks and
             // merges same-version locators. Retain these identities and edges
@@ -91,7 +107,14 @@ impl ProjectLockfile {
                 node.complete = false;
             }
         }
-        let records = fingerprint_nodes(&nodes)?;
+        drop(normalize_span);
+        tracing::info!(
+            target: "bundler::progress",
+            nodes = nodes.len(),
+            "Fingerprinting lockfile package graph"
+        );
+        let records = tracing::info_span!("lockfile.fingerprint", nodes = nodes.len())
+            .in_scope(|| fingerprint_nodes_with_execution(&nodes, execution))?;
         let mut packages = BTreeMap::new();
         let mut importers = BTreeMap::new();
         for (key, record) in records {
@@ -106,6 +129,7 @@ impl ProjectLockfile {
         }
         // Format parsers may reopen the file. Seal the bytes surrounding that
         // parse, rather than attributing a later read to the parsed graph.
+        let _validation = tracing::info_span!("lockfile.validate", inputs = inputs.len()).entered();
         for input in &inputs {
             input.validate()?;
         }
@@ -119,6 +143,7 @@ impl ProjectLockfile {
     }
 
     pub(crate) fn recheck(&self) -> eyre::Result<()> {
+        let _span = tracing::info_span!("lockfile.recheck", inputs = self.inputs.len()).entered();
         for input in &self.inputs {
             input.validate()?;
         }
@@ -422,10 +447,121 @@ fn hash(value: Value) -> eyre::Result<Hash> {
     Ok(Sha256::digest(serde_json::to_vec(&canonical(&value))?).into())
 }
 
-/// Hash the SCC condensation DAG, not a DFS tree with cycle back-edges cut.
-/// Every member sees the complete component and all outgoing named edges.
+#[cfg(test)]
 fn fingerprint_nodes(
     nodes: &BTreeMap<Key, Node>,
+) -> eyre::Result<BTreeMap<Key, PackageFingerprint>> {
+    fingerprint_nodes_with_execution(nodes, ExecutionOptions::default())
+}
+
+#[derive(Clone, Copy)]
+struct ComponentFingerprint {
+    hash: Hash,
+    mutable: bool,
+    complete: bool,
+}
+
+struct ComponentOutput {
+    id: usize,
+    fingerprint: ComponentFingerprint,
+    packages: Vec<(Key, PackageFingerprint)>,
+}
+
+struct FingerprintGraph<'a> {
+    nodes: &'a BTreeMap<Key, Node>,
+    keys: Vec<Key>,
+    index: BTreeMap<Key, usize>,
+    components: Vec<Vec<usize>>,
+    owner: Vec<usize>,
+}
+
+impl FingerprintGraph<'_> {
+    fn hash_component(
+        &self,
+        id: usize,
+        completed: &[OnceLock<ComponentFingerprint>],
+    ) -> eyre::Result<ComponentOutput> {
+        let _span = tracing::info_span!("lockfile.component", component_id = id).entered();
+        let mut records = Vec::new();
+        let mut mutable = false;
+        let mut complete = true;
+        for &i in &self.components[id] {
+            let node = &self.nodes[&self.keys[i]];
+            mutable |= node.mutable;
+            complete &= node.complete;
+            let mut named = node.edges.clone();
+            named.sort();
+            let mut named_records = Vec::new();
+            for edge in named {
+                let child = edge
+                    .target
+                    .as_ref()
+                    .and_then(|key| self.index.get(key))
+                    .copied();
+                let outgoing = if let Some(child) = child {
+                    let component = self.owner[child];
+                    if component != id {
+                        let dependency = completed[component]
+                            .get()
+                            .ok_or_eyre("lockfile dependency fingerprint is not ready")?;
+                        mutable |= dependency.mutable;
+                        complete &= dependency.complete;
+                        Some(dependency.hash)
+                    } else {
+                        None
+                    }
+                } else {
+                    complete = false;
+                    None
+                };
+                named_records.push(json!([edge, outgoing]));
+            }
+            records.push(json!([
+                self.keys[i],
+                node.identity,
+                node.metadata,
+                named_records
+            ]));
+        }
+        let fingerprint = ComponentFingerprint {
+            hash: hash(json!(["bundler-lock-scc-v1", records]))?,
+            mutable,
+            complete,
+        };
+        let packages = self.components[id]
+            .iter()
+            .map(|&i| {
+                let key = &self.keys[i];
+                Ok((
+                    key.clone(),
+                    PackageFingerprint {
+                        instance: hash(json!([
+                            "bundler-lock-instance-v1",
+                            self.nodes[key].identity
+                        ]))?,
+                        dependencies: hash(json!([
+                            "bundler-lock-package-v1",
+                            key,
+                            fingerprint.hash
+                        ]))?,
+                        mutable,
+                        complete,
+                    },
+                ))
+            })
+            .collect::<eyre::Result<_>>()?;
+        Ok(ComponentOutput {
+            id,
+            fingerprint,
+            packages,
+        })
+    }
+}
+
+/// Cycles are one job; a component is ready only after all outgoing hashes arrive.
+fn fingerprint_nodes_with_execution(
+    nodes: &BTreeMap<Key, Node>,
+    execution: ExecutionOptions,
 ) -> eyre::Result<BTreeMap<Key, PackageFingerprint>> {
     let keys: Vec<_> = nodes.keys().cloned().collect();
     let index: BTreeMap<_, _> = keys
@@ -485,64 +621,78 @@ fn fingerprint_nodes(
         members.sort_unstable();
         components.push(members);
     }
-    // Kosaraju above produces source-first components: children are ready in reverse.
-    let mut component_hashes = vec![[0; 32]; components.len()];
-    let mut mutable = vec![false; components.len()];
-    let mut complete = vec![true; components.len()];
-    for id in (0..components.len()).rev() {
-        let mut records = Vec::new();
-        for &i in &components[id] {
-            let node = &nodes[&keys[i]];
-            mutable[id] |= node.mutable;
-            complete[id] &= node.complete;
-            let mut named = node.edges.clone();
-            named.sort();
-            let mut named_records = Vec::new();
-            for edge in named {
-                let child = edge.target.as_ref().and_then(|k| index.get(k)).copied();
-                let outgoing = if let Some(child) = child {
-                    let c = owner[child];
-                    if c != id {
-                        ensure!(c > id, "invalid component order");
-                        mutable[id] |= mutable[c];
-                        complete[id] &= complete[c];
-                        Some(component_hashes[c])
-                    } else {
-                        None
-                    }
-                } else {
-                    complete[id] = false;
-                    None
-                };
-                named_records.push(json!([edge, outgoing]));
+    let mut dependencies = vec![BTreeSet::new(); components.len()];
+    for (i, targets) in edges.iter().enumerate() {
+        for &target in targets {
+            if owner[i] != owner[target] {
+                dependencies[owner[i]].insert(owner[target]);
             }
-            records.push(json!([
-                keys[i],
-                node.identity,
-                node.metadata,
-                named_records
-            ]));
         }
-        component_hashes[id] = hash(json!(["bundler-lock-scc-v1", records]))?;
     }
-    keys.iter()
-        .enumerate()
-        .map(|(i, key)| {
-            Ok((
-                key.clone(),
-                PackageFingerprint {
-                    instance: hash(json!(["bundler-lock-instance-v1", nodes[key].identity]))?,
-                    dependencies: hash(json!([
-                        "bundler-lock-package-v1",
-                        key,
-                        component_hashes[owner[i]]
-                    ]))?,
-                    mutable: mutable[owner[i]],
-                    complete: complete[owner[i]],
-                },
-            ))
-        })
-        .collect()
+    let mut dependents = vec![Vec::new(); components.len()];
+    for (id, dependencies) in dependencies.iter().enumerate() {
+        for &dependency in dependencies {
+            dependents[dependency].push(id);
+        }
+    }
+    let mut remaining: Vec<_> = dependencies.iter().map(BTreeSet::len).collect();
+    let ready: Vec<_> = (0..components.len())
+        .filter(|&id| remaining[id] == 0)
+        .collect();
+    let completed: Vec<_> = (0..components.len()).map(|_| OnceLock::new()).collect();
+    let total = keys.len();
+    let graph = FingerprintGraph {
+        nodes,
+        keys,
+        index,
+        components,
+        owner,
+    };
+    let mut packages = BTreeMap::new();
+    let progress = |completed, finished, success| {
+        tracing::info!(
+            target: "bundler::progress::lockfile",
+            completed,
+            total,
+            finished,
+            success,
+            "Fingerprinting lockfile package graph"
+        );
+    };
+    progress(0_usize, false, true);
+    let result = execution
+        .replenish_stage(
+            WorkStage::Lockfile,
+            ready,
+            |id| graph.hash_component(id, &completed),
+            |output| {
+                let output = output?;
+                ensure!(
+                    completed[output.id].set(output.fingerprint).is_ok(),
+                    "duplicate lockfile fingerprint result"
+                );
+                packages.extend(output.packages);
+                let mut ready = Vec::new();
+                for &dependent in &dependents[output.id] {
+                    remaining[dependent] -= 1;
+                    if remaining[dependent] == 0 {
+                        ready.push(dependent);
+                    }
+                }
+                progress(packages.len(), false, true);
+                Ok(ready)
+            },
+        )
+        .and_then(|()| {
+            ensure!(
+                packages.len() == total,
+                "unfinished lockfile fingerprint jobs"
+            );
+            Ok(())
+        });
+    progress(packages.len(), true, result.is_ok());
+    result?;
+    Ok(packages)
 }
 
 #[cfg(test)]
@@ -562,6 +712,108 @@ mod tests {
 
     fn fingerprints(graph: &LockfileGraph) -> eyre::Result<BTreeMap<Key, PackageFingerprint>> {
         fingerprint_nodes(&normalized_nodes(graph)?)
+    }
+
+    #[test]
+    fn parallel_fingerprints_match_legacy_bytes_for_shared_dependencies_cycles_and_missing_edges(
+    ) -> eyre::Result<()> {
+        let mut graph = LockfileGraph::default();
+        for name in ["root", "a", "b", "leaf", "unrelated"] {
+            graph.packages.insert(format!("{name}@1"), package(name));
+        }
+        for (parent, child) in [
+            ("root", "a"),
+            ("a", "b"),
+            ("b", "a"),
+            ("b", "leaf"),
+            ("leaf", "missing"),
+        ] {
+            graph
+                .packages
+                .get_mut(&format!("{parent}@1"))
+                .unwrap()
+                .dependencies
+                .insert(child.into(), "1".into());
+        }
+        graph
+            .packages
+            .get_mut("root@1")
+            .unwrap()
+            .optional_dependencies
+            .insert("a".into(), "1".into());
+        let mut nodes = normalized_nodes(&graph)?;
+        nodes
+            .get_mut(&Key::Package("leaf@1".into()))
+            .unwrap()
+            .mutable = true;
+        let components = [
+            vec!["leaf@1"],
+            vec!["unrelated@1"],
+            vec!["a@1", "b@1"],
+            vec!["root@1"],
+        ];
+        let mut expected = BTreeMap::<Key, PackageFingerprint>::new();
+        let mut component_hashes = BTreeMap::new();
+        // Fixed dependency-first components reproduce the original serial payloads.
+        for component in components {
+            let members: Vec<_> = component
+                .into_iter()
+                .map(|key| Key::Package(key.into()))
+                .collect();
+            let mut mutable = false;
+            let mut complete = true;
+            let mut records = Vec::new();
+            for key in &members {
+                let node = &nodes[key];
+                mutable |= node.mutable;
+                complete &= node.complete;
+                let mut edges = node.edges.clone();
+                edges.sort();
+                let mut named = Vec::new();
+                for edge in edges {
+                    let outgoing = match edge.target.as_ref() {
+                        Some(target) if members.contains(target) => None,
+                        Some(target) => {
+                            mutable |= expected[target].mutable;
+                            complete &= expected[target].complete;
+                            Some(component_hashes[target])
+                        }
+                        None => {
+                            complete = false;
+                            None
+                        }
+                    };
+                    named.push(json!([edge, outgoing]));
+                }
+                records.push(json!([key, node.identity, node.metadata, named]));
+            }
+            let component_hash = hash(json!(["bundler-lock-scc-v1", records]))?;
+            for key in members {
+                let instance = hash(json!(["bundler-lock-instance-v1", nodes[&key].identity]))?;
+                let dependencies = hash(json!(["bundler-lock-package-v1", key, component_hash]))?;
+                component_hashes.insert(key.clone(), component_hash);
+                expected.insert(
+                    key,
+                    PackageFingerprint {
+                        instance,
+                        dependencies,
+                        mutable,
+                        complete,
+                    },
+                );
+            }
+        }
+        for workers in [1, 2, 4] {
+            let execution = ExecutionOptions::new(std::num::NonZeroUsize::new(workers).unwrap());
+            for _ in 0..3 {
+                assert_eq!(
+                    fingerprint_nodes_with_execution(&nodes, execution)?,
+                    expected
+                );
+            }
+            assert!(fingerprint_nodes_with_execution(&BTreeMap::new(), execution)?.is_empty());
+        }
+        Ok(())
     }
 
     #[test]

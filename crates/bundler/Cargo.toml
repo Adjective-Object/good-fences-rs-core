@@ -2,7 +2,7 @@
 name = "bundler"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.95"
+rust-version = "1.97"
 license = "Apache-2.0"
 description = "Owned graph retention, exact chunk planning and native ESM emission"
 
@@ -17,6 +17,10 @@ ast-segmenter = { path = "../ast_segmenter" }
 source_graph = { path = "../source_graph" }
 eyre.workspace = true
 tracing.workspace = true
+parking_lot.workspace = true
+ignore = "0.4"
+jwalk.workspace = true
+rayon.workspace = true
 oxc_span.workspace = true
 oxc_allocator.workspace = true
 oxc_ast.workspace = true
@@ -26,7 +30,7 @@ oxc_utils_parse = { path = "../oxc_utils_parse" }
 oxc_semantic.workspace = true
 oxc_codegen.workspace = true
 oxc_transformer.workspace = true
-oxc_sourcemap = "6.1.1"
+oxc_sourcemap = "9.0.0"
 logger = { path = "../logger" }
 serde_json.workspace = true
 sha2 = "0.10.9"

@@ -1,4 +1,5 @@
 //! Explicit filesystem observations, retained with the values they produced.
+use eyre::WrapErr;
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use std::{
@@ -6,6 +7,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+mod snapshot;
+pub use snapshot::InputSnapshot;
+pub(crate) use snapshot::SharedError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputKind {
@@ -90,19 +95,32 @@ impl PathInput {
     }
 
     pub fn capture(path: &Path) -> eyre::Result<Self> {
-        let path = std::path::absolute(path)?;
+        let path = std::path::absolute(path)
+            .wrap_err_with(|| format!("resolving input observation path {}", path.display()))?;
         let mut links = Vec::new();
         // Inspect only this path's prefixes, never their siblings or children.
         for prefix in path.ancestors().collect::<Vec<_>>().into_iter().rev() {
             match fs::symlink_metadata(prefix) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
-                    links.push((prefix.to_owned(), fs::read_link(prefix)?));
+                    links.push((
+                        prefix.to_owned(),
+                        fs::read_link(prefix)
+                            .wrap_err_with(|| format!("reading input link {}", prefix.display()))?,
+                    ));
                 }
                 Ok(_) => {}
                 Err(error) if absent(&error) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => {
+                    return Err(error).wrap_err_with(|| {
+                        format!("inspecting input path prefix {}", prefix.display())
+                    })
+                }
             }
         }
+        Self::capture_with_links(path, links)
+    }
+
+    fn capture_with_links(path: PathBuf, links: Vec<(PathBuf, PathBuf)>) -> eyre::Result<Self> {
         let (kind, canonical, identity) = match fs::metadata(&path) {
             Ok(metadata) => (
                 if metadata.is_file() {
@@ -112,11 +130,18 @@ impl PathInput {
                 } else {
                     InputKind::Other
                 },
-                Some(fs::canonicalize(&path)?),
-                Some(identity(&path, &metadata)?),
+                Some(fs::canonicalize(&path).wrap_err_with(|| {
+                    format!("canonicalizing observed input {}", path.display())
+                })?),
+                Some(identity(&path, &metadata).wrap_err_with(|| {
+                    format!("reading filesystem identity for {}", path.display())
+                })?),
             ),
             Err(error) if absent(&error) => (InputKind::Missing, None, None),
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                return Err(error)
+                    .wrap_err_with(|| format!("reading input metadata {}", path.display()))
+            }
         };
         Ok(Self {
             path,
@@ -158,10 +183,15 @@ impl PathInput {
     }
 
     pub fn validate(&self) -> eyre::Result<()> {
-        let mut fresh = Self::capture(&self.path)?;
+        let mut fresh = Self::capture(&self.path)
+            .wrap_err_with(|| format!("revalidating observed input {}", self.path.display()))?;
         if self.content.is_some() && fresh.kind == InputKind::File {
-            fresh.seal_content(&fs::read(&self.path)?);
-            let mut after = Self::capture(&self.path)?;
+            fresh.seal_content(
+                &fs::read(&self.path)
+                    .wrap_err_with(|| format!("reading sealed input {}", self.path.display()))?,
+            );
+            let mut after = Self::capture(&self.path)
+                .wrap_err_with(|| format!("rechecking sealed input {}", self.path.display()))?;
             after.content = fresh.content;
             eyre::ensure!(
                 fresh == after,
@@ -175,6 +205,28 @@ impl PathInput {
             self.path.display()
         );
         Ok(())
+    }
+
+    pub fn checked_from_parts_in(
+        snapshot: &InputSnapshot,
+        path: PathBuf,
+        kind: InputKind,
+        canonical: Option<PathBuf>,
+        identity: Option<(u64, u64)>,
+        links: Vec<(PathBuf, PathBuf)>,
+        content: Option<[u8; 32]>,
+    ) -> eyre::Result<Self> {
+        eyre::ensure!(path.is_absolute(), "resolution input path is not absolute");
+        let input = Self {
+            path,
+            kind,
+            canonical,
+            identity,
+            links,
+            content,
+        };
+        snapshot.validate(&input)?;
+        Ok(input)
     }
 }
 
@@ -198,6 +250,14 @@ impl InputProof {
         Ok(())
     }
 
+    pub fn validate_in(&self, snapshot: &InputSnapshot) -> eyre::Result<()> {
+        self.check_errors()?;
+        for input in &self.inputs {
+            snapshot.validate(input)?;
+        }
+        Ok(())
+    }
+
     pub fn check_errors(&self) -> eyre::Result<()> {
         eyre::ensure!(
             self.errors.is_empty(),
@@ -210,34 +270,67 @@ impl InputProof {
 
 /// Request-owned, explicit collector. Clones share only this request's capture.
 #[derive(Clone, Debug, Default)]
-pub struct InputObserver(Arc<Mutex<InputProof>>);
+pub struct InputObserver {
+    proof: Arc<Mutex<InputProof>>,
+    snapshot: Option<InputSnapshot>,
+}
 
 impl InputObserver {
+    pub fn with_snapshot(snapshot: InputSnapshot) -> Self {
+        Self {
+            snapshot: Some(snapshot),
+            ..Self::default()
+        }
+    }
+
+    pub fn fork(&self) -> Self {
+        Self {
+            snapshot: self.snapshot.clone(),
+            ..Self::default()
+        }
+    }
+
+    pub fn capture(&self, path: &Path) -> eyre::Result<PathInput> {
+        match &self.snapshot {
+            Some(snapshot) => snapshot.capture(path),
+            None => PathInput::capture(path),
+        }
+    }
+
+    pub fn read(&self, path: &Path) -> eyre::Result<Option<Arc<[u8]>>> {
+        let (input, bytes) = match &self.snapshot {
+            Some(snapshot) => snapshot.read(path)?,
+            None => InputSnapshot::default().read(path)?,
+        };
+        self.record(input);
+        Ok(bytes)
+    }
+
     pub fn record(&self, input: PathInput) {
-        self.0.lock().inputs.push(input);
+        self.proof.lock().inputs.push(input);
     }
 
     pub fn error(&self, error: impl std::fmt::Display) {
-        self.0.lock().errors.push(error.to_string());
+        self.proof.lock().errors.push(error.to_string());
     }
 
     pub fn replay(&self, proof: &InputProof) {
-        let mut capture = self.0.lock();
+        let mut capture = self.proof.lock();
         capture.inputs.extend_from_slice(&proof.inputs);
         capture.errors.extend_from_slice(&proof.errors);
     }
 
     pub fn proof(&self) -> InputProof {
-        self.0.lock().clone()
+        self.proof.lock().clone()
     }
 
     pub fn position(&self) -> (usize, usize) {
-        let capture = self.0.lock();
+        let capture = self.proof.lock();
         (capture.inputs.len(), capture.errors.len())
     }
 
     pub fn since(&self, position: (usize, usize)) -> InputProof {
-        let capture = self.0.lock();
+        let capture = self.proof.lock();
         InputProof {
             inputs: capture.inputs[position.0..].to_vec(),
             errors: capture.errors[position.1..].to_vec(),
@@ -246,7 +339,7 @@ impl InputObserver {
 
     /// Preserve legacy bool-probe behavior, but never turn IO errors into valid proofs.
     pub fn is_file(&self, path: &Path) -> bool {
-        match PathInput::capture(path) {
+        match self.capture(path) {
             Ok(input) => {
                 let result = input.kind() == InputKind::File;
                 self.record(input);

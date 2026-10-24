@@ -1,7 +1,7 @@
 //! Demand admission is explicit; membership checks never perform filesystem IO.
 use std::{ffi::OsString, sync::Mutex};
 
-use ftree_cache::inputs::{InputKind, PathInput};
+use ftree_cache::inputs::{InputKind, InputSnapshot, PathInput};
 
 use super::*;
 
@@ -15,7 +15,6 @@ struct State {
     inputs: BTreeMap<PathBuf, PathInput>,
     directories: BTreeMap<PathBuf, Vec<OsString>>,
     contexts: Vec<Context>,
-    #[cfg(test)]
     directory_reads: usize,
 }
 
@@ -36,10 +35,10 @@ pub(super) type ExpandedContext = (
 
 pub(crate) struct Inventory {
     root: PathBuf,
-    // Workers only consult membership and seal their own package-format reads.
-    // Admission/context expansion remain coordinator-owned. Styles borrows this
-    // same inventory throughout its transitive resource discovery.
+    // Precise workers admit routes and seal package/context observations.
+    // Speculation uses private inventories, merging only when demanded.
     state: Mutex<State>,
+    snapshot: InputSnapshot,
 }
 
 fn excluded(path: &Path) -> bool {
@@ -135,10 +134,45 @@ fn checked_route(root: &Path, state: &State, route: &Path) -> Option<PathBuf> {
 }
 
 impl Inventory {
+    pub(super) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(super) fn snapshot(&self) -> &InputSnapshot {
+        &self.snapshot
+    }
+
+    pub(super) fn fork(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            state: Mutex::new(State::default()),
+            snapshot: self.snapshot.clone(),
+        }
+    }
+
+    pub(super) fn observations(&self) -> Vec<PathInput> {
+        self.state
+            .lock()
+            .unwrap()
+            .inputs
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn merge_observations(&self, inputs: Vec<PathInput>) -> eyre::Result<()> {
+        let mut state = self.state.lock().unwrap();
+        for input in inputs {
+            Self::observe(&mut state, input)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn new(root: &Path) -> Self {
         Self {
             root: root.into(),
             state: Mutex::new(State::default()),
+            snapshot: InputSnapshot::default(),
         }
     }
 
@@ -186,7 +220,7 @@ impl Inventory {
     }
 
     pub(crate) fn probe_file(&self, path: &Path) -> eyre::Result<bool> {
-        let input = PathInput::capture(&absolute_route(path)?)?;
+        let input = self.snapshot.capture(&absolute_route(path)?)?;
         let file = input.kind() == InputKind::File;
         Self::observe(&mut self.state.lock().unwrap(), input)?;
         Ok(file)
@@ -203,7 +237,7 @@ impl Inventory {
         let route = absolute_route(route)?;
         let mut state = self.state.lock().unwrap();
         if kind == InputKind::File && state.files.contains(&route) {
-            let input = PathInput::capture(&route)?;
+            let input = self.snapshot.capture(&route)?;
             ensure!(
                 input.kind() == InputKind::File && input.canonical() == Some(route.as_path()),
                 "admitted source identity changed: {}",
@@ -220,7 +254,7 @@ impl Inventory {
             )
         })?;
         if route != original {
-            Self::observe(&mut state, PathInput::capture(&original)?)?;
+            Self::observe(&mut state, self.snapshot.capture(&original)?)?;
         }
         let scope = std::iter::once(&self.root)
             .chain(state.scopes.keys())
@@ -240,7 +274,9 @@ impl Inventory {
         for part in route.strip_prefix(&scope)?.components() {
             let parent = canonical.clone();
             prefix.push(part);
-            let input = PathInput::capture(&prefix)
+            let input = self
+                .snapshot
+                .capture(&prefix)
                 .wrap_err_with(|| format!("inventory target {}", prefix.display()))?;
             ensure!(
                 matches!(input.kind(), InputKind::File | InputKind::Directory),
@@ -289,9 +325,9 @@ impl Inventory {
         }
         ensure!(
             if kind == InputKind::File {
-                canonical.is_file()
+                self.snapshot.capture(&canonical)?.kind() == InputKind::File
             } else {
-                canonical.is_dir()
+                self.snapshot.capture(&canonical)?.kind() == InputKind::Directory
             },
             "inventory input has the wrong file kind"
         );
@@ -334,15 +370,14 @@ impl Inventory {
     pub(super) fn package_format(&self, source: &Path) -> eyre::Result<ModuleFormat> {
         for directory in source.parent().into_iter().flat_map(Path::ancestors) {
             let path = directory.join("package.json");
-            let mut input = PathInput::capture(&path)?;
+            let mut input = self.snapshot.capture(&path)?;
             let bytes = if input.kind() == InputKind::File {
-                let bytes = fs::read(&path)?;
-                input.seal_content(&bytes);
-                Some(bytes)
+                let (sealed, bytes) = self.snapshot.read(&path)?;
+                input = sealed;
+                bytes
             } else {
                 None
             };
-            input.validate()?;
             Self::observe(&mut self.state.lock().unwrap(), input)?;
             if let Some(bytes) = bytes {
                 let json: serde_json::Value =
@@ -523,10 +558,7 @@ impl Inventory {
                 .collect::<Result<Vec<_>, _>>()?;
             entries.sort();
             let mut state = self.state.lock().unwrap();
-            #[cfg(test)]
-            {
-                state.directory_reads += 1;
-            }
+            state.directory_reads += 1;
             if fresh {
                 directories.insert(target.into(), entries.clone());
             } else {
@@ -591,11 +623,12 @@ impl Inventory {
 
     pub(super) fn recheck(&self) -> eyre::Result<()> {
         let _span = tracing::info_span!("inventory.recheck").entered();
+        let snapshot = InputSnapshot::default();
         // Workers have joined. Drop the mutex before recursive context scans.
         let contexts = {
             let state = self.state.lock().unwrap();
             for input in state.inputs.values() {
-                input.validate()?;
+                snapshot.validate(input)?;
             }
             for file in &state.files {
                 self.check_scopes(&state, file)?;
@@ -623,7 +656,6 @@ impl Inventory {
         Ok(())
     }
 
-    #[cfg(test)]
     pub(super) fn directory_reads(&self) -> usize {
         self.state.lock().unwrap().directory_reads
     }

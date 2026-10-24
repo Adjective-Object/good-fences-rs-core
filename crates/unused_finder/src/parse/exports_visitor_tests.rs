@@ -14,8 +14,14 @@ mod test {
     fn parse(src: &str) -> RawImportExportInfo {
         let allocator = oxc_allocator::Allocator::default();
         let ret = oxc_utils_parse::parse_ts(&allocator, src);
-        assert!(ret.errors.is_empty(), "parse errors: {:?}", ret.errors);
-        let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&ret.program);
+        assert!(
+            ret.diagnostics.is_empty(),
+            "parse errors: {:?}",
+            ret.diagnostics
+        );
+        let semantic_ret = oxc_semantic::SemanticBuilder::new()
+            .with_build_nodes(true)
+            .build(&ret.program);
 
         let stdio_logger = StdioLogger::new();
         let logger = WrapFileLogger::new("test.ts", src.to_owned(), &stdio_logger);
@@ -724,11 +730,7 @@ mod test {
                 ExportedSymbol::Named("getWorkplaceSuggestionForDay".to_owned()),
                 ExportedSymbol::Named("setWorkplaceSuggestionForDay".to_owned())
             ),
-            info
-                .exported_ids
-                .keys()
-                .cloned()
-                .collect::<AHashSet<_>>()
+            info.exported_ids.keys().cloned().collect::<AHashSet<_>>()
         );
     }
 }

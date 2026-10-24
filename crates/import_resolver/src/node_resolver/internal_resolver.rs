@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Error, Ok};
 use hashbrown::HashSet;
 
-use crate::resolve::{PathResolver, Resolution};
 use super::util::package_name;
+use crate::resolve::{PathResolver, Resolution};
 use packagejson::PackageJson;
 
 /// A resolver which will only resolve internal modules, using the inner resolver.
@@ -48,11 +48,7 @@ impl<R> InternalOnlyResolver<R> {
 
 /// Implements PathResolver for the InternalOnlyResolver
 impl<R: PathResolver> PathResolver for InternalOnlyResolver<R> {
-    fn resolve(
-        &self,
-        base: &std::path::Path,
-        module_specifier: &str,
-    ) -> Result<Resolution, Error> {
+    fn resolve(&self, base: &std::path::Path, module_specifier: &str) -> Result<Resolution, Error> {
         // split the package name off the module_specifier, if any
         match package_name(module_specifier) {
             Some(packagename) if !self.internal_packages.contains(packagename) => {

@@ -73,6 +73,7 @@ pub fn load_prepared_with_declarations(
     declarations: &ast_segmenter::PreparedDeclarations,
 ) -> eyre::Result<CacheOutcome> {
     load_prepared_inner(logger, path, prepared, mode, declarations, || Ok(()))
+        .wrap_err_with(|| format!("loading prepared source cache for {}", path.display()))
 }
 
 pub fn sidecar_path(source: &Path) -> PathBuf {
@@ -134,13 +135,13 @@ fn read_cache(path: &Path) -> Result<Vec<u8>, MissReason> {
         if e.kind() == std::io::ErrorKind::NotFound {
             MissReason::Missing
         } else {
-            MissReason::ReadFailure(e.to_string())
+            MissReason::ReadFailure(format!("opening cache {}: {e}", path.display()))
         }
     })?;
     let mut bytes = Vec::new();
     file.take(MAX_RECORD_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| MissReason::ReadFailure(e.to_string()))?;
+        .map_err(|e| MissReason::ReadFailure(format!("reading cache {}: {e}", path.display())))?;
     if bytes.len() > MAX_RECORD_BYTES {
         return Err(MissReason::InvalidRecord("cache exceeds byte limit".into()));
     }
@@ -193,7 +194,13 @@ fn load_prepared_inner(
 ) -> eyre::Result<CacheOutcome> {
     let source = prepared.source;
     let _span = tracing::info_span!("cache.load", bytes = source.len()).entered();
-    let config = ParserConfig::for_path(prepared.parser_path, prepared.package)?;
+    let config =
+        ParserConfig::for_path(prepared.parser_path, prepared.package).wrap_err_with(|| {
+            format!(
+                "selecting cache parser mode for {}",
+                prepared.parser_path.display()
+            )
+        })?;
     let cached = if mode == CacheMode::Disabled {
         Err(MissReason::Disabled)
     } else {
@@ -216,8 +223,11 @@ fn load_prepared_inner(
                 prepared.parser_path,
                 prepared.package,
                 declarations,
-            )?;
-            let record = CacheRecord::from_parsed(source, &parsed)?;
+            )
+            .wrap_err_with(|| format!("extracting source facts for {}", path.display()))?;
+            let record = CacheRecord::from_parsed(source, &parsed).wrap_err_with(|| {
+                format!("constructing source cache record for {}", path.display())
+            })?;
             drop(extraction_span);
             let write = if mode == CacheMode::ReadWrite {
                 match publish(path, source, prepared.original, &record, before_publish) {
@@ -247,8 +257,10 @@ fn publish(
     before_publish: impl FnOnce() -> eyre::Result<()>,
 ) -> eyre::Result<()> {
     let _span = tracing::info_span!("cache.publish").entered();
-    let bytes = record.encode(source)?;
     let destination = sidecar_path(path);
+    let bytes = record
+        .encode(source)
+        .wrap_err_with(|| format!("encoding cache {}", destination.display()))?;
     let parent = destination
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -260,15 +272,24 @@ fn publish(
     prefix.push(".stage-");
     let mut staging = tempfile::Builder::new()
         .prefix(&prefix)
-        .tempfile_in(parent)?;
-    staging.write_all(&bytes)?;
-    staging.flush()?;
-    staging.as_file().sync_all()?;
+        .tempfile_in(parent)
+        .wrap_err_with(|| format!("creating cache staging file for {}", destination.display()))?;
+    staging
+        .write_all(&bytes)
+        .wrap_err_with(|| format!("writing cache staging file for {}", destination.display()))?;
+    staging
+        .flush()
+        .wrap_err_with(|| format!("flushing cache staging file for {}", destination.display()))?;
+    staging
+        .as_file()
+        .sync_all()
+        .wrap_err_with(|| format!("syncing cache staging file for {}", destination.display()))?;
     before_publish()?;
     unchanged(path, original)?;
     let staging = staging.into_temp_path();
     // std also handles replacement of open destinations on Windows.
-    fs::rename(&staging, &destination).wrap_err("cache replacement failed")?;
+    fs::rename(&staging, &destination)
+        .wrap_err_with(|| format!("replacing cache {}", destination.display()))?;
     Ok(())
 }
 

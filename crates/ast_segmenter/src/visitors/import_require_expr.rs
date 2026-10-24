@@ -1,7 +1,7 @@
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, IdentifierReference, Statement,
 };
-use oxc_ast_visit::{Visit, walk};
+use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::Semantic;
 
 use crate::{
@@ -19,11 +19,7 @@ impl ImportsAndRequires {
     /// Checks if the current call expr is a require() or import().then() pattern
     /// and if it is, updates this data structure with the import path and the names that are
     /// being imported.
-    pub fn scan_call_expr<'a>(
-        &mut self,
-        semantic: &Semantic<'a>,
-        expr: &CallExpression<'a>,
-    ) {
+    pub fn scan_call_expr<'a>(&mut self, semantic: &Semantic<'a>, expr: &CallExpression<'a>) {
         match &expr.callee {
             // require('foo')
             Expression::Identifier(ident) => {
@@ -40,11 +36,10 @@ impl ImportsAndRequires {
                 }
                 // Check if obj is import('foo')
                 if let Expression::ImportExpression(import_expr) = &member.object {
-                    let imported_path =
-                        match extract_string_from_expression(&import_expr.source) {
-                            Some(path) => path,
-                            None => return,
-                        };
+                    let imported_path = match extract_string_from_expression(&import_expr.source) {
+                        Some(path) => path,
+                        None => return,
+                    };
 
                     // args in .then((<args>) => {..}) or .then(function (<args>) {..})
                     let then_arg_obj_pattern = match expr.arguments.first() {
@@ -62,23 +57,20 @@ impl ImportsAndRequires {
                     };
 
                     // extract names from the object binding pattern
-                    let obj_names =
-                        then_arg_obj_pattern
-                            .properties
-                            .iter()
-                            .filter_map(|prop| -> Option<Symbol> {
-                                match prop.key {
-                                    oxc_ast::ast::PropertyKey::StaticIdentifier(ref ident) => {
-                                        Some(Symbol::Named(Name::from(ident.name.as_str())))
-                                    }
-                                    _ => None,
+                    let obj_names = then_arg_obj_pattern.properties.iter().filter_map(
+                        |prop| -> Option<Symbol> {
+                            match prop.key {
+                                oxc_ast::ast::PropertyKey::StaticIdentifier(ref ident) => {
+                                    Some(Symbol::Named(Name::from(ident.name.as_str())))
                                 }
-                            });
+                                _ => None,
+                            }
+                        },
+                    );
 
                     // store the names (removing any Namespace entry that was added
                     // by visit_import_expression processing the inner import() call)
-                    let entry =
-                        self.imported_paths.entry(imported_path).or_default();
+                    let entry = self.imported_paths.entry(imported_path).or_default();
                     entry.remove(&Symbol::Namespace);
                     for name in obj_names {
                         entry.insert(name);
@@ -90,10 +82,7 @@ impl ImportsAndRequires {
     }
 
     /// Handle a standalone `import('foo')` expression.
-    pub fn scan_import_expr<'a>(
-        &mut self,
-        import_expr: &oxc_ast::ast::ImportExpression<'a>,
-    ) {
+    pub fn scan_import_expr<'a>(&mut self, import_expr: &oxc_ast::ast::ImportExpression<'a>) {
         if let Some(import_path) = extract_string_from_expression(&import_expr.source) {
             self.imported_paths.insert(import_path, Symbol::Namespace);
         }
@@ -107,14 +96,20 @@ fn is_global_require<'a>(semantic: &Semantic<'a>, ident: &IdentifierReference<'a
     let Some(ref_id) = ident.reference_id.get() else {
         return false;
     };
-    semantic.scoping().get_reference(ref_id).symbol_id().is_none()
+    semantic
+        .scoping()
+        .get_reference(ref_id)
+        .symbol_id()
+        .is_none()
 }
 
 fn extract_generic_function_def_first_arg<'a>(
     expr: &'a Expression<'a>,
 ) -> Option<&'a BindingPattern<'a>> {
     match expr {
-        Expression::ArrowFunctionExpression(arrow) => arrow.params.items.first().map(|p| &p.pattern),
+        Expression::ArrowFunctionExpression(arrow) => {
+            arrow.params.items.first().map(|p| &p.pattern)
+        }
         Expression::FunctionExpression(func) => func.params.items.first().map(|p| &p.pattern),
         _ => None,
     }
@@ -122,7 +117,7 @@ fn extract_generic_function_def_first_arg<'a>(
 
 fn extract_string_from_expression(expr: &Expression<'_>) -> Option<String> {
     if let Expression::StringLiteral(s) = expr {
-        Some(s.value.to_string())
+        s.value.as_str().map(str::to_owned)
     } else {
         None
     }
@@ -131,7 +126,7 @@ fn extract_string_from_expression(expr: &Expression<'_>) -> Option<String> {
 fn args_as_import(args: &oxc_allocator::Vec<'_, Argument<'_>>) -> Option<String> {
     let first = args.first()?;
     match first {
-        Argument::StringLiteral(s) => Some(s.value.to_string()),
+        Argument::StringLiteral(s) => s.value.as_str().map(str::to_owned),
         _ => None,
     }
 }
@@ -195,7 +190,11 @@ mod test {
     ) {
         let allocator = oxc_allocator::Allocator::default();
         let ret = oxc_utils_parse::parse_ts(&allocator, source);
-        assert!(ret.errors.is_empty(), "parse errors: {:?}", ret.errors);
+        assert!(
+            ret.diagnostics.is_empty(),
+            "parse errors: {:?}",
+            ret.diagnostics
+        );
         let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&ret.program);
         let semantic = &semantic_ret.semantic;
 

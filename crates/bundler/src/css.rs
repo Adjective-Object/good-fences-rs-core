@@ -8,7 +8,7 @@ use std::{
 };
 
 use cssparser::{BasicParseErrorKind, ParseError, Parser, ParserInput, Token};
-use eyre::{WrapErr, ensure};
+use eyre::{ensure, WrapErr};
 use import_resolver::structural::{DependencyResolver, ResolutionMode, ResolvedDependency};
 use sha2::{Digest, Sha256};
 

@@ -338,13 +338,10 @@ impl From<&[Segment]> for RawImportExportInfo {
                 let entry = info.export_from_ids.entry(path.clone()).or_default();
                 for re_export in re_exports {
                     let imported = match &re_export.imported_as {
-                        ast_segmenter::ImportTarget::ExportedSymbol(s) => {
-                            ExportedSymbol::from(s)
-                        }
+                        ast_segmenter::ImportTarget::ExportedSymbol(s) => ExportedSymbol::from(s),
                         ast_segmenter::ImportTarget::Namespace => ExportedSymbol::Namespace,
                     };
-                    let renamed_to =
-                        re_export.exported_as.as_ref().map(ExportedSymbol::from);
+                    let renamed_to = re_export.exported_as.as_ref().map(ExportedSymbol::from);
                     let converted = ReExportedSymbol {
                         imported,
                         renamed_to,
@@ -455,8 +452,11 @@ impl RawImportExportInfo {
         let mut errs = MultiErr::<anyhow::Error>::new();
         let mut all_specifiers = AHashMap::default();
 
-        let imports_r =
-            errs.extract(resolve_hashmap(from_file_path, &resolver, imported_path_ids));
+        let imports_r = errs.extract(resolve_hashmap(
+            from_file_path,
+            &resolver,
+            imported_path_ids,
+        ));
         all_specifiers.extend(imports_r.specifier_map);
 
         let requires_r = errs.extract(resolve_hashset(from_file_path, &resolver, require_paths));
@@ -465,8 +465,7 @@ impl RawImportExportInfo {
         let paths_r = errs.extract(resolve_hashset(from_file_path, &resolver, imported_paths));
         all_specifiers.extend(paths_r.specifier_map);
 
-        let exports_r =
-            errs.extract(resolve_hashmap(from_file_path, &resolver, export_from_ids));
+        let exports_r = errs.extract(resolve_hashmap(from_file_path, &resolver, export_from_ids));
         all_specifiers.extend(exports_r.specifier_map);
 
         let executed_r = errs.extract(resolve_hashset(from_file_path, &resolver, executed_paths));

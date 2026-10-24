@@ -382,8 +382,9 @@ fn diagnostics_are_regenerated_for_current_source_policy_and_path() {
     ] {
         let error =
             load_or_parse(&logger::StdioLogger::new(), &path, ModuleFormat::Esm, mode).unwrap_err();
-        assert!(error.to_string().contains(path.to_str().unwrap()));
-        assert!(error.to_string().contains("parser diagnostics"));
+        let diagnostic = format!("{error:#}");
+        assert!(diagnostic.contains(path.to_str().unwrap()), "{diagnostic}");
+        assert!(diagnostic.contains("parser diagnostics"), "{diagnostic}");
         assert!(!sidecar_path(&path).exists());
     }
     fs::write(&path, "export const value = 1;").unwrap();

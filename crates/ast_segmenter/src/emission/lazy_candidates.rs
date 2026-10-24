@@ -36,13 +36,10 @@ fn unparenthesized<'b, 'a>(mut expression: &'b Expression<'a>) -> &'b Expression
 }
 
 fn concise<'b, 'a>(arrow: &'b ArrowFunctionExpression<'a>) -> Option<&'b Expression<'a>> {
-    if arrow.r#async || !arrow.expression || arrow.body.statements.len() != 1 {
+    if arrow.r#async {
         return None;
     }
-    match &arrow.body.statements[0] {
-        Statement::ExpressionStatement(s) => Some(unparenthesized(&s.expression)),
-        _ => None,
-    }
+    arrow.get_expression().map(unparenthesized)
 }
 
 fn options_properties(new: &NewExpression<'_>) -> Option<Vec<LazyOptionProperty>> {
@@ -107,12 +104,13 @@ fn options_properties(new: &NewExpression<'_>) -> Option<Vec<LazyOptionProperty>
                 return None;
             }
             let name = property.key.static_name()?;
+            let name = name.as_str()?;
             if matches!(property.key, PropertyKey::StaticIdentifier(_))
                 && property.key.span().size() as usize != name.len()
             {
                 return None;
             }
-            if matches!(name.as_ref(), "initializer" | "__proto__") {
+            if matches!(name, "initializer" | "__proto__") {
                 return None;
             }
             Some(LazyOptionProperty::new(

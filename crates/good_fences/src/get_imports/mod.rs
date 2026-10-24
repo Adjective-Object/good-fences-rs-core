@@ -28,8 +28,12 @@ pub fn get_imports_map_from_file<P: AsRef<str>>(
     PARSE_ARENA.with(|arena_cell| {
         let arena = arena_cell.borrow();
         let ret = oxc_utils_parse::parse_file(&arena, &source, path);
-        if !ret.errors.is_empty() {
-            let parser_errors = ret.errors.iter().map(|e| e.message.to_string()).collect();
+        if !ret.diagnostics.is_empty() {
+            let parser_errors = ret
+                .diagnostics
+                .iter()
+                .map(|e| e.message.to_string())
+                .collect();
             drop(arena);
             arena_cell.borrow_mut().reset();
             return Err(GetImportError::ParseTsFileError {
@@ -85,7 +89,6 @@ fn get_imports_map_from_visitor(visitor: ImportPathVisitor<'_, '_>) -> FileImpor
 
     final_imports_map
 }
-
 
 #[cfg(test)]
 mod test {

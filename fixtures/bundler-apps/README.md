@@ -8,7 +8,7 @@ Install `agent-browser` and its browser using the official installation steps
 at <https://agent-browser.dev/installation>. With `agent-browser` on `PATH`:
 
 ```sh
-cargo build -p bundler --example build
+cargo build -p bundler-cli
 node scripts/bundler-browser.mjs
 ```
 

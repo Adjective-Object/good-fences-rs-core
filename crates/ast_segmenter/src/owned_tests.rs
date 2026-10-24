@@ -20,6 +20,40 @@ fn parse(source: &str) -> ModuleFacts {
 }
 
 #[test]
+fn lone_surrogates_do_not_become_utf8_requests_or_known_properties() {
+    for source in [
+        r#"import "./\ud800";"#,
+        r#"export { value } from "./\ud800";"#,
+        r#"require("./\ud800");"#,
+        r#"import("./" + "\ud800" + suffix);"#,
+        r#"import(`./\ud800/${suffix}`);"#,
+    ] {
+        let error = parse_module(
+            &logger::StdioLogger::new(),
+            source,
+            Path::new("surrogate.js"),
+            ModuleFormat::Esm,
+        )
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("lone UTF-16 surrogate"),
+            "{:?}",
+            error
+        );
+    }
+    let facts = parse(r#"object["\ud800"](); object["\ufffd"](); object["\ud83d\ude00"]();"#);
+    let properties: Vec<_> = facts
+        .invocations()
+        .iter()
+        .map(|invocation| match invocation.shape() {
+            crate::invocation::CalleeShape::Member { property, .. } => property.as_deref(),
+            other => panic!("expected member invocation, got {:?}", other),
+        })
+        .collect();
+    assert_eq!(properties, [None, Some("\u{fffd}"), Some("\u{1f600}")]);
+}
+
+#[test]
 fn async_deferred_tracks_the_executing_body_not_async_ancestry() {
     let facts = parse(
         r#"
@@ -171,7 +205,11 @@ fn occurrence_dto_snapshot_and_arena_reset() {
         let semantic = oxc_semantic::SemanticBuilder::new()
             .with_check_syntax_error(true)
             .build(&parsed.program);
-        assert!(semantic.errors.is_empty(), "{:?}", semantic.errors);
+        assert!(
+            semantic.diagnostics.is_empty(),
+            "{:?}",
+            semantic.diagnostics
+        );
         extract(&parsed.program, &semantic.semantic).unwrap()
     };
     arena.reset();

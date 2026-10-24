@@ -119,6 +119,8 @@ fn statement_to_segment<'a>(
         // Module declaration statements — run the exports visitor
         Statement::ImportDeclaration(_)
         | Statement::ExportNamedDeclaration(_)
+        | Statement::ExportDeclaration(_)
+        | Statement::ExportFromDeclaration(_)
         | Statement::ExportDefaultDeclaration(_)
         | Statement::ExportAllDeclaration(_)
         | Statement::TSImportEqualsDeclaration(_) => {
@@ -225,7 +227,7 @@ pub fn segment_file<'a>(
                 {
                     variables.insert_local_str(&name, HoistingLevel::LetConstHoisting);
                 }
-                if matches!(stmt, Statement::ExportNamedDeclaration(_)) {
+                if matches!(stmt, Statement::ExportDeclaration(_)) {
                     let tags = crate::raw_module_deps::SymbolTags::from_comments(
                         &program.comments,
                         program.source_text,
@@ -312,8 +314,14 @@ mod test {
     fn segment(src: &str) -> Vec<Segment> {
         let allocator = oxc_allocator::Allocator::default();
         let ret = oxc_utils_parse::parse_file(&allocator, src, std::path::Path::new("test.ts"));
-        assert!(ret.errors.is_empty(), "parse errors: {:?}", ret.errors);
-        let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&ret.program);
+        assert!(
+            ret.diagnostics.is_empty(),
+            "parse errors: {:?}",
+            ret.diagnostics
+        );
+        let semantic_ret = oxc_semantic::SemanticBuilder::new()
+            .with_build_nodes(true)
+            .build(&ret.program);
         let semantic = &semantic_ret.semantic;
         let logger = logger::StdioLogger::new();
         let file_logger = logger_srcfile::WrapFileLogger::new("test.ts", src.to_owned(), &logger);
@@ -523,23 +531,52 @@ mod test {
         assert_eq!(segments.len(), 3);
 
         // Segment 0: import → declares `foo` with ImportHoisting
-        let locals0: Vec<&str> = segments[0].variables.get_locals().map(|s| s.as_ref()).collect();
-        assert!(locals0.contains(&"foo"), "expected 'foo' in segment 0 locals");
+        let locals0: Vec<&str> = segments[0]
+            .variables
+            .get_locals()
+            .map(|s| s.as_ref())
+            .collect();
+        assert!(
+            locals0.contains(&"foo"),
+            "expected 'foo' in segment 0 locals"
+        );
         assert_eq!(
-            segments[0].variables.get_locals_with_hoisting().find(|(n, _)| n.as_str() == "foo").map(|(_, h)| h),
+            segments[0]
+                .variables
+                .get_locals_with_hoisting()
+                .find(|(n, _)| n.as_str() == "foo")
+                .map(|(_, h)| h),
             Some(HoistingLevel::ImportHoisting)
         );
 
         // Segment 1: const → declares `x` with LetConstHoisting
-        let locals1: Vec<&str> = segments[1].variables.get_locals().map(|s| s.as_ref()).collect();
+        let locals1: Vec<&str> = segments[1]
+            .variables
+            .get_locals()
+            .map(|s| s.as_ref())
+            .collect();
         assert!(locals1.contains(&"x"), "expected 'x' in segment 1 locals");
-        assert!(!locals1.contains(&"foo"), "'foo' should not be in segment 1");
+        assert!(
+            !locals1.contains(&"foo"),
+            "'foo' should not be in segment 1"
+        );
 
         // Segment 2: function → declares `bar` with FunctionHoisting
-        let locals2: Vec<&str> = segments[2].variables.get_locals().map(|s| s.as_ref()).collect();
-        assert!(locals2.contains(&"bar"), "expected 'bar' in segment 2 locals");
+        let locals2: Vec<&str> = segments[2]
+            .variables
+            .get_locals()
+            .map(|s| s.as_ref())
+            .collect();
+        assert!(
+            locals2.contains(&"bar"),
+            "expected 'bar' in segment 2 locals"
+        );
         assert_eq!(
-            segments[2].variables.get_locals_with_hoisting().find(|(n, _)| n.as_str() == "bar").map(|(_, h)| h),
+            segments[2]
+                .variables
+                .get_locals_with_hoisting()
+                .find(|(n, _)| n.as_str() == "bar")
+                .map(|(_, h)| h),
             Some(HoistingLevel::FunctionHoisting)
         );
     }
@@ -555,12 +592,23 @@ mod test {
         assert_eq!(segments.len(), 2);
 
         // Segment 0 (import): `foo` is local, not escaped
-        let escaped0: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
+        let escaped0: Vec<&str> = segments[0]
+            .variables
+            .get_escaped_symbols()
+            .map(|s| s.as_ref())
+            .collect();
         assert!(!escaped0.contains(&"foo"));
 
         // Segment 1 (const x = foo()): `foo` is escaped (declared in segment 0)
-        let escaped1: Vec<&str> = segments[1].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
-        assert!(escaped1.contains(&"foo"), "expected 'foo' escaped in segment 1");
+        let escaped1: Vec<&str> = segments[1]
+            .variables
+            .get_escaped_symbols()
+            .map(|s| s.as_ref())
+            .collect();
+        assert!(
+            escaped1.contains(&"foo"),
+            "expected 'foo' escaped in segment 1"
+        );
     }
 
     #[test]
@@ -568,8 +616,15 @@ mod test {
         let segments = segment("const x = console.log('hello');");
         assert_eq!(segments.len(), 1);
 
-        let escaped: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
-        assert!(escaped.contains(&"console"), "expected 'console' as escaped global");
+        let escaped: Vec<&str> = segments[0]
+            .variables
+            .get_escaped_symbols()
+            .map(|s| s.as_ref())
+            .collect();
+        assert!(
+            escaped.contains(&"console"),
+            "expected 'console' as escaped global"
+        );
     }
 
     #[test]
@@ -613,11 +668,22 @@ mod test {
         let segments = segment("function foo() { return foo; }");
         assert_eq!(segments.len(), 1);
 
-        let locals: Vec<&str> = segments[0].variables.get_locals().map(|s| s.as_ref()).collect();
+        let locals: Vec<&str> = segments[0]
+            .variables
+            .get_locals()
+            .map(|s| s.as_ref())
+            .collect();
         assert!(locals.contains(&"foo"));
 
-        let escaped: Vec<&str> = segments[0].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
-        assert!(!escaped.contains(&"foo"), "'foo' should not be escaped in its own statement");
+        let escaped: Vec<&str> = segments[0]
+            .variables
+            .get_escaped_symbols()
+            .map(|s| s.as_ref())
+            .collect();
+        assert!(
+            !escaped.contains(&"foo"),
+            "'foo' should not be escaped in its own statement"
+        );
     }
 
     #[test]
@@ -631,10 +697,21 @@ mod test {
         assert_eq!(segments.len(), 2);
 
         // `helper` is local in segment 0, escaped in segment 1
-        let locals0: Vec<&str> = segments[0].variables.get_locals().map(|s| s.as_ref()).collect();
+        let locals0: Vec<&str> = segments[0]
+            .variables
+            .get_locals()
+            .map(|s| s.as_ref())
+            .collect();
         assert!(locals0.contains(&"helper"));
 
-        let escaped1: Vec<&str> = segments[1].variables.get_escaped_symbols().map(|s| s.as_ref()).collect();
-        assert!(escaped1.contains(&"helper"), "expected 'helper' escaped in segment 1");
+        let escaped1: Vec<&str> = segments[1]
+            .variables
+            .get_escaped_symbols()
+            .map(|s| s.as_ref())
+            .collect();
+        assert!(
+            escaped1.contains(&"helper"),
+            "expected 'helper' escaped in segment 1"
+        );
     }
 }

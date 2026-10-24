@@ -17,6 +17,9 @@ Before commiting any changes, check:
 - never use `#[allow(lint)]`, always use `#[expect(lint)]` in case the underlying issue is ever fixed.
   If it is only errors in some build configurations, use e.g. `#[cfg_attr(feature = 'test', dead_code)]`
 - Always use `eyre` for errors, never use `thiserror`
+- Add lazy `WrapErr` context at pipeline/IO boundaries, retaining typed causes.
+  Include action and relevant paths/requests in errors, never in tracing fields.
+  Error-chain assertions use alternate report formatting, not just `to_string()`.
 - Use `insta` for general purpose snapshot testing
 - Use `inquire` for interactive user prompts
 - Use `cargo bench` for benchmarking. Never use `criterion`.
@@ -48,7 +51,7 @@ Any temporary notes about mid-refactor or mid-implementation belong in the NOTES
 
 - `fixtures/bundler/` holds portable runtime contracts, not generated-code snapshots.
   Preserve pinned upstream provenance, adaptation notes, and all applicable licenses.
-- `cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs`
+- `cargo build -p bundler-cli && node scripts/bundler-fixtures.mjs`
   validates all corpus metadata, then source observations and public build/output
   in one run. Report input/build/backend/output failures separately, continue
   later cases, and never build invalid inputs or count legacy passes as native.

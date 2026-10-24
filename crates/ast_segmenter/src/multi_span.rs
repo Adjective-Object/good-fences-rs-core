@@ -79,8 +79,8 @@ pub(crate) fn compound_declaration<'s, 'a>(
 ) -> Option<&'s VariableDeclaration<'a>> {
     let declaration = match statement {
         Statement::VariableDeclaration(declaration) => declaration.as_ref(),
-        Statement::ExportNamedDeclaration(export) => match &export.declaration {
-            Some(Declaration::VariableDeclaration(declaration)) => declaration.as_ref(),
+        Statement::ExportDeclaration(export) => match &export.declaration {
+            Declaration::VariableDeclaration(declaration) => declaration.as_ref(),
             _ => return None,
         },
         _ => return None,

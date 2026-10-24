@@ -27,6 +27,19 @@ fn fixture() -> (TmpDir, BuildSession, BuildOptions) {
 }
 
 #[test]
+fn publication_failure_retains_destination_operation_and_io_cause() {
+    let (dir, mut session, options) = fixture();
+    let build = session.build(&options).unwrap();
+    let output = dir.root().join("occupied");
+    fs::write(&output, "not a directory").unwrap();
+    let error = publish(&output, &build.product.artifacts, &Cancellation::default()).unwrap_err();
+    let chain = format!("{error:#}");
+    assert!(chain.contains(&output.display().to_string()), "{chain}");
+    assert!(chain.contains("creating output directory"), "{chain}");
+    assert!(error.downcast_ref::<std::io::Error>().is_some());
+}
+
+#[test]
 fn owned_paths_accept_native_joins_but_reject_unsafe_components() {
     relative(&PathBuf::from("nested").join("entry.mjs")).unwrap();
     for path in [
@@ -106,24 +119,18 @@ fn stylesheet_routes_require_owned_css_and_cannot_be_executable_routes() {
     let before = snapshot(&output);
     let mut invalid = artifacts.clone();
     invalid.resources.remove(stylesheet);
-    assert!(publish(&output, &invalid, &Cancellation::default())
-        .unwrap_err()
-        .to_string()
-        .contains("stylesheet route is not an owned CSS resource"));
+    let error = publish(&output, &invalid, &Cancellation::default()).unwrap_err();
+    assert!(format!("{error:#}").contains("stylesheet route is not an owned CSS resource"));
     let mut invalid = artifacts.clone();
     invalid
         .stylesheets
         .insert(input, PathBuf::from("https://cdn.example/styles/style.css"));
-    assert!(publish(&output, &invalid, &Cancellation::default())
-        .unwrap_err()
-        .to_string()
-        .contains("stylesheet route is not an owned CSS resource"));
+    let error = publish(&output, &invalid, &Cancellation::default()).unwrap_err();
+    assert!(format!("{error:#}").contains("stylesheet route is not an owned CSS resource"));
     let mut invalid = artifacts.clone();
     invalid.entries.insert("css".into(), stylesheet.clone());
-    assert!(publish(&output, &invalid, &Cancellation::default())
-        .unwrap_err()
-        .to_string()
-        .contains("module route is not an owned executable"));
+    let error = publish(&output, &invalid, &Cancellation::default()).unwrap_err();
+    assert!(format!("{error:#}").contains("module route is not an owned executable"));
     assert_eq!(snapshot(&output), before);
 
     fs::write(
@@ -325,7 +332,10 @@ fn cancellation_failure_and_busy_writer_leave_previous_outputs_intact() {
         .build_and_publish(&options, &output, &Cancellation::default())
         .err()
         .unwrap();
-    assert!(busy.to_string().contains("another publisher"), "{busy:#}");
+    assert!(
+        format!("{busy:#}").contains("another publisher"),
+        "{busy:?}"
+    );
     assert_eq!(snapshot(&output), previous);
     lock.unlock().unwrap();
     drop(lock);

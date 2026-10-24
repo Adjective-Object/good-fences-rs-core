@@ -26,15 +26,15 @@ serde_json = "1.0.59"
 thiserror = "1.0.52"
 schemars = "0.8.21"
 glob-match = "0.2.1"
-oxc_allocator = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_ast = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_ast_visit = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_parser = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_semantic = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_span = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_diagnostics = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_codegen = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
-oxc_transformer = { git = "https://github.com/oxc-project/oxc", rev = "87f065ebf7cde21d1229322f4c7ee58baca5648e" }
+oxc_allocator = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_ast = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_ast_visit = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_parser = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_semantic = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_span = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_diagnostics = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_codegen = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
+oxc_transformer = { git = "https://github.com/oxc-project/oxc", rev = "73e6b564737a29ecebf428d276421dcc492836df" }
 
 [profile.release]
 # Build with debug info, but split it into separate pdb files we don't need to distribute

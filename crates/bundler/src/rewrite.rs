@@ -8,8 +8,6 @@ use eyre::{ensure, OptionExt};
 #[cfg(debug_assertions)]
 use oxc_allocator::Allocator;
 #[cfg(debug_assertions)]
-use oxc_parser::Parser;
-#[cfg(debug_assertions)]
 use oxc_span::SourceType;
 use oxc_span::Span;
 
@@ -127,21 +125,21 @@ pub fn validate(path: &Path, source: &str) -> eyre::Result<()> {
     } else {
         SourceType::mjs()
     };
-    let parsed = Parser::new(&allocator, source, source_type).parse();
+    let parsed = oxc_utils_parse::parse_with_source_type(&allocator, source, source_type, path)?;
     ensure!(
-        !parsed.panicked && parsed.errors.is_empty(),
+        !parsed.fatal_error && parsed.diagnostics.is_empty(),
         "{}: emitted JavaScript parser diagnostics: {:?}",
         path.display(),
-        parsed.errors
+        parsed.diagnostics
     );
     let semantic = oxc_semantic::SemanticBuilder::new()
         .with_check_syntax_error(true)
         .build(&parsed.program);
     ensure!(
-        semantic.errors.is_empty(),
+        semantic.diagnostics.is_empty(),
         "{}: emitted JavaScript semantic diagnostics: {:?}",
         path.display(),
-        semantic.errors
+        semantic.diagnostics
     );
     Ok(())
 }

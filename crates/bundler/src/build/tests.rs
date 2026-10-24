@@ -9,6 +9,7 @@ mod browser;
 mod resolution_cache;
 mod sass;
 mod transpile;
+mod discovery;
 
 #[cfg(any(unix, windows))]
 mod linked_inventory;
@@ -4953,7 +4954,7 @@ fn relative_context_requires_reject_every_async_esm_candidate() {
         .err()
         .unwrap();
     assert!(
-        error.to_string().contains("require of async ESM"),
+        format!("{error:#}").contains("require of async ESM"),
         "{error:?}"
     );
 }
@@ -6058,7 +6059,7 @@ fn named_entry_outputs_reject_unsafe_reserved_incompatible_and_colliding_paths()
         .unwrap()
         .to_owned();
     options.entries.get_mut("entry.mjs").unwrap().output_name = Some(generated.into());
-    let error = session.build(&options).err().unwrap().to_string();
+    let error = format!("{:#}", session.build(&options).err().unwrap());
     assert!(
         error.contains("collides with generated artifact"),
         "{error}"
@@ -6091,7 +6092,7 @@ fn named_entry_outputs_reject_unsafe_reserved_incompatible_and_colliding_paths()
             },
         ),
     ]);
-    let error = session.build(&options).err().unwrap().to_string();
+    let error = format!("{:#}", session.build(&options).err().unwrap());
     assert!(error.contains("incompatible .js module formats"), "{error}");
 }
 
@@ -6413,14 +6414,13 @@ fn no_op_policy_roots_source_export_and_warm_counters() {
     assert_eq!(observe(&local.product.artifacts), b"2\n");
     assert!(local.invalidated.contains(&root.join("main.mjs")));
     write(root, "dep.mjs", "export const renamed = 2;");
-    let failure = session.build(&options).err().unwrap().to_string();
+    let failure = session.build(&options).err().unwrap();
     let full = BuildSession::new(root)
         .unwrap()
         .build(&options)
         .err()
-        .unwrap()
-        .to_string();
-    assert_eq!(failure, full);
+        .unwrap();
+    assert_eq!(format!("{failure:#}"), format!("{full:#}"));
     write(
         root,
         "dep.mjs",

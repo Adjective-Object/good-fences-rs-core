@@ -69,10 +69,10 @@ pub fn parse_source(source: &str, path: &Path, facts: LocalFacts) -> Result<Pars
         .with_check_syntax_error(true)
         .build(&parsed.program);
     ensure!(
-        semantic.errors.is_empty(),
+        semantic.diagnostics.is_empty(),
         "{}: semantic diagnostics: {:?}",
         path.display(),
-        semantic.errors
+        semantic.diagnostics
     );
     parse_from_ast(&parsed.program, &semantic.semantic, facts)
 }
@@ -277,6 +277,9 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
         if declaration.import_kind.is_type() {
             return;
         }
+        let Some(module) = declaration.source.value.as_str() else {
+            return;
+        };
         if let Some(specifiers) = &declaration.specifiers {
             for specifier in specifiers {
                 let path = match specifier {
@@ -295,7 +298,7 @@ impl<'a> Visit<'a> for Bindings<'_, 'a> {
                         NamedValue {
                             value: self.values[&symbol].value,
                             binding: Some(Binding::Module {
-                                module: declaration.source.value.to_string(),
+                                module: module.to_owned(),
                                 path,
                             }),
                         },
@@ -481,8 +484,8 @@ impl<'a> Extractor<'_, 'a> {
         for statement in statements {
             let function = match statement {
                 Statement::FunctionDeclaration(function) => Some(function.as_ref()),
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::FunctionDeclaration(function)) => Some(function.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::FunctionDeclaration(function) => Some(function.as_ref()),
                     _ => None,
                 },
                 Statement::ExportDefaultDeclaration(export) => match &export.declaration {
@@ -753,7 +756,7 @@ impl<'a> Extractor<'_, 'a> {
         let object = self.expression(object);
         let receiver = object.named.value;
         let property = property.or_else(|| match key?.get_inner_expression() {
-            Expression::StringLiteral(literal) => Some(literal.value.as_str()),
+            Expression::StringLiteral(literal) => literal.value.as_str(),
             _ => None,
         });
         let key = key.map(|key| self.expression(key));
@@ -1054,11 +1057,12 @@ impl<'a> Visit<'a> for Extractor<'_, 'a> {
                     effects: self.context.pure(),
                 });
             }
-            Statement::ImportDeclaration(_) | Statement::ExportAllDeclaration(_) => {}
-            Statement::ExportNamedDeclaration(declaration) => {
-                if let Some(declaration) = &declaration.declaration {
-                    self.visit_declaration(declaration);
-                }
+            Statement::ImportDeclaration(_)
+            | Statement::ExportAllDeclaration(_)
+            | Statement::ExportFromDeclaration(_)
+            | Statement::ExportNamedDeclaration(_) => {}
+            Statement::ExportDeclaration(declaration) => {
+                self.visit_declaration(&declaration.declaration);
             }
             Statement::ExportDefaultDeclaration(declaration) => {
                 if let Some(expression) = declaration.declaration.as_expression() {
@@ -1199,7 +1203,7 @@ impl<'a> Compiler<'_, '_, 'a> {
         parameters: &FormalParameters<'a>,
         body: Option<&FunctionBody<'a>>,
         unsupported: bool,
-        expression: bool,
+        expression: Option<&Expression<'a>>,
     ) {
         let extractor = &mut self.extractor;
         let info = extractor.functions[&span].clone();
@@ -1216,7 +1220,8 @@ impl<'a> Compiler<'_, '_, 'a> {
         extractor.deferred = true;
         extractor.context.start_function();
         let mut arguments = Vec::new();
-        let mut unsupported = unsupported || parameters.rest.is_some() || body.is_none();
+        let mut unsupported =
+            unsupported || parameters.rest.is_some() || (body.is_none() && expression.is_none());
         for parameter in &parameters.items {
             if let BindingPattern::BindingIdentifier(id) = &parameter.pattern {
                 arguments.push(extractor.slots[&id.symbol_id.get().expect("parameter symbol")]);
@@ -1240,18 +1245,16 @@ impl<'a> Compiler<'_, '_, 'a> {
                 value: value.named.value,
                 effects: value.effects,
             });
+        } else if let Some(expression) = expression {
+            let value = extractor.expression(expression);
+            returns.push(value.named.value);
+            extractor.roots.push(SourceRoot {
+                span,
+                value: value.named.value,
+                effects: value.effects,
+            });
         } else if let Some(body) = body {
-            if expression {
-                if let Some(Statement::ExpressionStatement(statement)) = body.statements.first() {
-                    let value = extractor.expression(&statement.expression);
-                    returns.push(value.named.value);
-                    extractor.roots.push(SourceRoot {
-                        span,
-                        value: value.named.value,
-                        effects: value.effects,
-                    });
-                }
-            } else if !extractor.function_statements(
+            if !extractor.function_statements(
                 &body.statements,
                 &mut returns,
                 &info
@@ -1305,7 +1308,7 @@ impl<'a> Visit<'a> for Compiler<'_, '_, 'a> {
             &function.params,
             function.body.as_deref(),
             function.r#async || function.generator,
-            false,
+            None,
         );
         walk::walk_function(self, function, flags);
     }
@@ -1314,9 +1317,9 @@ impl<'a> Visit<'a> for Compiler<'_, '_, 'a> {
         self.compile(
             function.span,
             &function.params,
-            Some(&function.body),
+            function.body.as_function_body(),
             function.r#async,
-            function.expression,
+            function.get_expression(),
         );
         walk::walk_arrow_function_expression(self, function);
     }

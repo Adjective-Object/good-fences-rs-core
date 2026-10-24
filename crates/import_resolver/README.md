@@ -3,6 +3,8 @@
 Resolves Node/package requests using the repository's cached resolver.
 `PathResolver` is the legacy single-policy interface. Resolver cache owners must
 invalidate filesystem/configuration changes through `mark_dirty_root`.
+Structural resolution adds importer, request and mode context without flattening
+the legacy resolver's underlying error chain.
 
 Run `cargo test -p import_resolver`; filesystem tests use managed directories.
 Default extension probing also accepts `.jsonc`, after the existing extensions;
@@ -29,6 +31,10 @@ original importer/request. Structural browser resolution rejects unreplaced or
 replacement bare/`node:` builtins even when external, and native `.node` addons;
 it never injects polyfills or empty modules. Package declaration
 order, including an early `default`, determines which active condition wins.
+Nested export conditions are evaluated in declaration order at each level,
+including `import`/`require` branches containing `types` and runtime `default`
+targets. Inactive nested branches may fall through to later parent conditions;
+private targets do not.
 An exports map is authoritative: unmatched subpaths or inactive conditions fail
 resolution, even when a matching physical file exists. Packages without exports
 retain legacy filesystem resolution. Browser resolution applies a dependency's
@@ -89,3 +95,12 @@ call. Source contents are not hashed for resolution. No directories are
 enumerated, and validation bypasses all context/target caches. Tracked calls
 surface probe IO errors even where legacy boolean/fallback resolution masks
 them. Failed requests are not exposed as reusable persisted records.
+
+Each resolver epoch shares a single-flight `InputSnapshot`, including negative
+candidates and manifest bytes. Import/require caches share parsed manifests but
+retain separate target results; target keys also include extensions, environment
+and symlink policy. Per-target initialization never holds a DashMap shard lock.
+Cached wrapping uses the original canonical observation, not another filesystem
+lookup. Relative probes also retain the epoch's observations: call `invalidate`
+after edits before resolving again. `set_snapshot` replaces both cache trees and
+advances the revision when embedding resolution in a shared build epoch.

@@ -155,7 +155,7 @@ fixture harness. No-op builds perform zero source/output JavaScript parses,
 dependency resolutions, links or artifact writes; config
 edits conservatively re-resolve and rebuild later layers.
 Run `./scripts/bundler-release-check` for the scoped release gates,
-`cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs`
+`cargo build -p bundler-cli && node scripts/bundler-fixtures.mjs`
 for unified input/build/output conformance (input, build, required-backend and
 output failures are reported separately), and
 `mkdir -p target/p1-test-tmp && TMPDIR="$PWD/target/p1-test-tmp" cargo bench -p bundler --bench incremental`

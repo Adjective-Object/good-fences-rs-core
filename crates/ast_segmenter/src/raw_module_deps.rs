@@ -119,11 +119,7 @@ impl<T: ToString + AsRef<str>> From<T> for Symbol {
 }
 impl Symbol {
     pub fn from_module_export_name(name: &ModuleExportName) -> Self {
-        match name {
-            ModuleExportName::IdentifierName(ident) => Self::from(ident.name.as_str()),
-            ModuleExportName::IdentifierReference(ident) => Self::from(ident.name.as_str()),
-            ModuleExportName::StringLiteral(str) => Self::from(str.value.as_ref()),
-        }
+        Self::from(name.name().as_str())
     }
 }
 
@@ -262,7 +258,7 @@ mod tests {
                 &source,
                 std::path::Path::new("comment.mjs"),
             );
-            assert!(parsed.errors.is_empty());
+            assert!(parsed.diagnostics.is_empty());
             let tags = SymbolTags::from_comments(
                 &parsed.program.comments,
                 &source,

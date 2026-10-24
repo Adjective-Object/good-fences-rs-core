@@ -1,6 +1,6 @@
 # oxc_utils_parse
 
-Parser helpers for the workspace's pinned OXC revision. `parse_file` preserves
+Parser helpers for OXC 0.155.0, requiring Rust 1.97 or newer. `parse_file` preserves
 the unused tracker's compatibility policy: parse every extension as TypeScript,
 with JSX enabled for `.jsx` and `.tsx`. `parse_ts` and `parse_tsx` select those
 language modes directly. Callers must check parser and semantic diagnostics.
@@ -17,6 +17,14 @@ CommonJS wrapper returns only for actual CommonJS inputs. It rejects
 unknown extensions, parser diagnostics and parser aborts, with path and OXC
 diagnostic ranges. Semantic diagnostics still need checking before extraction.
 Package discovery belongs to the caller; this helper does no filesystem IO.
+`parse_with_source_type` is the explicit-grammar boundary used by bundler parsing
+and output validation. Upstream parser unwinds become errors containing the
+filename, grammar and panic payload; the process-wide panic hook is unchanged.
+This improves diagnostics, not parser correctness or recovery from process aborts.
+The pinned revision includes upstream's PURE member-access fix: annotations on
+calls followed by property access remain applied inside nested assignments,
+including the MobX iterator-prototype initializer. Sources and annotations are
+not rewritten to work around parser bugs.
 Explicit `.cjs`/`.cjsx` files containing ESM syntax fail instead of being
 reclassified. TypeScript CommonJS inputs retain their explicit mode for downstream
 type erasure and the unsupported ESM-to-CommonJS transformation gate.

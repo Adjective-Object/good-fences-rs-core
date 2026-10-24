@@ -1021,7 +1021,10 @@ exports.esmStub = require('node:fs');
 "#,
     );
     let mut config = browser_options();
-    config.resolver.alias.insert("fs".into(), "./stub.cjs".into());
+    config
+        .resolver
+        .alias
+        .insert("fs".into(), "./stub.cjs".into());
     config
         .resolver
         .alias

@@ -93,14 +93,14 @@ impl Position {
 }
 
 #[derive(Default)]
-pub(crate) struct Writer {
+pub(crate) struct Writer<'a> {
     text: String,
     position: Position,
-    map: Option<SourceMapBuilder>,
+    map: Option<SourceMapBuilder<'a>>,
     contents: HashMap<String, Option<Arc<str>>>,
 }
 
-impl Writer {
+impl<'a> Writer<'a> {
     pub(crate) fn new(enabled: bool) -> Self {
         Self {
             map: enabled.then(SourceMapBuilder::default),
@@ -112,19 +112,19 @@ impl Writer {
         self.push(text, None);
     }
 
-    pub(crate) fn source(&mut self, source: &Source, span: Span) {
+    pub(crate) fn source(&mut self, source: &'a Source, span: Span) {
         self.push(source.slice(span), Some((source, span.start, true, None)));
     }
 
-    pub(crate) fn named(&mut self, text: &str, source: &Source, offset: u32, name: &str) {
+    pub(crate) fn named(&mut self, text: &str, source: &'a Source, offset: u32, name: &'a str) {
         self.push(text, Some((source, offset, false, Some(name))));
     }
 
-    pub(crate) fn replacement(&mut self, text: &str, source: &Source, offset: u32) {
+    pub(crate) fn replacement(&mut self, text: &str, source: &'a Source, offset: u32) {
         self.push(text, Some((source, offset, false, None)));
     }
 
-    fn push(&mut self, text: &str, origin: Option<(&Source, u32, bool, Option<&str>)>) {
+    fn push(&mut self, text: &str, origin: Option<(&'a Source, u32, bool, Option<&'a str>)>) {
         if let Some(map) = &mut self.map {
             let mut original = origin
                 .map(|(source, offset, _, _)| source.position(offset as usize))
@@ -197,20 +197,20 @@ impl Writer {
         self.text.push_str(text);
     }
 
-    pub(crate) fn finish(self, destination: &Path) -> (String, Option<SourceMap>) {
-        let map = self.map.map(|mut builder| {
-            builder.set_file(&destination.file_name().unwrap().to_string_lossy());
+    pub(crate) fn finish(self, destination: &Path) -> (String, Option<SourceMap<'static>>) {
+        let map = self.map.map(|builder| {
             let mut map = builder.into_sourcemap();
+            map.set_file(&destination.file_name().unwrap().to_string_lossy());
             let contents = map
                 .get_sources()
                 .map(|source| {
                     self.contents
-                        .get(source.as_ref())
+                        .get(source)
                         .and_then(|content| content.as_deref())
                 })
                 .collect();
             map.set_source_contents(contents);
-            map
+            map.into_owned()
         });
         (self.text, map)
     }
@@ -270,7 +270,9 @@ mod tests {
         writer.named("renamed", &source, offset, "z");
         writer.generated(";");
         let (_, map) = writer.finish(Path::new("out.mjs"));
-        let map = SourceMap::from_json_string(&map.unwrap().to_json_string()).unwrap();
+        let map = SourceMap::from_json_string(&map.unwrap().to_json_string())
+            .unwrap()
+            .into_owned();
         let table = map.generate_lookup_table();
         for (line, column, original_line, original_column) in [
             (0, 3, 0, 0),
@@ -288,7 +290,7 @@ mod tests {
                 (token.get_src_line(), token.get_src_col()),
                 (original_line, original_column)
             );
-            assert_eq!(token.get_source_content().unwrap().as_ref(), text);
+            assert_eq!(token.get_source_content().unwrap(), text);
         }
         for (line, column) in [(0, 0), (5, 1), (6, 7)] {
             assert!(map
@@ -301,10 +303,9 @@ mod tests {
             map.lookup_source_view_token(&table, 6, 0)
                 .unwrap()
                 .get_name()
-                .unwrap()
-                .as_ref(),
+                .unwrap(),
             "z"
         );
-        assert_eq!(map.get_file().unwrap().as_ref(), "out.mjs");
+        assert_eq!(map.get_file().unwrap(), "out.mjs");
     }
 }

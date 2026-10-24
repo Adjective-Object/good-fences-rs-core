@@ -8,9 +8,9 @@ use std::{
 };
 
 use ast_segmenter::{
-    ModuleFormat, PreparedDeclarations, fingerprint::Fingerprint, owned::DependencyKind,
+    fingerprint::Fingerprint, owned::DependencyKind, ModuleFormat, PreparedDeclarations,
 };
-use eyre::{WrapErr, ensure};
+use eyre::{ensure, WrapErr};
 use import_resolver::{
     node_resolver::caching::NodeModulesResolverOptions,
     resolve::TargetEnv,
@@ -26,6 +26,7 @@ use crate::{
     policy::EffectPolicy,
 };
 
+mod discovery;
 #[path = "entry_outputs.rs"]
 mod entry_outputs;
 mod prepare;
@@ -43,7 +44,7 @@ pub struct Entry {
 
 #[derive(Clone)]
 pub struct BuildOptions {
-    /// Explicit bounded workers; defaults to inline serial execution.
+    /// Explicit bounded workers; defaults to one preparation/resolution worker.
     pub execution: crate::execution::ExecutionOptions,
     /// Logical entry IDs mapped to source entries and optional output names.
     pub entries: BTreeMap<String, Entry>,
@@ -139,10 +140,12 @@ pub struct Fingerprints {
 
 #[derive(Debug, Default, Clone)]
 pub struct Counters {
-    #[cfg(test)]
-    inventory_directory_reads: usize,
+    /// Actual demand/context directory enumeration, including final rechecks.
+    pub inventory_directory_reads: usize,
     /// Actual source extraction cache misses (emission checks are separate).
     pub source_parses: usize,
+    /// Speculative extractions not consumed by the precise source frontier.
+    pub speculative_parses: usize,
     /// Actual declaration serializations/hashes, including worker-local calls.
     pub declaration_fingerprints: usize,
     pub memory_hits: usize,
@@ -167,7 +170,7 @@ pub struct Counters {
 impl Counters {
     fn record_parses(&mut self, before: crate::rewrite::ParseCounts) {
         let counts = crate::rewrite::parse_counts().difference(before);
-        self.source_reparses = counts.source - self.source_parses;
+        self.source_reparses = counts.source - self.source_parses - self.speculative_parses;
         self.final_validations = counts.validation;
         self.fragment_reparses = counts.output - self.final_validations;
         self.declaration_fingerprints = counts.declarations;
@@ -235,8 +238,15 @@ pub(crate) fn hash(bytes: &[u8]) -> [u8; 32] {
 
 impl BuildSession {
     pub fn new(root: impl AsRef<Path>) -> eyre::Result<Self> {
-        let root = root.as_ref().canonicalize()?;
-        ensure!(root.is_dir(), "build root is not a directory");
+        let root = root
+            .as_ref()
+            .canonicalize()
+            .wrap_err_with(|| format!("opening build root {}", root.as_ref().display()))?;
+        ensure!(
+            root.is_dir(),
+            "build root is not a directory: {}",
+            root.display()
+        );
         Ok(Self {
             root,
             sources: BTreeMap::new(),
@@ -254,6 +264,11 @@ impl BuildSession {
     }
 
     pub fn build(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
+        self.build_inner(options)
+            .wrap_err_with(|| format!("building project {}", self.root.display()))
+    }
+
+    fn build_inner(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
         let _span = tracing::info_span!(
             "build",
             entries = options.entries.len(),
@@ -272,8 +287,15 @@ impl BuildSession {
         let mut counters = Counters::default();
         let before_parses = crate::rewrite::parse_counts();
         let mut warnings = Vec::new();
-        let public_base = crate::output_url::PublicBase::new(&options.output.base_url)?;
-        options.css.validate()?;
+        let public_base = crate::output_url::PublicBase::new(&options.output.base_url)
+            .wrap_err("validating output public base URL")?;
+        options.css.validate().wrap_err("validating CSS options")?;
+        tracing::info!(
+            target: "bundler::progress",
+            entries = options.entries.len(),
+            workers = options.execution.workers().get(),
+            "Preparing effect declarations"
+        );
         let declaration_span = tracing::info_span!("build.declarations").entered();
         let environment = match options.resolver.target_env {
             TargetEnv::Node => ecco::Environment::Node,
@@ -285,7 +307,8 @@ impl BuildSession {
             .is_none_or(|(config, host, _)| config != &options.declarations || *host != environment)
         {
             let prepared =
-                crate::effect_analysis::prepare_declarations(&options.declarations, environment)?;
+                crate::effect_analysis::prepare_declarations(&options.declarations, environment)
+                    .wrap_err("preparing effect declarations")?;
             self.declarations = Some((options.declarations.clone(), environment, prepared));
         }
         let declarations = self
@@ -305,11 +328,11 @@ impl BuildSession {
             &options.resolver,
             options.output.source_maps,
         );
-        let resolution_fingerprint_span =
-            tracing::info_span!("build.resolution_fingerprint").entered();
+        let resolution_fingerprint_span = tracing::info_span!("build.resolver_policy").entered();
         let resolution_key = resolver::BuildResolver::policy(options);
         drop(resolution_fingerprint_span);
-        let lockfile = resolver::Lockfile::read(&self.root, &mut warnings)?;
+        tracing::info!(target: "bundler::progress", "Loading resolver and lockfile");
+        let lockfile = resolver::Lockfile::read(&self.root, &mut warnings, options.execution)?;
         let resolver = resolver::BuildResolver::new(
             &self.root,
             options,
@@ -348,8 +371,27 @@ impl BuildSession {
         }
         let mut scheduled = BTreeSet::new();
         let mut resources = BTreeSet::new();
+        let mut awaiting = BTreeSet::new();
         let initial: BTreeSet<_> = queue.into_iter().collect();
-        let mut jobs = prepare::enqueue(initial, &mut scheduled, &mut resources, options);
+        let mut jobs = prepare::enqueue(
+            initial,
+            &mut scheduled,
+            &mut resources,
+            &mut awaiting,
+            options,
+        );
+        let candidates = discovery::candidates(
+            &self.root,
+            entries.values().map(|(path, _)| path.clone()),
+            options,
+        )?;
+        let speculation = prepare::Speculation::new(&candidates, options.execution.workers().get());
+        jobs.extend(
+            candidates
+                .into_iter()
+                .filter(|path| !scheduled.contains(path))
+                .map(prepare::Job::Speculate),
+        );
         let mut inputs: Vec<OwnedSourceFileInput> = Vec::new();
         let mut sources = BTreeMap::new();
         let mut loaded_sources = BTreeMap::new();
@@ -364,28 +406,84 @@ impl BuildSession {
         let mut prepare_styles = false;
         #[cfg(test)]
         let observer = prepare::AFTER_PREPARE.with(|observer| observer.borrow().clone());
-        let read = |path: PathBuf| {
+        let read_with_inventory = |path: PathBuf, inventory: &Inventory| {
             let result = prepare::read(
                 &path,
-                &inventory,
+                inventory,
                 previous.get(&path),
                 options,
                 &declarations,
                 &public_base,
-            );
+            )
+            .wrap_err_with(|| format!("preparing module {}", path.display()));
             #[cfg(test)]
             if let Some(observer) = &observer {
                 observer(&path);
             }
             (path, result)
         };
+        let read = |path| read_with_inventory(path, &inventory);
+        let work = |job| match job {
+            prepare::Job::Prepare(path) => match speculation.claim(&path) {
+                prepare::Claim::Ready(ready) => (path, Some(ready)),
+                prepare::Claim::Waiting => (path, None),
+                prepare::Claim::Read => {
+                    let (path, result) = read(path);
+                    (path, Some((result, Vec::new(), 0)))
+                }
+            },
+            prepare::Job::Speculate(path) => match speculation.claim(&path) {
+                prepare::Claim::Ready(ready) => (path, Some(ready)),
+                prepare::Claim::Waiting => (path, None),
+                prepare::Claim::Read => {
+                    let candidate_inventory = inventory.fork();
+                    let before = crate::rewrite::parse_counts();
+                    let result = candidate_inventory
+                        .admit(&path)
+                        .and_then(|_| read_with_inventory(path.clone(), &candidate_inventory).1);
+                    let parses = crate::rewrite::parse_counts().difference(before).source;
+                    speculation.record_parses(parses);
+                    (
+                        path,
+                        Some((result, candidate_inventory.observations(), parses)),
+                    )
+                }
+            },
+            prepare::Job::ResolveSpeculative { path, record } => {
+                resolver.speculate(&path, &record);
+                (path, None)
+            }
+            prepare::Job::Resolve {
+                path,
+                loaded,
+                css_identity,
+            } => {
+                let record = &loaded
+                    .source
+                    .as_ref()
+                    .or_else(|| previous.get(&path))
+                    .expect("prepared source")
+                    .record;
+                let result = prepare::resolve(&path, record, &inventory, options, &resolver).map(
+                    |resolutions| prepare::Prepared::Resolved {
+                        loaded,
+                        css_identity,
+                        resolutions,
+                    },
+                );
+                (path, Some((result, Vec::new(), 0)))
+            }
+        };
+        tracing::info!(target: "bundler::progress", "Preparing modules and resolving dependencies");
         let preparation_span = tracing::info_span!("build.prepare").entered();
+        let mut last_progress = Instant::now();
         loop {
             let mut integrate =
                 |(path, prepared): (PathBuf, eyre::Result<prepare::Prepared>),
                  deferred_styles: &mut BTreeMap<PathBuf, prepare::Prepared>| {
                     let _span = tracing::info_span!("build.integrate").entered();
                     let mut discovered = BTreeSet::new();
+                    let mut next = None;
                     let result = (|| -> eyre::Result<()> {
                         let kind = crate::resource::kind(&path, &options.css);
                         if matches!(
@@ -410,7 +508,17 @@ impl BuildSession {
                             TargetEnv::Node => ModuleFormat::CommonJs,
                         };
                         let mut css_identity = None;
+                        let mut resolutions = None;
                         let loaded = match prepared? {
+                            prepare::Prepared::Resolved {
+                                loaded,
+                                css_identity: identity,
+                                resolutions: resolved,
+                            } => {
+                                css_identity = identity;
+                                resolutions = Some(resolved);
+                                loaded
+                            }
                             prepare::Prepared::Script(loaded) => loaded,
                             prepare::Prepared::Resource { input, format } => {
                                 let prepared_css = if matches!(
@@ -418,12 +526,14 @@ impl BuildSession {
                                     crate::resource::ResourceKind::Stylesheet { .. }
                                 ) {
                                     if !prepare_styles {
-                                        styles.discover(
-                                            &path,
-                                            &input,
-                                            &resolver,
-                                            &sass_resolver,
-                                        )?;
+                                        options.execution.resolve(|| {
+                                            styles.discover(
+                                                &path,
+                                                &input,
+                                                &resolver,
+                                                &sass_resolver,
+                                            )
+                                        })?;
                                         discovered.extend(styles.evaluation_paths(&path).cloned());
                                         deferred_styles.insert(
                                             path.clone(),
@@ -483,6 +593,14 @@ impl BuildSession {
                                     &declarations,
                                 )?
                             }
+                        };
+                        let Some(resolved) = resolutions else {
+                            next = Some(prepare::Job::Resolve {
+                                path: path.clone(),
+                                loaded,
+                                css_identity,
+                            });
+                            return Ok(());
                         };
                         if previous
                             .get(&path)
@@ -559,84 +677,10 @@ impl BuildSession {
                                 .entry(path.clone())
                                 .or_insert_with(|| self.resolutions.get(&path).cloned());
                         }
-                        let resolution_span = tracing::info_span!("build.resolve").entered();
-                        let resolved = {
-                            let mut resolved = HashMap::new();
-                            for dependency in source.record.module().facts().dependencies() {
-                                if dependency.type_only() {
-                                    continue;
-                                }
-                                let _dependency_span = tracing::info_span!(
-                                    "resolve.dependency",
-                                    context = dependency.pattern().is_some(),
-                                    require = dependency.kind() == DependencyKind::Require
-                                )
-                                .entered();
-                                let mode = if dependency.kind() == DependencyKind::Require {
-                                    ResolutionMode::Require
-                                } else {
-                                    ResolutionMode::Import
-                                };
-                                if dependency.pattern().is_some() {
-                                    let candidates = crate::context::resolve(
-                                        &self.root,
-                                        &path,
-                                        dependency,
-                                        inventory.candidates(
-                                            &path,
-                                            &source.record,
-                                            dependency,
-                                            &options.resolver.extensions,
-                                        )?,
-                                        &options.resolver.extensions,
-                                        &resolver,
-                                    )
-                                    .wrap_err_with(|| {
-                                        format!(
-                                            "{}: context at bytes {}..{}",
-                                            path.display(),
-                                            dependency.span().start,
-                                            dependency.span().end
-                                        )
-                                    })?;
-                                    resolved.insert(
-                                        dependency.id(),
-                                        DependencyTarget::Context(candidates),
-                                    );
-                                    continue;
-                                }
-                                let target = resolver
-                                    .resolve_dependency(&path, &dependency.specifier(), mode)
-                                    .wrap_err_with(|| {
-                                        format!(
-                                            "{}: bytes {}..{}",
-                                            path.display(),
-                                            dependency.span().start,
-                                            dependency.span().end
-                                        )
-                                    })?;
-                                resolved.insert(
-                            dependency.id(),
-                            match target {
-                                ResolvedDependency::File(target) => {
-                                    ensure!(inventory.contains(&target),
-                                        "{}: resolving {:?}: source outside reachable build inventory (or reserved/excluded): {}",
-                                        path.display(), dependency.specifier(), target.display());
-                                    DependencyTarget::File(target)
-                                },
-                                ResolvedDependency::External(name) => {
-                                    DependencyTarget::External(name)
-                                }
-                            },
-                        );
-                            }
-                            if !has_context && self.resolutions.get(&path) != Some(&resolved) {
-                                changed.insert(path.clone());
-                            }
-                            self.resolutions.insert(path.clone(), resolved.clone());
-                            resolved
-                        };
-                        drop(resolution_span);
+                        if !has_context && self.resolutions.get(&path) != Some(&resolved) {
+                            changed.insert(path.clone());
+                        }
+                        self.resolutions.insert(path.clone(), resolved.clone());
                         for target in resolved.values() {
                             if let DependencyTarget::File(path) = target {
                                 discovered.insert(path.clone());
@@ -661,15 +705,71 @@ impl BuildSession {
                     })();
                     let failed = result.is_err();
                     if let Err(error) = result {
-                        errors.insert(path, error);
+                        errors.insert(
+                            path.clone(),
+                            error.wrap_err(format!("integrating module {}", path.display())),
+                        );
                     }
-                    (discovered, failed)
+                    if last_progress.elapsed() >= Duration::from_secs(1) {
+                        tracing::info!(
+                            target: "bundler::progress",
+                            modules = inputs.len(),
+                            source_parses = counters.source_parses,
+                            memory_hits = counters.memory_hits,
+                            disk_hits = counters.disk_hits,
+                            "Preparing modules and resolving dependencies"
+                        );
+                        last_progress = Instant::now();
+                    }
+                    (discovered, failed, next)
                 };
             'frontier: loop {
-                let result = options.execution.replenish(jobs, &read, |result| {
-                    let (discovered, _) = integrate(result, &mut deferred_styles);
-                    prepare::enqueue(discovered, &mut scheduled, &mut resources, options)
-                });
+                let result = options.execution.replenish_prioritized(
+                    crate::execution::WorkStage::Preparation,
+                    jobs,
+                    &work,
+                    |(path, completed)| {
+                        let mut jobs = Vec::new();
+                        if let Some((prepared, observations, parses)) = completed {
+                            if !scheduled.contains(&path) {
+                                if let Ok(prepare::Prepared::Script(loaded)) = &prepared {
+                                    let source = loaded
+                                        .source
+                                        .as_ref()
+                                        .or_else(|| previous.get(&path))
+                                        .expect("speculative source");
+                                    jobs.push(prepare::Job::ResolveSpeculative {
+                                        path: path.clone(),
+                                        record: source.record.clone(),
+                                    });
+                                }
+                                speculation.store(path, (prepared, observations, parses));
+                            } else {
+                                awaiting.remove(&path);
+                                speculation.promote(parses);
+                                let prepared =
+                                    inventory.merge_observations(observations).and(prepared);
+                                let (discovered, _, next) =
+                                    integrate((path, prepared), &mut deferred_styles);
+                                jobs = prepare::enqueue(
+                                    discovered,
+                                    &mut scheduled,
+                                    &mut resources,
+                                    &mut awaiting,
+                                    options,
+                                );
+                                jobs.extend(next);
+                            }
+                        }
+                        Ok((jobs, !awaiting.is_empty()))
+                    },
+                    |job| {
+                        matches!(
+                            job,
+                            prepare::Job::Speculate(_) | prepare::Job::ResolveSpeculative { .. }
+                        )
+                    },
+                );
                 if let Err(error) = result {
                     self.resolutions.clear();
                     self.pending_invalidated.extend(changed);
@@ -684,11 +784,18 @@ impl BuildSession {
                         Some(prepared) => (path, Ok(prepared)),
                         None => read(path),
                     };
-                    let (discovered, failed) = integrate(prepared, &mut deferred_styles);
+                    let (discovered, failed, next) = integrate(prepared, &mut deferred_styles);
                     if failed {
                         break 'frontier;
                     }
-                    jobs = prepare::enqueue(discovered, &mut scheduled, &mut resources, options);
+                    jobs = prepare::enqueue(
+                        discovered,
+                        &mut scheduled,
+                        &mut resources,
+                        &mut awaiting,
+                        options,
+                    );
+                    jobs.extend(next);
                     if !jobs.is_empty() {
                         break;
                     }
@@ -700,7 +807,10 @@ impl BuildSession {
             if !errors.is_empty() {
                 break;
             }
-            let expanded = match inventory.expand_contexts(&resolver) {
+            let expanded = match options
+                .execution
+                .resolve(|| inventory.expand_contexts(&resolver))
+            {
                 Ok(expanded) => expanded,
                 Err(error) => {
                     self.resolutions.clear();
@@ -738,9 +848,16 @@ impl BuildSession {
                     .resolutions
                     .insert(dependency, target);
             }
-            jobs = prepare::enqueue(discovered, &mut scheduled, &mut resources, options);
+            jobs = prepare::enqueue(
+                discovered,
+                &mut scheduled,
+                &mut resources,
+                &mut awaiting,
+                options,
+            );
         }
         drop(preparation_span);
+        counters.speculative_parses = speculation.unused_parses();
         for (path, before) in previous_contexts {
             if self.resolutions.get(&path) != before.as_ref() {
                 changed.insert(path);
@@ -764,6 +881,15 @@ impl BuildSession {
         if let Some((_, error)) = errors.into_iter().next() {
             return Err(error);
         }
+        tracing::info!(
+            target: "bundler::progress",
+            modules = inputs.len(),
+            source_parses = counters.source_parses,
+            speculative_parses = counters.speculative_parses,
+            memory_hits = counters.memory_hits,
+            disk_hits = counters.disk_hits,
+            "Modules prepared"
+        );
         self.upstreams = upstreams;
         warnings.sort();
         for path in self.sources.keys() {
@@ -775,6 +901,9 @@ impl BuildSession {
         self.sources.retain(|path, _| sources.contains_key(path));
         self.resolutions
             .retain(|path, _| sources.contains_key(path));
+        resolver.retain_precise();
+        sass_resolver.retain_precise();
+        tracing::info!(target: "bundler::progress", "Checking build fingerprints");
         let fingerprint_span = tracing::info_span!("build.fingerprints").entered();
         let parse = Fingerprint::of(
             format!(
@@ -891,21 +1020,32 @@ impl BuildSession {
         drop(fingerprint_span);
         if let Some(last) = &self.last {
             if last.fingerprints == fingerprints {
-                Self::recheck(&self.sources, &inventory)?;
-                #[cfg(test)]
-                {
-                    counters.inventory_directory_reads = inventory.directory_reads();
-                }
-                resolver.recheck()?;
-                sass_resolver.recheck()?;
-                styles.recheck()?;
+                tracing::info!(target: "bundler::progress", "Rechecking inputs for unchanged build");
+                Self::recheck(&self.sources, &inventory)
+                    .wrap_err("rechecking sources before build reuse")?;
+                counters.inventory_directory_reads = inventory.directory_reads();
+                resolver
+                    .recheck()
+                    .wrap_err("rechecking script resolution inputs before build reuse")?;
+                sass_resolver
+                    .recheck()
+                    .wrap_err("rechecking Sass resolution inputs before build reuse")?;
+                styles
+                    .recheck()
+                    .wrap_err("rechecking stylesheet inputs before build reuse")?;
                 for upstream in self.upstreams.values() {
-                    upstream.recheck()?;
+                    upstream
+                        .recheck()
+                        .wrap_err("rechecking upstream source-map inputs before build reuse")?;
                 }
                 resolver.finish(&mut counters, &mut warnings);
                 sass_resolver.finish(&mut counters, &mut warnings);
-                resolver.recheck()?;
-                sass_resolver.recheck()?;
+                resolver
+                    .recheck()
+                    .wrap_err("rechecking script inputs after resolution-cache publication")?;
+                sass_resolver
+                    .recheck()
+                    .wrap_err("rechecking Sass inputs after resolution-cache publication")?;
                 self.resolution_memory
                     .retain_used(&resolver, &sass_resolver);
                 warnings.sort();
@@ -923,10 +1063,17 @@ impl BuildSession {
         }
         // shortcut: rebuild derived graph/retention/output after any key change;
         // optimize only after benchmarks justify a finer later-layer worklist.
+        tracing::info!(
+            target: "bundler::progress",
+            modules = inputs.len(),
+            "Constructing and validating source graph"
+        );
         let graph_span = tracing::info_span!("build.graph", modules = inputs.len()).entered();
         inputs.sort_by(|a, b| a.path.cmp(&b.path));
         let graph = SourceGraph::from_owned(inputs);
-        graph.validate_links()?;
+        graph
+            .validate_links()
+            .wrap_err("validating prepared source graph")?;
         drop(graph_span);
         let roots: Vec<_> = entries
             .iter()
@@ -943,9 +1090,12 @@ impl BuildSession {
                 }
             })
             .collect();
-        let plan = tracing::info_span!("build.plan").in_scope(|| {
-            chunks::partition_with_options(&graph, &roots, &options.effects, &options.output)
-        })?;
+        tracing::info!(target: "bundler::progress", "Planning retained modules and chunks");
+        let plan = tracing::info_span!("build.plan")
+            .in_scope(|| {
+                chunks::partition_with_options(&graph, &roots, &options.effects, &options.output)
+            })
+            .wrap_err("planning retained modules and chunks")?;
         warnings.extend(plan.retention.warnings.iter().cloned());
         let mappings = sources
             .iter()
@@ -974,6 +1124,7 @@ impl BuildSession {
                 .map(|source| (path.clone(), source))
             })
             .collect::<eyre::Result<BTreeMap<_, _>>>()?;
+        tracing::info!(target: "bundler::progress", "Linking and emitting native chunks");
         let mut artifacts = link::esm_plan_configured(
             &graph,
             &plan,
@@ -986,7 +1137,9 @@ impl BuildSession {
             options.output.min_chunk_bytes,
             &mappings,
             options.execution,
-        )?;
+        )
+        .wrap_err("linking native output chunks")?;
+        tracing::info!(target: "bundler::progress", "Finalizing resources and rendering output");
         let finalize_span = tracing::info_span!("build.finalize").entered();
         for &file in &plan.retention.modules {
             let path = graph.file_path(file).expect("retained source");
@@ -997,27 +1150,43 @@ impl BuildSession {
                     .resources
                     .insert(crate::resource::asset_path(path, input), input.clone());
             } else if matches!(kind, crate::resource::ResourceKind::Stylesheet { .. }) {
-                styles.emit(path, &mut artifacts)?;
+                styles
+                    .emit(path, &mut artifacts)
+                    .wrap_err_with(|| format!("emitting stylesheet {}", path.display()))?;
             }
         }
-        let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)?;
-        let artifacts = artifacts.render_to_with_maps(&destinations, options.output.source_maps)?;
+        let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)
+            .wrap_err("assigning entry output paths")?;
+        let artifacts = artifacts
+            .render_to_with_maps(&destinations, options.output.source_maps)
+            .wrap_err("rendering output artifacts and source maps")?;
         drop(finalize_span);
-        Self::recheck(&self.sources, &inventory)?;
-        #[cfg(test)]
-        {
-            counters.inventory_directory_reads = inventory.directory_reads();
-        }
-        resolver.recheck()?;
-        styles.recheck()?;
-        sass_resolver.recheck()?;
+        tracing::info!(target: "bundler::progress", "Rechecking build inputs");
+        Self::recheck(&self.sources, &inventory)
+            .wrap_err("rechecking sources before build success")?;
+        counters.inventory_directory_reads = inventory.directory_reads();
+        resolver
+            .recheck()
+            .wrap_err("rechecking script resolution inputs before build success")?;
+        styles
+            .recheck()
+            .wrap_err("rechecking stylesheet inputs before build success")?;
+        sass_resolver
+            .recheck()
+            .wrap_err("rechecking Sass resolution inputs before build success")?;
         for upstream in self.upstreams.values() {
-            upstream.recheck()?;
+            upstream
+                .recheck()
+                .wrap_err("rechecking upstream source-map inputs before build success")?;
         }
         resolver.finish(&mut counters, &mut warnings);
         sass_resolver.finish(&mut counters, &mut warnings);
-        resolver.recheck()?;
-        sass_resolver.recheck()?;
+        resolver
+            .recheck()
+            .wrap_err("rechecking script inputs after resolution-cache publication")?;
+        sass_resolver
+            .recheck()
+            .wrap_err("rechecking Sass inputs after resolution-cache publication")?;
         self.resolution_memory
             .retain_used(&resolver, &sass_resolver);
         warnings.sort();
@@ -1052,12 +1221,15 @@ impl BuildSession {
         let _span = tracing::info_span!("build.recheck", sources = sources.len()).entered();
         for (path, source) in sources {
             ensure!(
-                fs::read(path)? == source.input,
+                fs::read(path).wrap_err_with(|| format!("rereading source {}", path.display()))?
+                    == source.input,
                 "source changed during build: {}",
                 path.display()
             );
         }
-        before.recheck()?;
+        before
+            .recheck()
+            .wrap_err("rechecking reachable build inventory")?;
         Ok(())
     }
 

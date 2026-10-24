@@ -10,7 +10,7 @@ use crate::resolve::{PathResolver, Resolution, TargetEnv, NODE_BUILTINS};
 use abspath::join_abspath;
 use anyhow::{bail, Context, Error, Result};
 use ftree_cache::context_data::{FileContextCache, WithCache};
-use ftree_cache::inputs::{InputObserver, InputProof, PathInput};
+use ftree_cache::inputs::{InputObserver, InputProof};
 use packagejson::exported_path::ExportedPathRef;
 use packagejson::{Browser, PackageJson};
 use path_clean::PathClean;
@@ -18,6 +18,7 @@ use pathdiff::diff_paths;
 use std::{
     env::current_dir,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 use tracing::{debug, trace, Level};
 
@@ -42,7 +43,10 @@ pub type NodeModulesCache = FileContextCache<
         (),
         // Track resolution of paths into each node_modules directory, so
         // we can optimisitcally resolve paths without hitting the filesystem
-        AHashMap<(String, Vec<String>), (CachedResolution, InputProof)>,
+        AHashMap<
+            (String, Vec<String>, Vec<String>, TargetEnv, bool),
+            Arc<parking_lot::Mutex<Option<(CachedResolution, InputProof)>>>,
+        >,
     >,
     NODE_MODULES,
 >;
@@ -160,16 +164,22 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
     fn wrap(&self, path: Option<PathBuf>) -> Result<PathBuf, Error> {
         if let Some(path) = path {
-            match PathInput::capture(&path) {
-                Ok(input) => self.observer.record(input),
-                Err(error) => self.observer.error(error),
-            }
-            if self.preserve_symlinks {
-                Ok(path.clean())
-            } else {
-                Ok(path
-                    .canonicalize()
-                    .inspect_err(|error| self.observer.error(error))?)
+            match self.observer.capture(&path) {
+                Ok(input) => {
+                    let canonical = input.canonical().map(Path::to_owned);
+                    self.observer.record(input);
+                    if self.preserve_symlinks {
+                        Ok(path.clean())
+                    } else {
+                        canonical.ok_or_else(|| {
+                            anyhow::anyhow!("resolved file no longer exists: {}", path.display())
+                        })
+                    }
+                }
+                Err(error) => {
+                    self.observer.error(&error);
+                    Err(Error::from_boxed(error.into()))
+                }
             }
         } else {
             Err(anyhow::anyhow!("file not found"))
@@ -350,7 +360,7 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
                             pkg_path.display(),
                         ));
                     }
-                    ExportedPathRef::Unrecognized => {
+                    ExportedPathRef::Unrecognized | ExportedPathRef::Conditional(_) => {
                         return Err(anyhow::anyhow!(
                             "Index export had an unrecognized format and will be treated as private during resolution",
                         ));
@@ -422,7 +432,13 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
         let mut conditions = self.export_conditions.clone();
         conditions.sort();
         conditions.dedup();
-        let key = (target.to_owned(), conditions);
+        let key = (
+            target.to_owned(),
+            conditions,
+            self.extensions.clone(),
+            self.target_env,
+            self.preserve_symlinks,
+        );
         let abs_base = join_abspath(self.monorepo_root, base_dir)?;
 
         let mut iter = self.node_modules_cache.probe_path_iter_with_inputs(
@@ -441,8 +457,13 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
 
             tracing::debug!("found node_modules directory: {:#?}", nm_dir_path);
 
-            // Use a cached resolution if it exists
-            match nm_dir_entry.get_cached().get(&key) {
+            let slot = nm_dir_entry
+                .get_cached_mut()
+                .entry(key.clone())
+                .or_default()
+                .clone();
+            let mut cached = slot.lock();
+            match cached.as_ref() {
                 Some((CachedResolution::Resolution(path), inputs)) => {
                     self.observer.replay(inputs);
                     // cached a resolution, return it
@@ -457,132 +478,131 @@ impl<'caches> CachingNodeModulesResolver<'caches> {
             };
 
             let input_start = self.observer.position();
-            // fall through: we have to actually try resolving against this node_modules directory
-            // Search for a package.json file to perform package rewrites against
-            let (package_name, rel_import) = match util::split_package_import(target) {
-                Some((pkg, rest)) => (pkg, rest),
-                None => continue,
-            };
-            let nm_pkg_path = nm_dir_path.join(NODE_MODULES).join(package_name);
+            let result = self.resolve_in_node_modules(nm_dir_path, target)?;
+            *cached = Some((
+                result
+                    .as_ref()
+                    .map_or(CachedResolution::NoResolution, |path| {
+                        CachedResolution::Resolution(path.clone())
+                    }),
+                self.observer.since(input_start),
+            ));
+            if result.is_some() {
+                return Ok(result);
+            }
+        }
 
-            // Get the cached derived data + pkgjson entry for this path.
-            let target_file_path: PathBuf = {
-                // scope to drop the lock on cached_entry
-                let cached_entry: ftree_cache::context_data::CtxRef<
-                    Option<WithCache<PackageJson, Option<PackageJsonRewriteData>>>,
-                > = self
-                    .pkg_json_cache
-                    .check_dir_with_inputs(&nm_pkg_path, Some(&self.observer))
-                    .with_context(|| {
-                        format!(
-                            "failed to read package.json for directory {:#?}",
-                            nm_pkg_path.display(),
-                        )
+        Ok(None)
+    }
+
+    fn resolve_in_node_modules(
+        &self,
+        nm_dir_path: &Path,
+        target: &str,
+    ) -> Result<Option<PathBuf>, Error> {
+        let (package_name, rel_import) = match util::split_package_import(target) {
+            Some((pkg, rest)) => (pkg, rest),
+            None => return Ok(None),
+        };
+        let nm_pkg_path = nm_dir_path.join(NODE_MODULES).join(package_name);
+
+        // Get the cached derived data + pkgjson entry for this path.
+        let target_file_path: PathBuf = {
+            // scope to drop the lock on cached_entry
+            let cached_entry: ftree_cache::context_data::CtxRef<
+                Option<WithCache<PackageJson, Option<PackageJsonRewriteData>>>,
+            > = self
+                .pkg_json_cache
+                .check_dir_with_inputs(&nm_pkg_path, Some(&self.observer))
+                .with_context(|| {
+                    format!(
+                        "failed to read package.json for directory {:#?}",
+                        nm_pkg_path.display(),
+                    )
+                })?;
+            let cached_entry_value = cached_entry.value();
+
+            match cached_entry_value {
+                Some(pkg_with_rewrite) => {
+                    // check for rewrite data
+                    let cached_rewrite_data = pkg_with_rewrite.try_get_cached_or_init(|pkg| {
+                        PackageJsonRewriteData::create(self, &nm_pkg_path, pkg)
                     })?;
-                let cached_entry_value = cached_entry.value();
-
-                match cached_entry_value {
-                    Some(pkg_with_rewrite) => {
-                        // check for rewrite data
-                        let cached_rewrite_data =
-                            pkg_with_rewrite.try_get_cached_or_init(|pkg| {
-                                PackageJsonRewriteData::create(self, &nm_pkg_path, pkg)
-                            })?;
-                        self.observer.replay(&cached_rewrite_data.inputs);
-                        match *cached_rewrite_data {
-                            PackageJsonRewriteData {
-                                exports: Some(ref rewrite_data),
-                                ..
-                            } => {
-                                // if there is a rewrite data, rewrite the path against it.
-                                let mut out = String::new();
-                                let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
-                                    &rel_import,
-                                    self.export_conditions.iter().map(|s| s.as_str()),
-                                    &mut out,
-                                )?;
-                                if let Some(rewritten_to) = rewritten_to {
-                                    match rewritten_to.rewritten_export {
-                                        ExportedPathRef::Exported(exported_rel_path) => nm_dir_path
-                                            .join(NODE_MODULES)
-                                            .join(package_name)
-                                            .join(exported_rel_path),
-                                        // tried to import a file that is explicitly marked private
-                                        ExportedPathRef::Private => {
-                                            return Err(anyhow::anyhow!(
+                    self.observer.replay(&cached_rewrite_data.inputs);
+                    match *cached_rewrite_data {
+                        PackageJsonRewriteData {
+                            exports: Some(ref rewrite_data),
+                            ..
+                        } => {
+                            // if there is a rewrite data, rewrite the path against it.
+                            let mut out = String::new();
+                            let rewritten_to = rewrite_data.rewrite_relative_export::<&str>(
+                                &rel_import,
+                                self.export_conditions.iter().map(|s| s.as_str()),
+                                &mut out,
+                            )?;
+                            if let Some(rewritten_to) = rewritten_to {
+                                match rewritten_to.rewritten_export {
+                                    ExportedPathRef::Exported(exported_rel_path) => nm_dir_path
+                                        .join(NODE_MODULES)
+                                        .join(package_name)
+                                        .join(exported_rel_path),
+                                    // tried to import a file that is explicitly marked private
+                                    ExportedPathRef::Private => {
+                                        return Err(anyhow::anyhow!(
                                                 "Import '{target}' is marked as private by export '{}' in {}",
                                                 rewritten_to.export_kind,
                                                 nm_pkg_path.join(PACKAGE).display(),
                                             ));
-                                        }
-                                        ExportedPathRef::Unrecognized => {
-                                            return Err(anyhow::anyhow!(
+                                    }
+                                    ExportedPathRef::Unrecognized
+                                    | ExportedPathRef::Conditional(_) => {
+                                        return Err(anyhow::anyhow!(
                                                 "Import '{target}' matched export '{}' in {}, which has an unrecognized export format. It will be treated as private",
                                                 rewritten_to.export_kind,
                                                 nm_pkg_path.join(PACKAGE).display(),
                                             ));
-                                        }
                                     }
-                                } else {
-                                    return Err(Error::from_boxed(
+                                }
+                            } else {
+                                return Err(Error::from_boxed(
                                         eyre::eyre!(
                                             "ERR_PACKAGE_PATH_NOT_EXPORTED: import {target:?} is not exported by {}",
                                             nm_pkg_path.join(PACKAGE).display()
                                         )
                                         .into(),
                                     ));
-                                }
-                            }
-                            _ => {
-                                // no rewrite data, so just use node_modules/imported/path
-                                tracing::debug!(
-                                    "no rewrite data in ${:#?} for {rel_import:#?}",
-                                    nm_pkg_path.display()
-                                );
-                                nm_dir_path.join(NODE_MODULES).join(target)
                             }
                         }
-                    }
-                    None => {
-                        tracing::debug!("no package.json found in: {:#?}", nm_pkg_path);
-                        // TODO: fall through to default resolution
-                        nm_dir_path.join(NODE_MODULES).join(target)
+                        _ => {
+                            // no rewrite data, so just use node_modules/imported/path
+                            tracing::debug!(
+                                "no rewrite data in ${:#?} for {rel_import:#?}",
+                                nm_pkg_path.display()
+                            );
+                            nm_dir_path.join(NODE_MODULES).join(target)
+                        }
                     }
                 }
-            };
-
-            tracing::debug!("attempting resolution: {target_file_path:#?}");
-            if let Some(result) = self
-                .resolve_as_file(&target_file_path)
-                .ok()
-                .or_else(|| self.resolve_as_directory(&target_file_path, true).ok())
-                .flatten()
-            {
-                // Resolved! Cache the result and return it.
-                nm_dir_entry.get_cached_mut().insert(
-                    key.clone(),
-                    (
-                        CachedResolution::Resolution(result.clone()),
-                        self.observer.since(input_start),
-                    ),
-                );
-                tracing::debug!("resolved: {target_file_path:#?}");
-                return Ok(Some(result));
-            } else {
-                tracing::debug!("caching failed resolution: {target_file_path:#?}");
-                // failed to resolve! Cache the failure so we don't try again,
-                // and continue the loop to try the next node_modules directory.
-                nm_dir_entry.get_cached_mut().insert(
-                    key.clone(),
-                    (
-                        CachedResolution::NoResolution,
-                        self.observer.since(input_start),
-                    ),
-                );
+                None => {
+                    tracing::debug!("no package.json found in: {:#?}", nm_pkg_path);
+                    // TODO: fall through to default resolution
+                    nm_dir_path.join(NODE_MODULES).join(target)
+                }
             }
+        };
+
+        tracing::debug!("attempting resolution: {target_file_path:#?}");
+        if let Some(result) = self
+            .resolve_as_file(&target_file_path)
+            .ok()
+            .or_else(|| self.resolve_as_directory(&target_file_path, true).ok())
+            .flatten()
+        {
+            tracing::debug!("resolved: {target_file_path:#?}");
+            return Ok(Some(result));
         }
 
-        // no matches anywhere, so this failed to resolve against any node_modules directory.
         Ok(None)
     }
 

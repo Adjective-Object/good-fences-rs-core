@@ -1,4 +1,5 @@
-use std::path::Path;
+use ftree_cache::inputs::InputSnapshot;
+use std::{path::Path, sync::Arc};
 
 use super::caching::{
     CachingNodeModulesResolver, NodeModulesCache, NodeModulesResolverOptions, PackageJsonCache,
@@ -8,12 +9,24 @@ use crate::resolve::{PathResolver, Resolution};
 #[derive(Debug, Default)]
 pub struct CombinedResolverCaches {
     node_modules_cache: NodeModulesCache,
-    package_json_cache: PackageJsonCache,
+    package_json_cache: Arc<PackageJsonCache>,
+    snapshot: InputSnapshot,
 }
 
 impl CombinedResolverCaches {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn with_shared(
+        package_json_cache: Arc<PackageJsonCache>,
+        snapshot: InputSnapshot,
+    ) -> Self {
+        Self {
+            package_json_cache,
+            snapshot,
+            node_modules_cache: NodeModulesCache::new(),
+        }
     }
 
     pub fn resolver<'a>(
@@ -31,10 +44,11 @@ impl CombinedResolverCaches {
     pub fn mark_dirty_root(&mut self, root: &Path) {
         self.node_modules_cache.mark_dirty_root(root);
         self.package_json_cache.mark_dirty_root(root);
+        self.snapshot.mark_dirty_root(root);
     }
 
-    pub fn package_json_cache(&mut self) -> &mut PackageJsonCache {
-        &mut self.package_json_cache
+    pub fn package_json_cache(&mut self) -> &PackageJsonCache {
+        &self.package_json_cache
     }
 }
 
@@ -53,6 +67,9 @@ impl PathResolver for CombinedResolver<'_> {
             &self.caches.node_modules_cache,
             self.options.clone(),
         )
+        .with_observer(ftree_cache::inputs::InputObserver::with_snapshot(
+            self.caches.snapshot.clone(),
+        ))
         .resolve(base, specifier)
     }
 }
@@ -168,6 +185,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn concurrent_package_targets_keep_extension_policies_separate() {
+        let dir = test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":"./value"}"#,
+            "node_modules/pkg/value.ts" => "",
+            "node_modules/pkg/value.tsx" => ""
+        };
+        let caches = CombinedResolverCaches::new();
+        std::thread::scope(|scope| {
+            for extension in ["ts", "tsx", "ts", "tsx"] {
+                let caches = &caches;
+                let dir = &dir;
+                scope.spawn(move || {
+                    let mut options = NodeModulesResolverOptions::default_for_env(TargetEnv::Node);
+                    options.extensions = vec![extension.into()];
+                    let resolver = caches.resolver(dir.root(), options);
+                    for _ in 0..8 {
+                        assert_eq!(
+                            resolver
+                                .resolve(&dir.root_join("entry.mjs"), "pkg")
+                                .unwrap()
+                                .path,
+                            dir.root_join(&format!("node_modules/pkg/value.{extension}"))
+                        );
+                    }
+                });
+            }
+        });
     }
 
     #[test]

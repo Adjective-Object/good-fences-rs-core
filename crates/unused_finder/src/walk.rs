@@ -1,7 +1,7 @@
 use crate::ignore_file::IgnoreFile;
+use crate::parse::exports_visitor_runner::get_file_segments;
 use crate::parse::exports_visitor_runner::SourceFileParseError;
 use crate::parse::RawImportExportInfo;
-use crate::parse::exports_visitor_runner::get_file_segments;
 use crate::walked_file::{WalkedPackage, WalkedSourceFile};
 use ahashmap::AHashMap;
 use anyhow::Context;

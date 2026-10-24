@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const defaultRoot = fileURLToPath(new URL('../fixtures/bundler/', import.meta.url));
 const requiredFields = ['id', 'moduleType', 'entryPoints', 'expectations', 'goals'];
 const defaultTempRoot = fileURLToPath(new URL('../target/p1-test-tmp/', import.meta.url));
-const defaultDriver = fileURLToPath(new URL(`../target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
+const defaultDriver = fileURLToPath(new URL(`../target/debug/bundler-cli${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
@@ -350,7 +350,7 @@ export function observeEntries(manifest, entries, cwd, timeoutMs = 5000, mode = 
 }
 
 export function buildProject(driver, root, entries, timeoutMs = 30000, fixtureConfig) {
-  assert(existsSync(driver), `Missing library driver; run cargo build -p bundler --example build (${driver})`);
+  assert(existsSync(driver), `Missing bundler CLI; run cargo build -p bundler-cli (${driver})`);
   const configArgs = [];
   if (fixtureConfig !== undefined) {
     validateFixtureConfig(fixtureConfig);

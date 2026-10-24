@@ -10,3 +10,9 @@ no directories; ordinary inputs seal kind/identity/links, not source contents.
 `PathInput::checked_from_parts` is the persisted-proof bridge: it freshly
 validates every supplied field/content seal before returning a reconstructed
 observation. Never add an unchecked constructor for disk provenance.
+
+Context cells atomically publish values with original proofs; return Arc-backed
+handles, never shard guards, and initialize outside DashMap locks. Explicit
+InputSnapshot epochs single-flight paths, shared prefixes and exact bytes.
+Snapshot checks compare original observations; final freshness requires a new
+snapshot. Do not use a live build snapshot as a final validation authority.

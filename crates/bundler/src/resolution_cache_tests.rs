@@ -259,6 +259,30 @@ fn external_footprints_unproven_inputs_and_duplicate_requests_are_not_persistabl
 }
 
 #[test]
+fn snapshot_hits_keep_borrowed_proofs_but_fresh_boundaries_detect_manifest_changes() {
+    let (_dir, roots, proof, target) = fixture();
+    let record = record(roots.clone(), &proof, &target, KEY);
+    let store = Store::new(roots.clone(), KEY, CacheMode::ReadWrite);
+    assert_eq!(store.save(&record), CacheWrite::Stored);
+    let epoch = InputSnapshot::default();
+    let loaded = store.load_scoped_in(&epoch).record.unwrap();
+    fs::write(
+        roots.package.join("package.json"),
+        r#"{"main":"changed.js"}"#,
+    )
+    .unwrap();
+    loaded
+        .revalidate_request_in(wire::Mode::Import, "main.js", "./target", &epoch)
+        .unwrap();
+    assert!(loaded.revalidate().is_err());
+    assert!(matches!(store.save(&loaded), CacheWrite::Failed(_)));
+    let next = store.load_scoped().record.unwrap();
+    assert!(next
+        .find(wire::Mode::Import, "main.js", "./target")
+        .is_none());
+}
+
+#[test]
 fn ancestor_node_lookup_paths_are_portable_and_bounded() {
     let (_dir, roots, _, _) = fixture();
     let ancestor = roots.project.parent().unwrap();

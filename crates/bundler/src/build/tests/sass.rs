@@ -275,13 +275,14 @@ fn sass_rechecks_transitive_original_bytes_before_returning() {
     );
 }
 
-fn stylesheet_map(result: &BuildResult, source: &Path) -> oxc_sourcemap::SourceMap {
+fn stylesheet_map(result: &BuildResult, source: &Path) -> oxc_sourcemap::SourceMap<'static> {
     let output = &result.product.artifacts.stylesheets[&source.canonicalize().unwrap()];
     let map = &result.product.artifacts.resources[&crate::sourcemap::path(output)];
-    let map =
-        oxc_sourcemap::SourceMap::from_json_string(std::str::from_utf8(map).unwrap()).unwrap();
+    let map = oxc_sourcemap::SourceMap::from_json_string(std::str::from_utf8(map).unwrap())
+        .unwrap()
+        .into_owned();
     assert_eq!(
-        map.get_file().unwrap().as_ref(),
+        map.get_file().unwrap(),
         output.file_name().unwrap().to_str().unwrap()
     );
     let footer =
@@ -311,7 +312,7 @@ fn stylesheet_origin(
         .lookup_source_view_token(&table, generated_line, generated_column)
         .unwrap();
     assert_eq!(
-        token.get_source().unwrap().as_ref(),
+        token.get_source().unwrap(),
         url::Url::from_file_path(original.canonicalize().unwrap())
             .unwrap()
             .as_str(),
@@ -323,7 +324,7 @@ fn stylesheet_origin(
         "{output_needle}"
     );
     assert_eq!(
-        token.get_source_content().unwrap().as_ref(),
+        token.get_source_content().unwrap(),
         fs::read_to_string(original).unwrap()
     );
 }

@@ -1,12 +1,14 @@
-use crate::inputs::{InputObserver, InputProof, PathInput};
+use crate::inputs::{InputKind, InputObserver, InputProof, SharedError};
 use anyhow::{anyhow, Context, Error, Result};
 use dashmap::DashMap;
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::path::{Path, PathBuf};
+use std::{
+    marker::PhantomData,
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
+};
 use tracing::debug;
-
-#[cfg(feature = "deadlock_ref")]
-use deadlock_ref::prelude::*;
 
 /// Represents some state which is represented by the existence of a path on the filesystem
 ///
@@ -56,18 +58,17 @@ impl ContextData for () {
         path: &Path,
         observer: &InputObserver,
     ) -> Result<Option<Self>, Error> {
-        let input = PathInput::capture(path);
-        let value = Self::read_context_data((), path);
-        match input {
+        match observer.capture(path) {
             Ok(input) => {
-                if let Err(error) = input.validate() {
-                    observer.error(error);
-                }
+                let exists = input.kind() != InputKind::Missing;
                 observer.record(input);
+                Ok(exists.then_some(()))
             }
-            Err(error) => observer.error(error),
+            Err(error) => {
+                observer.error(error);
+                Self::read_context_data((), path)
+            }
         }
-        value
     }
 }
 
@@ -235,28 +236,60 @@ pub struct FileContextCache<
     /// A directory is considered to have a context file if the entry is Some(T)
     ///
     /// If there is no entry, the directory has not been probed yet
-    cache: DashMap<PathBuf, Option<T>>,
-    inputs: DashMap<PathBuf, InputProof>,
+    cache: DashMap<PathBuf, ContextCell<T>>,
     args: TArgs,
 }
 
-#[cfg(feature = "deadlock_ref")]
-pub type CtxRef<'a, T> = DeadlockDebugRef<dashmap::mapref::one::Ref<'a, PathBuf, T>>;
-#[cfg(feature = "deadlock_ref")]
-pub type CtxOptRef<'a, T> =
-    DeadlockDebugRef<dashmap::mapref::one::MappedRef<'a, PathBuf, Option<T>, T>>;
+type ContextCell<T> = Arc<OnceLock<std::result::Result<Arc<ContextEntry<Option<T>>>, SharedError>>>;
 
-#[cfg(not(feature = "deadlock_ref"))]
-pub type CtxRef<'a, T> = dashmap::mapref::one::Ref<'a, PathBuf, T>;
-#[cfg(not(feature = "deadlock_ref"))]
-pub type CtxOptRef<'a, T> = dashmap::mapref::one::MappedRef<'a, PathBuf, Option<T>, T>;
+#[derive(Debug)]
+struct ContextEntry<T> {
+    value: T,
+    inputs: InputProof,
+}
+
+#[derive(Debug)]
+pub struct CtxRef<'a, T> {
+    entry: Arc<ContextEntry<T>>,
+    lifetime: PhantomData<&'a ()>,
+}
+
+impl<T> CtxRef<'_, T> {
+    pub fn value(&self) -> &T {
+        &self.entry.value
+    }
+}
+
+impl<T> Deref for CtxRef<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.value()
+    }
+}
+
+#[derive(Debug)]
+pub struct CtxOptRef<'a, T>(CtxRef<'a, Option<T>>);
+
+impl<T> CtxOptRef<'_, T> {
+    pub fn value(&self) -> &T {
+        self.0.value().as_ref().expect("checked present context")
+    }
+}
+
+impl<T> Deref for CtxOptRef<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.value()
+    }
+}
 
 /// convenience implementation that allows constructing a FileContextCache that has no arguments
 impl<T: ContextData<()>, const CONTEXT_FNAME: &'static str> FileContextCache<T, CONTEXT_FNAME, ()> {
     pub fn new() -> Self {
         Self {
             cache: DashMap::new(),
-            inputs: DashMap::new(),
             args: (),
         }
     }
@@ -279,8 +312,12 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
     pub fn prepopulate(&self, path: &Path, data: impl Into<T>) {
         let observer = InputObserver::default();
         observer.error("prepopulated context has no filesystem provenance");
-        self.inputs.insert(path.to_owned(), observer.proof());
-        self.cache.insert(path.to_owned(), Some(data.into()));
+        let cell = OnceLock::new();
+        let _ = cell.set(Ok(Arc::new(ContextEntry {
+            value: Some(data.into()),
+            inputs: observer.proof(),
+        })));
+        self.cache.insert(path.to_owned(), Arc::new(cell));
     }
 
     /// Checks the given path for a context file (e.g. a package.json file)
@@ -319,8 +356,8 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
             };
 
             let probe_result = self.check_dir_with_inputs(head_path, observer)?;
-            if let Ok(res) = probe_result.try_map(|x| x.as_ref()) {
-                return Ok(Some((head_path, res)));
+            if probe_result.is_some() {
+                return Ok(Some((head_path, CtxOptRef(probe_result))));
             }
 
             // if we would walk above the configured root,
@@ -371,60 +408,41 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
         base: &Path,
         observer: Option<&InputObserver>,
     ) -> Result<CtxRef<'a, Option<T>>, Error> {
-        tracing::debug!("{} check_dir! {}", CONTEXT_FNAME, base.display());
-        let mk_ref = || -> Result<dashmap::mapref::one::Ref<'a, PathBuf, Option<T>>, Error> {
-            let res =
-                self.cache
-                    .entry(base.to_owned())
-                    .or_try_insert_with(|| -> Result<Option<T>> {
-                        tracing::debug!(
-                            "{} check_dir! - populate - {}",
-                            CONTEXT_FNAME,
-                            base.display()
-                        );
-                        let x = self
-                            .check_dir_os_fs(base)
-                            .with_context(|| {
-                                format!("Failed while checking {:?} for {}", base, CONTEXT_FNAME)
-                            })
-                            .inspect_err(|error| {
-                                if let Some(observer) = observer {
-                                    observer.error(format!("{error:#}"));
-                                }
-                            })?;
-                        tracing::debug!(
-                            "{} check_dir! - populated! - {}",
-                            CONTEXT_FNAME,
-                            base.display()
-                        );
-                        Ok(x)
-                    })?;
-            // downgrade mutable ref to non-mutable ref
-            if let Some(observer) = observer {
-                if let Some(proof) = self.inputs.get(base) {
-                    observer.replay(&proof);
-                } else {
-                    observer.error("cached context has no filesystem provenance");
+        let cell = self.cache.entry(base.into()).or_default().clone();
+        let loaded = cell.get_or_init(|| {
+            self.check_dir_os_fs(base, observer)
+                .map(Arc::new)
+                .map_err(|error| SharedError::new(error.into_boxed_dyn_error()))
+        });
+        let entry = match loaded {
+            Ok(entry) => entry.clone(),
+            Err(error) => {
+                let error = Error::new(error.clone());
+                if let Some(observer) = observer {
+                    observer.error(format!("{error:#}"));
                 }
+                return Err(error);
             }
-            Ok(res.downgrade())
         };
-
-        #[cfg(feature = "deadlock_ref")]
-        return DeadlockDebugRef::try_create(format!("{CONTEXT_FNAME}:{}", base.display()), mk_ref);
-        #[cfg(not(feature = "deadlock_ref"))]
-        return mk_ref();
+        if let Some(observer) = observer {
+            observer.replay(&entry.inputs);
+        }
+        Ok(CtxRef {
+            entry,
+            lifetime: PhantomData,
+        })
     }
 
-    fn check_dir_os_fs(&self, base: &Path) -> Result<Option<T>, Error> {
+    fn check_dir_os_fs(
+        &self,
+        base: &Path,
+        observer: Option<&InputObserver>,
+    ) -> Result<ContextEntry<Option<T>>, Error> {
         // probe the real FS for the configured context file
         let context_file_path = base.to_owned().join(CONTEXT_FNAME);
-        let observer = InputObserver::default();
+        let observer = observer.map(InputObserver::fork).unwrap_or_default();
         let result = T::read_context_data_with_inputs(self.args, &context_file_path, &observer)
-            .with_context(|| "in read_context_data");
-        if result.is_ok() {
-            self.inputs.insert(base.to_owned(), observer.proof());
-        }
+            .with_context(|| format!("reading filesystem context {}", context_file_path.display()));
         debug!(
             "Checking {}/{}: {}",
             base.to_string_lossy(),
@@ -436,13 +454,15 @@ impl<T: ContextData<TArgs>, TArgs: Copy, const CONTEXT_FNAME: &'static str>
             }
         );
 
-        result
+        result.map(|value| ContextEntry {
+            value,
+            inputs: observer.proof(),
+        })
     }
 
     /// Clears the cache for all paths under a subdirectory, recursively.
     pub fn mark_dirty_root(&self, path: &Path) {
         self.cache.retain(|key, _| !key.starts_with(path));
-        self.inputs.retain(|key, _| !key.starts_with(path));
     }
 }
 
@@ -534,8 +554,8 @@ where
                 Err(e) => return Some(Err(e)),
             };
 
-            if let Ok(res) = probe_result.try_map(|x| x.as_ref()) {
-                let r: CtxOptRef<'context_cache, TContext> = res;
+            if probe_result.is_some() {
+                let r: CtxOptRef<'context_cache, TContext> = CtxOptRef(probe_result);
                 return Some(Ok((head_path, r)));
             }
 

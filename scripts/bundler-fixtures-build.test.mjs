@@ -7,7 +7,7 @@ import { buildProject, execute, managed, observeEntries, runBundlerCases, runFix
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const managedRoot = path.join(project, 'target/p1-test-tmp');
-const driver = path.join(project, `target/debug/examples/build${process.platform === 'win32' ? '.exe' : ''}`);
+const driver = path.join(project, `target/debug/bundler-cli${process.platform === 'win32' ? '.exe' : ''}`);
 
 function withCorpus(source, callback, extra = {}) {
   mkdirSync(managedRoot, { recursive: true });
@@ -579,8 +579,8 @@ test('driver rejects unknown, malformed and oversized config before publication'
       assert(!existsSync(path.join(output, '.bundler-current.json')), 'invalid config published');
     }
     const missing = execute(driver, [root, output, '--fixture-config'], root);
-    assert.equal(missing.status, 1);
-    assert.match(missing.stderr, /missing fixture config file/u);
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /--fixture-config <FILE>/u);
   });
 });
 

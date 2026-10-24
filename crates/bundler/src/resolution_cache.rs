@@ -9,8 +9,8 @@ use cache_flatbuffers::{
     resolution::{validate_path, Key, WireResolution, SCHEMA_VERSION},
     resolution_wire as wire, MAX_RECORD_BYTES,
 };
-use eyre::{ensure, OptionExt, Result};
-use ftree_cache::inputs::{InputKind, InputProof, PathInput};
+use eyre::{ensure, OptionExt, Result, WrapErr};
+use ftree_cache::inputs::{InputKind, InputProof, InputSnapshot, PathInput};
 use segment_cache::{CacheMode, CacheStatus, CacheWrite, MissReason};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,11 +27,47 @@ pub(crate) struct Roots {
 }
 
 impl Roots {
+    #[cfg(test)]
     pub(crate) fn new(project: &Path, package: &Path) -> Result<Self> {
-        let canonical_project = project.canonicalize()?;
-        let canonical_package = package.canonicalize()?;
-        let working_directory = std::env::current_dir()?;
-        let canonical_working_directory = working_directory.canonicalize()?;
+        Self::new_in(project, package, &InputSnapshot::default())
+    }
+
+    pub(crate) fn new_in(project: &Path, package: &Path, snapshot: &InputSnapshot) -> Result<Self> {
+        let canonical_project = snapshot
+            .capture(project)?
+            .canonical()
+            .map(Path::to_owned)
+            .ok_or_eyre("missing resolution-cache project root")
+            .wrap_err_with(|| {
+                format!(
+                    "resolving resolution-cache project root {}",
+                    project.display()
+                )
+            })?;
+        let canonical_package = snapshot
+            .capture(package)?
+            .canonical()
+            .map(Path::to_owned)
+            .ok_or_eyre("missing resolution-cache package root")
+            .wrap_err_with(|| {
+                format!(
+                    "resolving resolution-cache package root {}",
+                    package.display()
+                )
+            })?;
+        let working_directory =
+            std::env::current_dir().wrap_err("reading resolution-cache working directory")?;
+        let canonical_working_directory = snapshot
+            .capture(&working_directory)?
+            .canonical()
+            .map(Path::to_owned)
+            .ok_or_eyre("missing resolution-cache working directory")
+            .wrap_err_with(|| {
+                format!(
+                    "resolving resolution-cache working directory {}",
+                    working_directory.display()
+                )
+            })?;
         Ok(Self {
             project: std::path::absolute(project)?,
             package: std::path::absolute(package)?,
@@ -153,12 +189,14 @@ impl Roots {
         Ok(root.join(from_portable(locator.path())))
     }
 
-    fn validate(&self) -> Result<()> {
+    fn validate_in(&self, snapshot: &InputSnapshot) -> Result<()> {
         ensure!(
-            self.project.canonicalize()? == self.canonical_project
-                && self.package.canonicalize()? == self.canonical_package
+            snapshot.capture(&self.project)?.canonical() == Some(self.canonical_project.as_path())
+                && snapshot.capture(&self.package)?.canonical()
+                    == Some(self.canonical_package.as_path())
                 && std::env::current_dir()? == self.working_directory
-                && self.working_directory.canonicalize()? == self.canonical_working_directory,
+                && snapshot.capture(&self.working_directory)?.canonical()
+                    == Some(self.canonical_working_directory.as_path()),
             "resolution path anchors changed"
         );
         Ok(())
@@ -261,7 +299,7 @@ fn encode_input(roots: &Roots, input: &PathInput) -> Result<wire::InputT> {
     Ok(record)
 }
 
-fn validate_input(roots: &Roots, input: wire::Input<'_>) -> Result<()> {
+fn validate_input(roots: &Roots, input: wire::Input<'_>, snapshot: &InputSnapshot) -> Result<()> {
     let path = roots.decode(input.path())?;
     let canonical = input
         .canonical()
@@ -308,7 +346,7 @@ fn validate_input(roots: &Roots, input: wire::Input<'_>) -> Result<()> {
     }
     // Only one proof at a time is reconstructed, checked, then discarded.
     // The checked cache itself retains no unpacked observations or tree.
-    PathInput::checked_from_parts(path, kind, canonical, identity, links, content)?;
+    PathInput::checked_from_parts_in(snapshot, path, kind, canonical, identity, links, content)?;
     Ok(())
 }
 
@@ -319,11 +357,21 @@ pub(crate) struct CheckedResolution {
 }
 
 impl CheckedResolution {
+    #[cfg(test)]
     pub(crate) fn encode(roots: Roots, key: Key, requests: &[Request<'_>]) -> Result<Self> {
+        Self::encode_in(roots, key, requests, &InputSnapshot::default())
+    }
+
+    pub(crate) fn encode_in(
+        roots: Roots,
+        key: Key,
+        requests: &[Request<'_>],
+        snapshot: &InputSnapshot,
+    ) -> Result<Self> {
         let mut entries = requests
             .iter()
             .map(|request| {
-                request.inputs.validate()?;
+                request.inputs.validate_in(snapshot)?;
                 let mut target = wire::TargetT::default();
                 match request.target {
                     Target::File(path) => target.file = Some(roots.encode(path)?),
@@ -359,28 +407,35 @@ impl CheckedResolution {
             bytes: key.dependencies,
         };
         data.requests = entries;
-        Self::check(WireResolution::encode(&data, key)?, roots)
+        Self::check_in(WireResolution::encode(&data, key)?, roots, snapshot)
     }
 
-    fn check(wire: WireResolution, roots: Roots) -> Result<Self> {
+    fn check_in(wire: WireResolution, roots: Roots, snapshot: &InputSnapshot) -> Result<Self> {
         // Semantic filesystem validity precedes construction of the checked owner.
-        Self::validate(&wire, &roots)?;
+        Self::validate_in(&wire, &roots, snapshot)?;
         Ok(Self { wire, roots })
     }
 
-    fn validate(wire: &WireResolution, roots: &Roots) -> Result<()> {
-        roots.validate()?;
+    fn validate_in(wire: &WireResolution, roots: &Roots, snapshot: &InputSnapshot) -> Result<()> {
+        roots.validate_in(snapshot)?;
         for request in wire.root().requests() {
-            Self::validate_request(roots, request)?;
+            Self::validate_request(roots, request, snapshot)?;
         }
         Ok(())
     }
 
-    fn validate_request(roots: &Roots, request: wire::Request<'_>) -> Result<()> {
+    fn validate_request(
+        roots: &Roots,
+        request: wire::Request<'_>,
+        snapshot: &InputSnapshot,
+    ) -> Result<()> {
         let importer = roots.package.join(from_portable(request.importer()));
-        ensure!(importer.is_file(), "resolution importer no longer exists");
+        ensure!(
+            snapshot.capture(&importer)?.kind() == InputKind::File,
+            "resolution importer no longer exists"
+        );
         for input in request.inputs() {
-            validate_input(roots, input)?;
+            validate_input(roots, input, snapshot)?;
         }
         if let Some(target) = request.target().file() {
             let target = roots.decode(target)?;
@@ -397,17 +452,19 @@ impl CheckedResolution {
         Ok(())
     }
 
-    pub(crate) fn revalidate_request(
+    pub(crate) fn revalidate_request_in(
         &self,
         mode: wire::Mode,
         importer: &str,
         specifier: &str,
+        snapshot: &InputSnapshot,
     ) -> Result<()> {
-        self.roots.validate()?;
+        self.roots.validate_in(snapshot)?;
         Self::validate_request(
             &self.roots,
             self.find(mode, importer, specifier)
                 .ok_or_eyre("missing resolution request")?,
+            snapshot,
         )
     }
 
@@ -444,7 +501,12 @@ impl CheckedResolution {
         Ok(routes)
     }
 
-    pub(crate) fn aggregate(roots: Roots, key: Key, records: &[Self]) -> Result<Self> {
+    pub(crate) fn aggregate_in(
+        roots: Roots,
+        key: Key,
+        records: &[Self],
+        snapshot: &InputSnapshot,
+    ) -> Result<Self> {
         let mut requests = std::collections::BTreeMap::new();
         for record in records {
             ensure!(roots == record.roots, "resolution merge roots mismatch");
@@ -456,14 +518,20 @@ impl CheckedResolution {
                 );
             }
         }
-        Self::check(
+        Self::check_in(
             WireResolution::aggregate(key, &requests.into_values().collect::<Vec<_>>())?,
             roots,
+            snapshot,
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn revalidate(&self) -> Result<()> {
-        Self::validate(&self.wire, &self.roots)
+        self.revalidate_in(&InputSnapshot::default())
+    }
+
+    pub(crate) fn revalidate_in(&self, snapshot: &InputSnapshot) -> Result<()> {
+        Self::validate_in(&self.wire, &self.roots, snapshot)
     }
 
     pub(crate) fn requests(&self) -> impl Iterator<Item = wire::Request<'_>> {
@@ -534,15 +602,20 @@ impl Store {
 
     #[cfg(test)]
     pub(crate) fn load(&self) -> Load {
-        self.load_inner(false)
+        self.load_inner(false, &InputSnapshot::default())
     }
 
     /// A stale request must not evict independent, still-proven requests.
+    #[cfg(test)]
     pub(crate) fn load_scoped(&self) -> Load {
-        self.load_inner(true)
+        self.load_scoped_in(&InputSnapshot::default())
     }
 
-    fn load_inner(&self, scoped: bool) -> Load {
+    pub(crate) fn load_scoped_in(&self, snapshot: &InputSnapshot) -> Load {
+        self.load_inner(true, snapshot)
+    }
+
+    fn load_inner(&self, scoped: bool, snapshot: &InputSnapshot) -> Load {
         let miss = |reason| Load {
             record: None,
             status: CacheStatus::Miss(reason),
@@ -555,25 +628,33 @@ impl Store {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return miss(MissReason::Missing)
             }
-            Err(error) => return miss(MissReason::ReadFailure(error.to_string())),
+            Err(error) => {
+                return miss(MissReason::ReadFailure(format!(
+                    "opening resolution cache {}: {error}",
+                    self.path().display()
+                )))
+            }
         };
         let mut bytes = Vec::new();
         if let Err(error) = file
             .take(MAX_RECORD_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
         {
-            return miss(MissReason::ReadFailure(error.to_string()));
+            return miss(MissReason::ReadFailure(format!(
+                "reading resolution cache {}: {error}",
+                self.path().display()
+            )));
         }
         match WireResolution::new(bytes.into(), self.key).and_then(|wire| {
             if !scoped {
-                return CheckedResolution::check(wire, self.roots.clone());
+                return CheckedResolution::check_in(wire, self.roots.clone(), snapshot);
             }
-            self.roots.validate()?;
+            self.roots.validate_in(snapshot)?;
             let requests: Vec<_> = wire
                 .root()
                 .requests()
                 .iter()
-                .filter(|r| CheckedResolution::validate_request(&self.roots, *r).is_ok())
+                .filter(|r| CheckedResolution::validate_request(&self.roots, *r, snapshot).is_ok())
                 .collect();
             if requests.len() == wire.root().requests().len() {
                 return Ok(CheckedResolution {
@@ -582,7 +663,7 @@ impl Store {
                 });
             }
             let wire = WireResolution::aggregate(self.key, &requests)?;
-            CheckedResolution::check(wire, self.roots.clone())
+            CheckedResolution::check_in(wire, self.roots.clone(), snapshot)
         }) {
             Ok(record) => Load {
                 record: Some(record),
@@ -592,31 +673,53 @@ impl Store {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn save(&self, record: &CheckedResolution) -> CacheWrite {
+        self.save_in(record, &InputSnapshot::default())
+    }
+
+    pub(crate) fn save_in(
+        &self,
+        record: &CheckedResolution,
+        snapshot: &InputSnapshot,
+    ) -> CacheWrite {
         if self.mode != CacheMode::ReadWrite {
             return CacheWrite::NotRequested;
         }
-        match self.save_inner(record) {
+        match self.save_inner(record, snapshot) {
             Ok(()) => CacheWrite::Stored,
-            Err(error) => CacheWrite::Failed(format!("{error:#}")),
+            Err(error) => CacheWrite::Failed(format!(
+                "saving resolution cache {}: {error:#}",
+                self.path().display()
+            )),
         }
     }
 
-    fn save_inner(&self, record: &CheckedResolution) -> Result<()> {
+    fn save_inner(&self, record: &CheckedResolution, snapshot: &InputSnapshot) -> Result<()> {
         ensure!(
             record.roots == self.roots,
             "resolution storage roots mismatch"
         );
         // A checked owner may have been made for a different policy/package.
         WireResolution::new(record.wire.bytes().into(), self.key)?;
-        record.revalidate()?;
+        record.revalidate_in(snapshot)?;
         let mut stage = tempfile::Builder::new()
             .prefix(".bundler-resolution-stage-")
-            .tempfile_in(&self.roots.package)?;
-        stage.write_all(record.wire.bytes())?;
-        stage.flush()?;
-        stage.as_file().sync_all()?;
-        stage.persist(self.path())?;
+            .tempfile_in(&self.roots.package)
+            .wrap_err("creating resolution-cache staging file")?;
+        stage
+            .write_all(record.wire.bytes())
+            .wrap_err("writing resolution-cache staging file")?;
+        stage
+            .flush()
+            .wrap_err("flushing resolution-cache staging file")?;
+        stage
+            .as_file()
+            .sync_all()
+            .wrap_err("syncing resolution-cache staging file")?;
+        stage
+            .persist(self.path())
+            .wrap_err("replacing resolution cache")?;
         Ok(())
     }
 }

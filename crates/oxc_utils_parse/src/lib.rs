@@ -7,6 +7,27 @@ use oxc_allocator::Allocator;
 use oxc_parser::{Parser, ParserReturn};
 use oxc_span::SourceType;
 
+/// Parse with explicit grammar, retaining the filename on upstream panics.
+pub fn parse_with_source_type<'a>(
+    allocator: &'a Allocator,
+    source: &'a str,
+    source_type: SourceType,
+    path: &std::path::Path,
+) -> eyre::Result<ParserReturn<'a>> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Parser::new(allocator, source, source_type).parse()
+    }))
+    .map_err(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        eyre::eyre!("Oxc parser panicked: {message}")
+    })
+    .wrap_err_with(|| format!("parsing {} ({source_type:?})", path.display()))
+}
+
 /// Package interpretation for extensions without an explicit module format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModuleFormat {
@@ -47,7 +68,7 @@ pub fn parse_bundler_file<'a>(
             ModuleFormat::CommonJs => source_type.with_commonjs(true),
         };
     }
-    let parsed = Parser::new(allocator, source, source_type).parse();
+    let parsed = parse_with_source_type(allocator, source, source_type, path)?;
     if source_type.is_commonjs()
         && path
             .extension()
@@ -69,16 +90,17 @@ pub fn parse_bundler_file<'a>(
     // Reparse detected modules in ESM mode to enforce strict/module grammar;
     // the CommonJS probe preserves wrapper returns for actual CommonJS inputs.
     let parsed = if detect_esm && parsed.module_record.has_module_syntax {
-        Parser::new(allocator, source, source_type.with_module(true)).parse()
+        parse_with_source_type(allocator, source, source_type.with_module(true), path)
+            .wrap_err("reparsing detected ESM syntax under module grammar")?
     } else {
         parsed
     };
     ensure!(
-        !parsed.panicked && parsed.errors.is_empty(),
-        "{}: parser diagnostics (panicked={}): {:?}",
+        !parsed.fatal_error && parsed.diagnostics.is_empty(),
+        "{}: parser diagnostics (fatal_error={}): {:?}",
         path.display(),
-        parsed.panicked,
-        parsed.errors
+        parsed.fatal_error,
+        parsed.diagnostics
     );
     Ok(parsed)
 }
@@ -116,14 +138,57 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn pure_member_access_survives_nested_assignment_and_conditional() {
+        for member in [
+            "factory().property",
+            "factory()[0].property",
+            "factory()?.property",
+            "factory?.().property",
+            "new Factory().property",
+        ] {
+            for format in [ModuleFormat::Esm, ModuleFormat::CommonJs] {
+                let source = format!(
+                    "let value; const result = ((value = /*#__PURE__*/ {member}) \
+                     == null ? void 0 : value.prototype) || {{}};"
+                );
+                let allocator = Allocator::default();
+                let parsed =
+                    parse_bundler_file(&allocator, &source, Path::new("member.js"), format)
+                        .unwrap();
+                assert_eq!(parsed.program.comments.len(), 1, "{source}");
+                assert!(parsed.program.comments[0].is_pure(), "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn unapplied_nested_pure_annotations_do_not_panic() {
+        let allocator = Allocator::default();
+        let source = "const value = /*#__PURE__*/ (other = /*#__PURE__*/ (value = other));";
+        let parsed = parse_bundler_file(
+            &allocator,
+            source,
+            Path::new("nested.mjs"),
+            ModuleFormat::Esm,
+        )
+        .unwrap();
+        assert_eq!(parsed.program.comments.len(), 2);
+        assert!(parsed
+            .program
+            .comments
+            .iter()
+            .all(|comment| !comment.is_pure()));
+    }
+
+    #[test]
     fn parse_ts_fixture() {
         let source = "const x: number = 42;\nfunction foo(a: string): boolean { return true; }";
         let allocator = Allocator::default();
         let result = parse_ts(&allocator, source);
         assert!(
-            result.errors.is_empty(),
+            result.diagnostics.is_empty(),
             "parse errors: {:?}",
-            result.errors
+            result.diagnostics
         );
     }
 
@@ -133,9 +198,9 @@ mod tests {
         let allocator = Allocator::default();
         let result = parse_tsx(&allocator, source);
         assert!(
-            result.errors.is_empty(),
+            result.diagnostics.is_empty(),
             "parse errors: {:?}",
-            result.errors
+            result.diagnostics
         );
     }
 
@@ -145,9 +210,9 @@ mod tests {
         let allocator = Allocator::default();
         let result = parse_file(&allocator, source, Path::new("test.ts"));
         assert!(
-            result.errors.is_empty(),
+            result.diagnostics.is_empty(),
             "parse errors: {:?}",
-            result.errors
+            result.diagnostics
         );
     }
 
@@ -157,9 +222,9 @@ mod tests {
         let allocator = Allocator::default();
         let result = parse_file(&allocator, source, Path::new("component.tsx"));
         assert!(
-            result.errors.is_empty(),
+            result.diagnostics.is_empty(),
             "parse errors: {:?}",
-            result.errors
+            result.diagnostics
         );
     }
 
@@ -344,7 +409,11 @@ mod tests {
                 ("export const value: number = 1;", true),
             ] {
                 let parsed = parse_file(&allocator, source, Path::new(path));
-                assert!(parsed.errors.is_empty(), "{path}: {:?}", parsed.errors);
+                assert!(
+                    parsed.diagnostics.is_empty(),
+                    "{path}: {:?}",
+                    parsed.diagnostics
+                );
                 assert!(parsed.program.source_type.is_typescript());
                 assert_eq!(parsed.program.source_type.is_module(), is_module);
                 assert!(!parsed.program.source_type.is_commonjs());

@@ -15,11 +15,13 @@ range identity without repeatedly verifying or hashing immutable module bytes.
 ## Parser stack
 
 Uses the oxc parser (`oxc_parser`) with `oxc_semantic` for scope analysis.
+Statement segmentation requires `SemanticBuilder::with_build_nodes(true)` to
+recover reference spans; diagnostics-only and transform passes need no node store.
 
 ## Extract-then-drop arena pattern
 
 oxc allocates its AST in a bumpalo arena (`oxc_allocator::Allocator`). All
-`Atom<'a>`, `&'a Node`, and `oxc_allocator::Vec` types borrow from the arena
+`Ident<'a>`, `JSStr<'a>`, `&'a Node`, and `oxc_allocator::Vec` borrow from the arena
 and cannot outlive it.
 
 Parse pipeline:
@@ -107,6 +109,8 @@ conservative; opaque CJS is always one effectful body.
 `invocation` owns call/new inputs, chain/reference shape, syntax value-use context
 and precisely attached PURE hint spans. Only the derived bundler evaluator may
 discard an unused invocation; input effects and optional guards must survive.
+Lone UTF-16 surrogates are not UTF-8 request/property identities. Reject such
+requests and leave computed property metadata unknown; never replace code units.
 
 `facts.emission` owns segment-indexed recipes and placement/name constraints.
 Deferred alternatives own only syntax shape and initializer source slots; keep

@@ -45,6 +45,9 @@ fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
     #[serde(untagged)]
     enum Exports {
         Root(String),
+        Conditions(
+            #[serde(deserialize_with = "deserialize_root_conditions")] Vec<(String, ExportedPath)>,
+        ),
         Subpaths(PackageJsonExports),
     }
     Ok(
@@ -58,6 +61,11 @@ fn deserialize_exports<'de, D: serde::Deserializer<'de>>(
             ]
             .into_iter()
             .collect(),
+            Exports::Conditions(conditions) => {
+                [(".".to_owned(), PackageJsonExport::Conditional(conditions))]
+                    .into_iter()
+                    .collect()
+            }
             Exports::Subpaths(paths) => paths,
         }),
     )
@@ -93,11 +101,23 @@ pub enum PackageJsonExport {
     Conditional(#[serde(deserialize_with = "deserialize_conditions")] Vec<(String, ExportedPath)>),
 }
 
-fn deserialize_conditions<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_conditions<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Vec<(String, ExportedPath)>, D::Error> {
-    struct Conditions;
-    impl<'de> serde::de::Visitor<'de> for Conditions {
+    deserialize_condition_map::<D, false>(deserializer)
+}
+
+fn deserialize_root_conditions<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<(String, ExportedPath)>, D::Error> {
+    deserialize_condition_map::<D, true>(deserializer)
+}
+
+fn deserialize_condition_map<'de, D: serde::Deserializer<'de>, const ROOT: bool>(
+    deserializer: D,
+) -> Result<Vec<(String, ExportedPath)>, D::Error> {
+    struct Conditions<const ROOT: bool>;
+    impl<'de, const ROOT: bool> serde::de::Visitor<'de> for Conditions<ROOT> {
         type Value = Vec<(String, ExportedPath)>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -109,7 +129,11 @@ fn deserialize_conditions<'de, D: serde::Deserializer<'de>>(
             mut map: M,
         ) -> Result<Self::Value, M::Error> {
             let mut conditions: Vec<(String, ExportedPath)> = Vec::new();
-            while let Some((condition, target)) = map.next_entry::<String, ExportedPath>()? {
+            while let Some(condition) = map.next_key::<String>()? {
+                if ROOT && condition.starts_with('.') {
+                    return Err(serde::de::Error::custom("subpath map, not root conditions"));
+                }
+                let target = map.next_value::<ExportedPath>()?;
                 if let Some((_, previous)) =
                     conditions.iter_mut().find(|(key, _)| key == &condition)
                 {
@@ -121,7 +145,7 @@ fn deserialize_conditions<'de, D: serde::Deserializer<'de>>(
             Ok(conditions)
         }
     }
-    deserializer.deserialize_map(Conditions)
+    deserializer.deserialize_map(Conditions::<ROOT>)
 }
 
 impl ContextData for PackageJson {
@@ -149,42 +173,30 @@ impl ContextData for PackageJson {
         path: &std::path::Path,
         observer: &ftree_cache::inputs::InputObserver,
     ) -> anyhow::Result<Option<Self>> {
-        use ftree_cache::inputs::PathInput;
-        let mut input = match PathInput::capture(path) {
-            Ok(input) => input,
-            Err(error) => {
-                observer.error(error);
-                return Self::read_context_data((), path);
-            }
-        };
-        let bytes = match std::fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if let Err(error) = input.validate() {
-                    observer.error(error);
-                }
-                observer.record(input);
-                return Ok(None);
-            }
-            Err(error) => return Err(error.into()),
-        };
-        match PathInput::capture(path) {
-            Ok(after) if after == input => {}
-            Ok(_) => observer.error(format!(
-                "manifest identity changed while reading {}",
-                path.display()
-            )),
-            Err(error) => observer.error(error),
-        }
-        input.seal_content(&bytes);
-        observer.record(input);
-        serde_json::from_slice(&bytes).map(Some).map_err(Into::into)
+        observer
+            .read(path)
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .map_err(Into::into)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_conditions_normalize_to_an_ordered_exact_root_export() {
+        let shorthand: PackageJson = serde_json::from_str(
+            r#"{"exports":{"default":{"import":{"types":"./types.d.ts","default":"./index.js"}},"custom":"./custom.js"}}"#,
+        ).unwrap();
+        let explicit: PackageJson = serde_json::from_str(
+            r#"{"exports":{".":{"default":{"import":{"types":"./types.d.ts","default":"./index.js"}},"custom":"./custom.js"}}}"#,
+        ).unwrap();
+        assert_eq!(shorthand, explicit);
+        assert_eq!(shorthand.exports.as_ref().unwrap().len(), 1);
+    }
 
     #[test]
     fn string_exports_normalize_to_root_and_package_file_access() {

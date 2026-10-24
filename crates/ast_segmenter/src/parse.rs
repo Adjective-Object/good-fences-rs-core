@@ -75,15 +75,17 @@ pub fn parse_module_with_prepared_declarations(
 ) -> eyre::Result<ParsedModule> {
     let allocator = Allocator::default();
     MODULE_PARSES.with(|count| count.set(count.get() + 1));
-    let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)?;
+    let parsed = oxc_utils_parse::parse_bundler_file(&allocator, source, path, package_format)
+        .wrap_err_with(|| format!("parsing module for extraction {}", path.display()))?;
     let semantic = oxc_semantic::SemanticBuilder::new()
+        .with_build_nodes(true)
         .with_check_syntax_error(true)
         .build(&parsed.program);
     ensure!(
-        semantic.errors.is_empty(),
+        semantic.diagnostics.is_empty(),
         "{}: semantic diagnostics: {:?}",
         path.display(),
-        semantic.errors
+        semantic.diagnostics
     );
     let mut facts = crate::owned::extract(&parsed.program, &semantic.semantic)
         .wrap_err_with(|| format!("{}: occurrence extraction failed", path.display()))?;
@@ -413,9 +415,7 @@ mod tests {
             "broken.js",
         )
         .unwrap_err();
-        assert!(parser_error
-            .to_string()
-            .contains("broken.js: parser diagnostics"));
+        assert!(format!("{parser_error:#}").contains("broken.js: parser diagnostics"));
 
         let source = "export const value = 1; const value = 2;";
         let allocator = Allocator::default();
@@ -426,7 +426,7 @@ mod tests {
             ModuleFormat::Esm,
         )
         .unwrap();
-        assert!(parsed.errors.is_empty());
+        assert!(parsed.diagnostics.is_empty());
         let semantic_error = parse(source, "duplicate.js").unwrap_err();
         assert!(semantic_error
             .to_string()
@@ -477,7 +477,9 @@ mod tests {
             ModuleFormat::CommonJs,
         )
         .unwrap();
-        let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
+        let semantic = oxc_semantic::SemanticBuilder::new()
+            .with_build_nodes(true)
+            .build(&parsed.program);
         let logger = logger::StdioLogger::new();
         let file_logger = WrapFileLogger::new("file.cjs", source.to_owned(), &logger);
         let error =

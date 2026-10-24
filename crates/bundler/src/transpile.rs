@@ -57,7 +57,7 @@ fn compile_inner(
     check_errors(
         "parse",
         parsed
-            .errors
+            .diagnostics
             .into_iter()
             .map(|error| error.with_source_code(source.to_owned())),
     )?;
@@ -74,7 +74,7 @@ fn compile_inner(
     check_errors(
         "semantic analysis",
         semantic
-            .errors
+            .diagnostics
             .into_iter()
             .map(|error| error.with_source_code(source.to_owned())),
     )?;
@@ -93,7 +93,7 @@ fn compile_inner(
     check_errors(
         "transform",
         transformed
-            .errors
+            .diagnostics
             .into_iter()
             .map(|error| error.with_source_code(source.to_owned())),
     )?;
@@ -105,10 +105,7 @@ fn compile_inner(
                 statement,
                 Statement::ExportNamedDeclaration(declaration)
                     if declaration.span == oxc_span::SPAN
-                        && declaration.declaration.is_none()
                         && declaration.specifiers.is_empty()
-                        && declaration.source.is_none()
-                        && declaration.with_clause.is_none()
             )
         });
     }
@@ -160,7 +157,7 @@ fn checked_map(
     path: &Path,
     original: &str,
     generated: &str,
-    map: &oxc_sourcemap::SourceMap,
+    map: &oxc_sourcemap::SourceMap<'_>,
 ) -> eyre::Result<WireSourceMap> {
     let absolute = std::path::absolute(path)?;
     let location = Url::from_file_path(&absolute)
@@ -214,11 +211,15 @@ mod tests {
         assert!(!config.typescript());
         assert!(!config.jsx());
         let parsed = Parser::new(&allocator, &compiled.source, config.source_type()).parse();
-        assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
         let semantic = SemanticBuilder::new()
             .with_check_syntax_error(true)
             .build(&parsed.program);
-        assert!(semantic.errors.is_empty(), "{:?}", semantic.errors);
+        assert!(
+            semantic.diagnostics.is_empty(),
+            "{:?}",
+            semantic.diagnostics
+        );
         compiled
     }
 

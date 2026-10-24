@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
-    Argument, CallExpression, ExportNamedDeclaration, Expression, IdentifierReference,
+    Argument, CallExpression, ExportFromDeclaration, Expression, IdentifierReference,
     ImportDeclaration, ImportDeclarationSpecifier, ImportExpression, ModuleExportName,
     TSImportEqualsDeclaration, TSModuleReference,
 };
-use oxc_ast_visit::{Visit, walk};
+use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::Semantic;
 
 pub struct ImportPathVisitor<'s, 'a> {
@@ -37,35 +37,36 @@ impl<'s, 'a> ImportPathVisitor<'s, 'a> {
 }
 
 impl<'s, 'a> Visit<'a> for ImportPathVisitor<'s, 'a> {
-    fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'a>) {
-        walk::walk_export_named_declaration(self, export);
+    fn visit_export_from_declaration(&mut self, export: &ExportFromDeclaration<'a>) {
+        walk::walk_export_from_declaration(self, export);
 
-        if let Some(source) = &export.source {
-            let source_str = source.value.to_string();
-            let mut specifiers: HashSet<String> = export
-                .specifiers
-                .iter()
-                .filter_map(|spec| -> Option<String> {
-                    let name = module_export_name_to_str(&spec.local);
-                    Some(name.to_string())
-                })
-                .collect();
+        let Some(source_str) = export.source.value.as_str().map(str::to_owned) else {
+            return;
+        };
+        let mut specifiers: HashSet<String> = export
+            .specifiers
+            .iter()
+            .filter_map(|spec| -> Option<String> {
+                let name = module_export_name_to_str(&spec.local);
+                Some(name.to_string())
+            })
+            .collect();
 
-            if let Some(imports) = self.imports_map.get_mut(&source_str) {
-                specifiers.drain().for_each(|x| {
-                    imports.insert(x);
-                });
-            } else {
-                self.imports_map.insert(source_str, specifiers);
-            }
+        if let Some(imports) = self.imports_map.get_mut(&source_str) {
+            specifiers.drain().for_each(|x| {
+                imports.insert(x);
+            });
+        } else {
+            self.imports_map.insert(source_str, specifiers);
         }
     }
 
     fn visit_ts_import_equals_declaration(&mut self, decl: &TSImportEqualsDeclaration<'a>) {
         walk::walk_ts_import_equals_declaration(self, decl);
         if let TSModuleReference::ExternalModuleReference(module_ref) = &decl.module_reference {
-            self.import_paths
-                .insert(module_ref.expression.value.to_string());
+            if let Some(source) = module_ref.expression.value.as_str() {
+                self.import_paths.insert(source.to_owned());
+            }
         }
     }
 
@@ -87,13 +88,17 @@ impl<'s, 'a> Visit<'a> for ImportPathVisitor<'s, 'a> {
 
         // import('foo')
         if let Expression::StringLiteral(s) = &expr.source {
-            self.import_paths.insert(s.value.to_string());
+            if let Some(source) = s.value.as_str() {
+                self.import_paths.insert(source.to_owned());
+            }
         }
     }
 
     fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
         walk::walk_import_declaration(self, node);
-        let source_path = node.source.value.to_string();
+        let Some(source_path) = node.source.value.as_str().map(str::to_owned) else {
+            return;
+        };
         if let Some(specifiers) = &node.specifiers {
             if let Some(imported_names) = self.imports_map.get_mut(&source_path) {
                 for spec in specifiers {
@@ -125,28 +130,27 @@ fn is_global_require<'a>(semantic: &Semantic<'a>, ident: &IdentifierReference<'a
 }
 
 fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> &'a str {
-    match name {
-        ModuleExportName::IdentifierName(ident) => ident.name.as_str(),
-        ModuleExportName::IdentifierReference(ident) => ident.name.as_str(),
-        ModuleExportName::StringLiteral(s) => s.value.as_str(),
-    }
+    name.name().as_str()
 }
 
-fn append_imported_names(spec: &ImportDeclarationSpecifier<'_>, imported_names: &mut HashSet<String>) {
+fn append_imported_names(
+    spec: &ImportDeclarationSpecifier<'_>,
+    imported_names: &mut HashSet<String>,
+) {
     match spec {
-        ImportDeclarationSpecifier::ImportSpecifier(named) => {
-            match &named.imported {
-                ModuleExportName::IdentifierName(ident) => {
-                    imported_names.insert(ident.name.to_string());
-                }
-                ModuleExportName::IdentifierReference(ident) => {
-                    imported_names.insert(ident.name.to_string());
-                }
-                ModuleExportName::StringLiteral(s) => {
-                    imported_names.insert(s.value.to_string());
+        ImportDeclarationSpecifier::ImportSpecifier(named) => match &named.imported {
+            ModuleExportName::IdentifierName(ident) => {
+                imported_names.insert(ident.name.to_string());
+            }
+            ModuleExportName::IdentifierReference(ident) => {
+                imported_names.insert(ident.name.to_string());
+            }
+            ModuleExportName::StringLiteral(s) => {
+                if let Some(name) = s.value.as_str() {
+                    imported_names.insert(name.to_owned());
                 }
             }
-        }
+        },
         ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {
             imported_names.insert("default".to_string());
         }
@@ -159,7 +163,7 @@ fn append_imported_names(spec: &ImportDeclarationSpecifier<'_>, imported_names: 
 fn extract_argument_value(args: &oxc_allocator::Vec<'_, Argument<'_>>) -> Option<String> {
     let first = args.first()?;
     match first {
-        Argument::StringLiteral(s) => Some(s.value.to_string()),
+        Argument::StringLiteral(s) => s.value.as_str().map(str::to_owned),
         _ => None,
     }
 }
@@ -177,7 +181,11 @@ mod test {
         ($source:expr, |$visitor:ident| $body:expr) => {{
             let allocator = Allocator::default();
             let ret = oxc_utils_parse::parse_ts(&allocator, $source);
-            assert!(ret.errors.is_empty(), "parse errors: {:?}", ret.errors);
+            assert!(
+                ret.diagnostics.is_empty(),
+                "parse errors: {:?}",
+                ret.diagnostics
+            );
             let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&ret.program);
             let semantic = &semantic_ret.semantic;
             let mut $visitor = ImportPathVisitor::new(semantic);
@@ -260,10 +268,8 @@ mod test {
             import foo from './bar';
             "#,
             |visitor| {
-                let expected_import_map = HashMap::from([(
-                    "./bar".to_string(),
-                    HashSet::from(["default".to_string()]),
-                )]);
+                let expected_import_map =
+                    HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
                 assert_eq!(expected_import_map, visitor.imports_map);
             }
         );
@@ -277,10 +283,8 @@ mod test {
             foo satisfies never;
             "#,
             |visitor| {
-                let expected_import_map = HashMap::from([(
-                    "./bar".to_string(),
-                    HashSet::from(["default".to_string()]),
-                )]);
+                let expected_import_map =
+                    HashMap::from([("./bar".to_string(), HashSet::from(["default".to_string()]))]);
                 assert_eq!(expected_import_map, visitor.imports_map);
             }
         );

@@ -97,8 +97,9 @@ Stage 1 and the three concrete review corrections were independently approved,
 spot-checked and committed as `6aeec15`. Stage 2 was independently reviewed,
 spot-checked and committed as `cf3bc83`. Stage 3 is completed as `6463c3e`.
 Stage 4 production integration was reviewed, spot-checked and committed as
-`1d66bfd`. Stage 5 demand admission is implemented in the current uncommitted
-diff; coordinator review/spot-check remain pending. Stage 6 remains pending.
+`1d66bfd`. Stage 5 demand admission and both review corrections were independently
+reviewed, spot-checked and committed as `bff43fc`. Stage 6 adoption evidence is
+being collected against that clean baseline; implementation does not commit.
 
 - Preserve Berry raw locators/workspaces and deterministic SCC/named-edge hashes.
 - Mark every npm/shrinkwrap and Classic Yarn record incomplete because normalized
@@ -321,10 +322,11 @@ Stage 4 validation (Windows, managed tests under ignored `target\test-temp`):
 
 ### Stage 5 — demand-driven input admission
 
-Implemented only in the explicit clean `source-maps` worktree at `1d66bfd`.
-No commits, delegation, branch-pointer changes or edits to perf-optim/client/afix.
-Coordinator review/spot-check remain pending; stage 6 adoption/benchmark work is
-deliberately not claimed.
+Implemented only in the explicit clean `source-maps` worktree at `1d66bfd`,
+then reviewed, spot-checked and committed as `bff43fc`.
+The implementer made no commits, delegation, branch-pointer changes or edits to
+perf-optim/client/afix. Coordinator review/spot-check subsequently completed;
+stage 6 adoption/benchmark evidence is recorded separately below.
 
 - Removed both production eager inventory calls, including the final whole-tree
   comparison. Literal builds do not enumerate directories, hash arbitrary
@@ -392,7 +394,7 @@ Stage 5 validation (Windows; project-local Node **22.15.0**, TEMP/TMP under
   errors; no findings remain in the new inventory/route projection code. Its
   diagnostics are retained in `target\stage5-clippy.log`. Handwritten
   Rust was formatted and `git diff --check` passed. Coordinator spot-check and
-  independent review are still required; no real-client workload/performance
+  independent review subsequently completed; no real-client workload/performance
   claim is substituted for stage 6.
 
 #### Stage 5 review corrections — checked aliases and map-admitted contexts
@@ -432,4 +434,80 @@ Correction validation uses the same project-local Node **22.15.0** and managed
   and `target\stage5-review-lib.log`. Existing ftree_cache lifetime warning
   remains. An overlapping Windows test relink hit LNK1104 while the earlier full
   test executable was running; sequential reruns passed, with no tooling changes.
-- No commit/delegation or stage 6 work; coordinator spot-check remains pending.
+- The implementer made no commit/delegation or stage 6 changes. Coordinator
+  spot-check and final independent review completed before commit `bff43fc`.
+
+### Stage 6 — adoption and performance evidence
+
+Work is confined to the `source-maps` worktree starting clean at `bff43fc`.
+No commit, delegation, branch-ref change or edits to client manifests/migration
+were made. Stage 6 independent review and coordinator spot-check remain the
+parent's responsibility before any commit.
+
+- Extended the existing subprocess regression (rather than adding another
+  process helper): real native publication with maps, Node execution, explicit
+  installed Berry locator, then a disconnected lockfile mutation in a third
+  process. Both package request proofs must hit, native artifacts remain equal,
+  and the package aggregate remains byte-identical. Added one native runtime
+  regression covering cached package-local finite TS contexts, original map
+  contents, an edited candidate and a newly added candidate.
+- Extended the existing standard `cargo bench` executable, still seven fresh
+  roots and no criterion. Its 64-source chain plus entry/two package sources
+  makes 67 sources/66 requests. It verifies new-session warm and disconnected
+  lockfile hits, targeted package-manifest misses (2 misses/64 hits), condition
+  changes, extraction/publication behavior and zero literal directory reads.
+  CSV includes resolution hits/misses, directory reads and both cache formats.
+- Promoted the existing test-only inventory directory-read counter to public
+  production `Counters` and example JSON. Added example resolution hit/miss
+  fields. Renamed the small policy-only trace span to `build.resolver_policy`;
+  `resolve.lockfile`, `resolve.recheck` and numeric `resolve.counts` distinguish
+  setup, actual proof work and counts even on returned errors. Periodic numeric
+  `resolve.progress` snapshots permit bounded interrupted recordings. Trace
+  privacy/balancing and output parity remain tested; no paths are added.
+
+Validation under the pinned nightly and project-local Node **22.15.0**, with
+managed test roots under ignored `target\test-temp`:
+
+- `cargo test -p bundler -p cache_flatbuffers --lib --quiet`:
+  **587 passed, 2 ignored** (bundler, 190.45 s); **20 passed** (wire).
+  The actual-project parser probe and subprocess helper remain the two ignores;
+  the enabled subprocess test explicitly executes its helper.
+- `cargo test -p bundler --example build --quiet`: **3 passed**.
+- `cargo check -p bundler --all-targets --quiet`: **passed**.
+- Full unchanged `cargo build -p bundler --example build` followed by
+  `node scripts\bundler-fixtures.mjs`, and one unchanged repeat: both report
+  **71 native passes / 90 emitted executions**, **1 input failure**
+  (`authored/native-async-cycles`, source stdout order), **0 build/backend/output
+  failures**, **0 legacy passes**, **0 unsupported**. The source failure is the
+  documented async-cycle nondeterminism, not a native output comparison.
+  Both runners then fail at the known stale extra TypeScript assertion
+  (“diagnostic build unexpectedly passed”). Compared with the recorded
+  72-native/93-execution baseline, exactly that one input case/three executions
+  is absent. Checks were neither weakened nor normalized.
+- The existing ftree_cache lifetime warning remains. Full-suite duration
+  includes concurrent compilation and is not a throughput measurement.
+
+Local retained evidence is under
+`C:\Users\mahuangh\.copilot\session-state\4f1953e4-a450-499e-be41-4e201dd09065\files\stage6-evidence`;
+raw application output/traces/maps remain in separate local `stage6-client-*`
+directories only. Client source sidecars are not globally inventoried: absence
+was checked for the four entries, not the entire tree. “Cold resolution” must
+not be described as a globally cold extraction/OS cache.
+
+#### Release compiler delay is not an application measurement
+
+At **2026-10-22 15:10:24 PDT**, no client `build.exe` was running. Direct pinned
+Cargo PID **25816** had run **473.0 s**; its driver compiler PID **35848** had
+run **308.8 s**, consuming **294.328 CPU s** under the existing `opt-level=s`,
+full LTO, debug-info-2/packed profile. This was active compilation, not package
+resolution or proof validation. The independent wrapped Cargo PID **33180**
+(wrapper **34844**) had run **1093.4 s**; its last report was **4 compiler-cache
+hits / 46 misses**, with low-free-space-threshold cache eviction in its logs.
+Those are compiler-cache counts, not application resolution counters.
+
+The stale wrapped session was cancelled only after verifying its complete
+descendant tree contained no compiler/linker and did not contain the independent
+direct Cargo/compiler. The active compiler was left running. No further broad
+validation/duplicate compilation was started after the status request.
+Logs are local `target\stage6-release-*.log`; no client proof-validation timing
+can be inferred from these build-tool durations.

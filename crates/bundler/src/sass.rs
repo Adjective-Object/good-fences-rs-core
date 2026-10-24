@@ -336,7 +336,7 @@ fn checked_map(
     let urls = decoded
         .get_sources()
         .map(|source| {
-            let source = Path::new(source.as_ref());
+            let source = Path::new(source);
             ensure!(
                 inputs.contains_key(source),
                 "Sass source map references unchecked input: {}",
@@ -354,11 +354,11 @@ fn checked_map(
             Ok(MapSource {
                 original: source,
                 url: &urls[index],
-                content: Some(std::str::from_utf8(&inputs[Path::new(source.as_ref())])?),
+                content: Some(std::str::from_utf8(&inputs[Path::new(source)])?),
             })
         })
         .collect::<eyre::Result<Vec<_>>>()?;
-    let names = decoded.get_names().map(AsRef::as_ref).collect::<Vec<_>>();
+    let names = decoded.get_names().collect::<Vec<_>>();
     let tokens = decoded
         .get_tokens()
         .map(|token| {

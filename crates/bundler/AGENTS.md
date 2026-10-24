@@ -1,5 +1,22 @@
 # bundler
 
+Emit high-level phase/count events on bundler::progress without paths/requests.
+Discovery alone samples root-relative file/directory names on the stderr-only
+bundler::progress::discovery target, at most once per second for each kind.
+Keep those events out of duration traces. Discover package edges on bounded
+workers, then use one bounded jwalk pool for all selected local package trees.
+Apply inherited ignore matchers on workers; never canonicalize every walked file.
+Keep preparation updates at most once per second and libraries subscriber-free.
+Preparation and import/proof/route resolution are separate bounded worker jobs,
+including single-worker builds. Keep coordinator integration free of import
+resolution; CSS/Sass resolution and context expansion also use workers.
+Upfront multi-root local discovery is speculative, not admission authority:
+follow runtime/optional/selected-peer package edges, never dev dependencies or
+node_modules source trees. Prune unselected nested packages and ignore files.
+Prioritize precise jobs, deduplicate/promote in-flight preparations, bound unused
+prepared owners, and discard the speculative tail. Only demanded observations,
+requests and errors may affect graph state, diagnostics, validation or publication.
+
 Production resolution uses per-package `GFRS` requests, never the derived source
 edge map or whole-inventory hashes as reuse authority. Key effective resolver/
 platform policy separately from package identity, own manifest bytes and named
@@ -8,6 +25,13 @@ hits and successful/no-op returns. Preserve other valid requests in complete
 atomic policy aggregates; never unpack hit trees. Unencodable external footprints
 stay fresh/scoped and diagnosed. Disabled caches do not read/write sidecars.
 Final input checks precede best-effort resolution-cache publication.
+Share one live filesystem snapshot across inventory and resolver policies.
+Hot proof/path/manifest lookups retain original observations without recapture.
+Validate persisted observations on first epoch use, and use new snapshots for
+final/no-op checks. Publication may reuse its validated boundary snapshot;
+post-publication checks must start fresh. Keep speculative inventories private.
+Trace numeric resolver counts on returned errors as well as success; distinguish
+resolution proof hits from extraction hits and never record request/path data.
 
 Lockfile identities are expected installs, never Node resolution authority.
 The production adapter pins registry aube-lockfile 2.8.1, uses upstream
@@ -18,6 +42,9 @@ drops declarations and npm install-path instances. Hash their entire raw lockfil
 (and Classic root manifest) into identities until lossless overlays exist.
 Peer constraints resolve only through explicit selected dependency providers.
 Hash named edges over the SCC condensation DAG; never cut cycle back-edges.
+Use bounded execution workers for ready SCC hash jobs. The coordinator stores
+completed hashes, unlocks dependents and emits numeric lockfile progress; worker
+completion order must not change fingerprint bytes or closure flags.
 Mutable closures and unresolved edges require later request-scoped validation;
 lockfile identity alone cannot authorize persistent resolution reuse. Parse once
 per build, share across script/Sass policies, and recheck selected path and bytes
@@ -96,7 +123,8 @@ Reuse hash-checked cache records
 in session emission; public low-level link::esm shares its parse-free
 source/config/facts provenance checker. Analysis-only graph inputs cannot emit.
 Input inventory admits checked lexical routes on demand, preserving canonical
-identity. Literal builds never enumerate directories or hash unused JSON/configs.
+identity. Only speculative local discovery may enumerate literal-build sources;
+never hash unused JSON/configs or make speculative listings reuse authority.
 Admit entries/resolved files before worker dispatch and resources before reads;
 contains is read-only. A shared mutex seals worker package-format observations,
 not a cloned global file set. Directory links authorize trees; file links only
@@ -423,7 +451,7 @@ and last-successful product identity on failure.
 Tracing stays subscriber-free in libraries. Propagate caller Dispatch and parent
 Span into both scoped worker stages; enter job spans only after dequeue, never
 across queue waits. Record numeric IDs/counts, not paths, source/options or payloads.
-The example's opt-in local trace must flush on returned errors without changing
+The bundler-cli opt-in local trace must flush on returned errors without changing
 stdout JSON; create new files outside inventory/output, never overwrite inputs.
 Keep pending invalidations across failed attempts until the next successful
 product/no-op, even when successfully prepared source facts were cached meanwhile.
@@ -441,8 +469,12 @@ their identities. Preserve supported behavior in independently reviewed incremen
 Artifacts report Backend::Native; derive driver layout from it, never filenames.
 All portable fixtures require native. The harness retains legacy rejection and
 reporting for older binaries, not a production emitter fallback.
-The example driver accepts only bounded explicit fixture output/CSS/resolveConditions/workers config,
-never general BuildOptions or implicit project config; keep positional calls.
+The bundler-cli driver accepts bounded strict JSON, not general BuildOptions.
+Project --config (including =PATH) or cwd-only bundler.config.json discovery adds
+root/outdir/entries/traceFile; resolve root from the config directory, then other
+configured paths from root. CLI trace paths stay cwd-relative and override config.
+Keep legacy positional/--fixture-config calls isolated from project discovery.
+Explicit missing/invalid configs never fall back; retain trace destination safety.
 resolveConditions extends Node defaults; the fixture observer explicitly passes
 each condition to Node via --conditions, never assumes Node reads our config.
 CSS fixtures syntax-check source JS, then run a separate native output observer;

@@ -44,6 +44,8 @@ identity follows explicit options; source paths must follow that same policy.
 Export conditions are active sets, not priority lists; preserve package JSON
 declaration order. Node defaults include node/node-addons/module-sync, not browser
 defaults. Select a subpath before evaluating its conditions.
+Evaluate nested condition trees recursively in order. Resume later parent
+conditions only when a nested branch has no match, never after a private leaf.
 Apply exact one-step aliases before builtin/external policy and downstream Node
 builtin resolution. Do not expand prefixes or recurse through aliases. Resolved
 stubs remain real files subject to consumer inventory/graph validation.
@@ -66,3 +68,9 @@ Tracked calls reject masked IO errors. Consumers key request mode/policy and
 freshly validate the returned proof before reuse/success, then invalidate on
 change. Ordinary candidates seal kind/identity/links, not source bytes; only
 content-dependent manifests seal bytes. Do not enumerate directory inventories.
+
+Filesystem observations belong to an explicit resolver epoch. Share exact
+manifest bytes across request modes, but keep target/condition/policy results
+distinct. Initialize context and target cells outside DashMap locks; wrap cached
+paths using their original canonical observations. Invalidation replaces the
+snapshot and cache trees together, including relative-file misses.

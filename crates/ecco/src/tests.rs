@@ -1488,9 +1488,9 @@ fn source_ast_entrypoint_does_not_need_reparsing() {
         &allocator,
         "const a: number = 1; Number(a); /*#__PURE__*/ unknown();",
     );
-    assert!(parsed.errors.is_empty());
+    assert!(parsed.diagnostics.is_empty());
     let semantic = oxc_semantic::SemanticBuilder::new().build(&parsed.program);
-    assert!(semantic.errors.is_empty());
+    assert!(semantic.diagnostics.is_empty());
     let analysis = extract_from_ast(
         &parsed.program,
         &semantic.semantic,

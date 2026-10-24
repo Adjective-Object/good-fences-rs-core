@@ -4845,20 +4845,18 @@ fn statement_sentinels_have_truthful_owners_and_async_load_closure() {
         struct Edges(Vec<String>);
         impl<'a> Visit<'a> for Edges {
             fn visit_import_declaration(&mut self, import: &ImportDeclaration<'a>) {
-                self.0.push(import.source.value.to_string());
+                self.0.push(import.source.value.display().to_string());
             }
-            fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'a>) {
-                if let Some(source) = &export.source {
-                    self.0.push(source.value.to_string());
-                }
+            fn visit_export_from_declaration(&mut self, export: &ExportFromDeclaration<'a>) {
+                self.0.push(export.source.value.display().to_string());
             }
             fn visit_export_all_declaration(&mut self, export: &ExportAllDeclaration<'a>) {
-                self.0.push(export.source.value.to_string());
+                self.0.push(export.source.value.display().to_string());
             }
             fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
                 if matches!(&call.callee,Expression::Identifier(i) if i.name == "require") {
                     if let Some(Argument::StringLiteral(source)) = call.arguments.first() {
-                        self.0.push(source.value.to_string());
+                        self.0.push(source.value.display().to_string());
                     }
                 }
                 walk::walk_call_expression(self, call);

@@ -74,6 +74,7 @@ pub fn publish(
     cancel: &Cancellation,
 ) -> eyre::Result<Published> {
     publish_inner(output, artifacts, cancel, |_| Ok(()))
+        .wrap_err_with(|| format!("publishing artifacts to {}", output.display()))
 }
 
 impl BuildSession {
@@ -96,7 +97,9 @@ impl BuildSession {
         let absolute = if output.is_absolute() {
             output.to_owned()
         } else {
-            std::env::current_dir()?.join(output)
+            std::env::current_dir()
+                .wrap_err("resolving publication working directory")?
+                .join(output)
         };
         if let Ok(relative) = absolute.strip_prefix(self.root()) {
             ensure!(
@@ -108,13 +111,19 @@ impl BuildSession {
                 "in-project output must be inside a reserved .bundler-* or target directory"
             );
         }
-        let (output, lock) = lock_output(&absolute)?;
+        tracing::info!(target: "bundler::progress", "Acquiring publication lock");
+        let (output, lock) = lock_output(&absolute)
+            .wrap_err_with(|| format!("acquiring publication output {}", absolute.display()))?;
         let result = (|| {
             let build = self.build(options)?;
             cancel.check()?;
             let published = publish_locked(&output, &build.product.artifacts, cancel, |_| Ok(()))
                 .wrap_err_with(|| {
-                format!("publication failed; cache warnings: {:?}", build.warnings)
+                format!(
+                    "publication to {} failed; cache warnings: {:?}",
+                    output.display(),
+                    build.warnings
+                )
             })?;
             Ok((build, published))
         })();
@@ -260,17 +269,25 @@ fn finish_lock<T>(
 }
 
 fn lock_output(output: &Path) -> eyre::Result<(PathBuf, OutputLock)> {
-    fs::create_dir_all(output)?;
-    let output = output.canonicalize()?;
+    fs::create_dir_all(output)
+        .wrap_err_with(|| format!("creating output directory {}", output.display()))?;
+    let output = output
+        .canonicalize()
+        .wrap_err_with(|| format!("canonicalizing output directory {}", output.display()))?;
     no_symlink(&output.join(LOCK))?;
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(output.join(LOCK))?;
-    lock.try_lock()
-        .wrap_err("another publisher owns this output directory")?;
+        .open(output.join(LOCK))
+        .wrap_err_with(|| format!("opening publication lock {}", output.join(LOCK).display()))?;
+    lock.try_lock().wrap_err_with(|| {
+        format!(
+            "another publisher owns this output directory: {}",
+            output.display()
+        )
+    })?;
     Ok((output, OutputLock(Some(lock))))
 }
 
@@ -281,9 +298,15 @@ fn publish_locked(
     mut hook: impl FnMut(Phase) -> eyre::Result<()>,
 ) -> eyre::Result<Published> {
     let _span = tracing::info_span!("build.publish", artifacts = artifacts.files.len()).entered();
+    tracing::info!(
+        target: "bundler::progress",
+        artifacts = artifacts.files.len() + artifacts.resources.len(),
+        "Publishing output artifacts"
+    );
     cancel.check()?;
     validate_artifacts(artifacts)?;
-    let previous = read_state(output)?;
+    let previous = read_state(output)
+        .wrap_err_with(|| format!("loading publication ownership from {}", output.display()))?;
     let owned: BTreeMap<_, _> = artifacts
         .file_bytes()
         .map(|(p, bytes)| (p.clone(), hash(bytes)))
@@ -301,7 +324,9 @@ fn publish_locked(
     });
     if let Some(existing) = state.generations.get(&generation) {
         ensure!(*existing == owned, "generation metadata mismatch");
-        verify(&destination, &owned)?;
+        verify(&destination, &owned).wrap_err_with(|| {
+            format!("verifying published generation {}", destination.display())
+        })?;
     } else {
         ensure!(
             !destination.try_exists()?,
@@ -313,15 +338,31 @@ fn publish_locked(
             for (path, bytes) in artifacts.file_bytes() {
                 cancel.check()?;
                 let file = stage.join(path);
-                fs::create_dir_all(file.parent().expect("artifact parent"))?;
-                let mut file = OpenOptions::new().write(true).create_new(true).open(file)?;
-                file.write_all(bytes)?;
-                file.sync_all()?;
+                fs::create_dir_all(file.parent().expect("artifact parent")).wrap_err_with(
+                    || format!("creating artifact parents for {}", file.display()),
+                )?;
+                let mut handle = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&file)
+                    .wrap_err_with(|| format!("creating output artifact {}", file.display()))?;
+                handle
+                    .write_all(bytes)
+                    .wrap_err_with(|| format!("writing output artifact {}", file.display()))?;
+                handle
+                    .sync_all()
+                    .wrap_err_with(|| format!("syncing output artifact {}", file.display()))?;
                 files_written += 1;
             }
             hook(Phase::Staged)?;
             cancel.check()?;
-            fs::rename(&stage, &destination)?;
+            fs::rename(&stage, &destination).wrap_err_with(|| {
+                format!(
+                    "installing generation {} from {}",
+                    destination.display(),
+                    stage.display()
+                )
+            })?;
             Ok::<_, eyre::Report>(())
         })();
         if let Err(error) = staged {
@@ -379,7 +420,8 @@ fn publish_locked(
 /// Read the atomic pointer for a fresh runtime instance. Existing instances keep
 /// their immutable generation URLs; publishing never changes those bytes.
 pub fn current_directory(output: &Path) -> eyre::Result<PathBuf> {
-    let state = read_state(output)?.ok_or_else(|| eyre::eyre!("no published generation"))?;
+    let state = read_state(output)?
+        .ok_or_else(|| eyre::eyre!("no published generation in {}", output.display()))?;
     let directory = output.join(state.current);
     no_symlink(&directory)?;
     ensure!(directory.is_dir(), "published generation is missing");
@@ -395,9 +437,15 @@ pub struct Cleanup {
 /// Caller must first quiesce runtimes using prior generations. Automatic pruning
 /// would break deferred imports in still-running old runtimes.
 pub fn prune_stale(output: &Path) -> eyre::Result<Cleanup> {
-    let output = output.canonicalize()?;
+    let output = output.canonicalize().wrap_err_with(|| {
+        format!(
+            "canonicalizing publication directory for cleanup {}",
+            output.display()
+        )
+    })?;
     let (output, lock) = lock_output(&output)?;
-    let result = prune_locked(&output);
+    let result = prune_locked(&output)
+        .wrap_err_with(|| format!("pruning stale generations in {}", output.display()));
     finish_lock(lock, result, |cleanup| &mut cleanup.warnings)
 }
 
@@ -450,7 +498,9 @@ fn no_symlink(path: &Path) -> eyre::Result<()> {
             path.display()
         ),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
+        Err(e) => {
+            return Err(e).wrap_err_with(|| format!("checking publication path {}", path.display()))
+        }
     }
     Ok(())
 }
@@ -470,7 +520,10 @@ fn verify(root: &Path, owned: &BTreeMap<PathBuf, [u8; 32]>) -> eyre::Result<()> 
     for (path, digest) in owned {
         let file = owned_path(root, path)?;
         ensure!(
-            hash(&fs::read(&file)?) == *digest,
+            hash(
+                &fs::read(&file)
+                    .wrap_err_with(|| format!("reading owned artifact {}", file.display()))?
+            ) == *digest,
             "owned artifact modified: {}",
             file.display()
         );
@@ -484,15 +537,20 @@ fn read_state(output: &Path) -> eyre::Result<Option<State>> {
     let file = match File::open(&path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
+        Err(e) => {
+            return Err(e).wrap_err_with(|| format!("opening publication state {}", path.display()))
+        }
     };
     let mut bytes = Vec::new();
-    file.take(MAX_METADATA + 1).read_to_end(&mut bytes)?;
+    file.take(MAX_METADATA + 1)
+        .read_to_end(&mut bytes)
+        .wrap_err_with(|| format!("reading publication state {}", path.display()))?;
     ensure!(
         bytes.len() as u64 <= MAX_METADATA,
         "ownership metadata exceeds limit"
     );
-    let state: State = serde_json::from_slice(&bytes)?;
+    let state: State = serde_json::from_slice(&bytes)
+        .wrap_err_with(|| format!("parsing publication state {}", path.display()))?;
     ensure!(
         state.owner == OWNER && state.generations.contains_key(&state.current),
         "invalid publication owner/current"
@@ -514,20 +572,31 @@ fn read_state(output: &Path) -> eyre::Result<Option<State>> {
 }
 
 fn write_state(output: &Path, state: &State) -> eyre::Result<()> {
-    let bytes = serde_json::to_vec(state)?;
+    let bytes = serde_json::to_vec(state).wrap_err("encoding publication state")?;
     ensure!(
         bytes.len() as u64 <= MAX_METADATA,
         "ownership metadata exceeds limit"
     );
     let mut stage = tempfile::Builder::new()
         .prefix(".bundler-pointer-stage-")
-        .tempfile_in(output)?;
-    stage.write_all(&bytes)?;
-    stage.flush()?;
-    stage.as_file().sync_all()?;
+        .tempfile_in(output)
+        .wrap_err_with(|| format!("creating publication pointer stage in {}", output.display()))?;
     stage
-        .persist(output.join(STATE))
-        .map_err(|e| eyre::eyre!("atomic output pointer replacement: {e}"))?;
+        .write_all(&bytes)
+        .wrap_err("writing publication pointer stage")?;
+    stage
+        .flush()
+        .wrap_err("flushing publication pointer stage")?;
+    stage
+        .as_file()
+        .sync_all()
+        .wrap_err("syncing publication pointer stage")?;
+    stage.persist(output.join(STATE)).wrap_err_with(|| {
+        format!(
+            "atomic output pointer replacement {}",
+            output.join(STATE).display()
+        )
+    })?;
     Ok(())
 }
 
@@ -541,7 +610,10 @@ fn create_stage(output: &Path) -> eyre::Result<PathBuf> {
         match fs::create_dir(&stage) {
             Ok(()) => return Ok(stage),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e.into()),
+            Err(e) => {
+                return Err(e)
+                    .wrap_err_with(|| format!("creating publication stage {}", stage.display()))
+            }
         }
     }
 }
@@ -559,10 +631,15 @@ fn cleanup(root: &Path, owned: &BTreeMap<PathBuf, [u8; 32]>) -> eyre::Result<()>
                     "refusing removal of modified artifact {}",
                     file.display()
                 );
-                fs::remove_file(&file)?;
+                fs::remove_file(&file)
+                    .wrap_err_with(|| format!("removing owned artifact {}", file.display()))?;
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
+            Err(e) => {
+                return Err(e).wrap_err_with(|| {
+                    format!("reading owned artifact for cleanup {}", file.display())
+                })
+            }
         }
         for parent in file.parent().into_iter().flat_map(Path::ancestors) {
             if !parent.starts_with(root) {

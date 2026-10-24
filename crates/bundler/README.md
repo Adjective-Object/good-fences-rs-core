@@ -1,5 +1,17 @@
 # bundler
 
+Build and publication errors retain `eyre` cause chains with project/module paths
+and stage/IO context. Worker panic reports retain string payloads and all workers
+are joined. Display the full chain with `{error:#}`; `to_string()` shows only the
+outer context. Diagnostic paths/requests are not added to duration traces.
+High-level `bundler::progress` tracing events mark build/publication phases and
+report numeric preparation/cache counts at most once per second. The library
+installs no subscriber; bundler-cli reports these events to stderr independently
+of its optional duration trace.
+The separate `bundler::progress::discovery` events sample root-relative filenames
+and traversed directories for stderr feedback, at most once per second per kind;
+these path-bearing events are excluded from duration traces.
+
 ## Replacement direction and current status
 
 The [fixture semantic contract](../../fixtures/bundler/README.md#permitted-execution-differences)
@@ -33,6 +45,14 @@ manifest/physical identities and full actual-request proofs. No peer provider is
 lockfile never changes installed-tree resolution. Npm/shrinkwrap and Classic
 retain stage one's documented coarse raw-lockfile hashes.
 
+Lockfile fingerprints use the configured execution worker limit (one runs inline).
+A coordinator tracks outstanding dependency components and dispatches ready jobs
+through a bounded channel; completions immediately unlock their dependents.
+Cycles are single SCC jobs, preserving the existing hash bytes and mutable/
+incomplete propagation regardless of completion order. Hashing and per-member
+fingerprints run on workers; only the coordinator stores results and emits
+`bundler::progress::lockfile` completion counts.
+
 Disk hits validate borrowed original positive/negative probes directly, without
 unpacking proof trees. Fresh resolutions retain their original proofs too.
 Both paths are rechecked before success, including no-op returns. A nearer file,
@@ -49,11 +69,29 @@ derived graph-edge state only. Graph/output fingerprints depend on actual source
 dependency facts, resolved edges and resolver policy: unrelated JSON/config or
 disconnected Berry lockfile edits do not change no-op product generations.
 
-Input admission is demand-driven: literal-entry builds never enumerate the
-project/node_modules tree, hash unrelated JSON/configs or rescan it at return.
-Only actual finite contexts enumerate prefix-compatible directory scopes; their
-matching candidates are checked again before success. Source extraction policy
-and source schema/extractor versions are unchanged.
+Inventory admission, manifest reads and script/Sass resolution share one
+build-scoped filesystem snapshot, including speculative workers' reads.
+Speculative inventories still retain private observations/admission state; only
+demanded observations enter final validation. Repeated positive/negative paths
+and ancestor link prefixes are memory-only hits. Persisted proofs compare against
+current-epoch observations without restatting shared inputs. Final checks use new snapshots and compare the original
+observations, including on no-op builds. Cache encoding/aggregation/publication
+reuse the validated boundary snapshot, rather than repeatedly reopening every
+request's inputs; post-publication checks remain fresh. Lockfile identities
+never substitute for the physical installation observations.
+
+Precise input admission remains demand-driven. An upfront multi-root walk supplies
+speculative script candidates from entrypoint packages and their local runtime,
+optional and selected-peer dependency closure, excluding dev dependencies.
+Installed package manifests can connect that closure, but `node_modules` sources,
+unselected nested packages, reserved directories and ignored files are not walked.
+Package-closure probes run on bounded workers. A single bounded `jwalk` pool
+enumerates the selected trees, applying inherited `.gitignore`/`.ignore` rules
+on workers without per-file canonicalization or source preprocessing.
+The walk does not preprocess sources or authorize imports. Normal preparation
+still applies to candidate TS/JSX files. Unreachable errors, observations and
+requests never enter successful build validation, diagnostics or resolution-cache
+publication. Finite contexts retain their precise candidate checks before success.
 
 ### Upstream JavaScript source maps
 
@@ -86,7 +124,9 @@ separate from the production AST cache's typed FlatBuffer records.
 
 `BuildSession` precompiles `.ts`, `.mts`, `.cts`, `.tsx`, `.jsx` and their explicit
 module JSX variants `.mtsx`/`.mjsx`/`.ctsx`/`.cjsx` with the
-pinned Oxc transformer/code generator before extraction and dependency resolution.
+pinned Oxc 0.155.0 transformer/code generator before extraction and dependency resolution.
+The JavaScript pipeline requires Rust 1.97 or newer; the repository's pinned
+nightly satisfies this requirement.
 Type-only dependencies disappear before resolution; runtime TypeScript constructs
 and JSX become JavaScript. Declaration files are not executable inputs.
 The generated parser mode preserves the input's module format, including
@@ -313,7 +353,7 @@ them. Unconfigured and unsupported-instance builds retain original behavior.
 Configuration-only changes invalidate derived output, reuse source facts and
 participate in no-op detection; registration ordering/duplicates are immaterial.
 
-The bounded public example accepts `fixtureConfig.output.lazy_runtimes` as a list
+The bounded bundler CLI accepts `fixtureConfig.output.lazy_runtimes` as a list
 of at most 16 `{module, import, action}` objects, each role an exact
 `{module: "root-relative.mjs", export: "Name"}`. Paths must be portable relative
 files, canonicalized inside the build root; names are nonempty/control-free and
@@ -367,7 +407,7 @@ sorting all graph definitions per owner.
 
 ## Real browser application smoke tests
 
-`cargo build -p bundler --example build` followed by
+`cargo build -p bundler-cli` followed by
 `node scripts/bundler-browser.mjs` runs pinned TodoMVC Modern JavaScript and Web
 Components sources and native published output through `agent-browser` in real
 Chromium. See `fixtures/bundler-apps/README.md` for prerequisites, exact packaging
@@ -377,7 +417,7 @@ Both apps have no lazy imports: their browser contracts require exactly one
 loaded JavaScript output, with CSS resources and separately requested CSS entries
 outside that count.
 
-The example driver's optional `--css-auto-mount` argument selects native ESM CSS
+The bundler CLI's optional `--css-auto-mount` argument selects native ESM CSS
 stubs for browser applications; its existing default is unchanged. Caller-loaded
 CSS URL wrappers use CommonJS and cannot execute directly in browsers.
 Inferred nested entry names normalize host separators before portable-name
@@ -543,20 +583,31 @@ entry aliases and naming.
 
 `BuildOptions.execution` and low-level `link::esm_with_execution` accept
 `execution::ExecutionOptions::new(NonZeroUsize::new(4).unwrap())`. The default is
-one worker, running inline; existing `link::esm` callers remain serial. The
+one worker; preparation/resolution run off the coordinator even with one worker.
+Existing `link::esm` callers remain serial, and single-worker fingerprinting and
+emission run inline. The
 explicit count bounds scoped workers, additionally capped by each batch's
 actual owner count for emission. No environment variable or global pool selects concurrency.
 
 Module preparation uses a replenished, deduplicated canonical-path frontier:
-the coordinator integrates each completed script and resolves/enqueues its
-dependencies immediately, without waiting for sibling jobs. Workers read source
+the coordinator integrates each completed job and enqueues separate preparation
+and resolution jobs without waiting for sibling jobs. Workers read source
 bytes and validate sidecars or extract owned facts using private Oxc arenas and
 the session's shared immutable `PreparedDeclarations`. At most the configured
-number of jobs, including completed results, are outstanding. Pending jobs hold
-paths, not source buffers. Cycles/shared dependencies are scheduled once.
-Resolution, graph mutation and Ecco solving stay serial. Stateful resources
+number of jobs, including completed results, are outstanding. Resolution jobs
+retain prepared source owners; pending speculative resolution retains immutable
+records rather than reparsing. Cycles/shared dependencies are scheduled once.
+Precise jobs overtake speculative jobs; in-flight candidates are reused, completed
+speculative preparations are bounded to twice the worker count, and unused queued
+work is abandoned when the precise frontier settles. Evicted results can be
+prepared again on demand. `Counters.speculative_parses` separates unused eager
+extraction from emission reparsing.
+Resolution, proof checks and route admission run on workers; graph mutation and
+Ecco solving stay serial. Resolver maps use short guards, with package loading and
+borrowed disk-proof validation outside them. Stateful resources
 (CSS, JSON and assets) use a canonical serial frontier after the script frontier
-drains, without pre-reading scripts on the coordinator. Preparation workers join
+drains; CSS/Sass request resolution and context expansion also run off the
+coordinator. Preparation workers join
 before resource processing or emission starts, so stage worker counts never add.
 Source errors are selected by canonical path after script discovery; serial
 resource processing stops at its first failure. Cache warnings are sorted.
@@ -581,11 +632,13 @@ invalidate a successful no-op generation. `Counters.declaration_fingerprints`
 reports actual declaration serialization/hashing rather than assuming worker
 counts are zero.
 
-The example driver's bounded `--fixture-config FILE` accepts `"workers": 1`
+The bundler CLI's bounded `--fixture-config FILE` accepts `"workers": 1`
 (default), with integer counts from 1 through 64. Use 1, 2, 4 and 6 for forthcoming
 cold/warm/no-op/edit benchmarks; hold fixture inputs, cache mode and output
 settings constant. It reports `declarationFingerprints` alongside existing
-parse/cache counters. No throughput claim is made before those benchmarks.
+parse/cache counters. `resolutionCacheHits` and `resolutionCacheMisses` count
+proven request reuse separately from source `diskHits`; `inventoryDirectoryReads`
+counts demand/context enumeration, including final validation.
 
 ### Opt-in duration traces
 
@@ -599,10 +652,10 @@ Worker IDs and canonical batch-local owner IDs are numeric; spans never record
 source paths/text, entry labels, namespace fragments, options, or cache payloads.
 Tracing does not affect cache keys, artifact bytes, counters, or no-op reuse.
 
-The example driver accepts `--trace-file FILE` alongside `--fixture-config FILE`.
+The bundler CLI accepts `--trace-file FILE` alongside `--fixture-config FILE`.
 It writes a local Chrome/Perfetto-compatible JSON trace, with per-thread duration
 spans for declarations/inventory, preparation/read/cache/decode/validation/
-extraction, serial resolution/planning/placement, owner emission, finalization,
+extraction, worker resolution, serial planning/placement, owner emission, finalization,
 rendering, final validation/rechecks and publication. It flushes after worker
 joins and span exits on both success and returned build errors. Stdout remains
 the existing build-result JSON (errors remain on stderr).
@@ -610,12 +663,17 @@ No administrator privileges, UAC elevation, global subscriber, or OS profiler
 are needed: these are application spans written to a normal user-owned file.
 
 Inventory spans separate checked admission, bounded context enumeration and
-final consulted-input rechecks. Literal builds have no directory-enumeration or
-global config-probe spans. Nested durations overlap: use exclusive time when
-aggregating them. Resolution-key
-fingerprinting, per-request static/context resolution, package-format probing,
+final consulted-input rechecks. `build.discover_local` measures speculative
+multi-root enumeration; it does not become a global validation/config dependency.
+Nested durations overlap: use exclusive time when
+aggregating them. Small resolver-policy hashing (`build.resolver_policy`),
+lockfile parsing (`resolve.lockfile`), per-request static/context resolution, package-format probing,
 TypeScript/JSX compilation and serial resource preparation are separate spans.
 Request-kind flags are recorded without paths or specifiers.
+`resolve.counts` records numeric resolutions/hits/misses/packages for each script
+and Sass resolver, including returned build errors; `resolve.recheck` measures
+final proof checks. Neither counts discarded requests as successful cache reuse.
+No whole-inventory fingerprint span remains.
 
 The destination's parent must exist. Files are opened with `create_new`, never
 truncated. Keep traces outside the build root and output tree, or use a
@@ -627,8 +685,8 @@ For a project with an entry importing lodash, create `workers.json` containing
 `{"workers":4}` and record from PowerShell:
 
 ```powershell
-cargo build -p bundler --release --example build
-.\target\release\examples\build.exe C:\work\lodash-project C:\work\lodash-project\.bundler-out --fixture-config C:\work\workers.json --trace-file C:\work\lodash-4-workers.json entry.mjs
+cargo build -p bundler-cli --release
+.\target\release\bundler-cli.exe C:\work\lodash-project C:\work\lodash-project\.bundler-out --fixture-config C:\work\workers.json --trace-file C:\work\lodash-4-workers.json entry.mjs
 ```
 
 Open that local file in a Chrome trace viewer or Perfetto; do not commit or upload
@@ -698,7 +756,7 @@ Global CSS uses a CJS URL wrapper and `.cjs` entry extension on Node, or a nativ
 ESM default URL export and `.mjs` entry extension on Browser.
 `Artifacts.stylesheets` maps retained
 input stylesheet roots to owned output-relative `.css` paths, never public URLs
-or executable aliases (including custom-suffix CSS Modules). The example driver reports
+or executable aliases (including custom-suffix CSS Modules). The bundler CLI reports
 this map and resource paths. Callers load the relevant root stylesheets in their
 application's order; there is **no implicit DOM injection** or automatic loading
 when a dynamic JavaScript chunk executes.
@@ -859,7 +917,7 @@ UTF-8 byte spans. The owned boundary normalizes the pinned decoder's NUL values
 to CSS's U+FFFD replacement character for names and composition file requests.
 It requires Rust **1.95 or newer**; the repository's
 `nightly-2026-05-01` satisfies this. Its re-exported allocator is separately locked
-at 0.137.0; the JavaScript Oxc revision is unchanged.
+at 0.137.0, independently of the JavaScript Oxc pin.
 Recoverable parse errors, raw selectors/unknown pseudo arguments and unsupported
 selector-bearing at-rule preludes fail closed with path/span diagnostics.
 Classes/IDs default to local. Bare `:local`/`:global` switches the rest of its
@@ -1225,7 +1283,7 @@ public CJS entry wrappers, not fake paths for merged private modules or internal
 CJS factories. `async_facades` maps reached source sites to their canonical
 target chunks (CJS targets use the canonical runtime-key bridge job);
 `async_modules` reports source paths with transitive static async status.
-The 66-source star-chain benchmark
+The 67-source star-chain benchmark
 still asserts one ordinary public `main.mjs`, without runtime/helpers.
 
 ## Retention
@@ -1356,7 +1414,7 @@ walks cannot omit effects merely because their initial root is a binding.
 Run `cargo test -p bundler`.
 
 Unified source and public-pipeline conformance:
-`cargo build -p bundler --example build && node scripts/bundler-fixtures.mjs`.
+`cargo build -p bundler-cli && node scripts/bundler-fixtures.mjs`.
 Harness regressions:
 `node --test scripts/bundler-fixtures.test.mjs scripts/bundler-fixtures-build.test.mjs`.
 The runner validates the entire corpus before execution, skips builds for bad
@@ -1364,8 +1422,8 @@ inputs, and collects input/build/required-backend/output failures without stoppi
 later cases. It reports native and legacy passes separately; unexpected failures
 make the CLI exit nonzero after reporting all cases. The same command retains
 the same-runtime identity and source-range diagnostic checks.
-The minimal driver can also build a project directly:
-`cargo run -p bundler --example build -- PROJECT OUTPUT ENTRY...`; it prints
+The `bundler-cli` command can also build a project directly:
+`cargo run -p bundler-cli -- PROJECT OUTPUT ENTRY...`; it prints
 generation-specific `entries`, the selected `backend`, physical `layout` and
 actual build counters as JSON. `link::Artifacts::backend` is the authoritative
 `link::Backend::Native` value assigned by the emitter, never inferred from
@@ -1380,52 +1438,11 @@ entries use the same import observer. See the
 [fixture schema and current backend counts](../../fixtures/bundler/README.md).
 Use an absolute OUTPUT, or note that it is relative to the process cwd.
 
-### Explicit fixture configuration
+### Command-line entrypoint
 
-Existing positional invocations are unchanged. To exercise output/CSS options or
-explicit package conditions:
-
-```sh
-cargo run -p bundler --example build -- PROJECT OUTPUT --fixture-config CONFIG.json ENTRY...
-```
-
-The optional flag occurs immediately after OUTPUT. CONFIG.json is an explicit
-JSON file limited to **16 KiB**, with only these optional fields (shown with
-shipped defaults); unknown fields, including nested fields, are errors:
-
-```json
-{
-  "target": "node",
-  "output": {"base_url": "./"},
-  "css": {"load": "caller-loaded", "css_modules": false, "css_modules_exclude": []},
-  "resolveConditions": []
-}
-```
-
-This is a small fixture driver, not a general BuildOptions configuration API.
-No configuration is discovered implicitly; entry selection remains positional.
-`target` accepts `"node"` or `"browser"` and selects the corresponding resolver
-conditions and host contracts before adding `resolveConditions`. The driver
-uses the same TypeScript/JSX precompilation pipeline as `BuildSession`.
-Sass stylesheets compile through the native resource pipeline.
-`css_modules` accepts `false`, `true` (`.module.css`/`.module.scss`/`.module.sass`), `"everything"` (known CSS/Sass
-inputs only) or `"ext:.custom.suffix"`; `load` accepts `"caller-loaded"` or
-`"auto-mount"`, independently of selection. Export-name conversion is fixed
-camelCase, not configurable. `css_modules_exclude` accepts dotted filename
-suffixes such as `[".global.css", ".global.scss"]`, overriding module selection.
-Invalid bases/suffixes, collisions, illegal or cyclic
-composition and unsupported/recovered module syntax return errors, never partial
-transform success. ICSS `:import`/`:export` and `@value` are unsupported; preprocessors
-other than Sass are unsupported. See the full CSS contract above for selector/value boundaries.
-
-Caller-loaded users must serve owned resources under the configured base and
-load/order their stylesheets. Auto-mount users must provide a usable document/head
-and serve the same resources; synchronous link insertion is **not load readiness**.
-Missing DOM/head fails rather than silently skipping CSS. The portable CSS
-contracts separately syntax-check source JavaScript and observe native emitted
-output because raw Node cannot import CSS. DOM recorders do not establish browser
-CSS application, real network behavior or readiness. Existing JavaScript fixtures
-continue comparing unbundled and emitted observations without a custom loader.
+The standalone `bundler-cli` crate owns clap parsing, project/fixture
+configuration, JSON reporting and scoped local traces. See its
+[README](../bundler-cli/README.md) for configuration and embedding.
 
 ## Browser target
 
@@ -1625,7 +1642,7 @@ comparing graph edges, independently of worker completion
 order. Provide a lexical linked entry rather than an unproven absolute
 external entry.
 
-Aliases share one canonical module identity. Only finite contexts enumerate
+Aliases share one canonical module identity. Outside speculative discovery, only finite contexts enumerate
 prefix-compatible scopes, caching each canonical directory listing once per
 build and cutting active directory cycles. There is no whole-project fallback
 for literal imports. Context checks compare matching named/canonical candidates,
@@ -1662,7 +1679,7 @@ compiler-config ingestion does not loosen strict JSON/package metadata parsing.
 options.resolver.export_conditions.push("source".into());
 ```
 
-For the example driver, pass `--fixture-config FILE` before entries with
+For the bundler CLI, pass `--fixture-config FILE` before entries with
 `{"resolveConditions":["source"]}`. These additional conditions extend Node
 defaults. Previously copied profiling project configs must migrate in the
 caller/staging setup; copying tsconfig conditions alone no longer works.
@@ -1815,15 +1832,22 @@ or full workspace test claim is made.
 
 `cargo bench` uses a custom standard benchmark executable, not criterion. Seven
 fresh managed project roots per scenario contain a 64-module `export *` chain,
-an entry and a conditionally exported package dependency
-(**66 reached sources / 65 requests**).
+an entry and a conditionally exported package with a package-local reexport
+(**67 reached sources / 66 requests**), with a Berry lockfile and explicit
+installed locator.
 Each sample runs cold parse-cache → new-session warm disk cache → same-session
-no-op → one local declaration edit → one added public export → explicit resolver
-condition switch. Timings include actual source/config IO, the full public pipeline and
+no-op → one local declaration edit → one added public export → package manifest
+edit → explicit resolver condition switch. Before no-op it also changes a
+disconnected lockfile package and starts another fresh session: all 66 requests
+must still hit, with identical artifacts and no publication writes.
+The package manifest edit must miss only two requests while retaining 64 hits.
+Timings include actual source/config IO, the full public pipeline and
 transactional publication; compilation, fixture setup and runtime execution are
 outside the timed section. “Cold” means no source sidecars/session/output,
 **not** flushed OS caches. Warm output already exists. Source/derived caches are
-not faked; assertions verify actual public counters.
+not faked; assertions verify actual public counters, including resolution
+hits/misses and zero inventory directory reads on cold literal builds.
+Cache byte totals include both extraction and package-local resolution sidecars.
 
 Historical cached-source migration release measurements, after the audit
 prerequisites (the config-edit row used the now-removed tsconfig condition input,
@@ -1866,7 +1890,8 @@ hardware-dependent samples, not a speedup claim.
 This is a correctness-first baseline, not fine-grained later-layer incrementality:
 config changes re-resolve all requests and any derived key change rebuilds the
 whole graph/effects/partition/output, while source parsing stays selective.
-Inventory and success rechecks walk the bounded project twice. Ownership checking
+Demand admission and success checks inspect consulted inputs only; literal
+builds do not walk the project tree. Ownership checking
 and debug-only final output validation remain whole-product operations.
 No heuristic chunk optimization, worker scaling or large-monorepo speed claim.
 
@@ -2018,9 +2043,9 @@ not textual matching; object/binding shorthand expands to preserve keys.
 Capture and public-binding renames are rejected rather than guessed.
 Unedited comments, directives and hashbangs remain byte-for-byte unchanged.
 
-At OXC revision `87f065ebf7cde21d1229322f4c7ee58baca5648e`,
-`Codegen::build(&Program)` prints a whole arena-owned AST and its options document
-only partial leading-comment preservation. Source edits fit our owned occurrence
+At OXC 0.155.0 (revision `73e6b564737a29ecebf428d276421dcc492836df`),
+`Codegen::build(&Program)` prints a whole arena-owned AST rather than preserving
+the original source layout. Source edits fit our owned occurrence
 spans without reconstructing/rebinding an AST. After optional TypeScript/JSX
 precompilation, linking therefore uses edits, not the printer/transformer.
 Low-level `emit::single_module`, `link::esm` and `BuildSession`

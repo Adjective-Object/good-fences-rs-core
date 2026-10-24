@@ -39,7 +39,7 @@ fn lazy_options_jsx_values_omit_only_optional_evidence_in_owned_and_wire_facts()
         let semantic = oxc_semantic::SemanticBuilder::new()
             .with_check_syntax_error(true)
             .build(&parsed.program);
-        assert!(semantic.errors.is_empty());
+        assert!(semantic.diagnostics.is_empty());
         let owned = crate::owned::extract(&parsed.program, &semantic.semantic).unwrap();
         let bytes = owned.encode_module(crate::ModuleBody::Esm, &[]);
         let module =

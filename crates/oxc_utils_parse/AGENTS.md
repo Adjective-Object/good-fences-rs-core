@@ -10,3 +10,5 @@ reject ESM syntax in .cjs/.cjsx rather than reclassifying it.
 Keep shared extension classification in bundler_source_type.
 Never silently skip generated files.
 Check semantic diagnostics after parsing before extracting executable records.
+Preserve PURE annotations on calls inside member-access chains and nested
+assignments; fix upstream parser behavior rather than stripping source comments.

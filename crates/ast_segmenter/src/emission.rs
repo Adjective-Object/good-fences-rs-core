@@ -214,8 +214,9 @@ pub(crate) fn extract(
                 .is_some_and(|s| match s {
                     Statement::ImportDeclaration(_)
                     | Statement::ExportAllDeclaration(_)
-                    | Statement::EmptyStatement(_) => true,
-                    Statement::ExportNamedDeclaration(e) => e.declaration.is_none(),
+                    | Statement::EmptyStatement(_)
+                    | Statement::ExportNamedDeclaration(_)
+                    | Statement::ExportFromDeclaration(_) => true,
                     _ => false,
                 });
         for binding in facts.bindings() {
@@ -266,7 +267,7 @@ pub(crate) fn extract(
         *recipe.placement_mut().instantiable_mut() = !recipe.placement().declarations().is_empty()
             && recipe.placement().declarations() == recipe.placement().hoisted();
         let declaration = statement.and_then(|s| match s {
-            Statement::ExportNamedDeclaration(e) => e.declaration.as_ref(),
+            Statement::ExportDeclaration(e) => Some(&e.declaration),
             _ => None,
         });
         let variables = match statement {
@@ -374,8 +375,8 @@ pub(crate) fn extract(
         recipe.operations_mut().extend(syntax);
         if source.as_slice().len() > 1 {
             let prefix = source.as_slice()[0];
-            if let Some(Statement::ExportNamedDeclaration(export)) = statement {
-                let declaration = export.declaration.as_ref().expect("split declaration");
+            if let Some(Statement::ExportDeclaration(export)) = statement {
+                let declaration = &export.declaration;
                 recipe.operations_mut().push(Operation::new(
                     None,
                     OperationKind::Export {
@@ -605,21 +606,26 @@ impl<'a> Visit<'a> for Extractor<'_> {
         walk::walk_import_declaration(self, import);
     }
     fn visit_export_named_declaration(&mut self, export: &ExportNamedDeclaration<'a>) {
+        self.export(export.span, ExportForm::Remove);
+        walk::walk_export_named_declaration(self, export);
+    }
+    fn visit_export_from_declaration(&mut self, export: &ExportFromDeclaration<'a>) {
+        self.export(export.span, ExportForm::Remove);
+        walk::walk_export_from_declaration(self, export);
+    }
+    fn visit_export_declaration(&mut self, export: &ExportDeclaration<'a>) {
         self.export(
             export.span,
-            export
-                .declaration
-                .as_ref()
-                .map_or(ExportForm::Remove, |d| ExportForm::Declaration {
-                    declaration: d.span(),
-                }),
+            ExportForm::Declaration {
+                declaration: export.declaration.span(),
+            },
         );
-        if let Some(Declaration::FunctionDeclaration(f)) = &export.declaration {
+        if let Declaration::FunctionDeclaration(f) = &export.declaration {
             if let Some(id) = &f.id {
                 self.hoisted.push(id.span.start);
             }
         }
-        walk::walk_export_named_declaration(self, export);
+        walk::walk_export_declaration(self, export);
     }
     fn visit_export_all_declaration(&mut self, export: &ExportAllDeclaration<'a>) {
         self.export(export.span, ExportForm::Remove);

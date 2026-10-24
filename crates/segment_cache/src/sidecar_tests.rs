@@ -28,6 +28,22 @@ fn no_staging(dir: &TmpDir) {
 }
 
 #[test]
+fn missing_source_retains_filename_and_io_cause() {
+    let dir = TmpDir::new();
+    let path = dir.root_join("missing.mjs");
+    let error = match run(&path) {
+        Ok(_) => panic!("missing source unexpectedly loaded"),
+        Err(error) => error,
+    };
+    assert!(format!("{error:#}").contains(&path.display().to_string()));
+    assert!(format!("{error:#}").contains("source read failed"));
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::NotFound
+    );
+}
+
+#[test]
 fn cold_warm_and_cache_modes() {
     let (_dir, path) = setup();
     let cold = run(&path).unwrap();

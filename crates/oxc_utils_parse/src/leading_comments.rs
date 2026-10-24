@@ -70,14 +70,19 @@ mod tests {
         let source = "// @ALLOW-UNUSED-EXPORT\nexport const x = 1;";
         let allocator = Allocator::default();
         let result = parse_ts(&allocator, source);
-        assert!(result.errors.is_empty(), "parse errors: {:?}", result.errors);
+        assert!(
+            result.diagnostics.is_empty(),
+            "parse errors: {:?}",
+            result.diagnostics
+        );
 
         let program = &result.program;
-        // Find the ExportNamedDeclaration
-        let export_stmt = program.body.iter().find(|s| {
-            matches!(s, Statement::ExportNamedDeclaration(_))
-        });
-        assert!(export_stmt.is_some(), "expected ExportNamedDeclaration");
+        // Find the exported declaration.
+        let export_stmt = program
+            .body
+            .iter()
+            .find(|s| matches!(s, Statement::ExportDeclaration(_)));
+        assert!(export_stmt.is_some(), "expected ExportDeclaration");
         let span_start = export_stmt.unwrap().span().start;
 
         let leading = leading_comments_at(&program.comments, source, span_start);
@@ -98,7 +103,11 @@ mod tests {
         let source = "const a = 1;\n// interior\nconst b = 2;";
         let allocator = Allocator::default();
         let result = parse_ts(&allocator, source);
-        assert!(result.errors.is_empty(), "parse errors: {:?}", result.errors);
+        assert!(
+            result.diagnostics.is_empty(),
+            "parse errors: {:?}",
+            result.diagnostics
+        );
 
         let program = &result.program;
         assert!(program.body.len() >= 2, "expected at least 2 statements");

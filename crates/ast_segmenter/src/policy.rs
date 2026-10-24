@@ -257,8 +257,18 @@ impl<'a> Visit<'a> for Policy {
     }
 
     fn visit_export_named_declaration(&mut self, declaration: &ExportNamedDeclaration<'a>) {
-        self.module_declaration(declaration.span, declaration.with_clause.is_some(), false);
+        self.module_declaration(declaration.span, false, false);
         walk::walk_export_named_declaration(self, declaration);
+    }
+
+    fn visit_export_from_declaration(&mut self, declaration: &ExportFromDeclaration<'a>) {
+        self.module_declaration(declaration.span, declaration.with_clause.is_some(), false);
+        walk::walk_export_from_declaration(self, declaration);
+    }
+
+    fn visit_export_declaration(&mut self, declaration: &ExportDeclaration<'a>) {
+        self.module_declaration(declaration.span, false, false);
+        walk::walk_export_declaration(self, declaration);
     }
 
     fn visit_export_all_declaration(&mut self, declaration: &ExportAllDeclaration<'a>) {
@@ -307,10 +317,8 @@ impl<'a> Visit<'a> for Policy {
         self.reject(statement.span, "unsupported with statement");
     }
 
-    fn visit_meta_property(&mut self, property: &MetaProperty<'a>) {
-        if property.meta.name == "import" {
-            self.reject(property.span, "unsupported import.meta");
-        }
+    fn visit_import_meta(&mut self, property: &ImportMeta) {
+        self.reject(property.span, "unsupported import.meta");
     }
 
     fn visit_await_expression(&mut self, expression: &AwaitExpression<'a>) {
@@ -380,13 +388,29 @@ impl<'a> Visit<'a> for Policy {
         self.reject(declaration.span, "unsupported TypeScript enum transform");
     }
 
-    fn visit_ts_module_declaration(&mut self, declaration: &TSModuleDeclaration<'a>) {
+    fn visit_ts_namespace_declaration(&mut self, declaration: &TSNamespaceDeclaration<'a>) {
         self.reject(
             declaration.span,
             "unsupported TypeScript namespace transform",
         );
     }
 
+    fn visit_ts_external_module_declaration(
+        &mut self,
+        declaration: &TSExternalModuleDeclaration<'a>,
+    ) {
+        self.reject(
+            declaration.span,
+            "unsupported TypeScript namespace transform",
+        );
+    }
+
+    fn visit_ts_global_declaration(&mut self, declaration: &TSGlobalDeclaration<'a>) {
+        self.reject(
+            declaration.span,
+            "unsupported TypeScript namespace transform",
+        );
+    }
     fn visit_formal_parameter(&mut self, parameter: &FormalParameter<'a>) {
         if parameter.accessibility.is_some() || parameter.readonly || parameter.r#override {
             self.reject(

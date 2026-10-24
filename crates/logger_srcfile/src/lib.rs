@@ -3,7 +3,7 @@ use std::path::Path;
 
 use logger::Logger;
 use once_cell::sync::OnceCell;
-use oxc_diagnostics::NamedSource;
+use oxc_diagnostics::{NamedSource, SourceCode};
 use oxc_span::Span;
 
 pub trait SrcFileLogger: Logger {
@@ -11,10 +11,10 @@ pub trait SrcFileLogger: Logger {
     fn src_error(&self, location: Span, message: impl Display);
 }
 
-fn compute_line_starts(source: &str) -> Vec<u32> {
+fn compute_line_starts(source: &[u8]) -> Vec<u32> {
     let mut starts = vec![0u32];
-    for (i, b) in source.bytes().enumerate() {
-        if b == b'\n' {
+    for (i, b) in source.iter().enumerate() {
+        if *b == b'\n' {
             starts.push((i + 1) as u32);
         }
     }
@@ -30,10 +30,7 @@ pub struct WrapFileLogger<TLogger> {
 impl<TLogger: Clone> Clone for WrapFileLogger<TLogger> {
     fn clone(&self) -> Self {
         Self {
-            named_source: NamedSource::new(
-                self.named_source.name(),
-                self.named_source.inner().clone(),
-            ),
+            named_source: self.named_source.clone(),
             inner_logger: self.inner_logger.clone(),
             line_starts: self.line_starts.clone(),
         }
@@ -53,7 +50,7 @@ impl<TLogger: Logger> WrapFileLogger<TLogger> {
     fn line_col(&self, byte_offset: u32) -> (usize, usize) {
         let starts = self
             .line_starts
-            .get_or_init(|| compute_line_starts(self.named_source.inner()));
+            .get_or_init(|| compute_line_starts(self.named_source.data()));
         let line_idx = match starts.binary_search(&byte_offset) {
             Ok(i) => i,
             Err(i) => i - 1,
@@ -63,7 +60,7 @@ impl<TLogger: Logger> WrapFileLogger<TLogger> {
     }
 
     pub fn filename(&self) -> &str {
-        self.named_source.name()
+        self.named_source.name().unwrap_or_default()
     }
 }
 
@@ -84,7 +81,7 @@ impl<TLogger: Logger> SrcFileLogger for WrapFileLogger<TLogger> {
         let (line, col) = self.line_col(location.start);
         self.warn(format!(
             "{}:{}:{} :: {}",
-            self.named_source.name(),
+            self.filename(),
             line,
             col,
             message,
@@ -94,7 +91,7 @@ impl<TLogger: Logger> SrcFileLogger for WrapFileLogger<TLogger> {
         let (line, col) = self.line_col(location.start);
         self.error(format!(
             "{}:{}:{} :: {}",
-            self.named_source.name(),
+            self.filename(),
             line,
             col,
             message,
@@ -167,9 +164,7 @@ mod tests {
 
     impl Logger for CollectLogger {
         fn log(&self, message: impl Display) {
-            self.messages
-                .borrow_mut()
-                .push(format!("LOG: {}", message));
+            self.messages.borrow_mut().push(format!("LOG: {}", message));
         }
         fn warn(&self, message: impl Display) {
             self.messages
@@ -177,16 +172,15 @@ mod tests {
                 .push(format!("WARN: {}", message));
         }
         fn error(&self, message: impl Display) {
-            self.messages
-                .borrow_mut()
-                .push(format!("ERR: {}", message));
+            self.messages.borrow_mut().push(format!("ERR: {}", message));
         }
     }
 
     #[test]
     fn line_col_lf_endings() {
         // "abc\ndef\nghi" — lines at offsets 0, 4, 8
-        let logger = WrapFileLogger::new("test.ts", "abc\ndef\nghi".to_string(), CollectLogger::new());
+        let logger =
+            WrapFileLogger::new("test.ts", "abc\ndef\nghi".to_string(), CollectLogger::new());
         // 'a' at offset 0 → line 1, col 0
         assert_eq!(logger.line_col(0), (1, 0));
         // 'd' at offset 4 → line 2, col 0
@@ -202,7 +196,8 @@ mod tests {
     #[test]
     fn line_col_crlf_endings() {
         // "ab\r\ncd\r\ne" — \n at offsets 3 and 7, line starts: 0, 4, 8
-        let logger = WrapFileLogger::new("test.ts", "ab\r\ncd\r\ne".to_string(), CollectLogger::new());
+        let logger =
+            WrapFileLogger::new("test.ts", "ab\r\ncd\r\ne".to_string(), CollectLogger::new());
         assert_eq!(logger.line_col(0), (1, 0)); // 'a'
         assert_eq!(logger.line_col(4), (2, 0)); // 'c'
         assert_eq!(logger.line_col(5), (2, 1)); // 'd'
@@ -229,4 +224,3 @@ mod tests {
         assert_eq!(msgs[0], "LOG: WARN: bar.ts:byte=42 :: something");
     }
 }
-

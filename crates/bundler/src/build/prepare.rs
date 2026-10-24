@@ -1,4 +1,4 @@
-//! Source-local work only; the coordinator retains resolver and CSS ownership.
+//! Bounded source preparation and import-resolution jobs.
 use super::*;
 
 #[cfg(test)]
@@ -7,12 +7,168 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+pub(super) enum Job {
+    Prepare(PathBuf),
+    Speculate(PathBuf),
+    ResolveSpeculative {
+        path: PathBuf,
+        record: CacheRecord,
+    },
+    Resolve {
+        path: PathBuf,
+        loaded: Loaded,
+        css_identity: Option<PathBuf>,
+    },
+}
+
+pub(super) type Completion = (
+    eyre::Result<Prepared>,
+    Vec<ftree_cache::inputs::PathInput>,
+    usize,
+);
+
+pub(super) enum Claim {
+    Read,
+    Waiting,
+    Ready(Completion),
+}
+
+pub(super) struct Speculation {
+    claims: BTreeMap<PathBuf, std::sync::atomic::AtomicBool>,
+    ready: parking_lot::Mutex<BTreeMap<PathBuf, Completion>>,
+    limit: usize,
+    parses: std::sync::atomic::AtomicUsize,
+    promoted: std::sync::atomic::AtomicUsize,
+}
+
+impl Speculation {
+    pub(super) fn new(paths: &BTreeSet<PathBuf>, workers: usize) -> Self {
+        Self {
+            claims: paths
+                .iter()
+                .map(|path| (path.clone(), false.into()))
+                .collect(),
+            ready: Default::default(),
+            limit: workers.saturating_mul(2),
+            parses: 0.into(),
+            promoted: 0.into(),
+        }
+    }
+
+    pub(super) fn record_parses(&self, count: usize) {
+        self.parses
+            .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(super) fn promote(&self, count: usize) {
+        self.promoted
+            .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(super) fn unused_parses(&self) -> usize {
+        self.parses.load(std::sync::atomic::Ordering::Relaxed)
+            - self.promoted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(super) fn claim(&self, path: &Path) -> Claim {
+        if let Some(ready) = self.ready.lock().remove(path) {
+            return Claim::Ready(ready);
+        }
+        if self
+            .claims
+            .get(path)
+            .is_some_and(|claimed| claimed.swap(true, std::sync::atomic::Ordering::AcqRel))
+        {
+            Claim::Waiting
+        } else {
+            Claim::Read
+        }
+    }
+
+    pub(super) fn store(&self, path: PathBuf, result: Completion) {
+        let mut ready = self.ready.lock();
+        ready.insert(path, result);
+        while ready.len() > self.limit {
+            let (path, _) = ready.pop_first().expect("nonempty speculative cache");
+            self.claims[&path].store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
 pub(super) enum Prepared {
     Script(Loaded),
     Resource {
         input: Vec<u8>,
         format: ModuleFormat,
     },
+    Resolved {
+        loaded: Loaded,
+        css_identity: Option<PathBuf>,
+        resolutions: HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>,
+    },
+}
+
+pub(super) fn resolve(
+    path: &Path,
+    record: &CacheRecord,
+    inventory: &Inventory,
+    options: &BuildOptions,
+    resolver: &impl DependencyResolver,
+) -> eyre::Result<HashMap<ast_segmenter::owned::DependencyId, DependencyTarget>> {
+    let _span = tracing::info_span!("build.resolve").entered();
+    let mut resolved = HashMap::new();
+    for dependency in record.module().facts().dependencies() {
+        if dependency.type_only() {
+            continue;
+        }
+        let _dependency_span = tracing::info_span!(
+            "resolve.dependency",
+            context = dependency.pattern().is_some(),
+            require = dependency.kind() == DependencyKind::Require
+        )
+        .entered();
+        let target = if dependency.pattern().is_some() {
+            DependencyTarget::Context(
+                crate::context::resolve(
+                    inventory.root(),
+                    path,
+                    dependency,
+                    inventory.candidates(path, record, dependency, &options.resolver.extensions)?,
+                    &options.resolver.extensions,
+                    resolver,
+                )
+                .wrap_err_with(|| {
+                    format!(
+                        "{}: context at bytes {}..{}",
+                        path.display(),
+                        dependency.span().start,
+                        dependency.span().end
+                    )
+                })?,
+            )
+        } else {
+            let mode = if dependency.kind() == DependencyKind::Require {
+                ResolutionMode::Require
+            } else {
+                ResolutionMode::Import
+            };
+            match resolver
+                .resolve_dependency(path, &dependency.specifier(), mode)
+                .wrap_err_with(|| {
+                    format!(
+                        "{}: bytes {}..{}",
+                        path.display(),
+                        dependency.span().start,
+                        dependency.span().end
+                    )
+                })? {
+                ResolvedDependency::File(target) => DependencyTarget::File(target),
+                ResolvedDependency::External(name) => DependencyTarget::External(name),
+            }
+        };
+        resolved.insert(dependency.id(), target);
+    }
+    Ok(resolved)
 }
 
 pub(super) struct Loaded {
@@ -27,8 +183,9 @@ pub(super) fn enqueue(
     paths: impl IntoIterator<Item = PathBuf>,
     scheduled: &mut BTreeSet<PathBuf>,
     resources: &mut BTreeSet<PathBuf>,
+    awaiting: &mut BTreeSet<PathBuf>,
     options: &BuildOptions,
-) -> Vec<PathBuf> {
+) -> Vec<Job> {
     paths
         .into_iter()
         .filter(|path| scheduled.insert(path.clone()))
@@ -39,6 +196,10 @@ pub(super) fn enqueue(
                 resources.insert(path.clone());
                 false
             }
+        })
+        .map(|path| {
+            awaiting.insert(path.clone());
+            Job::Prepare(path)
         })
         .collect()
 }
@@ -58,7 +219,8 @@ pub(super) fn read(
         path.display()
     );
     let format = tracing::info_span!("prepare.package_format")
-        .in_scope(|| inventory.package_format(path))?;
+        .in_scope(|| inventory.package_format(path))
+        .wrap_err_with(|| format!("determining package format for {}", path.display()))?;
     let input = tracing::info_span!("prepare.read_bytes")
         .in_scope(|| fs::read(path))
         .wrap_err_with(|| format!("source {}", path.display()))?;
@@ -157,7 +319,9 @@ pub(super) fn load(
     if let Some(source) = previous {
         return Ok(Loaded {
             source: None,
-            parsed: source.record.to_parsed(&source.text)?,
+            parsed: source.record.to_parsed(&source.text).wrap_err_with(|| {
+                format!("borrowing in-memory source facts for {}", path.display())
+            })?,
             status: None,
             warning: None,
             transpiled: None,
@@ -174,14 +338,18 @@ pub(super) fn load(
         },
         cache,
         declarations,
-    )?;
+    )
+    .wrap_err_with(|| format!("loading source facts for {}", path.display()))?;
     let warning = if let CacheWrite::Failed(message) = loaded.write {
         Some(format!("{}: cache write: {message}", path.display()))
     } else {
         None
     };
     Ok(Loaded {
-        parsed: loaded.record.to_parsed(&loaded.source)?,
+        parsed: loaded
+            .record
+            .to_parsed(&loaded.source)
+            .wrap_err_with(|| format!("borrowing loaded source facts for {}", path.display()))?,
         source: Some(Source {
             css_identity: None,
             input,

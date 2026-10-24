@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 pub use validate::validate_parsed;
 
 pub use cache_flatbuffers::{EXTRACTOR_VERSION, MAX_RECORD_BYTES, SCHEMA_VERSION};
-pub const OXC_REVISION: &str = "87f065ebf7cde21d1229322f4c7ee58baca5648e";
+pub const OXC_REVISION: &str = "73e6b564737a29ecebf428d276421dcc492836df";
 
 mod records;
 pub use records::{CacheRecord, CachedModule};

@@ -1,0 +1,23 @@
+[package]
+name = "bundler-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.97"
+license = "Apache-2.0"
+description = "Command-line entrypoint for the native bundler"
+
+[dependencies]
+bundler = { path = "../bundler" }
+clap = { version = "4.5.13", features = ["derive"] }
+eyre.workspace = true
+import_resolver = { path = "../import_resolver" }
+indicatif = { version = "0.18", default-features = false }
+segment_cache = { path = "../segment_cache" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-chrome = "0.7"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "fmt", "ansi"] }
+
+[dev-dependencies]
+test_tmpdir = { path = "../test_tmpdir" }

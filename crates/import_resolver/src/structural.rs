@@ -10,8 +10,9 @@ use crate::{
     },
     resolve::{PathResolver, TargetEnv, NODE_BUILTINS},
 };
-use ftree_cache::inputs::InputObserver;
+use eyre::WrapErr;
 pub use ftree_cache::inputs::{InputKind, InputProof, PathInput};
+use ftree_cache::inputs::{InputObserver, InputSnapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionMode {
@@ -50,6 +51,7 @@ pub struct StructuralResolver {
     import_cache: CombinedResolverCaches,
     require_cache: CombinedResolverCaches,
     revision: u64,
+    snapshot: InputSnapshot,
 }
 
 impl StructuralResolver {
@@ -58,13 +60,16 @@ impl StructuralResolver {
         options: NodeModulesResolverOptions,
         externals: BTreeSet<String>,
     ) -> Self {
+        let snapshot = InputSnapshot::default();
+        let packages = std::sync::Arc::new(crate::node_resolver::caching::PackageJsonCache::new());
         Self {
             root,
             options,
             externals,
-            import_cache: CombinedResolverCaches::new(),
-            require_cache: CombinedResolverCaches::new(),
+            import_cache: CombinedResolverCaches::with_shared(packages.clone(), snapshot.clone()),
+            require_cache: CombinedResolverCaches::with_shared(packages, snapshot.clone()),
             revision: 0,
+            snapshot,
         }
     }
 
@@ -74,9 +79,20 @@ impl StructuralResolver {
 
     /// Coarse invalidation is intentional: misses and configuration ancestry also change.
     pub fn invalidate(&mut self) {
-        self.import_cache = CombinedResolverCaches::new();
-        self.require_cache = CombinedResolverCaches::new();
+        self.set_snapshot(InputSnapshot::default());
+    }
+
+    /// Replace the filesystem epoch and all context/target results together.
+    pub fn set_snapshot(&mut self, snapshot: InputSnapshot) {
+        let packages = std::sync::Arc::new(crate::node_resolver::caching::PackageJsonCache::new());
+        self.import_cache = CombinedResolverCaches::with_shared(packages.clone(), snapshot.clone());
+        self.require_cache = CombinedResolverCaches::with_shared(packages, snapshot.clone());
+        self.snapshot = snapshot;
         self.revision += 1;
+    }
+
+    pub fn snapshot(&self) -> &InputSnapshot {
+        &self.snapshot
     }
 
     pub fn set_policy(&mut self, options: NodeModulesResolverOptions, externals: BTreeSet<String>) {
@@ -91,12 +107,12 @@ impl StructuralResolver {
         specifier: &str,
         mode: ResolutionMode,
     ) -> eyre::Result<TrackedDependency> {
-        let observer = InputObserver::default();
+        let observer = InputObserver::with_snapshot(self.snapshot.clone());
         let dependency = self.resolve_inner(base, specifier, mode, Some(&observer))?;
         let inputs = observer.proof();
-        inputs.check_errors().map_err(|error| {
-            eyre::eyre!(
-                "{mode:?} resolving {specifier:?} from {}: {error:#}",
+        inputs.check_errors().wrap_err_with(|| {
+            format!(
+                "{mode:?} resolving {specifier:?} from {}: checking input proof",
                 base.display()
             )
         })?;
@@ -150,13 +166,8 @@ impl StructuralResolver {
             Some(observer) => resolver.resolve_with_inputs(base, specifier, observer.clone()),
             None => resolver.resolve(base, specifier),
         }
-        .map_err(|error| {
-            eyre::eyre!(
-                "{:?} resolving {specifier:?} from {}: {error:#}",
-                mode,
-                base.display()
-            )
-        })?;
+        .map_err(|error| eyre::eyre!(error.into_boxed_dyn_error()))
+        .wrap_err_with(|| format!("{mode:?} resolving {specifier:?} from {}", base.display()))?;
         eyre::ensure!(
             observer.map_or_else(
                 || result.path.is_file(),
@@ -206,12 +217,33 @@ mod tests {
     }
 
     #[test]
+    fn resolution_context_preserves_the_original_error_chain() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => ""
+        };
+        let resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let base = dir.root().join("entry.mjs");
+        let error = resolver
+            .resolve_dependency(&base, "./absent.mjs", ResolutionMode::Import)
+            .unwrap_err();
+        let chain = format!("{error:#}");
+        assert!(chain.contains(&base.display().to_string()), "{chain}");
+        assert!(chain.contains("./absent.mjs"), "{chain}");
+        assert!(chain.contains("Import resolving"), "{chain}");
+        assert!(error.chain().count() > 1, "{error:?}");
+    }
+
+    #[test]
     fn tracked_extension_priority_and_source_contents_are_distinct_inputs() {
         let dir = test_tmpdir::test_tmpdir! {
             "entry.mjs" => "",
             "value.ts" => "export const value = 1;"
         };
-        let resolver = StructuralResolver::new(
+        let mut resolver = StructuralResolver::new(
             dir.root().into(),
             NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
             BTreeSet::new(),
@@ -240,6 +272,7 @@ mod tests {
         result.inputs.validate().unwrap();
         std::fs::write(dir.root().join("value.js"), "").unwrap();
         assert!(result.inputs.validate().is_err());
+        resolver.invalidate();
         assert_eq!(
             resolver
                 .resolve_dependency(
@@ -297,6 +330,45 @@ mod tests {
     }
 
     #[test]
+    fn warm_package_resolution_does_not_reopen_a_cached_target_for_another_importer() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "nested/entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":"./index.mjs"}"#,
+            "node_modules/pkg/index.mjs" => ""
+        };
+        let mut resolver = StructuralResolver::new(
+            dir.root().into(),
+            NodeModulesResolverOptions::default_for_env(TargetEnv::Node),
+            BTreeSet::new(),
+        );
+        let first = tracked(
+            &resolver,
+            &dir.root().join("entry.mjs"),
+            "pkg",
+            ResolutionMode::Import,
+        );
+        std::fs::remove_file(dir.root().join("node_modules/pkg/index.mjs")).unwrap();
+        let cached = resolver
+            .resolve_dependency_with_inputs(
+                &dir.root().join("nested/entry.mjs"),
+                "pkg",
+                ResolutionMode::Import,
+            )
+            .unwrap();
+        assert_eq!(cached.dependency, first.dependency);
+        assert!(cached.inputs.validate().is_err());
+        resolver.invalidate();
+        assert!(resolver
+            .resolve_dependency_with_inputs(
+                &dir.root().join("nested/entry.mjs"),
+                "pkg",
+                ResolutionMode::Import
+            )
+            .is_err());
+    }
+
+    #[test]
     fn tracked_ancestor_misses_and_cached_negative_detect_nearer_packages() {
         for present_node_modules in [false, true] {
             let dir = test_tmpdir::test_tmpdir! {
@@ -323,6 +395,53 @@ mod tests {
                 .resolve_dependency_with_inputs(&base, "pkg", ResolutionMode::Import)
                 .unwrap();
             assert!(after.inputs.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn nested_export_conditions_resolve_and_cache_import_require_and_custom_modes() {
+        let dir = test_tmpdir::test_tmpdir! {
+            "entry.mjs" => "",
+            "node_modules/pkg/package.json" => r#"{"exports":{".":{"iconFont":{"import":{"types":"./fonts.d.ts","default":"./fonts.mjs"}},"default":{"import":{"types":"./index.d.ts","default":"./index.mjs"},"require":{"types":"./index.d.cts","default":"./index.cjs"}}},"./svg/*":{"import":{"types":"./atoms/*.d.ts","default":"./atoms/*.mjs"},"require":{"types":"./atoms/*.d.cts","default":"./atoms/*.cjs"}}}}"#,
+            "node_modules/pkg/index.mjs" => "",
+            "node_modules/pkg/index.cjs" => "",
+            "node_modules/pkg/fonts.mjs" => "",
+            "node_modules/pkg/atoms/icon.mjs" => "",
+            "node_modules/pkg/atoms/icon.cjs" => ""
+        };
+        for environment in [TargetEnv::Node, TargetEnv::Browser] {
+            let mut resolver = StructuralResolver::new(
+                dir.root().into(),
+                NodeModulesResolverOptions::default_for_env(environment),
+                BTreeSet::new(),
+            );
+            for _ in 0..2 {
+                for (request, mode, file) in [
+                    ("pkg", ResolutionMode::Import, "index.mjs"),
+                    ("pkg", ResolutionMode::Require, "index.cjs"),
+                    ("pkg/svg/icon", ResolutionMode::Import, "atoms/icon.mjs"),
+                    ("pkg/svg/icon", ResolutionMode::Require, "atoms/icon.cjs"),
+                ] {
+                    let result = tracked(&resolver, &dir.root().join("entry.mjs"), request, mode);
+                    assert_eq!(
+                        result.dependency,
+                        ResolvedDependency::File(dir.root().join("node_modules/pkg").join(file))
+                    );
+                }
+            }
+            let mut options = NodeModulesResolverOptions::default_for_env(environment);
+            options.export_conditions.push("iconFont".into());
+            resolver.set_policy(options, BTreeSet::new());
+            assert_eq!(
+                tracked(
+                    &resolver,
+                    &dir.root().join("entry.mjs"),
+                    "pkg",
+                    ResolutionMode::Import
+                )
+                .dependency,
+                ResolvedDependency::File(dir.root().join("node_modules/pkg/fonts.mjs"))
+            );
         }
     }
 

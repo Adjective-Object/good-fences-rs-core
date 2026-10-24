@@ -39,9 +39,9 @@ pub fn get_file_segments(file_path: &Path) -> Result<Vec<Segment>, SourceFilePar
     PARSE_ARENA.with(|arena_cell| {
         let arena = arena_cell.borrow();
         let ret = oxc_utils_parse::parse_file(&arena, &source, file_path);
-        if !ret.errors.is_empty() {
+        if !ret.diagnostics.is_empty() {
             let msg = ret
-                .errors
+                .diagnostics
                 .iter()
                 .map(|e| e.message.to_string())
                 .collect::<Vec<_>>()
@@ -50,7 +50,7 @@ pub fn get_file_segments(file_path: &Path) -> Result<Vec<Segment>, SourceFilePar
             arena_cell.borrow_mut().reset();
             return Err(SourceFileParseError::Parser(file_path.to_path_buf(), msg));
         }
-        if ret.panicked {
+        if ret.fatal_error {
             drop(arena);
             arena_cell.borrow_mut().reset();
             return Err(SourceFileParseError::TypeScriptSyntax(
@@ -59,7 +59,10 @@ pub fn get_file_segments(file_path: &Path) -> Result<Vec<Segment>, SourceFilePar
             ));
         }
 
-        let semantic = oxc_semantic::SemanticBuilder::new().build(&ret.program).semantic;
+        let semantic = oxc_semantic::SemanticBuilder::new()
+            .with_build_nodes(true)
+            .build(&ret.program)
+            .semantic;
 
         let stdio_logger = StdioLogger::new();
         let file_logger = WrapFileLogger::new(

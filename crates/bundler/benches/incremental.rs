@@ -9,6 +9,25 @@ use test_tmpdir::TmpDir;
 
 const MODULES: usize = 64;
 const SAMPLES: usize = 7;
+const LOCKFILE: &str = r#"
+__metadata:
+  version: 10
+  cacheKey: 10c0
+"root@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "root@workspace:."
+  dependencies:
+    benchmark-config: "npm:1.0.0"
+"benchmark-config@npm:1.0.0":
+  version: 1.0.0
+  resolution: "benchmark-config@npm:1.0.0"
+  checksum: config-one
+"unused@npm:1.0.0":
+  version: 1.0.0
+  resolution: "unused@npm:1.0.0"
+  checksum: unused-one
+"#;
+const PACKAGE: &str = r#"{"name":"benchmark-config","version":"1.0.0","_locator":"benchmark-config@npm:1.0.0","type":"module","exports":{".":{"alternate":"./config-b.mjs","default":"./config-a.mjs"}}}"#;
 
 struct Sample {
     total_ms: f64,
@@ -23,7 +42,12 @@ fn cache_bytes(root: &Path) -> std::io::Result<u64> {
         let entry = entry?;
         if entry.file_type()?.is_dir() {
             total += cache_bytes(&entry.path())?;
-        } else if segment_cache::is_cache_artifact(&entry.path()) {
+        } else if segment_cache::is_cache_artifact(&entry.path())
+            || entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".bundler-resolution-v1-")
+        {
             total += entry.metadata()?.len();
         }
     }
@@ -81,15 +105,24 @@ fn main() -> eyre::Result<()> {
     for _ in 0..SAMPLES {
         let dir = TmpDir::new();
         let root = dir.root();
-        fs::write(root.join("package.json"), r#"{"type":"module"}"#)?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","private":true,"type":"module","dependencies":{"benchmark-config":"1.0.0"}}"#,
+        )?;
+        fs::write(root.join("yarn.lock"), LOCKFILE)?;
         let package = root.join("node_modules/benchmark-config");
         fs::create_dir_all(&package)?;
+        fs::write(package.join("package.json"), PACKAGE)?;
         fs::write(
-            package.join("package.json"),
-            r#"{"type":"module","exports":{".":{"alternate":"./config-b.mjs","default":"./config-a.mjs"}}}"#,
+            package.join("config-a.mjs"),
+            "export {config} from './value-a.mjs';",
         )?;
-        fs::write(package.join("config-a.mjs"), "export const config = 'a';")?;
-        fs::write(package.join("config-b.mjs"), "export const config = 'b';")?;
+        fs::write(
+            package.join("config-b.mjs"),
+            "export {config} from './value-b.mjs';",
+        )?;
+        fs::write(package.join("value-a.mjs"), "export const config = 'a';")?;
+        fs::write(package.join("value-b.mjs"), "export const config = 'b';")?;
         fs::write(
             root.join("m0.mjs"),
             "export let value = 1; export function bump() { value++; }",
@@ -124,7 +157,10 @@ fn main() -> eyre::Result<()> {
         let output = root.join(".bundler-output");
         let mut session = BuildSession::new(root)?;
         let cold = run(&mut session, &options, &output)?;
-        assert_eq!(cold.build.counters.source_parses, MODULES + 2);
+        assert_eq!(cold.build.counters.source_parses, MODULES + 3);
+        assert_eq!(cold.build.counters.resolutions, MODULES + 2);
+        assert_eq!(cold.build.counters.resolution_cache_hits, 0);
+        assert_eq!(cold.build.counters.inventory_directory_reads, 0);
         let cold_artifacts = cold.build.product.artifacts.clone();
         let sidecar = segment_cache::sidecar_path(&root.join("main.mjs"));
         let sidecar_bytes = fs::read(&sidecar)?;
@@ -136,11 +172,29 @@ fn main() -> eyre::Result<()> {
         let mut session = BuildSession::new(root)?;
         let warm = run(&mut session, &options, &output)?;
         assert_eq!(warm.build.counters.source_parses, 0);
-        assert_eq!(warm.build.counters.disk_hits, MODULES + 2);
+        assert_eq!(warm.build.counters.disk_hits, MODULES + 3);
+        assert_eq!(warm.build.counters.resolutions, 0);
+        assert_eq!(warm.build.counters.resolution_cache_hits, MODULES + 2);
         assert_eq!(warm.build.product.artifacts, cold_artifacts);
         assert_eq!(fs::read(&sidecar)?, sidecar_bytes);
         assert_eq!(fs::metadata(&sidecar)?.modified()?, sidecar_modified);
         results.entry("warm").or_default().push(warm);
+
+        fs::write(
+            root.join("yarn.lock"),
+            LOCKFILE.replace("unused-one", "unused-two"),
+        )?;
+        let mut session = BuildSession::new(root)?;
+        let unrelated = run(&mut session, &options, &output)?;
+        assert_eq!(unrelated.build.counters.source_parses, 0);
+        assert_eq!(unrelated.build.counters.resolutions, 0);
+        assert_eq!(unrelated.build.counters.resolution_cache_hits, MODULES + 2);
+        assert_eq!(unrelated.build.product.artifacts, cold_artifacts);
+        assert_eq!(unrelated.published.files_written, 0);
+        results
+            .entry("unrelated-lockfile")
+            .or_default()
+            .push(unrelated);
 
         let noop = run(&mut session, &options, &output)?;
         assert_eq!(noop.build.counters.source_parses, 0);
@@ -164,19 +218,39 @@ fn main() -> eyre::Result<()> {
         assert_eq!(edit.build.counters.source_parses, 1);
         results.entry("export-edit").or_default().push(edit);
 
+        fs::write(
+            package.join("package.json"),
+            PACKAGE.replace(
+                r#""type":"module""#,
+                r#""description":"changed","type":"module""#,
+            ),
+        )?;
+        let edit = run(&mut session, &options, &output)?;
+        assert_eq!(edit.build.counters.source_parses, 0);
+        assert_eq!(edit.build.counters.resolutions, 2);
+        assert_eq!(edit.build.counters.resolution_cache_hits, MODULES);
+        results.entry("package-edit").or_default().push(edit);
+
         options.resolver.export_conditions.push("alternate".into());
         let edit = run(&mut session, &options, &output)?;
-        assert_eq!(edit.build.counters.source_parses, 1);
+        assert_eq!(edit.build.counters.source_parses, 2);
+        assert_eq!(edit.build.counters.resolutions, MODULES + 2);
         results.entry("config-edit").or_default().push(edit);
     }
-    println!("64-module star chain + entry + configured dependency; {SAMPLES} fresh-root samples per scenario");
-    println!("scenario,median_total_ms,min_total_ms,max_total_ms,median_build_ms,extract,resolutions,link,output_parses,source_reparses,fragment_reparses,final_validations,memory_hits,disk_hits,artifact_writes,cache_bytes");
+    println!(
+        "64-module star chain + entry + configured dependency; {SAMPLES} fresh-root samples per scenario"
+    );
+    println!(
+        "scenario,median_total_ms,min_total_ms,max_total_ms,median_build_ms,extract,resolutions,resolution_hits,resolution_misses,directory_reads,link,output_parses,source_reparses,fragment_reparses,final_validations,memory_hits,disk_hits,artifact_writes,cache_bytes"
+    );
     for name in [
         "cold",
         "warm",
+        "unrelated-lockfile",
         "no-op",
         "local-edit",
         "export-edit",
+        "package-edit",
         "config-edit",
     ] {
         let samples = results.get_mut(name).expect("all scenarios");
@@ -184,13 +258,16 @@ fn main() -> eyre::Result<()> {
         let middle = &samples[SAMPLES / 2];
         let c = &middle.build.counters;
         println!(
-            "{name},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{}",
+            "{name},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             middle.total_ms,
             samples[0].total_ms,
             samples[SAMPLES - 1].total_ms,
             c.elapsed.as_secs_f64() * 1000.0,
             c.source_parses,
             c.resolutions,
+            c.resolution_cache_hits,
+            c.resolution_cache_misses,
+            c.inventory_directory_reads,
             c.emissions,
             c.output_parses,
             c.source_reparses,

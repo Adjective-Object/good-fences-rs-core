@@ -22,3 +22,19 @@ authorize tracked hits. Windows identities use metadata-only directory/file
 handles with the repository's pinned nightly toolchain.
 
 Run `cargo test -p ftree_cache` (also supported with `--features deadlock_ref`).
+Observation/revalidation errors include the operation and input path while
+retaining underlying IO causes.
+
+`InputSnapshot` defines one explicit filesystem epoch. Snapshot-aware observers
+share single-flight path, link-prefix and exact-content reads; hits replay the
+original observations without filesystem access. Start a new snapshot for fresh
+boundary checks (`InputProof::validate_in`), never reuse the live build snapshot
+to certify final freshness. `checked_from_parts_in` validates borrowed disk
+observations against that epoch without unpacking a proof tree.
+After filesystem changes, invalidate or replace both the snapshot and the
+context cache together.
+
+Context values and proofs are published together through per-key cells.
+Returned handles own an `Arc`, not a DashMap shard lock; initializers run outside
+shard locks, and unrelated contexts can initialize concurrently. Invalidation
+removes cells without invalidating outstanding handles.

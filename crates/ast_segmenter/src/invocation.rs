@@ -33,7 +33,7 @@ pub(crate) fn shape(callee: &Expression<'_>, facts: &ModuleFacts) -> CalleeShape
         Expression::ComputedMemberExpression(m) => Some((
             &m.object,
             match m.expression.get_inner_expression() {
-                Expression::StringLiteral(s) => Some(s.value.to_string()),
+                Expression::StringLiteral(s) => s.value.as_str().map(str::to_owned),
                 _ => None,
             },
             true,
@@ -45,7 +45,7 @@ pub(crate) fn shape(callee: &Expression<'_>, facts: &ModuleFacts) -> CalleeShape
             ChainElement::ComputedMemberExpression(m) => Some((
                 &m.object,
                 match m.expression.get_inner_expression() {
-                    Expression::StringLiteral(s) => Some(s.value.to_string()),
+                    Expression::StringLiteral(s) => s.value.as_str().map(str::to_owned),
                     _ => None,
                 },
                 true,

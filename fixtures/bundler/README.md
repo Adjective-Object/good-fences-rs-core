@@ -40,7 +40,7 @@ or explicitly test the native fallback; a native no-op is not transform coverage
 From the repository root, with Node.js 22 and the repository Rust toolchain:
 
 ```sh
-cargo build -p bundler --example build
+cargo build -p bundler-cli
 node scripts/bundler-fixtures.mjs
 ```
 
@@ -237,7 +237,7 @@ Metadata/input, build, backend and output validation stages remain separate.
 `authored/native-generated-async` observes eager unrelated effects, a cold guard,
 introduced suspension, receiver semantics and concurrent stable identity.
 Do not use output observers to bypass ordinary JS differential contracts.
-The example driver exposes `generatedBoundaries` plus `moduleMembers` and
+The bundler CLI exposes `generatedBoundaries` plus `moduleMembers` and
 `segmentMembers` containing source identities and final artifact paths. Use these
 to verify extraction/co-location, not generated filename patterns. These fields
 are build diagnostics; they are absent from the source observation.
@@ -285,7 +285,7 @@ loading selector `a` does not warm `b` when their destinations differ. Matching
 source-owner/original-module/destination projections share one real instance.
 There is no global runtime layer.
 
-The bounded example driver accepts this exact optional shape:
+The bounded bundler CLI accepts this exact optional shape:
 
 ```json
 {"fixtureConfig":{"output":{"lazy_runtimes":[{
@@ -336,7 +336,7 @@ Node defaults. Move previously staged tsconfig custom conditions here (or to
 the Rust resolver options); tsconfig files, including JSONC extends/references,
 are no longer interpreted or validated for resolution. TS compilation remains external.
 
-`fixtureConfig` exposes only the example driver's output/CSS options, bounded
+`fixtureConfig` exposes only the bundler CLI's output/CSS options, bounded
 worker count, cache mode and additional explicit export conditions; it does not
 configure external dependencies, effects, entry renames or custom plugins:
 
@@ -577,8 +577,8 @@ The shared `observeEntries` helper returns `{stdout, outcomes}`, where each orde
 is `{entry, stdout, error}` and `error` is null or `{name, code?}`. Differential
 comparison includes observed codes even when the manifest does not constrain
 them, and compares stdout per entry as well as the manifest's concatenated lines.
-`buildProject` invokes `bundler`'s `examples/build.rs` library driver; there is no
-competing JS resolver/graph/emitter or handwritten CLI framework.
+`buildProject` invokes the `bundler-cli` crate, which calls `BuildSession`; there is no
+competing JS resolver/graph/emitter. Argument parsing uses clap.
 
 Managed copies default to project-local `target/p1-test-tmp`. Runtime invocations
 have five-second timeouts, bounded output, sanitized Node preload environment,

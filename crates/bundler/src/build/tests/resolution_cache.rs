@@ -111,15 +111,27 @@ fn resolution_cache_new_sessions_and_incomplete_installed_graphs_hit() {
 #[ignore = "subprocess helper, invoked with a managed project directory"]
 fn resolution_cache_process_worker() {
     let root = PathBuf::from(std::env::var_os("BUNDLER_RESOLUTION_TEST_ROOT").unwrap());
-    let result = build(&root, &options());
+    let mut config = options();
+    config.output.source_maps = true;
+    let (result, published) = BuildSession::new(&root)
+        .unwrap()
+        .build_and_publish(
+            &config,
+            &root.join(".bundler-process-output"),
+            &crate::publish::Cancellation::default(),
+        )
+        .unwrap();
     fs::write(
         root.join(".bundler-process-result"),
-        format!(
-            "{}:{}:{:?}",
-            result.counters.resolutions,
-            result.counters.resolution_cache_hits,
-            hash(format!("{:?}", result.product.artifacts).as_bytes()),
-        ),
+        serde_json::to_vec(&serde_json::json!({
+            "resolutions": result.counters.resolutions,
+            "hits": result.counters.resolution_cache_hits,
+            "parses": result.counters.source_parses,
+            "directoryReads": result.counters.inventory_directory_reads,
+            "entry": published.entries["main"],
+            "artifacts": hash(format!("{:?}", result.product.artifacts).as_bytes()),
+        }))
+        .unwrap(),
     )
     .unwrap();
 }
@@ -128,6 +140,11 @@ fn resolution_cache_process_worker() {
 fn resolution_cache_separate_processes_reuse_original_request_proofs() {
     let dir = TmpDir::new();
     fixture(dir.root());
+    write(
+        dir.root(),
+        "node_modules/pkg/package.json",
+        r#"{"name":"pkg","version":"1.0.0","_locator":"pkg@npm:1.0.0","exports":"./index.mjs"}"#,
+    );
     let run = || {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -139,13 +156,118 @@ fn resolution_cache_separate_processes_reuse_original_request_proofs() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        fs::read_to_string(dir.root().join(".bundler-process-result")).unwrap()
+        serde_json::from_slice::<serde_json::Value>(
+            &fs::read(dir.root().join(".bundler-process-result")).unwrap(),
+        )
+        .unwrap()
     };
     let cold = run();
     let warm = run();
-    assert!(cold.starts_with("2:0:"), "{cold}");
-    assert!(warm.starts_with("0:2:"), "{warm}");
-    assert_eq!(cold.splitn(3, ':').nth(2), warm.splitn(3, ':').nth(2));
+    assert_eq!(cold["resolutions"], 2);
+    assert_eq!(cold["hits"], 0);
+    assert_eq!(warm["resolutions"], 0);
+    assert_eq!(warm["hits"], 2);
+    assert_eq!(warm["parses"], 0);
+    assert_eq!(cold["artifacts"], warm["artifacts"]);
+    let package_sidecar = sidecar(&dir.root().join("node_modules/pkg"), &options());
+    let before = fs::read(&package_sidecar).unwrap();
+    write(
+        dir.root(),
+        "yarn.lock",
+        &BERRY.replace("unused-one", "changed-disconnected-package"),
+    );
+    let unrelated = run();
+    assert_eq!(unrelated["resolutions"], 0);
+    assert_eq!(unrelated["hits"], 2);
+    assert_eq!(unrelated["artifacts"], cold["artifacts"]);
+    assert_eq!(fs::read(&package_sidecar).unwrap(), before);
+    for result in [cold, warm, unrelated] {
+        assert_eq!(result["directoryReads"], 0);
+        let entry = result["entry"].as_str().unwrap();
+        let output = std::process::Command::new("node")
+            .args([
+                "--input-type=module",
+                "-e",
+                "import {pathToFileURL} from 'node:url'; const m = await import(pathToFileURL(process.argv[1])); console.log(m.value);",
+            ])
+            .arg(entry)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "1");
+        assert!(PathBuf::from(format!("{entry}.map")).is_file());
+    }
+}
+
+#[test]
+fn resolution_cache_runtime_package_context_and_maps_recheck_new_candidates() {
+    let dir = TmpDir::new();
+    fixture(dir.root());
+    write(
+        dir.root(),
+        "node_modules/pkg/index.mjs",
+        "export async function load(name) { return (await import(`./choices/${name}.ts`)).value; }",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/choices/one.ts",
+        "export const value: number = 17;",
+    );
+    write(dir.root(), "main.mjs", "export {load} from 'pkg';");
+    let mut config = options();
+    config.output.source_maps = true;
+    let cold = build(dir.root(), &config);
+    let warm = build(dir.root(), &config);
+    assert_eq!(warm.counters.resolutions, 0);
+    assert!(warm.counters.resolution_cache_hits > 0);
+    assert_eq!(warm.product.artifacts, cold.product.artifacts);
+    let check = |result: &BuildResult, value: u32| {
+        let runner = format!(
+            "import assert from 'node:assert/strict'; import {{load}} from './main.mjs'; assert.equal(await load('one'), {value});"
+        );
+        assert_eq!(observe_named(&result.product.artifacts, &runner), b"");
+        let contents: Vec<_> = result
+            .product
+            .artifacts
+            .files
+            .iter()
+            .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "map"))
+            .flat_map(|(_, text)| {
+                let map = oxc_sourcemap::SourceMap::from_json_string(text).unwrap();
+                map.get_source_contents()
+                    .flatten()
+                    .map(|content| content.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert!(contents
+            .iter()
+            .any(|text| text.contains(&format!("number = {value}"))));
+    };
+    check(&cold, 17);
+    check(&warm, 17);
+    write(
+        dir.root(),
+        "node_modules/pkg/choices/one.ts",
+        "export const value: number = 23;",
+    );
+    write(
+        dir.root(),
+        "node_modules/pkg/choices/two.ts",
+        "export const value: number = 29;",
+    );
+    let changed = build(dir.root(), &config);
+    assert!(changed.counters.resolution_cache_hits > 0);
+    assert!(changed.counters.resolutions > 0);
+    assert_ne!(changed.product.artifacts, cold.product.artifacts);
+    check(&changed, 23);
+    assert_eq!(
+        observe_named(
+            &changed.product.artifacts,
+            "import assert from 'node:assert/strict'; import {load} from './main.mjs'; assert.equal(await load('two'), 29);"
+        ),
+        b""
+    );
 }
 
 #[test]
