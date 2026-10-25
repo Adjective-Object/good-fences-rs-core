@@ -44,8 +44,6 @@ impl Backend {
 pub struct Artifacts<C = String> {
     pub backend: Backend,
     pub files: BTreeMap<PathBuf, C>,
-    /// Self-contained classic scripts, not native module namespace routes.
-    pub classic_scripts: BTreeSet<PathBuf>,
     /// Non-executable, byte-preserving resources keyed by output-relative paths.
     pub resources: BTreeMap<PathBuf, Vec<u8>>,
     /// Input CSS roots to owned output-relative CSS paths, never public URLs.
@@ -124,7 +122,6 @@ impl Artifacts<crate::assembly::Code> {
         Ok(Artifacts {
             backend: self.backend,
             files,
-            classic_scripts: self.classic_scripts,
             resources: self.resources,
             stylesheets: self.stylesheets,
             entries: self.entries,
@@ -468,24 +465,6 @@ pub(crate) trait SourceTexts {
     fn text(&self, path: &std::path::Path) -> Option<&str>;
 }
 
-pub(crate) fn classic_script_plan(
-    graph: &SourceGraph,
-    plan: &ChunkPlan,
-    policy: &EffectPolicy,
-    sources: &dyn SourceTexts,
-    mappings: &BTreeMap<PathBuf, std::sync::Arc<crate::sourcemap::Source>>,
-) -> eyre::Result<Artifacts<crate::assembly::Code>> {
-    let manifest = diagnostic_manifest(graph, plan, policy)?;
-    graph.validate_links()?;
-    let relocations = BTreeMap::new();
-    let mut modules = load_modules(graph, plan, sources, &relocations)?;
-    for module in modules.values_mut() {
-        module.mapping = mappings.get(module.path).cloned();
-    }
-    let symbols = crate::symbols::Symbols::link(graph, plan)?;
-    native::classic_script(graph, plan, &modules, &manifest, &symbols)
-}
-
 impl SourceTexts for BTreeMap<PathBuf, String> {
     fn text(&self, path: &std::path::Path) -> Option<&str> {
         self.get(path).map(String::as_str)
@@ -543,17 +522,6 @@ fn load_modules<'a>(
             .text(path)
             .ok_or_else(|| eyre::eyre!("{}: missing linked source text", path.display()))?;
         let parsed = crate::emit::checked_source(graph, file, source)?;
-        for dependency in parsed
-            .facts()
-            .dependencies()
-            .iter()
-            .filter(|d| d.kind() == DependencyKind::Url)
-        {
-            ensure!(relocations.get(path).is_some_and(|relocations| relocations.iter().any(|relocation|
-                matches!(relocation, crate::css_loading::UrlRelocation::Script { dependency: id, .. } if *id == dependency.id()))),
-                "{}: URL occurrence at bytes {}..{} needs a checked classic-script resource build",
-                path.display(), dependency.span().start, dependency.span().end);
-        }
         path.to_str()
             .ok_or_eyre("emission module paths must be UTF-8")?;
         modules.insert(
@@ -669,9 +637,6 @@ pub(super) fn target_files(
     file: u32,
     dependency: Dependency<'_>,
 ) -> eyre::Result<Vec<u32>> {
-    if dependency.kind() == DependencyKind::Url {
-        return Ok(vec![]);
-    }
     if matches!(
         graph.dependency_target(file, dependency.id()),
         Some(DependencyTarget::External(_))

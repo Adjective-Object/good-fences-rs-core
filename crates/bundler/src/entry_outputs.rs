@@ -17,23 +17,6 @@ pub(super) fn apply(
     options: &BuildOptions,
     artifacts: &mut Artifacts<Code>,
 ) -> eyre::Result<BTreeMap<PathBuf, PathBuf>> {
-    apply_mode(root, options, artifacts, false)
-}
-
-pub(super) fn apply_classic(
-    root: &Path,
-    options: &BuildOptions,
-    artifacts: &mut Artifacts<Code>,
-) -> eyre::Result<BTreeMap<PathBuf, PathBuf>> {
-    apply_mode(root, options, artifacts, true)
-}
-
-fn apply_mode(
-    root: &Path,
-    options: &BuildOptions,
-    artifacts: &mut Artifacts<Code>,
-    classic_script: bool,
-) -> eyre::Result<BTreeMap<PathBuf, PathBuf>> {
     let mut names = BTreeMap::new();
     let mut renames: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     let mut aliases = BTreeSet::new();
@@ -53,9 +36,7 @@ fn apply_mode(
                     .wrap_err("linked entry outside build root requires an explicit output_name")?,
             )?,
         };
-        if classic_script && entry.output_name.is_none() {
-            requested.set_extension("js");
-        } else if entry.output_name.is_none()
+        if entry.output_name.is_none()
             && (crate::resource::kind(&entry.path, &options.css)
                 != crate::resource::ResourceKind::Script
                 || crate::transpile::required(&entry.path)
@@ -74,33 +55,22 @@ fn apply_mode(
         let mut path = output_path(&requested_text)
             .wrap_err_with(|| format!("entry {name:?} output {}", requested.display()))?;
         if path.extension().is_none() {
-            let extension = if classic_script {
-                "js"
-            } else {
-                entry
-                    .path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .filter(|s| matches!(*s, "mjs" | "cjs" | "js"))
-                    .filter(|s| commonjs || *s != "cjs")
-                    .unwrap_or(if commonjs { "cjs" } else { "mjs" })
-            };
+            let extension = entry
+                .path
+                .extension()
+                .and_then(|s| s.to_str())
+                .filter(|s| matches!(*s, "mjs" | "cjs" | "js"))
+                .filter(|s| commonjs || *s != "cjs")
+                .unwrap_or(if commonjs { "cjs" } else { "mjs" });
             path.set_extension(extension);
         }
         let extension = path.extension().and_then(|s| s.to_str());
-        if classic_script {
-            ensure!(
-                extension == Some("js"),
-                "classic script output must have a .js extension"
-            );
-        } else {
-            ensure!(
-                extension == Some("js") || extension == Some(if commonjs { "cjs" } else { "mjs" }),
-                "entry output {name:?}: incompatible output extension for {}",
-                if commonjs { "CommonJS" } else { "ESM" }
-            );
-        }
-        if extension == Some("js") && !classic_script {
+        ensure!(
+            extension == Some("js") || extension == Some(if commonjs { "cjs" } else { "mjs" }),
+            "entry output {name:?}: incompatible output extension for {}",
+            if commonjs { "CommonJS" } else { "ESM" }
+        );
+        if extension == Some("js") {
             let package = portable_path(&path.parent().unwrap().join("package.json"))?;
             let format = if commonjs { "commonjs" } else { "module" };
             if let Some(previous) = packages.insert(package.clone(), format) {
@@ -216,7 +186,6 @@ fn apply_mode(
             .insert(package, Code::from(format!("{{\"type\":\"{format}\"}}\n")));
     }
     artifacts.entries = names;
-    artifacts.classic_scripts = artifacts.classic_scripts.iter().map(&project).collect();
     for path in artifacts
         .modules
         .values_mut()

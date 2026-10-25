@@ -119,7 +119,7 @@ fn ordinary(
     execution: crate::execution::ExecutionOptions,
 ) -> eyre::Result<Artifacts<Code>> {
     if let Some(output) = tracing::info_span!("emit.single")
-        .in_scope(|| single(graph, plan, modules, manifest, prepared, None, false))?
+        .in_scope(|| single(graph, plan, modules, manifest, prepared, None))?
     {
         return Ok(output);
     }
@@ -557,55 +557,8 @@ pub(super) fn deferred(
         manifest,
         &prepared,
         Some(&initialization),
-        false,
     )?
     .map(|artifacts| (artifacts, initialization.init)))
-}
-
-pub(super) fn classic_script(
-    graph: &SourceGraph,
-    plan: &ChunkPlan,
-    modules: &BTreeMap<u32, Module<'_>>,
-    manifest: &DiagnosticManifest,
-    symbols: &Symbols,
-) -> eyre::Result<Artifacts<Code>> {
-    for module in modules.values() {
-        let facts = module.parsed.facts();
-        ensure!(
-            !facts.commonjs() && facts.top_level_await().is_empty() && facts.hashbang().is_none(),
-            "{}: classic script requires synchronous ESM without a hashbang",
-            module.path.display()
-        );
-        if let Some(dependency) = facts.dependencies().iter().find(|dependency| {
-            !dependency.type_only()
-                && !matches!(
-                    dependency.kind(),
-                    DependencyKind::Import | DependencyKind::ReExport
-                )
-        }) {
-            eyre::bail!(
-                "{}: classic script cannot preserve {:?} at bytes {}..{}",
-                module.path.display(),
-                dependency.kind(),
-                dependency.span().start,
-                dependency.span().end
-            );
-        }
-        ensure!(
-            !facts.references().iter().any(|reference| {
-                reference.binding().is_none() && reference.name() == "arguments"
-            }),
-            "{}: classic script cannot capture an unresolved arguments reference",
-            module.path.display()
-        );
-    }
-    let prepared = PreparedValues::new(graph, modules, symbols);
-    single(graph, plan, modules, manifest, &prepared, None, true)?.ok_or_else(|| {
-        eyre::eyre!(
-            "classic script requires one complete acyclic synchronous ESM closure with no \
-             external, CommonJS, dynamic-import or namespace boundary"
-        )
-    })
 }
 
 fn single(
@@ -615,7 +568,6 @@ fn single(
     manifest: &DiagnosticManifest,
     prepared: &PreparedValues<'_>,
     initialization: Option<&Initialization>,
-    classic_script: bool,
 ) -> eyre::Result<Option<Artifacts<Code>>> {
     let symbols = prepared.symbols;
     // Bounded fast path: a single entrance covers the complete acyclic synchronous
@@ -633,11 +585,7 @@ fn single(
     let [file] = seed.evaluation_roots.as_slice() else {
         return Ok(None);
     };
-    if if classic_script {
-        !seed.binding_roots.is_empty()
-    } else {
-        seed.binding_roots != [GraphNode::Module(*file)]
-    } {
+    if seed.binding_roots != [GraphNode::Module(*file)] {
         return Ok(None);
     }
     for module in modules.values() {
@@ -779,48 +727,31 @@ fn single(
         Some(initialization) => initialization.guard(bodies),
         None => bodies,
     });
-    if !classic_script {
-        output.push_str("export {\n");
-        if let Some(initialization) = initialization {
-            output.push_str(&format!("{},\n", initialization.init));
-        }
-        for (public, linked) in &symbols.exports[file] {
-            output.push_str(&format!(
-                "{} as {},\n",
-                values
-                    .name(&linked.identity)
-                    .ok_or_eyre("missing native export value")?,
-                quote(public)
-            ));
-        }
-        output.push_str("};\n");
-    } else {
-        output = output.surrounded("(function() {\n'use strict';\n", "\n})();\n");
+    output.push_str("export {\n");
+    if let Some(initialization) = initialization {
+        output.push_str(&format!("{},\n", initialization.init));
     }
-    let path = PathBuf::from(if classic_script {
-        "native.js"
-    } else {
-        "native.mjs"
-    });
-    output.default_export = !classic_script && symbols.exports[file].contains_key("default");
+    for (public, linked) in &symbols.exports[file] {
+        output.push_str(&format!(
+            "{} as {},\n",
+            values
+                .name(&linked.identity)
+                .ok_or_eyre("missing native export value")?,
+            quote(public)
+        ));
+    }
+    output.push_str("};\n");
+    let path = PathBuf::from("native.mjs");
+    output.default_export = symbols.exports[file].contains_key("default");
     let (chunk, nodes) = plan.chunks.first_key_value().unwrap();
     Ok(Some(Artifacts {
         backend: super::Backend::Native,
         resources: BTreeMap::new(),
         stylesheets: BTreeMap::new(),
         files: BTreeMap::from([(path.clone(), output)]),
-        classic_scripts: if classic_script {
-            BTreeSet::from([path.clone()])
-        } else {
-            BTreeSet::new()
-        },
         entries: BTreeMap::from([(entry.clone(), path.clone())]),
         // Only the public entry namespace is executable as an independent module.
-        modules: if classic_script {
-            BTreeMap::new()
-        } else {
-            BTreeMap::from([(graph.file_path(*file).unwrap().to_owned(), path.clone())])
-        },
+        modules: BTreeMap::from([(graph.file_path(*file).unwrap().to_owned(), path.clone())]),
         members: nodes
             .iter()
             .map(|node| (node.clone(), path.clone()))

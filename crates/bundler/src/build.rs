@@ -31,7 +31,6 @@ mod discovery;
 mod entry_outputs;
 mod prepare;
 mod scratch;
-mod script_urls;
 
 pub use crate::css_selection::CssModules;
 
@@ -236,7 +235,6 @@ pub struct BuildSession {
     )>,
     pending_invalidated: BTreeSet<PathBuf>,
     last: Option<Rc<BuildProduct>>,
-    script_sessions: BTreeMap<PathBuf, Box<BuildSession>>,
 }
 
 // Publication ownership/cleanup uses this integrity hash, not the internal keys.
@@ -264,7 +262,6 @@ impl BuildSession {
             declarations: None,
             pending_invalidated: BTreeSet::new(),
             last: None,
-            script_sessions: BTreeMap::new(),
         })
     }
 
@@ -275,36 +272,11 @@ impl BuildSession {
     pub fn build(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
         options
             .execution
-            .scoped_pool(|| self.build_inner(options, false))?
+            .scoped_pool(|| self.build_inner(options))?
             .wrap_err_with(|| format!("building project {}", self.root.display()))
     }
 
-    /// Build one evaluation-only browser entry as an isolated, synchronous script.
-    /// Only complete acyclic ESM closures supported by native lexical linking are
-    /// accepted; unsupported boundaries return errors, never module output.
-    /// Nested resource URLs remain unsupported in this bounded script closure.
-    pub fn build_classic_script(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
-        ensure!(
-            options.resolver.target_env == TargetEnv::Browser
-                && options.entries.len() == 1
-                && options.entries.values().all(|entry| !entry.namespace),
-            "classic script requires one evaluation-only browser entry"
-        );
-        ensure!(
-            !options.output.synthesize_async_boundaries && options.output.lazy_runtimes.is_empty(),
-            "classic script does not support generated async boundaries or lazy runtimes"
-        );
-        options
-            .execution
-            .scoped_pool(|| self.build_inner(options, true))?
-            .wrap_err_with(|| format!("building classic script in {}", self.root.display()))
-    }
-
-    fn build_inner(
-        &mut self,
-        options: &BuildOptions,
-        classic_script: bool,
-    ) -> eyre::Result<BuildResult> {
+    fn build_inner(&mut self, options: &BuildOptions) -> eyre::Result<BuildResult> {
         let _span = tracing::info_span!(
             "build",
             entries = options.entries.len(),
@@ -729,15 +701,7 @@ impl BuildSession {
                         if !has_context && self.resolutions.get(&path) != Some(&resolved) {
                             changed.insert(path.clone());
                         }
-                        for (id, target) in &resolved {
-                            if source.record.module().facts().dependencies().iter().any(
-                                |dependency| {
-                                    dependency.id() == *id
-                                        && dependency.kind() == DependencyKind::Url
-                                },
-                            ) {
-                                continue;
-                            }
+                        for target in resolved.values() {
                             if let DependencyTarget::File(path) = target {
                                 discovered.insert(path.clone());
                             } else if let DependencyTarget::Context(candidates) = target {
@@ -942,35 +906,10 @@ impl BuildSession {
                 self.pending_invalidated.insert(path.clone());
             }
         }
+        let invalidated = self.reverse_users(self.pending_invalidated.clone());
         self.sources.retain(|path, _| prepared_paths.contains(path));
         self.resolutions
             .retain(|path, _| prepared_paths.contains(path));
-        let scripts = script_urls::prepare(
-            &self.root,
-            &inventory,
-            &self.sources,
-            &self.resolutions,
-            &mut self.script_sessions,
-            options,
-            classic_script,
-            &mut relocations,
-            &mut counters,
-            &mut warnings,
-        )?;
-        for (target, script) in &scripts {
-            if !script.invalidated.is_empty() {
-                self.pending_invalidated
-                    .extend(script.invalidated.iter().cloned());
-                for (path, targets) in &self.resolutions {
-                    if targets.values().any(
-                        |value| matches!(value, DependencyTarget::File(path) if path == target),
-                    ) {
-                        self.pending_invalidated.insert(path.clone());
-                    }
-                }
-            }
-        }
-        let invalidated = self.reverse_users(self.pending_invalidated.clone());
         resolver.retain_precise();
         sass_resolver.retain_precise();
         tracing::info!(target: "bundler::progress", "Checking build fingerprints");
@@ -1061,8 +1000,7 @@ impl BuildSession {
         );
         fingerprints.output = Fingerprint::of(
             format!(
-                "{fingerprints:?}:{emitter:?}:{classic_script}:{:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}",
-                scripts.iter().map(|(path, script)| (path, &script.product.fingerprints)).collect::<Vec<_>>(),
+                "{fingerprints:?}:{emitter:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{:?}",
                 crate::css_syntax::PARSER_REVISION,
                 options.entries,
                 public_base.as_str(),
@@ -1094,14 +1032,7 @@ impl BuildSession {
                 tracing::info!(target: "bundler::progress", "Rechecking inputs for unchanged build");
                 Self::recheck(&self.sources, &inventory)
                     .wrap_err("rechecking sources before build reuse")?;
-                script_urls::recheck(
-                    &inventory,
-                    &mut self.script_sessions,
-                    &scripts,
-                    options,
-                    &mut counters,
-                )?;
-                counters.inventory_directory_reads += inventory.directory_reads();
+                counters.inventory_directory_reads = inventory.directory_reads();
                 resolver
                     .recheck()
                     .wrap_err("rechecking script resolution inputs before build reuse")?;
@@ -1229,30 +1160,19 @@ impl BuildSession {
             })
             .collect::<eyre::Result<BTreeMap<_, _>>>()?;
         tracing::info!(target: "bundler::progress", "Linking and emitting native chunks");
-        let mut artifacts = if classic_script {
-            ensure!(
-                self.sources
-                    .keys()
-                    .all(|path| crate::resource::kind(path, &options.css)
-                        == crate::resource::ResourceKind::Script),
-                "classic script supports script inputs only, not prepared resources"
-            );
-            link::classic_script_plan(&graph, &plan, &options.effects, &self.sources, &mappings)
-        } else {
-            link::esm_plan_configured(
-                &graph,
-                &plan,
-                &options.effects,
-                &self.sources,
-                &relocations,
-                options.resolver.target_env == TargetEnv::Browser,
-                &require_resources,
-                &BTreeMap::new(),
-                options.output.min_chunk_bytes,
-                &mappings,
-                options.execution,
-            )
-        }
+        let mut artifacts = link::esm_plan_configured(
+            &graph,
+            &plan,
+            &options.effects,
+            &self.sources,
+            &relocations,
+            options.resolver.target_env == TargetEnv::Browser,
+            &require_resources,
+            &BTreeMap::new(),
+            options.output.min_chunk_bytes,
+            &mappings,
+            options.execution,
+        )
         .wrap_err("linking native output chunks")?;
         tracing::info!(target: "bundler::progress", "Finalizing resources and rendering output");
         let finalize_span = tracing::info_span!("build.finalize").entered();
@@ -1270,37 +1190,16 @@ impl BuildSession {
                     .wrap_err_with(|| format!("emitting stylesheet {}", path.display()))?;
             }
         }
-        let mut destinations = if classic_script {
-            entry_outputs::apply_classic(&self.root, options, &mut artifacts)
-        } else {
-            entry_outputs::apply(&self.root, options, &mut artifacts)
-        }
-        .wrap_err("assigning entry output paths")?;
-        for script in scripts.values() {
-            for path in script.product.artifacts.files.keys() {
-                ensure!(
-                    destinations.insert(path.clone(), path.clone()).is_none(),
-                    "script URL artifact identity collision: {}",
-                    path.display()
-                );
-            }
-        }
-        let mut artifacts = artifacts
+        let destinations = entry_outputs::apply(&self.root, options, &mut artifacts)
+            .wrap_err("assigning entry output paths")?;
+        let artifacts = artifacts
             .render_to_with_maps(&destinations, options.output.source_maps)
             .wrap_err("rendering output artifacts and source maps")?;
-        script_urls::merge(&mut artifacts, &scripts)?;
         drop(finalize_span);
         tracing::info!(target: "bundler::progress", "Rechecking build inputs");
         Self::recheck(&self.sources, &inventory)
             .wrap_err("rechecking sources before build success")?;
-        script_urls::recheck(
-            &inventory,
-            &mut self.script_sessions,
-            &scripts,
-            options,
-            &mut counters,
-        )?;
-        counters.inventory_directory_reads += inventory.directory_reads();
+        counters.inventory_directory_reads = inventory.directory_reads();
         resolver
             .recheck()
             .wrap_err("rechecking script resolution inputs before build success")?;

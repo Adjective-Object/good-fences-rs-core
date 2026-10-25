@@ -388,8 +388,7 @@ enumeration!(
     ReExport,
     DynamicImport,
     Require,
-    ImportType,
-    Url
+    ImportType
 );
 enumeration!(
     effect_reason,
@@ -1131,18 +1130,12 @@ impl OperationKind<'_> {
                 NamespaceAccess::DirectRead { member, .. } => member,
                 NamespaceAccess::Native(_) => unreachable!("only direct reads have operations"),
             },
-            Self::Dependency { dependency } => {
-                let dependency = facts
-                    .dependencies()
-                    .iter()
-                    .find(|d| d.id() == dependency)
-                    .expect("validated dependency");
-                if dependency.kind() == o::DependencyKind::Url {
-                    dependency.specifier_span()
-                } else {
-                    dependency.span()
-                }
-            }
+            Self::Dependency { dependency } => facts
+                .dependencies()
+                .iter()
+                .find(|d| d.id() == dependency)
+                .expect("validated dependency")
+                .span(),
             Self::Export { span, .. } | Self::SourceHint { span } => span,
             Self::Invocation { invocation, .. } => facts
                 .invocations()

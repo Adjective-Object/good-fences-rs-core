@@ -612,7 +612,7 @@ fn balanced_type(mut tokens: &[&str], parameter: bool) -> bool {
     stack.is_empty()
 }
 
-pub(super) fn syntax_tokens(mut text: &str) -> Option<Vec<&str>> {
+fn syntax_tokens(mut text: &str) -> Option<Vec<&str>> {
     let mut tokens = Vec::new();
     loop {
         text = trivia(text)?;
@@ -1127,7 +1127,6 @@ fn operations(
                         DependencyKind::Import
                             | DependencyKind::DynamicImport
                             | DependencyKind::Require
-                            | DependencyKind::Url
                     ),
                     "invalid emission dependency kind"
                 );
@@ -1358,10 +1357,7 @@ fn operations(
         if contains(range, dependency.span())
             && matches!(
                 dependency.kind(),
-                DependencyKind::Import
-                    | DependencyKind::DynamicImport
-                    | DependencyKind::Require
-                    | DependencyKind::Url
+                DependencyKind::Import | DependencyKind::DynamicImport | DependencyKind::Require
             )
         {
             ensure!(

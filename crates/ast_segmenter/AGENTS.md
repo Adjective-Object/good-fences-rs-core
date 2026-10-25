@@ -138,9 +138,6 @@ parents and source-slot roots precompose nesting before the arena drops.
 PURE callee steps preserve parentheses as chain boundaries and guard awaits in
 the invocation's own function scope. CJS remains one opaque recipe with only
 dependency/hint slots. Never persist chosen names, targets or transform policy.
-Literal `new URL(relative, import.meta.url)` with unshadowed URL owns a `Url`
-dependency and a literal-slot operation under its original invocation. No Worker
-identity, resolved target, executable kind or resource activation is cached.
 Namespace-use candidates cover all import bindings; only linked namespace
 identities activate them, including named/default imports of namespace reexports.
 `emission.execution` owns parented callable/instance contexts and occurrence timing.

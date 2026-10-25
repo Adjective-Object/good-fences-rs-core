@@ -23,7 +23,7 @@ Graph linking, effect policy, Ecco registration, execution constraints and nativ
 recipe rendering consume owned-or-wire AST views. A byte-backed graph retains
 verified owners, including Ecco's nested storage, without unpacking extraction
 trees. Derived plans remain owned. Production `BuildSession` sidecars use typed
-`.seg.fb` records (schema 19/extractor 28); parse fingerprints include both active
+`.seg.fb` records (schema 18/extractor 27); parse fingerprints include both active
 versions. Legacy `.seg.cbor` and both staging formats are excluded from inventory,
 but never loaded as current facts or deleted by the migration.
 
@@ -48,51 +48,6 @@ Attached boolean `webpackIgnore: true` block or line comments leave literal and
 computed imports native, without resolving or capturing dependencies; arguments
 still evaluate normally. JSDoc/unrelated comments and string contents do not
 enable ignoring, and explicit false follows normal bundling.
-
-### Explicit classic-script subtargets
-
-`BuildSession::build_classic_script` independently builds one evaluation-only
-browser entry (`Entry.namespace = false`) into a self-contained `.js` script.
-It reuses checked native lexical linking and source-order scheduling, then
-isolates declarations in a strict function scope. Loading the bytes with
-`importScripts` completes initialization synchronously; there is no module
-loader, runtime compilation, factory registry or initialization in a parent
-realm. Output bytes, optional source maps, entry names, invalidation and cache
-rechecks use the ordinary public artifact pipeline. `Artifacts.classic_scripts`
-identifies the executable script paths; `publish::publish` publishes all owned
-bytes without requiring module-type metadata for those paths. No ESM namespace
-routes or package-format marker are advertised for this output.
-
-This bounded mode accepts only a complete acyclic synchronous ESM script
-closure that the existing single-entrance linker can reconstruct. It rejects
-externals, CommonJS, dynamic imports, top-level await, prepared resources,
-hashbangs, unresolved `arguments` captures and unsupported namespace/placement
-boundaries rather than falling back to module output. Generated async boundaries
-and registered lazy runtimes are unsupported.
-
-Browser `BuildSession::build` also discovers literal relative
-`new URL("./worker", import.meta.url)` resources with an unshadowed `URL`.
-The bounded JavaScript resource policy builds each checked target as an independent
-classic script; it does not infer a global Worker from a surrounding constructor
-or imported wrapper alias. Resolution uses configured extensions (including
-extensionless `.worker` requests), ordinary inventory admission and scoped proofs.
-Linked external targets retain checked project-relative entry routes, which child
-builds re-admit on preparation and final/no-op rechecks.
-Worker effects never enter the parent graph. Original URL construction and wrapper
-calls remain at their source sites; only the original literal slot is relocated
-through typed final artifact identities after pruning/entry renaming. Public bases
-apply from the final generation root, without changing owned script paths.
-Child maps/bytes are published with the parent, never exposed as parent namespace
-routes; child fingerprints and fresh input/proof rechecks participate in no-op
-reuse and target edits invalidate referring users.
-
-This is a classic-script JS resource contract, not a raw-source/JSON/asset URL
-loader or general import.meta implementation. Node URLs, nested script URLs,
-computed requests, queries/fragments/percent/backslash requests and shadowed URL
-constructors are explicit errors. The same bounded classic closure restrictions
-above apply, including deferred dynamic imports/contexts; unsupported targets fail
-the parent build, never emit an original source URL or a module-worker substitute.
-Low-level linking cannot emit URL occurrences without checked resource products.
 
 ### Package-local resolution caches
 

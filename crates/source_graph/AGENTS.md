@@ -7,8 +7,6 @@ Copy reference `async_deferred` per occurrence, never OR consumer/target pairs
 or introduce dependencies from the tag. Same-segment reference edges stay intact.
 Module nodes preserve empty-file identity; enclosing-function metadata is not
 permission to execute a require eagerly.
-URL resource occurrences keep checked file resolutions but introduce no parent
-module/binding/evaluation edges; a separate realm owns their executable graph.
 Read `file_facts` Copy views and value iterators; `file_fact_storage` shares the
 owner for Ecco/emission. Building graph ranges is not permission to unpack facts.
 

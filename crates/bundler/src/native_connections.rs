@@ -833,7 +833,6 @@ impl Connections {
                     DependencyKind::ReExport => RequestKind::ReExport,
                     DependencyKind::DynamicImport => RequestKind::DynamicImport,
                     DependencyKind::Require => RequestKind::Require,
-                    DependencyKind::Url => continue,
                     DependencyKind::ImportType => {
                         eyre::bail!("type request in executable JavaScript")
                     }

@@ -325,42 +325,12 @@ impl<'a> CachedRenderer<'a> {
         relocations: &[crate::css_loading::UrlRelocation],
     ) -> eyre::Result<()> {
         for relocation in relocations {
-            let crate::css_loading::UrlRelocation::BuildRoot {
-                operation: site,
-                public_url,
-            } = relocation
-            else {
-                let crate::css_loading::UrlRelocation::Script {
-                    dependency,
-                    target,
-                    base,
-                } = relocation
-                else {
-                    unreachable!()
-                };
-                let dependency = self
-                    .facts
-                    .dependencies()
-                    .iter()
-                    .find(|d| d.id() == *dependency)
-                    .ok_or_eyre("missing script URL occurrence")?;
-                ensure!(
-                    dependency.kind() == DependencyKind::Url,
-                    "invalid script URL occurrence"
-                );
-                self.dependency(
-                    dependency,
-                    Code::resource_url(target.clone(), base.clone()),
-                    false,
-                );
-                continue;
-            };
             if !self
                 .recipe
                 .source()
                 .spans()
                 .iter()
-                .any(|span| crate::effects::contains(span, *site))
+                .any(|span| crate::effects::contains(span, relocation.operation))
             {
                 continue;
             }
@@ -371,14 +341,17 @@ impl<'a> CachedRenderer<'a> {
                 .position(|operation| {
                     matches!(operation.kind(),
                         ast_segmenter::views::OperationKind::Invocation { invocation, .. }
-                        if self.facts.invocations().get(invocation as usize).unwrap().span() == *site
+                        if self.facts.invocations().get(invocation as usize).unwrap().span() == relocation.operation
                             && self.facts.invocations().get(invocation as usize).unwrap().construct()
                     )
                 })
                 .ok_or_eyre(
                     "generated URL relocation does not match a cached construction operation",
                 )?;
-            self.replace(index as u32, Code::build_root_url(public_url.clone()));
+            self.replace(
+                index as u32,
+                Code::build_root_url(relocation.public_url.clone()),
+            );
         }
         Ok(())
     }

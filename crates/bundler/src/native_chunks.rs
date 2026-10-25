@@ -922,7 +922,6 @@ fn emit_inner(
         stylesheets: BTreeMap::new(),
         backend: Backend::Native,
         files,
-        classic_scripts: BTreeSet::new(),
         entries: entry_paths,
         modules: namespaces,
         members,

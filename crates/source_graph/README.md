@@ -4,9 +4,6 @@ Owns source modules and consumer → dependency structure, independently of usag
 tags and bundler effects. `SourceFileInput` is the legacy tracker adapter.
 `OwnedSourceFileInput` retains `ast_segmenter::views::FactsStorage`
 and per-occurrence resolution results (also reusable from `segment_cache`).
-Literal resource URL occurrences retain checked file resolutions without parent
-module-evaluation or binding edges: the target executes in an independent realm,
-not during evaluation of the referring module.
 
 `edges`, `outgoing` and `incoming` expose one authoritative edge collection.
 Legacy tracker inputs project their lossy maps into this collection once at

@@ -7,8 +7,7 @@
   Aggregate updates copy verified borrowed request tables directly into a new
   builder, preserving untouched requests without unpacking input/proof trees.
 
-- This is the production `.seg.fb` backend (schema 19/extractor 28).
-  Literal resource URLs have a typed dependency discriminant, never module edges.
+- This is the production `.seg.fb` backend (schema 18/extractor 27).
   `segment_cache` adds source-local semantic validation before exposing records.
 - Parser config seals effective format and syntax-detection policy. Requested
   CommonJS-default detection may match cached ESM only under identical policy;

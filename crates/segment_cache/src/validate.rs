@@ -371,39 +371,6 @@ pub(crate) fn validate_module(
                 && contains(d.span(), d.specifier_span()),
             "invalid dependency site"
         );
-        if d.kind() == DependencyKind::Url {
-            let call = facts
-                .invocations()
-                .iter()
-                .find(|call| call.span() == d.span())
-                .ok_or_else(|| eyre::eyre!("URL dependency has no construction"))?;
-            ensure!(
-                !facts.commonjs()
-                    && !d.type_only()
-                    && d.pattern().is_none()
-                    && call.construct()
-                    && call.arguments().len() == 2
-                    && call.arguments().get(0).unwrap().span() == d.specifier_span()
-                    && !call.arguments().iter().any(|arg| arg.spread())
-                    && (d.specifier().starts_with("./") || d.specifier().starts_with("../"))
-                    && !d.specifier().contains(['?', '#', '%', '\\'])
-                    && facts
-                        .references()
-                        .iter()
-                        .any(|reference| reference.span() == call.callee()
-                            && reference.name() == "URL"
-                            && reference.binding().is_none()),
-                "invalid literal resource URL evidence"
-            );
-            let base = call.arguments().get(1).unwrap().span();
-            ensure!(
-                source
-                    .get(base.start as usize..base.end as usize)
-                    .and_then(crate::validate_emission::syntax_tokens)
-                    .is_some_and(|tokens| tokens == ["import", ".", "meta", ".", "url"]),
-                "invalid resource URL base"
-            );
-        }
         if let Some(function) = d.enclosing_function() {
             span(source, function)?;
             ensure!(contains(function, d.span()), "invalid function containment");

@@ -4,12 +4,6 @@ Extracts owned top-level statement segments from OXC-parsed JavaScript and
 TypeScript. Each segment contains module imports/exports, variable declarations
 and references, and its ownership span; the parser arena can then be reset.
 Spans are zero-based UTF-8 byte ranges with an exclusive end.
-Literal relative `new URL("./file", import.meta.url)` with an unshadowed `URL`
-records a typed `Url` dependency and original construction/literal evidence.
-Its composed recipe operation addresses the literal, not the construction;
-runtime URL lookup/creation timing is unchanged. Other import.meta forms,
-computed requests, query/fragment/percent/backslash URLs and shadowed URL
-constructors remain unsupported. No Worker identity or build policy is inferred.
 Computed dynamic imports retain bounded relative patterns, or a two-empty-piece
 pattern for recursive importing-directory capture when no relative prefix exists.
 Attached `/* webpackIgnore: true */` and line comments leave imports native:

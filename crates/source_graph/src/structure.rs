@@ -308,20 +308,6 @@ impl SourceGraph {
                 }
             }
             for dependency in input.facts.dependencies() {
-                if dependency.kind() == DependencyKind::Url {
-                    // Resource URLs belong to a different realm, not this evaluation graph.
-                    if !matches!(
-                        input.resolutions.get(&dependency.id()),
-                        Some(DependencyTarget::File(_))
-                    ) {
-                        self.diagnostics.push(crate::LinkDiagnostic {
-                            file_id,
-                            site: dependency.span(),
-                            message: "unresolved resource URL".into(),
-                        });
-                    }
-                    continue;
-                }
                 let context = match input.resolutions.get(&dependency.id()) {
                     Some(DependencyTarget::Context(candidates)) => Some(candidates),
                     _ => None,
@@ -383,7 +369,6 @@ impl SourceGraph {
                     DependencyKind::DynamicImport => EdgeKind::DynamicImport,
                     DependencyKind::Require => EdgeKind::Require,
                     DependencyKind::ImportType => EdgeKind::ImportType,
-                    DependencyKind::Url => unreachable!("resource URLs have no module edges"),
                 };
                 let bindings: Vec<_> = input
                     .facts
