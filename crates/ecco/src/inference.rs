@@ -185,7 +185,6 @@ pub(crate) fn infer_contracts<'a>(
             remaining: CONTRACT_BUDGET,
             opaque: function.unsupported,
             arrow: function.arrow,
-            expanding: HashSet::new(),
         };
         let mut parameters = Vec::new();
         for parameter in &function.params.items {
@@ -443,6 +442,81 @@ impl Computed {
             effects: HazardExpr::Bool(false),
         }
     }
+
+    fn binary(operator: &str, left: Self, right: Self) -> Self {
+        let mut effects = vec![left.effects, right.effects];
+        match operator {
+            "===" | "!==" => {}
+            "in" => effects.extend([
+                left.value.hazard(Hazard::ToPrimitive),
+                right.value.hazard(Hazard::In),
+            ]),
+            "instanceof" => effects.extend([
+                left.value.hazard(Hazard::PrototypeRead),
+                right.value.hazard(Hazard::Instanceof),
+            ]),
+            "==" | "!="
+                if matches!((&left.value.origin, &right.value.origin),
+                (Origin::Input(left), Origin::Input(right)) if left == right) => {}
+            _ => effects.extend([
+                left.value.hazard(Hazard::ToPrimitive),
+                right.value.hazard(Hazard::ToPrimitive),
+            ]),
+        }
+        Self {
+            value: Value::primitive(),
+            effects: union(effects),
+        }
+    }
+
+    fn unary(operator: &str, argument: Self) -> Self {
+        let effects = if matches!(operator, "!" | "void" | "typeof") {
+            argument.effects
+        } else {
+            union([argument.effects, argument.value.hazard(Hazard::ToPrimitive)])
+        };
+        Self {
+            value: if operator == "void" {
+                Value::void()
+            } else {
+                Value::primitive()
+            },
+            effects,
+        }
+    }
+
+    fn alternatives(left: Self, right: Self) -> Self {
+        Self {
+            value: Transfer::join(&[left.value, right.value]),
+            effects: union([left.effects, right.effects]),
+        }
+    }
+
+    fn conditional(test: Self, left: Self, right: Self) -> Self {
+        Self {
+            value: Transfer::join(&[left.value, right.value]),
+            effects: union([test.effects, left.effects, right.effects]),
+        }
+    }
+
+    fn object(empty: bool, unknown_read: bool, effects: Vec<HazardExpr>) -> Self {
+        let mut value = Value::primitive();
+        value.hazards = std::array::from_fn(|_| HazardExpr::Unknown);
+        value.hazards[Hazard::PropertyRead as usize] = if unknown_read {
+            HazardExpr::Unknown
+        } else {
+            HazardExpr::Bool(false)
+        };
+        value.hazards[Hazard::ToPrimitive as usize] = if empty {
+            HazardExpr::Bool(false)
+        } else {
+            HazardExpr::Unknown
+        };
+        Self {
+            value,
+            effects: union(effects),
+        }
+    }
 }
 
 fn union(expressions: impl IntoIterator<Item = HazardExpr>) -> HazardExpr {
@@ -497,10 +571,64 @@ struct Analyzer<'s, 'a> {
     remaining: usize,
     opaque: bool,
     arrow: bool,
+}
+
+/// Borrowed transfer inputs contain no arena or mutable collection state.
+#[derive(Clone, Copy)]
+struct TransferInputs<'s> {
+    contracts: &'s [Definition],
+    symbols: &'s HashMap<SymbolId, usize>,
+    bindings: &'s HashMap<Binding, usize>,
+    imports: &'s HashMap<SymbolId, Binding>,
+    prefixes: &'s HashSet<Binding>,
+    global_symbols: &'s [GlobalSymbol],
+    locals: &'s HashMap<SymbolId, Value>,
+    arrow: bool,
+}
+
+struct TransferOutcome {
+    computed: Computed,
+    updates: Vec<Update>,
+    budget_used: usize,
+    opaque: bool,
+}
+
+/// One owned accumulator per expression root, not one copied log per AST edge.
+struct Transfer<'s> {
+    inputs: TransferInputs<'s>,
+    updates: Vec<Update>,
+    budget: usize,
+    remaining: usize,
+    opaque: bool,
     expanding: HashSet<usize>,
 }
 
-impl<'a> Analyzer<'_, 'a> {
+struct Expressions<'s, 'a> {
+    semantic: &'s Semantic<'a>,
+    transfer: Transfer<'s>,
+}
+
+impl<'s> Transfer<'s> {
+    fn new(inputs: TransferInputs<'s>, budget: usize, opaque: bool) -> Self {
+        Self {
+            inputs,
+            updates: Vec::new(),
+            budget,
+            remaining: budget,
+            opaque,
+            expanding: HashSet::new(),
+        }
+    }
+
+    fn finish(self, computed: Computed) -> TransferOutcome {
+        TransferOutcome {
+            computed,
+            updates: self.updates,
+            budget_used: self.budget - self.remaining,
+            opaque: self.opaque,
+        }
+    }
+
     fn spend(&mut self) -> bool {
         self.spend_size(1)
     }
@@ -526,24 +654,61 @@ impl<'a> Analyzer<'_, 'a> {
 
     fn bound(&self, binding: Binding) -> Value {
         let mut value = Value::unknown();
-        if let Some(index) = self.bindings.get(&binding) {
+        if let Some(index) = self.inputs.bindings.get(&binding) {
             value.callable = Some(*index);
-            let definition = &self.contracts[*index];
+            let definition = &self.inputs.contracts[*index];
             value.hazards =
                 std::array::from_fn(|index| match definition.hazards().get(Hazard::ALL[index]) {
                     HazardExpr::Bool(false) => HazardExpr::Bool(false),
                     _ => HazardExpr::Unknown,
                 });
-        } else if self.prefixes.contains(&binding) {
+        } else if self.inputs.prefixes.contains(&binding) {
             value.hazards[Hazard::PropertyRead as usize] = HazardExpr::Bool(false);
         }
         value.binding = Some(binding);
         value
     }
 
+    fn identifier(&mut self, symbol: Option<SymbolId>, name: &str) -> Computed {
+        let value = if let Some(symbol) = symbol {
+            if let Some(value) = self.inputs.locals.get(&symbol) {
+                if !self.spend_size(value.size()) {
+                    return self.unknown();
+                }
+                value.clone()
+            } else if let Some(index) = self.inputs.symbols.get(&symbol) {
+                self.bound(self.inputs.contracts[*index].binding().clone())
+            } else if let Some(binding) = self.inputs.imports.get(&symbol) {
+                self.bound(binding.clone())
+            } else {
+                Value::unknown()
+            }
+        } else if name == "undefined" {
+            Value::void()
+        } else {
+            self.bound(Binding::Global(vec![name.to_owned()]))
+        };
+        Computed {
+            value,
+            effects: if symbol.is_none()
+                && self
+                    .inputs
+                    .global_symbols
+                    .iter()
+                    .any(|symbol| symbol.name() == name && symbol.read_effects())
+            {
+                HazardExpr::Unknown
+            } else {
+                HazardExpr::Bool(false)
+            },
+        }
+    }
+}
+
+impl<'a> Expressions<'_, 'a> {
     fn expression(&mut self, expression: &Expression<'a>) -> Computed {
-        if self.opaque || !self.spend() {
-            return self.unknown();
+        if self.transfer.opaque || !self.transfer.spend() {
+            return self.transfer.unknown();
         }
         match expression.get_inner_expression() {
             Expression::BooleanLiteral(_)
@@ -551,7 +716,7 @@ impl<'a> Analyzer<'_, 'a> {
             | Expression::StringLiteral(_)
             | Expression::BigIntLiteral(_)
             | Expression::NullLiteral(_) => Computed::pure(Value::primitive()),
-            Expression::ThisExpression(_) => Computed::pure(if self.arrow {
+            Expression::ThisExpression(_) => Computed::pure(if self.transfer.inputs.arrow {
                 Value::unknown()
             } else {
                 Value::input("this".into())
@@ -561,39 +726,13 @@ impl<'a> Analyzer<'_, 'a> {
                     .semantic
                     .scoping()
                     .get_reference(identifier.reference_id.get().expect("checked references"));
-                let value = if let Some(symbol) = reference.symbol_id() {
-                    if let Some(size) = self.locals.get(&symbol).map(Value::size) {
-                        if !self.spend_size(size) {
-                            return self.unknown();
-                        }
-                        self.locals[&symbol].clone()
-                    } else if let Some(index) = self.symbols.get(&symbol) {
-                        self.bound(self.contracts[*index].binding().clone())
-                    } else if let Some(binding) = self.imports.get(&symbol) {
-                        self.bound(binding.clone())
-                    } else {
-                        Value::unknown()
-                    }
-                } else if identifier.name == "undefined" {
-                    Value::void()
-                } else {
-                    self.bound(Binding::Global(vec![identifier.name.to_string()]))
-                };
-                Computed {
-                    value,
-                    effects: if reference.symbol_id().is_none()
-                        && self.global_symbols.iter().any(|symbol| {
-                            symbol.name() == identifier.name.as_str() && symbol.read_effects()
-                        }) {
-                        HazardExpr::Unknown
-                    } else {
-                        HazardExpr::Bool(false)
-                    },
-                }
+                self.transfer
+                    .identifier(reference.symbol_id(), identifier.name.as_str())
             }
             Expression::StaticMemberExpression(member) => {
                 let object = self.expression(&member.object);
-                self.member(object, Some(member.property.name.as_str()), None)
+                self.transfer
+                    .member(object, Some(member.property.name.as_str()), None)
             }
             Expression::ComputedMemberExpression(member) => {
                 let object = self.expression(&member.object);
@@ -602,7 +741,7 @@ impl<'a> Analyzer<'_, 'a> {
                     Expression::StringLiteral(node) => node.value.as_str(),
                     _ => None,
                 };
-                self.member(object, property, Some(key))
+                self.transfer.member(object, property, Some(key))
             }
             Expression::CallExpression(call) => {
                 let (callee, receiver) = match call.callee.get_inner_expression() {
@@ -610,7 +749,8 @@ impl<'a> Analyzer<'_, 'a> {
                         let object = self.expression(&member.object);
                         let receiver = object.value.clone();
                         (
-                            self.member(object, Some(member.property.name.as_str()), None),
+                            self.transfer
+                                .member(object, Some(member.property.name.as_str()), None),
                             receiver,
                         )
                     }
@@ -622,7 +762,7 @@ impl<'a> Analyzer<'_, 'a> {
                             Expression::StringLiteral(node) => node.value.as_str(),
                             _ => None,
                         };
-                        (self.member(object, property, Some(key)), receiver)
+                        (self.transfer.member(object, property, Some(key)), receiver)
                     }
                     _ => (self.expression(&call.callee), Value::void()),
                 };
@@ -630,22 +770,19 @@ impl<'a> Analyzer<'_, 'a> {
                 let mut arguments = Vec::new();
                 for argument in &call.arguments {
                     let Some(expression) = argument.as_expression() else {
-                        return self.unknown();
+                        return self.transfer.unknown();
                     };
                     let argument = self.expression(expression);
-                    if self.opaque {
-                        return self.unknown();
+                    if self.transfer.opaque {
+                        return self.transfer.unknown();
                     }
                     effects.push(argument.effects);
                     arguments.push(argument.value);
                 }
-                let opaque = self.opaque;
-                let result = self.invoke(callee.value, arguments, receiver, !call.pure);
-                if call.pure {
-                    self.opaque = opaque;
-                } else {
-                    effects.push(result.effects);
-                }
+                let result = self
+                    .transfer
+                    .invocation(callee.value, arguments, receiver, call.pure);
+                effects.push(result.effects);
                 Computed {
                     value: result.value,
                     effects: union(effects),
@@ -654,62 +791,22 @@ impl<'a> Analyzer<'_, 'a> {
             Expression::BinaryExpression(binary) => {
                 let left = self.expression(&binary.left);
                 let right = self.expression(&binary.right);
-                let mut effects = vec![left.effects, right.effects];
-                match binary.operator.as_str() {
-                    "===" | "!==" => {}
-                    "in" => effects.extend([
-                        left.value.hazard(Hazard::ToPrimitive),
-                        right.value.hazard(Hazard::In),
-                    ]),
-                    "instanceof" => effects.extend([
-                        left.value.hazard(Hazard::PrototypeRead),
-                        right.value.hazard(Hazard::Instanceof),
-                    ]),
-                    "==" | "!="
-                        if matches!((&left.value.origin, &right.value.origin),
-                        (Origin::Input(left), Origin::Input(right)) if left == right) => {}
-                    _ => effects.extend([
-                        left.value.hazard(Hazard::ToPrimitive),
-                        right.value.hazard(Hazard::ToPrimitive),
-                    ]),
-                }
-                Computed {
-                    value: Value::primitive(),
-                    effects: union(effects),
-                }
+                Computed::binary(binary.operator.as_str(), left, right)
             }
             Expression::UnaryExpression(unary) if unary.operator.as_str() != "delete" => {
                 let argument = self.expression(&unary.argument);
-                let effects = if matches!(unary.operator.as_str(), "!" | "void" | "typeof") {
-                    argument.effects
-                } else {
-                    union([argument.effects, argument.value.hazard(Hazard::ToPrimitive)])
-                };
-                Computed {
-                    value: if unary.operator.as_str() == "void" {
-                        Value::void()
-                    } else {
-                        Value::primitive()
-                    },
-                    effects,
-                }
+                Computed::unary(unary.operator.as_str(), argument)
             }
             Expression::LogicalExpression(logical) => {
                 let left = self.expression(&logical.left);
                 let right = self.expression(&logical.right);
-                Computed {
-                    value: Self::join(&[left.value, right.value]),
-                    effects: union([left.effects, right.effects]),
-                }
+                Computed::alternatives(left, right)
             }
             Expression::ConditionalExpression(conditional) => {
                 let test = self.expression(&conditional.test);
                 let left = self.expression(&conditional.consequent);
                 let right = self.expression(&conditional.alternate);
-                Computed {
-                    value: Self::join(&[left.value, right.value]),
-                    effects: union([test.effects, left.effects, right.effects]),
-                }
+                Computed::conditional(test, left, right)
             }
             Expression::SequenceExpression(sequence) => {
                 let mut effects = Vec::new();
@@ -737,17 +834,10 @@ impl<'a> Analyzer<'_, 'a> {
             }
             Expression::ObjectExpression(object) => {
                 let mut effects = Vec::new();
-                let mut value = Value::primitive();
-                value.hazards = std::array::from_fn(|_| HazardExpr::Unknown);
-                value.hazards[Hazard::PropertyRead as usize] = HazardExpr::Bool(false);
-                value.hazards[Hazard::ToPrimitive as usize] = if object.properties.is_empty() {
-                    HazardExpr::Bool(false)
-                } else {
-                    HazardExpr::Unknown
-                };
+                let mut unknown_read = false;
                 for property in &object.properties {
                     let ObjectPropertyKind::ObjectProperty(property) = property else {
-                        return self.unknown();
+                        return self.transfer.unknown();
                     };
                     if property.computed {
                         if let Some(key) = property.key.as_expression() {
@@ -761,22 +851,21 @@ impl<'a> Analyzer<'_, 'a> {
                             .static_name()
                             .is_some_and(|name| name == "__proto__")
                     {
-                        value.hazards[Hazard::PropertyRead as usize] = HazardExpr::Unknown;
+                        unknown_read = true;
                     }
                     effects.push(self.expression(&property.value).effects);
                 }
-                Computed {
-                    value,
-                    effects: union(effects),
-                }
+                Computed::object(object.properties.is_empty(), unknown_read, effects)
             }
             Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_) => {
                 Computed::pure(Value::unknown())
             }
-            _ => self.unknown(),
+            _ => self.transfer.unknown(),
         }
     }
+}
 
+impl Transfer<'_> {
     fn member(&self, object: Computed, property: Option<&str>, key: Option<Computed>) -> Computed {
         let binding = match (object.value.binding.clone(), property) {
             (Some(Binding::Global(mut path)), Some(property)) => {
@@ -797,6 +886,39 @@ impl<'a> Analyzer<'_, 'a> {
             value: binding.map_or_else(Value::unknown, |binding| self.bound(binding)),
             effects: union(effects),
         }
+    }
+}
+
+impl<'a> Analyzer<'_, 'a> {
+    fn expression(&mut self, expression: &Expression<'a>) -> Computed {
+        let outcome = self.expression_outcome(expression);
+        self.remaining -= outcome.budget_used;
+        self.opaque = outcome.opaque;
+        for update in outcome.updates {
+            if !self.updates.contains(&update) {
+                self.updates.push(update);
+            }
+        }
+        outcome.computed
+    }
+
+    fn expression_outcome(&self, expression: &Expression<'a>) -> TransferOutcome {
+        let inputs = TransferInputs {
+            contracts: self.contracts,
+            symbols: self.symbols,
+            bindings: self.bindings,
+            imports: self.imports,
+            prefixes: self.prefixes,
+            global_symbols: self.global_symbols,
+            locals: &self.locals,
+            arrow: self.arrow,
+        };
+        let mut expressions = Expressions {
+            semantic: self.semantic,
+            transfer: Transfer::new(inputs, self.remaining, self.opaque),
+        };
+        let computed = expressions.expression(expression);
+        expressions.transfer.finish(computed)
     }
 
     fn statements(&mut self, statements: &[Statement<'a>]) -> bool {
@@ -872,7 +994,9 @@ impl<'a> Analyzer<'_, 'a> {
             }
         }
     }
+}
 
+impl Transfer<'_> {
     fn join(values: &[Value]) -> Value {
         let first = values.first().cloned().unwrap_or_else(Value::void);
         let origin = if values.iter().all(|value| value.origin == first.origin) {
@@ -895,6 +1019,23 @@ impl<'a> Analyzer<'_, 'a> {
         }
     }
 
+    fn invocation(
+        &mut self,
+        function: Value,
+        arguments: Vec<Value>,
+        receiver: Value,
+        pure: bool,
+    ) -> Computed {
+        let opaque = self.opaque;
+        let mut result = self.invoke(function, arguments, receiver, !pure);
+        if pure {
+            // Only invocation opacity is masked; inputs and spent work survive.
+            self.opaque = opaque;
+            result.effects = HazardExpr::Bool(false);
+        }
+        result
+    }
+
     fn invoke(
         &mut self,
         function: Value,
@@ -909,7 +1050,7 @@ impl<'a> Analyzer<'_, 'a> {
             if !self.expanding.insert(index) {
                 return self.unknown();
             }
-            let definition = self.contracts[index].clone();
+            let definition = &self.inputs.contracts[index];
             if !definition.variadic() && arguments.len() > definition.parameters().len() {
                 self.expanding.remove(&index);
                 return self.unknown();
@@ -933,7 +1074,7 @@ impl<'a> Analyzer<'_, 'a> {
                     &definition.hazards().get(Hazard::Call),
                     &frame,
                     &arguments,
-                    &definition,
+                    definition,
                 )
             };
             if execute {
@@ -941,11 +1082,11 @@ impl<'a> Analyzer<'_, 'a> {
                     &definition.hazards().get(Hazard::Call),
                     &frame,
                     &arguments,
-                    &definition,
+                    definition,
                 );
                 for update in definition.updates() {
                     let expression =
-                        self.substitute(update.expression(), &frame, &arguments, &definition);
+                        self.substitute(update.expression(), &frame, &arguments, definition);
                     if let Some(Value {
                         origin: Origin::Input(target),
                         ..
@@ -971,7 +1112,7 @@ impl<'a> Analyzer<'_, 'a> {
                             &definition.return_hazards().get(Hazard::ALL[index]),
                             &frame,
                             &arguments,
-                            &definition,
+                            definition,
                         )
                     }),
                     callable: None,
@@ -1109,12 +1250,14 @@ impl<'a> Analyzer<'_, 'a> {
             _ => {}
         }
     }
+}
 
+impl Analyzer<'_, '_> {
     fn finish(self, binding: Binding, parameters: Vec<String>) -> Definition {
         if self.opaque {
             return unknown_contract(binding, parameters);
         }
-        let value = Self::join(&self.returns);
+        let value = Transfer::join(&self.returns);
         let returns = match value.origin {
             Origin::Input(name) => Returns::Argument(name),
             Origin::Void => Returns::Void,
@@ -1150,5 +1293,105 @@ impl<'a> Analyzer<'_, 'a> {
             return_hazards,
             self.updates,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transfer_outcomes_isolate_updates_opacity_and_work() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<TransferInputs<'_>>();
+        send_sync::<Transfer<'_>>();
+        send_sync::<TransferOutcome>();
+
+        let facts = parse_declarations(
+            "global fn mutate(target) {
+                call_effects = false
+                updates target.property_read_effects |= true
+                returns = target
+            }",
+        )
+        .unwrap();
+        let symbols = HashMap::new();
+        let bindings = facts
+            .definitions()
+            .iter()
+            .enumerate()
+            .map(|(index, definition)| (definition.binding().clone(), index))
+            .collect();
+        let imports = HashMap::new();
+        let prefixes = HashSet::new();
+        let locals = HashMap::new();
+        let inputs = TransferInputs {
+            contracts: facts.definitions(),
+            symbols: &symbols,
+            bindings: &bindings,
+            imports: &imports,
+            prefixes: &prefixes,
+            global_symbols: &[],
+            locals: &locals,
+            arrow: false,
+        };
+        for pure in [false, true] {
+            let mut transfer = Transfer::new(inputs, 10, false);
+            let function = transfer.bound(Binding::Global(vec!["mutate".into()]));
+            let computed = transfer.invocation(
+                function,
+                vec![Value::input("input".into())],
+                Value::void(),
+                pure,
+            );
+            let outcome = transfer.finish(computed);
+            assert!(
+                matches!(outcome.computed.value.origin, Origin::Input(ref name) if name == "input")
+            );
+            assert_eq!(outcome.computed.effects, HazardExpr::Bool(false));
+            assert!(!outcome.opaque);
+            assert_eq!(outcome.budget_used, if pure { 1 } else { 3 });
+            assert_eq!(
+                outcome.updates,
+                if pure {
+                    Vec::new()
+                } else {
+                    vec![Update::new(
+                        "input".into(),
+                        Some(Hazard::PropertyRead),
+                        HazardExpr::Bool(true),
+                    )]
+                }
+            );
+        }
+        for pure in [false, true] {
+            let mut transfer = Transfer::new(inputs, 10, false);
+            let computed = transfer.invocation(Value::unknown(), Vec::new(), Value::void(), pure);
+            let outcome = transfer.finish(computed);
+            assert!(matches!(outcome.computed.value.origin, Origin::Unknown));
+            assert_eq!(outcome.opaque, !pure);
+            assert_eq!(outcome.budget_used, 1);
+            assert!(outcome.updates.is_empty());
+            assert_eq!(
+                outcome.computed.effects,
+                if pure {
+                    HazardExpr::Bool(false)
+                } else {
+                    HazardExpr::Unknown
+                }
+            );
+        }
+        let mut transfer = Transfer::new(inputs, 2, false);
+        let function = transfer.bound(Binding::Global(vec!["mutate".into()]));
+        let computed = transfer.invocation(
+            function,
+            vec![Value::input("input".into())],
+            Value::void(),
+            false,
+        );
+        let outcome = transfer.finish(computed);
+        assert!(outcome.opaque);
+        assert_eq!(outcome.budget_used, 2);
+        assert_eq!(outcome.updates[0].expression(), &HazardExpr::Unknown);
     }
 }

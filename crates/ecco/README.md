@@ -288,6 +288,15 @@ and PURE behavior rather than treating incomplete inference as authoritative.
 Cycles, unsupported bodies, and exhausted per-function work/expansion budgets
 produce unknown contracts without executing their bodies during inference.
 
+Contract expression transfers borrow immutable declarations and local values,
+separately from OXC traversal and statement/function collection. Each expression
+root returns its value/effect summary, ordered deduplicated updates, consumed
+work, and opacity. A transfer-local accumulator avoids copying update logs along
+recursive edges; collection merges outcomes in source order and carries the
+remaining per-function budget. Invocation expansion borrows contracts rather
+than cloning them. Traversal is still recursive and serial: work limits do not
+bound native stack depth, and no expression scheduler or pool is installed.
+
 The extractor handles simple declarations, calls, object literals, member reads,
 operators, templates, conditional/logical expressions, aliases, and the function
 bodies described above. Function creation remains safe even for unsupported

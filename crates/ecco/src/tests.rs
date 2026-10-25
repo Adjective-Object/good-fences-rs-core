@@ -1036,6 +1036,85 @@ fn isolated_known_updates_and_receiver_dependencies_are_composed() {
 }
 
 #[test]
+fn isolated_expression_outcomes_preserve_updates_and_pure_input_boundaries() {
+    let analysis = source(
+        r#"
+            global fn mutate(target) {
+                call_effects = false
+                updates target.property_read_effects |= true
+                returns = target
+            }
+        "#,
+        r#"
+            function ordered(first, second) {
+                mutate(first);
+                (mutate(second), mutate(first));
+                return mutate(second);
+            }
+            function masked(target) { return /*#__PURE__*/ mutate(target); }
+            function inputs(target) {
+                return /*#__PURE__*/ target.method(mutate(target));
+            }
+        "#,
+    );
+    let update = |target: &str| {
+        Update::new(
+            target.into(),
+            Some(Hazard::PropertyRead),
+            HazardExpr::Bool(true),
+        )
+    };
+    assert_eq!(
+        inferred(&analysis, "ordered").updates(),
+        &[update("first"), update("second")]
+    );
+    assert_eq!(
+        inferred(&analysis, "ordered").returns(),
+        &Returns::Argument("second".into())
+    );
+    assert!(inferred(&analysis, "masked").updates().is_empty());
+    assert_eq!(
+        inferred(&analysis, "masked").returns(),
+        &Returns::Argument("target".into())
+    );
+    assert_eq!(inferred(&analysis, "inputs").updates(), &[update("target")]);
+    assert_eq!(
+        inferred(&analysis, "inputs").hazards().get(Hazard::Call),
+        HazardExpr::Read {
+            value: "target".into(),
+            slot: Hazard::PropertyRead,
+        }
+    );
+}
+
+#[test]
+fn isolated_member_transfers_keep_receivers_distinct_from_unbound_calls() {
+    let analysis = source(
+        r#"
+            global fn namespace.method() {
+                call_effects = this.property_read_effects
+                returns = this
+            }
+        "#,
+        r#"
+            function bound() { return namespace["method"](); }
+            function unbound() {
+                const method = namespace.method;
+                return method();
+            }
+        "#,
+    );
+    assert_eq!(inferred(&analysis, "bound").returns(), &Returns::Unknown);
+    assert_eq!(inferred(&analysis, "unbound").returns(), &Returns::Void);
+    for name in ["bound", "unbound"] {
+        assert_eq!(
+            inferred(&analysis, name).hazards().get(Hazard::Call),
+            HazardExpr::Bool(false)
+        );
+    }
+}
+
+#[test]
 fn isolated_callbacks_propagate_known_updates_without_executing_queries() {
     let analysis = source(
         r#"

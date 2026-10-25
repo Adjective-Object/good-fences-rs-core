@@ -18,6 +18,10 @@
   Keep linked captures and alias joins in owned summaries, never inferred guesses.
 - Process dependencies before consumers and bound contract expansion; cycles and
   unsupported bodies produce unknown contracts whose execution stays deferred.
+- Contract transfers borrow immutable, arena-free inputs and return summaries,
+  ordered updates, work cost and opacity. Keep transfer-local expansion state
+  separate from statement collection; merge outcomes in source order without
+  cloning declaration/local tables or contracts. Traversal remains recursive.
 - Keep declarations and extracted graphs owned; never retain OXC arena data.
 - Persist only `ParsedFile` precursors. Instantiate roots/functions in a fresh
   `Analysis`; external resolutions come from the caller's canonical graph.
